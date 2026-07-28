@@ -417,9 +417,13 @@ float CLandscapeTools::paintRadius() const
 
 void CLandscapeTools::setGeneratedAtlasTileCount(int count)
 {
-    m_generatedAtlasTiles->setText(tr("New exact tiles: %1").arg(qMax(0, count)));
+    const int generated = qMax(0, count);
+    const int active = m_authoredAtlasSlots + generated;
+    m_generatedAtlasTiles->setText(tr(
+        "%1 authored + %2 generated = %3 active slots")
+        .arg(m_authoredAtlasSlots).arg(generated).arg(active));
     m_generatedAtlasTiles->setToolTip(tr(
-        "Unique missing corner combinations generated and cached for this map session."));
+        "Authored slots remain byte-identical. Generated exact corner combinations are appended after them and cached for this map session."));
 }
 ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {
@@ -564,6 +568,7 @@ void CLandscapeTools::setPaintMaterials(
     m_underwaterPaintTypes = uniqueIdentities(underwaterTypes);
     m_overlayPaintTypes = uniqueIdentities(overlayTypes);
     m_paintCatalogStatus = status;
+    m_authoredAtlasSlots = qMax(0, totalSlots);
     QString coverage = totalSlots > 0
         ? tr("%1 / %2 assigned%3").arg(assignedSlots).arg(totalSlots)
               .arg(assignedSlots < totalSlots

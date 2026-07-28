@@ -1,5 +1,6 @@
 #include "terrain_atlas_profile.h"
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -47,6 +48,37 @@ ETerrainAtlasUnderwaterRole parseUnderwaterRole(const QString& value)
         return ETerrainAtlasUnderwaterRole::Mixed;
     return ETerrainAtlasUnderwaterRole::Surface;
 }
+
+QByteArray presetAtlasIdentity(const QJsonObject& preset)
+{
+    // Bindings are alternate pixel revisions of one reviewed semantic atlas.
+    // Identify the semantic atlas itself so aliases group together, while two
+    // unrelated atlases that happen to share a page hash can never be merged.
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(preset.value(QStringLiteral("signaturesBase64"))
+                     .toString().toLatin1());
+    hash.addData(QJsonDocument(preset.value(QStringLiteral("families"))
+                                   .toArray()).toJson(QJsonDocument::Compact));
+    return hash.result().toHex();
+}
+
+QJsonObject matchingPreset(const STerrainAtlasProfile& profile)
+{
+    for(const QJsonValue& value : presetArray(nullptr))
+    {
+        const QJsonObject preset = value.toObject();
+        if(preset.value(QStringLiteral("namespace")).toString().compare(
+               profile.mprNamespace, Qt::CaseInsensitive) != 0)
+            continue;
+        for(const QJsonValue& bindingValue : preset.value(
+                QStringLiteral("bindings")).toArray())
+            if(bindingValue.toObject().value(QStringLiteral("pixelSha256"))
+                   .toString().toLatin1().toLower()
+               == profile.atlasPixelSha256.toLower())
+                return preset;
+    }
+    return {};
+}
 }
 
 int CTerrainAtlasPresetCatalog::presetCount(CValidationReport* report)
@@ -62,11 +94,14 @@ QString CTerrainAtlasPresetCatalog::materialTheme(const QString& variantName)
 }
 
 qint32 CTerrainAtlasPresetCatalog::globalMaterialId(
-    const QString& variantName, ETerrainAtlasLayer layer)
+    const QString& variantName, ETerrainAtlasLayer layer,
+    const QByteArray& atlasIdentity, qint32 localFamilyId)
 {
     const QByteArray key = (layer == ETerrainAtlasLayer::Land
         ? QByteArrayLiteral("land:") : QByteArrayLiteral("overlay:"))
-        + variantName.trimmed().toCaseFolded().toUtf8();
+        + (atlasIdentity.isEmpty()
+            ? variantName.trimmed().toCaseFolded().toUtf8()
+            : atlasIdentity.toLower() + ':' + QByteArray::number(localFamilyId));
     quint32 hash = 2166136261u;
     for(char byte : key)
     {
@@ -86,6 +121,7 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
     for(const QJsonValue& value : presetArray(report))
     {
         const QJsonObject preset = value.toObject();
+        const QByteArray atlasIdentity = presetAtlasIdentity(preset);
         const QString mprNamespace = preset.value(QStringLiteral("namespace")).toString();
         const int slotCount = preset.value(QStringLiteral("slotCount")).toInt();
         const QByteArray signatures = QByteArray::fromBase64(
@@ -135,15 +171,16 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                     layerValue.toString() == QStringLiteral("overlay")
                     ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
                 const QString key = QString(layer == ETerrainAtlasLayer::Land
-                    ? QStringLiteral("L:%1") : QStringLiteral("O:%1"))
-                    .arg(variantName.trimmed().toCaseFolded());
+                    ? QStringLiteral("L:%1:%2") : QStringLiteral("O:%1:%2"))
+                    .arg(QString::fromLatin1(atlasIdentity)).arg(localId);
                 STerrainGlobalMaterialFamily& global = grouped[key];
                 if(global.name.isEmpty())
                 {
                     global.name = variantName.trimmed();
                     global.theme = theme;
                     global.layer = layer;
-                    global.id = globalMaterialId(global.name, layer);
+                    global.id = globalMaterialId(global.name, layer,
+                                                 atlasIdentity, localId);
                     const QString previous = identityKeys.value(global.id);
                     if(!previous.isEmpty() && previous != key)
                     {
@@ -164,6 +201,7 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                     continue;
                 STerrainGlobalMaterialSource source;
                 source.mprNamespace = mprNamespace;
+                source.atlasIdentity = atlasIdentity;
                 source.textureCount = (slotCount + 63) / 64;
                 source.uniformSlot = uniformSlot;
                 source.variantName = variantName;
@@ -172,6 +210,25 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
         }
     }
     QVector<STerrainGlobalMaterialFamily> result = grouped.values().toVector();
+    QMap<QString, int> duplicateNames;
+    for(const STerrainGlobalMaterialFamily& family : result)
+        ++duplicateNames[QString::number(int(family.layer)) + QLatin1Char(':')
+                         + family.name.toCaseFolded()];
+    for(STerrainGlobalMaterialFamily& family : result)
+    {
+        const QString duplicateKey = QString::number(int(family.layer))
+            + QLatin1Char(':') + family.name.toCaseFolded();
+        if(duplicateNames.value(duplicateKey) <= 1 || family.sources.isEmpty())
+            continue;
+        QString label = family.sources.front().mprNamespace;
+        for(const STerrainGlobalMaterialSource& source : family.sources)
+            if(source.mprNamespace.startsWith(QStringLiteral("Zone"),
+                                              Qt::CaseInsensitive)
+               && !label.startsWith(QStringLiteral("Zone"),
+                                    Qt::CaseInsensitive))
+                label = source.mprNamespace;
+        family.name += QStringLiteral(" — ") + label;
+    }
     std::sort(result.begin(), result.end(), [](
         const STerrainGlobalMaterialFamily& left,
         const STerrainGlobalMaterialFamily& right) {
@@ -188,10 +245,38 @@ CTerrainTransitionCatalog CTerrainAtlasPresetCatalog::globalizedCatalog(
     const STerrainAtlasProfile& profile,
     const CTerrainTransitionCatalog& source)
 {
+    const QJsonObject preset = matchingPreset(profile);
+    const QByteArray atlasIdentity = presetAtlasIdentity(preset);
     QMap<qint32, qint32> globalByLocal;
     for(const STerrainAtlasProfileFamily& family : profile.families)
-        globalByLocal.insert(family.id,
-            globalMaterialId(family.name, family.layer));
+    {
+        STerrainTransitionSignature pure;
+        pure.northWest = pure.northEast = pure.southEast = pure.southWest = family.id;
+        bool hasUniform = false;
+        source.selectForPaint(pure, 0, 0, 0, &hasUniform);
+        qint32 globalId = globalMaterialId(family.name, family.layer,
+                                          atlasIdentity, family.id);
+        if(!hasUniform)
+        {
+            // A transition-only local identity may borrow only one explicit
+            // full-tile variant with the same reviewed name. Never merge all
+            // same-named uniform sources into one brush identity.
+            QByteArray bestIdentity;
+            for(const STerrainGlobalMaterialFamily& candidate :
+                    globalUniformFamilies(nullptr))
+                if(candidate.layer == family.layer
+                   && !candidate.sources.isEmpty()
+                   && candidate.sources.front().variantName.compare(
+                       family.name, Qt::CaseInsensitive) == 0
+                   && (bestIdentity.isEmpty()
+                       || candidate.sources.front().atlasIdentity < bestIdentity))
+                {
+                    bestIdentity = candidate.sources.front().atlasIdentity;
+                    globalId = candidate.id;
+                }
+        }
+        globalByLocal.insert(family.id, globalId);
+    }
     CTerrainTransitionCatalog result;
     result.setMirrorPaintGridY(source.paintGridMirrored());
     for(int slot = 0; slot < profile.atlasSlotCount; ++slot)

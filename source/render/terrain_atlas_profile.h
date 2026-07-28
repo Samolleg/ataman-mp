@@ -46,6 +46,7 @@ struct STerrainAtlasProfileSource
 struct STerrainGlobalMaterialSource
 {
     QString mprNamespace;
+    QByteArray atlasIdentity;
     int textureCount{0};
     int uniformSlot{-1};
     QString variantName;
@@ -189,7 +190,9 @@ public:
     static int presetCount(CValidationReport* report = nullptr);
     static QString materialTheme(const QString& variantName);
     static qint32 globalMaterialId(const QString& variantName,
-                                   ETerrainAtlasLayer layer);
+                                   ETerrainAtlasLayer layer,
+                                   const QByteArray& atlasIdentity = QByteArray(),
+                                   qint32 localFamilyId = 0);
     static QVector<STerrainGlobalMaterialFamily> globalUniformFamilies(
         CValidationReport* report = nullptr);
     static CTerrainTransitionCatalog globalizedCatalog(

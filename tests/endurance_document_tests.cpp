@@ -13,6 +13,7 @@
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
 #include "terrain_virtual_atlas.h"
+#include "tile.h"
 #include "staged_save_validator.h"
 
 namespace {
@@ -343,6 +344,7 @@ private slots:
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
     void workingAtlasRealizesExactTransitionsBeyond512Slots();
+    void multiRowTerrainAtlasKeepsAuthoredPagesInPlace();
     void zone2TransitionOnlyGrassMapsToGlobalUniformFamily();
     void authoredPresetSupportsZone18SharedLayers();
     void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
@@ -5669,8 +5671,9 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QVERIFY(families.size() >= 10);
     QSet<qint32> identities;
-    const STerrainGlobalMaterialFamily* darkGrass = nullptr;
-    const STerrainGlobalMaterialFamily* freshGrass = nullptr;
+    QSet<qint32> darkGrassIds;
+    QSet<QByteArray> darkGrassAtlases;
+    QSet<qint32> freshGrassIds;
     int grassVariantCount = 0;
     for(const STerrainGlobalMaterialFamily& family : families)
     {
@@ -5679,38 +5682,41 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
         identities.insert(family.id);
         QVERIFY(!family.theme.isEmpty());
         QVERIFY(!family.sources.isEmpty());
+        const QByteArray familyAtlasIdentity = family.sources.front().atlasIdentity;
+        QVERIFY(!familyAtlasIdentity.isEmpty());
         for(const STerrainGlobalMaterialSource& source : family.sources)
         {
             QVERIFY(source.uniformSlot >= 0);
             QVERIFY(source.textureCount > source.uniformSlot / 64);
             QVERIFY(!source.variantName.isEmpty());
-            QCOMPARE(source.variantName, family.name);
+            QCOMPARE(source.atlasIdentity, familyAtlasIdentity);
             QCOMPARE(CTerrainAtlasPresetCatalog::materialTheme(
                          source.variantName), family.theme);
             // Reviewed transition-support classifications must never leak
             // into the global brush palette as purported uniform sources.
-            QVERIFY(!(family.name == QStringLiteral("Stone / Grayish")
+            QVERIFY(!(source.variantName == QStringLiteral("Stone / Grayish")
                       && source.mprNamespace == QStringLiteral("Zone8")));
-            QVERIFY(!(family.name == QStringLiteral("Ground / Dirt")
+            QVERIFY(!(source.variantName == QStringLiteral("Ground / Dirt")
                       && source.mprNamespace == QStringLiteral("zone9")));
         }
         if(family.layer == ETerrainAtlasLayer::Land
            && family.theme == QStringLiteral("Grass")) ++grassVariantCount;
         if(family.layer == ETerrainAtlasLayer::Land
-           && family.name == QStringLiteral("Grass / Dark")) darkGrass = &family;
+           && family.sources.front().variantName == QStringLiteral("Grass / Dark"))
+        {
+            darkGrassIds.insert(family.id);
+            darkGrassAtlases.insert(familyAtlasIdentity);
+        }
         if(family.layer == ETerrainAtlasLayer::Land
-           && family.name == QStringLiteral("Grass / Fresh")) freshGrass = &family;
+           && family.sources.front().variantName == QStringLiteral("Grass / Fresh"))
+            freshGrassIds.insert(family.id);
     }
-    QVERIFY(darkGrass);
-    QVERIFY(freshGrass);
+    QVERIFY(darkGrassIds.size() >= 5);
+    QCOMPARE(darkGrassIds.size(), darkGrassAtlases.size());
+    QVERIFY(!freshGrassIds.isEmpty());
     QVERIFY(grassVariantCount >= 4);
-    QCOMPARE(darkGrass->theme, QStringLiteral("Grass"));
-    QCOMPARE(freshGrass->theme, QStringLiteral("Grass"));
-    QCOMPARE(darkGrass->id, CTerrainAtlasPresetCatalog::globalMaterialId(
-        QStringLiteral("Grass / Dark"), ETerrainAtlasLayer::Land));
-    QCOMPARE(freshGrass->id, CTerrainAtlasPresetCatalog::globalMaterialId(
-        QStringLiteral("Grass / Fresh"), ETerrainAtlasLayer::Land));
-    QVERIFY(darkGrass->id != freshGrass->id);
+    for(qint32 dark : darkGrassIds)
+        QVERIFY(!freshGrassIds.contains(dark));
 }
 
 void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots()
@@ -5761,6 +5767,15 @@ void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots(
     QCOMPARE(working.activeTileImages().size(), 9 * 64);
 }
 
+void EnduranceDocumentTests::multiRowTerrainAtlasKeepsAuthoredPagesInPlace()
+{
+    QCOMPARE(CTile::atlasPageRowOrigin(0, 8, 8), 0.0f);
+    QCOMPARE(CTile::atlasPageRowOrigin(7, 8, 8), 0.0f);
+    QCOMPARE(CTile::atlasPageRowOrigin(0, 9, 3), 0.0f);
+    QVERIFY(qFuzzyCompare(CTile::atlasPageRowOrigin(3, 9, 3), 1.0f / 3.0f));
+    QVERIFY(qFuzzyCompare(CTile::atlasPageRowOrigin(8, 9, 3), 2.0f / 3.0f));
+}
+
 void EnduranceDocumentTests::zone2TransitionOnlyGrassMapsToGlobalUniformFamily()
 {
     CValidationReport report;
@@ -5774,15 +5789,7 @@ void EnduranceDocumentTests::zone2TransitionOnlyGrassMapsToGlobalUniformFamily()
     const CTerrainTransitionCatalog global =
         CTerrainAtlasPresetCatalog::globalizedCatalog(
             profile, local.landCatalog);
-    const qint32 grassId = CTerrainAtlasPresetCatalog::globalMaterialId(
-        QStringLiteral("Grass / Irregular"), ETerrainAtlasLayer::Land);
-    const QVector<STerrainGlobalMaterialFamily> materials =
-        CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
-    const auto grassSource = std::find_if(materials.cbegin(), materials.cend(),
-        [grassId](const STerrainGlobalMaterialFamily& material) {
-            return material.id == grassId && !material.sources.isEmpty();
-        });
-    QVERIFY(grassSource != materials.cend());
+    qint32 grassId = 0;
     bool sawTransitionOnlyIrregular = false;
     for(int slot = 0; slot < 512; ++slot)
     {
@@ -5806,10 +5813,23 @@ void EnduranceDocumentTests::zone2TransitionOnlyGrassMapsToGlobalUniformFamily()
             after.northWest, after.northEast,
             after.southEast, after.southWest};
         QVERIFY(!globalCorners.contains(9));
-        QVERIFY(globalCorners.contains(grassId));
+        for(int corner = 0; corner < localCorners.size(); ++corner)
+            if(localCorners.at(corner) == 9)
+            {
+                if(grassId == 0) grassId = globalCorners.at(corner);
+                QCOMPARE(globalCorners.at(corner), grassId);
+            }
         for(qint32 corner : globalCorners) QVERIFY(corner > 255);
     }
     QVERIFY(sawTransitionOnlyIrregular);
+    QVERIFY(grassId > 255);
+    const QVector<STerrainGlobalMaterialFamily> materials =
+        CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+    const auto grassSource = std::find_if(materials.cbegin(), materials.cend(),
+        [grassId](const STerrainGlobalMaterialFamily& material) {
+            return material.id == grassId && !material.sources.isEmpty();
+        });
+    QVERIFY(grassSource != materials.cend());
     QVERIFY(global.hasMaterial(grassId));
 }
 

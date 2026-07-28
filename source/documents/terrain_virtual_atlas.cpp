@@ -42,6 +42,54 @@ bool signatureLess(const STerrainTransitionSignature& left,
     return corners(left) < corners(right);
 }
 
+quint32 terrainNoiseHash(quint32 value)
+{
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    return value ^ (value >> 16);
+}
+
+double terrainNoiseLattice(int x, int y, quint32 seed)
+{
+    const quint32 mixed = terrainNoiseHash(seed
+        ^ quint32(x) * 0x9e3779b9u ^ quint32(y) * 0x85ebca6bu);
+    return double(mixed & 0xffffu) / 65535.0;
+}
+
+double terrainValueNoise(double x, double y, quint32 seed)
+{
+    const int x0 = int(std::floor(x));
+    const int y0 = int(std::floor(y));
+    const double fx0 = x - x0;
+    const double fy0 = y - y0;
+    const double fx = fx0 * fx0 * (3.0 - 2.0 * fx0);
+    const double fy = fy0 * fy0 * (3.0 - 2.0 * fy0);
+    const double nw = terrainNoiseLattice(x0, y0, seed);
+    const double ne = terrainNoiseLattice(x0 + 1, y0, seed);
+    const double sw = terrainNoiseLattice(x0, y0 + 1, seed);
+    const double se = terrainNoiseLattice(x0 + 1, y0 + 1, seed);
+    return (nw + (ne - nw) * fx) * (1.0 - fy)
+         + (sw + (se - sw) * fx) * fy;
+}
+
+quint32 transitionNoiseSeed(const QVector<qint32>& ids,
+                            const QMap<qint32, QImage>& sources,
+                            quint32 seed)
+{
+    quint32 result = seed ^ 0xa511e9b3u;
+    for(qint32 id : ids)
+    {
+        const QByteArray hash = imageHash(sources.value(id));
+        quint32 pixels = 0;
+        for(int index = 0; index < 8 && index < hash.size(); ++index)
+            pixels = pixels * 33u + quint8(hash.at(index));
+        result = terrainNoiseHash(result ^ pixels);
+    }
+    return result;
+}
+
 QRgb premultipliedBlend(const QRgb samples[4], const double weights[4])
 {
     double alpha = 0.0;
@@ -295,6 +343,8 @@ QImage CTerrainVirtualAtlas::generateTile(
         }
     }
     const int size = m_authoredTiles.front().width();
+    const quint32 noiseSeed = transitionNoiseSeed(
+        ids, m_materialSources, m_distributionSeed);
     QImage result(size, size, QImage::Format_RGBA8888);
     for(int y = 0; y < size; ++y)
     {
@@ -302,9 +352,39 @@ QImage CTerrainVirtualAtlas::generateTile(
         for(int x = 0; x < size; ++x)
         {
             const double u = size == 1 ? 0.0 : double(x) / double(size - 1);
+            // Warp the interior corner field with deterministic multi-scale
+            // value noise. The envelope is zero on every tile edge, so two
+            // neighbouring exact tuples still produce byte-identical seams,
+            // while the visible meeting line meanders like authored terrain
+            // instead of dividing the tile into four geometric quadrants.
+            const double envelope = std::sin(u * 3.14159265358979323846)
+                                  * std::sin(v * 3.14159265358979323846);
+            const double coarseX = terrainValueNoise(u * 2.25, v * 2.25,
+                                                       noiseSeed) - 0.5;
+            const double coarseY = terrainValueNoise(u * 2.25, v * 2.25,
+                                                       noiseSeed ^ 0x68bc21ebu) - 0.5;
+            const double detailX = terrainValueNoise(u * 5.0, v * 5.0,
+                                                       noiseSeed ^ 0x02e5be93u) - 0.5;
+            const double detailY = terrainValueNoise(u * 5.0, v * 5.0,
+                                                       noiseSeed ^ 0x967a889bu) - 0.5;
+            const double phase = double(noiseSeed & 0xffffu) / 65535.0
+                               * 6.28318530717958647692;
+            const double sweepX = std::sin(v * 6.28318530717958647692 + phase)
+                                + 0.45 * std::sin(v * 15.7079632679489661923
+                                                + phase * 1.71);
+            const double sweepY = std::sin(u * 6.28318530717958647692 + phase * 1.31)
+                                + 0.45 * std::sin(u * 15.7079632679489661923
+                                                + phase * 0.73);
+            const double warpedU = qBound(0.0,
+                u + envelope * (coarseX * 0.60 + detailX * 0.20
+                                + sweepX * 0.20), 1.0);
+            const double warpedV = qBound(0.0,
+                v + envelope * (coarseY * 0.60 + detailY * 0.20
+                                + sweepY * 0.20), 1.0);
             const double bilinear[4] = {
-                (1.0 - u) * (1.0 - v), u * (1.0 - v),
-                u * v, (1.0 - u) * v
+                (1.0 - warpedU) * (1.0 - warpedV),
+                warpedU * (1.0 - warpedV),
+                warpedU * warpedV, (1.0 - warpedU) * warpedV
             };
             // A transition is a masked meeting of material textures, not a
             // low-frequency colour interpolation across the complete tile.
@@ -801,7 +881,11 @@ int CTerrainWorkingAtlas::realize(
         return -1;
 
     int workingSlot = -1;
-    for(int slot = 0; slot < m_capacityLimit; ++slot)
+    // Authored imagery is immutable for the entire editing session. Generated
+    // transitions live only in the extension namespace; an apparently unused
+    // stock slot may still be referenced by preserved layers, undo history, or
+    // renderer state and must never be recycled under it.
+    for(int slot = m_authoredImages.size(); slot < m_capacityLimit; ++slot)
     {
         if(workingUsage->value(slot) == 0 && !protectedSlots.contains(slot))
         {

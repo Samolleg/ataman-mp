@@ -185,6 +185,7 @@ private slots:
     void generatesFourFamilyTupleWithOrientation();
     void generatedEdgesUseOnlyTheirTwoCornerMaterials();
     void generatedTransitionRetainsSourceTextureIdentity();
+    void generatedTransitionBoundaryIsOrganicRatherThanQuadrants();
     void generatedNeighbourEdgesArePixelContinuous();
     void rotationsAndIdenticalPixelsAreDeduplicated();
     void stableHashesAndNamespaceAreDeterministic();
@@ -200,6 +201,8 @@ private slots:
     void inactiveOverlaySentinelSurvivesLandFinalization();
     void gradedAlphaIsRefusedWithoutFlattening();
     void workingAtlasGeneratesImmediatelyAndReusesTuple();
+    void workingAtlasNeverReplacesAuthoredPixels();
+    void repeatedGeneratedStampsNeverMutateAuthoredAtlas();
     void workingAtlasProtectsUndoSlotsAndRefusesCapacity();
     void externalUniformFamilyPaintsAndBlendsWithoutAuthoredSlot();
     void selfPaintPreservesExactPackedTileAndRotation();
@@ -306,6 +309,38 @@ void TerrainVirtualAtlasTests::generatedTransitionRetainsSourceTextureIdentity()
     // three quarters of its pixels, with only a narrow visible join.
     QVERIFY(sourceLike >= 48);
     QVERIFY(genuinelyMixed > 0);
+}
+
+void TerrainVirtualAtlasTests::generatedTransitionBoundaryIsOrganicRatherThanQuadrants()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 73);
+    const STerrainVirtualTile tile = atlas.resolve(signature(1, 1, 2, 2), 0, 0);
+    QVERIFY(tile.generatedIndex >= 0);
+    const QImage generated = atlas.generatedTiles().at(tile.generatedIndex).pixels;
+    QSet<int> crossingRows;
+    for(int x = 1; x + 1 < generated.width(); ++x)
+    {
+        int crossing = -1;
+        const bool startsGreen = generated.pixelColor(x, 0).green()
+                               > generated.pixelColor(x, 0).red();
+        for(int y = 1; y < generated.height(); ++y)
+            if((generated.pixelColor(x, y).green()
+                > generated.pixelColor(x, y).red()) != startsGreen)
+            {
+                crossing = y;
+                break;
+            }
+        if(crossing >= 0)
+            crossingRows.insert(crossing);
+    }
+    // A straight bilinear/quadrant mask crosses every column on one row.
+    // Generated game-art transitions must visibly meander through the tile.
+    QVERIFY2(crossingRows.size() >= 5,
+             "Generated transition is still a straight quadrant cut");
 }
 
 void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
@@ -538,9 +573,10 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     QCOMPARE(painted.material(6,8),qint32(1));
     QVector<QImage> workingImages = fixture.images;
     while(workingImages.size() < 64) workingImages.append(fixture.images.front());
-    CTerrainWorkingAtlas working(fixture.catalog, workingImages, 99, 64);
+    CTerrainWorkingAtlas working(fixture.catalog, workingImages, 99, 128);
+    model.enableWorkingAtlasSlots(128);
     QMap<int,quint64> usage;
-    for(int slot = 0; slot < 64; ++slot) usage.insert(slot, 0);
+    for(int slot = 0; slot < 128; ++slot) usage.insert(slot, 0);
     QSet<int> protectedSlots({0,1,2,3,10});
     QSet<int> affected;
     for(const auto& vertex : command.virtualVertices)
@@ -672,7 +708,7 @@ void TerrainVirtualAtlasTests::gradedAlphaIsRefusedWithoutFlattening()
 void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()
 {
     Fixture fixture;
-    CTerrainWorkingAtlas working(fixture.catalog,fixture.images,17,4);
+    CTerrainWorkingAtlas working(fixture.catalog,fixture.images,17,8);
     QVERIFY2(working.isValid(),qPrintable(working.error()));
     QMap<int,quint64> usage;
     usage[0]=4;usage[1]=4;usage[2]=4;usage[3]=0;
@@ -683,9 +719,9 @@ void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()
                                         &generated,&report);
     QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
     QVERIFY(generated);
-    QCOMPARE(SMprPackedTile::decode(first).atlasSlot(),3);
-    QVERIFY(working.takeChangedSlots().contains(3));
-    usage[3]=1;
+    QCOMPARE(SMprPackedTile::decode(first).atlasSlot(),4);
+    QVERIFY(working.takeChangedSlots().contains(4));
+    usage[4]=1;
     const quint16 reused=working.resolve(missing,9,10,&usage,protectedSlots,
                                          &generated,&report);
     QCOMPARE(reused,first);
@@ -694,6 +730,71 @@ void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()
     bool decoded=false;
     QCOMPARE(working.catalog().gridSignatureForPacked(reused,&decoded),missing);
     QVERIFY(decoded);
+}
+
+void TerrainVirtualAtlasTests::workingAtlasNeverReplacesAuthoredPixels()
+{
+    Fixture fixture;
+    const QVector<QImage> original = fixture.images;
+    CTerrainWorkingAtlas working(fixture.catalog, fixture.images, 17, 8);
+    QMap<int, quint64> usage;
+    for(int slot = 0; slot < 8; ++slot) usage[slot] = 0;
+    CValidationReport report;
+    bool generated = false;
+    const quint16 packed = working.resolve(signature(1, 2, 3, 4), 0, 0,
+                                            &usage, {}, &generated, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(generated);
+    QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(), original.size());
+    const QVector<QImage> active = working.activeTileImages();
+    for(int slot = 0; slot < original.size(); ++slot)
+        QCOMPARE(active.at(slot), original.at(slot));
+}
+
+void TerrainVirtualAtlasTests::repeatedGeneratedStampsNeverMutateAuthoredAtlas()
+{
+    Fixture fixture;
+    QVector<QImage> authored;
+    authored.reserve(512);
+    for(int slot = 0; slot < 512; ++slot)
+        authored.append(fixture.images.at(slot % fixture.images.size()));
+    QMap<qint32, QImage> external;
+    for(int material = 5; material <= 6; ++material)
+    {
+        QImage image(8, 8, QImage::Format_RGBA8888);
+        for(int y = 0; y < image.height(); ++y)
+            for(int x = 0; x < image.width(); ++x)
+                image.setPixelColor(x, y, QColor(
+                    (material * 31 + x * 19 + y * 7) & 255,
+                    (material * 47 + x * 5 + y * 23) & 255,
+                    (material * 59 + x * 13 + y * 11) & 255));
+        external.insert(material, image);
+    }
+    CTerrainWorkingAtlas working(fixture.catalog, authored, 97, 1024, external);
+    QMap<int, quint64> usage;
+    for(int slot = 0; slot < 1024; ++slot) usage[slot] = 0;
+    CValidationReport report;
+    int realized = 0;
+    for(int nw = 1; nw <= 6 && realized < 300; ++nw)
+        for(int ne = 1; ne <= 6 && realized < 300; ++ne)
+            for(int se = 1; se <= 6 && realized < 300; ++se)
+                for(int sw = 1; sw <= 6 && realized < 300; ++sw)
+                {
+                    bool generated = false;
+                    const quint16 packed = working.resolve(
+                        signature(nw, ne, se, sw), nw * 37 + se,
+                        ne * 41 + sw, &usage, {}, &generated, &report);
+                    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+                    const int slot = SMprPackedTile::decode(packed).atlasSlot();
+                    QVERIFY(slot >= 0);
+                    usage[slot] += 1;
+                    realized = working.generatedTileCount();
+                }
+    QVERIFY2(realized >= 300, "Stress fixture did not create enough exact tiles");
+    const QVector<QImage> active = working.activeTileImages();
+    QVERIFY(active.size() > authored.size());
+    for(int slot = 0; slot < authored.size(); ++slot)
+        QCOMPARE(active.at(slot), authored.at(slot));
 }
 
 void TerrainVirtualAtlasTests::workingAtlasProtectsUndoSlotsAndRefusesCapacity()

@@ -160,6 +160,7 @@ private:
     QVector<STerrainPaintMaterialChoice> m_overlayPaintTypes;
     QString m_paintCatalogStatus;
     int m_paletteColumns{1};
+    int m_authoredAtlasSlots{0};
     bool m_paletteRelayoutPending{false};
     void updateModeVisibility();
     void refreshPaintTerrainTypes();

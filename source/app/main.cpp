@@ -1121,7 +1121,8 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.findChild<QLabel*>("generatedAtlasTileCount");
         landscapeTools.setGeneratedAtlasTileCount(7);
         const bool generatedAtlasCountVisible = generatedAtlasStatus
-            && generatedAtlasStatus->text().contains(QStringLiteral("7"));
+            && generatedAtlasStatus->text() == QStringLiteral(
+                "512 authored + 7 generated = 519 active slots");
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {

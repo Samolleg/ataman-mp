@@ -59,6 +59,15 @@ public:
     ushort tileRotation() const {return m_rotNum;}
     void setTile(int index, int rotNum);
     void setAtlasLayout(int textureCount, int columns);
+    static float atlasPageRowOrigin(int atlasIndex, int textureCount,
+                                    int columns)
+    {
+        const int safeTextures = qMax(1, textureCount);
+        const int safeColumns = qBound(1, columns, safeTextures);
+        const int rows = qMax(1, (safeTextures + safeColumns - 1)
+                                  / safeColumns);
+        return float(atlasIndex / safeColumns) / float(rows);
+    }
     void setMaxZ(float maxZ) { m_maxZ = maxZ; }
     const QVector<QVector<SSecVertex>>& arrVertex(){return m_arrVertex;}
     void setMaterialIndex(short matIndex) {m_materialIndex = matIndex;}

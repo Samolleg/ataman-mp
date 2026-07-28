@@ -7270,11 +7270,11 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
     const QVector<QImage> activeImages = m_workingTerrainAtlas->activeTileImages();
     const QVector<QImage> tableImages = activeImages.mid(
         0, m_authoredTerrainTileImages.size());
-    if(!m_pTileForm->replaceTileImages(tableImages))
+    if(tableImages != m_authoredTerrainTileImages)
     {
-        if(report) report->add("terrain.working_atlas_table",
+        if(report) report->add("terrain.working_atlas_authored_mutation",
             EValidationSeverity::Error,
-            "The generated exact tiles could not be installed in the atlas table.");
+            "The working atlas attempted to change authored terrain pixels. The preview update was refused before upload.");
         return false;
     }
     makeCurrent();
