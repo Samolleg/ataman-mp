@@ -3088,15 +3088,16 @@ void MainWindow::launchCurrentMapTest()
             tr("The current MOB edits could not be staged safely:\n\n%1").arg(mobReport.toText()));
         return;
     }
-    progress->setLabelText(tr("Generating and validating the run-local AI graph..."));
+    progress->setLabelText(tr("Preparing and validating the selected run-local AI graph..."));
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QByteArray generatedAiGraphData;
     QString generatedGraphError;
+    QString generatedGraphSource;
     if(!m_pView->buildGeneratedAiGraphCandidate(
-           &generatedAiGraphData, &generatedGraphError))
+           &generatedAiGraphData, &generatedGraphError, &generatedGraphSource))
     {
         QMessageBox::critical(this, tr("Map test launch"),
-            tr("Endurance could not generate a runtime-compatible AI graph for "
+            tr("Endurance could not prepare a runtime-compatible AI graph for "
                "the current terrain and objects:\n\n%1")
                 .arg(generatedGraphError));
         return;
@@ -3115,8 +3116,8 @@ void MainWindow::launchCurrentMapTest()
         return;
     }
     ei::log(eLogInfo, QString(
-        "Prepared authoritative run-local AI graph bytes:%1 primaryMobGraphStripped:true")
-        .arg(generatedAiGraphData.size()));
+        "Prepared selected run-local AI graph source:%1 bytes:%2 primaryMobGraphStripped:true")
+        .arg(generatedGraphSource).arg(generatedAiGraphData.size()));
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     for(CMob* supplemental : m_pView->mobs())
     {

@@ -78,6 +78,15 @@ SAiGraphCollisionProxy boxVolume(float minimumX, float minimumY, float minimumZ,
                         QVector2D(maximumX, maximumY), QVector2D(minimumX, maximumY)};
     volume.minimumZ = minimumZ;
     volume.maximumZ = maximumZ;
+    volume.boxCorners = {
+        QVector3D(minimumX, minimumY, minimumZ),
+        QVector3D(maximumX, minimumY, minimumZ),
+        QVector3D(minimumX, maximumY, minimumZ),
+        QVector3D(maximumX, maximumY, minimumZ),
+        QVector3D(minimumX, minimumY, maximumZ),
+        QVector3D(maximumX, minimumY, maximumZ),
+        QVector3D(minimumX, maximumY, maximumZ),
+        QVector3D(maximumX, maximumY, maximumZ)};
     volume.passability = passability;
     volume.authored = true;
     return volume;

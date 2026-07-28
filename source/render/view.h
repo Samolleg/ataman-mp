@@ -134,7 +134,8 @@ public:
     bool buildValidatedLandscapeCandidate(QByteArray* data,
                                           CValidationReport* report = nullptr);
     bool buildGeneratedAiGraphCandidate(QByteArray* data,
-                                        QString* error = nullptr);
+                                        QString* error = nullptr,
+                                        QString* sourceDescription = nullptr);
     bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();
@@ -676,6 +677,7 @@ private:
     QLabel* m_aiGraphSourceLabel{nullptr};
     CAiGraphDocument m_aiGraphDocument;
     CAiGraphDocument m_aiGraphLoadedDocument;
+    QByteArray m_aiGraphLoadedBytes;
     CAiGraphDocument m_aiGraphRegeneratedDocument;
     SAiGraphPreviewBuildResult m_aiGraphRegeneratedResult;
     QString m_aiGraphSource;

@@ -1,6 +1,7 @@
 #include "ai_graph_preview_builder.h"
 
 #include <QElapsedTimer>
+#include <QHash>
 #include <QQueue>
 #include <QtEndian>
 #include <QtMath>
@@ -208,6 +209,54 @@ struct SIndexedCollisionTile
     int minimumHeight{0};
     int maximumHeight{0};
 };
+
+struct SSampledCollisionInterval
+{
+    float minimumHeight{std::numeric_limits<float>::max()};
+    float maximumHeight{-std::numeric_limits<float>::max()};
+};
+
+QHash<int, SSampledCollisionInterval> sampleCollisionBoxFaces(
+    const SAiGraphCollisionProxy& volume, int aiWidth, int aiHeight)
+{
+    QHash<int, SSampledCollisionInterval> intervals;
+    if(volume.boxCorners.size() != 8)
+        return intervals;
+
+    // Walk the six faces of the transformed box. Samples are spaced more
+    // densely than the 0.5 m AI raster so a rotated or narrow authored volume
+    // does not gain the extra tile of thickness produced by polygon overlap.
+    const int faceWalk[] = {1, 0, 2, 6, 7, 5, 1, 0};
+    for(int face = 1; face <= 6; ++face)
+    {
+        const QVector3D center = volume.boxCorners.at(faceWalk[face]);
+        const QVector3D axisA = volume.boxCorners.at(faceWalk[face - 1]) - center;
+        const QVector3D axisB = volume.boxCorners.at(faceWalk[face + 1]) - center;
+        const float projectedA = qSqrt(axisA.x() * axisA.x() + axisA.y() * axisA.y());
+        const float projectedB = qSqrt(axisB.x() * axisB.x() + axisB.y() * axisB.y());
+        const int stepsA = qMax(2, qRound(projectedA / CAiGraphPreviewBuilder::AiTileWorldSize
+                                         * 1.5f) + 2);
+        const int stepsB = qMax(2, qRound(projectedB / CAiGraphPreviewBuilder::AiTileWorldSize
+                                         * 1.5f) + 2);
+        for(int a = 0; a < stepsA; ++a)
+            for(int b = 0; b < stepsB; ++b)
+            {
+                const QVector3D point = center
+                    + axisA * ((float(a) + 0.5f) / float(stepsA))
+                    + axisB * ((float(b) + 0.5f) / float(stepsB));
+                const int x = int(std::floor(point.x()
+                    / CAiGraphPreviewBuilder::AiTileWorldSize));
+                const int y = int(std::floor(point.y()
+                    / CAiGraphPreviewBuilder::AiTileWorldSize));
+                if(x < 0 || y < 0 || x >= aiWidth || y >= aiHeight)
+                    continue;
+                SSampledCollisionInterval& interval = intervals[tileIndex(x, y, aiWidth)];
+                interval.minimumHeight = qMin(interval.minimumHeight, point.z());
+                interval.maximumHeight = qMax(interval.maximumHeight, point.z());
+            }
+    }
+    return intervals;
+}
 
 int quantizedHeight(float worldHeight, float maximumTerrainHeight,
                     int maximumValue = MaximumAiHeight)
@@ -645,6 +694,50 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
            || volume.passability == EAiGraphObjectPassability::Ignored
            || volume.passability == EAiGraphObjectPassability::Easy)
             continue;
+        const QHash<int, SSampledCollisionInterval> sampledIntervals =
+            sampleCollisionBoxFaces(volume, aiWidth, aiHeight);
+        if(!sampledIntervals.isEmpty())
+        {
+            result.collisionCoverageTests += sampledIntervals.size();
+            for(auto sample = sampledIntervals.constBegin();
+                sample != sampledIntervals.constEnd(); ++sample)
+            {
+                const int index = sample.key();
+                const float localMinimumZ = sample.value().minimumHeight;
+                const float localMaximumZ = sample.value().maximumHeight;
+                if(volume.passability != EAiGraphObjectPassability::Bridge)
+                {
+                    SIndexedCollisionTile tile;
+                    tile.proxyIndex = proxyIndex;
+                    tile.next = collisionHead.at(index);
+                    tile.minimumHeight = quantizedHeight(
+                        localMinimumZ, input.maximumTerrainHeight,
+                        MaximumObjectHeight);
+                    tile.maximumHeight = quantizedHeight(
+                        localMaximumZ, input.maximumTerrainHeight,
+                        MaximumObjectHeight);
+                    collisionHead[index] = collisionTiles.size();
+                    collisionTiles.append(tile);
+                }
+                else
+                {
+                    navigationHeights[index] = qMax(navigationHeights.at(index),
+                        quantizedHeight(localMaximumZ,
+                                        input.maximumTerrainHeight,
+                                        MaximumObjectHeight));
+                    navigationWater[index] = 0;
+                    navigationTypes[index] = 7;
+                    if(!bridgeTiles.at(index))
+                        ++result.bridgeAiTiles;
+                    bridgeTiles[index] = true;
+                }
+            }
+            continue;
+        }
+
+        // Legacy/fallback proxies without transformed box corners retain the
+        // older conservative footprint path. Authored object geometry should
+        // normally take the sampled path above.
         float minimumX = volume.footprint.front().x();
         float maximumX = minimumX;
         float minimumY = volume.footprint.front().y();
@@ -860,7 +953,6 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 int best = tileIndex(gx * 8 + 3, gy * 8 + 3, aiWidth);
                 int bestQuality = 0;
                 bool foundCrossing = false;
-                bool foundCrossingBridge = false;
                 for(int size = 2; size <= AiTilesPerGraphCell; size += 2)
                 {
                     const int offset = (AiTilesPerGraphCell - size) / 2;
@@ -873,18 +965,13 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                             continue;
                         const bool crosses = crossingCandidates.at(
                             ly * AiTilesPerGraphCell + lx);
-                        const bool crossingBridge = crosses
-                            && bridgeTiles.at(candidate);
-                        if((crossingBridge && !foundCrossingBridge)
-                           || (!foundCrossingBridge
-                               && (candidateQuality > bestQuality || !foundCrossing)))
+                        if(candidateQuality > bestQuality || !foundCrossing)
                         {
                             if(crosses || !foundCrossing)
                             {
                                 best = candidate;
                                 bestQuality = candidateQuality;
                                 foundCrossing = crosses;
-                                foundCrossingBridge = crossingBridge;
                             }
                         }
                     }

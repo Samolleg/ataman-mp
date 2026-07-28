@@ -1434,8 +1434,8 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphUseLoadedButton->setCheckable(true);
     m_aiGraphUseLoadedButton->setText(tr("Loaded preview override: OFF"));
     m_aiGraphUseLoadedButton->setToolTip(tr(
-        "Viewport only: toggle between the graph loaded from the map and the regenerated preview. "
-        "Test Current Map always stages a freshly validated regenerated graph."));
+        "Toggle between the graph loaded from the map and the regenerated preview. "
+        "Test Current Map and Hot Reload stage the selected graph."));
     actions->addWidget(m_aiGraphUseLoadedButton);
     actions->addWidget(m_aiGraphRegenerateButton);
     body->addLayout(actions);
@@ -1581,6 +1581,7 @@ void CView::refreshAiGraphPreviewSource()
         m_aiGraphRegenerationTimer->stop();
     m_aiGraphDocument.clear();
     m_aiGraphLoadedDocument.clear();
+    m_aiGraphLoadedBytes.clear();
     m_aiGraphRegeneratedDocument.clear();
     m_aiGraphRegeneratedResult = SAiGraphPreviewBuildResult();
     m_aiGraphSource.clear();
@@ -1632,6 +1633,7 @@ void CView::refreshAiGraphPreviewSource()
             for(const QString& warning : warnings)
                 ei::log(eLogWarning, "AI graph preview: " + warning);
             m_aiGraphLoadedDocument = m_aiGraphDocument;
+            m_aiGraphLoadedBytes = sourceBytes;
             m_aiGraphLoadedSource = m_aiGraphSource;
         }
     }
@@ -1773,7 +1775,8 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
     return true;
 }
 
-bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
+bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error,
+                                           QString* sourceDescription)
 {
     if(data)
         data->clear();
@@ -1795,8 +1798,21 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
     const int expectedWidth = (m_terrainEdit.vertexCountX() - 1) / 4;
     const int expectedHeight = (m_terrainEdit.vertexCountY() - 1) / 4;
     CAiGraphDocument generated;
-    if(m_aiGraphRegeneratedFresh && m_aiGraphRegeneratedDocument.isValid())
+    QByteArray candidate;
+    if(m_aiGraphLoadedOverride && m_aiGraphLoadedDocument.isValid()
+       && !m_aiGraphLoadedBytes.isEmpty())
+    {
+        generated = m_aiGraphLoadedDocument;
+        candidate = m_aiGraphLoadedBytes;
+        if(sourceDescription)
+            *sourceDescription = m_aiGraphLoadedSource;
+    }
+    else if(m_aiGraphRegeneratedFresh && m_aiGraphRegeneratedDocument.isValid())
+    {
         generated = m_aiGraphRegeneratedDocument;
+        if(sourceDescription)
+            *sourceDescription = m_aiGraphRegeneratedSource;
+    }
     else
     {
         SAiGraphPreviewBuildInput input;
@@ -1810,6 +1826,8 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
             return false;
         }
         generated = result.document;
+        if(sourceDescription)
+            *sourceDescription = tr("Freshly regenerated graph");
     }
     QString compatibilityError;
     if(!generated.validateRuntimeCompatibility(expectedWidth, expectedHeight,
@@ -1820,7 +1838,8 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
                 .arg(compatibilityError);
         return false;
     }
-    const QByteArray candidate = generated.serialize(error);
+    if(candidate.isEmpty())
+        candidate = generated.serialize(error);
     if(candidate.isEmpty())
         return false;
     CAiGraphDocument reopened;
@@ -3212,22 +3231,22 @@ void CView::rebuildAiGraphOverlayGeometry()
                 continue;
             QVector3D position((x * 8 + localX + 0.5f) * 0.5f,
                                (y * 8 + localY + 0.5f) * 0.5f, 0.0f);
-            if(!m_pLand->projectPt(position))
-                continue;
-            if(!m_aiGraphLoadedOverride && m_aiGraphRegeneratedFresh
-               && m_aiGraphRegeneratedResult.valid)
+            const bool regenerated = !m_aiGraphLoadedOverride
+                && m_aiGraphRegeneratedFresh && m_aiGraphRegeneratedResult.valid;
+            if(regenerated)
             {
                 const int aiWidth = width * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
                 const int aiX = x * CAiGraphPreviewBuilder::AiTilesPerGraphCell + localX;
                 const int aiY = y * CAiGraphPreviewBuilder::AiTilesPerGraphCell + localY;
                 const int aiIndex = aiY * aiWidth + aiX;
                 if(aiIndex >= 0
-                   && aiIndex < m_aiGraphRegeneratedResult.navigationSurfaceHeights.size()
-                   && aiIndex < m_aiGraphRegeneratedResult.bridgeMask.size()
-                   && m_aiGraphRegeneratedResult.bridgeMask.at(aiIndex))
-                    position.setZ(qMax(position.z(),
-                        m_aiGraphRegeneratedResult.navigationSurfaceHeights.at(aiIndex)));
+                   && aiIndex < m_aiGraphRegeneratedResult.navigationSurfaceHeights.size())
+                    position.setZ(m_aiGraphRegeneratedResult.navigationSurfaceHeights.at(aiIndex));
+                else
+                    continue;
             }
+            else if(!m_pLand->projectPt(position))
+                continue;
             position.setZ(position.z() + 0.20f);
             const int cell = y * width + x;
             positions[cell] = position;
