@@ -904,6 +904,8 @@ CView::~CView()
     ei::setCrashContext("shutdown/view-opengl-resources");
     if(isValid())
         makeCurrent();
+    if(m_pLand)
+        m_pLand->clearPreviewTerrainAtlas();
     ei::setCrashContext("shutdown/view-gpu-timer");
     if(m_gpuTimer)
     {
@@ -5306,7 +5308,11 @@ void CView::unloadLand(bool promptForSave)
     rebuildTerrainAutoCatalog();
     m_terrainSemanticSeed = 0;
     m_mprDocument = CMprDocument();
+    if(isValid())
+        makeCurrent();
     m_pLand->unloadMpr();
+    if(isValid())
+        doneCurrent();
     refreshMprSettingsDock();
     refreshAiGraphPreviewSource();
     m_caveEnvironment = false;

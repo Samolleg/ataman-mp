@@ -92,6 +92,7 @@ public:
     bool previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile,
                               bool updateSector = true);
     bool previewTerrainAtlas(const QVector<QImage>& tileImages, int textureCount);
+    void clearPreviewTerrainAtlas();
     void setDirty(bool bDirty) {m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
@@ -111,6 +112,7 @@ private:
     QVector<SAnimTile> m_aAnimTile;
     QVector<QVector<CSector*>> m_aSector;
     QOpenGLTexture* m_texture;
+    QOpenGLTexture* m_baseAtlasTexture{nullptr};
     QOpenGLTexture* m_previewAtlasTexture{nullptr};
     QFileInfo m_filePath;
     QString m_innerMapName;

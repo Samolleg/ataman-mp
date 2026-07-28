@@ -20,6 +20,7 @@
 #include "staged_save_validator.h"
 #include "log.h"
 #include "mpr_document.h"
+#include "terrain_virtual_atlas.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -32,8 +33,9 @@ CLandscape* CLandscape::getInstance()
 
 void CLandscape::unloadMpr()
 {
-    delete m_previewAtlasTexture;
-    m_previewAtlasTexture = nullptr;
+    clearPreviewTerrainAtlas();
+    m_baseAtlasTexture = nullptr;
+    m_texture = nullptr;
     for (auto& xSec: m_aSector)
     {
         for(auto& ySec: xSec)
@@ -67,19 +69,15 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     const int pageSize = tileSize * 8;
     QImage combined(pageSize * textureCount, pageSize, QImage::Format_RGBA8888);
     combined.fill(Qt::transparent);
-    for(int slot = 0; slot < tileImages.size(); ++slot)
+    for(int page = 0; page < textureCount; ++page)
     {
-        if(tileImages.at(slot).size() != QSize(tileSize, tileSize))
+        const QImage pageImage = CTerrainVirtualAtlas::composePage(
+            tileImages, page * 64, tileSize);
+        if(pageImage.size() != QSize(pageSize, pageSize))
             return false;
-        const QImage source = tileImages.at(slot)
-            .convertToFormat(QImage::Format_RGBA8888).mirrored(false, true);
-        const int page = slot / 64;
-        const int local = slot % 64;
-        const int destinationX = page * pageSize + (local % 8) * tileSize;
-        const int destinationY = (local / 8) * tileSize;
-        for(int y = 0; y < tileSize; ++y)
-            memcpy(combined.scanLine(destinationY + y) + destinationX * 4,
-                   source.constScanLine(y), size_t(tileSize) * 4u);
+        for(int y = 0; y < pageSize; ++y)
+            memcpy(combined.scanLine(y) + page * pageSize * 4,
+                   pageImage.constScanLine(y), size_t(pageSize) * 4u);
     }
     QOpenGLTexture* replacement = new QOpenGLTexture(
         combined, QOpenGLTexture::GenerateMipMaps);
@@ -91,10 +89,36 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     replacement->setMinificationFilter(QOpenGLTexture::NearestMipMapLinear);
     replacement->setMagnificationFilter(QOpenGLTexture::Nearest);
     replacement->setWrapMode(QOpenGLTexture::Repeat);
+    if(m_previewAtlasTexture && m_previewAtlasTexture->isCreated())
+        m_previewAtlasTexture->destroy();
     delete m_previewAtlasTexture;
     m_previewAtlasTexture = replacement;
     m_texture = replacement;
+    ei::log(eLogInfo, QString("Working terrain atlas uploaded: slots:%1 dimensions:%2x%3")
+        .arg(tileImages.size()).arg(combined.width()).arg(combined.height()));
     return true;
+}
+
+void CLandscape::clearPreviewTerrainAtlas()
+{
+    m_texture = m_baseAtlasTexture;
+    if(!m_previewAtlasTexture)
+        return;
+    if(QOpenGLContext::currentContext())
+    {
+        if(m_previewAtlasTexture->isCreated())
+            m_previewAtlasTexture->destroy();
+        delete m_previewAtlasTexture;
+    }
+    else
+    {
+        // At process teardown the driver releases the texture with its
+        // context. Deleting Qt's wrapper after that context has vanished can
+        // dereference a dead QOpenGLContext; retain the tiny wrapper instead.
+        ei::log(eLogWarning,
+            "Working terrain atlas wrapper retained because no OpenGL context is current");
+    }
+    m_previewAtlasTexture = nullptr;
 }
 
 CLandscape::~CLandscape()
@@ -261,6 +285,7 @@ void CLandscape::readMap(const QFileInfo& path)
     int texCount;
     ei::setCrashContext("mpr/terrain-atlas/build:" + path.fileName());
     m_texture = CTextureList::getInstance()->buildLandTex(innerMapName, int(m_header.nTexture), texCount);
+    m_baseAtlasTexture = m_texture;
     ei::log(eLogInfo, QString("MPR terrain atlas complete file:%1 textureCount:%2")
             .arg(path.fileName()).arg(texCount));
 

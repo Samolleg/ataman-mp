@@ -115,6 +115,7 @@ private slots:
     void stableHashesAndNamespaceAreDeterministic();
     void mapWideUsageAndUnusedCompaction();
     void capacityRefusalNeverSubstitutes();
+    void rawPageCompositionPreservesEveryUntouchedSlot();
     void pageOrientationMipmapsAlphaAndReopen();
     void namespacesAreIsolated();
     void exactOnlyNoOpPreservesPixels();
@@ -124,6 +125,9 @@ private slots:
     void gradedAlphaIsRefusedWithoutFlattening();
     void workingAtlasGeneratesImmediatelyAndReusesTuple();
     void workingAtlasProtectsUndoSlotsAndRefusesCapacity();
+    void selfPaintPreservesExactPackedTileAndRotation();
+    void parallelStripesAndBaseCrossResolveExactly();
+    void nestedCircleMaterialPairingsResolveExactly();
     void generatedPaintMatrixSavesReopensAndMatchesVertexOracle();
 };
 
@@ -254,6 +258,41 @@ void TerrainVirtualAtlasTests::capacityRefusalNeverSubstitutes()
     QVERIFY(result.packedCells.isEmpty());
 }
 
+void TerrainVirtualAtlasTests::rawPageCompositionPreservesEveryUntouchedSlot()
+{
+    QVector<QImage> tiles;
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        QImage tile(8, 8, QImage::Format_RGBA8888);
+        for(int y = 0; y < 8; ++y) for(int x = 0; x < 8; ++x)
+            tile.setPixelColor(x, y, QColor(slot * 3 % 256,
+                slot * 5 % 256, (x * 29 + y * 17) % 256, 255));
+        tiles.append(tile);
+    }
+    const QImage original = CTerrainVirtualAtlas::composePage(tiles, 0, 8);
+    QCOMPARE(original.size(), QSize(64, 64));
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        const int destinationX = (slot % 8) * 8;
+        const int destinationY = (7 - slot / 8) * 8;
+        QCOMPARE(original.copy(destinationX, destinationY, 8, 8), tiles.at(slot));
+    }
+
+    QImage replacement = tiles.at(37);
+    replacement.fill(QColor(255, 0, 255, 255));
+    tiles[37] = replacement;
+    const QImage changed = CTerrainVirtualAtlas::composePage(tiles, 0, 8);
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        const int destinationX = (slot % 8) * 8;
+        const int destinationY = (7 - slot / 8) * 8;
+        const QImage before = original.copy(destinationX, destinationY, 8, 8);
+        const QImage after = changed.copy(destinationX, destinationY, 8, 8);
+        if(slot == 37) QVERIFY(before != after);
+        else QCOMPARE(after, before);
+    }
+}
+
 void TerrainVirtualAtlasTests::pageOrientationMipmapsAlphaAndReopen()
 {
     Fixture fixture;
@@ -264,12 +303,12 @@ void TerrainVirtualAtlasTests::pageOrientationMipmapsAlphaAndReopen()
     const STerrainAtlasFinalization result=atlas.finalize(field,"Zone1",512);
     QVERIFY2(result.success,qPrintable(result.error));
     QCOMPARE(result.pages.size(),1);
-    QCOMPARE(result.pages[0].pixelColor(0,7).alpha(),0);
+    QCOMPARE(result.pages[0].pixelColor(0,56).alpha(),0);
     const ei::SMmpInspection reopened=ei::inspectMmp(result.pageMmpPayloads[0]);
     QVERIFY2(reopened.valid,qPrintable(reopened.diagnostic));
     QCOMPARE(reopened.formatName,QString("DXT1"));
     QVERIFY(reopened.authoredMipSizes.size()>1);
-    QCOMPARE(reopened.baseImage.pixelColor(0,7).alpha(),0);
+    QCOMPARE(reopened.baseImage.pixelColor(0,56).alpha(),0);
 }
 
 void TerrainVirtualAtlasTests::namespacesAreIsolated()
@@ -466,6 +505,173 @@ void TerrainVirtualAtlasTests::workingAtlasProtectsUndoSlotsAndRefusesCapacity()
     QVERIFY(report.toText().contains("No identity was substituted"));
 }
 
+void TerrainVirtualAtlasTests::selfPaintPreservesExactPackedTileAndRotation()
+{
+    const QVector<ETerrainTileBrushShape> shapes = {
+        ETerrainTileBrushShape::Circle, ETerrainTileBrushShape::Square};
+    for(qint32 material = 1; material <= 4; ++material)
+        for(ETerrainTileBrushShape shape : shapes)
+            for(float radius : {1.0f, 3.0f})
+            {
+                CTerrainTransitionCatalog catalog;
+                SMprPackedTile originalPacked;
+                originalPacked.tileIndex = quint8(8 + material);
+                originalPacked.rotation = quint8((material + int(radius)) % 4);
+                STerrainTransitionVariant variant;
+                variant.signature = signature(material, material, material, material);
+                variant.packedTile = originalPacked.encode();
+                QVERIFY(catalog.addVariant(variant));
+
+                QByteArray payload;
+                QDataStream sec(&payload, QIODevice::WriteOnly);
+                sec.setByteOrder(QDataStream::LittleEndian);
+                sec << quint32(0xCF4BF774) << quint8(0);
+                payload.append(QByteArray(33 * 33 * 8, '\0'));
+                const int tileOffset = payload.size();
+                payload.append(QByteArray(16 * 16 * 2, '\0'));
+                for(int cell = 0; cell < 16 * 16; ++cell)
+                    qToLittleEndian<quint16>(originalPacked.encode(),
+                        reinterpret_cast<uchar*>(payload.data() + tileOffset + cell * 2));
+                STerrainSectorSource source;
+                source.memberName = "Self000000.SEC";
+                source.sectorX = source.sectorY = 0;
+                source.type = 0;
+                source.payload = payload;
+                source.landTileOffset = tileOffset;
+                CTerrainEditModel model;
+                CValidationReport report;
+                QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report,
+                                          1, QVector<qint32>(64, 1), 0));
+                STerrainTileBrush brush;
+                brush.centerX = brush.centerY = 8.0f;
+                brush.radius = radius;
+                brush.shape = shape;
+                const STerrainTileCommand command = model.makeVirtualMaterialPaint(
+                    8, 8, brush, ETerrainTileLayer::Land, material,
+                    catalog, 0x2468u, &report);
+                QVERIFY2(command.isEmpty(), qPrintable(report.toText()));
+                for(int y = 0; y < 16; ++y) for(int x = 0; x < 16; ++x)
+                {
+                    bool available = false;
+                    QCOMPARE(model.packedTile(x, y, ETerrainTileLayer::Land,
+                                              &available), originalPacked.encode());
+                    QVERIFY(available);
+                }
+            }
+}
+
+void TerrainVirtualAtlasTests::parallelStripesAndBaseCrossResolveExactly()
+{
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(16, 16, 1));
+    for(int stripe = 0; stripe < 3; ++stripe)
+        for(int y = 2 + stripe * 5; y <= 4 + stripe * 5; ++y)
+            for(int x = 2; x <= 14; ++x)
+                QVERIFY(field.setMaterial(x, y, stripe + 2));
+    for(int y = 1; y <= 15; ++y)
+        for(int x = 7; x <= 9; ++x)
+            QVERIFY(field.setMaterial(x, y, 1));
+
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x314159u);
+    CValidationReport report;
+    const auto finalized = atlas.finalize(field, "StripeCross", 512,
+                                           {1,2,3,4}, &report);
+    QVERIFY2(finalized.success, qPrintable(finalized.error + "\n" + report.toText()));
+    for(int y = 0; y < 16; ++y) for(int x = 0; x < 16; ++x)
+    {
+        bool decoded = false;
+        QCOMPARE(finalizedSignature(finalized,
+            finalized.packedCells.at(y * 16 + x), &decoded), field.cellSignature(x, y));
+        QVERIFY(decoded);
+    }
+    for(int y = 1; y <= 15; ++y)
+        for(int x = 7; x <= 9; ++x)
+            QCOMPARE(field.material(x, y), qint32(1));
+
+    CMprDocument source;
+    QVERIFY(source.loadBytes(portableMpr(), "stripe-source.mpr", &report));
+    const auto package = CTerrainVirtualAtlas::buildPortablePackage(
+        source, finalized, ETerrainTileLayer::Land, &report);
+    QVERIFY2(package.success, qPrintable(package.error + "\n" + report.toText()));
+    CMprDocument reopened;
+    QVERIFY(reopened.loadBytes(package.mprBytes, "stripe-cross.mpr", &report));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(reopened, &report));
+    for(int y = 0; y < 16; ++y) for(int x = 0; x < 16; ++x)
+    {
+        bool available = false;
+        QCOMPARE(terrain.packedTile(x, y, ETerrainTileLayer::Land, &available),
+                 finalized.packedCells.at(y * 16 + x));
+        QVERIFY(available);
+    }
+}
+
+void TerrainVirtualAtlasTests::nestedCircleMaterialPairingsResolveExactly()
+{
+    Fixture fixture;
+    int scenarios = 0;
+    for(qint32 outer = 1; outer <= 4; ++outer)
+        for(qint32 inner = 1; inner <= 4; ++inner)
+        {
+            if(inner == outer) continue;
+            CTerrainVirtualMaterialField field;
+            QVERIFY(field.resize(16, 16, 1));
+            STerrainTileBrush outerBrush;
+            outerBrush.centerX = outerBrush.centerY = 8.0f;
+            outerBrush.radius = 3.0f;
+            outerBrush.shape = ETerrainTileBrushShape::Circle;
+            const int outerChanges = field.paint(outerBrush, outer);
+            if(outer == 1) QCOMPARE(outerChanges, 0);
+            else QVERIFY(outerChanges > 0);
+            STerrainTileBrush innerBrush = outerBrush;
+            innerBrush.radius = 1.0f;
+            QVERIFY(field.paint(innerBrush, inner) > 0);
+
+            CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x271828u);
+            CValidationReport report;
+            const auto finalized = atlas.finalize(field,
+                QString("Nested-%1-%2").arg(outer).arg(inner), 512,
+                {1,2,3,4}, &report);
+            QVERIFY2(finalized.success,
+                qPrintable(finalized.error + "\n" + report.toText()));
+            for(int y = 0; y < 16; ++y) for(int x = 0; x < 16; ++x)
+            {
+                bool decoded = false;
+                QCOMPARE(finalizedSignature(finalized,
+                    finalized.packedCells.at(y * 16 + x), &decoded),
+                    field.cellSignature(x, y));
+                QVERIFY(decoded);
+            }
+            CMprDocument source;
+            QVERIFY(source.loadBytes(portableMpr(), "nested-source.mpr", &report));
+            const auto package = CTerrainVirtualAtlas::buildPortablePackage(
+                source, finalized, ETerrainTileLayer::Land, &report);
+            QVERIFY2(package.success,
+                qPrintable(package.error + "\n" + report.toText()));
+            CMprDocument reopened;
+            QVERIFY(reopened.loadBytes(package.mprBytes,
+                QString("nested-%1-%2.mpr").arg(outer).arg(inner), &report));
+            CTerrainEditModel terrain;
+            QVERIFY(terrain.load(reopened, &report));
+            for(int y = 0; y < 16; ++y) for(int x = 0; x < 16; ++x)
+            {
+                bool available = false;
+                QCOMPARE(terrain.packedTile(x, y, ETerrainTileLayer::Land,
+                                            &available),
+                         finalized.packedCells.at(y * 16 + x));
+                QVERIFY(available);
+            }
+            CTerrainVirtualAtlas repeated(fixture.catalog, fixture.images, 0x271828u);
+            const auto again = repeated.finalize(field,
+                QString("Nested-%1-%2").arg(outer).arg(inner), 512, {1,2,3,4});
+            QCOMPARE(again.stableSha256, finalized.stableSha256);
+            QCOMPARE(again.pageMmpPayloads, finalized.pageMmpPayloads);
+            ++scenarios;
+        }
+    QCOMPARE(scenarios, 12);
+}
+
 void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexOracle()
 {
     struct Scenario { QString name; qint32 background; qint32 brush; QVector<QPoint> touched; };
@@ -474,7 +680,6 @@ void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexO
     for(qint32 background = 1; background <= 4; ++background)
         for(qint32 brush = 1; brush <= 4; ++brush)
         {
-            if(background == brush) continue;
             for(const QString& shape : shapes)
             {
                 Scenario scenario;
@@ -607,7 +812,7 @@ void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexO
                                package.resourceArchiveBytes));
         }
     }
-    QCOMPARE(scenarios.size(), 62);
+    QCOMPARE(scenarios.size(), 82);
     QVERIFY(authoredCells > 0);
     QVERIFY(generatedCells > 0);
     rawResults.prepend(QString("PASS scenarios=%1 authoredCells=%2 generatedCells=%3")

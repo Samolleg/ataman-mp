@@ -363,10 +363,14 @@ QImage CTerrainVirtualAtlas::composePage(const QVector<QImage>& tiles,
     page.fill(Qt::transparent);
     for(int local = 0; local < 64 && firstTile + local < tiles.size(); ++local)
     {
+        // Tile images are already stored in the MMP/OpenGL bottom-up row
+        // convention. Slot row zero is the visual top of the 8x8 page, so it
+        // belongs in raw page row seven. Mirroring every tile and leaving the
+        // page rows in visual order flips the complete atlas at upload time.
         const QImage source = tiles.at(firstTile + local)
-            .convertToFormat(QImage::Format_RGBA8888).mirrored(false, true);
+            .convertToFormat(QImage::Format_RGBA8888);
         const int destinationX = (local % 8) * tileSize;
-        const int destinationY = (local / 8) * tileSize;
+        const int destinationY = (7 - local / 8) * tileSize;
         for(int y = 0; y < tileSize; ++y)
             memcpy(page.scanLine(destinationY + y) + destinationX * 4,
                    source.constScanLine(y), size_t(tileSize) * 4u);
