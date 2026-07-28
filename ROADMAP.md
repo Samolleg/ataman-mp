@@ -150,6 +150,28 @@ rather than another editor architecture pass.
 
 ## Script-authoring conveniences
 
+- [ ] **Post-baseline / potential 1.0:** restore structured MOB VSS visual
+  scripting support. Normal script text and `VSS_SECTION` are independently
+  serialized; the game executes normal script and skips VSS, while VSS stores
+  editor-side visual-authoring source/metadata for triggers, checks, commands,
+  graph nodes/paths/links, groups, variables, layout, titles, and custom-script
+  fragments. Endurance currently preserves VSS losslessly as opaque bytes and
+  must continue doing so until structured support is proven.
+  - Add a lossless structured parser and read-only viewer first, preserving
+    unknown VSS records, ordering, and raw payloads.
+  - Recover the original VSS-to-normal-script compiler and synchronization
+    contract through controlled evidence before generating or editing either
+    representation.
+  - Add visual graph editing only after deterministic generation and validation
+    of normal script are established.
+  - Track explicit synchronization/conflict state. Update VSS and normal script
+    together as one undoable transaction; never silently choose one side or
+    discard unknown records.
+  - Once supported, provide intentional VSS-to-script and script-to-VSS
+    synchronization/conversion with conflicts surfaced for user resolution.
+  - **New MOB baseline:** omit `VSS_SECTION` and author normal script only. Do
+    not synthesize empty/stub VSS. Copy-from-existing must not copy VSS unless a
+    future explicit advanced option requests it.
 - [ ] Add a viewport action such as **Copy Current Camera Transform as Script**.
   Capture the current editor camera using the verified game-compatible
   coordinate, handedness, orientation, and argument-order convention, then copy
