@@ -12,12 +12,15 @@
 #include <QLabel>
 #include <QPainter>
 #include <QPushButton>
+#include <QResizeEvent>
+#include <QScrollArea>
 #include <QSlider>
 #include <QSettings>
 #include <QSet>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTabWidget>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -47,6 +50,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_flatten(new QSpinBox(this))
     , m_flipVertical(new QCheckBox(tr("Flip image vertically"), this))
     , m_materialTabs(new QTabWidget(this))
+    , m_groundMaterialScroll(new QScrollArea(this))
+    , m_overlayMaterialScroll(new QScrollArea(this))
     , m_groundMaterialPage(new QWidget(this))
     , m_overlayMaterialPage(new QWidget(this))
     , m_groundMaterialGrid(new QGridLayout)
@@ -161,9 +166,20 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     overlayGrid->setLayout(m_overlayMaterialGrid);
     overlayPalette->addWidget(overlayGrid);
     overlayPalette->addStretch(1);
-    m_materialTabs->addTab(m_groundMaterialPage, tr("Ground"));
-    m_materialTabs->addTab(m_overlayMaterialPage, tr("Overlay"));
-    paintLayout->addWidget(m_materialTabs);
+    const auto configurePaletteScroll = [](QScrollArea* scroll, QWidget* page) {
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        scroll->setWidget(page);
+    };
+    configurePaletteScroll(m_groundMaterialScroll, m_groundMaterialPage);
+    configurePaletteScroll(m_overlayMaterialScroll, m_overlayMaterialPage);
+    m_groundMaterialScroll->setObjectName(QStringLiteral("groundMaterialScroll"));
+    m_overlayMaterialScroll->setObjectName(QStringLiteral("overlayMaterialScroll"));
+    m_materialTabs->addTab(m_groundMaterialScroll, tr("Ground"));
+    m_materialTabs->addTab(m_overlayMaterialScroll, tr("Overlay"));
+    paintLayout->addWidget(m_materialTabs, 1);
 
     m_paintRadius->setRange(1, 33);
     m_paintRadius->setValue(qBound(1,
@@ -584,7 +600,8 @@ void CLandscapeTools::rebuildMaterialPalette()
     clear(m_underwaterMaterialGrid);
     clear(m_overlayMaterialGrid);
 
-    const auto populate = [this](QGridLayout* grid, QButtonGroup* group,
+    const int columns = qMax(1, m_paletteColumns);
+    const auto populate = [this, columns](QGridLayout* grid, QButtonGroup* group,
             const QVector<STerrainPaintMaterialChoice>& choices) {
         int row = 0;
         const auto addSection = [&](bool used, const QString& title) {
@@ -594,7 +611,7 @@ void CLandscapeTools::rebuildMaterialPalette()
           if(section.isEmpty()) return;
           QLabel* heading = new QLabel(title, this);
           heading->setStyleSheet(QStringLiteral("QLabel { font-weight: bold; margin-top: 5px; }"));
-          grid->addWidget(heading, row++, 0, 1, 5);
+          grid->addWidget(heading, row++, 0, 1, columns);
           QMap<QString, QVector<STerrainPaintMaterialChoice>> byFamily;
           for(const STerrainPaintMaterialChoice& choice : section)
               byFamily[choice.familyName.isEmpty() ? choice.name
@@ -603,7 +620,7 @@ void CLandscapeTools::rebuildMaterialPalette()
           {
             QLabel* familyHeading = new QLabel(family.key(), this);
             familyHeading->setStyleSheet(QStringLiteral("QLabel { margin-top: 3px; color: palette(mid); }"));
-            grid->addWidget(familyHeading, row++, 0, 1, 5);
+            grid->addWidget(familyHeading, row++, 0, 1, columns);
             int index = 0;
             for(const STerrainPaintMaterialChoice& choice : family.value())
             {
@@ -626,15 +643,18 @@ void CLandscapeTools::rebuildMaterialPalette()
                   button->setText(choice.name.left(2).toUpper());
               button->setFixedSize(64, 64);
               group->addButton(button);
-              grid->addWidget(button, row + index / 5, index % 5);
+              grid->addWidget(button, row + index / columns, index % columns,
+                              Qt::AlignHCenter);
               ++index;
             }
-            row += (family.value().size() + 4) / 5;
+            row += (family.value().size() + columns - 1) / columns;
           }
         };
         addSection(true, tr("Used on this map"));
         addSection(false, tr("Unused materials"));
-        grid->setColumnStretch(5, 1);
+        for(int column = 0; column < columns; ++column)
+            grid->setColumnStretch(column, 1);
+        grid->setAlignment(Qt::AlignTop);
     };
     populate(m_groundMaterialGrid, m_groundMaterialButtons, m_landPaintTypes);
     populate(m_underwaterMaterialGrid, m_groundMaterialButtons, m_underwaterPaintTypes);
@@ -655,6 +675,28 @@ void CLandscapeTools::rebuildMaterialPalette()
     if(!restore(m_overlayMaterialButtons, previousOverlay)
        && !m_overlayMaterialButtons->buttons().isEmpty())
         m_overlayMaterialButtons->buttons().front()->setChecked(true);
+}
+
+void CLandscapeTools::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    if(m_paletteRelayoutPending)
+        return;
+    m_paletteRelayoutPending = true;
+    // Rebuilding a layout synchronously from its parent's resize event can
+    // recurse through QScrollArea geometry negotiation. Coalesce it onto the
+    // event queue once the viewport has its final width.
+    QTimer::singleShot(0, this, [this]() {
+        m_paletteRelayoutPending = false;
+        const int viewportWidth = m_groundMaterialScroll
+            ? m_groundMaterialScroll->viewport()->width() : width();
+        const int columns = qMax(1, (viewportWidth - 12) / 70);
+        if(columns != m_paletteColumns)
+        {
+            m_paletteColumns = columns;
+            rebuildMaterialPalette();
+        }
+    });
 }
 
 void CLandscapeTools::setUsedTerrainFamilies(

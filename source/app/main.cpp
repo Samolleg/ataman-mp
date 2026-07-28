@@ -26,6 +26,7 @@
 #include <QMenu>
 #include <QContextMenuEvent>
 #include <QScrollBar>
+#include <QScrollArea>
 #include <QFormLayout>
 #include <QEventLoop>
 #include <QPainter>
@@ -1082,6 +1083,23 @@ int runHeadlessCommand(QApplication& app)
             grassVariantButtons == 2 && grassFamilyHeadings == 1
             && landscapeTools.selectPaintTerrainType(101)
             && landscapeTools.selectPaintTerrainType(102);
+        landscapeTools.resize(720, 900);
+        landscapeTools.show();
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QScrollArea* groundMaterialScroll =
+            landscapeTools.findChild<QScrollArea*>("groundMaterialScroll");
+        QScrollArea* overlayMaterialScroll =
+            landscapeTools.findChild<QScrollArea*>("overlayMaterialScroll");
+        const bool materialPaletteScrollsAndFillsWidth = groundMaterialScroll
+            && overlayMaterialScroll && groundMaterialScroll->widgetResizable()
+            && overlayMaterialScroll->widgetResizable()
+            && groundMaterialScroll->horizontalScrollBarPolicy()
+                == Qt::ScrollBarAlwaysOff
+            && overlayMaterialScroll->horizontalScrollBarPolicy()
+                == Qt::ScrollBarAlwaysOff
+            && groundMaterialScroll->widget()->width()
+                >= groundMaterialScroll->viewport()->width();
+        landscapeTools.hide();
         QLabel* atlasSourceStatus =
             landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");
         landscapeTools.setPaintMaterials(
@@ -1315,6 +1333,7 @@ int runHeadlessCommand(QApplication& app)
             && programmaticModeRefreshesMaterials
             && uniqueMaterialPaletteCards
             && materialVariantsRemainDistinctAndGrouped
+            && materialPaletteScrollsAndFillsWidth
             && defaultAtlasSourceVisible
             && localAtlasSourceVisible
             && generatedAtlasCountVisible
@@ -1398,6 +1417,8 @@ int runHeadlessCommand(QApplication& app)
                << uniqueMaterialPaletteCards
                << " materialVariantsRemainDistinctAndGrouped="
                << materialVariantsRemainDistinctAndGrouped
+               << " materialPaletteScrollsAndFillsWidth="
+               << materialPaletteScrollsAndFillsWidth
                << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
                << " localAtlasSourceVisible=" << localAtlasSourceVisible
                << " generatedAtlasCountVisible=" << generatedAtlasCountVisible

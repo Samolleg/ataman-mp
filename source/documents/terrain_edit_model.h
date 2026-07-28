@@ -341,6 +341,7 @@ public:
                      int textureCount = 0,
                      const QVector<qint32>& tileTypes = QVector<qint32>(),
                      int materialCount = 0);
+    void enableWorkingAtlasSlots(int slotCount);
 
     int vertexCountX() const { return m_vertexCountX; }
     int vertexCountY() const { return m_vertexCountY; }

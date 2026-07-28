@@ -731,12 +731,20 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     const QMap<qint32, QImage>& externalMaterialSources)
     : m_authoredCatalog(authoredCatalog), m_workingCatalog(authoredCatalog),
       m_authoredImages(authoredTiles), m_workingImages(authoredTiles),
-      m_capacityLimit(qMin(capacityLimit, authoredTiles.size()))
+      m_capacityLimit(qBound(authoredTiles.size(), capacityLimit, 16384))
 {
+    if(!authoredTiles.isEmpty() && m_workingImages.size() < m_capacityLimit)
+    {
+        QImage blank(authoredTiles.front().size(), QImage::Format_RGBA8888);
+        blank.fill(Qt::transparent);
+        m_workingImages.resize(m_capacityLimit);
+        for(int slot = authoredTiles.size(); slot < m_workingImages.size(); ++slot)
+            m_workingImages[slot] = blank;
+    }
     m_resolver.reset(new CTerrainVirtualAtlas(
         m_authoredCatalog, m_authoredImages, distributionSeed,
         externalMaterialSources));
-    for(int slot = 0; slot < m_capacityLimit; ++slot)
+    for(int slot = 0; slot < m_authoredImages.size(); ++slot)
     {
         const QPair<int, int> key(0, slot);
         m_virtualToWorking.insert(key, slot);
@@ -760,6 +768,18 @@ QString CTerrainWorkingAtlas::error() const
 int CTerrainWorkingAtlas::generatedTileCount() const
 {
     return m_resolver ? m_resolver->generatedTiles().size() : 0;
+}
+
+int CTerrainWorkingAtlas::activeTextureCount() const
+{
+    const int highest = m_workingToVirtual.isEmpty()
+        ? -1 : m_workingToVirtual.lastKey();
+    return qMax(1, (highest + 64) / 64);
+}
+
+QVector<QImage> CTerrainWorkingAtlas::activeTileImages() const
+{
+    return m_workingImages.mid(0, activeTextureCount() * 64);
 }
 
 QSet<int> CTerrainWorkingAtlas::takeChangedSlots()

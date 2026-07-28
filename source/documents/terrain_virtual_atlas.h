@@ -160,7 +160,10 @@ public:
     QString error() const;
     const CTerrainTransitionCatalog& catalog() const { return m_workingCatalog; }
     const QVector<QImage>& tileImages() const { return m_workingImages; }
+    QVector<QImage> activeTileImages() const;
+    int capacityLimit() const { return m_capacityLimit; }
     int generatedTileCount() const;
+    int activeTextureCount() const;
     QSet<int> takeChangedSlots();
 
     quint16 resolve(const STerrainTransitionSignature& signature,

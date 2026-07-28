@@ -576,6 +576,7 @@ private:
     int m_tileStrokeRefused{0};
     int m_tileStrokeChangedTiles{0};
     int m_tileStrokeSolverNodes{0};
+    bool m_tileStrokeUndoCheckpointed{false};
     bool m_terrainPreviewBatchActive{false};
     QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
     bool m_sculptOutlineValid{false};

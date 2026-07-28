@@ -114,6 +114,8 @@ private:
     QOpenGLTexture* m_texture;
     QOpenGLTexture* m_baseAtlasTexture{nullptr};
     QOpenGLTexture* m_previewAtlasTexture{nullptr};
+    int m_previewAtlasTextureCount{0};
+    int m_previewAtlasColumns{0};
     QFileInfo m_filePath;
     QString m_innerMapName;
     QByteArray m_originalMprData;

@@ -58,6 +58,7 @@ public:
     virtual int tileIndex() const;
     ushort tileRotation() const {return m_rotNum;}
     void setTile(int index, int rotNum);
+    void setAtlasLayout(int textureCount, int columns);
     void setMaxZ(float maxZ) { m_maxZ = maxZ; }
     const QVector<QVector<SSecVertex>>& arrVertex(){return m_arrVertex;}
     void setMaterialIndex(short matIndex) {m_materialIndex = matIndex;}
@@ -75,7 +76,9 @@ protected:
     ushort m_atlasTexIndex; // index of texture atlas
     ushort m_rotNum; //number of rotation
     float m_maxZ; // update for each tile when changing maximum altitude
-    int m_texAtlasNumber; // update for each tile when changing atlas number
+    int m_texAtlasNumber{1}; // update for each tile when changing atlas number
+    int m_atlasColumns{1};
+    int m_atlasRows{1};
     short m_materialIndex; // only for liquid tiles. ind == 1 is equal to disabled liquid
 };
 

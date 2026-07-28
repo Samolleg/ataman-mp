@@ -100,6 +100,10 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
             const int localId = familyObject.value(QStringLiteral("id")).toInt(-1);
             const QString variantName = familyObject.value(
                 QStringLiteral("name")).toString();
+            if(!familyObject.value(QStringLiteral("paintSelectable")).toBool(true))
+                continue;
+            const int thumbnailSlot = familyObject.value(
+                QStringLiteral("thumbnailSlot")).toInt(-1);
             int uniformSlot = -1;
             for(int slot = 0; slot < slotCount; ++slot)
             {
@@ -109,8 +113,13 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                    && quint8(signatures.at(offset + 2)) == localId
                    && quint8(signatures.at(offset + 3)) == localId)
                 {
-                    uniformSlot = slot;
-                    break;
+                    if(uniformSlot < 0)
+                        uniformSlot = slot;
+                    if(slot == thumbnailSlot)
+                    {
+                        uniformSlot = slot;
+                        break;
+                    }
                 }
             }
             if(uniformSlot < 0)

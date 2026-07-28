@@ -14,6 +14,8 @@ CTile::CTile(ushort packedData, ushort x, ushort y, float maxZ, int atlasNumber)
   ,m_y(y)
   ,m_maxZ(maxZ)
   ,m_texAtlasNumber(atlasNumber)
+  ,m_atlasColumns(qMax(1, atlasNumber))
+  ,m_atlasRows(1)
 {
     reset();
     m_x = x;
@@ -91,14 +93,18 @@ void CTile::generateDrawVertexData(QVector<SVertexData>& outData, int& curIndex)
 {
     QVector<QVector2D> tCoord; // store x,y min and x,y max
     tCoord.resize(2);
-    int texCount = m_texAtlasNumber;
-    tCoord[0].setX((m_index%8/8.0f+m_atlasTexIndex)/texCount); // A landscape texture is expected to be a set of textures attached along the X axis, so for the X coordinate we need to take this offset into account.
-    tCoord[0].setY((7-int(m_index/8))/8.0f);
+    const int pageColumn = m_atlasTexIndex % m_atlasColumns;
+    const int pageRow = m_atlasTexIndex / m_atlasColumns;
+    tCoord[0].setX((m_index%8/8.0f+pageColumn)/m_atlasColumns);
+    tCoord[0].setY((m_atlasRows - 1 - pageRow
+                    +(7-int(m_index/8))/8.0f)/m_atlasRows);
 
-    tCoord[1].setX(tCoord[0].x() + 1.0f/8.0f/texCount);
-    tCoord[1].setY(tCoord[0].y() + 1.0f/8.0f);
-    tCoord[0] += QVector2D(4.0f/512.0f/texCount, 4.0f/512.0f/texCount); // cut a little piece from tile texture (dxt provide some "trash' on border)
-    tCoord[1] -= QVector2D(4.0f/512.0f/texCount, 4.0f/512.0f/texCount); // cut a little piece from tile texture (dxt provide some "trash' on border)
+    tCoord[1].setX(tCoord[0].x() + 1.0f/8.0f/m_atlasColumns);
+    tCoord[1].setY(tCoord[0].y() + 1.0f/8.0f/m_atlasRows);
+    tCoord[0] += QVector2D(4.0f/512.0f/m_atlasColumns,
+                          4.0f/512.0f/m_atlasRows);
+    tCoord[1] -= QVector2D(4.0f/512.0f/m_atlasColumns,
+                          4.0f/512.0f/m_atlasRows);
 
     auto calcTexCoord = [&tCoord](QVector2D& texCoord, int row, int col)
     {
@@ -183,6 +189,14 @@ void CTile::setTile(int index, int rotNum)
     m_index = index%64;
     m_atlasTexIndex = index/64;
     m_rotNum = rotNum;
+}
+
+void CTile::setAtlasLayout(int textureCount, int columns)
+{
+    m_texAtlasNumber = qMax(1, textureCount);
+    m_atlasColumns = qBound(1, columns, m_texAtlasNumber);
+    m_atlasRows = qMax(1, (m_texAtlasNumber + m_atlasColumns - 1)
+                            / m_atlasColumns);
 }
 
 ushort CTile::packData()

@@ -12,6 +12,7 @@
 #include "terrain_edit_model.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
+#include "terrain_virtual_atlas.h"
 #include "staged_save_validator.h"
 
 namespace {
@@ -341,6 +342,7 @@ private slots:
     void authoredPresetCatalogCoversKnownAtlasesAndMatchesZone1();
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
+    void workingAtlasRealizesExactTransitionsBeyond512Slots();
     void zone2TransitionOnlyGrassMapsToGlobalUniformFamily();
     void authoredPresetSupportsZone18SharedLayers();
     void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
@@ -5489,6 +5491,42 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
                     + QLatin1Char('\n') + capturedReport.toText()));
         QCOMPARE(capturedProfile.assignedSlotCount(), item.slotCount);
     }
+
+    CValidationReport zone2Report;
+    const STerrainAtlasProfile zone2 = CTerrainAtlasPresetCatalog::exactProfile(
+        "Zone2",
+        "ed0bc69bd4abbb8f9f90fab44574a24b0b806521b6bc36501eea7c5add258612",
+        512, &zone2Report);
+    QVERIFY2(zone2.approved, qPrintable(zone2Report.toText()));
+    const auto zone2Family = [&zone2](const QString& name) {
+        return std::find_if(zone2.families.cbegin(), zone2.families.cend(),
+            [&name](const STerrainAtlasProfileFamily& family) {
+                return family.name == name;
+            });
+    };
+    const auto limestone = zone2Family(QStringLiteral("Stone / Limestone"));
+    const auto pink = zone2Family(QStringLiteral("Stone / Pink"));
+    const auto mossy = zone2Family(QStringLiteral("Stone / Mossy"));
+    const auto irregular = zone2Family(QStringLiteral("Grass / Irregular"));
+    QVERIFY(limestone != zone2.families.cend());
+    QVERIFY(pink != zone2.families.cend());
+    QVERIFY(mossy != zone2.families.cend());
+    QVERIFY(irregular != zone2.families.cend());
+    for(const QString& removed : {
+            QStringLiteral("Ground / Light"),
+            QStringLiteral("Grass / Winter normal"),
+            QStringLiteral("Ground / Common"),
+            QStringLiteral("Grass / Winter faded"),
+            QStringLiteral("Ground / Trampled"),
+            QStringLiteral("Ground / Dirt"),
+            QStringLiteral("Grass / Irregular dark"),
+            QStringLiteral("Ground / Dry")})
+        QVERIFY2(zone2Family(removed) == zone2.families.cend(), qPrintable(removed));
+    QCOMPARE(irregular->thumbnailSlot, 117);
+    QCOMPARE(zone2.slotDefinitions.at(117).signature.southWest, irregular->id);
+    QCOMPARE(zone2.slotDefinitions.at(393).signature.northWest, limestone->id);
+    QCOMPARE(zone2.slotDefinitions.at(416).signature.southWest, pink->id);
+    QCOMPARE(zone2.slotDefinitions.at(285).signature.northWest, mossy->id);
 }
 
 void EnduranceDocumentTests::authoredPresetSupportsZone18SharedLayers()
@@ -5539,6 +5577,7 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     const QJsonArray presets = catalog.value(QStringLiteral("presets")).toArray();
     QCOMPARE(presets.size(), 38);
     int totalSlots = 0, bindings = 0, transitionSupportFamilies = 0;
+    QHash<QString, QByteArray> identityByBinding;
     for(const QJsonValue& value : presets)
     {
         const QJsonObject preset = value.toObject();
@@ -5546,6 +5585,37 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
         const int slotCount = preset.value(QStringLiteral("slotCount")).toInt();
         const QJsonArray presetBindings = preset.value(QStringLiteral("bindings")).toArray();
         QVERIFY2(!presetBindings.isEmpty(), qPrintable(nameSpace));
+        QJsonArray familyIdentity;
+        for(const QJsonValue& familyValue : preset.value(QStringLiteral("families")).toArray())
+        {
+            const QJsonObject family = familyValue.toObject();
+            QJsonObject identity;
+            identity.insert(QStringLiteral("id"), family.value(QStringLiteral("id")));
+            identity.insert(QStringLiteral("name"), family.value(QStringLiteral("name")));
+            identity.insert(QStringLiteral("thumbnailSlot"),
+                            family.value(QStringLiteral("thumbnailSlot")));
+            identity.insert(QStringLiteral("paintSelectable"),
+                            family.value(QStringLiteral("paintSelectable")));
+            familyIdentity.append(identity);
+        }
+        QJsonObject atlasIdentity;
+        atlasIdentity.insert(QStringLiteral("signaturesBase64"),
+                             preset.value(QStringLiteral("signaturesBase64")));
+        atlasIdentity.insert(QStringLiteral("families"), familyIdentity);
+        const QByteArray encodedIdentity = QJsonDocument(atlasIdentity).toJson(
+            QJsonDocument::Compact);
+        for(const QJsonValue& bindingValue : presetBindings)
+        {
+            const QJsonObject binding = bindingValue.toObject();
+            const QString bindingKey = binding.value(QStringLiteral("variant")).toString()
+                + QLatin1Char(':')
+                + binding.value(QStringLiteral("pixelSha256")).toString()
+                + QLatin1Char(':') + QString::number(slotCount);
+            if(identityByBinding.contains(bindingKey))
+                QCOMPARE(identityByBinding.value(bindingKey), encodedIdentity);
+            else
+                identityByBinding.insert(bindingKey, encodedIdentity);
+        }
         const QByteArray hash = presetBindings.first().toObject()
             .value(QStringLiteral("pixelSha256")).toString().toLatin1();
         QCOMPARE(hash.size(), 64);
@@ -5588,7 +5658,7 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 76);
-    QCOMPARE(transitionSupportFamilies, 76);
+    QCOMPARE(transitionSupportFamilies, 64);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -5617,6 +5687,12 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
             QCOMPARE(source.variantName, family.name);
             QCOMPARE(CTerrainAtlasPresetCatalog::materialTheme(
                          source.variantName), family.theme);
+            // Reviewed transition-support classifications must never leak
+            // into the global brush palette as purported uniform sources.
+            QVERIFY(!(family.name == QStringLiteral("Stone / Grayish")
+                      && source.mprNamespace == QStringLiteral("Zone8")));
+            QVERIFY(!(family.name == QStringLiteral("Ground / Dirt")
+                      && source.mprNamespace == QStringLiteral("zone9")));
         }
         if(family.layer == ETerrainAtlasLayer::Land
            && family.theme == QStringLiteral("Grass")) ++grassVariantCount;
@@ -5635,6 +5711,54 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     QCOMPARE(freshGrass->id, CTerrainAtlasPresetCatalog::globalMaterialId(
         QStringLiteral("Grass / Fresh"), ETerrainAtlasLayer::Land));
     QVERIFY(darkGrass->id != freshGrass->id);
+}
+
+void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots()
+{
+    CTerrainTransitionCatalog authored;
+    STerrainTransitionVariant uniform;
+    uniform.signature.northWest = uniform.signature.northEast =
+        uniform.signature.southEast = uniform.signature.southWest = 1;
+    uniform.packedTile = 0;
+    QVERIFY(authored.addVariant(uniform));
+
+    QVector<QImage> tiles;
+    tiles.reserve(512);
+    for(int slot = 0; slot < 512; ++slot)
+    {
+        QImage image(16, 16, QImage::Format_RGBA8888);
+        image.fill(QColor(30 + slot % 30, 90, 35));
+        tiles.append(image);
+    }
+    QMap<qint32, QImage> sources;
+    for(int material = 1; material <= 4; ++material)
+    {
+        QImage source(16, 16, QImage::Format_RGBA8888);
+        source.fill(QColor(material * 45, 30 + material * 20, 180));
+        sources.insert(material, source);
+    }
+    CTerrainWorkingAtlas working(authored, tiles, 77u, 1024, sources);
+    QVERIFY(working.isValid());
+    QCOMPARE(working.capacityLimit(), 1024);
+    QCOMPARE(working.activeTextureCount(), 8);
+
+    QMap<int, quint64> usage;
+    for(int slot = 0; slot < 512; ++slot)
+        usage.insert(slot, 1);
+    STerrainTransitionSignature fourFamily;
+    fourFamily.northWest = 1;
+    fourFamily.northEast = 2;
+    fourFamily.southEast = 3;
+    fourFamily.southWest = 4;
+    CValidationReport report;
+    bool generated = false;
+    const quint16 packed = working.resolve(
+        fourFamily, 10, 20, &usage, {}, &generated, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(generated);
+    QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(), 512);
+    QCOMPARE(working.activeTextureCount(), 9);
+    QCOMPARE(working.activeTileImages().size(), 9 * 64);
 }
 
 void EnduranceDocumentTests::zone2TransitionOnlyGrassMapsToGlobalUniformFamily()

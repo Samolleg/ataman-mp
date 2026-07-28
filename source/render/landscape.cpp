@@ -4,6 +4,7 @@
 #include <QSaveFile>
 #include <QMessageBox>
 #include <QOpenGLContext>
+#include <QOpenGLFunctions>
 
 #include "landscape.h"
 
@@ -67,7 +68,23 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     if(tileSize <= 0 || tileImages.front().height() != tileSize)
         return false;
     const int pageSize = tileSize * 8;
-    QImage combined(pageSize * textureCount, pageSize, QImage::Format_RGBA8888);
+    const int columns = textureCount <= 8
+        ? textureCount : int(std::ceil(std::sqrt(double(textureCount))));
+    const int rows = (textureCount + columns - 1) / columns;
+    GLint maximumTextureSize = 0;
+    QOpenGLContext::currentContext()->functions()->glGetIntegerv(
+        GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+    if(pageSize * columns > maximumTextureSize
+       || pageSize * rows > maximumTextureSize)
+    {
+        ei::log(eLogWarning, QString(
+            "Working terrain atlas grid exceeds this GPU: pages:%1 grid:%2x%3 page:%4 max:%5")
+            .arg(textureCount).arg(columns).arg(rows).arg(pageSize)
+            .arg(maximumTextureSize));
+        return false;
+    }
+    QImage combined(pageSize * columns, pageSize * rows,
+                    QImage::Format_RGBA8888);
     combined.fill(Qt::transparent);
     for(int page = 0; page < textureCount; ++page)
     {
@@ -75,8 +92,11 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
             tileImages, page * 64, tileSize);
         if(pageImage.size() != QSize(pageSize, pageSize))
             return false;
+        const int pageColumn = page % columns;
+        const int pageRow = page / columns;
         for(int y = 0; y < pageSize; ++y)
-            memcpy(combined.scanLine(y) + page * pageSize * 4,
+            memcpy(combined.scanLine(pageRow * pageSize + y)
+                       + pageColumn * pageSize * 4,
                    pageImage.constScanLine(y), size_t(pageSize) * 4u);
     }
     QOpenGLTexture* replacement = new QOpenGLTexture(
@@ -94,14 +114,31 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     delete m_previewAtlasTexture;
     m_previewAtlasTexture = replacement;
     m_texture = replacement;
-    ei::log(eLogInfo, QString("Working terrain atlas uploaded: slots:%1 dimensions:%2x%3")
-        .arg(tileImages.size()).arg(combined.width()).arg(combined.height()));
+    if(textureCount != m_previewAtlasTextureCount
+       || columns != m_previewAtlasColumns)
+    {
+        m_previewAtlasTextureCount = textureCount;
+        m_previewAtlasColumns = columns;
+        for(QVector<CSector*>& row : m_aSector)
+            for(CSector* sector : row)
+                if(sector) sector->setTerrainAtlasLayout(textureCount, columns);
+    }
+    ei::log(eLogInfo, QString("Working terrain atlas uploaded: slots:%1 pages:%2 grid:%3x%4 dimensions:%5x%6")
+        .arg(tileImages.size()).arg(textureCount).arg(columns).arg(rows)
+        .arg(combined.width()).arg(combined.height()));
     return true;
 }
 
 void CLandscape::clearPreviewTerrainAtlas()
 {
     m_texture = m_baseAtlasTexture;
+    if(m_previewAtlasTextureCount > 0 && QOpenGLContext::currentContext())
+        for(QVector<CSector*>& row : m_aSector)
+            for(CSector* sector : row)
+                if(sector) sector->setTerrainAtlasLayout(
+                    int(m_header.nTexture), int(m_header.nTexture));
+    m_previewAtlasTextureCount = 0;
+    m_previewAtlasColumns = 0;
     if(!m_previewAtlasTexture)
         return;
     if(QOpenGLContext::currentContext())

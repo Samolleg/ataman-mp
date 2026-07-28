@@ -750,6 +750,15 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     return true;
 }
 
+void CTerrainEditModel::enableWorkingAtlasSlots(int slotCount)
+{
+    const int bounded = qBound(0, slotCount, 16384);
+    if(bounded <= m_tileTypes.size())
+        return;
+    m_tileTypes.resize(bounded);
+    m_textureCount = qMax(m_textureCount, (bounded + 63) / 64);
+}
+
 int CTerrainEditModel::globalIndex(int x, int y) const
 {
     return y * m_vertexCountX + x;

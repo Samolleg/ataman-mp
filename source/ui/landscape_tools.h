@@ -15,6 +15,8 @@ class QDoubleSpinBox;
 class QLabel;
 class QButtonGroup;
 class QGridLayout;
+class QResizeEvent;
+class QScrollArea;
 class QSlider;
 class QSpinBox;
 class QTabWidget;
@@ -115,6 +117,9 @@ signals:
     void paintTerrainTypeChanged(qint32 terrainType);
     void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
     bool m_editingActive{false};
     QComboBox* m_mode;
@@ -125,6 +130,8 @@ private:
     QSpinBox* m_flatten;
     QCheckBox* m_flipVertical;
     QTabWidget* m_materialTabs;
+    QScrollArea* m_groundMaterialScroll;
+    QScrollArea* m_overlayMaterialScroll;
     QWidget* m_groundMaterialPage;
     QWidget* m_overlayMaterialPage;
     QGridLayout* m_groundMaterialGrid;
@@ -152,6 +159,8 @@ private:
     QVector<STerrainPaintMaterialChoice> m_underwaterPaintTypes;
     QVector<STerrainPaintMaterialChoice> m_overlayPaintTypes;
     QString m_paintCatalogStatus;
+    int m_paletteColumns{1};
+    bool m_paletteRelayoutPending{false};
     void updateModeVisibility();
     void refreshPaintTerrainTypes();
     void rebuildMaterialPalette();

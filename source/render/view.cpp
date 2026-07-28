@@ -6707,8 +6707,10 @@ void CView::rebuildTerrainAutoCatalog()
             m_authoredTerrainTileImages = m_pTileForm->tileImages();
         m_workingTerrainAtlas.reset(new CTerrainWorkingAtlas(
             m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies(),
-            m_authoredTerrainTileImages, m_terrainSemanticSeed, 512,
+            m_authoredTerrainTileImages, m_terrainSemanticSeed, 4096,
             m_terrainGlobalMaterialSources));
+        m_terrainEdit.enableWorkingAtlasSlots(
+            m_workingTerrainAtlas->capacityLimit());
         if(m_landscapeTools)
             m_landscapeTools->setGeneratedAtlasTileCount(0);
         const QVector<STerrainAtlasSlotUsage> currentUsage = terrainAtlasUsage();
@@ -7155,10 +7157,21 @@ void CView::exportTerrainPaintDiagnostic()
 QMap<int, quint64> CView::workingTerrainAtlasUsage() const
 {
     QMap<int, quint64> result;
-    const QVector<STerrainAtlasSlotUsage> usage = terrainAtlasUsage();
-    for(int slot = 0; slot < usage.size(); ++slot)
-        result.insert(slot, quint64(usage.at(slot).landCount)
-                            + quint64(usage.at(slot).overlayCount));
+    const int capacity = m_workingTerrainAtlas
+        ? m_workingTerrainAtlas->capacityLimit() : 0;
+    for(int slot = 0; slot < capacity; ++slot)
+        result.insert(slot, 0);
+    for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
+        for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
+            for(ETerrainTileLayer layer : {ETerrainTileLayer::Land,
+                                           ETerrainTileLayer::Overlay})
+            {
+                bool available = false;
+                const SMprPackedTile packed = SMprPackedTile::decode(
+                    m_terrainEdit.packedTile(x, y, layer, &available));
+                if(available && packed.atlasSlot() < capacity)
+                    ++result[packed.atlasSlot()];
+            }
     return result;
 }
 
@@ -7173,11 +7186,72 @@ bool CView::realizeWorkingTerrainSignature(
             "The live exact-transition cache is unavailable for this map.");
         return false;
     }
-    const quint16 packed = m_workingTerrainAtlas->resolve(
-        signature, cellX, cellY, usage, m_workingAtlasProtectedSlots,
-        generated, report);
-    if(report && report->hasErrors())
+    const auto appendFindings = [report](const CValidationReport& source) {
+        if(!report) return;
+        for(const SValidationFinding& finding : source.findings())
+            report->add(finding.code, finding.severity,
+                        finding.message, finding.location);
+    };
+    const auto hasCapacityFinding = [](const CValidationReport& source) {
+        for(const SValidationFinding& finding : source.findings())
+            if(finding.code == QStringLiteral("terrain.working_atlas_capacity"))
+                return true;
         return false;
+    };
+    CValidationReport attempt;
+    quint16 packed = m_workingTerrainAtlas->resolve(
+        signature, cellX, cellY, usage, m_workingAtlasProtectedSlots,
+        generated, &attempt);
+    if(attempt.hasErrors() && hasCapacityFinding(attempt) && usage)
+    {
+        bool reclaimable = false;
+        for(int slot = 0; slot < m_workingTerrainAtlas->capacityLimit(); ++slot)
+            if(usage->value(slot) == 0 && m_workingAtlasProtectedSlots.contains(slot))
+            {
+                reclaimable = true;
+                break;
+            }
+        if(reclaimable)
+        {
+            // Physical packed slots are referenced by old undo commands. They
+            // may only be recycled after that history is explicitly retired.
+            // The virtual material field/current map remain authoritative.
+            if(m_pUndoStack)
+                m_pUndoStack->clear();
+            m_workingAtlasProtectedSlots.clear();
+            for(auto it = usage->cbegin(); it != usage->cend(); ++it)
+                if(it.value() != 0)
+                    m_workingAtlasProtectedSlots.insert(it.key());
+            CValidationReport retry;
+            if(generated) *generated = false;
+            packed = m_workingTerrainAtlas->resolve(
+                signature, cellX, cellY, usage, m_workingAtlasProtectedSlots,
+                generated, &retry);
+            if(!retry.hasErrors())
+            {
+                m_tileStrokeUndoCheckpointed = true;
+                if(report) report->add("terrain.working_atlas_undo_checkpoint",
+                    EValidationSeverity::Warning,
+                    "The live preview cache was full. The editor checkpointed the current terrain state and cleared prior undo history so unused physical slots could be safely recycled; no material identity was substituted.");
+                ei::log(eLogWarning,
+                    "Terrain preview cache checkpointed current state and cleared undo history to reclaim unused exact-transition slots.");
+            }
+            appendFindings(retry);
+            if(retry.hasErrors())
+                return false;
+        }
+        else
+        {
+            appendFindings(attempt);
+            return false;
+        }
+    }
+    else
+    {
+        appendFindings(attempt);
+        if(attempt.hasErrors())
+            return false;
+    }
     if(usage)
         ++(*usage)[SMprPackedTile::decode(packed).atlasSlot()];
     return true;
@@ -7193,7 +7267,10 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
     const QSet<int> changed = m_workingTerrainAtlas->takeChangedSlots();
     if(changed.isEmpty())
         return true;
-    if(!m_pTileForm->replaceTileImages(m_workingTerrainAtlas->tileImages()))
+    const QVector<QImage> activeImages = m_workingTerrainAtlas->activeTileImages();
+    const QVector<QImage> tableImages = activeImages.mid(
+        0, m_authoredTerrainTileImages.size());
+    if(!m_pTileForm->replaceTileImages(tableImages))
     {
         if(report) report->add("terrain.working_atlas_table",
             EValidationSeverity::Error,
@@ -7202,7 +7279,7 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
     }
     makeCurrent();
     const bool installed = m_pLand->previewTerrainAtlas(
-        m_workingTerrainAtlas->tileImages(), int(m_pLand->textureNum()));
+        activeImages, m_workingTerrainAtlas->activeTextureCount());
     doneCurrent();
     if(!installed && report)
         report->add("terrain.working_atlas_renderer",
@@ -9473,9 +9550,12 @@ void CView::endTileBrushGroup()
         m_pLand->setDirty(m_terrainEdit.isDirty());
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
-        emit updateMsg(tr("Terrain stroke: %1 stamp(s), %2 changed tile(s), %3 no-op, %4 refused.")
+        emit updateMsg(tr("Terrain stroke: %1 stamp(s), %2 changed tile(s), %3 no-op, %4 refused.%5")
             .arg(m_tileStrokeActions).arg(m_tileStrokeChangedTiles)
-            .arg(m_tileStrokeNoOps).arg(m_tileStrokeRefused));
+            .arg(m_tileStrokeNoOps).arg(m_tileStrokeRefused)
+            .arg(m_tileStrokeUndoCheckpointed
+                ? tr(" Preview cache checkpointed; earlier undo history was cleared.")
+                : QString()));
         ei::log(m_tileStrokeRefused > 0 ? eLogWarning : eLogInfo,
             QString("Terrain paint stroke %1 summary: actions=%2 applied=%3 no-op=%4 refused=%5 changed=%6 solverNodes=%7")
                 .arg(m_tileBrushCommandId).arg(m_tileStrokeActions)
@@ -9509,6 +9589,7 @@ void CView::beginTileBrushGroup()
     m_tileStrokeRefused = 0;
     m_tileStrokeChangedTiles = 0;
     m_tileStrokeSolverNodes = 0;
+    m_tileStrokeUndoCheckpointed = false;
 }
 
 bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool forward)
