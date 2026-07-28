@@ -585,10 +585,13 @@ remain unchanged.
 
 ### 0.3.0 release gate
 
-- [ ] Runtime-confirm the merged overlay path on current main: animated Zone 18
-  water, exact neutral/picking geometry while landscape editing, stationary
-  Zone 16 lava, animation reset after unload/reload, and equivalent water draws
-  through desktop OpenGL and ANGLE.
+- [x] Runtime-confirm the merged overlay visuals on current main through desktop
+  OpenGL: animated Zone 18 water and stationary Zone 16 lava. The user confirmed
+  both cases after integration at `2994805`; the equivalent ANGLE comparison was
+  explicitly waived for this release gate.
+- [ ] Runtime-confirm exact neutral/picking geometry while landscape editing and
+  animation reset after unload/reload. These behavioral checks remain separate
+  from the completed Zone 16/18 visual confirmation.
 - [ ] Runtime-confirm that Test Current Map and hot reload start at the editor
   time while the game clock continues normally, including a cave/briefing map.
 - [ ] Confirm the startup splash/taskbar handoff on an existing profile and a

@@ -125,3 +125,11 @@ by desktop OpenGL and ANGLE. Runtime cases are:
 4. Load `zone16.mpr` and verify lava/non-water overlay visuals remain stationary
    and free of shader/index errors.
 5. Unload and reload each map and verify phase starts from the new map lifetime.
+
+## Integrated-main validation status
+
+- Desktop OpenGL: user-confirmed animated Zone 18 water and stationary Zone 16
+  lava on integrated main `2994805`.
+- ANGLE comparison: explicitly waived for this release validation pass.
+- Exact landscape-editing neutral/picking coincidence and unload/reload phase
+  reset remain separate behavioral checks until explicitly confirmed.
