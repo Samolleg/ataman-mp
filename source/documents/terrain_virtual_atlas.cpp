@@ -289,14 +289,37 @@ QImage CTerrainVirtualAtlas::generateTile(
         for(int x = 0; x < size; ++x)
         {
             const double u = size == 1 ? 0.0 : double(x) / double(size - 1);
-            const double weights[4] = {
+            const double bilinear[4] = {
                 (1.0 - u) * (1.0 - v), u * (1.0 - v),
                 u * v, (1.0 - u) * v
             };
+            // A transition is a masked meeting of material textures, not a
+            // low-frequency colour interpolation across the complete tile.
+            // Aggregate duplicate corners first, then sharpen the material
+            // masks so source detail is retained outside the true boundary.
+            double weights[4] = {0.0, 0.0, 0.0, 0.0};
+            double total = 0.0;
             QRgb samples[4];
             for(int corner = 0; corner < 4; ++corner)
+            {
                 samples[corner] = m_materialSources.value(ids.at(corner))
                     .pixelColor(x, y).rgba();
+                bool first = true;
+                double materialWeight = 0.0;
+                for(int candidate = 0; candidate < 4; ++candidate)
+                    if(ids.at(candidate) == ids.at(corner))
+                    {
+                        materialWeight += bilinear[candidate];
+                        if(candidate < corner) first = false;
+                    }
+                if(first)
+                {
+                    weights[corner] = std::pow(materialWeight, 8.0);
+                    total += weights[corner];
+                }
+            }
+            if(total > 0.0)
+                for(double& weight : weights) weight /= total;
             result.setPixelColor(x, y,
                 QColor::fromRgba(premultipliedBlend(samples, weights)));
         }
@@ -617,6 +640,13 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
                 ?sector.landTileOffset:sector.overlayTileOffset;
             for(int local=0;local<16*16;++local)
             {
+                // Inactive overlay cells deliberately store 0xffff. It is an
+                // absence sentinel, not atlas slot 16383, and must survive a
+                // land-only finalization exactly.
+                if(pinnedLayer==ETerrainTileLayer::Overlay
+                   && local<sector.overlayMaterialIndices.size()
+                   && sector.overlayMaterialIndices.at(local)==-1)
+                    continue;
                 const quint16 before=qFromLittleEndian<quint16>(
                     reinterpret_cast<const uchar*>(payload.constData()+int(pinnedOffset)+local*2));
                 SMprPackedTile packed=SMprPackedTile::decode(before);

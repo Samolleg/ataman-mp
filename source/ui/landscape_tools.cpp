@@ -67,6 +67,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_showOverlays(new QCheckBox(tr("Show overlays (J)"), this))
     , m_tilesetStatus(new QLabel(tr("Terrain materials are loaded from the MPR namespace template."), this))
     , m_atlasCoverage(new QLabel(tr("0 / 0 assigned"), this))
+    , m_generatedAtlasTiles(new QLabel(tr("New exact tiles: 0"), this))
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
 {
@@ -216,6 +217,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QHBoxLayout* atlasRow = new QHBoxLayout;
     atlasRow->addWidget(reviewAtlas);
     atlasRow->addWidget(m_atlasCoverage, 1);
+    atlasRow->addWidget(m_generatedAtlasTiles);
     paintLayout->addLayout(atlasRow);
     QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
     QPushButton* finalizeAtlas = new QPushButton(
@@ -237,6 +239,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(reviewAtlas, &QPushButton::clicked, this, &CLandscapeTools::atlasProfileReviewRequested);
     connect(exportDiagnostic, &QPushButton::clicked, this, &CLandscapeTools::exportPaintDiagnosticRequested);
     connect(finalizeAtlas, &QPushButton::clicked, this, &CLandscapeTools::finalizeVirtualAtlasRequested);
+    m_atlasCoverage->setObjectName(QStringLiteral("materialAtlasSourceStatus"));
+    m_generatedAtlasTiles->setObjectName(QStringLiteral("generatedAtlasTileCount"));
     connect(m_groundMaterialButtons, QOverload<int>::of(&QButtonGroup::buttonClicked),
             this, [this](int) {
                 bool selected = false;
@@ -390,10 +394,16 @@ quint16 CLandscapeTools::flattenHeight() const { return quint16(m_flatten->value
 bool CLandscapeTools::flipHeightmapVertically() const { return m_flipVertical->isChecked(); }
 float CLandscapeTools::paintRadius() const
 {
-    m_atlasCoverage->setObjectName(QStringLiteral("materialAtlasSourceStatus"));
     // UI size 1 is one terrain vertex. The terrain model uses a zero-based
     // radius so subsequent integer sizes grow symmetrically around it.
     return float(m_paintRadius->value() - 1.0);
+}
+
+void CLandscapeTools::setGeneratedAtlasTileCount(int count)
+{
+    m_generatedAtlasTiles->setText(tr("New exact tiles: %1").arg(qMax(0, count)));
+    m_generatedAtlasTiles->setToolTip(tr(
+        "Unique missing corner combinations generated and cached for this map session."));
 }
 ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {

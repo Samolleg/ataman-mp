@@ -5227,10 +5227,14 @@ void CView::loadLandscape(const QFileInfo& filePath)
         return;
     }
 
+    const QString mapLocalAtlas = filePath.dir().filePath(
+        filePath.completeBaseName() + QStringLiteral("-atlas.res"));
+    CTextureList::getInstance()->setMapLocalTerrainArchive(mapLocalAtlas);
     ei::setCrashContext("mpr/open/dispatch:" + filePath.fileName());
     m_pLand->readMap(filePath);
     if(!m_pLand->isMprLoad())
     {
+        CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
         ei::log(eLogWarning, "Landscape failed to load: " + filePath.absoluteFilePath());
         return;
     }
@@ -5302,6 +5306,8 @@ void CView::unloadLand(bool promptForSave)
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_workingTerrainAtlas.reset();
+    if(m_landscapeTools)
+        m_landscapeTools->setGeneratedAtlasTileCount(0);
     m_authoredTerrainTileImages.clear();
     m_workingAtlasProtectedSlots.clear();
     m_terrainEdit = CTerrainEditModel();
@@ -5311,6 +5317,7 @@ void CView::unloadLand(bool promptForSave)
     if(isValid())
         makeCurrent();
     m_pLand->unloadMpr();
+    CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
     if(isValid())
         doneCurrent();
     refreshMprSettingsDock();
@@ -6597,6 +6604,8 @@ void CView::rebuildTerrainAutoCatalog()
         m_workingTerrainAtlas.reset(new CTerrainWorkingAtlas(
             m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies(),
             m_authoredTerrainTileImages, m_terrainSemanticSeed, 512));
+        if(m_landscapeTools)
+            m_landscapeTools->setGeneratedAtlasTileCount(0);
         const QVector<STerrainAtlasSlotUsage> currentUsage = terrainAtlasUsage();
         for(int slot = 0; slot < currentUsage.size(); ++slot)
             if(currentUsage.at(slot).landCount > 0
@@ -7020,6 +7029,9 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
 {
     if(!m_workingTerrainAtlas)
         return false;
+    if(m_landscapeTools)
+        m_landscapeTools->setGeneratedAtlasTileCount(
+            m_workingTerrainAtlas->generatedTileCount());
     const QSet<int> changed = m_workingTerrainAtlas->takeChangedSlots();
     if(changed.isEmpty())
         return true;
@@ -7038,6 +7050,8 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
         report->add("terrain.working_atlas_renderer",
             EValidationSeverity::Error,
             "The generated exact tiles could not be installed in the live terrain renderer.");
+    if(installed)
+        update();
     return installed;
 }
 
@@ -7098,16 +7112,20 @@ void CView::finalizeVirtualTerrainAtlas()
         m_mprDocument.mapInfo().tileTypes,&report,pinned);
     if(!finalized.success)
     {
+        const QString findings=report.findings().isEmpty()
+            ?QString():QStringLiteral("\n\n")+report.toText();
         QMessageBox::critical(this,tr("Atlas finalization refused"),
-            finalized.error+QStringLiteral("\n\n")+report.toText());
+            finalized.error+findings);
         return;
     }
     const STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
         m_mprDocument,finalized,layer,&report);
     if(!package.success)
     {
+        const QString findings=report.findings().isEmpty()
+            ?QString():QStringLiteral("\n\n")+report.toText();
         QMessageBox::critical(this,tr("Atlas package validation failed"),
-            package.error+QStringLiteral("\n\n")+report.toText());
+            package.error+findings);
         return;
     }
     const QString parentPath=QFileDialog::getExistingDirectory(
@@ -9304,6 +9322,13 @@ void CView::endTileBrushGroup()
                 .arg(m_tileStrokeApplied).arg(m_tileStrokeNoOps)
                 .arg(m_tileStrokeRefused).arg(m_tileStrokeChangedTiles)
                 .arg(m_tileStrokeSolverNodes));
+        // Resolution happens after mouse release. Present the completed atlas
+        // texture and rebuilt sector VBOs immediately instead of waiting for
+        // a later camera/input event to trigger another frame.
+        if(isValid())
+            updateGL();
+        else
+            update();
     }
     m_lastTerrainPaintCenterValid = false;
     ++m_tileBrushCommandId;

@@ -1079,6 +1079,11 @@ int runHeadlessCommand(QApplication& app)
             && atlasSourceStatus->text().contains(QStringLiteral("Local override"))
             && atlasSourceStatus->toolTip().contains(
                 QDir::toNativeSeparators(localAtlasPath));
+        QLabel* generatedAtlasStatus =
+            landscapeTools.findChild<QLabel*>("generatedAtlasTileCount");
+        landscapeTools.setGeneratedAtlasTileCount(7);
+        const bool generatedAtlasCountVisible = generatedAtlasStatus
+            && generatedAtlasStatus->text().contains(QStringLiteral("7"));
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
@@ -1291,6 +1296,7 @@ int runHeadlessCommand(QApplication& app)
             && uniqueMaterialPaletteCards
             && defaultAtlasSourceVisible
             && localAtlasSourceVisible
+            && generatedAtlasCountVisible
                 && materialAtlasActionWorks
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
@@ -1371,6 +1377,7 @@ int runHeadlessCommand(QApplication& app)
                << uniqueMaterialPaletteCards
                << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
                << " localAtlasSourceVisible=" << localAtlasSourceVisible
+               << " generatedAtlasCountVisible=" << generatedAtlasCountVisible
                << " materialAtlasActionWorks=" << materialAtlasActionWorks
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"

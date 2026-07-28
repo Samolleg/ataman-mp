@@ -1230,7 +1230,9 @@ int CTextureList::extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringLi
 {
     outArrImage.clear();
     outArrImage.resize(inArrTextureName.size());
-    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!m_mapLocalTerrainArchive.isEmpty())
+        sources.prepend(m_mapLocalTerrainArchive);
     if(sources.isEmpty())
         return false;
 
@@ -1280,6 +1282,25 @@ int CTextureList::extractMmpToDxt1(QImage& outImage, const QString textureName)
     if(res == 0)
         outImage = arrImage.front();
     return res;
+}
+
+void CTextureList::setMapLocalTerrainArchive(const QString& path)
+{
+    QString resolved;
+    if(!path.isEmpty())
+    {
+        const QFileInfo candidate(path);
+        if(candidate.isFile())
+            resolved = candidate.absoluteFilePath();
+    }
+    if(resolved == m_mapLocalTerrainArchive)
+        return;
+
+    m_mapLocalTerrainArchive = resolved;
+    if(m_mapLocalTerrainArchive.isEmpty())
+        ei::log(eLogInfo, "Map-local terrain atlas source cleared");
+    else
+        ei::log(eLogInfo, "Map-local terrain atlas source: " + m_mapLocalTerrainArchive);
 }
 
 struct STexSpecified
@@ -1333,7 +1354,16 @@ QByteArray combineTerrainMip(const QVector<STexSpecified>& parts, int outputLeve
 QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexCount, int& texCount)
 {
     ei::setCrashContext("mpr/terrain-atlas/cache:" + name);
-    const QString cacheKey = name.toLower();
+    QString archiveFingerprint;
+    if(!m_mapLocalTerrainArchive.isEmpty())
+    {
+        const QFileInfo archive(m_mapLocalTerrainArchive);
+        archiveFingerprint = QStringLiteral("|%1|%2|%3")
+            .arg(archive.absoluteFilePath())
+            .arg(archive.size())
+            .arg(archive.lastModified().toMSecsSinceEpoch());
+    }
+    const QString cacheKey = name.toLower() + archiveFingerprint;
     if(m_aTexture.contains(cacheKey))
     {
         texCount = m_aTexture[cacheKey]->width()/m_aTexture[cacheKey]->height();
@@ -1341,7 +1371,9 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     }
 
     QVector<STexSpecified> aPart;
-    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!m_mapLocalTerrainArchive.isEmpty())
+        sources.prepend(m_mapLocalTerrainArchive);
     if(sources.isEmpty())
     {
         ei::log(eLogWarning, "Cannot build terrain textures because no resources are configured. Use Settings > Game and Mod Setup.");

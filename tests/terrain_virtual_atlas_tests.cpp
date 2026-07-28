@@ -2,6 +2,8 @@
 #include <QtEndian>
 #include <QDir>
 #include <QFile>
+#include <QPainter>
+#include <QTransform>
 
 #include "endurance_document.h"
 #include "mmp_codec.h"
@@ -49,7 +51,7 @@ struct Fixture
     }
 };
 
-QByteArray portableMpr()
+QByteArray portableMpr(bool withInactiveOverlay = false)
 {
     QByteArray mp;
     QDataStream stream(&mp,QIODevice::WriteOnly);
@@ -62,9 +64,14 @@ QByteArray portableMpr()
     QByteArray sector;
     QDataStream sec(&sector,QIODevice::WriteOnly);
     sec.setByteOrder(QDataStream::LittleEndian);
-    sec<<quint32(0xCF4BF774)<<quint8(0);
-    sector.append(QByteArray(33*33*8,'\0'));
+    sec<<quint32(0xCF4BF774)<<quint8(withInactiveOverlay ? 3 : 0);
+    sector.append(QByteArray(33*33*8*(withInactiveOverlay ? 2 : 1),'\0'));
     sector.append(QByteArray(16*16*2,'\0'));
+    if(withInactiveOverlay)
+    {
+        sector.append(QByteArray(16*16*2, char(0xff)));
+        sector.append(QByteArray(16*16*2, char(0xff)));
+    }
     QByteArray empty(16,'\0');
     qToLittleEndian<quint32>(0x019CE23C,reinterpret_cast<uchar*>(empty.data()));
     qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
@@ -99,6 +106,72 @@ bool writeBytes(const QString& path, const QByteArray& bytes)
     return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
         && file.write(bytes) == bytes.size();
 }
+
+void applyVisualPatterns(QVector<QImage>* images)
+{
+    if(!images) return;
+    const QColor light[] = {QColor(210,210,205), QColor(65,145,55),
+                            QColor(180,115,35), QColor(55,95,165)};
+    const QColor dark[] = {QColor(85,90,95), QColor(18,65,24),
+                           QColor(90,45,12), QColor(18,35,80)};
+    for(int material = 0; material < images->size() && material < 4; ++material)
+        for(int y = 0; y < 8; ++y) for(int x = 0; x < 8; ++x)
+        {
+            const bool mark = material == 0 ? ((x / 2 + y / 2) & 1)
+                : material == 1 ? (x % 3 == 0)
+                : material == 2 ? ((x + y) % 4 == 0)
+                : ((x - y + 16) % 5 == 0);
+            (*images)[material].setPixelColor(x, y, mark ? light[material] : dark[material]);
+        }
+}
+
+QImage renderFinalizedPreview(const STerrainAtlasFinalization& finalized,
+                              int width, int height)
+{
+    if(finalized.tiles.isEmpty() || finalized.packedCells.size() != width * height)
+        return {};
+    const int tileSize = finalized.tiles.front().pixels.width();
+    QImage canvas(width * tileSize, height * tileSize, QImage::Format_RGBA8888);
+    canvas.fill(Qt::black);
+    QPainter painter(&canvas);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    for(int y = 0; y < height; ++y) for(int x = 0; x < width; ++x)
+    {
+        const SMprPackedTile packed = SMprPackedTile::decode(
+            finalized.packedCells.at(y * width + x));
+        if(packed.atlasSlot() < 0 || packed.atlasSlot() >= finalized.tiles.size())
+            continue;
+        QImage tile = finalized.tiles.at(packed.atlasSlot()).pixels
+            .mirrored(false, true);
+        if(packed.rotation)
+            tile = tile.transformed(QTransform().rotate(-90.0 * packed.rotation),
+                                    Qt::FastTransformation);
+        painter.drawImage(x * tileSize, y * tileSize, tile);
+    }
+    painter.end();
+    return canvas.scaled(canvas.size() * 4, Qt::IgnoreAspectRatio,
+                         Qt::FastTransformation);
+}
+
+bool writeVisualScene(const QString& root, const QString& relative,
+                      const QByteArray& mpr, const QByteArray& resources,
+                      const STerrainAtlasFinalization& finalized,
+                      int width, int height, const QString& description)
+{
+    const QDir output(root);
+    const QString scenePath = output.filePath(QStringLiteral("visual-scenes/") + relative);
+    if(!QDir().mkpath(scenePath)) return false;
+    const QDir scene(scenePath);
+    const QImage preview = renderFinalizedPreview(finalized, width, height);
+    const QByteArray review = QString(
+        "AUTOMATED STRUCTURE: pass\nVISUAL REVIEW: unreviewed\n"
+        "Review categories: acceptable | no-blend | tile-mismatch | wrong-rotation\n\n%1\n")
+        .arg(description).toUtf8();
+    return writeBytes(scene.filePath("scene.mpr"), mpr)
+        && writeBytes(scene.filePath("scene-atlas.res"), resources)
+        && !preview.isNull() && preview.save(scene.filePath("preview.png"), "PNG")
+        && writeBytes(scene.filePath("VISUAL-REVIEW.txt"), review);
+}
 }
 
 class TerrainVirtualAtlasTests:public QObject
@@ -111,6 +184,8 @@ private slots:
     void generatesTwoTwoTuple();
     void generatesFourFamilyTupleWithOrientation();
     void generatedEdgesUseOnlyTheirTwoCornerMaterials();
+    void generatedTransitionRetainsSourceTextureIdentity();
+    void generatedNeighbourEdgesArePixelContinuous();
     void rotationsAndIdenticalPixelsAreDeduplicated();
     void stableHashesAndNamespaceAreDeterministic();
     void mapWideUsageAndUnusedCompaction();
@@ -122,6 +197,7 @@ private slots:
     void portablePackageRemapsNamespaceAndReopens();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void preservedLayerSlotsArePinnedAndRemapped();
+    void inactiveOverlaySentinelSurvivesLandFinalization();
     void gradedAlphaIsRefusedWithoutFlattening();
     void workingAtlasGeneratesImmediatelyAndReusesTuple();
     void workingAtlasProtectsUndoSlotsAndRefusesCapacity();
@@ -189,9 +265,68 @@ void TerrainVirtualAtlasTests::generatedEdgesUseOnlyTheirTwoCornerMaterials()
     const STerrainVirtualTile tile=atlas.resolve(signature(1,2,3,4),0,0);
     const QImage image=atlas.generatedTiles().at(tile.generatedIndex).pixels;
     const QColor top=image.pixelColor(3,0);
-    QCOMPARE(top,QColor(140,134,106,255));
+    QVERIFY(top.red()>190 && top.green()>180 && top.blue()<60);
     const QColor bottom=image.pixelColor(3,7);
-    QCOMPARE(bottom,QColor(134,106,20,255));
+    QVERIFY(bottom.red()>190 && bottom.green()<70 && bottom.blue()<40);
+}
+
+void TerrainVirtualAtlasTests::generatedTransitionRetainsSourceTextureIdentity()
+{
+    Fixture fixture;
+    for(int material = 0; material < 2; ++material)
+        for(int y = 0; y < 8; ++y) for(int x = 0; x < 8; ++x)
+        {
+            const bool light = ((x + y) & 1) == 0;
+            fixture.images[material].setPixelColor(x, y, material == 0
+                ? QColor(light ? 245 : 105, 25, 20, 255)
+                : QColor(20, light ? 235 : 95, 30, 255));
+        }
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const STerrainVirtualTile tile = atlas.resolve(signature(1,1,2,2), 0, 0);
+    QVERIFY(tile.generatedIndex >= 0);
+    const QImage generated = atlas.generatedTiles().at(tile.generatedIndex).pixels;
+    int sourceLike = 0;
+    int genuinelyMixed = 0;
+    for(int y = 0; y < 8; ++y) for(int x = 0; x < 8; ++x)
+    {
+        const QColor actual = generated.pixelColor(x, y);
+        const auto distance = [&actual](const QColor& source) {
+            return qAbs(actual.red() - source.red())
+                + qAbs(actual.green() - source.green())
+                + qAbs(actual.blue() - source.blue());
+        };
+        const int nearest = qMin(distance(fixture.images[0].pixelColor(x,y)),
+                                 distance(fixture.images[1].pixelColor(x,y)));
+        sourceLike += nearest <= 20;
+        genuinelyMixed += nearest > 20;
+    }
+    // Ordinary bilinear cross-fading makes most of the tile a blurry average.
+    // A generated transition must instead retain a source texture on at least
+    // three quarters of its pixels, with only a narrow visible join.
+    QVERIFY(sourceLike >= 48);
+    QVERIFY(genuinelyMixed > 0);
+}
+
+void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
+{
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(2, 1, 1));
+    QVERIFY(field.setMaterial(0, 0, 1));
+    QVERIFY(field.setMaterial(1, 0, 2));
+    QVERIFY(field.setMaterial(2, 0, 1));
+    QVERIFY(field.setMaterial(0, 1, 4));
+    QVERIFY(field.setMaterial(1, 1, 3));
+    QVERIFY(field.setMaterial(2, 1, 4));
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const auto finalized = atlas.finalize(field, "PixelSeam", 512, {1,2,3,4});
+    QVERIFY2(finalized.success, qPrintable(finalized.error));
+    const QImage preview = renderFinalizedPreview(finalized, 2, 1);
+    QVERIFY(!preview.isNull());
+    const int seamLeft = preview.width() / 2 - 1;
+    const int seamRight = preview.width() / 2;
+    for(int y = 0; y < preview.height(); ++y)
+        QCOMPARE(preview.pixelColor(seamLeft, y), preview.pixelColor(seamRight, y));
 }
 
 void TerrainVirtualAtlasTests::rotationsAndIdenticalPixelsAreDeduplicated()
@@ -455,6 +590,34 @@ void TerrainVirtualAtlasTests::preservedLayerSlotsArePinnedAndRemapped()
     QVERIFY(result.authoredSlotRemap.value(0)!=result.authoredSlotRemap.value(3));
 }
 
+void TerrainVirtualAtlasTests::inactiveOverlaySentinelSurvivesLandFinalization()
+{
+    CMprDocument source;
+    CValidationReport report;
+    QVERIFY2(source.loadBytes(portableMpr(true), "inactive-overlay.mpr", &report),
+             qPrintable(report.toText()));
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(16, 16, 1));
+    QVERIFY(field.setMaterial(8, 8, 2));
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const auto finalized = atlas.finalize(field, "InactiveOverlay", 512,
+                                           {1,2,3,4}, &report);
+    QVERIFY2(finalized.success, qPrintable(finalized.error + "\n" + report.toText()));
+    const auto package = CTerrainVirtualAtlas::buildPortablePackage(
+        source, finalized, ETerrainTileLayer::Land, &report);
+    QVERIFY2(package.success, qPrintable(package.error + "\n" + report.toText()));
+    CMprDocument reopened;
+    QVERIFY2(reopened.loadBytes(package.mprBytes, "inactive-overlay-result.mpr", &report),
+             qPrintable(report.toText()));
+    QVERIFY(reopened.sectors().front().hasOverlay);
+    const SMprSectorInfo& sector = reopened.sectors().front();
+    const QByteArray payload = reopened.members().at(sector.memberIndex).payload;
+    QCOMPARE(qFromLittleEndian<quint16>(reinterpret_cast<const uchar*>(
+        payload.constData() + int(sector.overlayTileOffset))), quint16(0xffff));
+    QCOMPARE(sector.overlayMaterialIndices.front(), qint16(-1));
+}
+
 void TerrainVirtualAtlasTests::gradedAlphaIsRefusedWithoutFlattening()
 {
     QImage image(8,8,QImage::Format_ARGB32);image.fill(QColor(10,20,30,128));
@@ -563,6 +726,9 @@ void TerrainVirtualAtlasTests::selfPaintPreservesExactPackedTileAndRotation()
 void TerrainVirtualAtlasTests::parallelStripesAndBaseCrossResolveExactly()
 {
     Fixture fixture;
+    const QString outputPath = QString::fromLocal8Bit(
+        qgetenv("EI_MAPPER_ATLAS_TEST_OUTPUT"));
+    if(!outputPath.isEmpty()) applyVisualPatterns(&fixture.images);
     CTerrainVirtualMaterialField field;
     QVERIFY(field.resize(16, 16, 1));
     for(int stripe = 0; stripe < 3; ++stripe)
@@ -572,6 +738,17 @@ void TerrainVirtualAtlasTests::parallelStripesAndBaseCrossResolveExactly()
     for(int y = 1; y <= 15; ++y)
         for(int x = 7; x <= 9; ++x)
             QVERIFY(field.setMaterial(x, y, 1));
+    QVector<QPoint> diagonalBase;
+    for(int y = 2; y <= 13; ++y)
+    {
+        const int centerX = y;
+        for(int offset = -1; offset <= 1; ++offset)
+        {
+            const QPoint point(centerX + offset, y);
+            diagonalBase.append(point);
+            QVERIFY(field.setMaterial(point.x(), point.y(), 1));
+        }
+    }
 
     CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x314159u);
     CValidationReport report;
@@ -588,6 +765,8 @@ void TerrainVirtualAtlasTests::parallelStripesAndBaseCrossResolveExactly()
     for(int y = 1; y <= 15; ++y)
         for(int x = 7; x <= 9; ++x)
             QCOMPARE(field.material(x, y), qint32(1));
+    for(const QPoint& point : diagonalBase)
+        QCOMPARE(field.material(point.x(), point.y()), qint32(1));
 
     CMprDocument source;
     QVERIFY(source.loadBytes(portableMpr(), "stripe-source.mpr", &report));
@@ -605,11 +784,18 @@ void TerrainVirtualAtlasTests::parallelStripesAndBaseCrossResolveExactly()
                  finalized.packedCells.at(y * 16 + x));
         QVERIFY(available);
     }
+    if(!outputPath.isEmpty())
+        QVERIFY(writeVisualScene(outputPath, "compositions/parallel-stripes-base-cross",
+            package.mprBytes, package.resourceArchiveBytes, finalized, 16, 16,
+            "Three parallel size-3 material stripes crossed by perpendicular and 45-degree size-3 base-material strokes."));
 }
 
 void TerrainVirtualAtlasTests::nestedCircleMaterialPairingsResolveExactly()
 {
     Fixture fixture;
+    const QString outputPath = QString::fromLocal8Bit(
+        qgetenv("EI_MAPPER_ATLAS_TEST_OUTPUT"));
+    if(!outputPath.isEmpty()) applyVisualPatterns(&fixture.images);
     int scenarios = 0;
     for(qint32 outer = 1; outer <= 4; ++outer)
         for(qint32 inner = 1; inner <= 4; ++inner)
@@ -662,6 +848,14 @@ void TerrainVirtualAtlasTests::nestedCircleMaterialPairingsResolveExactly()
                          finalized.packedCells.at(y * 16 + x));
                 QVERIFY(available);
             }
+            if(!outputPath.isEmpty())
+                QVERIFY(writeVisualScene(outputPath,
+                    QString("compositions/nested-circles/outer-%1-inner-%2")
+                        .arg(outer).arg(inner),
+                    package.mprBytes, package.resourceArchiveBytes,
+                    finalized, 16, 16,
+                    QString("Radius-3 material %1 circle with radius-1 material %2 center.")
+                        .arg(outer).arg(inner)));
             CTerrainVirtualAtlas repeated(fixture.catalog, fixture.images, 0x271828u);
             const auto again = repeated.finalize(field,
                 QString("Nested-%1-%2").arg(outer).arg(inner), 512, {1,2,3,4});
@@ -714,6 +908,7 @@ void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexO
              qPrintable(sourceReport.toText()));
     const QString outputPath = QString::fromLocal8Bit(qgetenv("EI_MAPPER_ATLAS_TEST_OUTPUT"));
     if(!outputPath.isEmpty()) QVERIFY(QDir().mkpath(outputPath));
+    if(!outputPath.isEmpty()) applyVisualPatterns(&fixture.images);
     QStringList rawResults;
     int authoredCells = 0;
     int generatedCells = 0;
@@ -801,25 +996,38 @@ void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexO
         QCOMPARE(repeat.stableSha256, finalized.stableSha256);
         QCOMPARE(repeat.packedCells, finalized.packedCells);
         QCOMPARE(repeat.pageMmpPayloads, finalized.pageMmpPayloads);
-        rawResults.append(QString("PASS %1 hash=%2 slots=%3 generated=%4")
+        rawResults.append(QString("STRUCTURAL-PASS %1 hash=%2 slots=%3 generated=%4 visual=unreviewed")
             .arg(scenario.name, QString::fromLatin1(finalized.stableSha256))
             .arg(finalized.requiredSlots).arg(finalized.usage.generatedTiles.size()));
         if(!outputPath.isEmpty())
         {
-            const QDir output(outputPath);
-            QVERIFY(writeBytes(output.filePath(scenario.name + ".mpr"), package.mprBytes));
-            QVERIFY(writeBytes(output.filePath(scenario.name + "-atlas.res"),
-                               package.resourceArchiveBytes));
+            QVERIFY(writeVisualScene(outputPath,
+                QString("background-%1/%2").arg(scenario.background).arg(scenario.name),
+                package.mprBytes, package.resourceArchiveBytes, finalized, 16, 16,
+                QString("Background material %1; brush material %2; scenario %3.")
+                    .arg(scenario.background).arg(scenario.brush).arg(scenario.name)));
         }
     }
     QCOMPARE(scenarios.size(), 82);
     QVERIFY(authoredCells > 0);
     QVERIFY(generatedCells > 0);
-    rawResults.prepend(QString("PASS scenarios=%1 authoredCells=%2 generatedCells=%3")
+    rawResults.prepend(QString("STRUCTURAL-PASS scenarios=%1 authoredCells=%2 generatedCells=%3 visualAcceptance=0")
         .arg(scenarios.size()).arg(authoredCells).arg(generatedCells));
     if(!outputPath.isEmpty())
+    {
         QVERIFY(writeBytes(QDir(outputPath).filePath("MODERN_ATLAS_AUTOTEST_RESULTS.txt"),
                            rawResults.join('\n').append('\n').toUtf8()));
+        QVERIFY(writeBytes(QDir(outputPath).filePath("README.md"), QByteArray(
+            "# Modern atlas visual scenes\n\n"
+            "Each scenario folder contains a complete synthetic `scene.mpr`, its full "
+            "`scene-atlas.res`, a directly viewable `preview.png`, and a visual-review card.\n\n"
+            "Automated save/reopen and semantic-corner equality are structural evidence only. "
+            "They do not constitute visual acceptance. Every image begins as `unreviewed`; mark "
+            "it `acceptable`, `no-blend`, `tile-mismatch`, or `wrong-rotation`.\n\n"
+            "The procedural textures expose blur and orientation without distributing game art. "
+            "Real-map visual fixtures must be generated separately from explicitly authorized "
+            "copied source maps and atlas resources.\n")));
+    }
 }
 
 QTEST_GUILESS_MAIN(TerrainVirtualAtlasTests)

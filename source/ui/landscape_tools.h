@@ -91,6 +91,7 @@ public:
                            const QString& status = QString(),
                            const QString& atlasSource = QString(),
                            const QString& atlasSourcePath = QString());
+    void setGeneratedAtlasTileCount(int count);
     bool selectPaintTerrainType(qint32 terrainType);
     bool underwaterFamiliesVisible() const;
     void setUnderwaterFamiliesVisible(bool visible);
@@ -139,6 +140,7 @@ private:
     QCheckBox* m_showOverlays;
     QLabel* m_tilesetStatus;
     QLabel* m_atlasCoverage;
+    QLabel* m_generatedAtlasTiles;
     QWidget* m_sculptControls;
     QWidget* m_paintControls;
     QVector<STerrainPaintMaterialChoice> m_landPaintTypes;

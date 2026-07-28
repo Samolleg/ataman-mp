@@ -141,6 +141,9 @@ public:
     const QList<QString>& textureList() const {return m_arrCellComboBox;}
     int extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringList& inArrTextureName);
     int extractMmpToDxt1(QImage& outImage, const QString textureName);
+    // A finalized isolated MPR may carry a sibling <mpr>-atlas.res. This
+    // session-only source is searched before configured shared terrain data.
+    void setMapLocalTerrainArchive(const QString& path);
 
 private:
     CTextureList();
@@ -160,6 +163,7 @@ private:
     QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;
     QList<QString> m_arrCellComboBox; //optimization for cell widget
+    QString m_mapLocalTerrainArchive;
 };
 
 
