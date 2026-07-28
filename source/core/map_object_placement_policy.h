@@ -24,11 +24,13 @@ inline bool usesTerrainRelativeMapObjectHeight(ENodeType type)
 
 inline QVector3D resolveTerrainRelativeMapObjectPosition(
     ENodeType type, const QVector3D& storedPosition,
-    const QVector3D& terrainProjectedPosition)
+    const QVector3D& terrainSurfacePosition)
 {
-    QVector3D resolved = terrainProjectedPosition;
+    // terrainSurfacePosition must contain the sampled surface height only.
+    // The MOB Z is an offset from that surface and is applied exactly once.
+    QVector3D resolved = terrainSurfacePosition;
     if(usesTerrainRelativeMapObjectHeight(type))
-        resolved.setZ(terrainProjectedPosition.z() + storedPosition.z());
+        resolved.setZ(terrainSurfacePosition.z() + storedPosition.z());
     return resolved;
 }
 

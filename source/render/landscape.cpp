@@ -439,11 +439,21 @@ void CLandscape::projectPosition(CNode* pNode)
         return;
     }
     QVector3D landPos(pNode->position());
-    if(pNode->nodeType() == eUnit)
-        landPos -= pNode->minPosition();
-    projectPt(landPos);
-    landPos = ei::resolveTerrainRelativeMapObjectPosition(
-        pNode->nodeType(), pNode->position(), landPos);
+    if(ei::usesTerrainRelativeMapObjectHeight(pNode->nodeType()))
+    {
+        // projectPt() adds the sampled terrain height to the input Z. Sample
+        // from zero here, then apply the MOB's terrain-relative Z exactly once.
+        landPos.setZ(0.0f);
+        projectPt(landPos);
+        landPos = ei::resolveTerrainRelativeMapObjectPosition(
+            pNode->nodeType(), pNode->position(), landPos);
+    }
+    else
+    {
+        if(pNode->nodeType() == eUnit)
+            landPos -= pNode->minPosition();
+        projectPt(landPos);
+    }
     pNode->setDrawPosition(landPos);
 }
 
