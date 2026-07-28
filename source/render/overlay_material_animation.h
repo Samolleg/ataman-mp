@@ -3,6 +3,7 @@
 
 #include <QVector2D>
 #include <QVector3D>
+#include <QVector>
 
 #include "types.h"
 
@@ -31,6 +32,14 @@ struct SOverlayWindAnimation
 
 SOverlayMaterialAnimation overlayMaterialAnimation(const SMaterial* material);
 QVector3D terrainMaterialEmission(const SMaterial* material);
+int sharedOverlayMaterialIndex(const QVector<qint16>& tileMaterialIndices,
+                               int tileColumns,
+                               int tileRows,
+                               int gridX,
+                               int gridY);
+QVector3D terrainUnderlayEmission(const QVector3D& overlayEmission,
+                                  float landHeight,
+                                  float overlayHeight);
 SOverlayWindAnimation overlayWindAnimation(const QVector3D& authoredDirection,
                                             float authoredStrength,
                                             float elapsedSeconds,

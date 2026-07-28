@@ -99,6 +99,62 @@ QVector3D terrainMaterialEmission(const SMaterial* material)
                      qBound(0.0f, material->B * strength, 1.0f));
 }
 
+int sharedOverlayMaterialIndex(const QVector<qint16>& tileMaterialIndices,
+                               int tileColumns,
+                               int tileRows,
+                               int gridX,
+                               int gridY)
+{
+    if(tileColumns <= 0 || tileRows <= 0
+       || tileMaterialIndices.size() < tileColumns * tileRows
+       || gridX < 0 || gridY < 0
+       || gridX > tileColumns * 2 || gridY > tileRows * 2)
+        return -1;
+
+    const int tileX = gridX / 2;
+    const int tileY = gridY / 2;
+    const bool onVerticalBoundary = (gridX & 1) == 0;
+    const bool onHorizontalBoundary = (gridY & 1) == 0;
+    int selected = -1;
+    const auto tryTile = [&](int x, int y)
+    {
+        if(selected != -1 || x < 0 || x >= tileColumns
+           || y < 0 || y >= tileRows)
+            return;
+        const int materialIndex = tileMaterialIndices.at(y * tileColumns + x);
+        if(materialIndex != -1)
+            selected = materialIndex;
+    };
+
+    if(onVerticalBoundary && onHorizontalBoundary)
+    {
+        tryTile(tileX - 1, tileY - 1);
+        tryTile(tileX - 1, tileY);
+        tryTile(tileX, tileY - 1);
+        tryTile(tileX, tileY);
+    }
+    else if(onVerticalBoundary)
+    {
+        tryTile(tileX - 1, tileY);
+        tryTile(tileX, tileY);
+    }
+    else if(onHorizontalBoundary)
+    {
+        tryTile(tileX, tileY - 1);
+        tryTile(tileX, tileY);
+    }
+    else
+        tryTile(tileX, tileY);
+    return selected;
+}
+
+QVector3D terrainUnderlayEmission(const QVector3D& overlayEmission,
+                                  float landHeight,
+                                  float overlayHeight)
+{
+    return overlayHeight > landHeight ? overlayEmission : QVector3D();
+}
+
 SOverlayWindAnimation overlayWindAnimation(const QVector3D& authoredDirection,
                                             float authoredStrength,
                                             float elapsedSeconds,

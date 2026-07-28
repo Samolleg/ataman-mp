@@ -17,7 +17,8 @@ private slots:
     void shaderContractsCoverDesktopAndAngle();
     void mapLifetimeResetsAnimationState();
     void derivesGeneralTerrainEmission();
-    void confinesTerrainEmissionToOverlayPass();
+    void usesSharedOverlayVertexRules();
+    void gatesUnderlayEmissionByPositiveDepth();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -203,16 +204,29 @@ void OverlayMaterialAnimationTests::derivesGeneralTerrainEmission()
     QCOMPARE(ei::terrainMaterialEmission(nullptr), QVector3D());
 }
 
-void OverlayMaterialAnimationTests::confinesTerrainEmissionToOverlayPass()
+void OverlayMaterialAnimationTests::usesSharedOverlayVertexRules()
 {
-    QDir repository(QDir::current());
-    while(!repository.exists("source/render/sector.cpp") && repository.cdUp()) {}
-    QFile sectorFile(repository.absoluteFilePath("source/render/sector.cpp"));
-    QVERIFY(sectorFile.open(QIODevice::ReadOnly));
-    const QByteArray sector = sectorFile.readAll();
-    QVERIFY(sector.contains("target.emission = emission;"));
-    QVERIFY(sector.contains("target.emission = QVector3D();"));
-    QVERIFY(!sector.contains("sharedTerrainEmissionGrid"));
+    const QVector<qint16> materials{
+        10, 11,
+        12, 13
+    };
+    QCOMPARE(ei::sharedOverlayMaterialIndex(materials, 2, 2, 2, 2), 10);
+    QCOMPARE(ei::sharedOverlayMaterialIndex(materials, 2, 2, 2, 1), 10);
+    QCOMPARE(ei::sharedOverlayMaterialIndex(materials, 2, 2, 1, 2), 10);
+    QCOMPARE(ei::sharedOverlayMaterialIndex(materials, 2, 2, 3, 3), 13);
+
+    QVector<qint16> sparse = materials;
+    sparse[0] = -1;
+    QCOMPARE(ei::sharedOverlayMaterialIndex(sparse, 2, 2, 2, 2), 12);
+    QCOMPARE(ei::sharedOverlayMaterialIndex(sparse, 2, 2, 0, 0), -1);
+}
+
+void OverlayMaterialAnimationTests::gatesUnderlayEmissionByPositiveDepth()
+{
+    const QVector3D red(0.8f, 0.0f, 0.0f);
+    QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 3.25f), red);
+    QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 3.0f), QVector3D());
+    QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 2.75f), QVector3D());
 }
 
 QTEST_APPLESS_MAIN(OverlayMaterialAnimationTests)

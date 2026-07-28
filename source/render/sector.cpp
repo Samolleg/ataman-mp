@@ -502,6 +502,11 @@ void CSector::generateVertexDataFromTile()
 
     m_arrAnimatedWaterVrtData.resize(m_arrWaterVrtData.size());
     m_arrLitLandVrtData.resize(m_arrLandVrtData.size());
+    QVector<qint16> overlayMaterials;
+    overlayMaterials.reserve(nTile * nTile);
+    for(int row = 0; bWater && row < m_arrWater.size(); ++row)
+        for(int col = 0; col < m_arrWater.at(row).size(); ++col)
+            overlayMaterials.append(qint16(m_arrWater.at(row).at(col).materialIndex()));
     for(int row = 0; bWater && row < m_arrWater.size(); ++row)
         for(int col = 0; col < m_arrWater.at(row).size(); ++col)
         {
@@ -511,7 +516,6 @@ void CSector::generateVertexDataFromTile()
                 ? &m_materials->at(materialIndex) : nullptr;
             const ei::SOverlayMaterialAnimation animation =
                 ei::overlayMaterialAnimation(material);
-            const QVector3D emission = ei::terrainMaterialEmission(material);
             for(int vertex = 0; vertex < 9; ++vertex)
             {
                 const int index = (row * nTile + col) * 9 + vertex;
@@ -522,11 +526,17 @@ void CSector::generateVertexDataFromTile()
                 target.texCoord = source.texCoord;
                 const int gridX = col * 2 + vertex % 3;
                 const int gridY = row * 2 + vertex / 3;
+                const int sharedMaterialIndex = ei::sharedOverlayMaterialIndex(
+                    overlayMaterials, nTile, nTile, gridX, gridY);
+                const SMaterial* sharedMaterial = m_materials
+                        && sharedMaterialIndex >= 0
+                        && sharedMaterialIndex < m_materials->size()
+                    ? &m_materials->at(sharedMaterialIndex) : nullptr;
                 target.animation = QVector4D(animation.waveMultiplier,
                     animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
                     animation.animated ? 1.0f : 0.0f);
                 target.grid = QVector2D(float(gridX), float(gridY));
-                target.emission = emission;
+                target.emission = ei::terrainMaterialEmission(sharedMaterial);
             }
         }
     for(int row = 0; row < m_arrLand.size(); ++row)
@@ -539,7 +549,23 @@ void CSector::generateVertexDataFromTile()
                 target.position = source.position;
                 target.normal = source.normal;
                 target.texCoord = source.texCoord;
+                const int gridX = col * 2 + vertex % 3;
+                const int gridY = row * 2 + vertex / 3;
+                const int sharedMaterialIndex = ei::sharedOverlayMaterialIndex(
+                    overlayMaterials, nTile, nTile, gridX, gridY);
+                const SMaterial* sharedMaterial = m_materials
+                        && sharedMaterialIndex >= 0
+                        && sharedMaterialIndex < m_materials->size()
+                    ? &m_materials->at(sharedMaterialIndex) : nullptr;
                 target.emission = QVector3D();
+                if(sharedMaterial && bWater)
+                {
+                    const QVector3D overlayEmission =
+                        ei::terrainMaterialEmission(sharedMaterial);
+                    const SVertexData& overlay = m_arrWaterVrtData.at(index);
+                    target.emission = ei::terrainUnderlayEmission(overlayEmission,
+                        source.position.z(), overlay.position.z());
+                }
             }
 }
 

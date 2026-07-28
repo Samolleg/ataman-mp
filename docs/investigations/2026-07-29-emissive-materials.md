@@ -7,10 +7,10 @@ Evil Islands has two independent authored emissive channels.
 1. MPR terrain-overlay materials serialize RGB and `selfIllumination`. Their
    emitted RGB is the component-wise saturated product
    `material.rgb * selfIllumination`. The overlay uses that value as part of
-   its own vertex lighting. It does not write emission into the land geometry
-   below or beside the overlay and does not generate an omnidirectional point
-   light or screen-space bloom. The overlay texture's authored alpha confines
-   the visible emissive result to the rendered liquid surface.
+   its own vertex lighting. The same upper-layer emission is also applied to a
+   paired lower-land vertex when the overlay vertex is strictly above it. This
+   creates the game's subtle interpolated terrain glow without an
+   omnidirectional point light or screen-space bloom.
 2. The physical-material archive supplies an emissive RGBA member for figure
    materials. In the shipped archive, only `magic.mat` is nonzero. The runtime
    promotes the Magic material's emissive RGB to `(1, 1, 1)` after loading it;
@@ -18,10 +18,16 @@ Evil Islands has two independent authored emissive channels.
    path. Equipment can therefore be fully self-lit when its database material
    record has physical type `Magic`.
 
-These channels affect the emitting geometry's lighting. There is no evidence
-that `selfIllumination` creates an arbitrary-radius local light, so Endurance
-does not synthesize one. Authored MOB `LIGHT` records and established particle
-lights remain the only spatial point-light inputs.
+Terrain emission is selected on the canonical 33x33 shared vertex lattice. At
+a tile boundary, the engine chooses the first active adjacent overlay material
+in deterministic northwest, southwest, northeast, southeast order (with only
+the applicable two candidates on an edge). It does not take a component-wise
+maximum of all adjacent materials. Lower terrain receives that selected
+emission only where `overlayZ - landZ > 0`; coincident or lower overlays add
+none. Normal triangle interpolation supplies the narrow transition visible in
+the game. There is no arbitrary-radius local light, so Endurance does not
+synthesize one. Authored MOB `LIGHT` records and established particle lights
+remain the spatial point-light inputs.
 
 ## Read-only evidence
 
@@ -46,6 +52,12 @@ Its loader reads the four material color vectors and power from each member,
 then explicitly writes binary32 `1.0` to the three emissive channels for the
 Magic material type. This independently confirms that the archive's `0.7`
 value is not the final runtime intensity.
+
+The same executable independently corroborates the terrain representation:
+two paired 1,089-vertex layers, an 84-byte vertex stride, a `0x16554` byte
+upper-layer offset, and a per-upper-vertex inactive sentinel. Those structural
+facts match the source-confirmed shared-vertex selection and depth-gated lower
+terrain illumination model.
 
 A complete read-only walk of 108 Base and active Jamais Vu MPR files found 11
 nonzero terrain-material definitions. Every definition is the same record:
@@ -73,16 +85,18 @@ No installed game, map, archive, database, or private reference was modified.
 
 ## Endurance implementation
 
-- The overlay VBO carries a static RGB emission attribute derived once from the
-  referenced MPR material. The land VBO carries an explicit neutral value, so
-  overlay self-illumination cannot leak into terrain tiles or cliff faces. No
-  per-frame buffer rebuild is introduced.
+- The overlay VBO carries static RGB emission selected on the canonical shared
+  vertex lattice. The land VBO receives the same value only at paired vertices
+  where the overlay is strictly higher. Duplicate batched tile vertices use the
+  same canonical selection, so interpolation is continuous without per-frame
+  buffer rebuilding.
 - Full-environment lighting saturating-adds emission to direct light, then
   takes the existing channel-wise maximum with ambient and point-light
   candidates. The existing projected-shadow and fog stages remain in place.
-- Land under every overlay material receives exact zero emission. Water, swamp,
-  lava, and future authored overlay types share the same general
+- Water, swamp, lava, and future authored overlay types share the same general
   material rule; emission is not gated by texture appearance or tile name.
+  Non-emissive materials remain neutral, and the positive-depth gate prevents
+  the former whole-tile red wash across banks and cliff faces.
 - Equipment resolution emits a per-part Magic flag only from an authoritative
   active-profile database material record. The render queue includes emission
   in batching compatibility so instanced draws cannot mix emissive and
@@ -95,9 +109,10 @@ No installed game, map, archive, database, or private reference was modified.
 ## Focused runtime validation
 
 1. Load Jamais Vu `zone16` in Full environment at the same time and camera as
-   the game comparison. Lava must remain red/self-lit while surrounding land and
-   cliff faces retain ordinary environment lighting. There must be no red tile
-   halo outside the authored overlay alpha.
+   the game comparison. Lava must remain red/self-lit and produce the same
+   narrow, softly interpolated red illumination on immediately paired terrain
+   vertices. Banks and cliff faces beyond those positive-depth vertices must
+   retain ordinary environment lighting; there must be no broad tile-sized wash.
 2. Toggle Unlit, Simple shading, and Full environment. Lava emission must be
    stable in the two lit modes; Unlit remains the authored texture preview.
 3. Toggle landscape editing. Water motion must still become exactly neutral;
