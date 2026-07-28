@@ -425,6 +425,14 @@ must not independently change its shaders or animation policy.
   height, initial land material, active Base/JMV profile, and a supplied terrain
   atlas namespace. Endurance reads compatible atlases but does not author or
   bundle atlas imagery.
+- [x] Keep optional heightmap validation inside the creation dialog, preserve
+  every entered setting after a rejected image/range, provide an explicit Clear
+  action, and preview the stretched/flipped image against the non-square tile
+  and SEC grid before committing the new landscape.
+- [x] Optionally initialize a full overlay plane (disabled by default) with an
+  explicit raw height, existing atlas slot/rotation and liquid material, plus an
+  independent edge taper. Generate canonical type-3 SEC members with shared
+  overlay seams instead of synthesizing the surface through post-create strokes.
 - [x] Generate deterministic MP/SEC members with canonical 33x33 sector vertex
   ownership, synchronized shared seams, explicit land/overlay initialization,
   and names derived from the chosen internal MPR namespace.

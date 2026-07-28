@@ -61,6 +61,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QImage>
+#include <QImageReader>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <cmath>
@@ -116,6 +117,130 @@ constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
 constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
 constexpr int kLoadedMapMob = 2;
+
+struct SNewMprHeightmap
+{
+    QImage image;
+    QString error;
+};
+
+SNewMprHeightmap loadNewMprHeightmap(const QString& path)
+{
+    SNewMprHeightmap result;
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))
+    {
+        result.error = QObject::tr("The selected file could not be opened: %1")
+            .arg(file.errorString());
+        return result;
+    }
+    QImageReader reader(&file);
+    reader.setAutoTransform(false);
+    result.image = reader.read();
+    if(result.image.isNull())
+        result.error = QObject::tr("The selected image could not be decoded: %1")
+            .arg(reader.errorString());
+    return result;
+}
+
+class CNewMprCanvasPreview final : public QWidget
+{
+public:
+    explicit CNewMprCanvasPreview(QWidget* parent = nullptr) : QWidget(parent)
+    {
+        setMinimumSize(420, 260);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        setToolTip(QObject::tr(
+            "The image is stretched to the complete terrain canvas. North is at the top. "
+            "Thin lines are tiles; stronger lines are 16-tile SEC sectors."));
+    }
+
+    void setCanvas(int sectorsX, int sectorsY, const QImage& heightmap,
+                   bool flipVertically, bool overlayEnabled,
+                   bool terrainTapered, bool overlayTapered)
+    {
+        m_sectorsX = qMax(1, sectorsX);
+        m_sectorsY = qMax(1, sectorsY);
+        m_heightmap = heightmap;
+        m_flipVertically = flipVertically;
+        m_overlayEnabled = overlayEnabled;
+        m_terrainTapered = terrainTapered;
+        m_overlayTapered = overlayTapered;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.fillRect(rect(), QColor(28, 28, 28));
+        const int tilesX = m_sectorsX * 16;
+        const int tilesY = m_sectorsY * 16;
+        QRectF available = QRectF(rect()).adjusted(24, 24, -24, -30);
+        const qreal scale = qMin(available.width() / qreal(tilesX),
+                                 available.height() / qreal(tilesY));
+        const QSizeF size(tilesX * scale, tilesY * scale);
+        const QRectF mapRect(available.center().x() - size.width() / 2.0,
+                             available.center().y() - size.height() / 2.0,
+                             size.width(), size.height());
+        painter.fillRect(mapRect, QColor(72, 72, 72));
+        if(!m_heightmap.isNull())
+        {
+            QImage image = m_flipVertically
+                ? m_heightmap.mirrored(false, true) : m_heightmap;
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            painter.drawImage(mapRect, image);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        }
+        if(m_terrainTapered)
+        {
+            painter.setPen(QPen(QColor(0, 0, 0, 150), qMax(2.0, scale * 2.0)));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRect(mapRect.adjusted(scale, scale, -scale, -scale));
+        }
+        if(m_overlayEnabled)
+        {
+            painter.fillRect(mapRect, QColor(40, 145, 220, 62));
+            painter.setPen(QPen(QColor(80, 190, 255, 210),
+                                m_overlayTapered ? 3.0 : 1.5));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRect(mapRect.adjusted(1, 1, -1, -1));
+        }
+        if(scale >= 3.0)
+        {
+            painter.setPen(QPen(QColor(255, 255, 255, 35), 1));
+            for(int x = 1; x < tilesX; ++x)
+                painter.drawLine(QPointF(mapRect.left() + x * scale, mapRect.top()),
+                                 QPointF(mapRect.left() + x * scale, mapRect.bottom()));
+            for(int y = 1; y < tilesY; ++y)
+                painter.drawLine(QPointF(mapRect.left(), mapRect.top() + y * scale),
+                                 QPointF(mapRect.right(), mapRect.top() + y * scale));
+        }
+        painter.setPen(QPen(QColor(255, 196, 64, 190), 1.5));
+        for(int x = 0; x <= m_sectorsX; ++x)
+            painter.drawLine(QPointF(mapRect.left() + x * 16 * scale, mapRect.top()),
+                             QPointF(mapRect.left() + x * 16 * scale, mapRect.bottom()));
+        for(int y = 0; y <= m_sectorsY; ++y)
+            painter.drawLine(QPointF(mapRect.left(), mapRect.top() + y * 16 * scale),
+                             QPointF(mapRect.right(), mapRect.top() + y * 16 * scale));
+        painter.setPen(QColor(220, 220, 220));
+        painter.drawText(QRectF(0, 2, width(), 20), Qt::AlignCenter,
+                         QObject::tr("NORTH"));
+        painter.drawText(QRectF(0, height() - 24, width(), 20), Qt::AlignCenter,
+                         QObject::tr("%1 x %2 tiles (%3 x %4 sectors)")
+                             .arg(tilesX).arg(tilesY)
+                             .arg(m_sectorsX).arg(m_sectorsY));
+    }
+
+private:
+    int m_sectorsX{1};
+    int m_sectorsY{1};
+    QImage m_heightmap;
+    bool m_flipVertically{false};
+    bool m_overlayEnabled{false};
+    bool m_terrainTapered{false};
+    bool m_overlayTapered{false};
+};
 
 QIcon entranceVisibilityIcon(bool visible, const QColor& color)
 {
@@ -6102,7 +6227,7 @@ void MainWindow::on_actionNew_MPR_triggered()
 {
     QDialog dialog(this);
     dialog.setWindowTitle(tr("Create New MPR"));
-    dialog.resize(620, 0);
+    dialog.resize(760, 820);
     QVBoxLayout* root = new QVBoxLayout(&dialog);
     QLabel* explanation = new QLabel(tr(
         "A new landscape reuses the exact atlas, material, and animation metadata from a proven template MPR. "
@@ -6157,13 +6282,17 @@ void MainWindow::on_actionNew_MPR_triggered()
     form->addRow(tr("Edge taper width (tiles)"), taperTiles);
 
     QLineEdit* heightmapPath = new QLineEdit(&dialog);
+    heightmapPath->setObjectName(QStringLiteral("newMprHeightmapPath"));
     heightmapPath->setPlaceholderText(tr("Optional; leave blank for a flat map"));
     QPushButton* browseHeightmap = new QPushButton(tr("Browse..."), &dialog);
+    QPushButton* clearHeightmap = new QPushButton(tr("Clear"), &dialog);
+    clearHeightmap->setObjectName(QStringLiteral("newMprHeightmapClear"));
     QWidget* heightmapRow = new QWidget(&dialog);
     QHBoxLayout* heightmapLayout = new QHBoxLayout(heightmapRow);
     heightmapLayout->setContentsMargins(0, 0, 0, 0);
     heightmapLayout->addWidget(heightmapPath, 1);
     heightmapLayout->addWidget(browseHeightmap);
+    heightmapLayout->addWidget(clearHeightmap);
     form->addRow(tr("Heightmap"), heightmapRow);
     QSpinBox* heightmapMinimum = new QSpinBox(&dialog);
     QSpinBox* heightmapMaximum = new QSpinBox(&dialog);
@@ -6174,6 +6303,51 @@ void MainWindow::on_actionNew_MPR_triggered()
     form->addRow(tr("Heightmap white raw height"), heightmapMaximum);
     QCheckBox* flipHeightmap = new QCheckBox(tr("Flip heightmap vertically"), &dialog);
     form->addRow(QString(), flipHeightmap);
+
+    QGroupBox* overlayGroup = new QGroupBox(tr("Initial overlay plane"), &dialog);
+    QFormLayout* overlayForm = new QFormLayout(overlayGroup);
+    QCheckBox* createOverlay = new QCheckBox(
+        tr("Create a full overlay plane (for water, lava, or other surfaces)"),
+        overlayGroup);
+    createOverlay->setObjectName(QStringLiteral("newMprCreateOverlay"));
+    overlayForm->addRow(QString(), createOverlay);
+    QSpinBox* overlayRawHeight = new QSpinBox(overlayGroup);
+    overlayRawHeight->setRange(0, 65535);
+    overlayRawHeight->setValue(32768);
+    overlayForm->addRow(tr("Plane raw height"), overlayRawHeight);
+    QSpinBox* overlayAtlasSlot = new QSpinBox(overlayGroup);
+    overlayAtlasSlot->setRange(0, 16383);
+    overlayForm->addRow(tr("Overlay atlas slot"), overlayAtlasSlot);
+    QComboBox* overlayRotation = new QComboBox(overlayGroup);
+    overlayRotation->addItems({tr("0 degrees"), tr("90 degrees"),
+                               tr("180 degrees"), tr("270 degrees")});
+    overlayForm->addRow(tr("Overlay tile rotation"), overlayRotation);
+    QSpinBox* overlayMaterial = new QSpinBox(overlayGroup);
+    overlayMaterial->setRange(0, 0);
+    overlayForm->addRow(tr("Liquid material index"), overlayMaterial);
+    QCheckBox* taperOverlay = new QCheckBox(
+        tr("Taper overlay edges down to raw height 0"), overlayGroup);
+    overlayForm->addRow(QString(), taperOverlay);
+    QSpinBox* overlayTaperTiles = new QSpinBox(overlayGroup);
+    overlayTaperTiles->setRange(1, 16);
+    overlayTaperTiles->setValue(2);
+    overlayForm->addRow(tr("Overlay taper width (tiles)"), overlayTaperTiles);
+    root->addWidget(overlayGroup);
+    for(QWidget* control : {static_cast<QWidget*>(overlayRawHeight),
+                            static_cast<QWidget*>(overlayAtlasSlot),
+                            static_cast<QWidget*>(overlayRotation),
+                            static_cast<QWidget*>(overlayMaterial),
+                            static_cast<QWidget*>(taperOverlay),
+                            static_cast<QWidget*>(overlayTaperTiles)})
+        control->setEnabled(false);
+
+    QLabel* previewStatus = new QLabel(&dialog);
+    previewStatus->setObjectName(QStringLiteral("newMprHeightmapStatus"));
+    previewStatus->setWordWrap(true);
+    CNewMprCanvasPreview* canvasPreview = new CNewMprCanvasPreview(&dialog);
+    canvasPreview->setObjectName(QStringLiteral("newMprCanvasPreview"));
+    root->addWidget(previewStatus);
+    root->addWidget(canvasPreview, 1);
 
     const QFileInfo currentTemplate = CLandscape::getInstance()->isMprLoad()
         ? CLandscape::getInstance()->filePath() : QFileInfo();
@@ -6188,6 +6362,8 @@ void MainWindow::on_actionNew_MPR_triggered()
             maxZ->setValue(current.mapInfo().maxZ);
             const quint32 atlasCount = qMin<quint32>(256, current.mapInfo().textureCount);
             atlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+            overlayAtlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+            overlayMaterial->setMaximum(qMax(0, int(current.mapInfo().materialCount) - 1));
         }
     }
     connect(browseTemplate, &QPushButton::clicked, &dialog, [&]() {
@@ -6205,6 +6381,9 @@ void MainWindow::on_actionNew_MPR_triggered()
             const quint32 atlasCount = qMin<quint32>(
                 256, candidateTemplate.mapInfo().textureCount);
             atlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+            overlayAtlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+            overlayMaterial->setMaximum(qMax(0,
+                int(candidateTemplate.mapInfo().materialCount) - 1));
         }
     });
     connect(browseHeightmap, &QPushButton::clicked, &dialog, [&]() {
@@ -6214,106 +6393,193 @@ void MainWindow::on_actionNew_MPR_triggered()
         if(!path.isEmpty())
             heightmapPath->setText(path);
     });
+    connect(clearHeightmap, &QPushButton::clicked, heightmapPath, &QLineEdit::clear);
     connect(closeEdges, &QCheckBox::toggled, taperTiles, &QSpinBox::setEnabled);
+    connect(createOverlay, &QCheckBox::toggled, &dialog, [&](bool enabled) {
+        overlayRawHeight->setEnabled(enabled);
+        overlayAtlasSlot->setEnabled(enabled);
+        overlayRotation->setEnabled(enabled);
+        overlayMaterial->setEnabled(enabled);
+        taperOverlay->setEnabled(enabled);
+        overlayTaperTiles->setEnabled(enabled && taperOverlay->isChecked());
+    });
+    connect(taperOverlay, &QCheckBox::toggled, &dialog, [&](bool enabled) {
+        overlayTaperTiles->setEnabled(createOverlay->isChecked() && enabled);
+    });
+
+    QImage previewHeightmap;
+    const auto refreshPreview = [&]() {
+        const QString path = heightmapPath->text().trimmed();
+        if(path.isEmpty())
+        {
+            previewHeightmap = QImage();
+            previewStatus->setText(tr("Flat terrain preview. Choose a heightmap to preview its stretch and orientation."));
+            previewStatus->setStyleSheet(QString());
+        }
+        else
+        {
+            const SNewMprHeightmap loaded = loadNewMprHeightmap(path);
+            previewHeightmap = loaded.image;
+            if(previewHeightmap.isNull())
+            {
+                previewStatus->setText(loaded.error);
+                previewStatus->setStyleSheet(QStringLiteral("color: #ff8080;"));
+            }
+            else
+            {
+                previewStatus->setText(tr("%1 x %2 image stretched to the full terrain canvas.")
+                    .arg(previewHeightmap.width()).arg(previewHeightmap.height()));
+                previewStatus->setStyleSheet(QString());
+            }
+        }
+        canvasPreview->setCanvas(sectorsX->value(), sectorsY->value(),
+            previewHeightmap, flipHeightmap->isChecked(), createOverlay->isChecked(),
+            closeEdges->isChecked(), taperOverlay->isChecked());
+    };
+    connect(heightmapPath, &QLineEdit::textChanged, &dialog,
+            [&](const QString&) { refreshPreview(); });
+    connect(sectorsX, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
+    connect(sectorsY, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
+    connect(flipHeightmap, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshPreview(); });
+    connect(closeEdges, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshPreview(); });
+    connect(createOverlay, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshPreview(); });
+    connect(taperOverlay, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshPreview(); });
+    refreshPreview();
 
     QDialogButtonBox* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Create and Open..."));
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     root->addWidget(buttons);
-    if(dialog.exec() != QDialog::Accepted)
-        return;
-
-    CMprDocument terrainTemplate;
-    CValidationReport report;
-    const QFileInfo templateFile(templatePath->text());
-    if(!terrainTemplate.load(templateFile, &report) || report.hasErrors())
-    {
-        QMessageBox::warning(this, tr("Create New MPR"),
-            tr("The terrain template could not be validated.\n\n%1").arg(report.toText()));
-        return;
-    }
-    SMprCreationRequest request;
-    request.innerNamespace = nameSpace->text().trimmed();
-    request.sectorCountX = quint32(sectorsX->value());
-    request.sectorCountY = quint32(sectorsY->value());
-    request.maxZ = float(maxZ->value());
-    request.flatRawHeight = quint16(flatRaw->value());
-    SMprPackedTile tile;
-    tile.atlasIndex = quint8(atlasSlot->value() / 64);
-    tile.tileIndex = quint8(atlasSlot->value() % 64);
-    tile.rotation = quint8(rotation->currentIndex());
-    request.initialPackedTile = tile.encode();
-    request.closeEdges = closeEdges->isChecked();
-    request.edgeTaperTiles = taperTiles->value();
-    if(!heightmapPath->text().trimmed().isEmpty())
-    {
-        QImage image(heightmapPath->text().trimmed());
-        if(image.isNull() || heightmapMaximum->value() < heightmapMinimum->value())
+    connect(buttons->button(QDialogButtonBox::Ok), &QPushButton::clicked,
+            &dialog, [&]() {
+        CMprDocument terrainTemplate;
+        CValidationReport report;
+        const QFileInfo templateFile(templatePath->text());
+        if(!terrainTemplate.load(templateFile, &report) || report.hasErrors())
         {
-            QMessageBox::warning(this, tr("Create New MPR"),
-                tr("The heightmap could not be decoded, or its raw range is invalid."));
+            QMessageBox::warning(&dialog, tr("Create New MPR"),
+                tr("The terrain template could not be validated.\n\n%1")
+                    .arg(report.toText()));
             return;
         }
-        request.heightmapWidth = image.width();
-        request.heightmapHeight = image.height();
-        request.heightmapMinimumRaw = float(heightmapMinimum->value());
-        request.heightmapMaximumRaw = float(heightmapMaximum->value());
-        request.heightmapSamples.reserve(image.width() * image.height());
-        for(int outputY = 0; outputY < image.height(); ++outputY)
+        if(heightmapMaximum->value() < heightmapMinimum->value())
         {
-            const int imageY = flipHeightmap->isChecked()
-                ? image.height() - 1 - outputY : outputY;
-            for(int x = 0; x < image.width(); ++x)
-                request.heightmapSamples.append(
-                    float(qGray(image.pixel(x, imageY))) / 255.0f);
+            QMessageBox::warning(&dialog, tr("Create New MPR"),
+                tr("Heightmap white raw height must be greater than or equal to black raw height."));
+            heightmapMaximum->setFocus();
+            return;
         }
-    }
-    QByteArray candidate;
-    report = CValidationReport();
-    if(!terrainTemplate.buildNewCanvas(request, &candidate, &report))
-    {
-        QMessageBox::warning(this, tr("Create New MPR"),
-            tr("The new landscape could not be generated.\n\n%1").arg(report.toText()));
-        return;
-    }
-    COptString* opt = dynamic_cast<COptString*>(
-        m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
-    const QString startFolder = opt ? opt->value() : templateFile.absolutePath();
-    QString destinationPath = QFileDialog::getSaveFileName(this, tr("Save New MPR"),
-        QDir(startFolder).filePath(request.innerNamespace + QStringLiteral(".mpr")),
-        tr("MPR (*.mpr)"));
-    if(destinationPath.isEmpty())
-        return;
-    if(!destinationPath.endsWith(".mpr", Qt::CaseInsensitive))
-        destinationPath += QStringLiteral(".mpr");
-    const QFileInfo destination(destinationPath);
-    if(destination.exists()
-       && QMessageBox::question(this, tr("Replace MPR"),
-            tr("%1 already exists. Back it up and replace it?").arg(destination.fileName()))
-          != QMessageBox::Yes)
-        return;
-    SMprSaveCommitRequest commit;
-    commit.destination = destination;
-    const SMprSaveCommitResult result = commitGeneratedMpr(candidate, commit);
-    if(!result.success)
-    {
-        QMessageBox::critical(this, tr("Create New MPR"),
-            tr("The generated MPR was not committed.\n\n%1").arg(result.error));
-        return;
-    }
-    if(opt)
-        opt->setValue(destination.absolutePath());
-    rememberRecentFile(destination);
-    if(!replaceLoadedLandscape(destination))
-    {
-        QMessageBox::information(this, tr("New MPR Created"),
-            tr("The validated MPR was created at:\n%1\n\nIt was not opened because the current document transition was cancelled.")
-                .arg(destination.absoluteFilePath()));
-        return;
-    }
-    statusBar()->showMessage(tr("Created and opened %1").arg(destination.fileName()), 5000);
+
+        SMprCreationRequest request;
+        request.innerNamespace = nameSpace->text().trimmed();
+        request.sectorCountX = quint32(sectorsX->value());
+        request.sectorCountY = quint32(sectorsY->value());
+        request.maxZ = float(maxZ->value());
+        request.flatRawHeight = quint16(flatRaw->value());
+        SMprPackedTile tile;
+        tile.atlasIndex = quint8(atlasSlot->value() / 64);
+        tile.tileIndex = quint8(atlasSlot->value() % 64);
+        tile.rotation = quint8(rotation->currentIndex());
+        request.initialPackedTile = tile.encode();
+        request.closeEdges = closeEdges->isChecked();
+        request.edgeTaperTiles = taperTiles->value();
+
+        const QString selectedHeightmap = heightmapPath->text().trimmed();
+        if(!selectedHeightmap.isEmpty())
+        {
+            const SNewMprHeightmap loaded = loadNewMprHeightmap(selectedHeightmap);
+            if(loaded.image.isNull())
+            {
+                ei::log(eLogWarning, QString("New MPR heightmap decode refused path:%1 error:%2")
+                    .arg(selectedHeightmap, loaded.error));
+                QMessageBox::warning(&dialog, tr("Create New MPR"), loaded.error);
+                heightmapPath->setFocus();
+                return;
+            }
+            request.heightmapWidth = loaded.image.width();
+            request.heightmapHeight = loaded.image.height();
+            request.heightmapMinimumRaw = float(heightmapMinimum->value());
+            request.heightmapMaximumRaw = float(heightmapMaximum->value());
+            request.heightmapSamples.reserve(loaded.image.width() * loaded.image.height());
+            for(int outputY = 0; outputY < loaded.image.height(); ++outputY)
+            {
+                const int imageY = flipHeightmap->isChecked()
+                    ? loaded.image.height() - 1 - outputY : outputY;
+                for(int x = 0; x < loaded.image.width(); ++x)
+                    request.heightmapSamples.append(
+                        float(qGray(loaded.image.pixel(x, imageY))) / 255.0f);
+            }
+        }
+        request.createOverlayPlane = createOverlay->isChecked();
+        request.overlayRawHeight = quint16(overlayRawHeight->value());
+        SMprPackedTile overlayTile;
+        overlayTile.atlasIndex = quint8(overlayAtlasSlot->value() / 64);
+        overlayTile.tileIndex = quint8(overlayAtlasSlot->value() % 64);
+        overlayTile.rotation = quint8(overlayRotation->currentIndex());
+        request.overlayPackedTile = overlayTile.encode();
+        request.overlayMaterialIndex = qint16(overlayMaterial->value());
+        request.taperOverlayEdges = taperOverlay->isChecked();
+        request.overlayEdgeTaperTiles = overlayTaperTiles->value();
+
+        QByteArray candidate;
+        report = CValidationReport();
+        if(!terrainTemplate.buildNewCanvas(request, &candidate, &report))
+        {
+            ei::log(eLogWarning, "New MPR generation refused: " + report.toText());
+            QMessageBox::warning(&dialog, tr("Create New MPR"),
+                tr("The new landscape could not be generated.\n\n%1")
+                    .arg(report.toText()));
+            return;
+        }
+        COptString* opt = dynamic_cast<COptString*>(
+            m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
+        const QString startFolder = opt ? opt->value() : templateFile.absolutePath();
+        QString destinationPath = QFileDialog::getSaveFileName(&dialog,
+            tr("Save New MPR"),
+            QDir(startFolder).filePath(request.innerNamespace + QStringLiteral(".mpr")),
+            tr("MPR (*.mpr)"));
+        if(destinationPath.isEmpty())
+            return;
+        if(!destinationPath.endsWith(".mpr", Qt::CaseInsensitive))
+            destinationPath += QStringLiteral(".mpr");
+        const QFileInfo destination(destinationPath);
+        if(destination.exists()
+           && QMessageBox::question(&dialog, tr("Replace MPR"),
+                tr("%1 already exists. Back it up and replace it?")
+                    .arg(destination.fileName())) != QMessageBox::Yes)
+            return;
+        SMprSaveCommitRequest commit;
+        commit.destination = destination;
+        const SMprSaveCommitResult result = commitGeneratedMpr(candidate, commit);
+        if(!result.success)
+        {
+            QMessageBox::critical(&dialog, tr("Create New MPR"),
+                tr("The generated MPR was not committed.\n\n%1").arg(result.error));
+            return;
+        }
+        if(opt)
+            opt->setValue(destination.absolutePath());
+        rememberRecentFile(destination);
+        if(!replaceLoadedLandscape(destination))
+        {
+            QMessageBox::information(&dialog, tr("New MPR Created"),
+                tr("The validated MPR was created at:\n%1\n\nIt was not opened because the current document transition was cancelled.")
+                    .arg(destination.absoluteFilePath()));
+            dialog.accept();
+            return;
+        }
+        statusBar()->showMessage(tr("Created and opened %1")
+            .arg(destination.fileName()), 5000);
+        dialog.accept();
+    });
+    dialog.exec();
 }
 
 void MainWindow::on_actionOpen_MOB_triggered()

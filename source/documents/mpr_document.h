@@ -147,6 +147,12 @@ struct SMprCreationRequest
     QVector<float> heightmapSamples;
     float heightmapMinimumRaw{0.0f};
     float heightmapMaximumRaw{65535.0f};
+    bool createOverlayPlane{false};
+    quint16 overlayRawHeight{32768};
+    quint16 overlayPackedTile{0};
+    qint16 overlayMaterialIndex{0};
+    bool taperOverlayEdges{false};
+    int overlayEdgeTaperTiles{2};
 };
 
 class CMprSemanticDiff

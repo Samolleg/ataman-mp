@@ -1260,6 +1260,16 @@ bool CMprDocument::buildNewCanvas(const SMprCreationRequest& request,
        && (request.edgeTaperTiles < 1 || request.edgeTaperTiles > 16))
         return fail("mpr.create.edge_taper",
                     "Closed-edge taper width must be between 1 and 16 tiles.");
+    if(request.createOverlayPlane
+       && (request.overlayMaterialIndex < 0
+           || request.overlayMaterialIndex >= qint16(m_mapInfo.materialCount)))
+        return fail("mpr.create.overlay_material",
+                    "The initial overlay plane requires an existing liquid material.");
+    if(request.createOverlayPlane && request.taperOverlayEdges
+       && (request.overlayEdgeTaperTiles < 1
+           || request.overlayEdgeTaperTiles > 16))
+        return fail("mpr.create.overlay_taper",
+                    "Overlay edge taper width must be between 1 and 16 tiles.");
     const bool hasHeightmap = !request.heightmapSamples.isEmpty();
     if(hasHeightmap
        && (request.heightmapWidth <= 0 || request.heightmapHeight <= 0
@@ -1289,6 +1299,13 @@ bool CMprDocument::buildNewCanvas(const SMprCreationRequest& request,
         return fail("mpr.create.tile",
                     QString("Initial tile references atlas %1, outside template namespace count %2.")
                         .arg(decoded.atlasIndex).arg(m_mapInfo.textureCount));
+    const SMprPackedTile decodedOverlay = SMprPackedTile::decode(
+        request.overlayPackedTile);
+    if(request.createOverlayPlane
+       && decodedOverlay.atlasIndex >= m_mapInfo.textureCount)
+        return fail("mpr.create.overlay_tile",
+                    QString("Initial overlay tile references atlas %1, outside template namespace count %2.")
+                        .arg(decodedOverlay.atlasIndex).arg(m_mapInfo.textureCount));
 
     const int mpIndex = uniqueMemberIndex(m_mapInfo.memberName);
     if(mpIndex < 0)
@@ -1315,19 +1332,65 @@ bool CMprDocument::buildNewCanvas(const SMprCreationRequest& request,
     for(quint32 y = 0; y < request.sectorCountY; ++y)
         for(quint32 x = 0; x < request.sectorCountX; ++x)
         {
-            QByteArray sec(int(kLandSectorSize), '\0');
+            QByteArray sec(int(request.createOverlayPlane
+                ? kOverlaySectorSize : kLandSectorSize), '\0');
             writeU32(&sec, 0, kSectorSignature);
-            sec[4] = char(0);
+            sec[4] = char(request.createOverlayPlane ? 3 : 0);
             for(quint64 vertex = 0; vertex < kSectorVertexCount; ++vertex)
             {
                 const quint64 offset = 5 + vertex * kSectorVertexSize;
                 writeU16(&sec, offset + 2, request.flatRawHeight);
                 writeU32(&sec, offset + 4, flatNormal);
+                if(request.createOverlayPlane)
+                {
+                    const int localX = int(vertex % 33);
+                    const int localY = int(vertex / 33);
+                    const int globalX = int(x) * 32 + localX;
+                    const int globalY = int(y) * 32 + localY;
+                    quint16 overlayHeight = request.overlayRawHeight;
+                    if(request.taperOverlayEdges)
+                    {
+                        const int maximumX = int(request.sectorCountX) * 32;
+                        const int maximumY = int(request.sectorCountY) * 32;
+                        const int distance = qMin(qMin(globalX, globalY),
+                                                  qMin(maximumX - globalX,
+                                                       maximumY - globalY));
+                        const int width = request.overlayEdgeTaperTiles * 2;
+                        const double linear = qBound(0.0,
+                            double(distance) / double(width), 1.0);
+                        const double smooth = linear * linear
+                            * (3.0 - 2.0 * linear);
+                        overlayHeight = quint16(qRound64(
+                            double(request.overlayRawHeight) * smooth));
+                    }
+                    const quint64 overlayOffset = 5
+                        + kSectorVertexCount * kSectorVertexSize
+                        + vertex * kSectorVertexSize;
+                    writeU16(&sec, overlayOffset + 2, overlayHeight);
+                    writeU32(&sec, overlayOffset + 4, flatNormal);
+                }
             }
-            const quint64 tileOffset = 5 + kSectorVertexCount * kSectorVertexSize;
+            const quint64 tileOffset = 5
+                + (request.createOverlayPlane ? 2 : 1)
+                    * kSectorVertexCount * kSectorVertexSize;
             for(quint64 tile = 0; tile < kSectorTileCount; ++tile)
                 writeU16(&sec, tileOffset + tile * kSectorTileSize,
-                         request.initialPackedTile);
+                          request.initialPackedTile);
+            if(request.createOverlayPlane)
+            {
+                const quint64 overlayTileOffset = tileOffset
+                    + kSectorTileCount * kSectorTileSize;
+                const quint64 overlayMaterialOffset = overlayTileOffset
+                    + kSectorTileCount * kSectorTileSize;
+                for(quint64 tile = 0; tile < kSectorTileCount; ++tile)
+                {
+                    writeU16(&sec, overlayTileOffset + tile * kSectorTileSize,
+                             request.overlayPackedTile);
+                    writeU16(&sec,
+                             overlayMaterialOffset + tile * kSectorTileSize,
+                             quint16(request.overlayMaterialIndex));
+                }
+            }
             const QString sectorName = QString("%1%2%3.SEC")
                 .arg(nameSpace).arg(x, 3, 10, QChar('0'))
                 .arg(y, 3, 10, QChar('0'));

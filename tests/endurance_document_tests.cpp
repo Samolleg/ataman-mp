@@ -342,6 +342,16 @@ quint16 sectorHeight(const QByteArray& sector, int x, int y)
     return value;
 }
 
+quint16 overlaySectorHeight(const QByteArray& sector, int x, int y)
+{
+    const int offset = 5 + 33 * 33 * 8 + (y * 33 + x) * 8 + 2;
+    QDataStream stream(sector.mid(offset, 2));
+    stream.setByteOrder(QDataStream::LittleEndian);
+    quint16 value = 0;
+    stream >> value;
+    return value;
+}
+
 QVector<STerrainSectorSource> twoSectorTerrain(quint16 height)
 {
     QVector<STerrainSectorSource> sources;
@@ -1868,6 +1878,47 @@ void EnduranceDocumentTests::newMprFromTemplateIsDeterministicSeamSafeAndRuntime
     QCOMPARE(heightmappedTerrain.height(0, 64), quint16(2000));
     QCOMPARE(heightmappedTerrain.height(64, 64), quint16(4000));
     QVERIFY(!heightmappedTerrain.hasSeamConflicts());
+
+    SMprCreationRequest overlayRequest = request;
+    overlayRequest.closeEdges = false;
+    overlayRequest.createOverlayPlane = true;
+    overlayRequest.overlayRawHeight = 42000;
+    overlayRequest.overlayPackedTile = initialTile.encode();
+    overlayRequest.overlayMaterialIndex = 1;
+    overlayRequest.taperOverlayEdges = true;
+    overlayRequest.overlayEdgeTaperTiles = 2;
+    QByteArray overlaid;
+    CValidationReport overlayReport;
+    QVERIFY2(terrainTemplate.buildNewCanvas(overlayRequest, &overlaid,
+                                             &overlayReport),
+             qPrintable(overlayReport.toText()));
+    CMprDocument overlaidDocument;
+    QVERIFY2(overlaidDocument.loadBytes(overlaid, "overlaid.mpr", &overlayReport),
+             qPrintable(overlayReport.toText()));
+    QCOMPARE(overlaidDocument.sectors().size(), 4);
+    for(const SMprSectorInfo& sector : overlaidDocument.sectors())
+        QVERIFY(sector.hasOverlay);
+    CTerrainEditModel overlaidTerrain;
+    QVERIFY2(overlaidTerrain.load(overlaidDocument, &overlayReport),
+             qPrintable(overlayReport.toText()));
+    QVERIFY(!overlaidTerrain.hasSeamConflicts());
+    bool overlayAvailable = false;
+    QCOMPARE(overlaidTerrain.overlayMaterialIndex(10, 10, &overlayAvailable),
+             qint16(1));
+    QVERIFY(overlayAvailable);
+    QCOMPARE(overlaidTerrain.packedTile(10, 10,
+        ETerrainTileLayer::Overlay, &overlayAvailable), initialTile.encode());
+    QVERIFY(overlayAvailable);
+    QCOMPARE(overlaySectorHeight(
+        overlaidDocument.memberPayload("NewLand000000.SEC"), 16, 16),
+        quint16(42000));
+    QCOMPARE(overlaySectorHeight(
+        overlaidDocument.memberPayload("NewLand000000.SEC"), 0, 0),
+        quint16(0));
+    QCOMPARE(overlaySectorHeight(
+        overlaidDocument.memberPayload("NewLand000000.SEC"), 32, 20),
+        overlaySectorHeight(
+            overlaidDocument.memberPayload("NewLand001000.SEC"), 0, 20));
 }
 
 void EnduranceDocumentTests::newMprRejectsInventedNamespaceAndInvalidDimensions()
