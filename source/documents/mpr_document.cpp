@@ -1276,8 +1276,9 @@ bool CMprDocument::buildNewCanvas(const SMprCreationRequest& request,
            || request.heightmapSamples.size()
               != request.heightmapWidth * request.heightmapHeight
            || request.heightmapMinimumRaw < 0.0f
-           || request.heightmapMaximumRaw > 65535.0f
-           || request.heightmapMaximumRaw < request.heightmapMinimumRaw))
+           || request.heightmapMinimumRaw > 65535.0f
+           || request.heightmapMaximumRaw < 0.0f
+           || request.heightmapMaximumRaw > 65535.0f))
         return fail("mpr.create.heightmap",
                     "New MPR heightmap dimensions or raw range are invalid.");
 

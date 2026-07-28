@@ -1879,6 +1879,26 @@ void EnduranceDocumentTests::newMprFromTemplateIsDeterministicSeamSafeAndRuntime
     QCOMPARE(heightmappedTerrain.height(64, 64), quint16(4000));
     QVERIFY(!heightmappedTerrain.hasSeamConflicts());
 
+    heightmapRequest.heightmapMinimumRaw = 5000.0f;
+    heightmapRequest.heightmapMaximumRaw = 1000.0f;
+    QByteArray invertedHeightmapped;
+    CValidationReport invertedHeightmapReport;
+    QVERIFY2(terrainTemplate.buildNewCanvas(heightmapRequest,
+                                             &invertedHeightmapped,
+                                             &invertedHeightmapReport),
+             qPrintable(invertedHeightmapReport.toText()));
+    CMprDocument invertedHeightmappedDocument;
+    QVERIFY(invertedHeightmappedDocument.loadBytes(invertedHeightmapped,
+        "inverted-heightmapped.mpr", &invertedHeightmapReport));
+    CTerrainEditModel invertedHeightmappedTerrain;
+    QVERIFY(invertedHeightmappedTerrain.load(invertedHeightmappedDocument,
+                                              &invertedHeightmapReport));
+    QCOMPARE(invertedHeightmappedTerrain.height(0, 0), quint16(5000));
+    QCOMPARE(invertedHeightmappedTerrain.height(64, 0), quint16(1000));
+    QCOMPARE(invertedHeightmappedTerrain.height(0, 64), quint16(4000));
+    QCOMPARE(invertedHeightmappedTerrain.height(64, 64), quint16(2000));
+    QVERIFY(!invertedHeightmappedTerrain.hasSeamConflicts());
+
     SMprCreationRequest overlayRequest = request;
     overlayRequest.closeEdges = false;
     overlayRequest.createOverlayPlane = true;

@@ -6227,6 +6227,7 @@ void MainWindow::on_actionNew_MPR_triggered()
 {
     QDialog dialog(this);
     dialog.setWindowTitle(tr("Create New MPR"));
+    dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
     dialog.resize(760, 820);
     QVBoxLayout* root = new QVBoxLayout(&dialog);
     QLabel* explanation = new QLabel(tr(
@@ -6239,6 +6240,8 @@ void MainWindow::on_actionNew_MPR_triggered()
     root->addLayout(form);
 
     QLineEdit* templatePath = new QLineEdit(&dialog);
+    templatePath->setToolTip(tr(
+        "A proven MPR whose atlas namespace, tile metadata, liquid materials, animations, and other MP settings will be copied. The template itself is never modified."));
     QPushButton* browseTemplate = new QPushButton(tr("Browse..."), &dialog);
     QWidget* templateRow = new QWidget(&dialog);
     QHBoxLayout* templateLayout = new QHBoxLayout(templateRow);
@@ -6248,6 +6251,8 @@ void MainWindow::on_actionNew_MPR_triggered()
     form->addRow(tr("Terrain template MPR"), templateRow);
 
     QLineEdit* nameSpace = new QLineEdit(&dialog);
+    nameSpace->setToolTip(tr(
+        "Internal MP/SEC resource-name stem for the new archive. Keep the template namespace unless matching atlas textures already exist under a different namespace."));
     form->addRow(tr("MPR namespace"), nameSpace);
     QSpinBox* sectorsX = new QSpinBox(&dialog);
     QSpinBox* sectorsY = new QSpinBox(&dialog);
@@ -6255,35 +6260,53 @@ void MainWindow::on_actionNew_MPR_triggered()
     sectorsY->setRange(1, 32);
     sectorsX->setValue(4);
     sectorsY->setValue(4);
+    sectorsX->setToolTip(tr(
+        "Horizontal map size. One sector contains 16 x 16 terrain tiles (33 x 33 shared vertices). Maximum: 32 sectors."));
+    sectorsY->setToolTip(tr(
+        "Vertical map size. One sector contains 16 x 16 terrain tiles (33 x 33 shared vertices). Maximum: 32 sectors."));
     form->addRow(tr("Width (16-tile sectors)"), sectorsX);
     form->addRow(tr("Height (16-tile sectors)"), sectorsY);
     QDoubleSpinBox* maxZ = new QDoubleSpinBox(&dialog);
     maxZ->setRange(0.001, 1000000.0);
     maxZ->setDecimals(3);
     maxZ->setValue(100.0);
+    maxZ->setToolTip(tr(
+        "World-space height represented by raw height 65535. Raw 0 is world height 0; raw 32768 is approximately half of maxZ. Increase maxZ for taller elevation differences without changing the 0-65535 raw precision."));
     form->addRow(tr("Vertical scale (maxZ)"), maxZ);
     QSpinBox* flatRaw = new QSpinBox(&dialog);
     flatRaw->setRange(0, 65535);
     flatRaw->setValue(32768);
+    flatRaw->setToolTip(tr(
+        "Initial terrain height when no heightmap is selected. World height = raw height / 65535 x maxZ. A selected heightmap replaces this value across the terrain."));
     form->addRow(tr("Flat raw height"), flatRaw);
     QSpinBox* atlasSlot = new QSpinBox(&dialog);
     atlasSlot->setRange(0, 16383);
+    atlasSlot->setToolTip(tr(
+        "Existing terrain tile in the template atlas namespace. Endurance stores this packed atlas slot on every initial land tile; it does not create atlas imagery."));
     form->addRow(tr("Initial atlas slot"), atlasSlot);
     QComboBox* rotation = new QComboBox(&dialog);
     rotation->addItems({tr("0 degrees"), tr("90 degrees"),
                         tr("180 degrees"), tr("270 degrees")});
+    rotation->setToolTip(tr(
+        "Rotation applied to the selected initial land atlas tile."));
     form->addRow(tr("Initial tile rotation"), rotation);
     QCheckBox* closeEdges = new QCheckBox(tr("Taper the outside edge down to raw height 0"), &dialog);
     closeEdges->setChecked(true);
+    closeEdges->setToolTip(tr(
+        "Gradually lowers the outer terrain band to raw 0 after heightmap import, creating a closed map edge. This deliberately replaces heightmap values inside that band."));
     form->addRow(QString(), closeEdges);
     QSpinBox* taperTiles = new QSpinBox(&dialog);
     taperTiles->setRange(1, 16);
     taperTiles->setValue(2);
+    taperTiles->setToolTip(tr(
+        "Width of the terrain edge band affected by the smooth taper."));
     form->addRow(tr("Edge taper width (tiles)"), taperTiles);
 
     QLineEdit* heightmapPath = new QLineEdit(&dialog);
     heightmapPath->setObjectName(QStringLiteral("newMprHeightmapPath"));
     heightmapPath->setPlaceholderText(tr("Optional; leave blank for a flat map"));
+    heightmapPath->setToolTip(tr(
+        "Optional grayscale image stretched across the complete map. Black pixels map to the black raw endpoint and white pixels to the white raw endpoint; either endpoint may be higher."));
     QPushButton* browseHeightmap = new QPushButton(tr("Browse..."), &dialog);
     QPushButton* clearHeightmap = new QPushButton(tr("Clear"), &dialog);
     clearHeightmap->setObjectName(QStringLiteral("newMprHeightmapClear"));
@@ -6299,9 +6322,15 @@ void MainWindow::on_actionNew_MPR_triggered()
     heightmapMinimum->setRange(0, 65535);
     heightmapMaximum->setRange(0, 65535);
     heightmapMaximum->setValue(65535);
+    heightmapMinimum->setToolTip(tr(
+        "Raw terrain height assigned to black pixels. It may be higher than the white endpoint to invert the heightmap."));
+    heightmapMaximum->setToolTip(tr(
+        "Raw terrain height assigned to white pixels. It may be lower than the black endpoint to invert the heightmap."));
     form->addRow(tr("Heightmap black raw height"), heightmapMinimum);
     form->addRow(tr("Heightmap white raw height"), heightmapMaximum);
     QCheckBox* flipHeightmap = new QCheckBox(tr("Flip heightmap vertically"), &dialog);
+    flipHeightmap->setToolTip(tr(
+        "Mirrors the source image north-to-south before it is stretched onto the map."));
     form->addRow(QString(), flipHeightmap);
 
     QGroupBox* overlayGroup = new QGroupBox(tr("Initial overlay plane"), &dialog);
@@ -6310,27 +6339,41 @@ void MainWindow::on_actionNew_MPR_triggered()
         tr("Create a full overlay plane (for water, lava, or other surfaces)"),
         overlayGroup);
     createOverlay->setObjectName(QStringLiteral("newMprCreateOverlay"));
+    createOverlay->setToolTip(tr(
+        "Creates an active overlay tile over the entire new map. Leave disabled for terrain-only maps."));
     overlayForm->addRow(QString(), createOverlay);
     QSpinBox* overlayRawHeight = new QSpinBox(overlayGroup);
     overlayRawHeight->setRange(0, 65535);
     overlayRawHeight->setValue(32768);
+    overlayRawHeight->setToolTip(tr(
+        "Constant raw height of the overlay plane. World height = raw height / 65535 x maxZ. This plane does not use the terrain heightmap."));
     overlayForm->addRow(tr("Plane raw height"), overlayRawHeight);
     QSpinBox* overlayAtlasSlot = new QSpinBox(overlayGroup);
     overlayAtlasSlot->setRange(0, 16383);
+    overlayAtlasSlot->setToolTip(tr(
+        "Existing atlas tile used by every initial overlay cell, such as a water or lava tile."));
     overlayForm->addRow(tr("Overlay atlas slot"), overlayAtlasSlot);
     QComboBox* overlayRotation = new QComboBox(overlayGroup);
     overlayRotation->addItems({tr("0 degrees"), tr("90 degrees"),
                                tr("180 degrees"), tr("270 degrees")});
+    overlayRotation->setToolTip(tr(
+        "Rotation applied to the selected initial overlay atlas tile."));
     overlayForm->addRow(tr("Overlay tile rotation"), overlayRotation);
     QSpinBox* overlayMaterial = new QSpinBox(overlayGroup);
     overlayMaterial->setRange(0, 0);
+    overlayMaterial->setToolTip(tr(
+        "Existing liquid/overlay material from the template MP. This controls material properties; the atlas slot controls the visible tile texture."));
     overlayForm->addRow(tr("Liquid material index"), overlayMaterial);
     QCheckBox* taperOverlay = new QCheckBox(
         tr("Taper overlay edges down to raw height 0"), overlayGroup);
+    taperOverlay->setToolTip(tr(
+        "Gradually lowers only the overlay plane around the outside edge. The land taper remains independent."));
     overlayForm->addRow(QString(), taperOverlay);
     QSpinBox* overlayTaperTiles = new QSpinBox(overlayGroup);
     overlayTaperTiles->setRange(1, 16);
     overlayTaperTiles->setValue(2);
+    overlayTaperTiles->setToolTip(tr(
+        "Width of the overlay edge band affected by the smooth taper."));
     overlayForm->addRow(tr("Overlay taper width (tiles)"), overlayTaperTiles);
     root->addWidget(overlayGroup);
     for(QWidget* control : {static_cast<QWidget*>(overlayRawHeight),
@@ -6413,7 +6456,11 @@ void MainWindow::on_actionNew_MPR_triggered()
         if(path.isEmpty())
         {
             previewHeightmap = QImage();
-            previewStatus->setText(tr("Flat terrain preview. Choose a heightmap to preview its stretch and orientation."));
+            previewStatus->setText(tr(
+                "Flat terrain preview: raw %1 = %2 world units. Choose a heightmap to preview its stretch and orientation.")
+                .arg(flatRaw->value())
+                .arg(double(flatRaw->value()) * maxZ->value() / 65535.0,
+                     0, 'f', 3));
             previewStatus->setStyleSheet(QString());
         }
         else
@@ -6427,8 +6474,18 @@ void MainWindow::on_actionNew_MPR_triggered()
             }
             else
             {
-                previewStatus->setText(tr("%1 x %2 image stretched to the full terrain canvas.")
-                    .arg(previewHeightmap.width()).arg(previewHeightmap.height()));
+                previewStatus->setText(tr(
+                    "%1 x %2 image stretched to the full terrain canvas. Black: raw %3 = %4 world units. White: raw %5 = %6 world units.%7")
+                    .arg(previewHeightmap.width()).arg(previewHeightmap.height())
+                    .arg(heightmapMinimum->value())
+                    .arg(double(heightmapMinimum->value()) * maxZ->value()
+                         / 65535.0, 0, 'f', 3)
+                    .arg(heightmapMaximum->value())
+                    .arg(double(heightmapMaximum->value()) * maxZ->value()
+                         / 65535.0, 0, 'f', 3)
+                    .arg(heightmapMinimum->value() > heightmapMaximum->value()
+                         ? tr(" Elevation is inverted (black is higher).")
+                         : QString()));
                 previewStatus->setStyleSheet(QString());
             }
         }
@@ -6444,6 +6501,14 @@ void MainWindow::on_actionNew_MPR_triggered()
             [&](int) { refreshPreview(); });
     connect(flipHeightmap, &QCheckBox::toggled, &dialog,
             [&](bool) { refreshPreview(); });
+    connect(maxZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dialog,
+            [&](double) { refreshPreview(); });
+    connect(flatRaw, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
+    connect(heightmapMinimum, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
+    connect(heightmapMaximum, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
     connect(closeEdges, &QCheckBox::toggled, &dialog,
             [&](bool) { refreshPreview(); });
     connect(createOverlay, &QCheckBox::toggled, &dialog,
@@ -6469,14 +6534,6 @@ void MainWindow::on_actionNew_MPR_triggered()
                     .arg(report.toText()));
             return;
         }
-        if(heightmapMaximum->value() < heightmapMinimum->value())
-        {
-            QMessageBox::warning(&dialog, tr("Create New MPR"),
-                tr("Heightmap white raw height must be greater than or equal to black raw height."));
-            heightmapMaximum->setFocus();
-            return;
-        }
-
         SMprCreationRequest request;
         request.innerNamespace = nameSpace->text().trimmed();
         request.sectorCountX = quint32(sectorsX->value());
