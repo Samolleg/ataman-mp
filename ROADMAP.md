@@ -52,6 +52,14 @@ rather than another editor architecture pass.
 
 ## Compatibility and profile support
 
+- [ ] **Low priority:** allow Test Current Map with a loaded MPR and no authored
+  MOB by staging a generated, structurally valid zero-object MOB. Profiles with
+  a verified SpellAddon autorun capability may also stage the run-local autorun
+  MOB so Play from Here, Godmode, and time override remain available. Mapped
+  Base MPRs may use their normal entrance; leave unmapped Base MPRs disabled
+  until a synthetic pre-load map identity/entrance bootstrap is separately
+  designed and runtime-validated. This is an Endurance preflight/protocol
+  limitation, not a requirement for authored objects in the map.
 - [ ] Add an advanced, explicitly experimental runtime-variant management UI.
   It may let a user fingerprint a patched `game.exe`, compare its changed
   sections/ranges with a known layout, and locally approve the hash only after

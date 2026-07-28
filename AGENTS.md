@@ -28,6 +28,32 @@ worktrees.
   source, or documentation; ask only about the remaining user decision. This
   requirement does not apply when the user explicitly authorizes best judgment,
   reasonable assumptions, or autonomous selection among the available options.
+- Before every substantive handoff, ask: "While working on this, which choices
+  did I make that I am not confident of? List all." Report all material
+  low-confidence choices, assumptions, evidence gaps, and unverified
+  interpretations; state briefly when there are none. Do not defer a material
+  ambiguity to this audit when it should have been raised before implementation.
+
+## Root-cause implementation and debugging
+
+- Before changing code, capture the original issue as a repeatable test with
+  explicit expected results. Trace the pipeline to the first incorrect value,
+  state, ownership transition, or decision. A fix is complete only when the
+  original test passes and proportionate regression checks remain clean.
+  Fixing only a side effect, hiding a symptom, or repairing a newly introduced
+  problem does not count as resolving the original issue.
+
+## Parallel thread workers
+
+- Read `docs/PARALLEL_THREAD_WORKERS.md` before creating a parallel Endurance
+  implementation task.
+- Create worktree workers through the saved Endurance Codex project, never from
+  the non-repository parent workspace. Use `list_projects`, then `create_thread`
+  with the Endurance `projectId` and `environment: worktree`.
+- Wait for worktree setup to complete before sending follow-up work. Do not use
+  same-directory forks for parallel edits.
+
+## Tester build handoff
 
 - Deliver an unpacked, user-runnable tester folder, not raw compiler output.
 - Do not launch the packaged editor interactively; the user runs it.
