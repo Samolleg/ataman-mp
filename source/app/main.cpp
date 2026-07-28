@@ -1058,7 +1058,7 @@ int runHeadlessCommand(QApplication& app)
         for(QToolButton* button : landscapeTools.findChildren<QToolButton*>())
             irregularButtons += button->property("terrainMaterialId").toInt() == 9;
         bool irregularSelected = false;
-        const bool contextualMaterialVariantsSelectable = irregularButtons == 2
+        const bool uniqueMaterialPaletteCards = irregularButtons == 1
             && landscapeTools.selectPaintTerrainType(9)
             && landscapeTools.paintTerrainType(&irregularSelected) == 9
             && irregularSelected;
@@ -1288,7 +1288,7 @@ int runHeadlessCommand(QApplication& app)
             && landscapeVisibilityControlsWork
             && overlaySurfaceToolSeparate
             && programmaticModeRefreshesMaterials
-            && contextualMaterialVariantsSelectable
+            && uniqueMaterialPaletteCards
             && defaultAtlasSourceVisible
             && localAtlasSourceVisible
                 && materialAtlasActionWorks
@@ -1367,8 +1367,8 @@ int runHeadlessCommand(QApplication& app)
                << " overlaySurfaceToolSeparate=" << overlaySurfaceToolSeparate
                << " programmaticModeRefreshesMaterials="
                << programmaticModeRefreshesMaterials
-               << " contextualMaterialVariantsSelectable="
-               << contextualMaterialVariantsSelectable
+               << " uniqueMaterialPaletteCards="
+               << uniqueMaterialPaletteCards
                << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
                << " localAtlasSourceVisible=" << localAtlasSourceVisible
                << " materialAtlasActionWorks=" << materialAtlasActionWorks

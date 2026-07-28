@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QSettings>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -130,7 +131,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
         "Automatic material brushes paint terrain vertices and resolve the surrounding atlas tiles together. Size 1 paints the nearest vertex (up to four tiles); larger circles and squares select more vertices. "
-        "The editor uses exact authored junctions when available. Unsupported detail-only junctions are skipped with a diagnostic warning; ordinary missing transitions use a local hard-edge fallback. "
+        "Each palette card is one uniform vertex-material identity. The editor uses exact authored junctions when available and automatically generates, caches, and reuses any missing corner combination on stroke release. "
         "Manual mode paints the selected existing atlas tile and rotation without blending. Right-click samples from the map. "
         "Alt+Wheel changes brush size. Shift+Wheel selects the automatic material or rotates the manual tile; Wheel keeps camera zoom. "
         "Overlay surface mode adds/removes coverage. Its Terrain material selects the atlas texture; its Surface material independently controls tint, opacity, illumination, waves, and texture warp. "
@@ -520,9 +521,22 @@ void CLandscapeTools::setPaintMaterials(
     int assignedSlots, int totalSlots, const QString& status,
     const QString& atlasSource, const QString& atlasSourcePath)
 {
-    m_landPaintTypes = landTypes;
-    m_underwaterPaintTypes = underwaterTypes;
-    m_overlayPaintTypes = overlayTypes;
+    const auto uniqueIdentities = [](const QVector<STerrainPaintMaterialChoice>& source) {
+        QVector<STerrainPaintMaterialChoice> result;
+        QSet<qint32> seen;
+        for(STerrainPaintMaterialChoice choice : source)
+        {
+            if(seen.contains(choice.id)) continue;
+            seen.insert(choice.id);
+            choice.supportId = 0;
+            choice.contextualStamp = false;
+            result.append(choice);
+        }
+        return result;
+    };
+    m_landPaintTypes = uniqueIdentities(landTypes);
+    m_underwaterPaintTypes = uniqueIdentities(underwaterTypes);
+    m_overlayPaintTypes = uniqueIdentities(overlayTypes);
     m_paintCatalogStatus = status;
     QString coverage = totalSlots > 0
         ? tr("%1 / %2 assigned%3").arg(assignedSlots).arg(totalSlots)
