@@ -16,6 +16,14 @@ SRuntimeProviderResult failure(const QString& code, const QString& message)
     return result;
 }
 
+bool jsonArrayContains(const QJsonArray& values, const QString& value)
+{
+    for(const QJsonValue& existing : values)
+        if(existing.toString().compare(value, Qt::CaseInsensitive) == 0)
+            return true;
+    return false;
+}
+
 QStringList expandedList(const QStringList& source)
 {
     QStringList result;
@@ -709,7 +717,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
     equipmentLayout->insert("providerId", providerId);
     equipmentLayout->insert("source", request.dataSource == EUnitVisualDataSource::EmbeddedMob
         ? "embeddedMob" : "profileDatabase");
-    QJsonArray components, placeholders, diagnostics;
+    QJsonArray components, placeholders, diagnostics, emissiveParts;
     QJsonObject componentTextures;
     QJsonArray bodyTextureLayers;
     QJsonArray replacedParts;
@@ -826,6 +834,21 @@ SRuntimeProviderResult resolveEquipmentLayout(
                     componentTextures.insert(component, texture);
             else
                 bodyTextureLayers.append(texture);
+
+            if(material->type.compare("Magic", Qt::CaseInsensitive) == 0)
+                for(const QString& component : matched)
+                {
+                    if(!jsonArrayContains(emissiveParts, component))
+                        emissiveParts.append(component);
+                    const int separator = component.indexOf(
+                        ".armor", 0, Qt::CaseInsensitive);
+                    if(separator > 0)
+                    {
+                        const QString slot = component.left(separator);
+                        if(!jsonArrayContains(emissiveParts, slot))
+                            emissiveParts.append(slot);
+                    }
+                }
         }
         if(item->textureType1 > 0 && item->type.compare("helm", Qt::CaseInsensitive) != 0)
             for(const QString& component : matched)
@@ -965,7 +988,13 @@ SRuntimeProviderResult resolveEquipmentLayout(
                     diagnostics.append(weapon.reference + ": weapon texture resource name cannot be derived");
                 }
                 else
-                    for(const QString& component : matched) componentTextures.insert(component, texture);
+                    for(const QString& component : matched)
+                    {
+                        componentTextures.insert(component, texture);
+                        if(material->type.compare("Magic", Qt::CaseInsensitive) == 0
+                                && !jsonArrayContains(emissiveParts, component))
+                            emissiveParts.append(component);
+                    }
             }
         }
     equipmentLayout->insert("layout", layout);
@@ -976,6 +1005,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
     equipmentLayout->insert("hidesHair", hidesHair);
     equipmentLayout->insert("placeholders", placeholders);
     equipmentLayout->insert("diagnostics", diagnostics);
+    equipmentLayout->insert("emissiveParts", emissiveParts);
     SRuntimeProviderResult result;
     result.success = placeholders.isEmpty();
     result.code = result.success ? "equipment.resolved" : "equipment.partial";

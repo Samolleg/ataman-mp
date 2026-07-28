@@ -16,6 +16,7 @@ private slots:
     void noiseIsStableAndSectorPeriodic();
     void shaderContractsCoverDesktopAndAngle();
     void mapLifetimeResetsAnimationState();
+    void derivesGeneralTerrainEmission();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -138,14 +139,19 @@ void OverlayMaterialAnimationTests::shaderContractsCoverDesktopAndAngle()
         "assets/shaders/landshader.vsh");
     const QString fragmentPath = repository.absoluteFilePath(
         "assets/shaders/landshader.fsh");
+    const QString objectFragmentPath = repository.absoluteFilePath(
+        "assets/shaders/fshader.fsh");
     QVERIFY2(!vertexPath.isEmpty(), "terrain vertex shader fixture not found");
     QVERIFY2(!fragmentPath.isEmpty(), "terrain fragment shader fixture not found");
     QFile vertexFile(vertexPath);
     QFile fragmentFile(fragmentPath);
+    QFile objectFragmentFile(objectFragmentPath);
     QVERIFY(vertexFile.open(QIODevice::ReadOnly));
     QVERIFY(fragmentFile.open(QIODevice::ReadOnly));
+    QVERIFY(objectFragmentFile.open(QIODevice::ReadOnly));
     const QByteArray vertex = vertexFile.readAll();
     const QByteArray fragment = fragmentFile.readAll();
+    const QByteArray objectFragment = objectFragmentFile.readAll();
     QVERIFY(vertex.contains("attribute vec4 a_overlayAnimation"));
     QVERIFY(vertex.contains("u_overlayMotionEnabled"));
     QVERIFY(vertex.contains("floor(logicalTime)"));
@@ -153,6 +159,11 @@ void OverlayMaterialAnimationTests::shaderContractsCoverDesktopAndAngle()
     QVERIFY(!vertex.contains("layout("));
     QVERIFY(!fragment.contains("u_animateLiquid"));
     QVERIFY(!fragment.contains("sampledUv"));
+    QVERIFY(vertex.contains("attribute vec3 a_materialEmission"));
+    QVERIFY(fragment.contains("v_materialEmission"));
+    QVERIFY(fragment.contains("u_sunColor * sunDiffuse + v_materialEmission"));
+    QVERIFY(objectFragment.contains("uniform vec3 u_materialEmission"));
+    QVERIFY(objectFragment.contains("u_sunColor * sunDiffuse + u_materialEmission"));
 }
 
 void OverlayMaterialAnimationTests::mapLifetimeResetsAnimationState()
@@ -165,6 +176,30 @@ void OverlayMaterialAnimationTests::mapLifetimeResetsAnimationState()
     QVERIFY(view.contains("m_overlayAnimationTimer.restart();"));
     QVERIFY(view.contains("m_overlayAnimationTimer.invalidate();"));
     QVERIFY(view.contains("m_landProgram.setUniformValue(\"u_overlayMotionEnabled\", false);"));
+}
+
+void OverlayMaterialAnimationTests::derivesGeneralTerrainEmission()
+{
+    SMaterial lava = material(ETerrainType::eTerrainWater, 0.5f, 0.0f);
+    lava.R = 0.7960785f;
+    lava.G = 0.0f;
+    lava.B = 0.0f;
+    lava.selfIllumination = 1.0f;
+    QCOMPARE(ei::terrainMaterialEmission(&lava),
+             QVector3D(0.7960785f, 0.0f, 0.0f));
+
+    SMaterial authoredOther = lava;
+    authoredOther.type = static_cast<ETerrainType>(99);
+    authoredOther.R = 0.75f;
+    authoredOther.G = 0.5f;
+    authoredOther.B = 0.25f;
+    authoredOther.selfIllumination = 2.0f;
+    QCOMPARE(ei::terrainMaterialEmission(&authoredOther),
+             QVector3D(1.0f, 1.0f, 0.5f));
+
+    authoredOther.selfIllumination = 0.0f;
+    QCOMPARE(ei::terrainMaterialEmission(&authoredOther), QVector3D());
+    QCOMPARE(ei::terrainMaterialEmission(nullptr), QVector3D());
 }
 
 QTEST_APPLESS_MAIN(OverlayMaterialAnimationTests)

@@ -94,6 +94,8 @@ void RenderQueueTests::groupsOnlyCompatibleInstanceRuns()
     highlighted.highlighted = true;
     SRenderItem dynamicCaster = first;
     dynamicCaster.dynamicShadow = true;
+    SRenderItem emissive = first;
+    emissive.materialEmission = QVector3D(1.0f, 1.0f, 1.0f);
 
     QVector<SRenderItem> compatible({first, second, differentUv});
     QCOMPARE(instanceBatchLength(compatible, 0), 2);
@@ -101,6 +103,7 @@ void RenderQueueTests::groupsOnlyCompatibleInstanceRuns()
     QVERIFY(!shareInstanceBatch(first, transparent));
     QVERIFY(!shareInstanceBatch(first, highlighted));
     QVERIFY(!shareInstanceBatch(first, dynamicCaster));
+    QVERIFY(!shareInstanceBatch(first, emissive));
 }
 
 void RenderQueueTests::filtersShadowCastersByDistance()

@@ -74,7 +74,8 @@ protected:
                               const QStringList& visibleParts, const QVector3D& complexion,
                               const QMap<QString, QString>& partTextureNames = {},
                               const QString& secondaryTextureName = QString(),
-                              const QStringList& bodyTextureLayers = {});
+                              const QStringList& bodyTextureLayers = {},
+                              const QMap<QString, QVector3D>& partEmissions = {});
     void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
     const SAnimationSkeleton& transientAnimationSkeleton() const;
     void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);
@@ -93,6 +94,7 @@ private:
     QOpenGLTexture* m_texture;
     QOpenGLTexture* m_secondaryTexture{nullptr};
     QMap<QString, QOpenGLTexture*> m_partTextures;
+    QMap<QString, QVector3D> m_partEmissions;
     ei::CFigure* m_pFigure;
     bool m_bDeleted;
     CBox m_cachedBBox;

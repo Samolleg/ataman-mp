@@ -52,6 +52,7 @@ varying highp vec3 v_normal;
 varying highp vec2 v_texture;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
+varying highp vec3 v_materialEmission;
 
 float unpackShadowDepth(vec4 encodedDepth)
 {
@@ -179,7 +180,9 @@ void main(void)
     }
     // Stock shadows are an 80/255-alpha projected silhouette over the
     // saturated environment result. Point lights are compared afterwards.
-    vec3 environmentLight = max(u_ambientColor, u_sunColor * sunDiffuse);
+    vec3 directLight = min(u_sunColor * sunDiffuse + v_materialEmission,
+                           vec3(1.0));
+    vec3 environmentLight = max(u_ambientColor, directLight);
     float projectedShadowVisibility = mix(1.0, shadow, 80.0 / 255.0);
     light = environmentLight * projectedShadowVisibility;
     for (int i = 0; i < 64; ++i)

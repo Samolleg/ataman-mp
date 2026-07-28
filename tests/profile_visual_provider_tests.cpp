@@ -66,6 +66,9 @@ QSharedPointer<ei::SProfileDatabaseSnapshot> database()
     dragonRed.name = "dragon red"; dragonRed.type = "Hide"; dragonRed.code = "dr";
     dragonRed.id = 10;
     db->materialRecords.insert("dragon red", dragonRed);
+    ei::SMaterialDatabaseRecord magic;
+    magic.name = "magic"; magic.type = "Magic"; magic.code = "mg"; magic.id = 11;
+    db->materialRecords.insert("magic", magic);
     ei::SMonsterDatabaseRecord extendedSkin;
     extendedSkin.name = "Human Extended Skin";
     extendedSkin.baseRace = "Human Male";
@@ -117,6 +120,7 @@ private slots:
     void weaponAtlasesUseLiteralTtiAndEstablishedFamilies();
     void weaponGeometryDoesNotReplaceHandsOrGloves();
     void equippedMaterialsRemainProfileExtensible();
+    void magicEquipmentCarriesWhiteEmission();
     void jmvTwoHandWeaponsUseDedicatedAtlasFamilies();
     void resolvesCompoundBowGeometry();
     void jmvIgnoresWeaponsBeyondFirstPair();
@@ -845,6 +849,19 @@ void ProfileVisualProviderTests::equippedMaterialsRemainProfileExtensible()
     QVERIFY(resolver->resolve(request, &output).success);
     QCOMPARE(output.value("componentTextures").toObject().value("hd.armor08").toString(),
              QString("unhumahl_08.sv.0.x2.mmp"));
+}
+
+void ProfileVisualProviderTests::magicEquipmentCarriesWhiteEmission()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", database());
+    SEquipmentLayoutRequest request;
+    request.model = "unhuma";
+    request.weapons << "sword.magic";
+    request.assemblyParts << "rh3.sword01";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(jsonStrings(output, "emissiveParts"), QStringList({"rh3.sword01"}));
 }
 
 void ProfileVisualProviderTests::jmvTwoHandWeaponsUseDedicatedAtlasFamilies()

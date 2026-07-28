@@ -68,6 +68,14 @@ private:
 
 
 private:
+    struct STerrainVertexData
+    {
+        QVector3D position;
+        QVector3D normal;
+        QVector2D texCoord;
+        QVector3D emission;
+    };
+
     struct SWaterVertexData
     {
         QVector3D position;
@@ -75,6 +83,7 @@ private:
         QVector2D texCoord;
         QVector4D animation;
         QVector2D grid;
+        QVector3D emission;
     };
 
     UI2 m_index;
@@ -82,6 +91,7 @@ private:
 
     QVector<QVector<CTile>> m_arrLand;
     QVector<SVertexData> m_arrLandVrtData;
+    QVector<STerrainVertexData> m_arrLitLandVrtData;
     QOpenGLBuffer m_vertexBuf;
     QOpenGLBuffer m_indexBuf;
     QOpenGLBuffer m_gridIndexBuf;

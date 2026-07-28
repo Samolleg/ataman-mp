@@ -43,6 +43,8 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program, const QVector3D& c
     m_instancedLocation = program ? program->uniformLocation("u_instanced") : -1;
     m_partAnimatedLocation = program ? program->uniformLocation("u_partAnimated") : -1;
     m_highlightLocation = program ? program->uniformLocation("u_highlight") : -1;
+    m_materialEmissionLocation = program
+        ? program->uniformLocation("u_materialEmission") : -1;
     QOpenGLContext* context = QOpenGLContext::currentContext();
     const QSurfaceFormat format = context ? context->format() : QSurfaceFormat();
     m_instancingEnabled = context && supportsInstancedRenderPath(
@@ -135,7 +137,8 @@ int RenderQueueContext::reserveInstanceBytes(int bytes)
 void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
                                 const QMatrix4x4& modelMatrix,
                                 ERenderMaterialClass materialClass, bool highlighted,
-                                bool castsShadow, bool dynamicShadow)
+                                bool castsShadow, bool dynamicShadow,
+                                const QVector3D& materialEmission)
 {
     if(!m_collecting || !part || !texture || !part->isDrawable())
         return;
@@ -152,6 +155,7 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
     item.sequence = m_sequence++;
     item.castsShadow = castsShadow;
     item.dynamicShadow = dynamicShadow;
+    item.materialEmission = materialEmission;
     item.colorVisible = !m_shadowOnlyCollection;
     item.shadowBoundsCenter = item.instanceMatrix.map(part->localBoundsCenter());
     const QVector3D scaleX(item.instanceMatrix(0, 0), item.instanceMatrix(1, 0),
@@ -369,6 +373,8 @@ void RenderQueueContext::flush()
     QOpenGLTexture* previousTexture = nullptr;
     ERenderMaterialClass previousClass = ERenderMaterialClass::Conservative;
     bool previousHighlight = false;
+    QVector3D previousEmission;
+    bool haveEmission = false;
     float previousUvScale = 0.0f;
     bool haveBatch = false;
     bool activeHighlight = false;
@@ -409,7 +415,8 @@ void RenderQueueContext::flush()
         const quintptr mesh = item.meshIdentity;
         if(!haveBatch || mesh != previousMesh || item.texture != previousTexture
                 || item.materialClass != previousClass || item.highlighted != previousHighlight
-                || item.textureUvScale != previousUvScale)
+                || item.textureUvScale != previousUvScale
+                || !haveEmission || item.materialEmission != previousEmission)
         {
             if(performance.collecting())
                 ++performance.counters().batches;
@@ -419,11 +426,14 @@ void RenderQueueContext::flush()
             previousClass = item.materialClass;
             previousHighlight = item.highlighted;
             previousUvScale = item.textureUvScale;
+            previousEmission = item.materialEmission;
+            haveEmission = true;
         }
         const int runLength = m_instancingEnabled
             ? instanceBatchLength(colorItems, itemIndex) : 1;
         bool instanced = false;
         m_program->setUniformValue("u_receiveDynamicShadow", !item.dynamicShadow);
+        m_program->setUniformValue(m_materialEmissionLocation, item.materialEmission);
         if(item.highlighted != activeHighlight)
         {
             activeHighlight = item.highlighted;
@@ -451,6 +461,7 @@ void RenderQueueContext::flush()
     m_program->setUniformValue(m_partAnimatedLocation, false);
     m_program->setUniformValue(m_highlightLocation, false);
     m_program->setUniformValue("u_receiveDynamicShadow", true);
+    m_program->setUniformValue(m_materialEmissionLocation, QVector3D());
     if(supportsFixedFunctionAlphaTest())
         ei::gl::Enable(GL_ALPHA_TEST);
     ei::gl::Enable(GL_BLEND);

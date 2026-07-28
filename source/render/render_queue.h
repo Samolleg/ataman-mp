@@ -37,6 +37,7 @@ struct SRenderItem
     bool colorVisible{true};
     QVector3D shadowBoundsCenter;
     float shadowBoundsRadius{0.0f};
+    QVector3D materialEmission;
 };
 
 struct SShadowCasterBounds
@@ -74,6 +75,14 @@ inline void sortRenderItems(QVector<SRenderItem>& items)
             return left.meshIdentity < right.meshIdentity;
         if(left.textureUvScale != right.textureUvScale)
             return left.textureUvScale < right.textureUvScale;
+        if(left.materialEmission != right.materialEmission)
+        {
+            if(left.materialEmission.x() != right.materialEmission.x())
+                return left.materialEmission.x() < right.materialEmission.x();
+            if(left.materialEmission.y() != right.materialEmission.y())
+                return left.materialEmission.y() < right.materialEmission.y();
+            return left.materialEmission.z() < right.materialEmission.z();
+        }
         return left.sequence < right.sequence;
     });
 }
@@ -88,7 +97,8 @@ inline bool shareInstanceBatch(const SRenderItem& left, const SRenderItem& right
         && left.dynamicShadow == right.dynamicShadow
         && left.texture == right.texture
         && left.meshIdentity == right.meshIdentity
-        && left.textureUvScale == right.textureUvScale;
+        && left.textureUvScale == right.textureUvScale
+        && left.materialEmission == right.materialEmission;
 }
 
 inline int instanceBatchLength(const QVector<SRenderItem>& items, int first)
@@ -156,7 +166,8 @@ public:
     void setShadowOnlyCollection(bool enabled) { m_shadowOnlyCollection = enabled; }
     void submit(CPart* part, QOpenGLTexture* texture, const QMatrix4x4& modelMatrix,
                 ERenderMaterialClass materialClass, bool highlighted,
-                bool castsShadow = false, bool dynamicShadow = false);
+                bool castsShadow = false, bool dynamicShadow = false,
+                const QVector3D& materialEmission = QVector3D());
     void submitSelection(CPart* part, const QMatrix4x4& modelMatrix,
                          const QVector4D& pickingColor);
     void flush();
@@ -189,6 +200,7 @@ private:
     int m_instancedLocation{-1};
     int m_partAnimatedLocation{-1};
     int m_highlightLocation{-1};
+    int m_materialEmissionLocation{-1};
 };
 
 #endif // RENDER_QUEUE_H

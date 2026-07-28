@@ -30,6 +30,7 @@ struct SOverlayWindAnimation
 };
 
 SOverlayMaterialAnimation overlayMaterialAnimation(const SMaterial* material);
+QVector3D terrainMaterialEmission(const SMaterial* material);
 SOverlayWindAnimation overlayWindAnimation(const QVector3D& authoredDirection,
                                             float authoredStrength,
                                             float elapsedSeconds,

@@ -341,6 +341,9 @@ void CUnit::refreshTransientVisual()
         }
     }
     const QStringList equipmentBodyLayers = jsonStringList(equipment, "bodyTextureLayers");
+    QMap<QString, QVector3D> partEmissions;
+    for(const QString& part : jsonStringList(equipment, "emissiveParts"))
+        partEmissions.insert(part.toLower(), QVector3D(1.0f, 1.0f, 1.0f));
     QStringList bodyTextureLayers;
     // Imported units keep their local armor list, but the active provider may
     // interpret those explicit item names into the same read-only atlas
@@ -356,7 +359,7 @@ void CUnit::refreshTransientVisual()
     m_renderedSecondaryTextureName = secondaryTexture;
     m_renderedBodyTextureLayers = bodyTextureLayers;
     applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
-                         secondaryTexture, bodyTextureLayers);
+                         secondaryTexture, bodyTextureLayers, partEmissions);
     m_resolvedAnimationModel = model;
     m_resolvedAnimationWeapons = equipmentRequest.weapons;
 }

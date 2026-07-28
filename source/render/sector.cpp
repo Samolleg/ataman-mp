@@ -501,6 +501,7 @@ void CSector::generateVertexDataFromTile()
     Q_ASSERT(!bWater || waterIndex == m_arrWaterVrtData.size());
 
     m_arrAnimatedWaterVrtData.resize(m_arrWaterVrtData.size());
+    m_arrLitLandVrtData.resize(m_arrLandVrtData.size());
     for(int row = 0; bWater && row < m_arrWater.size(); ++row)
         for(int col = 0; col < m_arrWater.at(row).size(); ++col)
         {
@@ -510,6 +511,7 @@ void CSector::generateVertexDataFromTile()
                 ? &m_materials->at(materialIndex) : nullptr;
             const ei::SOverlayMaterialAnimation animation =
                 ei::overlayMaterialAnimation(material);
+            const QVector3D emission = ei::terrainMaterialEmission(material);
             for(int vertex = 0; vertex < 9; ++vertex)
             {
                 const int index = (row * nTile + col) * 9 + vertex;
@@ -524,8 +526,19 @@ void CSector::generateVertexDataFromTile()
                     animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
                     animation.animated ? 1.0f : 0.0f);
                 target.grid = QVector2D(float(gridX), float(gridY));
+                target.emission = emission;
             }
         }
+    for(int index = 0; index < m_arrLandVrtData.size(); ++index)
+    {
+        const SVertexData& source = m_arrLandVrtData.at(index);
+        STerrainVertexData& target = m_arrLitLandVrtData[index];
+        target.position = source.position;
+        target.normal = source.normal;
+        target.texCoord = source.texCoord;
+        target.emission = bWater && index < m_arrAnimatedWaterVrtData.size()
+            ? m_arrAnimatedWaterVrtData.at(index).emission : QVector3D();
+    }
 }
 
 void CSector::updatePosition()
@@ -570,7 +583,8 @@ void CSector::updatePosition()
         m_boundsRadius = 23.0f;
     }
     m_vertexBuf.bind();
-    m_vertexBuf.allocate(m_arrLandVrtData.data(), m_arrLandVrtData.count()*int(sizeof(SVertexData)));
+    m_vertexBuf.allocate(m_arrLitLandVrtData.data(),
+                         m_arrLitLandVrtData.count()*int(sizeof(STerrainVertexData)));
     m_vertexBuf.release();
 
     QVector<ushort> aInd;
@@ -677,17 +691,25 @@ void CSector::draw(QOpenGLShaderProgram* program)
     m_vertexBuf.bind();
     int vertLoc = program->attributeLocation("a_position");
     program->enableAttributeArray(vertLoc);
-    program->setAttributeBuffer(vertLoc, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    program->setAttributeBuffer(vertLoc, GL_FLOAT, offset, 3, int(sizeof(STerrainVertexData)));
 
     offset += int(sizeof(QVector3D));
     int normLoc = program->attributeLocation("a_normal");
     program->enableAttributeArray(normLoc);
-    program->setAttributeBuffer(normLoc, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    program->setAttributeBuffer(normLoc, GL_FLOAT, offset, 3, int(sizeof(STerrainVertexData)));
 
     offset+=int(sizeof(QVector3D)); // size of normal
     int textureLocation = program->attributeLocation("a_texture");
     program->enableAttributeArray(textureLocation);
-    program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
+    program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(STerrainVertexData)));
+    offset += int(sizeof(QVector2D));
+    const int emissionLocation = program->attributeLocation("a_materialEmission");
+    if(emissionLocation >= 0)
+    {
+        program->enableAttributeArray(emissionLocation);
+        program->setAttributeBuffer(emissionLocation, GL_FLOAT, offset, 3,
+                                    int(sizeof(STerrainVertexData)));
+    }
     const int animationLocation = program->attributeLocation("a_overlayAnimation");
     if(animationLocation >= 0)
     {
@@ -751,6 +773,14 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
     {
         program->enableAttributeArray(gridLocation);
         program->setAttributeBuffer(gridLocation, GL_FLOAT, offset, 2,
+                                    int(sizeof(SWaterVertexData)));
+    }
+    offset += int(sizeof(QVector2D));
+    const int emissionLocation = program->attributeLocation("a_materialEmission");
+    if(emissionLocation >= 0)
+    {
+        program->enableAttributeArray(emissionLocation);
+        program->setAttributeBuffer(emissionLocation, GL_FLOAT, offset, 3,
                                     int(sizeof(SWaterVertexData)));
     }
 

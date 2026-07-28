@@ -89,6 +89,16 @@ SOverlayMaterialAnimation overlayMaterialAnimation(const SMaterial* material)
     return result;
 }
 
+QVector3D terrainMaterialEmission(const SMaterial* material)
+{
+    if(!material || material->selfIllumination <= 0.0f)
+        return QVector3D();
+    const float strength = material->selfIllumination;
+    return QVector3D(qBound(0.0f, material->R * strength, 1.0f),
+                     qBound(0.0f, material->G * strength, 1.0f),
+                     qBound(0.0f, material->B * strength, 1.0f));
+}
+
 SOverlayWindAnimation overlayWindAnimation(const QVector3D& authoredDirection,
                                             float authoredStrength,
                                             float elapsedSeconds,

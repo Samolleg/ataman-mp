@@ -125,6 +125,7 @@ CObjectBase::CObjectBase(const CObjectBase &base):
     m_texture = base.m_texture;
     m_secondaryTexture = base.m_secondaryTexture;
     m_partTextures = base.m_partTextures;
+    m_partEmissions = base.m_partEmissions;
     m_pFigure = base.m_pFigure;
     m_minPoint = base.m_minPoint;
     m_bodyParts = base.m_bodyParts;
@@ -266,9 +267,12 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
             queue.submit(part, texture, matrix,
                          CTextureList::getInstance()->materialClass(texture),
                          m_state == ENodeState::eSelect,
-                         castsRenderShadow(), nodeType() == ENodeType::eUnit);
+                         castsRenderShadow(), nodeType() == ENodeType::eUnit,
+                         m_partEmissions.value(part->name().toLower()));
             continue;
         }
+        program->setUniformValue("u_materialEmission",
+                                 m_partEmissions.value(part->name().toLower()));
         if(texture != boundTexture)
         {
             texture->bind(0);
@@ -283,6 +287,7 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
     {
         program->setUniformValue("u_partAnimated", false);
         program->setUniformValue("u_highlight", false);
+        program->setUniformValue("u_materialEmission", QVector3D());
     }
 }
 
@@ -729,17 +734,25 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
                                        const QStringList& visibleParts, const QVector3D& complexion,
                                        const QMap<QString, QString>& partTextureNames,
                                        const QString& secondaryTextureName,
-                                       const QStringList& bodyTextureLayers)
+                                       const QStringList& bodyTextureLayers,
+                                       const QMap<QString, QVector3D>& partEmissions)
 {
     QString textureFingerprint;
     for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
         textureFingerprint += it.key().toLower() + '=' + it.value().toLower() + ';';
-    const QString fingerprint = modelName.toLower() + '|' + textureName.toLower() + '|'
+    QString fingerprint = modelName.toLower() + '|' + textureName.toLower() + '|'
         + secondaryTextureName.toLower() + '|'
         + bodyTextureLayers.join(';').toLower() + '|'
         + visibleParts.join(';').toLower() + '|' + QString::number(complexion.x(), 'g', 8)
         + ',' + QString::number(complexion.y(), 'g', 8) + ',' + QString::number(complexion.z(), 'g', 8)
         + '|' + textureFingerprint;
+    QString emissionFingerprint;
+    for(auto it = partEmissions.constBegin(); it != partEmissions.constEnd(); ++it)
+        emissionFingerprint += it.key().toLower() + '='
+            + QString::number(it.value().x(), 'g', 8) + ','
+            + QString::number(it.value().y(), 'g', 8) + ','
+            + QString::number(it.value().z(), 'g', 8) + ';';
+    fingerprint += '|' + emissionFingerprint;
     if(fingerprint == m_transientVisualFingerprint)
         return;
     m_transientVisualFingerprint = fingerprint;
@@ -753,9 +766,12 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     m_secondaryTexture = secondaryTextureName.trimmed().isEmpty() ? nullptr
         : CTextureList::getInstance()->texture(secondaryTextureName, modelName);
     m_partTextures.clear();
+    m_partEmissions.clear();
     for(auto it = partTextureNames.constBegin(); it != partTextureNames.constEnd(); ++it)
         m_partTextures.insert(it.key().toLower(),
             CTextureList::getInstance()->texture(it.value(), modelName));
+    for(auto it = partEmissions.constBegin(); it != partEmissions.constEnd(); ++it)
+        m_partEmissions.insert(it.key().toLower(), it.value());
     if(!bodyTextureLayers.isEmpty())
         for(const QString& partName : visibleParts)
             if(ei::usesUnlayeredHumanoidTexture(partName)

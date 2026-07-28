@@ -43,6 +43,7 @@ uniform float u_nearShadowSplit;
 uniform bool u_shadowCascadeDebug;
 uniform bool u_receiveDynamicShadow;
 uniform bool u_receiveStaticShadow;
+uniform vec3 u_materialEmission;
 varying highp vec3 v_normal;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
@@ -103,7 +104,8 @@ void main(void)
       if (u_lightingMode == 1)
       {
         float simpleDiffuse = max(dot(normal, normalize(vec3(0.35, 0.45, 0.82))), 0.0);
-        resColor.rgb *= vec3(0.62 + 0.52 * simpleDiffuse);
+        resColor.rgb *= max(vec3(0.62 + 0.52 * simpleDiffuse),
+                            u_materialEmission);
       }
       else
       {
@@ -173,7 +175,9 @@ void main(void)
       }
       // Stock shadows are an 80/255-alpha projected silhouette over the
       // saturated environment result. Point lights are compared afterwards.
-      vec3 environmentLight = max(u_ambientColor, u_sunColor * sunDiffuse);
+      vec3 directLight = min(u_sunColor * sunDiffuse + u_materialEmission,
+                             vec3(1.0));
+      vec3 environmentLight = max(u_ambientColor, directLight);
       float projectedShadowVisibility = mix(1.0, shadow, 80.0 / 255.0);
       vec3 light = environmentLight * projectedShadowVisibility;
       for (int i = 0; i < 64; ++i)

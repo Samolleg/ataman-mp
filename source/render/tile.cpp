@@ -288,6 +288,12 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
         program->disableAttributeArray(gridLocation);
         program->setAttributeValue(gridLocation, QVector2D());
     }
+    const int emissionLocation = program->attributeLocation("a_materialEmission");
+    if(emissionLocation >= 0)
+    {
+        program->disableAttributeArray(emissionLocation);
+        program->setAttributeValue(emissionLocation, QVector3D());
+    }
     m_indexBuf.bind();
     ei::gl::DrawElements(GL_TRIANGLES, 24, GL_UNSIGNED_SHORT, nullptr);
 }
