@@ -17,7 +17,7 @@ private slots:
     void shaderContractsCoverDesktopAndAngle();
     void mapLifetimeResetsAnimationState();
     void derivesGeneralTerrainEmission();
-    void blendsTerrainEmissionAcrossSharedVertices();
+    void confinesTerrainEmissionToOverlayPass();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -203,29 +203,16 @@ void OverlayMaterialAnimationTests::derivesGeneralTerrainEmission()
     QCOMPARE(ei::terrainMaterialEmission(nullptr), QVector3D());
 }
 
-void OverlayMaterialAnimationTests::blendsTerrainEmissionAcrossSharedVertices()
+void OverlayMaterialAnimationTests::confinesTerrainEmissionToOverlayPass()
 {
-    const QVector3D red(0.8f, 0.0f, 0.0f);
-    const QVector<QVector3D> grid = ei::sharedTerrainEmissionGrid(
-        {red, QVector3D()}, 1, 2);
-    QCOMPARE(grid.size(), 15);
-
-    // The emissive tile contributes to its complete 3x3 lattice. The adjacent
-    // tile therefore reads the same red value at the shared edge, then
-    // interpolates to neutral over its own interior instead of making a seam.
-    for(int y = 0; y < 3; ++y)
-    {
-        QCOMPARE(grid.at(y * 5 + 0), red);
-        QCOMPARE(grid.at(y * 5 + 1), red);
-        QCOMPARE(grid.at(y * 5 + 2), red);
-        QCOMPARE(grid.at(y * 5 + 3), QVector3D());
-        QCOMPARE(grid.at(y * 5 + 4), QVector3D());
-    }
-
-    const QVector<QVector3D> mixed = ei::sharedTerrainEmissionGrid(
-        {QVector3D(0.8f, 0.1f, 0.0f), QVector3D(0.1f, 0.7f, 0.3f)}, 1, 2);
-    QCOMPARE(mixed.at(2), QVector3D(0.8f, 0.7f, 0.3f));
-    QVERIFY(ei::sharedTerrainEmissionGrid({red}, 1, 2).isEmpty());
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/sector.cpp") && repository.cdUp()) {}
+    QFile sectorFile(repository.absoluteFilePath("source/render/sector.cpp"));
+    QVERIFY(sectorFile.open(QIODevice::ReadOnly));
+    const QByteArray sector = sectorFile.readAll();
+    QVERIFY(sector.contains("target.emission = emission;"));
+    QVERIFY(sector.contains("target.emission = QVector3D();"));
+    QVERIFY(!sector.contains("sharedTerrainEmissionGrid"));
 }
 
 QTEST_APPLESS_MAIN(OverlayMaterialAnimationTests)

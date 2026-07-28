@@ -502,23 +502,6 @@ void CSector::generateVertexDataFromTile()
 
     m_arrAnimatedWaterVrtData.resize(m_arrWaterVrtData.size());
     m_arrLitLandVrtData.resize(m_arrLandVrtData.size());
-    QVector<QVector3D> tileEmissions;
-    if(bWater)
-    {
-        tileEmissions.reserve(m_arrWater.size() * nTile);
-        for(int row = 0; row < m_arrWater.size(); ++row)
-            for(int col = 0; col < m_arrWater.at(row).size(); ++col)
-            {
-                const int materialIndex = m_arrWater.at(row).at(col).materialIndex();
-                const SMaterial* material = m_materials && materialIndex >= 0
-                        && materialIndex < m_materials->size()
-                    ? &m_materials->at(materialIndex) : nullptr;
-                tileEmissions.append(ei::terrainMaterialEmission(material));
-            }
-    }
-    const QVector<QVector3D> sharedEmission = bWater
-        ? ei::sharedTerrainEmissionGrid(tileEmissions, m_arrWater.size(), nTile)
-        : QVector<QVector3D>();
     for(int row = 0; bWater && row < m_arrWater.size(); ++row)
         for(int col = 0; col < m_arrWater.at(row).size(); ++col)
         {
@@ -528,6 +511,7 @@ void CSector::generateVertexDataFromTile()
                 ? &m_materials->at(materialIndex) : nullptr;
             const ei::SOverlayMaterialAnimation animation =
                 ei::overlayMaterialAnimation(material);
+            const QVector3D emission = ei::terrainMaterialEmission(material);
             for(int vertex = 0; vertex < 9; ++vertex)
             {
                 const int index = (row * nTile + col) * 9 + vertex;
@@ -542,7 +526,7 @@ void CSector::generateVertexDataFromTile()
                     animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
                     animation.animated ? 1.0f : 0.0f);
                 target.grid = QVector2D(float(gridX), float(gridY));
-                target.emission = sharedEmission.at(gridY * nVertex + gridX);
+                target.emission = emission;
             }
         }
     for(int row = 0; row < m_arrLand.size(); ++row)
@@ -555,11 +539,7 @@ void CSector::generateVertexDataFromTile()
                 target.position = source.position;
                 target.normal = source.normal;
                 target.texCoord = source.texCoord;
-                const int gridX = col * 2 + vertex % 3;
-                const int gridY = row * 2 + vertex / 3;
-                target.emission = bWater
-                    ? sharedEmission.at(gridY * nVertex + gridX)
-                    : QVector3D();
+                target.emission = QVector3D();
             }
 }
 
