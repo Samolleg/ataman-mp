@@ -437,6 +437,8 @@ QVector<SNavigationCollisionProxy> CObjectBase::navigationCollisionProxies() con
         }
 
         QVector<QVector2D> projected;
+        QVector<QVector3D> boxCorners;
+        boxCorners.reserve(8);
         float minimumZ = std::numeric_limits<float>::max();
         float maximumZ = -std::numeric_limits<float>::max();
         for(int z = 0; z < 2; ++z)
@@ -449,11 +451,13 @@ QVector<SNavigationCollisionProxy> CObjectBase::navigationCollisionProxies() con
                     local = part->poseMatrix().map(local * scale);
                     const QVector3D world = m_rotation.rotatedVector(local) + m_drawPosition;
                     projected.append(world.toVector2D());
+                    boxCorners.append(world);
                     minimumZ = qMin(minimumZ, world.z());
                     maximumZ = qMax(maximumZ, world.z());
                 }
         SNavigationCollisionProxy proxy;
         proxy.footprint = navigationConvexHull(projected);
+        proxy.boxCorners = boxCorners;
         proxy.minimumZ = minimumZ;
         proxy.maximumZ = maximumZ;
         proxy.kind = navigationKindForPart(part->name());

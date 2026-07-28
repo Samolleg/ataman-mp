@@ -20,6 +20,7 @@ enum class EAiGraphObjectPassability : quint8
 struct SAiGraphCollisionProxy
 {
     QVector<QVector2D> footprint;
+    QVector<QVector3D> boxCorners;
     float minimumZ{0.0f};
     float maximumZ{0.0f};
     EAiGraphObjectPassability passability{EAiGraphObjectPassability::Blocking};
@@ -57,6 +58,11 @@ struct SAiGraphPreviewBuildResult
     int bridgeAiTiles{0};
     int waterAiTiles{0};
     qint64 collisionCoverageTests{0};
+    qint64 routeQueueSettledTiles{0};
+    qint64 routeSearchEarlyExits{0};
+    qint64 buildMilliseconds{0};
+    qint64 collisionRasterMilliseconds{0};
+    qint64 routeBuildMilliseconds{0};
     QStringList warnings;
 };
 

@@ -98,6 +98,7 @@ private slots:
     void regenerationRejectsGameScaleTerrainCliffs();
     void regenerationAppliesWaterClearanceToEveryProfile();
     void regenerationUsesBridgeSurfaceAndObjectSemantics();
+    void regenerationRasterizesSlopedBridgeHeightsPerTile();
     void regenerationHonorsConfiguredTerrainTraversal();
     void regenerationUsesRuntimeRouteWeightScale();
     void regenerationIndexesCollisionCoverageOnce();
@@ -322,6 +323,54 @@ void AiGraphDocumentTests::regenerationUsesBridgeSurfaceAndObjectSemantics()
         QVERIFY(ignored.document.weight(layer, 1, 1, 6) >= 0);
 }
 
+void AiGraphDocumentTests::regenerationRasterizesSlopedBridgeHeightsPerTile()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 2;
+    input.graphHeight = 2;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.waterDepths.fill(6.0f, aiWidth * aiHeight);
+
+    SAiGraphCollisionProxy ramp = boxVolume(
+        0.0f, 0.0f, 0.0f, 4.0f, 8.0f, 1.1f,
+        EAiGraphObjectPassability::Bridge);
+    ramp.boxCorners = {
+        QVector3D(0.0f, 0.0f, 0.0f), QVector3D(4.0f, 0.0f, 1.0f),
+        QVector3D(0.0f, 8.0f, 0.0f), QVector3D(4.0f, 8.0f, 1.0f),
+        QVector3D(0.0f, 0.0f, 0.1f), QVector3D(4.0f, 0.0f, 1.1f),
+        QVector3D(0.0f, 8.0f, 0.1f), QVector3D(4.0f, 8.0f, 1.1f)
+    };
+    input.collisionProxies.append(ramp);
+    ramp.footprint = {QVector2D(4.0f, 0.0f), QVector2D(8.0f, 0.0f),
+                      QVector2D(8.0f, 8.0f), QVector2D(4.0f, 8.0f)};
+    ramp.minimumZ = 1.0f;
+    ramp.maximumZ = 2.1f;
+    ramp.boxCorners = {
+        QVector3D(4.0f, 0.0f, 1.0f), QVector3D(8.0f, 0.0f, 2.0f),
+        QVector3D(4.0f, 8.0f, 1.0f), QVector3D(8.0f, 8.0f, 2.0f),
+        QVector3D(4.0f, 0.0f, 1.1f), QVector3D(8.0f, 0.0f, 2.1f),
+        QVector3D(4.0f, 8.0f, 1.1f), QVector3D(8.0f, 8.0f, 2.1f)
+    };
+    input.collisionProxies.append(ramp);
+    const SAiGraphPreviewBuildResult perTile = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(perTile.valid, qPrintable(perTile.error));
+    QVERIFY2(perTile.document.weight(3, 0, 0, 6) >= 0,
+             qPrintable(QStringLiteral("weight=%1 p0=%2 p1=%3 bridges=%4")
+                 .arg(perTile.document.weight(3, 0, 0, 6))
+                 .arg(perTile.document.packedPosition(3, 0, 0))
+                 .arg(perTile.document.packedPosition(3, 1, 0))
+                 .arg(perTile.bridgeAiTiles)));
+
+    // A single maximum for the whole ramp creates a false cliff at its low end.
+    input.collisionProxies[0].boxCorners.clear();
+    input.collisionProxies[1].boxCorners.clear();
+    const SAiGraphPreviewBuildResult uniform = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(uniform.valid, qPrintable(uniform.error));
+    QCOMPARE(uniform.document.weight(3, 0, 0, 6), qint16(-1));
+}
+
 void AiGraphDocumentTests::regenerationAppliesWaterClearanceToEveryProfile()
 {
     SAiGraphPreviewBuildInput input;
@@ -440,6 +489,11 @@ void AiGraphDocumentTests::regenerationHandlesPopulatedMapScale()
     QCOMPARE(result.collisionProxyCount, input.collisionProxies.size());
     QVERIFY2(result.collisionCoverageTests < 100000,
              qPrintable(QString::number(result.collisionCoverageTests)));
+    QVERIFY(result.routeSearchEarlyExits > 0);
+    const qint64 exhaustiveSearchBound = qint64(input.graphWidth)
+        * input.graphHeight * CAiGraphDocument::LayerCount * 625;
+    QVERIFY2(result.routeQueueSettledTiles < exhaustiveSearchBound * 4 / 5,
+             qPrintable(QString::number(result.routeQueueSettledTiles)));
 }
 
 void AiGraphDocumentTests::parsesProfileTerrainTraversalRegistry()

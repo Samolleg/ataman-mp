@@ -1743,6 +1743,7 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                 {
                     SAiGraphCollisionProxy proxy;
                     proxy.footprint = source.footprint;
+                    proxy.boxCorners = source.boxCorners;
                     proxy.minimumZ = source.minimumZ;
                     proxy.maximumZ = source.maximumZ;
                     switch(source.kind)
@@ -1924,11 +1925,13 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
                 if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
                     m_aiGraphPreviewToggle->setChecked(true);
             }
-            ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 authored_proxies:%4 bridge_tiles:%5 human_blocked_tiles:%6 coverage_tests:%7")
+            ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 authored_proxies:%4 bridge_tiles:%5 human_blocked_tiles:%6 coverage_tests:%7 total_ms:%8 collision_ms:%9 routes_ms:%10 settled_tiles:%11 early_exits:%12")
                 .arg(result.document.width()).arg(result.document.height())
                 .arg(result.collisionProxyCount).arg(result.authoredCollisionProxyCount)
                 .arg(result.bridgeAiTiles).arg(result.blockedAiTiles)
-                .arg(result.collisionCoverageTests));
+                .arg(result.collisionCoverageTests).arg(result.buildMilliseconds)
+                .arg(result.collisionRasterMilliseconds).arg(result.routeBuildMilliseconds)
+                .arg(result.routeQueueSettledTiles).arg(result.routeSearchEarlyExits));
             for(const QString& warning : result.warnings)
                 ei::log(eLogWarning, "AI graph preview: " + warning);
             syncAiGraphPreviewWidget();

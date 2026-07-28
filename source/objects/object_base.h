@@ -28,6 +28,7 @@ enum class ENavigationVolumeKind : quint8
 struct SNavigationCollisionProxy
 {
     QVector<QVector2D> footprint;
+    QVector<QVector3D> boxCorners;
     float minimumZ{0.0f};
     float maximumZ{0.0f};
     ENavigationVolumeKind kind{ENavigationVolumeKind::Blocking};

@@ -1,5 +1,6 @@
 #include "ai_graph_preview_builder.h"
 
+#include <QElapsedTimer>
 #include <QQueue>
 #include <QtEndian>
 #include <QtMath>
@@ -126,6 +127,91 @@ bool volumeCoversAiTile(const SAiGraphCollisionProxy& volume, int x, int y)
     }
     return false;
 }
+
+bool verticalIntervalAtPoint(const SAiGraphCollisionProxy& volume,
+                             float x, float y,
+                             float* minimumZ, float* maximumZ)
+{
+    if(volume.boxCorners.size() != 8 || !minimumZ || !maximumZ)
+        return false;
+    const QVector3D origin = volume.boxCorners.at(0);
+    const QVector3D axisX = volume.boxCorners.at(1) - origin;
+    const QVector3D axisY = volume.boxCorners.at(2) - origin;
+    const QVector3D axisZ = volume.boxCorners.at(4) - origin;
+    const QVector3D crossYZ = QVector3D::crossProduct(axisY, axisZ);
+    const float determinant = QVector3D::dotProduct(axisX, crossYZ);
+    if(qAbs(determinant) <= 1.0e-8f)
+        return false;
+    const QVector3D reciprocal[3] = {
+        crossYZ / determinant,
+        QVector3D::crossProduct(axisZ, axisX) / determinant,
+        QVector3D::crossProduct(axisX, axisY) / determinant
+    };
+    const QVector3D atZero(x - origin.x(), y - origin.y(), -origin.z());
+    float low = -std::numeric_limits<float>::max();
+    float high = std::numeric_limits<float>::max();
+    for(const QVector3D& coordinate : reciprocal)
+    {
+        const float base = QVector3D::dotProduct(atZero, coordinate);
+        const float slope = coordinate.z();
+        if(qAbs(slope) <= 1.0e-8f)
+        {
+            if(base < -1.0e-5f || base > 1.00001f)
+                return false;
+            continue;
+        }
+        const float first = -base / slope;
+        const float second = (1.0f - base) / slope;
+        low = qMax(low, qMin(first, second));
+        high = qMin(high, qMax(first, second));
+        if(low > high + 1.0e-5f)
+            return false;
+    }
+    if(!qIsFinite(low) || !qIsFinite(high))
+        return false;
+    *minimumZ = low;
+    *maximumZ = high;
+    return true;
+}
+
+void collisionIntervalForAiTile(const SAiGraphCollisionProxy& volume,
+                                int x, int y,
+                                float* minimumZ, float* maximumZ)
+{
+    float low = std::numeric_limits<float>::max();
+    float high = -std::numeric_limits<float>::max();
+    bool found = false;
+    const float left = float(x) * CAiGraphPreviewBuilder::AiTileWorldSize;
+    const float top = float(y) * CAiGraphPreviewBuilder::AiTileWorldSize;
+    const float sample[] = {0.0f, 0.5f, 1.0f};
+    for(float sy : sample)
+        for(float sx : sample)
+        {
+            float sampleLow = 0.0f, sampleHigh = 0.0f;
+            if(!verticalIntervalAtPoint(
+                   volume,
+                   left + sx * CAiGraphPreviewBuilder::AiTileWorldSize,
+                   top + sy * CAiGraphPreviewBuilder::AiTileWorldSize,
+                   &sampleLow, &sampleHigh))
+                continue;
+            low = qMin(low, sampleLow);
+            high = qMax(high, sampleHigh);
+            found = true;
+        }
+    // Very thin volumes can cross a tile without touching the regular sample
+    // lattice. Preserve their conservative coverage while using per-tile
+    // intervals for ordinary authored volumes.
+    *minimumZ = found ? low : volume.minimumZ;
+    *maximumZ = found ? high : volume.maximumZ;
+}
+
+struct SIndexedCollisionTile
+{
+    int proxyIndex{-1};
+    int next{-1};
+    int minimumHeight{0};
+    int maximumHeight{0};
+};
 
 int quantizedHeight(float worldHeight, float maximumTerrainHeight,
                     int maximumValue = MaximumAiHeight)
@@ -449,6 +535,8 @@ QVector<SAiTerrainTraversal> CAiGraphPreviewBuilder::parseTerrainTraversalRegist
 SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBuildInput& input)
 {
     SAiGraphPreviewBuildResult result;
+    QElapsedTimer totalTimer;
+    totalTimer.start();
     if(input.graphWidth <= 0 || input.graphHeight <= 0
        || input.graphWidth > 256 || input.graphHeight > 256)
     { result.error = QStringLiteral("Invalid graph dimensions."); return result; }
@@ -492,13 +580,13 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
             ++result.waterAiTiles;
     }
     QVector<bool> bridgeTiles(aiCount, false);
-    // Resolve polygon/tile coverage once. The earlier source-correct object
-    // pass repeated the same polygon test for every profile and every AI tile
-    // (and performed a second full scan for bridges). A populated map such as
-    // gz1g has thousands of proxies, turning that into billions of identical
-    // tests. Indexing each proxy only over its bounded tile rectangle preserves
-    // the exact coverage predicate while making the eight profile passes local.
-    QVector<QVector<int>> collisionProxiesByTile(aiCount);
+    // Rasterize object coverage and transformed vertical intervals once. A flat
+    // linked index avoids allocating one QVector for every 0.5 m navigation tile.
+    QElapsedTimer collisionTimer;
+    collisionTimer.start();
+    QVector<int> collisionHead(aiCount, -1);
+    QVector<SIndexedCollisionTile> collisionTiles;
+    collisionTiles.reserve(input.collisionProxies.size() * 8);
     for(int proxyIndex = 0; proxyIndex < input.collisionProxies.size(); ++proxyIndex)
     {
         const SAiGraphCollisionProxy& volume = input.collisionProxies.at(proxyIndex);
@@ -538,12 +626,28 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 if(!volumeCoversAiTile(volume, x, y))
                     continue;
                 const int index = tileIndex(x, y, aiWidth);
+                float localMinimumZ = volume.minimumZ;
+                float localMaximumZ = volume.maximumZ;
+                collisionIntervalForAiTile(volume, x, y,
+                                           &localMinimumZ, &localMaximumZ);
                 if(volume.passability != EAiGraphObjectPassability::Bridge)
-                    collisionProxiesByTile[index].append(proxyIndex);
+                {
+                    SIndexedCollisionTile tile;
+                    tile.proxyIndex = proxyIndex;
+                    tile.next = collisionHead.at(index);
+                    tile.minimumHeight = quantizedHeight(
+                        localMinimumZ, input.maximumTerrainHeight,
+                        MaximumObjectHeight);
+                    tile.maximumHeight = quantizedHeight(
+                        localMaximumZ, input.maximumTerrainHeight,
+                        MaximumObjectHeight);
+                    collisionHead[index] = collisionTiles.size();
+                    collisionTiles.append(tile);
+                }
                 else
                 {
                     navigationHeights[index] = qMax(navigationHeights.at(index),
-                        quantizedHeight(volume.maximumZ,
+                        quantizedHeight(localMaximumZ,
                                         input.maximumTerrainHeight,
                                         MaximumObjectHeight));
                     navigationWater[index] = 0;
@@ -554,6 +658,7 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 }
             }
     }
+    result.collisionRasterMilliseconds = collisionTimer.elapsed();
 
     QVector<bool> walkSlopeBlocked(aiCount, false);
     QVector<bool> flySlopeBlocked(aiCount, false);
@@ -574,6 +679,8 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
         }
 
     QVector<SAiGraphLayer> layers(LayerCount);
+    QElapsedTimer routeTimer;
+    routeTimer.start();
     for(int layerIndex = 0; layerIndex < LayerCount; ++layerIndex)
     {
         QVector<quint8> rawQuality(aiCount, 0);
@@ -597,17 +704,17 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                     ? MaximumObjectHeight * 2 : (layerIndex == 1 ? 0 : unitHeight);
                 if(layerIndex != 0)
                     applyWater(&tile, navigationWater.at(index));
-                for(const int proxyIndex : collisionProxiesByTile.at(index))
+                for(int collisionIndex = collisionHead.at(index);
+                    collisionIndex >= 0;
+                    collisionIndex = collisionTiles.at(collisionIndex).next)
                 {
+                    const SIndexedCollisionTile& collision =
+                        collisionTiles.at(collisionIndex);
                     const SAiGraphCollisionProxy& proxy =
-                        input.collisionProxies.at(proxyIndex);
+                        input.collisionProxies.at(collision.proxyIndex);
                     applyObstacle(&tile, proxy.passability,
-                        quantizedHeight(proxy.minimumZ,
-                                        input.maximumTerrainHeight,
-                                        MaximumObjectHeight),
-                        quantizedHeight(proxy.maximumZ,
-                                        input.maximumTerrainHeight,
-                                        MaximumObjectHeight));
+                                  collision.minimumHeight,
+                                  collision.maximumHeight);
                 }
                 rawQuality[index] = terrainClass(tile);
             }
@@ -649,6 +756,35 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 if(x < 3 || y < 3 || x >= aiWidth - 3 || y >= aiHeight - 3
                    || slopeBlocked)
                     quality[index] = 0;
+            }
+
+        // Edge costs depend only on the current layer's tile qualities and
+        // terrain heights. Precompute them once instead of recalculating slope,
+        // terrain, and diagonal multipliers in every graph-cell search.
+        QVector<int> traversalEdgeCosts(aiCount * DirectionCount, -1);
+        for(int y = 0; y < aiHeight; ++y)
+            for(int x = 0; x < aiWidth; ++x)
+            {
+                const int current = tileIndex(x, y, aiWidth);
+                for(int direction = 0; direction < DirectionCount; ++direction)
+                {
+                    const QPoint delta = CAiGraphDocument::directionDelta(direction);
+                    const int nx = x + delta.x(), ny = y + delta.y();
+                    if(nx < 0 || ny < 0 || nx >= aiWidth || ny >= aiHeight)
+                        continue;
+                    const int next = tileIndex(nx, ny, aiWidth);
+                    if(quality.at(next) == 0)
+                        continue;
+                    const int elevation = elevationMultiplier(
+                        navigationHeights.at(next) - navigationHeights.at(current),
+                        input.maximumTerrainHeight, layerIndex == 0);
+                    int stepCost = TerrainRouteCosts[quality.at(next)];
+                    if(elevation < 0 || stepCost < 0)
+                        continue;
+                    stepCost = (stepCost * elevation) >> 10;
+                    stepCost = (stepCost * (delta.x() && delta.y() ? 1448 : 1024)) >> 10;
+                    traversalEdgeCosts[current * DirectionCount + direction] = stepCost;
+                }
             }
 
         SAiGraphLayer& layer = layers[layerIndex];
@@ -709,6 +845,29 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 const int regionWidth = highX - lowX, regionHeight = highY - lowY;
                 QVector<int> distance(regionWidth * regionHeight, std::numeric_limits<int>::max());
                 const auto regionIndex = [=](int x, int y) { return (y-lowY)*regionWidth + x-lowX; };
+                QVector<quint8> destinationMask(regionWidth * regionHeight, 0);
+                int destinationsRemaining = 0;
+                for(int direction = 0; direction < DirectionCount; ++direction)
+                {
+                    const QPoint delta = CAiGraphDocument::directionDelta(direction);
+                    const int ngx = gx + delta.x(), ngy = gy + delta.y();
+                    if(ngx < 0 || ngy < 0
+                       || ngx >= input.graphWidth || ngy >= input.graphHeight)
+                        continue;
+                    const int destination = representative.at(
+                        tileIndex(ngx, ngy, input.graphWidth));
+                    const int dx = destination % aiWidth, dy = destination / aiWidth;
+                    if(dx < lowX || dx >= highX || dy < lowY || dy >= highY)
+                        continue;
+                    const int destinationRegion = regionIndex(dx, dy);
+                    if(!destinationMask.at(destinationRegion))
+                    {
+                        destinationMask[destinationRegion] = 1;
+                        ++destinationsRemaining;
+                    }
+                }
+                if(destinationsRemaining == 0)
+                    continue;
                 std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<QueueEntry>> queue;
                 distance[regionIndex(start % aiWidth, start / aiWidth)] = 0;
                 queue.push(qMakePair(0, start));
@@ -718,23 +877,26 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                     const int currentDistance = entry.first, current = entry.second;
                     const int cx = current % aiWidth, cy = current / aiWidth;
                     if(currentDistance != distance.at(regionIndex(cx, cy))) continue;
+                    ++result.routeQueueSettledTiles;
+                    const int currentRegion = regionIndex(cx, cy);
+                    if(destinationMask.at(currentRegion))
+                    {
+                        destinationMask[currentRegion] = 0;
+                        if(--destinationsRemaining == 0)
+                        {
+                            ++result.routeSearchEarlyExits;
+                            break;
+                        }
+                    }
                     for(int direction = 0; direction < DirectionCount; ++direction)
                     {
                         const QPoint delta = CAiGraphDocument::directionDelta(direction);
                         const int nx = cx + delta.x(), ny = cy + delta.y();
                         if(nx < lowX || nx >= highX || ny < lowY || ny >= highY) continue;
                         const int next = tileIndex(nx, ny, aiWidth);
-                        if(quality.at(next) == 0) continue;
-                        const int dz = navigationHeights.at(next) - navigationHeights.at(current);
-                        const int elevation = elevationMultiplier(
-                            dz, input.maximumTerrainHeight, layerIndex == 0);
-                        if(elevation < 0)
-                            continue;
-                        int stepCost = TerrainRouteCosts[quality.at(next)];
-                        if(stepCost < 0)
-                            continue;
-                        stepCost = (stepCost * elevation) >> 10;
-                        stepCost = (stepCost * (delta.x() && delta.y() ? 1448 : 1024)) >> 10;
+                        const int stepCost = traversalEdgeCosts.at(
+                            current * DirectionCount + direction);
+                        if(stepCost < 0) continue;
                         const int candidate = currentDistance + stepCost;
                         const int ri = regionIndex(nx, ny);
                         if(candidate < distance.at(ri))
@@ -760,11 +922,13 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
         if(layerIndex == 3)
             result.blockedAiTiles = int(std::count(quality.cbegin(), quality.cend(), quint8(0)));
     }
+    result.routeBuildMilliseconds = routeTimer.elapsed();
 
     QString error;
     if(!result.document.initializePreview(input.graphWidth, input.graphHeight, layers, &error))
     { result.error = error; return result; }
     result.collisionProxyCount = input.collisionProxies.size();
+    result.buildMilliseconds = totalTimer.elapsed();
     result.valid = true;
     return result;
 }
