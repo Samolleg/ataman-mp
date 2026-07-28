@@ -10,5 +10,6 @@ SOURCES += \
     ../source/documents/ai_graph_preview_builder.cpp
 
 HEADERS += \
+    ../source/core/map_object_placement_policy.h \
     ../source/documents/ai_graph_document.h \
     ../source/documents/ai_graph_preview_builder.h

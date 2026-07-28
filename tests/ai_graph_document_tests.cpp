@@ -4,6 +4,7 @@
 
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
+#include "../source/core/map_object_placement_policy.h"
 
 namespace {
 QByteArray syntheticGraph(int width, int height, bool trailing = false)
@@ -98,6 +99,7 @@ class AiGraphDocumentTests : public QObject
     Q_OBJECT
 private slots:
     void parsesKindMajorPlanesAndSignedValues();
+    void resolvesTerrainRelativeStaticObjectPlacement();
     void preservesNoOpBytesIncludingTrailingData();
     void rejectsMalformedDimensionsAndTruncation();
     void exposesStableLayerAndDirectionDefinitions();
@@ -118,6 +120,27 @@ private slots:
     void regenerationHandlesPopulatedMapScale();
     void parsesProfileTerrainTraversalRegistry();
 };
+
+void AiGraphDocumentTests::resolvesTerrainRelativeStaticObjectPlacement()
+{
+    const QVector3D stored(80.0f, 42.0f, 3.25f);
+    const QVector3D terrain(80.0f, 42.0f, 11.5f);
+    const QVector3D resolved = ei::resolveTerrainRelativeMapObjectPosition(
+        eWorldObject, stored, terrain);
+    QCOMPARE(resolved, QVector3D(80.0f, 42.0f, 14.75f));
+
+    QVERIFY(ei::usesTerrainRelativeMapObjectHeight(eWorldObject));
+    QVERIFY(ei::usesTerrainRelativeMapObjectHeight(eTorch));
+    QVERIFY(ei::usesTerrainRelativeMapObjectHeight(eLever));
+    QVERIFY(!ei::usesTerrainRelativeMapObjectHeight(eUnit));
+    QVERIFY(!ei::usesTerrainRelativeMapObjectHeight(eParticle));
+
+    QVERIFY(ei::contributesStaticNavigationCollision(eWorldObject));
+    QVERIFY(ei::contributesStaticNavigationCollision(eTorch));
+    QVERIFY(ei::contributesStaticNavigationCollision(eLever));
+    QVERIFY(!ei::contributesStaticNavigationCollision(eMagicTrap));
+    QVERIFY(!ei::contributesStaticNavigationCollision(eUnit));
+}
 
 void AiGraphDocumentTests::parsesKindMajorPlanesAndSignedValues()
 {

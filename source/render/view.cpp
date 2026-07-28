@@ -30,6 +30,7 @@
 #include <limits>
 
 #include "view.h"
+#include "map_object_placement_policy.h"
 #include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
@@ -1738,7 +1739,7 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
             for(CNode* node : mob->nodes())
             {
                 if(!node || node->isMarkDeleted()
-                   || (node->nodeType() != eWorldObject && node->nodeType() != eLever))
+                   || !ei::contributesStaticNavigationCollision(node->nodeType()))
                     continue;
                 CObjectBase* object = dynamic_cast<CObjectBase*>(node);
                 if(!object)

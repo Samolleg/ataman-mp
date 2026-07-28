@@ -5,6 +5,7 @@
 #include <QMessageBox>
 
 #include "landscape.h"
+#include "map_object_placement_policy.h"
 
 #include <cmath>
 #include "render_performance.h"
@@ -441,6 +442,8 @@ void CLandscape::projectPosition(CNode* pNode)
     if(pNode->nodeType() == eUnit)
         landPos -= pNode->minPosition();
     projectPt(landPos);
+    landPos = ei::resolveTerrainRelativeMapObjectPosition(
+        pNode->nodeType(), pNode->position(), landPos);
     pNode->setDrawPosition(landPos);
 }
 
