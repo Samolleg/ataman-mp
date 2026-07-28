@@ -6453,6 +6453,7 @@ void MainWindow::on_actionNew_MPR_triggered()
     QImage previewHeightmap;
     const auto refreshPreview = [&]() {
         const QString path = heightmapPath->text().trimmed();
+        flatRaw->setEnabled(path.isEmpty());
         if(path.isEmpty())
         {
             previewHeightmap = QImage();
