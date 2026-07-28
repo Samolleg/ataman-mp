@@ -1883,7 +1883,8 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
 
 float CTerrainEditModel::navigationHeightSample(int aiTileX, int aiTileY,
                                                 ETerrainTileLayer layer,
-                                                bool* available) const
+                                                bool* available,
+                                                bool requireActiveOverlay) const
 {
     if(available)
         *available = false;
@@ -1914,7 +1915,8 @@ float CTerrainEditModel::navigationHeightSample(int aiTileX, int aiTileY,
         if(!tileLocation(globalTileX, globalTileY, &sectorIndex, &localTile))
             return 0.0f;
         const SSector& sector = m_sectors.at(sectorIndex);
-        if(!overlayTileIsActive(sector, localTile) || sector.source.overlayVertexOffset == 0)
+        if(sector.source.overlayVertexOffset == 0
+           || (requireActiveOverlay && !overlayTileIsActive(sector, localTile)))
             return 0.0f;
         const int localQuadX = quadX - sector.source.sectorX * kSectorStride;
         const int localQuadY = quadY - sector.source.sectorY * kSectorStride;

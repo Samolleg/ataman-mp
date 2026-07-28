@@ -8,24 +8,32 @@ editor diagnostic and does not silently replace an embedded or external graph.
 - all eight unit-profile layers are regenerated independently;
 - terrain is sampled on the 0.5 m AI grid with the SEC three-corner sampling
   rule rather than generic bilinear filtering;
-- active overlays contribute water depth only when their referenced MPR
-  material is explicitly water; land-family overlays remain non-water;
+- layered sectors contribute their stored overlay-plane depth even where an
+  overlay tile is inactive; an active liquid tile additionally supplies its
+  terrain class, while land-family overlays do not masquerade as water;
 - prone movement rejects any positive water depth, ordinary profiles compare
   depth with their own clearance, and the levitating profile follows the water
   surface;
-- active-profile `tileDesc.reg` speed and cost values define terrain quality;
+- active-profile `tileDesc.reg` speed and cost values define terrain quality
+  for the seven ground profiles; levitation deliberately ignores terrain-type
+  traversal restrictions;
 - visible FIG parts contribute their authored, complexion-adjusted navigation
   bounds after current part pose, object scale, rotation, and position;
 - oriented authored footprints are rasterized directly instead of being widened
   to world-axis mesh boxes;
 - `BASE*` parts provide a single bridge-deck navigation surface, while
   `CROWN*` and `EMPTY*` parts retain their non-blocking classifications;
-- small, medium, and very-large footprint masks expand impassable terrain;
+- small, medium, and very-large footprint masks expand only impassability;
+  they do not smear a slow terrain class into neighboring passable cells;
 - ordinary and levitating slope limits remain distinct;
-- graph-node placement prefers higher-quality terrain, and link weights include
-  terrain quality, diagonal distance, and elevation cost;
-- borders, diagonal corner cutting, fresh graph serialization, consistency,
-  and connected-component recoloring remain validated.
+- graph-node placement uses the legal central fallback and prefers a local
+  passable component that crosses the graph cell before terrain quality;
+- link weights use the runtime terrain-class cost table, cardinal/diagonal
+  distance factors, elevation multiplier, and serialization scale;
+- a diagonal destination is legal when that destination is passable; blocked
+  orthogonal neighbors do not add a separate corner-cut prohibition;
+- borders, inclusive neighboring-cell search bounds, fresh graph serialization,
+  consistency, and connected-component recoloring remain validated.
 
 ## Deliberate diagnostic boundary
 
@@ -47,7 +55,10 @@ metadata that is not present in the loaded FIG assembly.
 - shallow water blocks prone while preserving levitating and taller-profile
   links;
 - deep water blocks all seven ordinary layers while preserving levitation;
-- configured impassable terrain types block every layer;
+- configured impassable terrain types block all seven ground layers while the
+  levitating layer remains terrain-type independent;
+- a flat eight-AI-tile cardinal/diagonal crossing serializes with the expected
+  64/90 route weights, preventing the former invented cost scale from returning;
 - small, medium, and very-large profiles retain independent clearance;
 - fences, authored overhead clearance, bridge decks over deep water, easy and
   ignored parts, walk slopes, and levitating slopes retain their expected

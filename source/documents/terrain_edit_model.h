@@ -363,7 +363,8 @@ public:
     // deliberately not ordinary bilinear filtering.
     float navigationHeightSample(int aiTileX, int aiTileY,
                                  ETerrainTileLayer layer,
-                                 bool* available = nullptr) const;
+                                 bool* available = nullptr,
+                                 bool requireActiveOverlay = true) const;
     qint16 overlayMaterialIndex(int globalTileX, int globalTileY,
                                 bool* available = nullptr) const;
     SOverlaySurfaceCommand makeOverlayActivation(

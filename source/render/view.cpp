@@ -1661,6 +1661,7 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
     input->graphHeight = m_aiGraphLoadedDocument.isValid()
         ? m_aiGraphLoadedDocument.height()
         : qCeil(float(m_terrainEdit.vertexCountY() - 1) / 4.0f);
+    input->maximumTerrainHeight = m_terrainEdit.maxZ();
     if(input->graphWidth * 4 != m_terrainEdit.vertexCountX() - 1
        || input->graphHeight * 4 != m_terrainEdit.vertexCountY() - 1)
     {
@@ -1694,15 +1695,28 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
             bool overlayAvailable = false;
             const qint16 materialIndex = m_terrainEdit.overlayMaterialIndex(
                 globalTileX, globalTileY, &overlayAvailable);
-            if(overlayAvailable && materialIndex >= 0 && materialIndex < materials.size()
+            bool heightAvailable = false;
+            const float overlayHeight = m_terrainEdit.navigationHeightSample(
+                x, y, ETerrainTileLayer::Overlay, &heightAvailable, false);
+            if(heightAvailable)
+                input->waterDepths[index] = qMax(
+                    0.0f, overlayHeight - input->terrainHeights.at(index));
+
+            if(input->waterDepths.at(index) > 0.0f
+               && overlayAvailable && materialIndex >= 0
+               && materialIndex < materials.size()
                && materials.at(materialIndex).type == eTerrainWater)
             {
-                bool heightAvailable = false;
-                const float overlayHeight = m_terrainEdit.navigationHeightSample(
-                    x, y, ETerrainTileLayer::Overlay, &heightAvailable);
-                if(heightAvailable)
-                    input->waterDepths[index] = qMax(
-                        0.0f, overlayHeight - input->terrainHeights.at(index));
+                bool overlayTileAvailable = false;
+                const quint16 overlayPacked = m_terrainEdit.packedTile(
+                    globalTileX, globalTileY, ETerrainTileLayer::Overlay,
+                    &overlayTileAvailable);
+                bool overlayTypeFound = false;
+                const qint32 overlayType = overlayTileAvailable
+                    ? m_terrainEdit.tileType(overlayPacked, &overlayTypeFound)
+                    : qint32(eUndefined);
+                if(overlayTypeFound && overlayType >= 0 && overlayType < eLast)
+                    input->terrainTypes[index] = quint8(overlayType);
             }
         }
 

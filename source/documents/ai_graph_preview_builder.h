@@ -37,6 +37,7 @@ struct SAiGraphPreviewBuildInput
 {
     int graphWidth{0};
     int graphHeight{0};
+    float maximumTerrainHeight{20.0f};
     QVector<float> terrainHeights;
     QVector<float> waterDepths;
     QVector<quint8> terrainTypes;
