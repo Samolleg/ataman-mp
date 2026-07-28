@@ -150,6 +150,8 @@ public:
                                          qint32 toMaterial,
                                          const QMap<qint32, int>& preferredMaterials = {}) const;
     QVector<STerrainTransitionSignature> gridSignatures() const;
+    void removeAtlasSlot(int atlasSlot);
+    bool paintGridMirrored() const { return m_mirrorPaintGridY; }
     int size() const { return m_variants.size(); }
 
 private:
@@ -433,7 +435,8 @@ public:
         qint32 preferredSupportId = 0) const;
     // Modern flow: material identity is committed to an independent vertex
     // field. Drag preview is deliberately uniform; release prefers authored
-    // exact tiles, and absent tuples are generated only during finalization.
+    // exact tiles. The caller must realize absent tuples in the live working
+    // atlas before requesting release resolution; identities are never deferred.
     STerrainTileCommand makeVirtualMaterialPaint(
         int selectedCellX, int selectedCellY,
         const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,

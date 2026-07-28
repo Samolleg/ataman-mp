@@ -1,5 +1,7 @@
 #include <QtTest>
 #include <QtEndian>
+#include <QDir>
+#include <QFile>
 
 #include "endurance_document.h"
 #include "mmp_codec.h"
@@ -75,6 +77,28 @@ QByteArray portableMpr()
     return archive.buildWithAppendedMember("CaveSet000000.SEC",sector,0,&second,&errors)
         ?second:QByteArray();
 }
+
+STerrainTransitionSignature finalizedSignature(
+    const STerrainAtlasFinalization& finalization, quint16 packed, bool* found)
+{
+    const SMprPackedTile decoded = SMprPackedTile::decode(packed);
+    const int slot = decoded.atlasSlot();
+    if(slot < 0 || slot >= finalization.tiles.size())
+    {
+        if(found) *found = false;
+        return {};
+    }
+    if(found) *found = true;
+    return CTerrainTransitionCatalog::rotated(
+        finalization.tiles.at(slot).canonicalSignature, -decoded.rotation);
+}
+
+bool writeBytes(const QString& path, const QByteArray& bytes)
+{
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
+        && file.write(bytes) == bytes.size();
+}
 }
 
 class TerrainVirtualAtlasTests:public QObject
@@ -98,6 +122,9 @@ private slots:
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void preservedLayerSlotsArePinnedAndRemapped();
     void gradedAlphaIsRefusedWithoutFlattening();
+    void workingAtlasGeneratesImmediatelyAndReusesTuple();
+    void workingAtlasProtectsUndoSlotsAndRefusesCapacity();
+    void generatedPaintMatrixSavesReopensAndMatchesVertexOracle();
 };
 
 void TerrainVirtualAtlasTests::virtualFieldPaintIsUnboundedByAtlas()
@@ -334,8 +361,34 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     for(const auto& touched:command.virtualVertices)
         QCOMPARE(painted.material(touched.globalX,touched.globalY),qint32(2));
     QCOMPARE(painted.material(6,8),qint32(1));
+    QVector<QImage> workingImages = fixture.images;
+    while(workingImages.size() < 64) workingImages.append(fixture.images.front());
+    CTerrainWorkingAtlas working(fixture.catalog, workingImages, 99, 64);
+    QMap<int,quint64> usage;
+    for(int slot = 0; slot < 64; ++slot) usage.insert(slot, 0);
+    QSet<int> protectedSlots({0,1,2,3,10});
+    QSet<int> affected;
+    for(const auto& vertex : command.virtualVertices)
+        for(int y : {vertex.globalY-1, vertex.globalY})
+            for(int x : {vertex.globalX-1, vertex.globalX})
+                if(x >= 0 && x < painted.tileWidth() && y >= 0 && y < painted.tileHeight())
+                    affected.insert(y * painted.tileWidth() + x);
+    CValidationReport releaseReport;
+    for(int cell : affected)
+    {
+        const int x = cell % painted.tileWidth();
+        const int y = cell / painted.tileWidth();
+        bool generated = false;
+        const quint16 packed = working.resolve(painted.cellSignature(x,y), x, y,
+                                               &usage, protectedSlots, &generated,
+                                               &releaseReport);
+        if(!releaseReport.hasErrors())
+            ++usage[SMprPackedTile::decode(packed).atlasSlot()];
+    }
+    QVERIFY2(!releaseReport.hasErrors(), qPrintable(releaseReport.toText()));
     const STerrainTileCommand resolved=model.makeVirtualStrokeResolution(
-        command,fixture.catalog,99,&report);
+        command,working.catalog(),99,&releaseReport);
+    QVERIFY2(!releaseReport.hasErrors(), qPrintable(releaseReport.toText()));
     QCOMPARE(resolved.semanticAudit.solverMode,QString("virtual-release-exact"));
     QVERIFY(!resolved.deltas.isEmpty());
     QVERIFY(model.apply(resolved,true,&report));
@@ -369,6 +422,199 @@ void TerrainVirtualAtlasTests::gradedAlphaIsRefusedWithoutFlattening()
     QString diagnostic;
     QVERIFY(ei::encodeMmpDxt1(image,true,&diagnostic).isEmpty());
     QVERIFY(diagnostic.contains("graded alpha"));
+}
+
+void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()
+{
+    Fixture fixture;
+    CTerrainWorkingAtlas working(fixture.catalog,fixture.images,17,4);
+    QVERIFY2(working.isValid(),qPrintable(working.error()));
+    QMap<int,quint64> usage;
+    usage[0]=4;usage[1]=4;usage[2]=4;usage[3]=0;
+    QSet<int> protectedSlots({0,1,2});
+    CValidationReport report;bool generated=false;
+    const STerrainTransitionSignature missing=signature(1,2,2,2);
+    const quint16 first=working.resolve(missing,7,8,&usage,protectedSlots,
+                                        &generated,&report);
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+    QVERIFY(generated);
+    QCOMPARE(SMprPackedTile::decode(first).atlasSlot(),3);
+    QVERIFY(working.takeChangedSlots().contains(3));
+    usage[3]=1;
+    const quint16 reused=working.resolve(missing,9,10,&usage,protectedSlots,
+                                         &generated,&report);
+    QCOMPARE(reused,first);
+    QCOMPARE(working.generatedTileCount(),1);
+    QVERIFY(working.takeChangedSlots().isEmpty());
+    bool decoded=false;
+    QCOMPARE(working.catalog().gridSignatureForPacked(reused,&decoded),missing);
+    QVERIFY(decoded);
+}
+
+void TerrainVirtualAtlasTests::workingAtlasProtectsUndoSlotsAndRefusesCapacity()
+{
+    Fixture fixture;
+    CTerrainWorkingAtlas working(fixture.catalog,fixture.images,3,4);
+    QMap<int,quint64> usage;
+    usage[0]=usage[1]=usage[2]=usage[3]=0;
+    const QSet<int> allProtected({0,1,2,3});
+    CValidationReport report;bool generated=false;
+    QCOMPARE(working.resolve(signature(1,2,3,4),0,0,&usage,allProtected,
+                             &generated,&report),quint16(0));
+    QVERIFY(report.hasErrors());
+    QVERIFY(report.toText().contains("undo history"));
+    QVERIFY(report.toText().contains("No identity was substituted"));
+}
+
+void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexOracle()
+{
+    struct Scenario { QString name; qint32 background; qint32 brush; QVector<QPoint> touched; };
+    QVector<Scenario> scenarios;
+    const QVector<QString> shapes = {"square", "horizontal", "vertical", "diagonal-nw-se", "diagonal-ne-sw"};
+    for(qint32 background = 1; background <= 4; ++background)
+        for(qint32 brush = 1; brush <= 4; ++brush)
+        {
+            if(background == brush) continue;
+            for(const QString& shape : shapes)
+            {
+                Scenario scenario;
+                scenario.name = QString("pair-%1-over-%2-%3").arg(brush).arg(background).arg(shape);
+                scenario.background = background;
+                scenario.brush = brush;
+                if(shape == "square")
+                    for(int y = 7; y <= 9; ++y) for(int x = 7; x <= 9; ++x)
+                        scenario.touched.append(QPoint(x, y));
+                else
+                    for(int offset = -3; offset <= 3; ++offset)
+                    {
+                        if(shape == "horizontal") scenario.touched.append(QPoint(8 + offset, 8));
+                        else if(shape == "vertical") scenario.touched.append(QPoint(8, 8 + offset));
+                        else if(shape == "diagonal-nw-se") scenario.touched.append(QPoint(8 + offset, 8 + offset));
+                        else scenario.touched.append(QPoint(8 + offset, 8 - offset));
+                    }
+                scenarios.append(scenario);
+            }
+        }
+    Scenario threeFamily{"junction-three-family", 1, 2,
+        {QPoint(8,8), QPoint(9,8), QPoint(8,9)}};
+    scenarios.append(threeFamily);
+    Scenario fourFamily{"junction-four-family", 1, 2,
+        {QPoint(8,8), QPoint(9,8), QPoint(9,9), QPoint(8,9)}};
+    scenarios.append(fourFamily);
+
+    Fixture fixture;
+    CMprDocument source;
+    CValidationReport sourceReport;
+    QVERIFY2(source.loadBytes(portableMpr(), "matrix-source.mpr", &sourceReport),
+             qPrintable(sourceReport.toText()));
+    const QString outputPath = QString::fromLocal8Bit(qgetenv("EI_MAPPER_ATLAS_TEST_OUTPUT"));
+    if(!outputPath.isEmpty()) QVERIFY(QDir().mkpath(outputPath));
+    QStringList rawResults;
+    int authoredCells = 0;
+    int generatedCells = 0;
+
+    for(const Scenario& scenario : scenarios)
+    {
+        CTerrainVirtualMaterialField field;
+        QVERIFY(field.resize(16, 16, scenario.background));
+        for(const QPoint& point : scenario.touched)
+            QVERIFY(field.setMaterial(point.x(), point.y(), scenario.brush));
+        if(scenario.name == "junction-three-family")
+        {
+            QVERIFY(field.setMaterial(8,8,2));
+            QVERIFY(field.setMaterial(9,8,3));
+            QVERIFY(field.setMaterial(8,9,2));
+        }
+        else if(scenario.name == "junction-four-family")
+        {
+            QVERIFY(field.setMaterial(8,8,1));
+            QVERIFY(field.setMaterial(9,8,2));
+            QVERIFY(field.setMaterial(9,9,3));
+            QVERIFY(field.setMaterial(8,9,4));
+        }
+        for(const QPoint& point : scenario.touched)
+            QVERIFY(field.material(point.x(), point.y()) != 0);
+
+        CValidationReport report;
+        CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x13579u);
+        const auto finalized = atlas.finalize(field, "MatrixMap", 512,
+                                               {1,2,3,4}, &report);
+        QVERIFY2(finalized.success, qPrintable(finalized.error + "\n" + report.toText()));
+        const auto package = CTerrainVirtualAtlas::buildPortablePackage(
+            source, finalized, ETerrainTileLayer::Land, &report);
+        QVERIFY2(package.success, qPrintable(package.error + "\n" + report.toText()));
+
+        for(int y = 0; y < 16; ++y)
+            for(int x = 0; x < 16; ++x)
+            {
+                const int cell = y * 16 + x;
+                bool decoded = false;
+                const auto actual = finalizedSignature(
+                    finalized, finalized.packedCells.at(cell), &decoded);
+                QVERIFY(decoded);
+                QCOMPARE(actual, field.cellSignature(x, y));
+                const SMprPackedTile packed = SMprPackedTile::decode(
+                    finalized.packedCells.at(cell));
+                if(finalized.tiles.at(packed.atlasSlot()).authored) ++authoredCells;
+                else ++generatedCells;
+                if(x + 1 < 16)
+                {
+                    const auto east = finalizedSignature(
+                        finalized, finalized.packedCells.at(cell + 1), &decoded);
+                    QCOMPARE(actual.northEast, east.northWest);
+                    QCOMPARE(actual.southEast, east.southWest);
+                }
+                if(y + 1 < 16)
+                {
+                    const auto south = finalizedSignature(
+                        finalized, finalized.packedCells.at(cell + 16), &decoded);
+                    QCOMPARE(actual.southWest, south.northWest);
+                    QCOMPARE(actual.southEast, south.northEast);
+                }
+            }
+
+        CMprDocument reopened;
+        QVERIFY2(reopened.loadBytes(package.mprBytes, scenario.name + ".mpr", &report),
+                 qPrintable(report.toText()));
+        CTerrainEditModel reopenedTerrain;
+        QVERIFY2(reopenedTerrain.load(reopened, &report), qPrintable(report.toText()));
+        for(int y = 0; y < 16; ++y) for(int x = 0; x < 16; ++x)
+        {
+            bool available = false;
+            const quint16 packed = reopenedTerrain.packedTile(
+                x, y, ETerrainTileLayer::Land, &available);
+            QVERIFY(available);
+            QCOMPARE(packed, finalized.packedCells.at(y * 16 + x));
+            bool decoded = false;
+            QCOMPARE(finalizedSignature(finalized, packed, &decoded),
+                     field.cellSignature(x, y));
+            QVERIFY(decoded);
+        }
+
+        CTerrainVirtualAtlas repeatAtlas(fixture.catalog, fixture.images, 0x13579u);
+        const auto repeat = repeatAtlas.finalize(field, "MatrixMap", 512, {1,2,3,4});
+        QCOMPARE(repeat.stableSha256, finalized.stableSha256);
+        QCOMPARE(repeat.packedCells, finalized.packedCells);
+        QCOMPARE(repeat.pageMmpPayloads, finalized.pageMmpPayloads);
+        rawResults.append(QString("PASS %1 hash=%2 slots=%3 generated=%4")
+            .arg(scenario.name, QString::fromLatin1(finalized.stableSha256))
+            .arg(finalized.requiredSlots).arg(finalized.usage.generatedTiles.size()));
+        if(!outputPath.isEmpty())
+        {
+            const QDir output(outputPath);
+            QVERIFY(writeBytes(output.filePath(scenario.name + ".mpr"), package.mprBytes));
+            QVERIFY(writeBytes(output.filePath(scenario.name + "-atlas.res"),
+                               package.resourceArchiveBytes));
+        }
+    }
+    QCOMPARE(scenarios.size(), 62);
+    QVERIFY(authoredCells > 0);
+    QVERIFY(generatedCells > 0);
+    rawResults.prepend(QString("PASS scenarios=%1 authoredCells=%2 generatedCells=%3")
+        .arg(scenarios.size()).arg(authoredCells).arg(generatedCells));
+    if(!outputPath.isEmpty())
+        QVERIFY(writeBytes(QDir(outputPath).filePath("MODERN_ATLAS_AUTOTEST_RESULTS.txt"),
+                           rawResults.join('\n').append('\n').toUtf8()));
 }
 
 QTEST_GUILESS_MAIN(TerrainVirtualAtlasTests)

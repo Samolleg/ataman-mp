@@ -5299,6 +5299,9 @@ void CView::unloadLand(bool promptForSave)
     m_overlayAnimationTimer.invalidate();
     m_terrainEditAvailable = false;
     finishSculptStroke();
+    m_workingTerrainAtlas.reset();
+    m_authoredTerrainTileImages.clear();
+    m_workingAtlasProtectedSlots.clear();
     m_terrainEdit = CTerrainEditModel();
     rebuildTerrainAutoCatalog();
     m_terrainSemanticSeed = 0;
@@ -6378,6 +6381,8 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 
 void CView::rebuildTerrainAutoCatalog()
 {
+    m_workingTerrainAtlas.clear();
+    m_workingAtlasProtectedSlots.clear();
     m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
     m_terrainAtlasProfile = STerrainAtlasProfile();
     m_terrainAtlasProfileSource = STerrainAtlasProfileSource();
@@ -6578,6 +6583,20 @@ void CView::rebuildTerrainAutoCatalog()
     emit updateMsg(m_terrainAtlasAnalysis.usable
         ? status
         : tr("This atlas layout is not registered; semantic terrain painting is disabled."));
+
+    if(m_terrainAtlasAnalysis.usable)
+    {
+        if(m_authoredTerrainTileImages.size() != m_pTileForm->tileImages().size())
+            m_authoredTerrainTileImages = m_pTileForm->tileImages();
+        m_workingTerrainAtlas.reset(new CTerrainWorkingAtlas(
+            m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies(),
+            m_authoredTerrainTileImages, m_terrainSemanticSeed, 512));
+        const QVector<STerrainAtlasSlotUsage> currentUsage = terrainAtlasUsage();
+        for(int slot = 0; slot < currentUsage.size(); ++slot)
+            if(currentUsage.at(slot).landCount > 0
+               || currentUsage.at(slot).overlayCount > 0)
+                m_workingAtlasProtectedSlots.insert(slot);
+    }
 }
 
 QVector<STerrainAtlasSlotUsage> CView::terrainAtlasUsage() const
@@ -6609,6 +6628,14 @@ void CView::reviewTerrainAtlasProfile()
     if(!m_terrainEditAvailable || !m_pTileForm || m_pTileForm->tileImages().isEmpty())
     {
         emit updateMsg(tr("Load an MPR and its complete terrain atlas before reviewing semantic conversion."));
+        return;
+    }
+    if(m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
+       || m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay))
+    {
+        QMessageBox::information(this, tr("Material atlas is in use"),
+            tr("Finalize or undo the current semantic terrain edits before changing the Material atlas profile. "
+               "This keeps every generated working tile and undo reference bound to the atlas that created it."));
         return;
     }
     const QString mprNamespace = m_mprDocument.mapInfo().innerNamespace;
@@ -6923,7 +6950,9 @@ void CView::exportTerrainPaintDiagnostic()
         current.insert("y", cell.globalY);
         current.insert("layer", cell.layer == ETerrainTileLayer::Land ? "land" : "overlay");
         current.insert("packed", packedTerrainTileJson(packed));
-        const CTerrainTransitionCatalog& catalog = m_terrainAtlasAnalysis.catalog(cell.layer);
+        const CTerrainTransitionCatalog& catalog = m_workingTerrainAtlas
+            ? m_workingTerrainAtlas->catalog()
+            : m_terrainAtlasAnalysis.catalog(cell.layer);
         bool found = false;
         const STerrainTransitionSignature paintSignature =
             catalog.gridSignatureForPacked(packed, &found);
@@ -6948,6 +6977,62 @@ void CView::exportTerrainPaintDiagnostic()
     }
     output.close();
     emit updateMsg(tr("Paint diagnostic exported without writing an MPR: %1").arg(path));
+}
+
+QMap<int, quint64> CView::workingTerrainAtlasUsage() const
+{
+    QMap<int, quint64> result;
+    const QVector<STerrainAtlasSlotUsage> usage = terrainAtlasUsage();
+    for(int slot = 0; slot < usage.size(); ++slot)
+        result.insert(slot, quint64(usage.at(slot).landCount)
+                            + quint64(usage.at(slot).overlayCount));
+    return result;
+}
+
+bool CView::realizeWorkingTerrainSignature(
+    const STerrainTransitionSignature& signature, int cellX, int cellY,
+    QMap<int, quint64>* usage, CValidationReport* report, bool* generated)
+{
+    if(!m_workingTerrainAtlas || !m_workingTerrainAtlas->isValid())
+    {
+        if(report) report->add("terrain.working_atlas_unavailable",
+            EValidationSeverity::Error,
+            "The live exact-transition cache is unavailable for this map.");
+        return false;
+    }
+    const quint16 packed = m_workingTerrainAtlas->resolve(
+        signature, cellX, cellY, usage, m_workingAtlasProtectedSlots,
+        generated, report);
+    if(report && report->hasErrors())
+        return false;
+    if(usage)
+        ++(*usage)[SMprPackedTile::decode(packed).atlasSlot()];
+    return true;
+}
+
+bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
+{
+    if(!m_workingTerrainAtlas)
+        return false;
+    const QSet<int> changed = m_workingTerrainAtlas->takeChangedSlots();
+    if(changed.isEmpty())
+        return true;
+    if(!m_pTileForm->replaceTileImages(m_workingTerrainAtlas->tileImages()))
+    {
+        if(report) report->add("terrain.working_atlas_table",
+            EValidationSeverity::Error,
+            "The generated exact tiles could not be installed in the atlas table.");
+        return false;
+    }
+    makeCurrent();
+    const bool installed = m_pLand->previewTerrainAtlas(
+        m_workingTerrainAtlas->tileImages(), int(m_pLand->textureNum()));
+    doneCurrent();
+    if(!installed && report)
+        report->add("terrain.working_atlas_renderer",
+            EValidationSeverity::Error,
+            "The generated exact tiles could not be installed in the live terrain renderer.");
+    return installed;
 }
 
 void CView::finalizeVirtualTerrainAtlas()
@@ -6982,15 +7067,26 @@ void CView::finalizeVirtualTerrainAtlas()
     QVector<quint16> pinned;
     const ETerrainTileLayer preserved=layer==ETerrainTileLayer::Land
         ?ETerrainTileLayer::Overlay:ETerrainTileLayer::Land;
+    CTerrainEditModel originalTerrain;
+    CValidationReport originalReport;
+    if(!originalTerrain.load(m_mprDocument,&originalReport))
+    {
+        QMessageBox::critical(this,tr("Atlas finalization refused"),
+            tr("The preserved layer could not be reconstructed from the original MPR.\n\n%1")
+                .arg(originalReport.toText()));
+        return;
+    }
     for(int y=0;y<m_terrainEdit.tileCountY();++y)
         for(int x=0;x<m_terrainEdit.tileCountX();++x)
         {
             bool available=false;
-            const quint16 packed=m_terrainEdit.packedTile(x,y,preserved,&available);
+            const quint16 packed=originalTerrain.packedTile(x,y,preserved,&available);
             if(available)pinned.append(packed);
         }
     CValidationReport report;
-    CTerrainVirtualAtlas atlas(catalog,m_pTileForm->tileImages(),m_terrainSemanticSeed);
+    const QVector<QImage>& authoredImages=m_authoredTerrainTileImages.isEmpty()
+        ?m_pTileForm->tileImages():m_authoredTerrainTileImages;
+    CTerrainVirtualAtlas atlas(catalog,authoredImages,m_terrainSemanticSeed);
     const STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,512,
         m_mprDocument.mapInfo().tileTypes,&report,pinned);
@@ -8778,9 +8874,10 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             && m_landscapeTools->landFamiliesAllowedInOverlay()
         ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
         : m_terrainAtlasAnalysis.catalog(layer);
-    const CTerrainTransitionCatalog& semanticCatalog = !bLand
-        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
-        : m_terrainAtlasAnalysis.catalog(layer);
+    const CTerrainTransitionCatalog& semanticCatalog = m_workingTerrainAtlas
+        ? m_workingTerrainAtlas->catalog()
+        : (!bLand ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+                  : m_terrainAtlasAnalysis.catalog(layer));
     const bool manual = m_landscapeTools->manualTileSelectionEnabled();
     qint32 terrainType = -1;
     STerrainTileCommand command;
@@ -8838,6 +8935,17 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         STerrainTileBrush vertexBrush = brush;
         vertexBrush.centerX = detailVertex.x();
         vertexBrush.centerY = detailVertex.y();
+        STerrainTransitionSignature pure;
+        pure.northWest = pure.northEast = pure.southEast = pure.southWest = terrainType;
+        QMap<int, quint64> usage = workingTerrainAtlasUsage();
+        if(!realizeWorkingTerrainSignature(pure, qRound(vertexBrush.centerX),
+             qRound(vertexBrush.centerY), &usage, &report)
+           || !syncWorkingTerrainAtlas(&report))
+        {
+            ++m_tileStrokeRefused;
+            emit updateMsg(report.toText());
+            return;
+        }
         command = m_terrainEdit.makeVirtualMaterialPaint(
             qRound(brush.centerX), qRound(brush.centerY), vertexBrush,
             layer, terrainType, semanticCatalog,
@@ -9106,15 +9214,66 @@ void CView::endTileBrushGroup()
         if(!m_tileStrokeCommand.virtualVertices.isEmpty())
         {
             const ETerrainTileLayer layer=m_tileStrokeCommand.virtualVertices.front().layer;
-            const CTerrainTransitionCatalog& catalog=layer==ETerrainTileLayer::Land
-                ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog;
             CValidationReport releaseReport;
-            STerrainTileCommand resolution=m_terrainEdit.makeVirtualStrokeResolution(
-                m_tileStrokeCommand,catalog,m_terrainSemanticSeed,&releaseReport);
-            if(!resolution.isEmpty()&&applyTerrainTilePreview(resolution,true))
+            CTerrainVirtualMaterialField field;
+            QMap<int,quint64> usage=workingTerrainAtlasUsage();
+            QSet<int> affected;
+            if(!m_terrainEdit.copyVirtualMaterialField(layer,&field))
+                releaseReport.add("terrain.virtual_stroke_field",
+                    EValidationSeverity::Error,
+                    "The completed stroke has no complete vertex-material field.");
+            else
             {
-                m_tileStrokeChangedTiles+=resolution.deltas.size();
-                appendTerrainTileCommand(&m_tileStrokeCommand,resolution);
+                for(const auto& vertex:m_tileStrokeCommand.virtualVertices)
+                    for(int y:{vertex.globalY-1,vertex.globalY})
+                        for(int x:{vertex.globalX-1,vertex.globalX})
+                            if(x>=0&&x<field.tileWidth()&&y>=0&&y<field.tileHeight())
+                                affected.insert(y*field.tileWidth()+x);
+                QVector<int> cells=affected.values().toVector();
+                std::sort(cells.begin(),cells.end());
+                for(int cell:cells)
+                {
+                    const int x=cell%field.tileWidth(),y=cell/field.tileWidth();
+                    bool found=false;
+                    const STerrainTransitionSignature exact=field.cellSignature(x,y,&found);
+                    if(!found||!realizeWorkingTerrainSignature(
+                           exact,x,y,&usage,&releaseReport))
+                        break;
+                }
+            }
+            if(!releaseReport.hasErrors()&&!syncWorkingTerrainAtlas(&releaseReport))
+                releaseReport.add("terrain.working_atlas_sync",
+                    EValidationSeverity::Error,
+                    "The completed stroke could not install its generated exact transitions.");
+            if(releaseReport.hasErrors())
+            {
+                applyTerrainTilePreview(m_tileStrokeCommand,false);
+                m_tileStrokeCommand=STerrainTileCommand();
+                ++m_tileStrokeRefused;
+                emit updateMsg(tr("Terrain stroke refused without substituting material identities:\n%1")
+                    .arg(releaseReport.toText()));
+            }
+            else
+            {
+                const CTerrainTransitionCatalog& catalog=m_workingTerrainAtlas
+                    ?m_workingTerrainAtlas->catalog()
+                    :(layer==ETerrainTileLayer::Land
+                        ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog);
+                STerrainTileCommand resolution=m_terrainEdit.makeVirtualStrokeResolution(
+                    m_tileStrokeCommand,catalog,m_terrainSemanticSeed,&releaseReport);
+                if(releaseReport.hasErrors())
+                {
+                    applyTerrainTilePreview(m_tileStrokeCommand,false);
+                    m_tileStrokeCommand=STerrainTileCommand();
+                    ++m_tileStrokeRefused;
+                    emit updateMsg(tr("Terrain stroke refused without substituting material identities:\n%1")
+                        .arg(releaseReport.toText()));
+                }
+                else if(!resolution.isEmpty()&&applyTerrainTilePreview(resolution,true))
+                {
+                    m_tileStrokeChangedTiles+=resolution.deltas.size();
+                    appendTerrainTileCommand(&m_tileStrokeCommand,resolution);
+                }
             }
             if(!releaseReport.findings().isEmpty())
                 ei::log(releaseReport.hasErrors()?eLogWarning:eLogInfo,
@@ -9170,6 +9329,13 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
     {
         ei::log(eLogWarning, "Semantic terrain preview command refused:\n" + report.toText());
         return false;
+    }
+    for(const STerrainTileDelta& delta:command.deltas)
+    {
+        m_workingAtlasProtectedSlots.insert(
+            SMprPackedTile::decode(delta.before).atlasSlot());
+        m_workingAtlasProtectedSlots.insert(
+            SMprPackedTile::decode(delta.after).atlasSlot());
     }
     QSet<QPair<int, int>> sectors;
     for(const STerrainTileDelta& delta : command.deltas)

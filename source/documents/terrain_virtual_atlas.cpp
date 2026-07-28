@@ -676,3 +676,180 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
         }
     result.resourceArchiveBytes=archiveBytes;result.success=true;return result;
 }
+
+CTerrainWorkingAtlas::CTerrainWorkingAtlas(
+    const CTerrainTransitionCatalog& authoredCatalog,
+    const QVector<QImage>& authoredTiles, quint32 distributionSeed,
+    int capacityLimit)
+    : m_authoredCatalog(authoredCatalog), m_workingCatalog(authoredCatalog),
+      m_authoredImages(authoredTiles), m_workingImages(authoredTiles),
+      m_capacityLimit(qMin(capacityLimit, authoredTiles.size()))
+{
+    m_resolver.reset(new CTerrainVirtualAtlas(
+        m_authoredCatalog, m_authoredImages, distributionSeed));
+    for(int slot = 0; slot < m_capacityLimit; ++slot)
+    {
+        const QPair<int, int> key(0, slot);
+        m_virtualToWorking.insert(key, slot);
+        m_workingToVirtual.insert(slot, key);
+    }
+}
+
+bool CTerrainWorkingAtlas::isValid() const
+{
+    return m_capacityLimit > 0 && m_resolver && m_resolver->isValid();
+}
+
+QString CTerrainWorkingAtlas::error() const
+{
+    if(m_capacityLimit <= 0)
+        return QStringLiteral("The working atlas has no validated physical slots.");
+    return m_resolver ? m_resolver->error()
+                      : QStringLiteral("The working atlas resolver is unavailable.");
+}
+
+int CTerrainWorkingAtlas::generatedTileCount() const
+{
+    return m_resolver ? m_resolver->generatedTiles().size() : 0;
+}
+
+QSet<int> CTerrainWorkingAtlas::takeChangedSlots()
+{
+    const QSet<int> result = m_changedSlots;
+    m_changedSlots.clear();
+    return result;
+}
+
+int CTerrainWorkingAtlas::realize(
+    bool generated, int sourceIndex, QMap<int, quint64>* workingUsage,
+    const QSet<int>& protectedSlots, CValidationReport* report)
+{
+    const QPair<int, int> key(generated ? 1 : 0, sourceIndex);
+    const auto existing = m_virtualToWorking.constFind(key);
+    if(existing != m_virtualToWorking.constEnd())
+        return existing.value();
+    if(!workingUsage)
+        return -1;
+
+    int workingSlot = -1;
+    for(int slot = 0; slot < m_capacityLimit; ++slot)
+    {
+        if(workingUsage->value(slot) == 0 && !protectedSlots.contains(slot))
+        {
+            workingSlot = slot;
+            break;
+        }
+    }
+    if(workingSlot < 0)
+    {
+        if(report) report->add("terrain.working_atlas_capacity",
+            EValidationSeverity::Error,
+            QString("The stroke needs another exact transition, but all %1 validated working slots are used or protected by undo history. No identity was substituted.")
+                .arg(m_capacityLimit));
+        return -1;
+    }
+
+    const auto evicted = m_workingToVirtual.constFind(workingSlot);
+    if(evicted != m_workingToVirtual.constEnd())
+        m_virtualToWorking.remove(evicted.value());
+    m_workingToVirtual.remove(workingSlot);
+    m_workingCatalog.removeAtlasSlot(workingSlot);
+
+    const QImage pixels = generated
+        ? m_resolver->generatedTiles().value(sourceIndex).pixels
+        : m_authoredImages.value(sourceIndex);
+    if(pixels.isNull())
+    {
+        if(report) report->add("terrain.working_atlas_pixels",
+            EValidationSeverity::Error,
+            "The exact transition has no realizable source pixels.");
+        return -1;
+    }
+    m_workingImages[workingSlot] = pixels;
+    m_virtualToWorking.insert(key, workingSlot);
+    m_workingToVirtual.insert(workingSlot, key);
+    installCatalogVariants(generated, sourceIndex, workingSlot);
+    m_changedSlots.insert(workingSlot);
+    return workingSlot;
+}
+
+void CTerrainWorkingAtlas::installCatalogVariants(
+    bool generated, int sourceIndex, int workingSlot)
+{
+    if(generated)
+    {
+        const STerrainTransitionSignature grid =
+            m_resolver->generatedTiles().at(sourceIndex).canonicalSignature;
+        const STerrainTransitionSignature base = m_workingCatalog.paintGridMirrored()
+            ? CTerrainTransitionCatalog::mirroredGridY(grid) : grid;
+        for(int rotation = 0; rotation < 4; ++rotation)
+        {
+            SMprPackedTile packed;
+            packed.tileIndex = quint8(workingSlot % 64);
+            packed.atlasIndex = quint8(workingSlot / 64);
+            packed.rotation = quint8(rotation);
+            STerrainTransitionVariant variant;
+            variant.signature = CTerrainTransitionCatalog::rotated(base, -rotation);
+            variant.packedTile = packed.encode();
+            m_workingCatalog.addVariant(variant);
+        }
+        return;
+    }
+
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        SMprPackedTile source;
+        source.tileIndex = quint8(sourceIndex % 64);
+        source.atlasIndex = quint8(sourceIndex / 64);
+        source.rotation = quint8(rotation);
+        bool found = false;
+        const STerrainTransitionSignature catalogSignature =
+            m_authoredCatalog.signatureForPacked(source.encode(), &found);
+        if(!found)
+            continue;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(workingSlot % 64);
+        packed.atlasIndex = quint8(workingSlot / 64);
+        packed.rotation = quint8(rotation);
+        STerrainTransitionVariant variant;
+        variant.signature = catalogSignature;
+        variant.packedTile = packed.encode();
+        m_workingCatalog.addVariant(variant);
+    }
+}
+
+quint16 CTerrainWorkingAtlas::resolve(
+    const STerrainTransitionSignature& signature, int cellX, int cellY,
+    QMap<int, quint64>* workingUsage, const QSet<int>& protectedSlots,
+    bool* generated, CValidationReport* report)
+{
+    if(generated)
+        *generated = false;
+    if(!isValid())
+    {
+        if(report) report->add("terrain.working_atlas_invalid",
+            EValidationSeverity::Error, error());
+        return 0;
+    }
+    const STerrainVirtualTile tile = m_resolver->resolve(
+        signature, cellX, cellY, report);
+    const bool isGenerated = !tile.authored;
+    const int sourceIndex = tile.authored
+        ? SMprPackedTile::decode(tile.authoredPacked).atlasSlot()
+        : tile.generatedIndex;
+    if(sourceIndex < 0)
+        return 0;
+    const int workingSlot = realize(isGenerated, sourceIndex,
+        workingUsage, protectedSlots, report);
+    if(workingSlot < 0)
+        return 0;
+    SMprPackedTile packed;
+    packed.tileIndex = quint8(workingSlot % 64);
+    packed.atlasIndex = quint8(workingSlot / 64);
+    packed.rotation = tile.authored
+        ? SMprPackedTile::decode(tile.authoredPacked).rotation
+        : tile.generatedRotation;
+    if(generated)
+        *generated = isGenerated;
+    return packed.encode();
+}

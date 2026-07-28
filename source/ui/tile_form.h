@@ -62,6 +62,7 @@ public:
     void setQuickTileSet(const QVector<int>& arrIndices);
     QPixmap tileWithRot(int index) {return tileWithRot(index, m_tileRot);};
     const QVector<QImage>& tileImages() const { return m_tileImages; }
+    bool replaceTileImages(const QVector<QImage>& images);
     void setSemanticAnnotations(const QStringList& annotations,
                                 const QString& profileStatus);
 

@@ -74,6 +74,7 @@ class CTreeView;
 class IPropertyBase;
 class CTileForm;
 class CLandscapeTools;
+class CTerrainWorkingAtlas;
 class CLight;
 class QOpenGLFramebufferObject;
 class RenderQueueContext;
@@ -325,6 +326,12 @@ private:
     void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();
     QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
+    QMap<int, quint64> workingTerrainAtlasUsage() const;
+    bool realizeWorkingTerrainSignature(
+        const STerrainTransitionSignature& signature, int cellX, int cellY,
+        QMap<int, quint64>* usage, CValidationReport* report,
+        bool* generated = nullptr);
+    bool syncWorkingTerrainAtlas(CValidationReport* report);
     void reviewTerrainAtlasProfile();
     void finalizeVirtualTerrainAtlas();
     void updateTerrainAtlasViewerAnnotations(const QString& status);
@@ -539,6 +546,9 @@ private:
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
     STerrainAtlasProfile m_terrainAtlasProfile;
     STerrainAtlasProfileSource m_terrainAtlasProfileSource;
+    QVector<QImage> m_authoredTerrainTileImages;
+    QSharedPointer<CTerrainWorkingAtlas> m_workingTerrainAtlas;
+    QSet<int> m_workingAtlasProtectedSlots;
     QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;

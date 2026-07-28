@@ -5,6 +5,8 @@
 #include <QImage>
 #include <QMap>
 #include <QPoint>
+#include <QSet>
+#include <QSharedPointer>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -138,6 +140,51 @@ private:
     quint32 m_distributionSeed{0};
     bool m_valid{false};
     QString m_error;
+};
+
+// A bounded physical cache used only for the live editor preview. It realizes
+// authored or generated exact tuples into currently unused slots, while the
+// unbounded vertex-material field remains authoritative. Finalization does not
+// trust this cache; it rebuilds a clean isolated atlas from the field.
+class CTerrainWorkingAtlas
+{
+public:
+    CTerrainWorkingAtlas(const CTerrainTransitionCatalog& authoredCatalog,
+                         const QVector<QImage>& authoredTiles,
+                         quint32 distributionSeed = 0,
+                         int capacityLimit = 512);
+
+    bool isValid() const;
+    QString error() const;
+    const CTerrainTransitionCatalog& catalog() const { return m_workingCatalog; }
+    const QVector<QImage>& tileImages() const { return m_workingImages; }
+    int generatedTileCount() const;
+    QSet<int> takeChangedSlots();
+
+    quint16 resolve(const STerrainTransitionSignature& signature,
+                    int cellX, int cellY,
+                    QMap<int, quint64>* workingUsage,
+                    const QSet<int>& protectedSlots,
+                    bool* generated = nullptr,
+                    CValidationReport* report = nullptr);
+
+private:
+    int realize(bool generated, int sourceIndex,
+                QMap<int, quint64>* workingUsage,
+                const QSet<int>& protectedSlots,
+                CValidationReport* report);
+    void installCatalogVariants(bool generated, int sourceIndex,
+                                int workingSlot);
+
+    CTerrainTransitionCatalog m_authoredCatalog;
+    CTerrainTransitionCatalog m_workingCatalog;
+    QVector<QImage> m_authoredImages;
+    QVector<QImage> m_workingImages;
+    QSharedPointer<CTerrainVirtualAtlas> m_resolver;
+    QMap<QPair<int, int>, int> m_virtualToWorking;
+    QMap<int, QPair<int, int>> m_workingToVirtual;
+    QSet<int> m_changedSlots;
+    int m_capacityLimit{0};
 };
 
 #endif // TERRAIN_VIRTUAL_ATLAS_H

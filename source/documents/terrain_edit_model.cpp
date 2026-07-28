@@ -468,6 +468,27 @@ QVector<STerrainTransitionSignature> CTerrainTransitionCatalog::gridSignatures()
     return result;
 }
 
+void CTerrainTransitionCatalog::removeAtlasSlot(int atlasSlot)
+{
+    QVector<STerrainTransitionVariant> retained;
+    retained.reserve(m_variants.size());
+    for(const STerrainTransitionVariant& variant : m_variants)
+        if(SMprPackedTile::decode(variant.packedTile).atlasSlot() != atlasSlot)
+            retained.append(variant);
+    m_variants.clear();
+    m_packedLookup.clear();
+    m_signatureLookup.clear();
+    // Material identities belong to the authoring catalog, not to whichever
+    // physical cache slots happen to be resident. Keep m_materialIds intact.
+    for(const STerrainTransitionVariant& variant : retained)
+    {
+        const int index = m_variants.size();
+        m_variants.append(variant);
+        m_packedLookup.insert(variant.packedTile, index);
+        m_signatureLookup[signatureKey(variant.signature)].append(index);
+    }
+}
+
 QVector<qint32> CTerrainTransitionCatalog::shortestMaterialPath(
     qint32 fromMaterial, qint32 toMaterial,
     const QMap<qint32, int>& preferredMaterials) const
@@ -4296,9 +4317,9 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
         delta.requestedMaterialId=-1;delta.requestedSignature=exact;
         command.deltas.append(delta);
     }
-    if(unresolved>0&&report)report->add("terrain.virtual_generated_pending",
-        EValidationSeverity::Info,
-        QString("%1 exact transition tuple(s) remain virtual and will be generated during finalization").arg(unresolved));
+    if(unresolved>0&&report)report->add("terrain.virtual_release_unresolved",
+        EValidationSeverity::Error,
+        QString("%1 exact transition tuple(s) were not realized in the live working atlas before release; the stroke must be refused without substituting identities").arg(unresolved));
     return command;
 }
 

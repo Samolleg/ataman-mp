@@ -3,10 +3,12 @@
 #include <QRandomGenerator>
 #include <QSaveFile>
 #include <QMessageBox>
+#include <QOpenGLContext>
 
 #include "landscape.h"
 
 #include <cmath>
+#include <cstring>
 #include "render_performance.h"
 #include "view_frustum.h"
 #include "res_file.h"
@@ -30,6 +32,8 @@ CLandscape* CLandscape::getInstance()
 
 void CLandscape::unloadMpr()
 {
+    delete m_previewAtlasTexture;
+    m_previewAtlasTexture = nullptr;
     for (auto& xSec: m_aSector)
     {
         for(auto& ySec: xSec)
@@ -43,12 +47,54 @@ void CLandscape::unloadMpr()
 }
 
 CLandscape::CLandscape():
-  m_bDirty(false)
+  m_texture(nullptr), m_bDirty(false)
 {
     m_aSector.clear();
     m_aAnimTile.clear();
     m_aMaterial.clear();
     m_aTileTypes.clear();
+}
+
+bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
+                                     int textureCount)
+{
+    if(textureCount <= 0 || tileImages.size() != textureCount * 64
+       || !QOpenGLContext::currentContext())
+        return false;
+    const int tileSize = tileImages.front().width();
+    if(tileSize <= 0 || tileImages.front().height() != tileSize)
+        return false;
+    const int pageSize = tileSize * 8;
+    QImage combined(pageSize * textureCount, pageSize, QImage::Format_RGBA8888);
+    combined.fill(Qt::transparent);
+    for(int slot = 0; slot < tileImages.size(); ++slot)
+    {
+        if(tileImages.at(slot).size() != QSize(tileSize, tileSize))
+            return false;
+        const QImage source = tileImages.at(slot)
+            .convertToFormat(QImage::Format_RGBA8888).mirrored(false, true);
+        const int page = slot / 64;
+        const int local = slot % 64;
+        const int destinationX = page * pageSize + (local % 8) * tileSize;
+        const int destinationY = (local / 8) * tileSize;
+        for(int y = 0; y < tileSize; ++y)
+            memcpy(combined.scanLine(destinationY + y) + destinationX * 4,
+                   source.constScanLine(y), size_t(tileSize) * 4u);
+    }
+    QOpenGLTexture* replacement = new QOpenGLTexture(
+        combined, QOpenGLTexture::GenerateMipMaps);
+    if(!replacement->isCreated())
+    {
+        delete replacement;
+        return false;
+    }
+    replacement->setMinificationFilter(QOpenGLTexture::NearestMipMapLinear);
+    replacement->setMagnificationFilter(QOpenGLTexture::Nearest);
+    replacement->setWrapMode(QOpenGLTexture::Repeat);
+    delete m_previewAtlasTexture;
+    m_previewAtlasTexture = replacement;
+    m_texture = replacement;
+    return true;
 }
 
 CLandscape::~CLandscape()

@@ -386,6 +386,31 @@ void CTileForm::setSemanticAnnotations(const QStringList& annotations,
     }
 }
 
+bool CTileForm::replaceTileImages(const QVector<QImage>& images)
+{
+    if(images.size() != m_tileImages.size())
+        return false;
+    for(int slot = 0; slot < images.size(); ++slot)
+    {
+        if(images.at(slot).isNull() || images.at(slot).size() != m_tileImages.at(slot).size())
+            return false;
+    }
+    m_tileImages = images;
+    m_icoList.clear();
+    m_icoList.reserve(images.size());
+    for(int slot = 0; slot < images.size(); ++slot)
+    {
+        const QIcon icon(QPixmap::fromImage(images.at(slot)));
+        m_icoList.append(icon);
+        QTableWidgetItem* item = ui->tableTile->item(
+            slot / m_nTilePerRow, slot % m_nTilePerRow);
+        if(item)
+            item->setIcon(icon);
+    }
+    updateQuickTable();
+    return true;
+}
+
 void CTileForm::selectTile(int index)
 {
     int row = index/m_nTilePerRow;
