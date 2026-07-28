@@ -325,6 +325,7 @@ private:
     void clearLandscapeBrushSelection();
     void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();
+    void refreshTerrainFamilyUsage();
     QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
     QMap<int, quint64> workingTerrainAtlasUsage() const;
     bool realizeWorkingTerrainSignature(
@@ -551,6 +552,8 @@ private:
     QSet<int> m_workingAtlasProtectedSlots;
     QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
+    QVector<STerrainGlobalMaterialFamily> m_terrainGlobalFamilies;
+    QMap<qint32, QImage> m_terrainGlobalMaterialSources;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;
     SOverlaySurfaceCommand m_overlaySurfaceStrokeCommand;

@@ -100,7 +100,8 @@ class CTerrainVirtualAtlas
 public:
     CTerrainVirtualAtlas(const CTerrainTransitionCatalog& catalog,
                          const QVector<QImage>& authoredTiles,
-                         quint32 distributionSeed = 0);
+                         quint32 distributionSeed = 0,
+                         const QMap<qint32, QImage>& externalMaterialSources = {});
 
     bool isValid() const { return m_valid; }
     QString error() const { return m_error; }
@@ -152,7 +153,8 @@ public:
     CTerrainWorkingAtlas(const CTerrainTransitionCatalog& authoredCatalog,
                          const QVector<QImage>& authoredTiles,
                          quint32 distributionSeed = 0,
-                         int capacityLimit = 512);
+                         int capacityLimit = 512,
+                         const QMap<qint32, QImage>& externalMaterialSources = {});
 
     bool isValid() const;
     QString error() const;

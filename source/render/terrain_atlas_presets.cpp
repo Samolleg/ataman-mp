@@ -54,6 +54,167 @@ int CTerrainAtlasPresetCatalog::presetCount(CValidationReport* report)
     return presetArray(report).size();
 }
 
+QString CTerrainAtlasPresetCatalog::materialTheme(const QString& variantName)
+{
+    const QString trimmed = variantName.trimmed();
+    const int separator = trimmed.indexOf(QLatin1Char('/'));
+    return (separator < 0 ? trimmed : trimmed.left(separator)).trimmed();
+}
+
+qint32 CTerrainAtlasPresetCatalog::globalMaterialId(
+    const QString& variantName, ETerrainAtlasLayer layer)
+{
+    const QByteArray key = (layer == ETerrainAtlasLayer::Land
+        ? QByteArrayLiteral("land:") : QByteArrayLiteral("overlay:"))
+        + materialTheme(variantName).toCaseFolded().toUtf8();
+    quint32 hash = 2166136261u;
+    for(char byte : key)
+    {
+        hash ^= quint8(byte);
+        hash *= 16777619u;
+    }
+    // Keep global family IDs positive and far away from legacy atlas-local
+    // one-byte IDs. Zero remains the invalid/unavailable sentinel.
+    return qint32(0x40000000u | (hash & 0x3fffffffu));
+}
+
+QVector<STerrainGlobalMaterialFamily>
+CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
+{
+    QMap<QString, STerrainGlobalMaterialFamily> grouped;
+    QMap<qint32, QString> identityKeys;
+    for(const QJsonValue& value : presetArray(report))
+    {
+        const QJsonObject preset = value.toObject();
+        const QString mprNamespace = preset.value(QStringLiteral("namespace")).toString();
+        const int slotCount = preset.value(QStringLiteral("slotCount")).toInt();
+        const QByteArray signatures = QByteArray::fromBase64(
+            preset.value(QStringLiteral("signaturesBase64")).toString().toLatin1());
+        if(mprNamespace.isEmpty() || slotCount <= 0
+           || signatures.size() != slotCount * 4)
+            continue;
+        for(const QJsonValue& familyValue : preset.value(
+                QStringLiteral("families")).toArray())
+        {
+            const QJsonObject familyObject = familyValue.toObject();
+            const int localId = familyObject.value(QStringLiteral("id")).toInt(-1);
+            const QString variantName = familyObject.value(
+                QStringLiteral("name")).toString();
+            int uniformSlot = -1;
+            for(int slot = 0; slot < slotCount; ++slot)
+            {
+                const int offset = slot * 4;
+                if(quint8(signatures.at(offset)) == localId
+                   && quint8(signatures.at(offset + 1)) == localId
+                   && quint8(signatures.at(offset + 2)) == localId
+                   && quint8(signatures.at(offset + 3)) == localId)
+                {
+                    uniformSlot = slot;
+                    break;
+                }
+            }
+            if(uniformSlot < 0)
+                continue; // transition evidence is not a paint family
+            const QString theme = materialTheme(variantName);
+            if(theme.isEmpty())
+                continue;
+            const QJsonArray layers = familyObject.value(
+                QStringLiteral("allowedLayers")).toArray();
+            for(const QJsonValue& layerValue : layers)
+            {
+                const ETerrainAtlasLayer layer =
+                    layerValue.toString() == QStringLiteral("overlay")
+                    ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
+                const QString key = QString(layer == ETerrainAtlasLayer::Land
+                    ? QStringLiteral("L:%1") : QStringLiteral("O:%1"))
+                    .arg(theme.toCaseFolded());
+                STerrainGlobalMaterialFamily& global = grouped[key];
+                if(global.name.isEmpty())
+                {
+                    global.name = theme;
+                    global.layer = layer;
+                    global.id = globalMaterialId(theme, layer);
+                    const QString previous = identityKeys.value(global.id);
+                    if(!previous.isEmpty() && previous != key)
+                    {
+                        if(report) report->add("terrain.global_family_hash_collision",
+                            EValidationSeverity::Error,
+                            "Two global terrain material families have the same deterministic identity",
+                            previous + QStringLiteral(" / ") + key);
+                        continue;
+                    }
+                    identityKeys.insert(global.id, key);
+                }
+                bool duplicate = false;
+                for(const STerrainGlobalMaterialSource& source : global.sources)
+                    duplicate |= source.mprNamespace.compare(
+                        mprNamespace, Qt::CaseInsensitive) == 0
+                        && source.uniformSlot == uniformSlot;
+                if(duplicate)
+                    continue;
+                STerrainGlobalMaterialSource source;
+                source.mprNamespace = mprNamespace;
+                source.textureCount = (slotCount + 63) / 64;
+                source.uniformSlot = uniformSlot;
+                source.variantName = variantName;
+                global.sources.append(source);
+            }
+        }
+    }
+    QVector<STerrainGlobalMaterialFamily> result = grouped.values().toVector();
+    std::sort(result.begin(), result.end(), [](
+        const STerrainGlobalMaterialFamily& left,
+        const STerrainGlobalMaterialFamily& right) {
+        if(left.layer != right.layer)
+            return left.layer == ETerrainAtlasLayer::Land;
+        return left.name.localeAwareCompare(right.name) < 0;
+    });
+    return result;
+}
+
+CTerrainTransitionCatalog CTerrainAtlasPresetCatalog::globalizedCatalog(
+    const STerrainAtlasProfile& profile,
+    const CTerrainTransitionCatalog& source)
+{
+    QMap<qint32, qint32> globalByLocal;
+    for(const STerrainAtlasProfileFamily& family : profile.families)
+        globalByLocal.insert(family.id,
+            globalMaterialId(family.name, family.layer));
+    CTerrainTransitionCatalog result;
+    result.setMirrorPaintGridY(source.paintGridMirrored());
+    for(int slot = 0; slot < profile.atlasSlotCount; ++slot)
+        for(int rotation = 0; rotation < 4; ++rotation)
+        {
+            SMprPackedTile packed;
+            packed.tileIndex = quint8(slot % 64);
+            packed.atlasIndex = quint8(slot / 64);
+            packed.rotation = quint8(rotation);
+            bool found = false;
+            STerrainTransitionSignature signature = source.signatureForPacked(
+                packed.encode(), &found);
+            if(!found) continue;
+            qint32* values[4] = {&signature.northWest, &signature.northEast,
+                                &signature.southEast, &signature.southWest};
+            bool mapped = true;
+            for(qint32* value : values)
+            {
+                const auto replacement = globalByLocal.constFind(*value);
+                if(replacement == globalByLocal.constEnd())
+                {
+                    mapped = false;
+                    break;
+                }
+                *value = replacement.value();
+            }
+            if(!mapped) continue;
+            STerrainTransitionVariant variant;
+            variant.signature = signature;
+            variant.packedTile = packed.encode();
+            result.addVariant(variant);
+        }
+    return result;
+}
+
 STerrainAtlasProfile CTerrainAtlasPresetCatalog::exactProfile(
     const QString& mprNamespace, const QByteArray& atlasPixelSha256,
     int atlasSlotCount, CValidationReport* report)

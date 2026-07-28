@@ -586,20 +586,28 @@ void CLandscapeTools::rebuildMaterialPalette()
 
     const auto populate = [this](QGridLayout* grid, QButtonGroup* group,
             const QVector<STerrainPaintMaterialChoice>& choices) {
-        int index = 0;
-        for(const STerrainPaintMaterialChoice& choice : choices)
-        {
+        int row = 0;
+        const auto addSection = [&](bool used, const QString& title) {
+          QVector<STerrainPaintMaterialChoice> section;
+          for(const STerrainPaintMaterialChoice& choice : choices)
+              if(choice.used == used) section.append(choice);
+          if(section.isEmpty()) return;
+          QLabel* heading = new QLabel(title, this);
+          heading->setStyleSheet(QStringLiteral("QLabel { font-weight: bold; margin-top: 5px; }"));
+          grid->addWidget(heading, row++, 0, 1, 5);
+          int index = 0;
+          for(const STerrainPaintMaterialChoice& choice : section)
+          {
             QToolButton* button = new QToolButton(this);
             button->setProperty("terrainMaterialId", choice.id);
             button->setProperty("terrainSupportMaterialId", choice.supportId);
             button->setProperty("terrainContextualStamp", choice.contextualStamp);
             button->setCheckable(true);
             button->setAutoRaise(false);
-            button->setToolTip(choice.contextualStamp
-                ? tr("%1 - %2 atlas slot(s) assigned. This card is an authored material-on-support junction. A click places the exact four-tile corner motif shown here; where a neighboring motif needs a missing transition, the editor uses the closest local authored tile and reports a warning.")
-                    .arg(choice.name).arg(choice.assignedSlots)
-                : tr("%1 - %2 atlas slot(s) assigned")
-                    .arg(choice.name).arg(choice.assignedSlots));
+            button->setToolTip(tr("%1 family - %2 atlas variant(s). %3")
+                .arg(choice.name).arg(choice.assignedSlots)
+                .arg(used ? tr("Currently used on this map.")
+                          : tr("Unused on this map; painting adds it and generates exact blends as needed.")));
             if(!choice.thumbnail.isNull())
             {
                 button->setIcon(QPixmap::fromImage(choice.thumbnail));
@@ -609,9 +617,13 @@ void CLandscapeTools::rebuildMaterialPalette()
                 button->setText(choice.name.left(2).toUpper());
             button->setFixedSize(64, 64);
             group->addButton(button);
-            grid->addWidget(button, index / 5, index % 5);
+            grid->addWidget(button, row + index / 5, index % 5);
             ++index;
-        }
+          }
+          row += (section.size() + 4) / 5;
+        };
+        addSection(true, tr("Used on this map"));
+        addSection(false, tr("Unused families"));
         grid->setColumnStretch(5, 1);
     };
     populate(m_groundMaterialGrid, m_groundMaterialButtons, m_landPaintTypes);
@@ -633,6 +645,26 @@ void CLandscapeTools::rebuildMaterialPalette()
     if(!restore(m_overlayMaterialButtons, previousOverlay)
        && !m_overlayMaterialButtons->buttons().isEmpty())
         m_overlayMaterialButtons->buttons().front()->setChecked(true);
+}
+
+void CLandscapeTools::setUsedTerrainFamilies(
+    const QSet<qint32>& landFamilies, const QSet<qint32>& overlayFamilies)
+{
+    bool changed = false;
+    const auto update = [&changed](QVector<STerrainPaintMaterialChoice>* choices,
+                                   const QSet<qint32>& used) {
+        for(STerrainPaintMaterialChoice& choice : *choices)
+            if(choice.used != used.contains(choice.id))
+            {
+                choice.used = used.contains(choice.id);
+                changed = true;
+            }
+    };
+    update(&m_landPaintTypes, landFamilies);
+    update(&m_underwaterPaintTypes, landFamilies);
+    update(&m_overlayPaintTypes, overlayFamilies);
+    if(changed)
+        rebuildMaterialPalette();
 }
 
 void CLandscapeTools::refreshPaintTerrainTypes()

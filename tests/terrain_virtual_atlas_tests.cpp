@@ -201,6 +201,7 @@ private slots:
     void gradedAlphaIsRefusedWithoutFlattening();
     void workingAtlasGeneratesImmediatelyAndReusesTuple();
     void workingAtlasProtectsUndoSlotsAndRefusesCapacity();
+    void externalUniformFamilyPaintsAndBlendsWithoutAuthoredSlot();
     void selfPaintPreservesExactPackedTileAndRotation();
     void parallelStripesAndBaseCrossResolveExactly();
     void nestedCircleMaterialPairingsResolveExactly();
@@ -575,6 +576,48 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     CTerrainVirtualMaterialField undone;
     QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
     QCOMPARE(undone.material(8,8),qint32(1));
+}
+
+void TerrainVirtualAtlasTests::externalUniformFamilyPaintsAndBlendsWithoutAuthoredSlot()
+{
+    Fixture fixture;
+    const qint32 externalId = 9001;
+    fixture.catalog.declareMaterial(externalId);
+    QMap<qint32, QImage> external;
+    external.insert(externalId, solid(qRgba(170, 170, 165, 255)));
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 17, external);
+    CValidationReport report;
+    const STerrainVirtualTile pure = atlas.resolve(
+        signature(externalId, externalId, externalId, externalId), 3, 4, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(!pure.authored);
+    QVERIFY(pure.generatedIndex >= 0);
+    const STerrainVirtualTile mixed = atlas.resolve(
+        signature(1, externalId, externalId, 1), 3, 4, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(mixed.generatedIndex >= 0);
+
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(2, 2, 1));
+    QVERIFY(field.setMaterial(1, 1, externalId));
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, "GlobalFamily", 64, {1, 1, 1, 1}, &report);
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
+    // The four incident mixed cells are rotations of one canonical tuple and
+    // must deduplicate. The separately resolved pure source remains cached but
+    // is not counted as map usage because this field has no all-external cell.
+    QCOMPARE(finalized.usage.generatedTiles.size(), 1);
+    QVERIFY(atlas.generatedTiles().size() >= 2);
+    for(int y = 0; y < field.tileHeight(); ++y)
+        for(int x = 0; x < field.tileWidth(); ++x)
+        {
+            bool found = false;
+            QCOMPARE(finalizedSignature(finalized,
+                         finalized.packedCells.at(y * field.tileWidth() + x),
+                         &found), field.cellSignature(x, y));
+            QVERIFY(found);
+        }
 }
 
 void TerrainVirtualAtlasTests::preservedLayerSlotsArePinnedAndRemapped()

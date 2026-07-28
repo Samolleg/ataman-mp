@@ -3,6 +3,7 @@
 
 #include <QWidget>
 #include <QImage>
+#include <QSet>
 #include <QVector>
 
 #include "landscape_edit_policy.h"
@@ -29,6 +30,7 @@ struct STerrainPaintMaterialChoice
     int assignedSlots{0};
     bool cornerOnly{false};
     bool contextualStamp{false};
+    bool used{false};
 };
 
 enum class EOverlaySurfaceOperation
@@ -92,6 +94,8 @@ public:
                            const QString& atlasSource = QString(),
                            const QString& atlasSourcePath = QString());
     void setGeneratedAtlasTileCount(int count);
+    void setUsedTerrainFamilies(const QSet<qint32>& landFamilies,
+                                const QSet<qint32>& overlayFamilies);
     bool selectPaintTerrainType(qint32 terrainType);
     bool underwaterFamiliesVisible() const;
     void setUnderwaterFamiliesVisible(bool visible);

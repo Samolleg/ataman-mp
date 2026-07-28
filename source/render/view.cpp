@@ -37,6 +37,7 @@
 #include <QDateTime>
 #include "mob\mob.h"
 #include "resourcemanager.h"
+#include "resource_name.h"
 #include "node.h"
 #include "landscape.h"
 #include "key_manager.h"
@@ -86,6 +87,53 @@
 class CLogic;
 
 namespace {
+CTerrainTransitionCatalog globalMaterialCatalog(
+    const STerrainAtlasProfile& profile,
+    const CTerrainTransitionCatalog& source,
+    ETerrainAtlasLayer layer)
+{
+    Q_UNUSED(layer);
+    return CTerrainAtlasPresetCatalog::globalizedCatalog(profile, source);
+}
+
+QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
+                               const QString& preferredNamespace,
+                               const QSize& requiredSize)
+{
+    QVector<STerrainGlobalMaterialSource> sources = family.sources;
+    std::stable_sort(sources.begin(), sources.end(),
+        [&preferredNamespace](const STerrainGlobalMaterialSource& left,
+                              const STerrainGlobalMaterialSource& right) {
+            const bool leftPreferred = left.mprNamespace.compare(
+                preferredNamespace, Qt::CaseInsensitive) == 0;
+            const bool rightPreferred = right.mprNamespace.compare(
+                preferredNamespace, Qt::CaseInsensitive) == 0;
+            return leftPreferred && !rightPreferred;
+        });
+    for(const STerrainGlobalMaterialSource& source : sources)
+    {
+        const QStringList names = ei::terrainTextureResourceNames(
+            source.mprNamespace, source.textureCount);
+        const int pageIndex = source.uniformSlot / 64;
+        if(pageIndex < 0 || pageIndex >= names.size())
+            continue;
+        QImage page;
+        if(!CTextureList::getInstance()->extractMmpToDxt1(page, names.at(pageIndex))
+           || page.isNull() || page.width() != page.height()
+           || page.width() % 8 != 0)
+            continue;
+        const int tileSize = page.width() / 8;
+        const int localSlot = source.uniformSlot % 64;
+        QImage tile = page.copy((localSlot % 8) * tileSize,
+                                (localSlot / 8) * tileSize,
+                                tileSize, tileSize).mirrored(false, true)
+                      .convertToFormat(QImage::Format_RGBA8888);
+        if(requiredSize.isEmpty() || tile.size() == requiredSize)
+            return tile;
+    }
+    return {};
+}
+
 QVector4D aiGraphLayerColor(int layer)
 {
     static const QVector4D colors[CAiGraphDocument::LayerCount] = {
@@ -6548,6 +6596,61 @@ void CView::rebuildTerrainAutoCatalog()
         }
         m_terrainMaterialRepresentatives.insert(material.id, material.representativeSlot);
     }
+    // The profile loop above remains useful for atlas review metadata, but the
+    // authoring palette and vertex field use game-wide full-tile families.
+    landChoices.clear();
+    underwaterChoices.clear();
+    overlayChoices.clear();
+    m_terrainMaterialRepresentatives.clear();
+    m_terrainGlobalFamilies.clear();
+    m_terrainGlobalMaterialSources.clear();
+    if(m_terrainAtlasAnalysis.usable)
+    {
+        m_terrainAtlasAnalysis.landCatalog = globalMaterialCatalog(
+            m_terrainAtlasProfile, m_terrainAtlasAnalysis.landCatalog,
+            ETerrainAtlasLayer::Land);
+        m_terrainAtlasAnalysis.overlayCatalog = globalMaterialCatalog(
+            m_terrainAtlasProfile, m_terrainAtlasAnalysis.overlayCatalog,
+            ETerrainAtlasLayer::Overlay);
+        m_terrainAtlasAnalysis.overlayCompatibleCatalog = globalMaterialCatalog(
+            m_terrainAtlasProfile, m_terrainAtlasAnalysis.overlayCompatibleCatalog,
+            ETerrainAtlasLayer::Overlay);
+        m_terrainGlobalFamilies =
+            CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+        const QSize requiredSize = m_pTileForm->tileImages().isEmpty()
+            ? QSize() : m_pTileForm->tileImages().front().size();
+        for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
+        {
+            const QImage source = loadGlobalUniformSource(
+                family, mprNamespace, requiredSize);
+            if(source.isNull())
+            {
+                report.add("terrain.global_family_source",
+                    EValidationSeverity::Warning,
+                    "A game-wide material family has no loadable uniform source in the configured resources",
+                    family.name);
+                continue;
+            }
+            m_terrainGlobalMaterialSources.insert(family.id, source);
+            STerrainPaintMaterialChoice choice;
+            choice.id = family.id;
+            choice.name = family.name;
+            choice.thumbnail = source;
+            choice.assignedSlots = family.sources.size();
+            if(family.layer == ETerrainAtlasLayer::Land)
+            {
+                m_terrainAtlasAnalysis.landCatalog.declareMaterial(family.id);
+                m_terrainAtlasAnalysis.overlayCompatibleCatalog.declareMaterial(family.id);
+                landChoices.append(choice);
+            }
+            else
+            {
+                m_terrainAtlasAnalysis.overlayCatalog.declareMaterial(family.id);
+                m_terrainAtlasAnalysis.overlayCompatibleCatalog.declareMaterial(family.id);
+                overlayChoices.append(choice);
+            }
+        }
+    }
     QString status = m_terrainAtlasAnalysis.usable
         ? tr("%1 loaded: %2 land and %3 overlay materials.")
               .arg(m_terrainAtlasAnalysis.templateName)
@@ -6555,7 +6658,7 @@ void CView::rebuildTerrainAutoCatalog()
         : tr("No structurally valid material is available for namespace '%1'. Open Material atlas to assign one; manual atlas tile mode remains available.")
               .arg(mprNamespace);
     if(builtInDefaultActive)
-        status = tr("Default Material atlas loaded: %1 land and %2 overlay materials.")
+        status = tr("Game-wide Material families loaded: %1 ground and %2 overlay families.")
             .arg(landChoices.size()).arg(overlayChoices.size());
     else if(reviewedProfileActive)
         status = m_terrainAtlasProfileSource.kind
@@ -6603,7 +6706,8 @@ void CView::rebuildTerrainAutoCatalog()
             m_authoredTerrainTileImages = m_pTileForm->tileImages();
         m_workingTerrainAtlas.reset(new CTerrainWorkingAtlas(
             m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies(),
-            m_authoredTerrainTileImages, m_terrainSemanticSeed, 512));
+            m_authoredTerrainTileImages, m_terrainSemanticSeed, 512,
+            m_terrainGlobalMaterialSources));
         if(m_landscapeTools)
             m_landscapeTools->setGeneratedAtlasTileCount(0);
         const QVector<STerrainAtlasSlotUsage> currentUsage = terrainAtlasUsage();
@@ -6611,7 +6715,60 @@ void CView::rebuildTerrainAutoCatalog()
             if(currentUsage.at(slot).landCount > 0
                || currentUsage.at(slot).overlayCount > 0)
                 m_workingAtlasProtectedSlots.insert(slot);
+        refreshTerrainFamilyUsage();
     }
+}
+
+void CView::refreshTerrainFamilyUsage()
+{
+    if(!m_landscapeTools || !m_terrainEditAvailable)
+        return;
+    QSet<qint32> land;
+    QSet<qint32> overlay;
+    CTerrainVirtualMaterialField field;
+    const auto collectField = [](const CTerrainVirtualMaterialField& source,
+                                 QSet<qint32>* used) {
+        for(int y = 0; y < source.vertexHeight(); ++y)
+            for(int x = 0; x < source.vertexWidth(); ++x)
+                used->insert(source.material(x, y));
+    };
+    if(m_terrainEdit.copyVirtualMaterialField(ETerrainTileLayer::Land, &field))
+        collectField(field, &land);
+    else
+        for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
+            for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
+            {
+                bool available = false;
+                const quint16 packed = m_terrainEdit.packedTile(
+                    x, y, ETerrainTileLayer::Land, &available);
+                bool found = false;
+                const STerrainTransitionSignature signature = available
+                    ? m_terrainAtlasAnalysis.landCatalog.gridSignatureForPacked(
+                        packed, &found) : STerrainTransitionSignature();
+                if(found)
+                    for(qint32 value : {signature.northWest, signature.northEast,
+                                        signature.southEast, signature.southWest})
+                        land.insert(value);
+            }
+    if(m_terrainEdit.copyVirtualMaterialField(ETerrainTileLayer::Overlay, &field))
+        collectField(field, &overlay);
+    else
+        for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
+            for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
+            {
+                bool available = false;
+                const quint16 packed = m_terrainEdit.packedTile(
+                    x, y, ETerrainTileLayer::Overlay, &available);
+                bool found = false;
+                const STerrainTransitionSignature signature = available
+                    ? m_terrainAtlasAnalysis.overlayCatalog.gridSignatureForPacked(
+                        packed, &found) : STerrainTransitionSignature();
+                if(found)
+                    for(qint32 value : {signature.northWest, signature.northEast,
+                                        signature.southEast, signature.southWest})
+                        overlay.insert(value);
+            }
+    m_landscapeTools->setUsedTerrainFamilies(land, overlay);
 }
 
 QVector<STerrainAtlasSlotUsage> CView::terrainAtlasUsage() const
@@ -7106,7 +7263,8 @@ void CView::finalizeVirtualTerrainAtlas()
     CValidationReport report;
     const QVector<QImage>& authoredImages=m_authoredTerrainTileImages.isEmpty()
         ?m_pTileForm->tileImages():m_authoredTerrainTileImages;
-    CTerrainVirtualAtlas atlas(catalog,authoredImages,m_terrainSemanticSeed);
+    CTerrainVirtualAtlas atlas(catalog, authoredImages, m_terrainSemanticSeed,
+                               m_terrainGlobalMaterialSources);
     const STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,512,
         m_mprDocument.mapInfo().tileTypes,&report,pinned);
@@ -9304,6 +9462,7 @@ void CView::endTileBrushGroup()
                     "Virtual terrain release resolution:\n"+releaseReport.toText());
         }
         m_tilePaintStrokeActive = false;
+        refreshTerrainFamilyUsage();
         if(m_pUndoStack && !m_overlaySurfaceStrokeCommand.isEmpty())
             m_pUndoStack->push(new COverlaySurfacePreviewCommand(
                 this, m_overlaySurfaceStrokeCommand, true));
@@ -9395,6 +9554,7 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
     m_pLand->setDirty(m_terrainEdit.isDirty());
     if(!m_tilePaintStrokeActive)
     {
+        refreshTerrainFamilyUsage();
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
         emit updateMsg(command.semanticAudit.solverMode == QStringLiteral("manual-atlas")

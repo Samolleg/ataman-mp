@@ -340,6 +340,8 @@ private slots:
     void authoredAtlasProfileMatchesZone1Catalog();
     void authoredPresetCatalogCoversKnownAtlasesAndMatchesZone1();
     void authoredPresetCatalogAllEntriesCompile();
+    void globalMaterialFamiliesUseOnlyUniformAnchorsAndMergeVariants();
+    void zone2TransitionOnlyGrassMapsToGlobalUniformFamily();
     void authoredPresetSupportsZone18SharedLayers();
     void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
@@ -5587,6 +5589,93 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 76);
     QCOMPARE(transitionSupportFamilies, 76);
+}
+
+void EnduranceDocumentTests::globalMaterialFamiliesUseOnlyUniformAnchorsAndMergeVariants()
+{
+    CValidationReport report;
+    const QVector<STerrainGlobalMaterialFamily> families =
+        CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(families.size() >= 10);
+    QSet<qint32> identities;
+    const STerrainGlobalMaterialFamily* grass = nullptr;
+    const STerrainGlobalMaterialFamily* stone = nullptr;
+    for(const STerrainGlobalMaterialFamily& family : families)
+    {
+        QVERIFY(family.id > 255);
+        QVERIFY(!identities.contains(family.id));
+        identities.insert(family.id);
+        QVERIFY(!family.name.contains('/'));
+        QVERIFY(!family.sources.isEmpty());
+        for(const STerrainGlobalMaterialSource& source : family.sources)
+        {
+            QVERIFY(source.uniformSlot >= 0);
+            QVERIFY(source.textureCount > source.uniformSlot / 64);
+            QVERIFY(!source.variantName.isEmpty());
+            QCOMPARE(CTerrainAtlasPresetCatalog::materialTheme(
+                         source.variantName), family.name);
+        }
+        if(family.layer == ETerrainAtlasLayer::Land
+           && family.name == QStringLiteral("Grass")) grass = &family;
+        if(family.layer == ETerrainAtlasLayer::Land
+           && family.name == QStringLiteral("Stone")) stone = &family;
+    }
+    QVERIFY(grass);
+    QVERIFY(stone);
+    QVERIFY(grass->sources.size() > 20);
+    QVERIFY(stone->sources.size() > 20);
+    QCOMPARE(grass->id, CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Grass / Dark"), ETerrainAtlasLayer::Land));
+    QCOMPARE(grass->id, CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Grass / Fresh"), ETerrainAtlasLayer::Land));
+    QVERIFY(grass->id != CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Stone / Gray"), ETerrainAtlasLayer::Land));
+}
+
+void EnduranceDocumentTests::zone2TransitionOnlyGrassMapsToGlobalUniformFamily()
+{
+    CValidationReport report;
+    const STerrainAtlasProfile profile = CTerrainAtlasPresetCatalog::exactProfile(
+        QStringLiteral("Zone2"),
+        QByteArrayLiteral("ed0bc69bd4abbb8f9f90fab44574a24b0b806521b6bc36501eea7c5add258612"),
+        512, &report);
+    QVERIFY2(profile.approved, qPrintable(report.toText()));
+    const STerrainAtlasAnalysis local = profile.approvedAnalysis(&report);
+    QVERIFY2(local.usable, qPrintable(report.toText()));
+    const CTerrainTransitionCatalog global =
+        CTerrainAtlasPresetCatalog::globalizedCatalog(
+            profile, local.landCatalog);
+    const qint32 grassId = CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Grass"), ETerrainAtlasLayer::Land);
+    bool sawTransitionOnlyIrregular = false;
+    for(int slot = 0; slot < 512; ++slot)
+    {
+        SMprPackedTile packed;
+        packed.atlasIndex = quint8(slot / 64);
+        packed.tileIndex = quint8(slot % 64);
+        bool localFound = false;
+        const STerrainTransitionSignature before =
+            local.landCatalog.gridSignatureForPacked(packed.encode(), &localFound);
+        if(!localFound) continue;
+        const QVector<qint32> localCorners = {
+            before.northWest, before.northEast,
+            before.southEast, before.southWest};
+        if(!localCorners.contains(9)) continue;
+        sawTransitionOnlyIrregular = true;
+        bool globalFound = false;
+        const STerrainTransitionSignature after =
+            global.gridSignatureForPacked(packed.encode(), &globalFound);
+        QVERIFY(globalFound);
+        const QVector<qint32> globalCorners = {
+            after.northWest, after.northEast,
+            after.southEast, after.southWest};
+        QVERIFY(!globalCorners.contains(9));
+        QVERIFY(globalCorners.contains(grassId));
+        for(qint32 corner : globalCorners) QVERIFY(corner > 255);
+    }
+    QVERIFY(sawTransitionOnlyIrregular);
+    QVERIFY(global.hasMaterial(grassId));
 }
 
 void EnduranceDocumentTests::materialAtlasStoreLoadsOnlyExplicitLocalOverrides()

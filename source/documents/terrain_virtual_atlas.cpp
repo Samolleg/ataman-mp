@@ -187,7 +187,8 @@ bool CTerrainEditModel::copyVirtualMaterialField(
 
 CTerrainVirtualAtlas::CTerrainVirtualAtlas(
     const CTerrainTransitionCatalog& catalog,
-    const QVector<QImage>& authoredTiles, quint32 distributionSeed)
+    const QVector<QImage>& authoredTiles, quint32 distributionSeed,
+    const QMap<qint32, QImage>& externalMaterialSources)
     : m_catalog(catalog), m_authoredTiles(authoredTiles),
       m_distributionSeed(distributionSeed)
 {
@@ -227,6 +228,18 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
                 m_materialSourceSlots.insert(material,slot);
             }
         }
+    }
+    for(auto source = externalMaterialSources.constBegin();
+        source != externalMaterialSources.constEnd(); ++source)
+    {
+        if(source.value().isNull() || source.value().size() != tileSize)
+            continue;
+        m_materialSources.insert(source.key(), source.value().convertToFormat(
+            QImage::Format_RGBA8888));
+        // External uniform anchors have no slot in the opened map. They remain
+        // logical sources until a pure or mixed tuple is realized into the
+        // working cache/final atlas.
+        m_materialSourceSlots.remove(source.key());
     }
     m_valid = true;
 }
@@ -714,13 +727,15 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
 CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     const CTerrainTransitionCatalog& authoredCatalog,
     const QVector<QImage>& authoredTiles, quint32 distributionSeed,
-    int capacityLimit)
+    int capacityLimit,
+    const QMap<qint32, QImage>& externalMaterialSources)
     : m_authoredCatalog(authoredCatalog), m_workingCatalog(authoredCatalog),
       m_authoredImages(authoredTiles), m_workingImages(authoredTiles),
       m_capacityLimit(qMin(capacityLimit, authoredTiles.size()))
 {
     m_resolver.reset(new CTerrainVirtualAtlas(
-        m_authoredCatalog, m_authoredImages, distributionSeed));
+        m_authoredCatalog, m_authoredImages, distributionSeed,
+        externalMaterialSources));
     for(int slot = 0; slot < m_capacityLimit; ++slot)
     {
         const QPair<int, int> key(0, slot);
