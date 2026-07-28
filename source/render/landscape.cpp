@@ -19,6 +19,7 @@
 #include "staged_save_validator.h"
 #include "log.h"
 #include "mpr_document.h"
+#include "terrain_edit_model.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -31,6 +32,7 @@ CLandscape* CLandscape::getInstance()
 
 void CLandscape::unloadMpr()
 {
+    m_canonicalTerrain = nullptr;
     for (auto& xSec: m_aSector)
     {
         for(auto& ySec: xSec)
@@ -44,7 +46,8 @@ void CLandscape::unloadMpr()
 }
 
 CLandscape::CLandscape():
-  m_bDirty(false)
+  m_bDirty(false),
+  m_canonicalTerrain(nullptr)
 {
     m_aSector.clear();
     m_aAnimTile.clear();
@@ -441,10 +444,18 @@ void CLandscape::projectPosition(CNode* pNode)
     QVector3D landPos(pNode->position());
     if(ei::usesTerrainRelativeMapObjectHeight(pNode->nodeType()))
     {
-        // projectPt() adds the sampled terrain height to the input Z. Sample
-        // from zero here, then apply the MOB's terrain-relative Z exactly once.
-        landPos.setZ(0.0f);
-        projectPt(landPos);
+        bool sampled = false;
+        if(m_canonicalTerrain)
+        {
+            landPos.setZ(m_canonicalTerrain->terrainSurfaceHeight(
+                landPos.x(), landPos.y(), &sampled));
+        }
+        if(!sampled)
+        {
+            // Compatibility fallback for legacy/non-canonical loads only.
+            landPos.setZ(0.0f);
+            projectPt(landPos);
+        }
         landPos = ei::resolveTerrainRelativeMapObjectPosition(
             pNode->nodeType(), pNode->position(), landPos);
     }

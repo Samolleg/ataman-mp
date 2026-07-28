@@ -1952,6 +1952,137 @@ float CTerrainEditModel::navigationHeightSample(int aiTileX, int aiTileY,
     return raw * m_maxZ / 65535.0f;
 }
 
+float CTerrainEditModel::terrainSurfaceHeight(float worldX, float worldY,
+                                              bool* available) const
+{
+    if(available)
+        *available = false;
+    if(m_vertexCountX < 2 || m_vertexCountY < 2 || m_heights.isEmpty()
+       || !std::isfinite(worldX) || !std::isfinite(worldY))
+        return 0.0f;
+
+    const float x = qBound(0.0f, worldX, float(m_vertexCountX - 2));
+    const float y = qBound(0.0f, worldY, float(m_vertexCountY - 2));
+    int cellX = int(std::nearbyint(double(x)));
+    int cellY = int(std::nearbyint(double(y)));
+
+    struct SurfaceVertex
+    {
+        double x{0.0};
+        double y{0.0};
+        double z{0.0};
+    };
+    const auto vertex = [this](int vx, int vy, SurfaceVertex* out) {
+        if(!out || vx < 0 || vy < 0 || vx >= m_vertexCountX || vy >= m_vertexCountY)
+            return false;
+        const int index = globalIndex(vx, vy);
+        out->x = double(vx) + double(m_xOffsets.at(index)) / 252.0;
+        out->y = double(vy) + double(m_yOffsets.at(index)) / 252.0;
+        out->z = double(m_heights.at(index)) * double(m_maxZ) / 65534.0;
+        return true;
+    };
+    const auto orientation = [](const SurfaceVertex& start,
+                                const SurfaceVertex& end,
+                                double pointX, double pointY) {
+        return (end.x - start.x) * (pointY - start.y)
+            - (end.y - start.y) * (pointX - start.x);
+    };
+    const auto planeHeight = [](double sampleX, double sampleY,
+                                const SurfaceVertex& first,
+                                const SurfaceVertex& second,
+                                const SurfaceVertex& third) {
+        const double e1 = second.x - first.x;
+        const double e2 = second.y - first.y;
+        const double e4 = third.x - first.x;
+        const double e5 = third.y - first.y;
+        const double c = e1 * e5 - e2 * e4;
+        if(std::fabs(c) < 0.01)
+            return (first.z + second.z + third.z) / 3.0;
+        const double e3 = second.z - first.z;
+        const double e6 = third.z - first.z;
+        const double a = e2 * e6 - e3 * e5;
+        const double b = e3 * e4 - e1 * e6;
+        const double d = -(a * first.x + b * first.y + c * first.z);
+        return -(a * sampleX + b * sampleY + d) / c;
+    };
+
+    for(int attempt = 0; attempt < 10; ++attempt)
+    {
+        SurfaceVertex upperLeft;
+        SurfaceVertex upperRight;
+        SurfaceVertex lowerLeft;
+        SurfaceVertex lowerRight;
+        if(!vertex(cellX, cellY, &upperLeft)
+           || !vertex(cellX + 1, cellY + 1, &lowerRight))
+            return 0.0f;
+        const bool hasUpperRight = vertex(cellX + 1, cellY, &upperRight);
+        const bool hasLowerLeft = vertex(cellX, cellY + 1, &lowerLeft);
+        if(hasUpperRight && !hasLowerLeft)
+        {
+            if(available)
+                *available = true;
+            return float(planeHeight(x, y, upperLeft, upperRight, lowerRight));
+        }
+        if(!hasUpperRight && hasLowerLeft)
+        {
+            if(available)
+                *available = true;
+            return float(planeHeight(x, y, upperLeft, lowerRight, lowerLeft));
+        }
+        if(!hasUpperRight || !hasLowerLeft)
+            return 0.0f;
+
+        if(orientation(upperRight, lowerRight, upperLeft.x, upperLeft.y) <= 0.0
+           || orientation(lowerLeft, upperLeft, lowerRight.x, lowerRight.y) <= 0.0)
+        {
+            if(available)
+                *available = true;
+            return float((lowerLeft.z + lowerRight.z) * 0.5);
+        }
+
+        const double diagonalSide = (double(x) - upperLeft.x)
+            * (lowerRight.y - upperLeft.y)
+            - (double(y) - upperLeft.y) * (lowerRight.x - upperLeft.x);
+        if(diagonalSide > 0.0)
+        {
+            if(attempt < 9)
+            {
+                if(orientation(upperRight, upperLeft, x, y) > 0.0)
+                {
+                    --cellY;
+                    continue;
+                }
+                if(orientation(upperRight, lowerRight, x, y) < 0.0)
+                {
+                    ++cellX;
+                    continue;
+                }
+            }
+            if(available)
+                *available = true;
+            return float(planeHeight(x, y, upperLeft, upperRight, lowerRight));
+        }
+
+        if(attempt < 9)
+        {
+            if(orientation(lowerLeft, upperLeft, x, y) < 0.0)
+            {
+                --cellX;
+                continue;
+            }
+            if(orientation(lowerLeft, lowerRight, x, y) > 0.0)
+            {
+                ++cellY;
+                continue;
+            }
+        }
+        if(available)
+            *available = true;
+        return float(planeHeight(x, y, upperLeft, lowerRight, lowerLeft));
+    }
+    return 0.0f;
+}
+
 STerrainVerticalScaleCommand CTerrainEditModel::makeVerticalScale(
     float newMaxZ, ETerrainVerticalScalePolicy policy, bool allowClamping,
     CValidationReport* report) const

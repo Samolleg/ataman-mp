@@ -365,6 +365,11 @@ public:
                                  ETerrainTileLayer layer,
                                  bool* available = nullptr,
                                  bool requireActiveOverlay = true) const;
+    // Samples the displaced main-terrain surface using the runtime cell
+    // selection and triangle rules. This is intentionally distinct from the
+    // navigation half-cell sampler and from viewport ray picking.
+    float terrainSurfaceHeight(float worldX, float worldY,
+                               bool* available = nullptr) const;
     qint16 overlayMaterialIndex(int globalTileX, int globalTileY,
                                 bool* available = nullptr) const;
     SOverlaySurfaceCommand makeOverlayActivation(

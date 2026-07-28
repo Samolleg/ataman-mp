@@ -19,6 +19,7 @@
 
 class CSector;
 class CTile;
+class CTerrainEditModel;
 
 struct SMapHeader
 {
@@ -72,6 +73,8 @@ public:
     bool projectPt(QVector<QVector3D>& aPoint);
     void projectPositions(QList<CNode*>& aNode);
     void projectPosition(CNode* pNode);
+    void setCanonicalTerrainModel(const CTerrainEditModel* model)
+    { m_canonicalTerrain = model; }
     bool pickTile(QVector3D& point, CTile*& pTileOut, STileLocation& tileLoc, bool bLand = true);
     void setTile(const QMap<STileLocation, STileInfo>& arrTileInfo);
     const QFileInfo& filePath() {return m_filePath;}
@@ -118,6 +121,7 @@ private:
     QByteArray m_originalMprData;
     QVector<int> m_arrIncorectTiles;
     bool m_bDirty;
+    const CTerrainEditModel* m_canonicalTerrain;
 };
 
 

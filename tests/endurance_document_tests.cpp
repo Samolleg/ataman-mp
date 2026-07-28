@@ -4,6 +4,7 @@
 #include <QTemporaryFile>
 #include <QTemporaryDir>
 #include <QTextCodec>
+#include <QtEndian>
 
 #include <limits>
 
@@ -260,6 +261,20 @@ QByteArray syntheticLandSector(quint16 height)
     return bytes;
 }
 
+void setSyntheticLandVertex(QByteArray* sector, int x, int y,
+                            qint8 xOffset, qint8 yOffset, quint16 height)
+{
+    Q_ASSERT(sector);
+    Q_ASSERT(x >= 0 && x < 33 && y >= 0 && y < 33);
+    const int offset = 5 + (y * 33 + x) * 8;
+    (*sector)[offset] = char(xOffset);
+    (*sector)[offset + 1] = char(yOffset);
+    uchar encoded[2];
+    qToLittleEndian<quint16>(height, encoded);
+    (*sector)[offset + 2] = char(encoded[0]);
+    (*sector)[offset + 3] = char(encoded[1]);
+}
+
 quint32 testReadU32(const QByteArray& bytes, int offset)
 {
     QDataStream stream(bytes.mid(offset, 4));
@@ -425,6 +440,7 @@ private slots:
     void terrainVerticalScalePoliciesAreUndoableAndExplicit();
     void globalTerrainHeightOperationsRejectInvalidRanges();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
+    void terrainSurfaceSamplingMatchesRuntimeCellSelection();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
@@ -2652,6 +2668,53 @@ void EnduranceDocumentTests::globalTerrainHeightOperationsRejectInvalidRanges()
     QVERIFY(terrain.apply(saturated, true, nullptr, true));
     QCOMPARE(terrain.heightRange().minimumRaw, quint16(65535));
     QCOMPARE(terrain.heightRange().maximumRaw, quint16(65535));
+}
+
+void EnduranceDocumentTests::terrainSurfaceSamplingMatchesRuntimeCellSelection()
+{
+    CTerrainEditModel flat;
+    QVERIFY(flat.loadSources(1, 1, 100.0f,
+                             twoSectorTerrain(32767).mid(0, 1)));
+    bool available = false;
+    QCOMPARE(flat.terrainSurfaceHeight(4.25f, 7.75f, &available), 50.0f);
+    QVERIFY(available);
+
+    QByteArray triangleSector = syntheticLandSector(0);
+    setSyntheticLandVertex(&triangleSector, 1, 0, 0, 0, 65534);
+    STerrainSectorSource triangleSource;
+    triangleSource.sectorX = 0;
+    triangleSource.sectorY = 0;
+    triangleSource.memberName = "triangle.SEC";
+    triangleSource.payload = triangleSector;
+    CTerrainEditModel triangle;
+    QVERIFY(triangle.loadSources(1, 1, 100.0f,
+                                 QVector<STerrainSectorSource>() << triangleSource));
+    const float triangleHeight = triangle.terrainSurfaceHeight(0.75f, 0.25f,
+                                                                &available);
+    QVERIFY(available);
+    QVERIFY(qAbs(triangleHeight - 50.0f) < 0.0001f);
+
+    // Nearest-cell selection initially starts in cell 1 for this point. The
+    // runtime displaced-cell correction must walk back into cell 0 instead of
+    // extrapolating the elevated neighboring cell's triangle.
+    QByteArray correctedSector = syntheticLandSector(0);
+    setSyntheticLandVertex(&correctedSector, 2, 1, 0, 0, 65534);
+    setSyntheticLandVertex(&correctedSector, 1, 2, 0, 0, 65534);
+    setSyntheticLandVertex(&correctedSector, 2, 2, 0, 0, 65534);
+    STerrainSectorSource correctedSource;
+    correctedSource.sectorX = 0;
+    correctedSource.sectorY = 0;
+    correctedSource.memberName = "corrected.SEC";
+    correctedSource.payload = correctedSector;
+    CTerrainEditModel corrected;
+    QVERIFY(corrected.loadSources(1, 1, 100.0f,
+                                  QVector<STerrainSectorSource>() << correctedSource));
+    QCOMPARE(corrected.terrainSurfaceHeight(0.6f, 0.6f, &available), 0.0f);
+    QVERIFY(available);
+
+    // Client terrain queries clamp to the final complete cell.
+    QCOMPARE(flat.terrainSurfaceHeight(-20.0f, 200.0f, &available), 50.0f);
+    QVERIFY(available);
 }
 
 void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()

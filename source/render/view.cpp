@@ -5788,6 +5788,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
         && !canonicalReport.hasErrors()
         && m_terrainEdit.load(m_mprDocument, &canonicalReport)
         && !canonicalReport.hasErrors();
+    m_pLand->setCanonicalTerrainModel(
+        m_terrainEditAvailable ? &m_terrainEdit : nullptr);
     if(!m_terrainEditAvailable)
     {
         ei::log(eLogWarning, "Canonical terrain editing disabled for this MPR:\n"
@@ -5860,6 +5862,7 @@ void CView::unloadLand(bool promptForSave)
 
     m_mprModifyTimer->stop();
     m_overlayAnimationTimer.invalidate();
+    m_pLand->setCanonicalTerrainModel(nullptr);
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_terrainEdit = CTerrainEditModel();
