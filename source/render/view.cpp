@@ -7827,6 +7827,7 @@ void CView::saveAllMob()
     progress.setMinimumDuration(250);
     progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
                              & ~Qt::WindowCloseButtonHint);
+    CMob* failedMob = nullptr;
     for(int index = 0; index < dirtyMobs.size(); ++index)
     {
         CMob* mob = dirtyMobs.at(index);
@@ -7839,9 +7840,18 @@ void CView::saveAllMob()
             QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         };
         if(!mob->save(updateProgress))
+        {
+            failedMob = mob;
             break;
+        }
     }
     progress.setValue(progress.maximum());
+    progress.close();
+    if(failedMob)
+        QMessageBox::critical(this, tr("Endurance safe save"),
+            failedMob->lastSaveError().isEmpty()
+                ? tr("The MOB could not be saved safely.")
+                : failedMob->lastSaveError());
     if(m_activeMob && !m_activeMob->isDirty())
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
@@ -7866,6 +7876,12 @@ bool CView::saveMobDocument(CMob* mob, const QFileInfo& destination)
     };
     const bool saved = mob->saveAs(destination, updateProgress);
     progress.setValue(progress.maximum());
+    progress.close();
+    if(!saved)
+        QMessageBox::critical(this, tr("Endurance safe save"),
+            mob->lastSaveError().isEmpty()
+                ? tr("The MOB could not be saved safely.")
+                : mob->lastSaveError());
     return saved;
 }
 

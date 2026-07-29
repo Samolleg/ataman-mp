@@ -214,6 +214,8 @@ public:
     const QVector<SMobObjectSnapshot>& objects() const { return m_objects; }
     const QVector<SMobIdRangeSnapshot>& idRanges() const { return m_idRanges; }
     bool hasSection(quint32 type) const;
+    bool ensureEmptyObjectSection(QByteArray* output,
+                                  CValidationReport* report = nullptr) const;
     bool isQuestMob() const { return m_questMob; }
     const QVector<quint32>& duplicateIds() const { return m_duplicateIds; }
     bool applyTransaction(const CMobEditTransaction& transaction,

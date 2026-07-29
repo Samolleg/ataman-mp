@@ -728,6 +728,11 @@ SMobSaveCommitResult commitGeneratedMob(
             + reopenReport.toText().trimmed();
         return result;
     }
+    if(!reopened.hasSection(0xB000))
+    {
+        result.error = "The generated MOB has no OBJECT_SECTION and cannot accept pasted objects.";
+        return result;
+    }
 
     const QFileInfo destination(request.destination.absoluteFilePath());
     const bool existed = destination.exists();

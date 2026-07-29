@@ -39,6 +39,7 @@ CMob::CMob():
   ,m_pProgress(nullptr)
   ,m_scriptKey(0)
   ,m_hasVssSection(false)
+  ,m_hasObjectSection(false)
   ,m_bDirty(false)
   ,m_activeRangeId(0)
 {
@@ -270,6 +271,7 @@ bool CMob::deserialize(QByteArray data)
         //object section
         else if(parser.isNextTag("OBJECT_SECTION"))
         {
+            m_hasObjectSection = true;
             step = step/3;
             m_pProgress->update(step);
             uint objSecLen = parser.nodeLen();
@@ -1520,7 +1522,7 @@ void CMob::serializeMob(QByteArray& data, bool writeLog)
         parser.endSection(); //"DIRICTORY_ELEMENTS"
     }
 
-    if(!m_aNode.empty())
+    if(m_hasObjectSection || !m_aNode.empty())
     {
         bool bSaveSelect = false; //todo: save selected objects with file->save selected objects only
 
@@ -1717,6 +1719,23 @@ bool CMob::buildRawObjectSequenceCandidate(
        !editedDocument.loadBytes(currentProjection, "edited-ui-projection.mob", report))
         return false;
 
+    QByteArray structuralBaselineSource = m_originalData;
+    QByteArray structuralBaselineClean = m_cleanProjection;
+    bool insertedEmptyObjectSection = false;
+    if(!sourceDocument.hasSection(0xB000) || !cleanDocument.hasSection(0xB000))
+    {
+        if(!sourceDocument.objects().isEmpty() || !cleanDocument.objects().isEmpty())
+            return false;
+        if(!sourceDocument.ensureEmptyObjectSection(&structuralBaselineSource, report)
+           || !cleanDocument.ensureEmptyObjectSection(&structuralBaselineClean, report)
+           || !sourceDocument.loadBytes(structuralBaselineSource,
+                                        m_filePath.filePath(), report)
+           || !cleanDocument.loadBytes(structuralBaselineClean,
+                                       "clean-ui-projection.mob", report))
+            return false;
+        insertedEmptyObjectSection = true;
+    }
+
     QMap<QString, const SMobObjectSnapshot*> cleanBySourcePath;
     const CMobSemanticDiff alignment = CMobSemanticDiff::compare(sourceDocument, cleanDocument);
     for(const SMobDiffEntry& entry : alignment.entries())
@@ -1733,7 +1752,7 @@ bool CMob::buildRawObjectSequenceCandidate(
         return false;
 
     const QByteArray sourceDocumentSha256 = QCryptographicHash::hash(
-        m_originalData, QCryptographicHash::Sha256);
+        structuralBaselineSource, QCryptographicHash::Sha256);
     QVector<QByteArray> sourceSubtrees;
     QVector<QByteArray> sourceHashes;
     QVector<QByteArray> cleanSubtrees;
@@ -1838,14 +1857,17 @@ bool CMob::buildRawObjectSequenceCandidate(
         return false;
     structuralSource = reconciledSource;
     structuralClean = reconciledClean;
-    if(structuralSource == m_originalData && structuralClean == m_cleanProjection)
+    if(structuralSource == structuralBaselineSource
+       && structuralClean == structuralBaselineClean)
         return false;
 
     if(currentProjection == structuralClean ||
        (m_aNode.isEmpty() && editedDocument.objects().isEmpty()))
     {
         *candidate = structuralSource;
-        *saveClass = "RAW_OBJECT_SEQUENCE";
+        *saveClass = insertedEmptyObjectSection
+            ? "INSERT_EMPTY_OBJECT_SECTION+RAW_OBJECT_SEQUENCE"
+            : "RAW_OBJECT_SEQUENCE";
     }
     else
     {
@@ -1854,7 +1876,9 @@ bool CMob::buildRawObjectSequenceCandidate(
                currentProjection, transaction, candidate, report) ||
            !transaction->validatedChangedSaveClass(saveClass))
             return false;
-        *saveClass = "RAW_OBJECT_SEQUENCE+" + *saveClass;
+        *saveClass = (insertedEmptyObjectSection
+            ? "INSERT_EMPTY_OBJECT_SECTION+RAW_OBJECT_SEQUENCE+"
+            : "RAW_OBJECT_SEQUENCE+") + *saveClass;
     }
 
     CMobDocument candidateDocument;
@@ -2088,6 +2112,7 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
 bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
 {
     const QString filePath = path.filePath();
+    m_lastSaveError.clear();
     try
     {
         QByteArray data;
@@ -2098,13 +2123,13 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
         {
             ei::log(eLogFatal, QString("Refusing dirty MOB save because the edit could not be mapped safely to the original raw tree path:%1")
                 .arg(filePath));
-            QMessageBox::critical(nullptr, "Lossless MOB save not available for this edit",
+            m_lastSaveError = QStringLiteral(
                 "Endurance could not map this complete edit set onto verified raw MOB records. "
                 "Properties, transforms, same-MOB copy/paste, deletion, and known patrol/look-point "
                 "changes save automatically. A newly created object requires a selected same-type raw "
                 "template, and unrecognized structural records remain protected.\n\n"
                 "No destination or backup file was changed. Endurance will not fall back to the legacy "
-                "rebuilding serializer.\n\n" + candidateReport.toText().trimmed());
+                "rebuilding serializer.\n\n") + candidateReport.toText().trimmed();
             return false;
         }
 
@@ -2114,9 +2139,9 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
         {
             ei::log(eLogFatal, QString("Refusing MOB save because staged validation failed path:%1 error:%2")
                 .arg(filePath, validation.error));
-            QMessageBox::critical(nullptr, "Endurance safe save",
-                QString("The staged MOB failed fresh validation, so the destination was not replaced.\n\n%1")
-                    .arg(validation.error));
+            m_lastSaveError = QString(
+                "The staged MOB failed fresh validation, so the destination was not replaced.\n\n%1")
+                    .arg(validation.error);
             return false;
         }
         ei::log(eLogInfo, QString("Staged MOB validation passed path:%1 size:%2 sha256:%3")
@@ -2130,9 +2155,9 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
             {
                 ei::log(eLogFatal, QString("Refusing MOB save because pre-save backup failed:%1 error:%2")
                     .arg(filePath, saveBackup.error));
-                QMessageBox::critical(nullptr, "Endurance safe save",
-                    QString("The pre-save backup failed, so the source file was not replaced.\n\n%1")
-                        .arg(saveBackup.error));
+                m_lastSaveError = QString(
+                    "The pre-save backup failed, so the source file was not replaced.\n\n%1")
+                        .arg(saveBackup.error);
                 return false;
             }
         }
@@ -2142,10 +2167,15 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
         if(!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
         {
             ei::log(eLogFatal, QString("Atomic MOB save failed:%1 error:%2").arg(filePath, file.errorString()));
-            QMessageBox::critical(nullptr, "Endurance safe save", "Atomic save failed. The source file was not replaced.");
+            m_lastSaveError = QStringLiteral(
+                "Atomic save failed. The source file was not replaced.");
             return false;
         }
         m_originalData = data;
+        CMobDocument savedDocument;
+        CValidationReport savedReport;
+        if(savedDocument.loadBytes(data, filePath, &savedReport))
+            m_hasObjectSection = savedDocument.hasSection(0xB000);
         captureCleanProjection();
         if(progress) progress("Rebinding saved MOB provenance...", 4, 5);
         if(!rebindRawObjectProvenance())
@@ -2157,8 +2187,8 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
     catch (const std::exception& ex)
     {
         ei::log(eLogFatal, ex.what());
-        QMessageBox::critical(nullptr, "Endurance safe save",
-            QString("The MOB save failed before replacement.\n\n%1").arg(ex.what()));
+        m_lastSaveError = QString("The MOB save failed before replacement.\n\n%1")
+            .arg(ex.what());
         return false;
     }
 }

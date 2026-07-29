@@ -2197,6 +2197,84 @@ bool CMobDocument::hasSection(quint32 type) const
     return !matches.isEmpty();
 }
 
+bool CMobDocument::ensureEmptyObjectSection(QByteArray* output,
+                                            CValidationReport* report) const
+{
+    if(!output)
+        return false;
+    output->clear();
+    if(hasSection(0xB000))
+    {
+        *output = m_originalBytes;
+        return true;
+    }
+    if(!m_objects.isEmpty())
+    {
+        if(report)
+            report->add("mob.object_section.nonempty", EValidationSeverity::Error,
+                        "A MOB with parsed objects cannot be upgraded as an empty object container.");
+        return false;
+    }
+
+    int rootIndex = -1;
+    for(int index = 0; index < m_sections.size(); ++index)
+    {
+        if(m_sections.at(index).type != 0xA000)
+            continue;
+        if(rootIndex >= 0)
+        {
+            if(report)
+                report->add("mob.object_section.multiple_roots", EValidationSeverity::Error,
+                            "The MOB contains more than one OBJECT_DB_FILE root.");
+            return false;
+        }
+        rootIndex = index;
+    }
+    if(rootIndex < 0)
+    {
+        if(report)
+            report->add("mob.object_section.missing_root", EValidationSeverity::Error,
+                        "The MOB has no OBJECT_DB_FILE root for an empty object container.");
+        return false;
+    }
+
+    const SMobSection& root = m_sections.at(rootIndex);
+    if(root.rawBytes.size() < 8 || root.declaredLength != quint32(root.rawBytes.size())
+       || quint64(root.rawBytes.size()) + 8u > quint64(UINT_MAX))
+    {
+        if(report)
+            report->add("mob.object_section.root_shape", EValidationSeverity::Error,
+                        "The OBJECT_DB_FILE root is not canonical enough for a safe structural insertion.",
+                        root.path);
+        return false;
+    }
+
+    QByteArray upgradedRoot;
+    appendU32(upgradedRoot, root.type);
+    appendU32(upgradedRoot, root.declaredLength + 8u);
+    upgradedRoot.append(root.rawBytes.mid(8));
+    appendU32(upgradedRoot, 0xB000);
+    appendU32(upgradedRoot, 8u);
+    for(int index = 0; index < m_sections.size(); ++index)
+        output->append(index == rootIndex ? upgradedRoot : m_sections.at(index).rawBytes);
+
+    CMobDocument reopened;
+    CValidationReport reopenReport;
+    if(!reopened.loadBytes(*output, QStringLiteral("empty-object-section-candidate.mob"),
+                           &reopenReport)
+       || !reopened.hasSection(0xB000) || !reopened.objects().isEmpty())
+    {
+        if(report)
+            *report = reopenReport;
+        output->clear();
+        return false;
+    }
+    if(report)
+        report->add("mob.object_section.inserted", EValidationSeverity::Info,
+                    "Inserted an empty OBJECT_SECTION into an object-free MOB.");
+    return true;
+}
+
 bool CMobDocument::embeddedAiGraph(QByteArray* graph,
                                    CValidationReport* report) const
 {

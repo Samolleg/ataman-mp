@@ -651,7 +651,8 @@ MainWindow::MainWindow(QWidget* parent) :
             }
             if(proceed && saveDirty)
                 for(CMob* dirtyMob : dirty)
-                    if(!dirtyMob->save()) { proceed = false; break; }
+                    if(!m_pView->saveMobDocument(dirtyMob, dirtyMob->filePath()))
+                    { proceed = false; break; }
             if(proceed)
                 for(CMob* selectedMob : selectedMobs)
                     if(selectedMob && m_pView->mobs().contains(selectedMob))
@@ -6822,6 +6823,7 @@ void MainWindow::on_actionNew_MOB_triggered()
 
         CMob generated;
         generated.setQuestMob(supplemental);
+        generated.ensureObjectSection();
         generated.setRanges(!supplemental, ranges);
         if(copyScript->isChecked() && source)
             generated.setScript(sourceState.script);
@@ -6860,6 +6862,7 @@ void MainWindow::on_actionNew_MOB_triggered()
            || candidateReport.hasErrors()
            || candidateDocument.isQuestMob() != supplemental
            || !candidateDocument.objects().isEmpty()
+           || !candidateDocument.hasSection(0xB000)
            || candidateDocument.hasEmbeddedAiGraph()
            || candidateDocument.hasSection(0x1E00))
         {

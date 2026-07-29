@@ -496,6 +496,7 @@ private slots:
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
+    void emptyGeneratedMobCanAcceptFirstRawObject();
     void generatedMobCommitIsValidatedBackedUpAndAtomic();
 };
 
@@ -5810,6 +5811,48 @@ void EnduranceDocumentTests::stagedMobIsReopenedWithoutCreatingDestination()
     QCOMPARE(QDir(dir.path()).entryList(QDir::Files).size(), 0);
 }
 
+void EnduranceDocumentTests::emptyGeneratedMobCanAcceptFirstRawObject()
+{
+    const QByteArray range = section(0xFF02,
+        section(0xFF05, u32(1000)) + section(0xFF06, u32(1999)));
+    const QByteArray unknownTopLevel = section(0x31415926, QByteArray(32, '\x5a'));
+    const QByteArray legacyEmpty = validMob(
+        section(0xD000) + section(0xFF00, range)) + unknownTopLevel;
+
+    CMobDocument document;
+    CValidationReport report;
+    QVERIFY2(document.loadBytes(legacyEmpty, "legacy-empty-generated.mob", &report),
+             qPrintable(report.toText()));
+    QVERIFY(document.objects().isEmpty());
+    QVERIFY(!document.hasSection(0xB000));
+
+    QByteArray upgraded;
+    QVERIFY2(document.ensureEmptyObjectSection(&upgraded, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(upgraded, validMob(section(0xD000) + section(0xFF00, range)
+                                + section(0xB000)) + unknownTopLevel);
+
+    CMobDocument reopened;
+    QVERIFY2(reopened.loadBytes(upgraded, "upgraded-empty-generated.mob", &report),
+             qPrintable(report.toText()));
+    QVERIFY(reopened.hasSection(0xB000));
+    QCOMPARE(reopened.objects().size(), 0);
+
+    const QByteArray donor = object(334, "tree");
+    const QByteArray donorHash = QCryptographicHash::hash(
+        donor, QCryptographicHash::Sha256);
+    QByteArray withFirstObject;
+    QVERIFY2(reopened.rebuildObjectSequenceFromRaw(
+        QVector<QByteArray>() << donor, QVector<QByteArray>() << donorHash,
+        &withFirstObject, &report), qPrintable(report.toText()));
+    CMobDocument finalDocument;
+    QVERIFY2(finalDocument.loadBytes(withFirstObject, "first-object.mob", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(finalDocument.objects().size(), 1);
+    QCOMPARE(finalDocument.objects().first().nid, quint32(334));
+    QCOMPARE(withFirstObject.right(unknownTopLevel.size()), unknownTopLevel);
+}
+
 void EnduranceDocumentTests::generatedMobCommitIsValidatedBackedUpAndAtomic()
 {
     QTemporaryDir dir;
@@ -5819,12 +5862,19 @@ void EnduranceDocumentTests::generatedMobCommitIsValidatedBackedUpAndAtomic()
 
     const QByteArray range = section(0xFF02,
         section(0xFF05, u32(1000)) + section(0xFF06, u32(1999)));
-    const QByteArray candidate = validMob(
+    const QByteArray incompleteCandidate = validMob(
         section(0xD000) + section(0xFF00, range));
+    const QByteArray candidate = validMob(
+        section(0xD000) + section(0xFF00, range) + section(0xB000));
 
     SMobSaveCommitRequest request;
     request.destination = destination;
     request.backupRootOverride = backupRoot.absoluteFilePath();
+    const SMobSaveCommitResult incomplete = commitGeneratedMob(
+        incompleteCandidate, request);
+    QVERIFY(!incomplete.success);
+    QVERIFY(incomplete.error.contains(QStringLiteral("OBJECT_SECTION")));
+    QVERIFY(!destination.exists());
     const SMobSaveCommitResult created = commitGeneratedMob(candidate, request);
     QVERIFY2(created.success, qPrintable(created.error));
     QCOMPARE(created.phase, QStringLiteral("complete"));
@@ -5836,13 +5886,15 @@ void EnduranceDocumentTests::generatedMobCommitIsValidatedBackedUpAndAtomic()
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QVERIFY(reopened.isQuestMob());
     QCOMPARE(reopened.objects().size(), 0);
+    QVERIFY(reopened.hasSection(0xB000));
     QCOMPARE(reopened.idRanges().size(), 1);
     QVERIFY(!reopened.hasEmbeddedAiGraph());
 
     const QByteArray replacement = validMob(
         section(0xD000) + section(0xFF00,
             section(0xFF02, section(0xFF05, u32(2000))
-                              + section(0xFF06, u32(2999)))));
+                              + section(0xFF06, u32(2999))))
+            + section(0xB000));
     const SMobSaveCommitResult replaced = commitGeneratedMob(replacement, request);
     QVERIFY2(replaced.success, qPrintable(replaced.error));
     QVERIFY(!replaced.backupPath.isEmpty());

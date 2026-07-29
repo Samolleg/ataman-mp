@@ -141,6 +141,7 @@ public:
     void saveMobAs();
     void saveActiveMob();
     void saveAllMob();
+    bool saveMobDocument(CMob* mob, const QFileInfo& destination);
     void unloadActiveMob();
     void openActiveMobEditParams();
     void openActiveMobScript();
@@ -318,7 +319,6 @@ protected:
 private:
     void closeMprSettingsDock();
     void refreshMprSettingsDock();
-    bool saveMobDocument(CMob* mob, const QFileInfo& destination);
     bool saveLandscapeDocument(const QFileInfo& destination);
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
                                       bool adoptAsOpenBaseline);
