@@ -141,7 +141,8 @@ public:
                          const QVector<QImage>& authoredTiles,
                          quint32 distributionSeed = 0,
                          const QMap<qint32, QImage>& externalMaterialSources = {},
-                         const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles = {});
+                         const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles = {},
+                         bool generatedTilesOpaque = true);
 
     static ETerrainBlendStyle blendStyleForMaterialName(const QString& name);
     static QString blendStyleName(ETerrainBlendStyle style);
@@ -217,6 +218,7 @@ private:
     CTerrainTransitionCatalog m_authoredLibraryCatalog;
     QVector<int> m_authoredLibraryGeneratedIndices;
     quint32 m_distributionSeed{0};
+    bool m_generatedTilesOpaque{true};
     bool m_valid{false};
     QString m_error;
 };

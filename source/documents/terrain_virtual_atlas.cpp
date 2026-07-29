@@ -72,7 +72,8 @@ int terrainBlendStylePriority(ETerrainBlendStyle style)
     return 0;
 }
 
-QRgb premultipliedBlend(const QRgb samples[4], const double weights[4])
+QRgb materialBlend(const QRgb samples[4], const double weights[4],
+                   bool forceOpaque)
 {
     double alpha = 0.0;
     double red = 0.0;
@@ -80,7 +81,12 @@ QRgb premultipliedBlend(const QRgb samples[4], const double weights[4])
     double blue = 0.0;
     for(int index = 0; index < 4; ++index)
     {
-        const double a = qAlpha(samples[index]) / 255.0;
+        // DXT1 terrain pages can decode the transparent selector even though
+        // the land renderer treats the authored texel as opaque coverage.
+        // Letting that selector participate in a newly generated land blend
+        // punches holes through the terrain and also biases its colour toward
+        // the other family. Overlay generation can explicitly retain alpha.
+        const double a = forceOpaque ? 1.0 : qAlpha(samples[index]) / 255.0;
         alpha += weights[index] * a;
         red += weights[index] * a * qRed(samples[index]);
         green += weights[index] * a * qGreen(samples[index]);
@@ -91,7 +97,153 @@ QRgb premultipliedBlend(const QRgb samples[4], const double weights[4])
     return qRgba(qBound(0, qRound(red / alpha), 255),
                  qBound(0, qRound(green / alpha), 255),
                  qBound(0, qRound(blue / alpha), 255),
-                 qBound(0, qRound(alpha * 255.0), 255));
+                 forceOpaque ? 255
+                             : qBound(0, qRound(alpha * 255.0), 255));
+}
+
+QImage removeSmallMaskFeatures(const QImage& source)
+{
+    if(source.isNull()) return {};
+    const int width = source.width();
+    const int height = source.height();
+    const int count = width * height;
+    QVector<quint8> binary(count);
+    for(int y = 0; y < height; ++y)
+        for(int x = 0; x < width; ++x)
+            binary[y * width + x] = source.pixelColor(x, y).red() >= 128;
+
+    // Remove both tiny owner islands and tiny support pinholes. The threshold
+    // scales with authored resolution: 8x8 fixtures retain their shape while
+    // 256px JMV masks reject the grain-sized components seen in generated art.
+    const int minimumArea = qMax(3, count / 1024);
+    for(int pass = 0; pass < 2; ++pass)
+    {
+        QVector<quint8> visited(count, 0);
+        for(int start = 0; start < count; ++start)
+        {
+            if(visited[start]) continue;
+            const quint8 value = binary[start];
+            QVector<int> component;
+            component.append(start);
+            visited[start] = 1;
+            for(int cursor = 0; cursor < component.size(); ++cursor)
+            {
+                const int index = component.at(cursor);
+                const int x = index % width;
+                const int y = index / width;
+                const int neighbours[4] = {index - 1, index + 1,
+                                            index - width, index + width};
+                for(int direction = 0; direction < 4; ++direction)
+                {
+                    if((direction == 0 && x == 0)
+                       || (direction == 1 && x + 1 == width)
+                       || (direction == 2 && y == 0)
+                       || (direction == 3 && y + 1 == height))
+                        continue;
+                    const int next = neighbours[direction];
+                    if(!visited[next] && binary[next] == value)
+                    {
+                        visited[next] = 1;
+                        component.append(next);
+                    }
+                }
+            }
+            if(component.size() < minimumArea)
+                for(int index : component) binary[index] = !value;
+        }
+    }
+
+    // Feather only the cleaned boundary. A short scale-relative box filter
+    // keeps stock-authored large shapes while avoiding a hard generated cut.
+    const int radius = qMin(width, height) < 32
+        ? 0 : qBound(1, qMin(width, height) / 64, 4);
+    QVector<int> integral((width + 1) * (height + 1), 0);
+    for(int y = 0; y < height; ++y)
+    {
+        int row = 0;
+        for(int x = 0; x < width; ++x)
+        {
+            row += binary[y * width + x] ? 255 : 0;
+            integral[(y + 1) * (width + 1) + x + 1] =
+                integral[y * (width + 1) + x + 1] + row;
+        }
+    }
+    QImage result(source.size(), QImage::Format_Grayscale8);
+    for(int y = 0; y < height; ++y)
+        for(int x = 0; x < width; ++x)
+        {
+            const int x0 = qMax(0, x - radius);
+            const int y0 = qMax(0, y - radius);
+            const int x1 = qMin(width - 1, x + radius);
+            const int y1 = qMin(height - 1, y + radius);
+            const int stride = width + 1;
+            const int sum = integral[(y1 + 1) * stride + x1 + 1]
+                - integral[y0 * stride + x1 + 1]
+                - integral[(y1 + 1) * stride + x0]
+                + integral[y0 * stride + x0];
+            const int samples = (x1 - x0 + 1) * (y1 - y0 + 1);
+            const int value = sum / qMax(1, samples);
+            result.setPixelColor(x, y, QColor(value, value, value));
+        }
+    return result;
+}
+
+QImage opaqueTerrainMaterialSource(const QImage& source)
+{
+    QImage result = source.convertToFormat(QImage::Format_RGBA8888);
+    if(result.isNull()) return result;
+    const int width = result.width();
+    const int height = result.height();
+    const int count = width * height;
+    QVector<int> nearest(count, -1);
+    QVector<int> queue;
+    queue.reserve(count);
+    for(int y = 0; y < height; ++y)
+        for(int x = 0; x < width; ++x)
+        {
+            const int index = y * width + x;
+            if(result.pixelColor(x, y).alpha() > 0)
+            {
+                nearest[index] = index;
+                queue.append(index);
+            }
+        }
+    // Multi-source flood fill reconstructs each DXT1 transparent selector
+    // from the closest real texel of that same uniform material. This avoids
+    // converting transparent decode placeholders into opaque black artifacts.
+    for(int cursor = 0; cursor < queue.size(); ++cursor)
+    {
+        const int index = queue.at(cursor);
+        const int x = index % width;
+        const int y = index / width;
+        const int neighbours[4] = {index - 1, index + 1,
+                                    index - width, index + width};
+        for(int direction = 0; direction < 4; ++direction)
+        {
+            if((direction == 0 && x == 0)
+               || (direction == 1 && x + 1 == width)
+               || (direction == 2 && y == 0)
+               || (direction == 3 && y + 1 == height))
+                continue;
+            const int next = neighbours[direction];
+            if(nearest[next] < 0)
+            {
+                nearest[next] = nearest[index];
+                queue.append(next);
+            }
+        }
+    }
+    for(int y = 0; y < height; ++y)
+        for(int x = 0; x < width; ++x)
+        {
+            const int sourceIndex = nearest[y * width + x];
+            QColor color = sourceIndex >= 0
+                ? result.pixelColor(sourceIndex % width, sourceIndex / width)
+                : QColor(0, 0, 0);
+            color.setAlpha(255);
+            result.setPixelColor(x, y, color);
+        }
+    return result;
 }
 
 int transitionTopology(const STerrainTransitionSignature& signature)
@@ -315,10 +467,12 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
     const CTerrainTransitionCatalog& catalog,
     const QVector<QImage>& authoredTiles, quint32 distributionSeed,
     const QMap<qint32, QImage>& externalMaterialSources,
-    const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles)
+    const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles,
+    bool generatedTilesOpaque)
     : m_catalog(catalog), m_authoredTiles(authoredTiles),
       m_materialBlendStyles(materialBlendStyles),
-      m_distributionSeed(distributionSeed)
+      m_distributionSeed(distributionSeed),
+      m_generatedTilesOpaque(generatedTilesOpaque)
 {
     if(authoredTiles.isEmpty())
     {
@@ -351,8 +505,10 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
             const int slot = SMprPackedTile::decode(packed).atlasSlot();
             if(slot >= 0 && slot < authoredTiles.size())
             {
-                m_materialSources.insert(material,
-                    authoredTiles.at(slot).convertToFormat(QImage::Format_RGBA8888));
+                m_materialSources.insert(material, m_generatedTilesOpaque
+                    ? opaqueTerrainMaterialSource(authoredTiles.at(slot))
+                    : authoredTiles.at(slot).convertToFormat(
+                        QImage::Format_RGBA8888));
                 m_materialSourceSlots.insert(material,slot);
             }
         }
@@ -362,8 +518,9 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
     {
         if(source.value().isNull() || source.value().size() != tileSize)
             continue;
-        m_materialSources.insert(source.key(), source.value().convertToFormat(
-            QImage::Format_RGBA8888));
+        m_materialSources.insert(source.key(), m_generatedTilesOpaque
+            ? opaqueTerrainMaterialSource(source.value())
+            : source.value().convertToFormat(QImage::Format_RGBA8888));
         // External uniform anchors have no slot in the opened map. They remain
         // logical sources until a pure or mixed tuple is realized into the
         // working cache/final atlas.
@@ -552,6 +709,7 @@ bool CTerrainVirtualAtlas::registerBlendMaskTemplate(
     if(separability < quint64(mask.width()) * quint64(mask.height()) * 6u)
         return true;
 
+    mask = removeSmallMaskFeatures(mask);
     const STerrainTransitionSignature preview =
         CTerrainTransitionCatalog::mirroredGridY(signature);
     const QVector<qint32> previewCorners = corners(preview);
@@ -781,6 +939,30 @@ QImage CTerrainVirtualAtlas::generateTile(
                     total += weights[corner];
                 }
             }
+            if(total <= 0.000001)
+            {
+                // Independently transferred one-corner masks can leave a gap
+                // at a rare 3-/4-family junction. Fall back only in that gap
+                // to the exact corner bilinear partition; never emit a zero-
+                // weight transparent/black texel or substitute an identity.
+                const double u = size == 1 ? 0.0
+                    : double(x) / double(size - 1);
+                const double v = size == 1 ? 0.0
+                    : double(y) / double(size - 1);
+                const double cornerWeights[4] = {(1-u)*(1-v), u*(1-v),
+                                                  u*v, (1-u)*v};
+                for(int corner = 0; corner < 4; ++corner)
+                {
+                    bool first = true;
+                    for(int candidate = 0; candidate < corner; ++candidate)
+                        first &= ids.at(candidate) != ids.at(corner);
+                    if(!first) continue;
+                    for(int candidate = corner; candidate < 4; ++candidate)
+                        if(ids.at(candidate) == ids.at(corner))
+                            weights[corner] += cornerWeights[candidate];
+                    total += weights[corner];
+                }
+            }
             if(total > 0.0)
                 for(double& weight : weights) weight /= total;
             const auto forceSharedEdge = [&](qint32 firstMaterial,
@@ -808,7 +990,8 @@ QImage CTerrainVirtualAtlas::generateTile(
             if(x == size - 1) forceSharedEdge(ids.at(1), ids.at(2),
                 size == 1 ? 0.0 : double(y) / double(size - 1));
             result.setPixelColor(x, y,
-                QColor::fromRgba(premultipliedBlend(samples, weights)));
+                QColor::fromRgba(materialBlend(samples, weights,
+                                               m_generatedTilesOpaque)));
         }
     return result;
 }

@@ -195,7 +195,9 @@ int terrainTransitionTopology(const STerrainTransitionSignature& signature)
 
 QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
                                 const QSize& requiredSize,
-                                QMap<QString, QImage>* decodedPageCache)
+                                QMap<QString, QByteArray>* encodedPageCache,
+                                QSet<QString>* missingPageCache,
+                                QMap<QString, QImage>* decodedTileCache)
 {
     const QStringList names = ei::terrainTextureResourceNames(
         source.mprNamespace, source.textureCount);
@@ -203,25 +205,26 @@ QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
     if(pageIndex < 0 || pageIndex >= names.size())
         return {};
     const QString pageName = names.at(pageIndex).toCaseFolded();
-    QImage page;
-    if(decodedPageCache && decodedPageCache->contains(pageName))
-        page = decodedPageCache->value(pageName);
-    else
-    {
-        CTextureList::getInstance()->extractMmpToDxt1(page, pageName);
-        if(decodedPageCache) decodedPageCache->insert(pageName, page);
-    }
-    if(page.isNull() || page.width() != page.height() || page.width() % 8 != 0)
-        return {};
-    const int tileSize = page.width() / 8;
     const int localSlot = source.slot % 64;
-    QImage tile = page.copy((localSlot % 8) * tileSize,
-                            (localSlot / 8) * tileSize,
-                            tileSize, tileSize).mirrored(false, true)
-                  .convertToFormat(QImage::Format_RGBA8888);
+    const QString tileCacheKey = QStringLiteral("%1|%2|%3x%4")
+        .arg(pageName).arg(localSlot)
+        .arg(requiredSize.width()).arg(requiredSize.height());
+    if(decodedTileCache && decodedTileCache->contains(tileCacheKey))
+        return decodedTileCache->value(tileCacheKey);
+    QImage tile;
+    QString diagnostic;
+    if(!ei::decodeMmpDxt1AtlasTileCached(
+           pageName, localSlot, encodedPageCache, missingPageCache,
+           [](const QString& name, QByteArray* payload) {
+               return CTextureList::getInstance()->terrainMmpPayload(
+                   name, payload);
+           }, &tile, &diagnostic))
+        return {};
+    tile = tile.convertToFormat(QImage::Format_RGBA8888);
     if(!requiredSize.isEmpty() && tile.size() != requiredSize)
         tile = tile.scaled(requiredSize, Qt::IgnoreAspectRatio,
                            Qt::SmoothTransformation);
+    if(decodedTileCache) decodedTileCache->insert(tileCacheKey, tile);
     return tile;
 }
 
@@ -1897,7 +1900,9 @@ void CView::refreshAfterResourceSetup()
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources();
     m_terrainGlobalUniformTileCache.clear();
-    m_terrainGlobalTransitionPageCache.clear();
+    m_terrainGlobalTransitionEncodedPageCache.clear();
+    m_terrainGlobalTransitionMissingPages.clear();
+    m_terrainGlobalTransitionTileCache.clear();
     m_spatialIndexDirty = true;
     m_skyResourcesChecked = false;
     m_staticShadowFingerprint.clear();
@@ -7410,7 +7415,10 @@ bool CView::realizeWorkingTerrainSignature(
         for(const STerrainGlobalTransitionSource& source : candidates)
         {
             const QImage pixels = loadGlobalTransitionTile(
-                source, requiredSize, &m_terrainGlobalTransitionPageCache);
+                source, requiredSize,
+                &m_terrainGlobalTransitionEncodedPageCache,
+                &m_terrainGlobalTransitionMissingPages,
+                &m_terrainGlobalTransitionTileCache);
             if(pixels.isNull())
                 continue;
             const QString label = QStringLiteral("%1 slot %2")
@@ -7505,7 +7513,9 @@ bool CView::realizeWorkingTerrainSignature(
         {
             const QImage pixels = loadGlobalTransitionTile(
                 candidate.source, requiredSize,
-                &m_terrainGlobalTransitionPageCache);
+                &m_terrainGlobalTransitionEncodedPageCache,
+                &m_terrainGlobalTransitionMissingPages,
+                &m_terrainGlobalTransitionTileCache);
             if(pixels.isNull())
                 continue;
             const int before =
@@ -7616,10 +7626,17 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
             "The working atlas attempted to change authored terrain pixels. The preview update was refused before upload.");
         return false;
     }
+    QElapsedTimer uploadTimer;
+    uploadTimer.start();
     makeCurrent();
     const bool installed = m_pLand->previewTerrainAtlas(
         activeImages, m_workingTerrainAtlas->activeTextureCount());
     doneCurrent();
+    ei::log(eLogInfo, QString(
+        "Working terrain atlas sync timing: changedSlots:%1 activeSlots:%2 pages:%3 elapsedMs:%4")
+        .arg(changed.size()).arg(activeImages.size())
+        .arg(m_workingTerrainAtlas->activeTextureCount())
+        .arg(uploadTimer.elapsed()));
     if(!installed && report)
         report->add("terrain.working_atlas_renderer",
             EValidationSeverity::Error,
@@ -7687,7 +7704,8 @@ void CView::finalizeVirtualTerrainAtlas()
         ?m_pTileForm->tileImages():m_authoredTerrainTileImages;
     CTerrainVirtualAtlas atlas(catalog, authoredImages, m_terrainSemanticSeed,
                                m_terrainGlobalMaterialSources,
-                               globalMaterialBlendStyles(m_terrainGlobalFamilies));
+                               globalMaterialBlendStyles(m_terrainGlobalFamilies),
+                               layer == ETerrainTileLayer::Land);
     for(auto imported = m_importedTerrainTransitions.cbegin();
         imported != m_importedTerrainTransitions.cend(); ++imported)
         if(!atlas.addAuthoredLibraryTransition(
@@ -7733,6 +7751,15 @@ void CView::finalizeVirtualTerrainAtlas()
         .arg(importedStockCount).arg(generatedCount),&preview);
     summary->setWordWrap(true);
     previewLayout->addWidget(summary);
+    QLabel* saveExplanation=new QLabel(tr(
+        "Save result: one edited .mpr plus its required map-specific .res atlas "
+        "and review manifest, stored together. Open or stage the new .mpr; do not "
+        "save the original map over it afterward. The .res is texture data used by "
+        "that MPR, not a second map."),&preview);
+    saveExplanation->setWordWrap(true);
+    saveExplanation->setStyleSheet(QStringLiteral(
+        "QLabel { background: #263746; border: 1px solid #4d718c; padding: 7px; }"));
+    previewLayout->addWidget(saveExplanation);
     QProgressBar* capacity=new QProgressBar(&preview);
     capacity->setRange(0,kMprPackedTerrainAtlasSlotLimit);
     capacity->setValue(finalized.requiredSlots);
@@ -7768,10 +7795,25 @@ void CView::finalizeVirtualTerrainAtlas()
         &preview);
     addedHeading->setWordWrap(true);
     previewLayout->addWidget(addedHeading);
+    QLabel* addedLegend=new QLabel(tr(
+        "Blue frame: existing stock JMV blend added to this map.  "
+        "Orange frame: newly generated exact blend."),&preview);
+    addedLegend->setStyleSheet(QStringLiteral(
+        "QLabel { color: #b9c4d0; padding-bottom: 4px; }"));
+    previewLayout->addWidget(addedLegend);
     QScrollArea* addedScroll=new QScrollArea(&preview);
     addedScroll->setWidgetResizable(true);
     QWidget* addedPage=new QWidget(addedScroll);
     QGridLayout* addedGrid=new QGridLayout(addedPage);
+    QMap<qint32,QString> materialNames;
+    for(const STerrainGlobalMaterialFamily& family:m_terrainGlobalFamilies)
+        materialNames.insert(family.id,family.name);
+    const auto materialLabel=[&materialNames](qint32 id)
+    {
+        return materialNames.contains(id)
+            ?materialNames.value(id)
+            :QStringLiteral("Material %1").arg(id);
+    };
     int addedIndex=0;
     for(int slot=0;slot<finalized.tiles.size();++slot)
     {
@@ -7781,13 +7823,24 @@ void CView::finalizeVirtualTerrainAtlas()
         item->setIcon(QPixmap::fromImage(tile.pixels));
         item->setIconSize(QSize(96,96));
         item->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        item->setStyleSheet(tile.authored
+            ?QStringLiteral("QToolButton { border: 3px solid #3f8dcc; padding: 3px; }")
+            :QStringLiteral("QToolButton { border: 3px solid #e88b2b; padding: 3px; }"));
         item->setText(tr("Slot %1 - %2").arg(slot)
             .arg(tile.authored?tr("stock JMV"):tr("generated")));
-        item->setToolTip(tr("Corners: %1, %2, %3, %4\nPixel SHA-256: %5\nBlend source: %6")
-            .arg(tile.canonicalSignature.northWest)
-            .arg(tile.canonicalSignature.northEast)
-            .arg(tile.canonicalSignature.southEast)
-            .arg(tile.canonicalSignature.southWest)
+        QStringList usedFamilies;
+        for(qint32 id:{tile.canonicalSignature.northWest,
+                       tile.canonicalSignature.northEast,
+                       tile.canonicalSignature.southEast,
+                       tile.canonicalSignature.southWest})
+            if(!usedFamilies.contains(materialLabel(id)))
+                usedFamilies.append(materialLabel(id));
+        item->setToolTip(tr("Used for: %1\nCorners: %2 | %3 | %4 | %5\nPixel SHA-256: %6\nBlend source: %7")
+            .arg(usedFamilies.join(QStringLiteral(" + ")))
+            .arg(materialLabel(tile.canonicalSignature.northWest))
+            .arg(materialLabel(tile.canonicalSignature.northEast))
+            .arg(materialLabel(tile.canonicalSignature.southEast))
+            .arg(materialLabel(tile.canonicalSignature.southWest))
             .arg(QString::fromLatin1(tile.pixelSha256))
             .arg(tile.blendProvenance.isEmpty()
                 ?tr("original map atlas"):tile.blendProvenance));
@@ -7801,7 +7854,8 @@ void CView::finalizeVirtualTerrainAtlas()
     previewLayout->addWidget(addedScroll,1);
     QDialogButtonBox* buttons=new QDialogButtonBox(
         QDialogButtonBox::Save|QDialogButtonBox::Cancel,&preview);
-    buttons->button(QDialogButtonBox::Save)->setText(tr("Choose output folder..."));
+    buttons->button(QDialogButtonBox::Save)->setText(tr(
+        "Save edited MPR with atlas resources..."));
     connect(buttons,&QDialogButtonBox::accepted,&preview,&QDialog::accept);
     connect(buttons,&QDialogButtonBox::rejected,&preview,&QDialog::reject);
     previewLayout->addWidget(buttons);
@@ -7861,7 +7915,24 @@ void CView::finalizeVirtualTerrainAtlas()
         item.insert(QStringLiteral("sourceSlot"),tile.sourceSlot);
         item.insert(QStringLiteral("pixelSha256"),QString::fromLatin1(tile.pixelSha256));
         item.insert(QStringLiteral("stockDerivedBlend"),tile.stockDerivedBlend);
+        item.insert(QStringLiteral("origin"),tile.sourceSlot>=0
+            ?QStringLiteral("original-map")
+            :(tile.authored?QStringLiteral("stock-jmv")
+                           :QStringLiteral("generated-exact")));
         item.insert(QStringLiteral("blendProvenance"),tile.blendProvenance);
+        QJsonArray families;
+        QStringList familyLabels;
+        for(qint32 id:{tile.canonicalSignature.northWest,
+                       tile.canonicalSignature.northEast,
+                       tile.canonicalSignature.southEast,
+                       tile.canonicalSignature.southWest})
+        {
+            const QString label=materialNames.contains(id)
+                ?materialNames.value(id):QStringLiteral("Material %1").arg(id);
+            if(!familyLabels.contains(label))familyLabels.append(label);
+        }
+        for(const QString& label:familyLabels)families.append(label);
+        item.insert(QStringLiteral("materialFamilies"),families);
         QJsonArray corners;corners.append(tile.canonicalSignature.northWest);
         corners.append(tile.canonicalSignature.northEast);
         corners.append(tile.canonicalSignature.southEast);
@@ -7902,11 +7973,15 @@ void CView::finalizeVirtualTerrainAtlas()
     }
     emit updateMsg(tr("Validated map-specific atlas package written: %1")
         .arg(QDir::toNativeSeparators(folderPath)));
-    QMessageBox::information(this,tr("Atlas package ready"),tr(
-        "Portable isolated terrain package created.\n\nFolder: %1\nNamespace: %2\n"
-        "Used tiles: %3 / %4\nTexture pages: %5\n\n"
+    QMessageBox::information(this,tr("Edited MPR and atlas ready"),tr(
+        "The edited map and its isolated terrain atlas were saved together.\n\n"
+        "MPR to open or stage:\n%1\n\nRequired atlas resource:\n%2\n\n"
+        "Namespace: %3\nUsed tiles: %4 / %5\nTexture pages: %6\n\n"
+        "Keep the MPR and RES together. The current editor tab still represents "
+        "the original editing session; reopen the MPR above to continue from the finalized package. "
         "The original MPR and shared atlas resources were not modified.")
-        .arg(QDir::toNativeSeparators(folderPath),finalized.isolatedNamespace)
+        .arg(QDir::toNativeSeparators(mprPath),
+             QDir::toNativeSeparators(resPath),finalized.isolatedNamespace)
         .arg(finalized.requiredSlots).arg(finalized.capacityLimit)
         .arg(finalized.textureCount));
 }
@@ -9937,6 +10012,10 @@ void CView::endTileBrushGroup()
             CTerrainVirtualMaterialField field;
             QMap<int,quint64> usage=workingTerrainAtlasUsage();
             QSet<int> affected;
+            QElapsedTimer releaseTimer;
+            releaseTimer.start();
+            qint64 resolveElapsed = 0;
+            qint64 uploadElapsed = 0;
             if(!m_terrainEdit.copyVirtualMaterialField(layer,&field))
                 releaseReport.add("terrain.virtual_stroke_field",
                     EValidationSeverity::Error,
@@ -9950,20 +10029,54 @@ void CView::endTileBrushGroup()
                                 affected.insert(y*field.tileWidth()+x);
                 QVector<int> cells=affected.values().toVector();
                 std::sort(cells.begin(),cells.end());
+                QProgressDialog progress(
+                    tr("Resolving exact terrain blends..."), QString(),
+                    0, cells.size() + 1, this);
+                progress.setWindowTitle(tr("Finishing terrain stroke"));
+                progress.setCancelButton(nullptr);
+                progress.setWindowModality(Qt::WindowModal);
+                progress.setMinimumDuration(250);
+                QElapsedTimer resolveTimer;
+                resolveTimer.start();
+                int resolvedCells = 0;
                 for(int cell:cells)
                 {
+                    progress.setValue(resolvedCells);
+                    progress.setLabelText(tr(
+                        "Resolving exact terrain blends (%1 / %2)...")
+                        .arg(resolvedCells + 1).arg(cells.size()));
+                    QCoreApplication::processEvents(
+                        QEventLoop::ExcludeUserInputEvents);
                     const int x=cell%field.tileWidth(),y=cell/field.tileWidth();
                     bool found=false;
                     const STerrainTransitionSignature exact=field.cellSignature(x,y,&found);
                     if(!found||!realizeWorkingTerrainSignature(
                            exact,x,y,&usage,&releaseReport))
                         break;
+                    ++resolvedCells;
+                }
+                resolveElapsed = resolveTimer.elapsed();
+                if(!releaseReport.hasErrors())
+                {
+                    progress.setValue(cells.size());
+                    progress.setLabelText(tr(
+                        "Uploading the resolved terrain atlas..."));
+                    QCoreApplication::processEvents(
+                        QEventLoop::ExcludeUserInputEvents);
+                    QElapsedTimer uploadTimer;
+                    uploadTimer.start();
+                    if(!syncWorkingTerrainAtlas(&releaseReport))
+                        releaseReport.add("terrain.working_atlas_sync",
+                            EValidationSeverity::Error,
+                            "The completed stroke could not install its generated exact transitions.");
+                    uploadElapsed = uploadTimer.elapsed();
+                    progress.setValue(cells.size() + 1);
                 }
             }
-            if(!releaseReport.hasErrors()&&!syncWorkingTerrainAtlas(&releaseReport))
-                releaseReport.add("terrain.working_atlas_sync",
-                    EValidationSeverity::Error,
-                    "The completed stroke could not install its generated exact transitions.");
+            ei::log(eLogInfo, QString(
+                "Terrain stroke release timing: affectedCells:%1 resolveMs:%2 uploadMs:%3 totalMs:%4")
+                .arg(affected.size()).arg(resolveElapsed).arg(uploadElapsed)
+                .arg(releaseTimer.elapsed()));
             if(releaseReport.hasErrors())
             {
                 applyTerrainTilePreview(m_tileStrokeCommand,false);

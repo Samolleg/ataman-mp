@@ -267,6 +267,10 @@ private slots:
     void generatedEdgesUseOnlyTheirTwoCornerMaterials();
     void generatedTransitionRetainsSourceTextureIdentity();
     void generatedTransitionBoundaryIsOrganicRatherThanQuadrants();
+    void generatedLandBlendCannotPunchTransparentHoles();
+    void generatedMultiFamilyBlendHasNoZeroWeightHoles();
+    void generatedOverlayBlendPreservesAuthoredAlpha();
+    void stockMaskTransferRemovesPixelSizedIslandsAndPinholes();
     void materialNamesSelectExplicitBlendStyles();
     void materialBlendStylesProvideBoundedDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
@@ -541,6 +545,112 @@ void TerrainVirtualAtlasTests::generatedTransitionBoundaryIsOrganicRatherThanQua
     // Generated game-art transitions must visibly meander through the tile.
     QVERIFY2(crossingRows.size() >= 5,
              "Generated transition is still a straight quadrant cut");
+}
+
+void TerrainVirtualAtlasTests::generatedLandBlendCannotPunchTransparentHoles()
+{
+    Fixture fixture;
+    for(int y = 0; y < 8; ++y)
+        for(int x = 0; x < 8; ++x)
+        {
+            fixture.images[0].setPixelColor(x, y, ((x + y) % 3)
+                ? QColor(210, 35, 20, 255) : QColor(0, 0, 0, 0));
+            fixture.images[1].setPixelColor(x, y, ((x * 3 + y) % 4)
+                ? QColor(30, 190, 45, 255) : QColor(0, 0, 0, 0));
+        }
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
+    const STerrainVirtualTile tile = atlas.resolve(
+        signature(1, 1, 2, 2), 0, 0);
+    QVERIFY(tile.generatedIndex >= 0);
+    const QImage generated = atlas.generatedTiles().at(
+        tile.generatedIndex).pixels;
+    for(int y = 0; y < generated.height(); ++y)
+        for(int x = 0; x < generated.width(); ++x)
+        {
+            const QColor pixel = generated.pixelColor(x, y);
+            QCOMPARE(pixel.alpha(), 255);
+            // Both uniform sources have low blue. A sky-cyan hole or an
+            // out-of-family channel can therefore never be synthesized.
+            QVERIFY(pixel.blue() <= 45);
+            QVERIFY(pixel.red() >= 30 && pixel.red() <= 210);
+            QVERIFY(pixel.green() >= 35 && pixel.green() <= 190);
+        }
+}
+
+void TerrainVirtualAtlasTests::generatedMultiFamilyBlendHasNoZeroWeightHoles()
+{
+    Fixture fixture;
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
+    const STerrainVirtualTile tile = atlas.resolve(
+        signature(1, 2, 3, 4), 0, 0);
+    QVERIFY(tile.generatedIndex >= 0);
+    const QImage generated = atlas.generatedTiles().at(
+        tile.generatedIndex).pixels;
+    for(int y = 0; y < generated.height(); ++y)
+        for(int x = 0; x < generated.width(); ++x)
+        {
+            const QColor pixel = generated.pixelColor(x, y);
+            QCOMPARE(pixel.alpha(), 255);
+            QVERIFY(pixel.red() + pixel.green() + pixel.blue() > 40);
+        }
+}
+
+void TerrainVirtualAtlasTests::generatedOverlayBlendPreservesAuthoredAlpha()
+{
+    Fixture fixture;
+    fixture.images[0].fill(QColor(210, 35, 20, 64));
+    fixture.images[1].fill(QColor(30, 190, 45, 192));
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0,
+        QMap<qint32, QImage>(), QMap<qint32, ETerrainBlendStyle>(), false);
+    seedReviewedStockMasks(atlas, fixture);
+    const STerrainVirtualTile tile = atlas.resolve(
+        signature(1, 1, 2, 2), 0, 0);
+    QVERIFY(tile.generatedIndex >= 0);
+    const QImage generated = atlas.generatedTiles().at(
+        tile.generatedIndex).pixels;
+    int translucent = 0;
+    for(int y = 0; y < generated.height(); ++y)
+        for(int x = 0; x < generated.width(); ++x)
+        {
+            const int alpha = generated.pixelColor(x, y).alpha();
+            QVERIFY(alpha >= 64 && alpha <= 192);
+            translucent += alpha < 255;
+        }
+    QCOMPARE(translucent, generated.width() * generated.height());
+}
+
+void TerrainVirtualAtlasTests::stockMaskTransferRemovesPixelSizedIslandsAndPinholes()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    fixture.images[0].fill(QColor(230, 20, 20, 255));
+    fixture.images[1].fill(QColor(20, 220, 20, 255));
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    QImage noisy(64, 64, QImage::Format_RGBA8888);
+    for(int y = 0; y < 64; ++y)
+        for(int x = 0; x < 64; ++x)
+            noisy.setPixelColor(x, y, x < 32
+                ? fixture.images[0].pixelColor(x, y)
+                : fixture.images[1].pixelColor(x, y));
+    // These deliberately model the 1-2 pixel grain reported in generated
+    // masks. Neither has enough area to survive the transferred silhouette.
+    noisy.setPixelColor(8, 31, fixture.images[1].pixelColor(8, 31));
+    noisy.setPixelColor(54, 30, fixture.images[0].pixelColor(54, 30));
+    QVERIFY(atlas.addStockBlendMaskTemplate(signature(1, 1, 2, 2),
+        noisy, QStringLiteral("grain-regression")));
+    const STerrainVirtualTile tile = atlas.resolve(
+        signature(1, 1, 2, 2), 0, 0);
+    QVERIFY(tile.generatedIndex >= 0);
+    const QImage generated = atlas.generatedTiles().at(
+        tile.generatedIndex).pixels;
+    QVERIFY(generated.pixelColor(8, 31).red()
+            > generated.pixelColor(8, 31).green());
+    QVERIFY(generated.pixelColor(54, 30).green()
+            > generated.pixelColor(54, 30).red());
 }
 
 void TerrainVirtualAtlasTests::materialNamesSelectExplicitBlendStyles()

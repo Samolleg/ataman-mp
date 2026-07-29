@@ -560,7 +560,9 @@ private:
     QMap<QString, QImage> m_terrainGlobalUniformTileCache;
     QMultiMap<QByteArray, STerrainGlobalTransitionSource>
         m_terrainGlobalTransitionSources;
-    QMap<QString, QImage> m_terrainGlobalTransitionPageCache;
+    QMap<QString, QByteArray> m_terrainGlobalTransitionEncodedPageCache;
+    QSet<QString> m_terrainGlobalTransitionMissingPages;
+    QMap<QString, QImage> m_terrainGlobalTransitionTileCache;
     QMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
         m_importedTerrainTransitions;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
