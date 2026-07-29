@@ -573,6 +573,23 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
         m_aiGraphRegenerationPending = false;
         startAiGraphPreviewRegeneration();
     });
+    // Character preparation must continue while the viewport is idle. The old
+    // draw-driven scheduler stopped permanently when Qt had no other reason to
+    // repaint (observed at 387/402 in zone18). This timer exists only while a
+    // preparation generation is incomplete and merely requests the next frame;
+    // all OpenGL work remains on this widget's GUI/context thread.
+    m_unitVisualPreparationTimer = new QTimer(this);
+    m_unitVisualPreparationTimer->setInterval(16);
+    connect(m_unitVisualPreparationTimer, &QTimer::timeout, this, [this]()
+    {
+        if(!ei::shouldPumpUnitVisualPreparation(m_unitAppearanceProgressPending,
+                m_unitAppearanceProgressTotal, m_unitAppearanceProgressCompleted))
+        {
+            m_unitVisualPreparationTimer->stop();
+            return;
+        }
+        update();
+    });
 }
 
 void CView::attachLandscapeTools(CLandscapeTools* tools)
@@ -6819,6 +6836,8 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
         m_unitAppearanceProgressCompleted = 0;
         m_unitAppearanceCacheHits = 0;
         m_unitAppearanceProgressPending = true;
+        if(m_unitVisualPreparationTimer && !m_unitVisualPreparationTimer->isActive())
+            m_unitVisualPreparationTimer->start();
         QTimer::singleShot(150, this, [this]()
         {
             if(!ei::shouldShowUnitAppearanceProgress(m_unitAppearanceProgressPending,
@@ -6864,6 +6883,8 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
             m_unitAppearanceProgressCompleted = 0;
             m_unitAppearanceCacheHits = 0;
             m_unitAppearanceProgressPending = false;
+            if(m_unitVisualPreparationTimer)
+                m_unitVisualPreparationTimer->stop();
         }
         return;
     }
@@ -6875,7 +6896,11 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
     // discover an unbounded synchronous workload.
     QElapsedTimer finalizationTimer;
     finalizationTimer.start();
-    const int finalizationLimit = cameraMoving ? 1 : 8;
+    // A single figure/texture upload is not time-sliceable. Do not deliberately
+    // add one of those stalls to every camera frame; units that actually enter
+    // view still take the established forced first-use path. While stationary,
+    // finalize one prepared unit per pump tick for predictable frame pacing.
+    const int finalizationLimit = cameraMoving ? 0 : 1;
     int finalized = 0;
     for(const Candidate& candidate : unresolved)
     {

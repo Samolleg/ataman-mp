@@ -12,7 +12,6 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QSaveFile>
-#include <QStandardPaths>
 
 namespace {
 
@@ -136,8 +135,17 @@ QString unitAppearancePreparationCacheKey(const SUnitAppearancePreparationTask& 
 
 QString unitAppearancePreparationCacheDirectory()
 {
-    const QString root = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-    return root.isEmpty() ? QString() : QDir(root).filePath(QStringLiteral("unit-appearances-v1"));
+    return unitAppearancePreparationCacheDirectoryForApplication(
+        QCoreApplication::applicationDirPath());
+}
+
+QString unitAppearancePreparationCacheDirectoryForApplication(
+    const QString& applicationDirectory)
+{
+    if(applicationDirectory.trimmed().isEmpty())
+        return QString();
+    return QDir(applicationDirectory).filePath(
+        QStringLiteral("cache/unit-appearances-v1"));
 }
 
 QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(

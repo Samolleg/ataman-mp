@@ -4,18 +4,22 @@
 
 - Successful character-appearance preparation is cached by profile, database,
   unit appearance inputs, and editor version. Reopening unchanged maps or
-  restarting the editor can reuse the cached CPU-side result.
+  restarting the editor can reuse the cached CPU-side result. The persistent
+  cache is portable and lives beside the editor under
+  `cache/unit-appearances-v1`, not in AppData.
 - Character preparation now remains active until the complete equipment,
   figure, layered texture, GPU-resource, and initial idle-pose work is ready.
   It reports `Resolving full character visuals...` in the existing
   non-blocking progress area instead of declaring completion after the much
   smaller database-plan phase.
-- CPU-safe database resolution remains on the worker. OpenGL-bound completion
-  is performed in bounded, camera-prioritized batches so characters are warmed
-  before traversal reaches them rather than remaining in their initial pose.
-- Keyboard camera movement uses the actual bounded frame delta. It is no longer
-  quantized to a 120 Hz simulation/interpolation phase, which could make
-  VSync-limited lateral movement visibly uneven despite a stable frame rate.
+- CPU-safe database resolution remains on the worker. An explicit 16 ms idle
+  pump now keeps OpenGL-bound completion moving even when the viewport has no
+  input or other repaint source; the reported zone18 387/402 stall is covered
+  directly by a regression check.
+- Background figure/texture finalization no longer inserts deliberate upload
+  work into camera-movement frames. It advances one character per stationary
+  pump tick; a character that genuinely enters view retains the immediate
+  first-use path.
 - The progress indicator remains visible across gaps between worker batches,
   and held camera input prevents foreground cold character resolution even on
   an interpolated frame with no positional delta.
@@ -26,12 +30,15 @@
 
 1. Open `gz18h`, wait for character resolution to finish, close and reopen it,
    and compare the first and warm-load progress duration.
-2. Restart Endurance, reopen the same unchanged map, and confirm cached
-   character appearances resolve substantially faster.
+2. Confirm the progress reaches 402/402 while leaving the camera completely
+   idle. Restart Endurance, reopen the same unchanged map, and confirm the log
+   reports appearance cache hits and that files exist in the editor-local
+   `cache/unit-appearances-v1` folder.
 3. Change the active profile/database or an individual unit appearance and
    confirm that changed content is resolved again rather than remaining stale.
-4. Open `gz11k`, leave VSync enabled, hold `A` or `D`, and check that lateral
-   motion remains smooth while FPS is pinned to the display refresh rate.
+4. Open `gz11k`, leave VSync enabled, hold `A` or `D`, and report whether the
+   remaining scene/frame-pacing jitter changes after character preparation is
+   complete. The rejected camera-delta change is not claimed as its fix.
 5. In `gz18h`, wait for `Resolving full character visuals...` to complete,
    then pan across the map and confirm newly encountered humanoids already use
    their resolved equipment/idle pose instead of initial placeholders.

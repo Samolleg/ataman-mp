@@ -595,6 +595,7 @@ private:
     QString m_aiGraphLoadedSource;
     QFutureWatcher<SAiGraphPreviewBuildResult>* m_aiGraphBuildWatcher{nullptr};
     QFutureWatcher<QVector<SUnitAppearancePreparationResult>>* m_unitAppearanceWatcher{nullptr};
+    QTimer* m_unitVisualPreparationTimer{nullptr};
     QHash<quintptr, QPointer<CUnit>> m_unitAppearanceTargets;
     int m_unitAppearanceProgressTotal{0};
     int m_unitAppearanceProgressCompleted{0};

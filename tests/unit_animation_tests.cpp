@@ -106,8 +106,27 @@ private slots:
     void resolvesAppearancePreparationWithoutSceneObjects();
     void cachesPreparedAppearanceByContentIdentity();
     void keepsAppearanceProgressVisibleBetweenWorkerBatches();
+    void pumpsIncompleteIdleVisualPreparation();
+    void keepsAppearanceCacheBesideEditor();
     void malformedAndUnknownInputsFailStatic();
 };
+
+void UnitAnimationTests::pumpsIncompleteIdleVisualPreparation()
+{
+    // Exact reported stalled state: the viewport became idle with fifteen
+    // characters left. It must keep requesting preparation frames.
+    QVERIFY(ei::shouldPumpUnitVisualPreparation(true, 402, 387));
+    QVERIFY(!ei::shouldPumpUnitVisualPreparation(true, 402, 402));
+    QVERIFY(!ei::shouldPumpUnitVisualPreparation(false, 402, 387));
+}
+
+void UnitAnimationTests::keepsAppearanceCacheBesideEditor()
+{
+    const QString root = QDir::cleanPath(QStringLiteral("C:/portable/EI Mapper Endurance"));
+    QCOMPARE(QDir::cleanPath(unitAppearancePreparationCacheDirectoryForApplication(root)),
+             QDir(root).filePath(QStringLiteral("cache/unit-appearances-v1")));
+    QVERIFY(unitAppearancePreparationCacheDirectoryForApplication(QString()).isEmpty());
+}
 
 void UnitAnimationTests::parsesAndSelectsDeterministically()
 {

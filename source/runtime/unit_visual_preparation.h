@@ -20,6 +20,11 @@ inline int completedUnitVisualCount(int total, int unresolved)
     return qBound(0, total - qMax(0, unresolved), qMax(0, total));
 }
 
+inline bool shouldPumpUnitVisualPreparation(bool pending, int total, int completed)
+{
+    return pending && total > 0 && completed < total;
+}
+
 }
 
 struct SUnitAppearancePreparationTask
@@ -44,6 +49,7 @@ struct SUnitAppearancePreparationResult
 };
 
 QString unitAppearancePreparationCacheKey(const SUnitAppearancePreparationTask& task);
+QString unitAppearancePreparationCacheDirectoryForApplication(const QString& applicationDirectory);
 QString unitAppearancePreparationCacheDirectory();
 QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
     const QVector<SUnitAppearancePreparationTask>& tasks,
