@@ -600,6 +600,12 @@ remain unchanged.
 - [x] Parameter-aware outliner filtering, dockable workspace panels, compound
   property/component copying, configurable shortcuts, camera speed, and
   external/internal script workflows.
+- [x] Prepare character appearance data in camera-priority background batches,
+  persist successful CPU-side resolutions by provider/database/request content
+  hash across map and editor reloads, and show delayed non-blocking progress for
+  uncached work. Smooth keyboard camera motion through a fixed 120 Hz motion
+  step with interpolated rendering so uneven viewport frame intervals do not
+  produce lateral strafe jitter. (`f889ac2`, `e68e34a`)
 - [x] Make `OBJBODYPARTS` editing lossless at the property/UI boundary: expose
   every serialized token (including unknown/profile-future values), retain
   exact order and duplicates, copy/paste the complete underlying array, and
@@ -665,6 +671,13 @@ remain unchanged.
   main window is ready. ([`3af2099`](https://github.com/Ilufus/ei-mapper-endurance/commit/3af2099))
 
 ### 0.3.0 release gate
+
+- [ ] Integrate the queued modern-atlas MVP from
+  `feature/modern-atlas-mvp@42aa7e7` conflict-aware. Preserve the generally
+  useful MPR loading, staging, and crash-handling work; import `a554c99` only
+  selectively and do not import experimental generated-blend imagery. The
+  measured expanded 8192 atlas remains unsupported because it exhausts the
+  available runtime memory budget.
 
 - [x] Runtime-confirm the merged overlay visuals on current main through desktop
   OpenGL: animated Zone 18 water and stationary Zone 16 lava. The user confirmed
