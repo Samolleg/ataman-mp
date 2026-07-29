@@ -3,6 +3,7 @@
 
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 namespace ei {
 
@@ -13,6 +14,11 @@ float textureUvScale(const QString& textureName);
 float textureUvScaleForBounds(const QString& textureName, float minU, float maxU,
                               float minV, float maxV);
 bool usesUnlayeredHumanoidTexture(const QString& partName);
+// Resource identity is stable for one configured profile generation. Archive
+// metadata is deliberately sampled once and invalidated by the explicit
+// resource-refresh path instead of being restatted for every map object.
+QString cachedResourceSourceFingerprint(const QVector<QString>& sources);
+void invalidateResourceSourceFingerprintCache();
 
 }
 

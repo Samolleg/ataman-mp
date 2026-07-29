@@ -10,6 +10,7 @@
 #include <QHeaderView>
 #include <QSaveFile>
 #include <QCryptographicHash>
+#include <QElapsedTimer>
 
 #include "mob.h"
 #include "utils.h"
@@ -391,22 +392,47 @@ bool CMob::deserialize(QByteArray data)
 
 void CMob::updateObjects()
 {
+    QElapsedTimer updateTimer;
+    updateTimer.start();
+    qint64 unitNanoseconds = 0;
+    qint64 otherNanoseconds = 0;
+    int unitCount = 0;
     ei::log(eLogInfo, "Start update " + QString::number(m_aNode.size())+ " objects");
     for(int i = 0; i < m_aNode.size(); ++i)
     {
         CNode* node = m_aNode.at(i);
+        const bool unit = dynamic_cast<CUnit*>(node) != nullptr;
+        QElapsedTimer objectTimer;
+        objectTimer.start();
         const QString context = QString("MOB object %1/%2 mapId=%3 type=%4 model=%5 texture=%6")
                 .arg(i + 1).arg(m_aNode.size()).arg(node->mapId()).arg(int(node->nodeType()))
                 .arg(node->modelName(), node->textureName());
-        ei::setCrashContext(context + " phase=loadFigure");
-        node->loadFigure();
-        ei::setCrashContext(context + " phase=loadTexture");
-        node->loadTexture();
+        // Units immediately replace their serialized/base figure with the
+        // profile-correct appearance assembled by the prioritized background
+        // resolver. Building that throwaway figure accounted for most of the
+        // foreground Zone 18 pause, so leave units visually unresolved here.
+        // Static objects still need their final figure before the map opens.
+        if(!unit)
+        {
+            ei::setCrashContext(context + " phase=loadFigure");
+            node->loadFigure();
+            ei::setCrashContext(context + " phase=loadTexture");
+            node->loadTexture();
+        }
+        if(unit)
+        {
+            unitNanoseconds += objectTimer.nsecsElapsed();
+            ++unitCount;
+        }
+        else
+            otherNanoseconds += objectTimer.nsecsElapsed();
     }
     ei::setCrashContext("MOB projection phase");
     CLandscape::getInstance()->projectPositions(m_aNode);
     m_pProgress->update(50);
-    ei::log(eLogInfo, "End update objects");
+    ei::log(eLogInfo, QString("End update objects elapsedMs:%1 units:%2 unitMs:%3 otherMs:%4")
+            .arg(updateTimer.elapsed()).arg(unitCount)
+            .arg(unitNanoseconds / 1000000).arg(otherNanoseconds / 1000000));
     ei::setCrashContext("idle after MOB update");
 }
 

@@ -113,7 +113,7 @@ private slots:
     void keepsAppearanceCacheBesideEditor();
     void rebuildsIncompatibleAppearanceCacheAutomatically();
     void cachesParsedAnimationAndRecoversFromCorruption();
-    void roundTripsComposedAtlasPixelsLosslessly();
+    void roundTripsComposedAtlasAsGpuReadyRgba8();
     void roundTripsFigureAssemblyAndUnknownPartNames();
     void malformedAndUnknownInputsFailStatic();
 };
@@ -147,7 +147,7 @@ void UnitAnimationTests::cachesParsedAnimationAndRecoversFromCorruption()
     QVERIFY(!hit);
 }
 
-void UnitAnimationTests::roundTripsComposedAtlasPixelsLosslessly()
+void UnitAnimationTests::roundTripsComposedAtlasAsGpuReadyRgba8()
 {
     QTemporaryDir cache;
     QVERIFY(cache.isValid());
@@ -159,11 +159,12 @@ void UnitAnimationTests::roundTripsComposedAtlasPixelsLosslessly()
     QVERIFY(ei::writeCachedVisualImage(cache.path(), QStringLiteral("atlas"), source));
     QImage restored;
     QVERIFY(ei::readCachedVisualImage(cache.path(), QStringLiteral("atlas"), &restored));
-    QCOMPARE(restored.format(), QImage::Format_RGBA64);
+    QCOMPARE(restored.format(), QImage::Format_RGBA8888);
     QCOMPARE(restored.size(), source.size());
+    const QImage expected = source.convertToFormat(QImage::Format_RGBA8888);
     for(int y = 0; y < source.height(); ++y)
         for(int x = 0; x < source.width(); ++x)
-            QCOMPARE(restored.pixelColor(x, y).rgba64(), source.pixelColor(x, y).rgba64());
+            QCOMPARE(restored.pixelColor(x, y), expected.pixelColor(x, y));
 }
 
 void UnitAnimationTests::roundTripsFigureAssemblyAndUnknownPartNames()

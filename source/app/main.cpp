@@ -388,6 +388,10 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption desktopOpenGlOption("desktop-opengl", "Use the system desktop OpenGL implementation (diagnostic GUI mode).");
     QCommandLineOption renderBenchmarkOption("render-benchmark",
         "Disable VSync and run the viewport continuously for renderer throughput capture.");
+    QCommandLineOption workspaceLoadSmokeOption("workspace-load-smoke",
+        "Open positional MPR/MOB documents, log foreground load timings, then exit.");
+    QCommandLineOption workspaceVisualSmokeOption("workspace-visual-smoke",
+        "Open positional documents and exit after all background unit visuals resolve.");
     parser.addOption(validateOption);
     parser.addOption(roundtripOption);
     parser.addOption(jsonOption);
@@ -399,8 +403,18 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(angleOpenGlOption);
     parser.addOption(desktopOpenGlOption);
     parser.addOption(renderBenchmarkOption);
+    parser.addOption(workspaceLoadSmokeOption);
+    parser.addOption(workspaceVisualSmokeOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
+
+    // This remains a normal GUI initialization/load path rather than a
+    // synthetic parser benchmark. The startup callback exits only after every
+    // positional document has passed through MainWindow/CView.
+    if(parser.isSet(workspaceLoadSmokeOption))
+        app.setProperty("workspaceLoadSmoke", true);
+    if(parser.isSet(workspaceVisualSmokeOption))
+        app.setProperty("workspaceVisualSmoke", true);
 
     if(parser.isSet(versionOption))
     {
@@ -1704,6 +1718,12 @@ int main(int argc, char *argv[])
         {
             for(const QString& path : startupDocuments)
                 window.openDocument(QFileInfo(path));
+            if(qApp->property("workspaceLoadSmoke").toBool())
+            {
+                ei::log(eLogInfo, QString("Workspace load smoke complete documents:%1")
+                        .arg(startupDocuments.size()));
+                qApp->quit();
+            }
         });
     }
     return app.exec();

@@ -1,5 +1,10 @@
 #include "resource_name.h"
 
+#include <QFileInfo>
+#include <QDateTime>
+#include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QRegularExpression>
 
 namespace {
@@ -26,9 +31,59 @@ void appendUnique(QStringList& values, const QString& value)
         values.append(value);
 }
 
+QMutex& resourceFingerprintMutex()
+{
+    static QMutex mutex;
+    return mutex;
+}
+
+QHash<QString, QString>& resourceFingerprintCache()
+{
+    static QHash<QString, QString> cache;
+    return cache;
+}
+
+QString resourcePathSetKey(const QVector<QString>& sources)
+{
+    QStringList paths;
+    paths.reserve(sources.size());
+    for(const QString& path : sources)
+        paths.append(QFileInfo(path).absoluteFilePath().toLower());
+    return paths.join(QLatin1Char('\n'));
+}
+
 }
 
 namespace ei {
+
+QString cachedResourceSourceFingerprint(const QVector<QString>& sources)
+{
+    const QString key = resourcePathSetKey(sources);
+    {
+        QMutexLocker locker(&resourceFingerprintMutex());
+        const auto found = resourceFingerprintCache().constFind(key);
+        if(found != resourceFingerprintCache().constEnd())
+            return found.value();
+    }
+
+    QString fingerprint;
+    for(const QString& path : sources)
+    {
+        const QFileInfo info(path);
+        fingerprint += info.absoluteFilePath().toLower() + '|'
+            + QString::number(info.size()) + '|'
+            + QString::number(info.lastModified().toMSecsSinceEpoch()) + '\n';
+    }
+    QMutexLocker locker(&resourceFingerprintMutex());
+    resourceFingerprintCache().insert(key, fingerprint);
+    return fingerprint;
+}
+
+void invalidateResourceSourceFingerprintCache()
+{
+    QMutexLocker locker(&resourceFingerprintMutex());
+    resourceFingerprintCache().clear();
+}
 
 float textureUvScale(const QString& textureName)
 {

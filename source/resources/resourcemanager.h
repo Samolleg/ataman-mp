@@ -241,4 +241,20 @@ private:
     QJsonObject m_lastSession;
 };
 
+namespace ei {
+enum class ECachedCompositePreparation
+{
+    Pending,
+    Ready,
+    Unavailable
+};
+ECachedCompositePreparation requestCachedLayerComposite(
+    const QString& resourceFingerprint, const QString& modelName,
+    const QStringList& layerNames);
+bool takePreparedLayerComposite(const QString& resourceFingerprint,
+                                const QString& modelName,
+                                const QStringList& layerNames,
+                                QImage* image);
+}
+
 #endif // CRESOURCEMANAGER_H

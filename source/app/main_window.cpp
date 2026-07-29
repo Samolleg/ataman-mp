@@ -1314,9 +1314,13 @@ MainWindow::MainWindow(QWidget* parent) :
     QVector<SRecoverableAutosave> recoveries;
     QString backupSessionError;
     CBackupManager backupManager;
-    m_backupSessionStarted = backupManager.beginEditorSession(
+    const bool workspaceSmoke = qApp->property("workspaceLoadSmoke").toBool()
+        || qApp->property("workspaceVisualSmoke").toBool();
+    m_backupSessionStarted = workspaceSmoke ? false : backupManager.beginEditorSession(
         &recoveries, &backupSessionError);
-    if(!m_backupSessionStarted)
+    if(workspaceSmoke)
+        ei::log(eLogInfo, "Automated workspace smoke: backup session notifications disabled");
+    else if(!m_backupSessionStarted)
         ei::log(eLogWarning, "Editor backup session journal unavailable: "
                 + backupSessionError);
     else
@@ -4659,6 +4663,8 @@ bool MainWindow::beginWorkspaceLoad(const QString& description)
     if(m_workspaceLoadInProgress)
         return false;
     m_workspaceLoadInProgress = true;
+    if(m_pView)
+        m_pView->setWorkspaceLoadInProgress(true);
     ei::log(eLogInfo, QString("Workspace load started: %1").arg(description));
     updateDocumentActionAvailability();
     updateMapTestAction();
@@ -4670,6 +4676,8 @@ void MainWindow::endWorkspaceLoad()
     if(!m_workspaceLoadInProgress)
         return;
     m_workspaceLoadInProgress = false;
+    if(m_pView)
+        m_pView->setWorkspaceLoadInProgress(false);
     ei::log(eLogInfo, "Workspace load finished");
     updateDocumentActionAvailability();
     updateMapTestAction();

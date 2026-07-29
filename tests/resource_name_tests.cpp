@@ -5,6 +5,7 @@
 #include "unit_appearance.h"
 
 #include <QFile>
+#include <QTemporaryDir>
 
 class ResourceNameTests : public QObject
 {
@@ -36,7 +37,33 @@ private slots:
     void compositesTransparentArmorOverBodyAtlas();
     void compositesPremultipliedPnt3LikeTheGame();
     void keepsFaceAndHairOnSkinAtlas();
+    void cachesResourceMetadataUntilExplicitRefresh();
 };
+
+void ResourceNameTests::cachesResourceMetadataUntilExplicitRefresh()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("figures.res"));
+    QFile source(path);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    source.write("first");
+    source.close();
+
+    const QVector<QString> sources{path};
+    ei::invalidateResourceSourceFingerprintCache();
+    const QString first = ei::cachedResourceSourceFingerprint(sources);
+
+    QVERIFY(source.open(QIODevice::WriteOnly | QIODevice::Append));
+    source.write("-changed");
+    source.close();
+    // A profile generation is immutable until the user/resource refresh path
+    // explicitly invalidates it; repeated object loads must remain O(1).
+    QCOMPARE(ei::cachedResourceSourceFingerprint(sources), first);
+
+    ei::invalidateResourceSourceFingerprintCache();
+    QVERIFY(ei::cachedResourceSourceFingerprint(sources) != first);
+}
 
 namespace {
 

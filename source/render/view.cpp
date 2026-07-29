@@ -6797,9 +6797,33 @@ bool CView::loadMob(QFileInfo &filePath)
     return true;
 }
 
+void CView::setWorkspaceLoadInProgress(bool inProgress)
+{
+    if(m_unitVisualPreparationSuspended == inProgress)
+        return;
+    m_unitVisualPreparationSuspended = inProgress;
+    if(inProgress)
+    {
+        if(m_unitVisualPreparationTimer)
+            m_unitVisualPreparationTimer->stop();
+        return;
+    }
+    if(m_unitVisualPreparationTimer
+            && ei::shouldPumpUnitVisualPreparation(m_unitAppearanceProgressPending,
+                                                   m_unitAppearanceProgressTotal,
+                                                   m_unitAppearanceProgressCompleted))
+        m_unitVisualPreparationTimer->start();
+    update();
+}
+
 void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
                                               bool cameraMoving)
 {
+    // Workspace replacement pumps Qt events while parsing/projecting thousands
+    // of objects. Never let the previous map's idle preparation generation use
+    // those event-loop windows and compete with the foreground load.
+    if(m_unitVisualPreparationSuspended)
+        return;
     if(m_pProgress && m_pProgress->isVisible() && m_unitAppearanceProgressTotal == 0)
         return;
 
@@ -6898,6 +6922,11 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
             m_unitAppearanceProgressPending = false;
             if(m_unitVisualPreparationTimer)
                 m_unitVisualPreparationTimer->stop();
+            if(qApp->property("workspaceVisualSmoke").toBool())
+            {
+                ei::log(eLogInfo, "Workspace visual smoke complete");
+                QTimer::singleShot(500, qApp, &QCoreApplication::quit);
+            }
         }
         return;
     }

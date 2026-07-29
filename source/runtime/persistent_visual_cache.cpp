@@ -19,7 +19,11 @@ namespace {
 
 const quint32 kContainerMagic = 0x43495645; // EIVC
 const int kContainerSchema = 2;
-const quint32 kImageSchema = 1;
+// Final decoded/composited game textures are uploaded as RGBA8. Persist the
+// GPU-ready 8-bit representation instead of the old RGBA64 cache payload,
+// which doubled disk traffic and decompression work without preserving any
+// additional source precision.
+const quint32 kImageSchema = 2;
 const quint32 kAssemblySchema = 1;
 const int kMaximumPayloadBytes = 512 * 1024 * 1024;
 const int kMaximumParts = 4096;
@@ -33,6 +37,11 @@ qint64 directoryBudget(const QString& path)
     const QString category = QFileInfo(path).fileName().toLower();
     if(category == QStringLiteral("character-atlases"))
         return 96ll * 1024ll * 1024ll;
+    if(category == QStringLiteral("character-composites"))
+        // Completed layered humanoid atlases are the expensive restart unit.
+        // Keep a full heavy-map working set so a sequential reload cannot
+        // evict entries before it reaches them again.
+        return 256ll * 1024ll * 1024ll;
     if(category == QStringLiteral("character-assemblies"))
         return 96ll * 1024ll * 1024ll;
     if(category == QStringLiteral("character-animations"))
@@ -237,17 +246,17 @@ bool readCachedVisualImage(const QString& directory, const QString& key, QImage*
     quint32 width = 0, height = 0;
     QByteArray pixels;
     stream >> width >> height >> pixels;
-    const quint64 expected = quint64(width) * quint64(height) * 8;
+    const quint64 expected = quint64(width) * quint64(height) * 4;
     if(stream.status() != QDataStream::Ok || width == 0 || height == 0
             || width > 16384 || height > 16384 || expected != quint64(pixels.size()))
     {
         QFile::remove(entryPath(directory, key));
         return false;
     }
-    QImage decoded(int(width), int(height), QImage::Format_RGBA64);
+    QImage decoded(int(width), int(height), QImage::Format_RGBA8888);
     for(int y = 0; y < decoded.height(); ++y)
-        memcpy(decoded.scanLine(y), pixels.constData() + y * decoded.width() * 8,
-               size_t(decoded.width() * 8));
+        memcpy(decoded.scanLine(y), pixels.constData() + y * decoded.width() * 4,
+               size_t(decoded.width() * 4));
     *image = decoded;
     return true;
 }
@@ -256,11 +265,11 @@ bool writeCachedVisualImage(const QString& directory, const QString& key, const 
 {
     if(image.isNull())
         return false;
-    const QImage converted = image.convertToFormat(QImage::Format_RGBA64);
-    QByteArray pixels(converted.width() * converted.height() * 8, Qt::Uninitialized);
+    const QImage converted = image.convertToFormat(QImage::Format_RGBA8888);
+    QByteArray pixels(converted.width() * converted.height() * 4, Qt::Uninitialized);
     for(int y = 0; y < converted.height(); ++y)
-        memcpy(pixels.data() + y * converted.width() * 8, converted.constScanLine(y),
-               size_t(converted.width() * 8));
+        memcpy(pixels.data() + y * converted.width() * 4, converted.constScanLine(y),
+               size_t(converted.width() * 4));
     QByteArray payload;
     QDataStream stream(&payload, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);

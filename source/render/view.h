@@ -106,6 +106,7 @@ public:
 
     void loadLandscape(const QFileInfo& filePath);
     void refreshAfterResourceSetup();
+    void setWorkspaceLoadInProgress(bool inProgress);
     void unloadLand(bool promptForSave = true);
     void saveLand();
     void saveLandAs();
@@ -603,6 +604,7 @@ private:
     int m_unitAppearanceCacheHits{0};
     int m_unitAppearanceLastLoggedCompleted{-1};
     bool m_unitAppearanceProgressPending{false};
+    bool m_unitVisualPreparationSuspended{false};
     QTimer* m_aiGraphRegenerationTimer{nullptr};
     quint64 m_aiGraphBuildRequest{0};
     bool m_aiGraphAutoRegenerationEnabled{false};

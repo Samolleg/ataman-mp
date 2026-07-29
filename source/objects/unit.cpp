@@ -1,5 +1,6 @@
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include "unit.h"
 #include "gl_dispatch.h"
 #include "view.h"
@@ -11,6 +12,7 @@
 #include "property.h"
 #include "profile_database.h"
 #include "profile_visual_provider.h"
+#include "persistent_visual_cache.h"
 
 #include <QJsonArray>
 #include <QRegularExpression>
@@ -215,6 +217,8 @@ namespace {
 quint64 s_unitCacheGeneration = std::numeric_limits<quint64>::max();
 QHash<QString, SAnimationClip> s_idleClipCache;
 QSet<QString> s_loggedVisualPlans;
+QHash<QString, QJsonObject> s_resolvedVisualPlanCache;
+constexpr quint32 kResolvedVisualPlanSchema = 1;
 
 void prepareUnitGenerationCaches(quint64 generation)
 {
@@ -248,6 +252,12 @@ bool optionalEquipmentPart(const QString& part)
         QRegularExpression::CaseInsensitiveOption);
     return optional.match(part).hasMatch();
 }
+
+QString resolvedVisualPlanKey(const QJsonObject& identity);
+bool readResolvedVisualPlan(const QString& key, QJsonObject* plan);
+void writeResolvedVisualPlan(const QString& key, const QJsonObject& plan);
+QMap<QString, QString> jsonStringMap(const QJsonObject& object);
+QMap<QString, QVector3D> jsonVectorMap(const QJsonObject& object);
 
 }
 
@@ -299,7 +309,6 @@ bool CUnit::refreshTransientVisual(bool force)
         appearanceResult = m_preparedAppearanceResult;
         if(!m_preparedAppearanceDiagnostic.isEmpty())
             diagnostic = m_preparedAppearanceDiagnostic;
-        m_preparedAppearanceValid = false;
     }
     else
         appearanceResult = appearanceResolver->resolve(appearanceRequest, &appearance);
@@ -317,6 +326,80 @@ bool CUnit::refreshTransientVisual(bool force)
     const QString texture = appearance.value("primaryTexture").toString();
     const QString secondaryTexture = appearance.value("secondaryTexture").toString();
     const bool databaseEquipmentPlan = appearance.value("source").toString() == "profileDatabase";
+    QJsonObject planIdentity;
+    planIdentity.insert("schema", int(kResolvedVisualPlanSchema));
+    planIdentity.insert("databaseCacheKey", database.isNull() ? QString() : database->cacheKey);
+    planIdentity.insert("appearanceProvider", context.providerForRole("characterAppearance"));
+    planIdentity.insert("equipmentProvider", context.providerForRole("equipmentLayout"));
+    planIdentity.insert("resourceFingerprint",
+        configuredResourceFingerprint(CObjectList::getInstance()->settings()));
+    planIdentity.insert("prototype", m_prototypeName);
+    planIdentity.insert("parentTemplate", m_parentTemplate);
+    planIdentity.insert("model", m_modelName);
+    planIdentity.insert("primaryTexture", m_primaryTexture);
+    planIdentity.insert("secondaryTexture", m_secondaryTexture);
+    planIdentity.insert("serializedParts", QJsonArray::fromStringList(m_bodyParts));
+    planIdentity.insert("embeddedArmor", QJsonArray::fromStringList(m_aArmor));
+    planIdentity.insert("embeddedWeapons", QJsonArray::fromStringList(m_aWeapon));
+    planIdentity.insert("dataSource", int(appearanceRequest.dataSource));
+    planIdentity.insert("appearance", appearance);
+    const QString visualPlanKey = resolvedVisualPlanKey(planIdentity);
+    bool cachedPlanPending = false;
+    auto applyResolvedPlan = [this, &cachedPlanPending](const QJsonObject& plan,
+                                                       const QVector3D& complexion) -> bool
+    {
+        const QString resolvedModel = plan.value("model").toString();
+        const QString resolvedTexture = plan.value("primaryTexture").toString();
+        if(resolvedModel.isEmpty() || resolvedTexture.isEmpty())
+            return false;
+        const QString resolvedSecondary = plan.value("secondaryTexture").toString();
+        const QStringList resolvedParts = jsonStringList(plan, "visibleParts");
+        const QStringList resolvedLayers = jsonStringList(plan, "bodyTextureLayers");
+        const QStringList resolvedWeapons = jsonStringList(plan, "animationWeapons");
+        const QMap<QString, QString> resolvedComponentTextures =
+            jsonStringMap(plan.value("componentTextures").toObject());
+        const QMap<QString, QVector3D> resolvedEmissions =
+            jsonVectorMap(plan.value("partEmissions").toObject());
+        if(!resolvedLayers.isEmpty())
+        {
+            const ei::ECachedCompositePreparation composite =
+                ei::requestCachedLayerComposite(
+                    configuredResourceFingerprint(CObjectList::getInstance()->settings()),
+                    resolvedModel, resolvedLayers);
+            if(composite == ei::ECachedCompositePreparation::Pending)
+            {
+                // Keep the unit unresolved while its already-cached source
+                // layers are composited off the GUI thread. The idle scheduler
+                // will retry and perform only the final GL upload.
+                m_resolvedDatabaseGeneration = std::numeric_limits<quint64>::max();
+                m_resolvedVisualRevision = std::numeric_limits<quint64>::max();
+                cachedPlanPending = true;
+                return false;
+            }
+        }
+        m_visualDiagnostics = jsonStringList(plan, "diagnostics");
+        m_renderedModelName = resolvedModel;
+        m_renderedPrimaryTextureName = resolvedTexture;
+        m_renderedSecondaryTextureName = resolvedSecondary;
+        m_renderedBodyTextureLayers = resolvedLayers;
+        applyTransientVisual(resolvedModel, resolvedTexture, resolvedParts, complexion,
+                             resolvedComponentTextures, resolvedSecondary,
+                             resolvedLayers, resolvedEmissions);
+        m_resolvedAnimationModel = resolvedModel;
+        m_resolvedAnimationWeapons = resolvedWeapons;
+        return true;
+    };
+    QJsonObject cachedVisualPlan;
+    if(readResolvedVisualPlan(visualPlanKey, &cachedVisualPlan))
+    {
+        if(applyResolvedPlan(cachedVisualPlan, m_complection))
+        {
+            m_preparedAppearanceValid = false;
+            return true;
+        }
+        if(cachedPlanPending)
+            return false;
+    }
     const QStringList assemblyParts = CObjectList::getInstance()->figurePartNames(model);
     const QStringList resolvedBodyParts = appearance.contains("bodyParts")
         ? jsonStringList(appearance, "bodyParts") : m_bodyParts;
@@ -449,7 +532,95 @@ bool CUnit::refreshTransientVisual(bool force)
                          secondaryTexture, bodyTextureLayers, partEmissions);
     m_resolvedAnimationModel = model;
     m_resolvedAnimationWeapons = equipmentRequest.weapons;
+    QJsonObject cachedPlan;
+    cachedPlan.insert("model", model);
+    cachedPlan.insert("primaryTexture", texture);
+    cachedPlan.insert("secondaryTexture", secondaryTexture);
+    cachedPlan.insert("visibleParts", QJsonArray::fromStringList(visibleParts));
+    cachedPlan.insert("bodyTextureLayers", QJsonArray::fromStringList(bodyTextureLayers));
+    cachedPlan.insert("animationWeapons", QJsonArray::fromStringList(equipmentRequest.weapons));
+    cachedPlan.insert("diagnostics", QJsonArray::fromStringList(m_visualDiagnostics));
+    QJsonObject cachedTextures;
+    for(auto it = componentTextures.constBegin(); it != componentTextures.constEnd(); ++it)
+        cachedTextures.insert(it.key(), it.value());
+    cachedPlan.insert("componentTextures", cachedTextures);
+    QJsonObject cachedEmissions;
+    for(auto it = partEmissions.constBegin(); it != partEmissions.constEnd(); ++it)
+    {
+        QJsonArray values;
+        values.append(it.value().x());
+        values.append(it.value().y());
+        values.append(it.value().z());
+        cachedEmissions.insert(it.key(), values);
+    }
+    cachedPlan.insert("partEmissions", cachedEmissions);
+    writeResolvedVisualPlan(visualPlanKey, cachedPlan);
+    m_preparedAppearanceValid = false;
     return true;
+}
+
+namespace {
+
+QString resolvedVisualPlanKey(const QJsonObject& identity)
+{
+    return ei::visualCacheKey(QJsonDocument(identity).toJson(QJsonDocument::Compact));
+}
+
+bool readResolvedVisualPlan(const QString& key, QJsonObject* plan)
+{
+    if(!plan || key.isEmpty())
+        return false;
+    const auto cached = s_resolvedVisualPlanCache.constFind(key);
+    if(cached != s_resolvedVisualPlanCache.constEnd())
+    {
+        *plan = cached.value();
+        return true;
+    }
+    QByteArray payload;
+    if(!ei::readVisualCachePayload(ei::visualCacheDirectory("character-plans"), key,
+                                   kResolvedVisualPlanSchema, &payload))
+        return false;
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(payload, &error);
+    if(error.error != QJsonParseError::NoError || !document.isObject())
+        return false;
+    *plan = document.object();
+    s_resolvedVisualPlanCache.insert(key, *plan);
+    return true;
+}
+
+void writeResolvedVisualPlan(const QString& key, const QJsonObject& plan)
+{
+    if(key.isEmpty() || plan.isEmpty())
+        return;
+    s_resolvedVisualPlanCache.insert(key, plan);
+    ei::writeVisualCachePayload(ei::visualCacheDirectory("character-plans"), key,
+                                kResolvedVisualPlanSchema,
+                                QJsonDocument(plan).toJson(QJsonDocument::Compact));
+}
+
+QMap<QString, QString> jsonStringMap(const QJsonObject& object)
+{
+    QMap<QString, QString> result;
+    for(auto it = object.constBegin(); it != object.constEnd(); ++it)
+        result.insert(it.key(), it.value().toString());
+    return result;
+}
+
+QMap<QString, QVector3D> jsonVectorMap(const QJsonObject& object)
+{
+    QMap<QString, QVector3D> result;
+    for(auto it = object.constBegin(); it != object.constEnd(); ++it)
+    {
+        const QJsonArray values = it.value().toArray();
+        if(values.size() == 3)
+            result.insert(it.key(), QVector3D(float(values.at(0).toDouble()),
+                                              float(values.at(1).toDouble()),
+                                              float(values.at(2).toDouble())));
+    }
+    return result;
+}
+
 }
 
 void CUnit::refreshAnimationPose()

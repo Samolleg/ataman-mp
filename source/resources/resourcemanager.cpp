@@ -1,4 +1,5 @@
 #include "resourcemanager.h"
+#include <QtConcurrent>
 #include <QOpenGLContext>
 #include "mmp_codec.h"
 #include <QDebug>
@@ -29,6 +30,13 @@ CTextureList* CTextureList::m_pTextureContainer = nullptr;
 CSessionDataManager* CSessionDataManager::m_pSessionDataManger = nullptr;
 
 namespace {
+
+QMutex s_compositePreparationMutex;
+QHash<QString, int> s_compositePreparationStates;
+QHash<QString, QImage> s_preparedCompositeImages;
+QList<QString> s_preparedCompositeOrder;
+qint64 s_preparedCompositeBytes = 0;
+const qint64 kPreparedCompositeBudget = 256ll * 1024ll * 1024ll;
 ERenderMaterialClass classifyDxt1Alpha(const QByteArray& data, int offset, int width, int height)
 {
     const int blocks = qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4);
@@ -198,19 +206,6 @@ QMap<QString, QByteArray> normalizedResourceMap(const QMap<QString, QByteArray>&
     return result;
 }
 
-QString resourceSourceFingerprint(const QVector<QString>& sources)
-{
-    QString result;
-    for(const QString& path : sources)
-    {
-        const QFileInfo info(path);
-        result += info.absoluteFilePath().toLower() + '|'
-                + QString::number(info.size()) + '|'
-                + QString::number(info.lastModified().toMSecsSinceEpoch()) + '\n';
-    }
-    return result;
-}
-
 bool readPreferredUnitDatabase(const QVector<QString>& sources, QByteArray& unitsDatabase,
                                QString* sourcePath)
 {
@@ -242,7 +237,7 @@ QString databaseHumanoidTexture(const QVector<QString>& sources, const QString& 
 {
     static QMap<QString, QMap<QString, int>> skinIndexCache;
     static QMap<QString, QString> databaseSourceCache;
-    const QString fingerprint = resourceSourceFingerprint(sources);
+    const QString fingerprint = ei::cachedResourceSourceFingerprint(sources);
     if(!skinIndexCache.contains(fingerprint))
     {
         QByteArray unitsDatabase;
@@ -344,7 +339,103 @@ int dxtLevelSize(int width, int height, int blockBytes)
 
 QString configuredResourceFingerprint(CSettings* settings)
 {
-    return resourceSourceFingerprint(configuredResourceSources(settings));
+    return ei::cachedResourceSourceFingerprint(configuredResourceSources(settings));
+}
+
+namespace ei {
+
+ECachedCompositePreparation requestCachedLayerComposite(
+    const QString& resourceFingerprint, const QString& modelName,
+    const QStringList& layerNames)
+{
+    if(resourceFingerprint.isEmpty() || modelName.isEmpty() || layerNames.isEmpty())
+        return ECachedCompositePreparation::Unavailable;
+    const QString identity = QStringLiteral("layers|") + resourceFingerprint + '|'
+        + modelName.toLower() + '|' + layerNames.join(';').toLower();
+    const QString key = visualCacheKey(identity.toUtf8());
+    {
+        QMutexLocker locker(&s_compositePreparationMutex);
+        const auto found = s_compositePreparationStates.constFind(key);
+        if(found != s_compositePreparationStates.constEnd())
+            return found.value() > 0 ? ECachedCompositePreparation::Ready
+                                    : (found.value() < 0
+                                       ? ECachedCompositePreparation::Unavailable
+                                       : ECachedCompositePreparation::Pending);
+        s_compositePreparationStates.insert(key, 0);
+    }
+    QtConcurrent::run([resourceFingerprint, modelName, layerNames, key]()
+    {
+        const QString compositeDirectory = visualCacheDirectory(
+            QStringLiteral("character-composites"));
+        QImage composite;
+        bool success = readCachedVisualImage(compositeDirectory, key, &composite);
+        if(!success)
+        {
+            QVector<QImage> layers;
+            layers.reserve(layerNames.size());
+            const QString sourceDirectory = visualCacheDirectory(
+                QStringLiteral("character-atlases"));
+            for(const QString& layerName : layerNames)
+            {
+                const QString sourceIdentity = resourceFingerprint + '|'
+                    + textureCacheKey(layerName, modelName);
+                QImage layer;
+                if(!readCachedVisualImage(sourceDirectory,
+                                          visualCacheKey(sourceIdentity.toUtf8()), &layer))
+                {
+                    layers.clear();
+                    break;
+                }
+                layers.append(layer);
+            }
+            QString diagnostic;
+            success = !layers.isEmpty()
+                && compositeTextureLayers(layers, &composite, &diagnostic)
+                && writeCachedVisualImage(compositeDirectory, key, composite);
+        }
+        QMutexLocker locker(&s_compositePreparationMutex);
+        if(success)
+        {
+            const QImage previous = s_preparedCompositeImages.take(key);
+            s_preparedCompositeBytes -= qint64(previous.bytesPerLine()) * previous.height();
+            s_preparedCompositeOrder.removeAll(key);
+            s_preparedCompositeImages.insert(key, composite);
+            s_preparedCompositeOrder.append(key);
+            s_preparedCompositeBytes += qint64(composite.bytesPerLine()) * composite.height();
+            while(s_preparedCompositeBytes > kPreparedCompositeBudget
+                    && !s_preparedCompositeOrder.isEmpty())
+            {
+                const QImage removed = s_preparedCompositeImages.take(
+                    s_preparedCompositeOrder.takeFirst());
+                s_preparedCompositeBytes -= qint64(removed.bytesPerLine()) * removed.height();
+            }
+        }
+        s_compositePreparationStates.insert(key, success ? 1 : -1);
+    });
+    return ECachedCompositePreparation::Pending;
+}
+
+bool takePreparedLayerComposite(const QString& resourceFingerprint,
+                                const QString& modelName,
+                                const QStringList& layerNames,
+                                QImage* image)
+{
+    if(!image)
+        return false;
+    const QString identity = QStringLiteral("layers|") + resourceFingerprint + '|'
+        + modelName.toLower() + '|' + layerNames.join(';').toLower();
+    const QString key = visualCacheKey(identity.toUtf8());
+    QMutexLocker locker(&s_compositePreparationMutex);
+    const auto found = s_preparedCompositeImages.find(key);
+    if(found == s_preparedCompositeImages.end())
+        return false;
+    *image = found.value();
+    s_preparedCompositeBytes -= qint64(found.value().bytesPerLine()) * found.value().height();
+    s_preparedCompositeOrder.removeAll(key);
+    s_preparedCompositeImages.erase(found);
+    return true;
+}
+
 }
 
 CObjectList *CObjectList::getInstance()
@@ -641,6 +732,7 @@ void CObjectList::initResource()
 
 void CObjectList::refreshConfiguredSources()
 {
+    ei::invalidateResourceSourceFingerprintCache();
     m_missingFigureNames.clear();
     m_animationArchives.clear();
     m_missingAnimationNames.clear();
@@ -1036,7 +1128,7 @@ QOpenGLTexture* CTextureList::texture(const QString& name, const QString& modelN
 QImage CTextureList::loadTextureImageResource(const QString& name, const QString& modelName)
 {
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
-    const QString key = resourceSourceFingerprint(sources) + '|'
+    const QString key = ei::cachedResourceSourceFingerprint(sources) + '|'
         + ei::textureCacheKey(name, modelName);
     if(m_aTextureImages.contains(key))
         return m_aTextureImages.value(key);
@@ -1127,13 +1219,26 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
                                              const QString& modelName)
 {
     const QString cacheKey = "layers|"
-        + resourceSourceFingerprint(configuredResourceSources(m_pSettings)) + '|'
+        + ei::cachedResourceSourceFingerprint(configuredResourceSources(m_pSettings)) + '|'
         + modelName.toLower() + '|'
         + layerNames.join(';').toLower();
     if(m_aTexture.contains(cacheKey))
         return m_aTexture.value(cacheKey);
+    const QString compositeDirectory = ei::visualCacheDirectory(
+        QStringLiteral("character-composites"));
+    const QString compositeKey = ei::visualCacheKey(cacheKey.toUtf8());
     QString diagnostic;
-    const QImage composite = layeredTextureImage(layerNames, modelName, &diagnostic);
+    QImage composite;
+    const QString fingerprint = ei::cachedResourceSourceFingerprint(
+        configuredResourceSources(m_pSettings));
+    const bool preparedCompositeHit = ei::takePreparedLayerComposite(
+        fingerprint, modelName, layerNames, &composite);
+    const bool persistentCompositeHit = preparedCompositeHit
+        || ei::readCachedVisualImage(compositeDirectory, compositeKey, &composite);
+    if(!persistentCompositeHit)
+    {
+        composite = layeredTextureImage(layerNames, modelName, &diagnostic);
+    }
     if(composite.isNull())
     {
         ei::log(eLogWarning, "Cannot compose humanoid body atlas: " + diagnostic);
@@ -1149,6 +1254,16 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
     texture->setData(composite);
     m_aTexture.insert(cacheKey, texture);
     m_textureMaterialClasses.insert(texture, classifyTextureAlpha(composite));
+    // A completed composite is the durable checkpoint for interrupted
+    // preparation, including one-off equipment combinations.
+    if(!persistentCompositeHit)
+    {
+        const QImage completed = composite;
+        QtConcurrent::run([compositeDirectory, compositeKey, completed]()
+        {
+            ei::writeCachedVisualImage(compositeDirectory, compositeKey, completed);
+        });
+    }
     return texture;
 }
 
@@ -1535,6 +1650,7 @@ void CTextureList::setTerrainMipmappingEnabled(bool enabled)
 
 void CTextureList::refreshConfiguredSources()
 {
+    ei::invalidateResourceSourceFingerprintCache();
     m_missingTextureNames.clear();
     m_aTextureImages.clear();
     for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
