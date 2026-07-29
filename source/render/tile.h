@@ -4,6 +4,7 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
 #include <QVector3D>
+#include <QtMath>
 #include "types.h"
 
 struct SSecVertex
@@ -59,6 +60,14 @@ public:
     ushort tileRotation() const {return m_rotNum;}
     void setTile(int index, int rotNum);
     void setAtlasLayout(int textureCount, int columns);
+    static int preferredAtlasColumns(int textureCount)
+    {
+        if(textureCount <= 0)
+            return 1;
+        if(textureCount <= 8)
+            return textureCount;
+        return qMax(1, qCeil(qSqrt(double(textureCount))));
+    }
     static float atlasPageRowOrigin(int atlasIndex, int textureCount,
                                     int columns)
     {

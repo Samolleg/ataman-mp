@@ -102,6 +102,7 @@ struct Atlas
     STerrainAtlasProfile profile;
     STerrainAtlasAnalysis analysis;
     QVector<QImage> tiles;
+    QVector<QByteArray> pageMmpPayloads;
     QString archivePath;
     QByteArray pixelHash;
 };
@@ -141,6 +142,7 @@ public:
         for(const Archive& archive : m_archives)
         {
             QVector<QImage> decoded;
+            QVector<QByteArray> pageMmpPayloads;
             bool complete = true;
             for(int page = 0; page < pages; ++page)
             {
@@ -158,6 +160,7 @@ public:
                     complete = false;
                     break;
                 }
+                pageMmpPayloads.append(payload);
                 decoded.append(inspected.baseImage);
             }
             if(!complete) continue;
@@ -173,6 +176,7 @@ public:
             result.profile = profile;
             result.analysis = profile.approvedAnalysis(&report);
             result.tiles = tiles;
+            result.pageMmpPayloads = pageMmpPayloads;
             result.archivePath = archive.path;
             result.pixelHash = hash;
             result.valid = result.analysis.usable && !report.hasErrors();
@@ -564,17 +568,9 @@ BuiltMap buildExpandedRuntimeProbe(
             const int slot = page * 64 + local;
             QImage pixels = sourceAtlas.tiles.at(slot % sourceAtlas.tiles.size())
                 .convertToFormat(QImage::Format_RGBA8888);
-            // Keep stock JMV imagery and untouched tile edges. A tiny interior
-            // marker makes all 16,384 physical identities deterministic.
-            for(int bit = 0; bit < 14; ++bit)
-            {
-                const int x = tileSize / 2 - 7 + bit;
-                const int y = tileSize / 2 + (bit & 1);
-                QColor color = pixels.pixelColor(x, y);
-                color.setRed((color.red() + ((slot >> bit) & 1 ? 71 : 19)) & 255);
-                color.setBlue((color.blue() + ((slot >> bit) & 1 ? 29 : 83)) & 255);
-                pixels.setPixelColor(x, y, color);
-            }
+            // Repeat exact stock Zone18 imagery. Physical slot/page identity
+            // comes from the MPR reference; changing pixels here prevents the
+            // semantic catalog from recovering a complete paintable field.
             const QByteArray pixelSha256 = QCryptographicHash::hash(
                 QByteArray(reinterpret_cast<const char*>(pixels.constBits()),
                            int(pixels.sizeInBytes())),
@@ -591,17 +587,17 @@ BuiltMap buildExpandedRuntimeProbe(
             }
             pageTiles.append(pixels);
         }
-        const QImage image = CTerrainVirtualAtlas::composePage(pageTiles, 0, tileSize);
-        QString diagnostic;
-        const QByteArray mmp = ei::encodeMmpDxt1(image, true, &diagnostic);
-        if(mmp.isEmpty())
+        if(sourceAtlas.pageMmpPayloads.isEmpty())
         {
-            result.error = QStringLiteral("Could not encode runtime atlas page: %1")
-                .arg(diagnostic);
+            result.error = QStringLiteral(
+                "The source atlas has no authored MMP page payloads.");
             return result;
         }
-        if(best.pages.isEmpty()) best.pages.append(image);
-        best.pageMmpPayloads.append(mmp);
+        if(best.pages.isEmpty())
+            best.pages.append(CTerrainVirtualAtlas::composePage(
+                pageTiles, 0, tileSize));
+        best.pageMmpPayloads.append(sourceAtlas.pageMmpPayloads.at(
+            page % sourceAtlas.pageMmpPayloads.size()));
     }
     best.packedCells.reserve(cellCount);
     for(int cell = 0; cell < cellCount; ++cell)
@@ -669,6 +665,9 @@ BuiltMap buildExpandedRuntimeProbe(
     manifest.insert("atlas_file", baseName + QStringLiteral("-atlas.res"));
     manifest.insert("texture_pages", best.textureCount);
     manifest.insert("active_slots", best.requiredSlots);
+    manifest.insert("pixel_policy", "exact-stock-zone18-repeat");
+    manifest.insert("page_payload_policy", "byte-identical-stock-mmp-repeat");
+    manifest.insert("source_cycle_slots", sourceAtlas.tiles.size());
     manifest.insert("highest_referenced_slot", highestReferencedSlot);
     manifest.insert("highest_referenced_page", targetPages - 1);
     manifest.insert("referenced_page_count", referencedPages.size());

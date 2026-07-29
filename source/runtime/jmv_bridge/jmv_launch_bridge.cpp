@@ -3329,10 +3329,16 @@ bool ActivateRuntime()
 {
     if(!PrepareRuntime())
         return false;
-    if(InterlockedCompareExchange(&g_activated, 1, 0) != 0)
+    const LONG activationState = InterlockedCompareExchange(&g_activated, 1, 0);
+    if(activationState == 2)
         return true;
+    if(activationState != 0)
+        return false;
     if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
+    {
+        InterlockedExchange(&g_activated, 2);
         return true;
+    }
     Log(L"RUNTIME_ACTIVATION phase=install-map-detours begin module=cached");
     const bool directLaunch = InstallMapLoadDetour();
     Log(directLaunch
@@ -3351,7 +3357,9 @@ bool ActivateRuntime()
                  g_patchedImports, g_captureStack ? L"available" : L"unavailable",
                  directLaunch ? L"available" : L"unavailable");
     Log(message);
-    return g_patchedImports > 0 && directLaunch;
+    const bool ready = g_patchedImports > 0 && directLaunch;
+    InterlockedExchange(&g_activated, ready ? 2 : 0);
+    return ready;
 }
 
 bool InitializeDirectLaunch()

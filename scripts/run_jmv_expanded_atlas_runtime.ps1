@@ -4,11 +4,17 @@ param(
     [Parameter(Mandatory = $true)][string]$ModRoot,
     [Parameter(Mandatory = $true)][string]$FixtureRoot,
     [string]$QtBin = "",
+    [ValidateNotNullOrEmpty()][int[]]$ProbePages = @(16, 32, 64, 128, 256),
     [int]$DwellMilliseconds = 20000,
     [int]$ProbeTimeoutSeconds = 120
 )
 
 $ErrorActionPreference = "Stop"
+foreach ($pages in $ProbePages) {
+    if ($pages -notin @(16, 32, 64, 128, 256)) {
+        throw "ProbePages accepts only the generated Zone18 page counts: 16, 32, 64, 128, 256."
+    }
+}
 $testExecutablePath = (Resolve-Path -LiteralPath $TestExecutable).Path
 $gameRootPath = (Resolve-Path -LiteralPath $GameRoot).Path
 $modRootPath = (Resolve-Path -LiteralPath $ModRoot).Path
@@ -270,7 +276,7 @@ function Write-CampaignSummary($Rows) {
 
 $rows = @()
 $script:AllProbeAttempts = @()
-foreach ($pages in @(16, 32, 64, 128, 256)) {
+foreach ($pages in $ProbePages) {
     Write-Host "Starting Zone18 atlas stress: $($pages * 64) slots / $pages pages"
     $row = $null
     for ($attempt = 1; $attempt -le 2; ++$attempt) {

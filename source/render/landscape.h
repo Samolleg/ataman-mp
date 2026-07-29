@@ -113,6 +113,7 @@ private:
     QVector<QVector<CSector*>> m_aSector;
     QOpenGLTexture* m_texture;
     QOpenGLTexture* m_baseAtlasTexture{nullptr};
+    int m_baseAtlasColumns{1};
     QOpenGLTexture* m_previewAtlasTexture{nullptr};
     int m_previewAtlasTextureCount{0};
     int m_previewAtlasColumns{0};

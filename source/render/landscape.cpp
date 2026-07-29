@@ -36,6 +36,7 @@ void CLandscape::unloadMpr()
 {
     clearPreviewTerrainAtlas();
     m_baseAtlasTexture = nullptr;
+    m_baseAtlasColumns = 1;
     m_texture = nullptr;
     for (auto& xSec: m_aSector)
     {
@@ -68,8 +69,7 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     if(tileSize <= 0 || tileImages.front().height() != tileSize)
         return false;
     const int pageSize = tileSize * 8;
-    const int columns = textureCount <= 8
-        ? textureCount : int(std::ceil(std::sqrt(double(textureCount))));
+    const int columns = CTile::preferredAtlasColumns(textureCount);
     const int rows = (textureCount + columns - 1) / columns;
     GLint maximumTextureSize = 0;
     QOpenGLContext::currentContext()->functions()->glGetIntegerv(
@@ -136,7 +136,7 @@ void CLandscape::clearPreviewTerrainAtlas()
         for(QVector<CSector*>& row : m_aSector)
             for(CSector* sector : row)
                 if(sector) sector->setTerrainAtlasLayout(
-                    int(m_header.nTexture), int(m_header.nTexture));
+                    int(m_header.nTexture), m_baseAtlasColumns);
     m_previewAtlasTextureCount = 0;
     m_previewAtlasColumns = 0;
     if(!m_previewAtlasTexture)
@@ -320,9 +320,12 @@ void CLandscape::readMap(const QFileInfo& path)
     ei::log(eLogInfo, QString("MPR namespace outer:%1 inner:%2 expectedTerrainAtlases:%3")
             .arg(path.baseName(), innerMapName).arg(m_header.nTexture));
     int texCount;
+    int atlasColumns = 1;
     ei::setCrashContext("mpr/terrain-atlas/build:" + path.fileName());
-    m_texture = CTextureList::getInstance()->buildLandTex(innerMapName, int(m_header.nTexture), texCount);
+    m_texture = CTextureList::getInstance()->buildLandTex(
+        innerMapName, int(m_header.nTexture), texCount, atlasColumns);
     m_baseAtlasTexture = m_texture;
+    m_baseAtlasColumns = atlasColumns;
     ei::log(eLogInfo, QString("MPR terrain atlas complete file:%1 textureCount:%2")
             .arg(path.fileName()).arg(texCount));
 
@@ -338,6 +341,7 @@ void CLandscape::readMap(const QFileInfo& path)
             QDataStream secStream(aComponent.take(innerMapName + genSectorSuffix(int(x), int(y)) + ".sec"));
             util::formatStream(secStream);
             CSector* sector = new CSector(secStream, m_header.maxZ, texCount, &m_aMaterial);
+            sector->setTerrainAtlasLayout(texCount, atlasColumns);
             sector->setIndex(secIndex);
             xSec.append(sector);
             if(sector->existsTileIndices(m_arrIncorectTiles))

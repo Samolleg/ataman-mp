@@ -336,6 +336,7 @@ private slots:
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
     void semanticAtlasProposalIsDeterministicAndApprovalGated();
     void semanticAtlasTransitionsCannotTransitivelyMergeMaterialAnchors();
+    void semanticAtlasInferenceAssignsExactRepeatedPhysicalSlots();
     void semanticAtlasPerceptualFamiliesSeparateHueAndWhiteTexture();
     void semanticAtlasInferenceUsesRendererOrientationAndPreservesCornerFamilies();
     void semanticAtlasTransitionsCrossTileTypeMetadata();
@@ -5531,6 +5532,39 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(zone2.slotDefinitions.at(285).signature.northWest, mossy->id);
 }
 
+void EnduranceDocumentTests::semanticAtlasInferenceAssignsExactRepeatedPhysicalSlots()
+{
+    QImage grass(24, 24, QImage::Format_RGBA8888);
+    grass.fill(QColor(30, 105, 35));
+    QImage stone(24, 24, QImage::Format_RGBA8888);
+    stone.fill(QColor(125, 120, 108));
+    QImage transition = grass;
+    for(int y = 0; y < transition.height(); ++y)
+        for(int x = transition.width() / 2; x < transition.width(); ++x)
+            transition.setPixelColor(x, y, stone.pixelColor(x, y));
+
+    const QVector<QImage> cycle({grass, stone, transition});
+    QVector<QImage> images;
+    QVector<qint32> tileTypes;
+    QVector<STerrainAtlasSlotUsage> usage;
+    images.reserve(1024);
+    tileTypes.fill(0, 1024);
+    usage.fill(STerrainAtlasSlotUsage(), 1024);
+    for(int slot = 0; slot < 1024; ++slot)
+    {
+        images.append(cycle.at(slot % cycle.size()));
+        usage[slot].landCount = 1;
+    }
+    CValidationReport report;
+    const STerrainAtlasProfile profile = CTerrainAtlasProfileInference::propose(
+        "repeated_stock_pages", images, tileTypes, usage, &report);
+    QCOMPARE(profile.atlasSlotCount, 1024);
+    QCOMPARE(profile.assignedSlotCount(), 1024);
+    QCOMPARE(profile.slotDefinitions.size(), 1024);
+    for(const STerrainAtlasProfileSlot& slot : profile.slotDefinitions)
+        QVERIFY(slot.assigned);
+}
+
 void EnduranceDocumentTests::authoredPresetSupportsZone18SharedLayers()
 {
     CValidationReport report;
@@ -5797,6 +5831,13 @@ void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots(
 
 void EnduranceDocumentTests::multiRowTerrainAtlasKeepsAuthoredPagesInPlace()
 {
+    QCOMPARE(CTile::preferredAtlasColumns(8), 8);
+    QCOMPARE(CTile::preferredAtlasColumns(9), 3);
+    QCOMPARE(CTile::preferredAtlasColumns(32), 6);
+    QCOMPARE(CTile::preferredAtlasColumns(64), 8);
+    QCOMPARE(CTile::preferredAtlasColumns(128), 12);
+    QCOMPARE(CTile::preferredAtlasColumns(256), 16);
+    QCOMPARE(CTile::preferredAtlasColumns(257), 17);
     QCOMPARE(CTile::atlasPageRowOrigin(0, 8, 8), 0.0f);
     QCOMPARE(CTile::atlasPageRowOrigin(7, 8, 8), 0.0f);
     QCOMPARE(CTile::atlasPageRowOrigin(0, 9, 3), 0.0f);

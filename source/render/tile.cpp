@@ -3,6 +3,7 @@
 #include "gl_dispatch.h"
 #include "math_utils.h"
 
+
 CTile::CTile():
     m_materialIndex(-1)
 {
@@ -94,7 +95,6 @@ void CTile::generateDrawVertexData(QVector<SVertexData>& outData, int& curIndex)
     QVector<QVector2D> tCoord; // store x,y min and x,y max
     tCoord.resize(2);
     const int pageColumn = m_atlasTexIndex % m_atlasColumns;
-    const int pageRow = m_atlasTexIndex / m_atlasColumns;
     tCoord[0].setX((m_index%8/8.0f+pageColumn)/m_atlasColumns);
     // QOpenGLTexture uploads QImage scanline zero as the bottom of the GL
     // texture. previewTerrainAtlas writes page row zero into those first

@@ -124,7 +124,8 @@ public:
     QImage textureImage(const QString& name, const QString& modelName);
     QImage layeredTextureImage(const QStringList& layerNames, const QString& modelName,
                                QString* diagnostic = nullptr);
-    QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount, int& texCount);
+    QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount,
+                                 int& texCount, int& atlasColumns);
     // Terrain atlases have an authored DXT mip chain. This only changes the
     // terrain sampler; character/equipment atlases deliberately remain on
     // their conservative non-mipmapped path because their small islands can
