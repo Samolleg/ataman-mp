@@ -99,7 +99,8 @@ CTerrainTransitionCatalog globalMaterialCatalog(
 QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
                                const QString& preferredNamespace,
                                const QSize& requiredSize,
-                               QMap<QString, QImage>* decodedPageCache)
+                               QMap<QString, QImage>* decodedPageCache,
+                               QMap<QString, QImage>* decodedTileCache)
 {
     QVector<STerrainGlobalMaterialSource> sources = family.sources;
     std::stable_sort(sources.begin(), sources.end(),
@@ -120,6 +121,11 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
         if(pageIndex < 0 || pageIndex >= names.size())
             continue;
         const QString pageName = names.at(pageIndex).toCaseFolded();
+        const QString tileCacheKey = QStringLiteral("%1|%2|%3x%4")
+            .arg(pageName).arg(source.uniformSlot % 64)
+            .arg(requiredSize.width()).arg(requiredSize.height());
+        if(decodedTileCache && decodedTileCache->contains(tileCacheKey))
+            return decodedTileCache->value(tileCacheKey);
         QImage page;
         if(decodedPageCache && decodedPageCache->contains(pageName))
             page = decodedPageCache->value(pageName);
@@ -138,7 +144,11 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
                                 tileSize, tileSize).mirrored(false, true)
                       .convertToFormat(QImage::Format_RGBA8888);
         if(requiredSize.isEmpty() || tile.size() == requiredSize)
+        {
+            if(decodedTileCache)
+                decodedTileCache->insert(tileCacheKey, tile);
             return tile;
+        }
         if(fallback.isNull()) fallback = tile;
     }
     // Material identity is independent of a map atlas's native tile
@@ -1872,6 +1882,8 @@ void CView::refreshAfterResourceSetup()
 {
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources();
+    m_terrainGlobalUniformTileCache.clear();
+    m_terrainGlobalTransitionPageCache.clear();
     m_spatialIndexDirty = true;
     m_skyResourcesChecked = false;
     m_staticShadowFingerprint.clear();
@@ -5519,10 +5531,19 @@ bool CView::saveLandscapeDocument(const QFileInfo& destination)
 }
 
 bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
-                                              CValidationReport* report)
+                                              CValidationReport* report,
+                                              QByteArray* terrainAtlasResource,
+                                              int* terrainAtlasPages,
+                                              int* terrainAtlasSlots)
 {
     if(data)
         data->clear();
+    if(terrainAtlasResource)
+        terrainAtlasResource->clear();
+    if(terrainAtlasPages)
+        *terrainAtlasPages = 0;
+    if(terrainAtlasSlots)
+        *terrainAtlasSlots = 0;
     if(!data || !m_pLand->isMprLoad() || !m_terrainEditAvailable)
     {
         if(report)
@@ -5573,6 +5594,65 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
         return false;
     }
     *data = validation.candidateBytes;
+    if(terrainAtlasResource && m_workingTerrainAtlas
+       && m_workingTerrainAtlas->activeTextureCount()
+              > int(m_mprDocument.mapInfo().textureCount))
+    {
+        CMprDocument stagedDocument;
+        CValidationReport stagedReport;
+        if(!stagedDocument.loadBytes(*data, QStringLiteral("test-current-map.mpr"),
+                                     &stagedReport)
+           || stagedReport.hasErrors())
+        {
+            if(report)
+                report->add(QStringLiteral("mpr.test.atlas.reopen"),
+                            EValidationSeverity::Error,
+                            tr("The edited MPR could not be reopened before staging its working atlas."));
+            return false;
+        }
+        QVector<QByteArray> authoredPages;
+        const QStringList names = ei::terrainTextureResourceNames(
+            m_mprDocument.mapInfo().innerNamespace,
+            int(m_mprDocument.mapInfo().textureCount));
+        for(const QString& name : names)
+        {
+            QByteArray payload;
+            QString sourcePath;
+            if(!CTextureList::getInstance()->terrainMmpPayload(
+                   name, &payload, &sourcePath))
+            {
+                if(report)
+                    report->add(QStringLiteral("mpr.test.atlas.source"),
+                                EValidationSeverity::Error,
+                                tr("The authored terrain page '%1' could not be read for isolated test staging.")
+                                    .arg(name));
+                return false;
+            }
+            authoredPages.append(payload);
+        }
+        const STerrainPortableAtlasPackage package =
+            CTerrainVirtualAtlas::buildWorkingPreviewPackage(
+                stagedDocument, m_workingTerrainAtlas->activeTileImages(),
+                authoredPages, report);
+        if(!package.success)
+        {
+            if(report)
+                report->add(QStringLiteral("mpr.test.atlas.package"),
+                            EValidationSeverity::Error, package.error);
+            return false;
+        }
+        *data = package.mprBytes;
+        *terrainAtlasResource = package.resourceArchiveBytes;
+        if(terrainAtlasPages)
+            *terrainAtlasPages = package.resourceMembers.size();
+        if(terrainAtlasSlots)
+            *terrainAtlasSlots = m_workingTerrainAtlas->activeTileImages().size();
+        ei::log(eLogInfo, QString(
+            "Test Current Map staged working terrain atlas pages:%1 slots:%2 authoredPagesPreserved:%3")
+            .arg(package.resourceMembers.size())
+            .arg(m_workingTerrainAtlas->activeTileImages().size())
+            .arg(authoredPages.size()));
+    }
     ei::log(eLogInfo, QString("Test Current Map staged unsaved MPR candidate members:%1 sha256:%2")
         .arg(validation.changedMembers.join(QStringLiteral(",")), validation.sha256));
     ei::log(eLogInfo, QString("Test Current Map staged MPR semantic diff:\n%1")
@@ -6519,7 +6599,6 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainPaintActions.clear();
     m_terrainPaintActionId = 0;
     m_terrainGlobalTransitionSources.clear();
-    m_terrainGlobalTransitionPageCache.clear();
     m_importedTerrainTransitions.clear();
     if(m_landscapeTools)
         m_landscapeTools->setPaintTerrainTypes({}, {}, {});
@@ -6703,7 +6782,8 @@ void CView::rebuildTerrainAutoCatalog()
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             const QImage source = loadGlobalUniformSource(
-                family, mprNamespace, requiredSize, &decodedGlobalPages);
+                family, mprNamespace, requiredSize, &decodedGlobalPages,
+                &m_terrainGlobalUniformTileCache);
             if(source.isNull())
             {
                 report.add("terrain.global_family_source",
@@ -6788,7 +6868,8 @@ void CView::rebuildTerrainAutoCatalog()
             m_authoredTerrainTileImages = m_pTileForm->tileImages();
         m_workingTerrainAtlas.reset(new CTerrainWorkingAtlas(
             m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies(),
-            m_authoredTerrainTileImages, m_terrainSemanticSeed, 4096,
+            m_authoredTerrainTileImages, m_terrainSemanticSeed,
+            kMprPackedTerrainAtlasSlotLimit,
             m_terrainGlobalMaterialSources,
             globalMaterialBlendStyles(m_terrainGlobalFamilies)));
         m_terrainEdit.enableWorkingAtlasSlots(

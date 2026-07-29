@@ -63,6 +63,7 @@ private slots:
     void currentSessionRestoreRejectsTamperedBackupWithoutTouchingLiveTree();
     void currentSessionSnapshotRejectsUnsafePath();
     void authoritativeResultAcceptsVerifiedRun();
+    void authoritativeResultRejectsStaleReadyWithoutControlledPlayer();
     void recognizesNativeRuntimeFailureDialogs();
     void authoritativeResultRejectsObservedFailureAfterStop();
     void authoritativeResultRequiresExpandedAtlasRegistration();
@@ -971,6 +972,13 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
     QVERIFY2(CJmvMapTestLauncher::analyzeCompletedRun(
                  runRoot, &authoritative, &findings),
              qPrintable(findings.join('\n')));
+    qInfo().noquote() << "RUNTIME_AUTHORITATIVE_EVIDENCE"
+                      << "passed=" << authoritative.value("passed").toBool()
+                      << "pages=" << authoritative.value("terrainAtlasPages").toInt()
+                      << "slots=" << authoritative.value("terrainAtlasSlots").toInt()
+                      << "playerCount=" << authoritative.value("reportedPlayerCount").toInt()
+                      << "zone=" << authoritative.value("actualZone").toString()
+                      << "runId=" << authoritative.value("runId").toString();
     if(!input.terrainTextureResourceData.isEmpty())
     {
         QCOMPARE(authoritative.value("terrainAtlasPages").toInt(),
@@ -1279,6 +1287,26 @@ void JmvMapTestLauncherTests::authoritativeResultAcceptsVerifiedRun()
     QStringList findings;
     QVERIFY2(CJmvMapTestLauncher::validateAutomatedResult(report, &findings),
              qPrintable(findings.join('\n')));
+}
+
+void JmvMapTestLauncherTests::authoritativeResultRejectsStaleReadyWithoutControlledPlayer()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    QString stale = successfulBridgeEvidence(temp.path());
+    stale.remove(QRegularExpression(
+        "[^\\n]*DIRECT_LAUNCH initialized New Game player[^\\n]*\\n"));
+    const QJsonObject report = CJmvMapTestLauncher::buildAuthoritativeResult(
+        resultManifest(temp.path(), source), stale, 0,
+        int(QProcess::NormalExit), false, "Removed all owned runtime artifacts");
+    QVERIFY(!report.value("passed").toBool());
+    QCOMPARE(report.value("reportedPlayerCount").toInt(), 0);
+    QVERIFY(!report.value("controlledPlayerConfirmed").toBool());
+    QStringList findings;
+    QVERIFY(!CJmvMapTestLauncher::validateAutomatedResult(report, &findings));
+    QVERIFY(findings.join('\n').contains("controlled player", Qt::CaseInsensitive));
 }
 
 void JmvMapTestLauncherTests::recognizesNativeRuntimeFailureDialogs()

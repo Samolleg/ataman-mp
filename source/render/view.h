@@ -113,7 +113,10 @@ public:
     void saveLand();
     void saveLandAs();
     bool buildValidatedLandscapeCandidate(QByteArray* data,
-                                          CValidationReport* report = nullptr);
+                                          CValidationReport* report = nullptr,
+                                          QByteArray* terrainAtlasResource = nullptr,
+                                          int* terrainAtlasPages = nullptr,
+                                          int* terrainAtlasSlots = nullptr);
     bool buildGeneratedAiGraphCandidate(QByteArray* data,
                                         QString* error = nullptr);
     bool loadMob(QFileInfo& filePath);
@@ -554,6 +557,7 @@ private:
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainGlobalMaterialFamily> m_terrainGlobalFamilies;
     QMap<qint32, QImage> m_terrainGlobalMaterialSources;
+    QMap<QString, QImage> m_terrainGlobalUniformTileCache;
     QMultiMap<QByteArray, STerrainGlobalTransitionSource>
         m_terrainGlobalTransitionSources;
     QMap<QString, QImage> m_terrainGlobalTransitionPageCache;

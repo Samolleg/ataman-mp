@@ -1325,6 +1325,21 @@ int CTextureList::extractMmpToDxt1(QImage& outImage, const QString textureName)
     return res;
 }
 
+bool CTextureList::terrainMmpPayload(const QString& textureName,
+                                     QByteArray* payload,
+                                     QString* sourcePath) const
+{
+    if(payload)
+        payload->clear();
+    if(!payload)
+        return false;
+    QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!m_mapLocalTerrainArchive.isEmpty())
+        sources.prepend(m_mapLocalTerrainArchive);
+    return readIndexedResource(sources, textureName.toLower(), *payload,
+                               sourcePath);
+}
+
 void CTextureList::setMapLocalTerrainArchive(const QString& path)
 {
     QString resolved;

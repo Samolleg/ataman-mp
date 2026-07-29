@@ -20,6 +20,7 @@ class CMprDocument;
 // 16 pages. Keep this separate from the 16,384-slot packed-format maximum so a
 // future higher limit requires its own controlled runtime proof.
 constexpr int kValidatedShippedTerrainAtlasSlotLimit = 1024;
+constexpr int kMprPackedTerrainAtlasSlotLimit = 16384;
 
 enum class ETerrainBlendStyle
 {
@@ -154,6 +155,10 @@ public:
     static STerrainPortableAtlasPackage buildPortablePackage(
         const CMprDocument& source, const STerrainAtlasFinalization& finalization,
         ETerrainTileLayer layer, CValidationReport* report = nullptr);
+    static STerrainPortableAtlasPackage buildWorkingPreviewPackage(
+        const CMprDocument& source, const QVector<QImage>& activeTiles,
+        const QVector<QByteArray>& authoredPagePayloads,
+        CValidationReport* report = nullptr);
 
 private:
     QByteArray signatureKey(const STerrainTransitionSignature& signature) const;

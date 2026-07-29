@@ -142,6 +142,11 @@ public:
     const QList<QString>& textureList() const {return m_arrCellComboBox;}
     int extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringList& inArrTextureName);
     int extractMmpToDxt1(QImage& outImage, const QString textureName);
+    // Returns the exact authored MMP payload used by terrain loading. Test
+    // Current Map uses this to preserve stock pages byte-for-byte while
+    // appending generated working-atlas pages to a run-local RES archive.
+    bool terrainMmpPayload(const QString& textureName, QByteArray* payload,
+                           QString* sourcePath = nullptr) const;
     // A finalized isolated MPR may carry a sibling <mpr>-atlas.res. This
     // session-only source is searched before configured shared terrain data.
     void setMapLocalTerrainArchive(const QString& path);

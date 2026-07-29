@@ -1175,8 +1175,18 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const bool payloadHashesValidated = stagedLoaderObserved
         && actualMprMatchesOwnedPayload && actualMobMatchesOwnedPayload
         && !requestedMprHash.isEmpty() && !requestedMobHash.isEmpty();
-    const int playerInitializations = bridgeResult.count(
+    QString playerEvidenceScope = bridgeResult;
+    if(completedReloadSequence != 0)
+    {
+        const int latestDispatch = bridgeResult.lastIndexOf(
+            QString("HOT_RELOAD dispatch sequence=%1")
+                .arg(completedReloadSequence));
+        if(latestDispatch >= 0)
+            playerEvidenceScope = bridgeResult.mid(latestDispatch);
+    }
+    const int playerInitializations = playerEvidenceScope.count(
         "DIRECT_LAUNCH initialized New Game player");
+    const bool controlledPlayerConfirmed = playerInitializations == 1;
 
     bool sourceFilesUnchanged = true;
     QJsonArray changedSources;
@@ -1254,6 +1264,10 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
        && requestedGeneration != actualGeneration)
         addUnique(&errors, QString("Requested save generation %1 but runtime committed %2.")
                   .arg(requestedGeneration).arg(actualGeneration));
+    if(!controlledPlayerConfirmed)
+        addUnique(&errors, QString("The staged run reported %1 controlled-player "
+                                  "initializations; exactly one is required.")
+                  .arg(playerInitializations));
     if(!sourceFilesUnchanged)
         addUnique(&errors, "One or more source map files changed during the test.");
     if(!cleanupComplete)
@@ -1318,10 +1332,12 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("drawallAutoexecConsumed", drawallAutoexecConsumed);
     report.insert("drawallContractValidated", drawallContractValidated);
     report.insert("playerInitializationCount", playerInitializations);
-    report.insert("reportedPlayerCount", playerInitializations > 0 ? 1 : -1);
-    report.insert("playerCountEvidence", playerInitializations > 0
-                  ? "New Game player-record initialization observed"
-                  : "not observed");
+    report.insert("reportedPlayerCount", playerInitializations);
+    report.insert("controlledPlayerConfirmed", controlledPlayerConfirmed);
+    report.insert("playerCountEvidence", controlledPlayerConfirmed
+                  ? "exactly one New Game player-record initialization observed"
+                  : QString("observed %1 New Game player-record initializations")
+                        .arg(playerInitializations));
     report.insert("sourceFilesUnchanged", sourceFilesUnchanged);
     report.insert("changedSources", changedSources);
     report.insert("cleanupComplete", cleanupComplete);
@@ -1362,6 +1378,8 @@ bool CJmvMapTestLauncher::validateAutomatedResult(const QJsonObject& report,
         local.append("The run-owned Zone18 drawall staging contract was not validated.");
     if(report.value("actualZone").toString().isEmpty())
         local.append("The actually loaded zone is missing.");
+    if(!report.value("controlledPlayerConfirmed").toBool())
+        local.append("Exactly one controlled player was not proven.");
     if(!report.value("sourceFilesUnchanged").toBool())
         local.append("Source-file preservation failed.");
     if(!report.value("cleanupComplete").toBool())

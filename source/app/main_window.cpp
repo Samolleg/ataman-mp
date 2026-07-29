@@ -2898,8 +2898,13 @@ void MainWindow::launchCurrentMapTest()
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     QByteArray mprData;
+    QByteArray workingTerrainAtlasResource;
+    int workingTerrainAtlasPages = 0;
+    int workingTerrainAtlasSlots = 0;
     CValidationReport mprReport;
-    if(!m_pView->buildValidatedLandscapeCandidate(&mprData, &mprReport))
+    if(!m_pView->buildValidatedLandscapeCandidate(
+           &mprData, &mprReport, &workingTerrainAtlasResource,
+           &workingTerrainAtlasPages, &workingTerrainAtlasSlots))
     {
         QMessageBox::warning(this, tr("JMV test launch"),
             tr("The current MPR edits could not be staged safely:\n\n%1")
@@ -3043,7 +3048,15 @@ void MainWindow::launchCurrentMapTest()
     const QFileInfo terrainAtlasResource(
         input.sourceMpr.dir().filePath(input.sourceMpr.completeBaseName()
                                       + QStringLiteral("-atlas.res")));
-    if(terrainAtlasResource.isFile())
+    if(!workingTerrainAtlasResource.isEmpty())
+    {
+        if(terrainAtlasResource.isFile())
+            input.sourceTerrainTextureResource = terrainAtlasResource;
+        input.terrainTextureResourceData = workingTerrainAtlasResource;
+        input.expectedTerrainAtlasPages = workingTerrainAtlasPages;
+        input.expectedTerrainAtlasSlots = workingTerrainAtlasSlots;
+    }
+    else if(terrainAtlasResource.isFile())
     {
         QFile archive(terrainAtlasResource.absoluteFilePath());
         CMprDocument stagedMpr;

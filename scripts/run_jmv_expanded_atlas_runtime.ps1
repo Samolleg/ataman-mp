@@ -10,6 +10,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'expanded_atlas_runtime_evidence.ps1')
 foreach ($pages in $ProbePages) {
     if ($pages -notin @(16, 32, 64, 128, 256)) {
         throw "ProbePages accepts only the generated Zone18 page counts: 16, 32, 64, 128, 256."
@@ -59,13 +60,34 @@ function Get-ProxyLogState {
     foreach ($path in @(
         (Join-Path $gameRootPath 'Starter\ddraw_proxy.log'),
         (Join-Path $gameRootPath 'Starter\Engine\ddraw_proxy.log'),
-        (Join-Path $gameRootPath 'ddraw_proxy.log'))) {
+        (Join-Path $gameRootPath 'ddraw_proxy.log'),
+        (Join-Path $gameRootPath 'Starter\addon.log'))) {
         if (Test-Path -LiteralPath $path -PathType Leaf) {
             $item = Get-Item -LiteralPath $path
             $rows += [pscustomobject]@{ path=$item.FullName; length=[int64]$item.Length }
         }
     }
     return $rows
+}
+
+function Get-NativeDumpState {
+    $directory = Join-Path $gameRootPath 'Starter\Dumps'
+    $rows = @()
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) { return $rows }
+    foreach ($file in Get-ChildItem -LiteralPath $directory -File | Where-Object {
+        $_.Extension -in @('.dmp','.mdmp')
+    }) {
+        $rows += [pscustomobject]@{
+            path=$file.FullName.ToLowerInvariant(); length=[int64]$file.Length
+            modified_utc=$file.LastWriteTimeUtc.ToString('o')
+        }
+    }
+    return $rows
+}
+
+function Get-NewNativeDumps($Before) {
+    return @(Get-ChangedNativeDumpRows -Before @($Before) `
+        -After @(Get-NativeDumpState))
 }
 
 function Preserve-ProxyLogDelta($Before, [string]$Destination) {
@@ -128,7 +150,9 @@ function Invoke-AtlasProbe([int]$Pages) {
     $tempReport = Join-Path $env:TEMP ("ei-zone18-{0}-{1}-runtime.txt" -f $PID,$Pages)
     $tempMemory = Join-Path $env:TEMP ("ei-zone18-{0}-{1}-memory.json" -f $PID,$Pages)
     $proxy = Join-Path $evidenceRoot "$prefix-proxy-log-delta.txt"
+    $dumpEvidence = Join-Path $evidenceRoot "$prefix-new-native-dumps.json"
     $proxyBefore = Get-ProxyLogState
+    $dumpsBefore = @(Get-NativeDumpState)
 
     $env:EI_ENDURANCE_RUNTIME_SMOKE_GAME_ROOT = $gameRootPath
     $env:EI_ENDURANCE_RUNTIME_SMOKE_MOD_ROOT = $modRootPath
@@ -151,7 +175,8 @@ function Invoke-AtlasProbe([int]$Pages) {
     $env:EI_ENDURANCE_RUNTIME_SMOKE_DWELL_MS = [string]$DwellMilliseconds
     $env:EI_ENDURANCE_RUNTIME_SMOKE_MEMORY_EVIDENCE = $tempMemory
 
-    Remove-Item -LiteralPath $report,$memory,$tempReport,$tempMemory -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $report,$memory,$tempReport,$tempMemory,$dumpEvidence `
+        -Force -ErrorAction SilentlyContinue
     $process = Start-Process -FilePath $testExecutablePath -ArgumentList `
         "runtimeSmokeReachesGameplayReady -o `"$tempReport,txt`"" -NoNewWindow -PassThru
     $timedOut = -not $process.WaitForExit($ProbeTimeoutSeconds * 1000)
@@ -166,35 +191,51 @@ function Invoke-AtlasProbe([int]$Pages) {
         if ((Invoke-OwnedRecovery $Pages) -ne 0) { throw "Owned recovery failed after page $Pages." }
     }
     Preserve-ProxyLogDelta $proxyBefore $proxy
+    $newNativeDumps = @(Get-NewNativeDumps $dumpsBefore)
+    if ($newNativeDumps.Count -gt 0) {
+        $newNativeDumps | ConvertTo-Json -Depth 4 | Set-Content `
+            -LiteralPath $dumpEvidence -Encoding UTF8
+    }
     if (Test-Path -LiteralPath $tempReport) { Copy-Item -LiteralPath $tempReport -Destination $report -Force }
     if (Test-Path -LiteralPath $tempMemory) { Copy-Item -LiteralPath $tempMemory -Destination $memory -Force }
     $reportText = if (Test-Path -LiteralPath $tempReport) { Get-Content -LiteralPath $tempReport -Raw } else { '' }
-    $memoryObject = if (Test-Path -LiteralPath $tempMemory) {
-        Get-Content -LiteralPath $tempMemory -Raw | ConvertFrom-Json
-    } else { $null }
-    $passed = -not $timedOut -and $exitCode -eq 0 -and
+    $memoryParseError = ''
+    $memoryObject = $null
+    if (Test-Path -LiteralPath $tempMemory) {
+        try { $memoryObject = Get-Content -LiteralPath $tempMemory -Raw | ConvertFrom-Json }
+        catch { $memoryParseError = $_.Exception.Message }
+    }
+    $passShape = -not $timedOut -and $exitCode -eq 0 -and
         $reportText -match 'Totals:\s+\d+ passed,\s+0 failed,' -and
         $reportText -match 'RUNTIME_FRAME_EVIDENCE.*rendered=\s*true' -and
         $reportText -match 'RUNTIME_MEMORY_EVIDENCE.*samples=' -and
         $memoryObject -and
         $memoryObject.schema -eq 'ei-runtime-memory-evidence-v2'
+    $authoritativeEvidence = $reportText -match `
+        ("RUNTIME_AUTHORITATIVE_EVIDENCE.*passed=\s*true.*pages=\s*{0}.*slots=\s*{1}" -f $Pages,$slots)
     $combinedFailure = $reportText + "`n" + (Get-Content -LiteralPath $proxy -Raw)
     $memorySignature = $combinedFailure -match `
         '(?i)out of memory|E_OUTOFMEMORY|bad_alloc|0xC0000017|not enough (storage|memory)|allocation fail'
-    $nativeRuntimeFailure = $combinedFailure -match `
-        '(?i)native runtime failure|Microsoft Visual C\+\+ Runtime|abnormal program termination'
+    $nativeRuntimeFailure = $newNativeDumps.Count -gt 0 -or $combinedFailure -match `
+        '(?i)native runtime failure|Microsoft Visual C\+\+ Runtime|abnormal program termination|process ended with a crash status'
     $vaExhausted = $memoryObject -and
         [double]$memoryObject.minimumLargestFreeRegionBytes -gt 0 -and
         [double]$memoryObject.minimumLargestFreeRegionBytes -lt 64MB
-    $classification = if ($passed) { 'pass' } elseif ($nativeRuntimeFailure) {
-        'native-runtime-crash'
-    } elseif ($memorySignature -or $vaExhausted) {
-        'memory-or-address-space-exhaustion'
-    } elseif ($timedOut) { 'timeout-unclassified' } else { 'unrelated-runtime-or-staging-failure' }
+    $classification = Get-ExpandedAtlasProbeClassification `
+        -PassShape ([bool]$passShape) -TimedOut ([bool]$timedOut) `
+        -NativeRuntimeFailure ([bool]$nativeRuntimeFailure) `
+        -MemoryFailure ([bool]($memorySignature -or $vaExhausted)) `
+        -AuthoritativeEvidence ([bool]$authoritativeEvidence)
+    $passed = Test-ExpandedAtlasProbePassed -Classification $classification
     return [pscustomobject]@{
         pages=$Pages; slots=$slots; passed=$passed; classification=$classification
         timed_out=$timedOut; exit_code=$exitCode; report=$report; memory=$memory
         proxy_log_delta=$proxy; memory_data=$memoryObject
+        authoritative_evidence=[bool]$authoritativeEvidence
+        new_native_dump_count=$newNativeDumps.Count
+        new_native_dumps=$newNativeDumps
+        dump_evidence=if ($newNativeDumps.Count -gt 0) { $dumpEvidence } else { '' }
+        memory_parse_error=$memoryParseError
     }
 }
 
@@ -222,6 +263,10 @@ function Write-CampaignSummary($Rows) {
             classification=$row.classification; timed_out=$row.timed_out
             exit_code=$row.exit_code; report=$row.report; memory=$row.memory
             proxy_log_delta=$row.proxy_log_delta
+            authoritative_evidence=$row.authoritative_evidence
+            new_native_dump_count=$row.new_native_dump_count
+            dump_evidence=$row.dump_evidence
+            memory_parse_error=$row.memory_parse_error
         }
         if ($row.memory_data) {
             foreach ($name in @('gameplayReadyWorkingSetBytes','gameplayReadyPrivateBytes',
@@ -255,6 +300,10 @@ function Write-CampaignSummary($Rows) {
             classification=$row.classification; timed_out=$row.timed_out
             exit_code=$row.exit_code; report=$row.report; memory=$row.memory
             proxy_log_delta=$row.proxy_log_delta
+            authoritative_evidence=$row.authoritative_evidence
+            new_native_dump_count=$row.new_native_dump_count
+            dump_evidence=$row.dump_evidence
+            memory_parse_error=$row.memory_parse_error
             sample_count=if ($row.memory_data) { [int]$row.memory_data.sampleCount } else { 0 }
             peak_private_bytes=if ($row.memory_data) { [int64]$row.memory_data.peakPrivateBytes } else { 0 }
             peak_committed_address_bytes=if ($row.memory_data) { [int64]$row.memory_data.peakCommittedAddressBytes } else { 0 }

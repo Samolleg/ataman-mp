@@ -1229,6 +1229,165 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
     result.resourceArchiveBytes=archiveBytes;result.success=true;return result;
 }
 
+STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
+    const CMprDocument& source, const QVector<QImage>& activeTiles,
+    const QVector<QByteArray>& authoredPagePayloads,
+    CValidationReport* report)
+{
+    STerrainPortableAtlasPackage result;
+    const SMprMapInfo& map = source.mapInfo();
+    if(!map.valid || activeTiles.isEmpty() || activeTiles.size() % 64 != 0
+       || activeTiles.size() > kMprPackedTerrainAtlasSlotLimit
+       || authoredPagePayloads.size() != int(map.textureCount)
+       || activeTiles.size() < int(map.tileCount))
+    {
+        result.error = QStringLiteral(
+            "The working terrain atlas does not match the staged MPR baseline.");
+        return result;
+    }
+    const int textureCount = activeTiles.size() / 64;
+    if(textureCount < authoredPagePayloads.size())
+    {
+        result.error = QStringLiteral(
+            "The working terrain atlas would discard authored texture pages.");
+        return result;
+    }
+    const QSize tileSize = activeTiles.front().size();
+    if(tileSize.isEmpty())
+    {
+        result.error = QStringLiteral("The working terrain tiles have no pixels.");
+        return result;
+    }
+    for(const QImage& tile : activeTiles)
+        if(tile.size() != tileSize || tile.isNull())
+        {
+            result.error = QStringLiteral(
+                "The working terrain atlas contains a missing or mismatched tile.");
+            return result;
+        }
+
+    const QByteArray originalMp = source.memberPayload(map.memberName);
+    const int tileTypeOffset = 38 + int(map.materialCount) * 44;
+    const int oldTailOffset = tileTypeOffset + int(map.tileCount) * 4;
+    if(tileTypeOffset < 38 || oldTailOffset > originalMp.size())
+    {
+        result.error = QStringLiteral("The staged MP tile-type array is truncated.");
+        return result;
+    }
+    QVector<qint32> tileTypes = map.tileTypes;
+    tileTypes.resize(activeTiles.size());
+    QByteArray replacementMp = originalMp.left(tileTypeOffset);
+    for(qint32 type : tileTypes)
+    {
+        char bytes[4];
+        qToLittleEndian<qint32>(type, reinterpret_cast<uchar*>(bytes));
+        replacementMp.append(bytes, 4);
+    }
+    replacementMp.append(originalMp.mid(oldTailOffset));
+    qToLittleEndian<quint32>(quint32(textureCount),
+        reinterpret_cast<uchar*>(replacementMp.data() + 16));
+    qToLittleEndian<quint32>(quint32(tileSize.width() * 8),
+        reinterpret_cast<uchar*>(replacementMp.data() + 20));
+    qToLittleEndian<quint32>(quint32(activeTiles.size()),
+        reinterpret_cast<uchar*>(replacementMp.data() + 24));
+    qToLittleEndian<quint32>(quint32(tileSize.width()),
+        reinterpret_cast<uchar*>(replacementMp.data() + 28));
+
+    CMprEditTransaction transaction(QStringLiteral(
+        "Stage working terrain atlas metadata"));
+    QByteArray originalMpSha256;
+    for(const SMprArchiveMember& member : source.members())
+        if(member.name.compare(map.memberName, Qt::CaseInsensitive) == 0)
+        {
+            originalMpSha256 = member.sha256;
+            break;
+        }
+    transaction.replaceMemberPayload(map.memberName, originalMpSha256,
+                                     replacementMp);
+    if(!source.applyTransaction(transaction, &result.mprBytes, report))
+    {
+        result.error = QStringLiteral(
+            "The working terrain atlas metadata transaction failed.");
+        return result;
+    }
+
+    QVector<QByteArray> pagePayloads = authoredPagePayloads;
+    pagePayloads.reserve(textureCount);
+    for(int page = authoredPagePayloads.size(); page < textureCount; ++page)
+    {
+        QString diagnostic;
+        const QImage pixels = composePage(activeTiles, page * 64,
+                                          tileSize.width());
+        const QByteArray payload = ei::encodeMmpDxt1(pixels, true, &diagnostic);
+        if(payload.isEmpty())
+        {
+            result.error = QStringLiteral(
+                "Could not encode working atlas page %1: %2")
+                .arg(page).arg(diagnostic);
+            return result;
+        }
+        pagePayloads.append(payload);
+    }
+
+    QByteArray empty(16, '\0');
+    qToLittleEndian<quint32>(0x019CE23C,
+        reinterpret_cast<uchar*>(empty.data()));
+    qToLittleEndian<quint32>(16,
+        reinterpret_cast<uchar*>(empty.data() + 8));
+    CResArchiveDocument archive;
+    QStringList errors;
+    if(!archive.loadBytes(empty, QStringLiteral("working-atlas.res"), &errors))
+    {
+        result.error = errors.join(QStringLiteral("\n"));
+        return result;
+    }
+    QVector<SResArchiveNewMember> members;
+    members.reserve(textureCount);
+    for(int page = 0; page < textureCount; ++page)
+    {
+        SResArchiveNewMember member;
+        member.name = QStringLiteral("%1%2.mmp")
+            .arg(map.innerNamespace.toLower())
+            .arg(page, 3, 10, QLatin1Char('0'));
+        member.payload = pagePayloads.at(page);
+        members.append(member);
+        result.resourceMembers.append(member.name);
+    }
+    if(!archive.buildWithAppendedMembers(members,
+                                          &result.resourceArchiveBytes,
+                                          &errors))
+    {
+        result.error = errors.join(QStringLiteral("\n"));
+        return result;
+    }
+
+    CMprDocument reopenedMpr;
+    CValidationReport reopenReport;
+    CResArchiveDocument reopenedRes;
+    if(!reopenedMpr.loadBytes(result.mprBytes, QStringLiteral("working.mpr"),
+                              &reopenReport)
+       || reopenReport.hasErrors()
+       || reopenedMpr.mapInfo().textureCount != quint32(textureCount)
+       || reopenedMpr.mapInfo().tileCount != quint32(activeTiles.size())
+       || !reopenedRes.loadBytes(result.resourceArchiveBytes,
+                                 QStringLiteral("working.res"), &errors))
+    {
+        result.error = QStringLiteral(
+            "The working terrain atlas package failed fresh reopen.");
+        return result;
+    }
+    for(int page = 0; page < textureCount; ++page)
+        if(reopenedRes.memberPayload(result.resourceMembers.at(page))
+           != pagePayloads.at(page))
+        {
+            result.error = QStringLiteral(
+                "A reopened working atlas page differs from its staged payload.");
+            return result;
+        }
+    result.success = true;
+    return result;
+}
+
 CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     const CTerrainTransitionCatalog& authoredCatalog,
     const QVector<QImage>& authoredTiles, quint32 distributionSeed,
@@ -1237,7 +1396,8 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles)
     : m_authoredCatalog(authoredCatalog), m_workingCatalog(authoredCatalog),
       m_authoredImages(authoredTiles), m_workingImages(authoredTiles),
-      m_capacityLimit(qBound(authoredTiles.size(), capacityLimit, 16384))
+      m_capacityLimit(qBound(authoredTiles.size(), capacityLimit,
+                             kMprPackedTerrainAtlasSlotLimit))
 {
     if(!authoredTiles.isEmpty() && m_workingImages.size() < m_capacityLimit)
     {
