@@ -66,6 +66,17 @@ QString aiGraphSharedMobWarning(const QString& mobFileName,
         .arg(mobFileName).arg(mapOwners.size()).arg(mapOwners.join(", "));
 }
 
+QString aiGraphPersistenceActionNotice(const QString& selectedSource)
+{
+    return QStringLiteral(
+        "Selected graph source: %1\n\n"
+        "Bake into Primary MOB uses exactly this selected graph. "
+        "Bake and Switch MOB to External .grp save the primary MOB immediately, "
+        "create a backup, establish a new clean baseline, and cannot be reversed "
+        "through Edit > Undo.")
+        .arg(selectedSource);
+}
+
 SAiGraphPreviewSource selectAiGraphPreviewSource(
     const QByteArray& primaryEmbeddedGraph,
     const QString& primaryMobFileName,

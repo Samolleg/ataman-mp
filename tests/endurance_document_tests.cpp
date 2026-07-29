@@ -414,6 +414,7 @@ private slots:
     void mobGraphReplacementAndInsertionAreExact();
     void mobGraphOwnershipReplacementClosesRaceCheckBeforeCommit();
     void aiGraphPersistenceUsesExactMprBasenameAndReportsShadowing();
+    void aiGraphPersistenceConfirmationNamesSourceAndNonUndoableSave();
     void aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt();
     void aiGraphFileCommitIsValidatedBackedUpAndAtomic();
     void aiGraphOwnershipSwitchValidationNeverRewritesExternalFile();
@@ -706,6 +707,18 @@ void EnduranceDocumentTests::aiGraphPersistenceUsesExactMprBasenameAndReportsSha
     QVERIFY(warning.contains("zone6.mob"));
     QVERIFY(warning.contains("zone6_2"));
     QVERIFY(warning.contains("both", Qt::CaseInsensitive));
+}
+
+void EnduranceDocumentTests::aiGraphPersistenceConfirmationNamesSourceAndNonUndoableSave()
+{
+    const QString source = QStringLiteral("External: zone6.grp");
+    const QString notice = aiGraphPersistenceActionNotice(source);
+    QVERIFY(notice.contains(source));
+    QVERIFY(notice.contains(QStringLiteral("uses exactly this selected graph")));
+    QVERIFY(notice.contains(QStringLiteral("save the primary MOB immediately")));
+    QVERIFY(notice.contains(QStringLiteral("create a backup")));
+    QVERIFY(notice.contains(QStringLiteral("cannot be reversed")));
+    QVERIFY(notice.contains(QStringLiteral("Edit > Undo")));
 }
 
 void EnduranceDocumentTests::aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt()

@@ -3728,13 +3728,12 @@ void MainWindow::persistAiGraph()
     const QString sharedWarning = aiGraphSharedMobWarning(
         primaryMob->filePath().fileName(), mapOwners);
 
-    QString detail = tr(
-        "Selected graph: %1\n"
-        "Active MPR: %2\n"
-        "Runtime external graph: %3\n"
-        "Primary MOB: %4\n\n"
+    QString detail = aiGraphPersistenceActionNotice(graphSource) + tr(
+        "\n\nActive MPR: %1\n"
+        "Runtime external graph: %2\n"
+        "Primary MOB: %3\n\n"
         "Runtime priority is the primary MOB's embedded graph first, then the exact active-MPR sibling .grp.")
-        .arg(graphSource, activeMpr.fileName(), externalPath,
+        .arg(activeMpr.fileName(), externalPath,
              primaryMob->filePath().absoluteFilePath());
     if(embedded)
         detail += tr("\n\nThe primary MOB currently has an embedded graph. Export Runtime .grp writes the selected graph. Switch MOB to External .grp never writes the existing .grp; it only validates that file and removes embedded ownership from the MOB.");
@@ -3746,7 +3745,7 @@ void MainWindow::persistAiGraph()
     QMessageBox prompt(this);
     prompt.setWindowTitle(tr("Bake / Export AI Graph"));
     prompt.setIcon(QMessageBox::Question);
-    prompt.setText(tr("Choose how the selected AI graph should be persisted."));
+    prompt.setText(tr("Choose how '%1' should be persisted.").arg(graphSource));
     prompt.setInformativeText(detail);
     QPushButton* exportButton = prompt.addButton(
         tr("Export Runtime .grp"), QMessageBox::AcceptRole);

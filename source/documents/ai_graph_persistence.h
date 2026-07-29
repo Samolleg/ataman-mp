@@ -10,6 +10,7 @@ QString aiGraphRuntimeSiblingPath(const QFileInfo& activeMpr);
 bool aiGraphEmbeddedSourceShadowsExternal(bool primaryMobHasEmbeddedGraph);
 QString aiGraphSharedMobWarning(const QString& mobFileName,
                                 const QStringList& mapOwners);
+QString aiGraphPersistenceActionNotice(const QString& selectedSource);
 
 struct SAiGraphPreviewSource
 {
