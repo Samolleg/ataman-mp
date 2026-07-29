@@ -757,6 +757,38 @@ void CChangeDiplomacyTableItem::redo()
     setText("Dip group (" + QString::number(m_row) + ", " + QString::number(m_column) + ") changed to " + QString::number(value));
 }
 
+CReplaceDiplomacyTableCommand::CReplaceDiplomacyTableCommand(
+        CMob* pMob, const QList<QString>& names,
+        const QVector<QVector<uint>>& table, const QString& description,
+        QUndoCommand* parent)
+    : QUndoCommand(parent), m_pMob(pMob),
+      m_oldNames(pMob ? pMob->diplomacyNames() : QList<QString>()),
+      m_oldTable(pMob ? pMob->diplomacyField() : QVector<QVector<uint>>()),
+      m_newNames(names), m_newTable(table)
+{
+    setText(description);
+}
+
+void CReplaceDiplomacyTableCommand::apply(
+        const QList<QString>& names, const QVector<QVector<uint>>& table)
+{
+    if(!m_pMob)
+        return;
+    m_pMob->setDiplomacyNames(names);
+    m_pMob->setDiplomacyField(table);
+    emit diplomacyTableReplaced();
+}
+
+void CReplaceDiplomacyTableCommand::undo()
+{
+    apply(m_oldNames, m_oldTable);
+}
+
+void CReplaceDiplomacyTableCommand::redo()
+{
+    apply(m_newNames, m_newTable);
+}
+
 CChangeActiveMobCommand::CChangeActiveMobCommand(CView *pView, QString mobName, QUndoCommand *parent):
     QUndoCommand(parent)
   ,m_pView(pView)

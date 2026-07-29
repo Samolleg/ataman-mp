@@ -6710,10 +6710,11 @@ void MainWindow::on_actionNew_MOB_triggered()
     form->addRow(tr("ID range maximum"), rangeMaximum);
 
     QCheckBox* createDiplomacy = new QCheckBox(
-        tr("Create a neutral 32-player diplomacy table"), &dialog);
+        tr("Create a default 32-player diplomacy table"), &dialog);
     createDiplomacy->setToolTip(tr(
         "Creates the standard 32 by 32 zero-valued table with Player-0 through "
-        "Player-31 names. Leave disabled to omit diplomacy metadata."));
+        "Player-31 names. It contains no hostile relations. Leave disabled to "
+        "omit diplomacy metadata."));
     form->addRow(QString(), createDiplomacy);
     root->addLayout(form);
 

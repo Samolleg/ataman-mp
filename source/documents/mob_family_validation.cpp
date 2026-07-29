@@ -14,6 +14,19 @@
 #include "script_reference_analyzer.h"
 
 namespace {
+constexpr quint32 kDiplomacyFieldSection = 0xDDDDDDD2;
+constexpr quint32 kMagicTrapSection = 0xBBAB0000;
+
+bool containsSectionType(const QVector<SMobSection>& sections, quint32 type)
+{
+    for(const SMobSection& section : sections)
+    {
+        if(section.type == type || containsSectionType(section.children, type))
+            return true;
+    }
+    return false;
+}
+
 QString foldedPath(const QString& path)
 {
     return QDir::cleanPath(QFileInfo(path).absoluteFilePath()).toLower();
@@ -657,6 +670,15 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         member.objects = document.objects();
         member.ranges = document.idRanges();
         member.primaryMob = !document.isQuestMob();
+        member.hasDiplomacyTable = containsSectionType(document.sections(),
+                                                       kDiplomacyFieldSection);
+        for(const SMobObjectSnapshot& object : member.objects)
+        {
+            if(object.sectionType != kMagicTrapSection)
+                continue;
+            ++member.magicTrapCount;
+            member.magicTrapSectionPaths.append(object.sectionPath);
+        }
         member.sourceSha256 = QCryptographicHash::hash(document.originalBytes(),
                                                         QCryptographicHash::Sha256);
         document.embeddedScript(&member.script, nullptr);
@@ -777,6 +799,24 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     {
         if(member.missing || !member.error.isEmpty())
             continue;
+        if(member.activeRuntimeFamily && member.magicTrapCount > 0
+           && !member.hasDiplomacyTable)
+        {
+            SMobFamilyFinding finding;
+            finding.severity = EMobFamilyFindingSeverity::Warning;
+            finding.code = "diplomacy.magic_trap_table_missing";
+            finding.category = "Diplomacy";
+            finding.message = QString(
+                "%1 contains %2 magic trap%3 but no MOB diplomacy table. Runtime derives trap hostility from that table, so the trap may have no valid victims. Copy the intended diplomacy from the primary/source MOB in MOB Parameters.")
+                .arg(member.fileName)
+                .arg(member.magicTrapCount)
+                .arg(member.magicTrapCount == 1 ? QString() : QString("s"));
+            for(const QString& sectionPath : member.magicTrapSectionPaths)
+                finding.locations.append(member.path + ":" + sectionPath);
+            if(finding.locations.isEmpty())
+                finding.locations.append(member.path);
+            report.findings.append(finding);
+        }
         QVector<SMobIdRangeSnapshot> effective;
         QMap<quint32, QVector<const SMobObjectSnapshot*>> ownersWithinMob;
         for(const SMobIdRangeSnapshot& range : member.ranges)

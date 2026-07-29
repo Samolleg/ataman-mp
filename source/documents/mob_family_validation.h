@@ -35,6 +35,9 @@ struct SMobFamilyMember
     QString script;
     bool primaryMob = false;
     bool activeRuntimeFamily = true;
+    bool hasDiplomacyTable = false;
+    int magicTrapCount = 0;
+    QStringList magicTrapSectionPaths;
 };
 
 struct SMobNidOwner
