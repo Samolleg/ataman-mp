@@ -26,9 +26,13 @@ struct SUnitAppearancePreparationResult
     SRuntimeProviderResult providerResult;
     QJsonObject appearance;
     QString diagnostic;
+    bool cacheHit{false};
 };
 
+QString unitAppearancePreparationCacheKey(const SUnitAppearancePreparationTask& task);
+QString unitAppearancePreparationCacheDirectory();
 QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
-    const QVector<SUnitAppearancePreparationTask>& tasks);
+    const QVector<SUnitAppearancePreparationTask>& tasks,
+    const QString& cacheDirectory = QString());
 
 #endif

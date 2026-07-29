@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QDataStream>
+#include <QTemporaryDir>
 #include "unit_animation.h"
 #include "profile_visual_provider.h"
 #include "unit_visual_preparation.h"
@@ -103,6 +104,7 @@ private slots:
     void appliesDistanceTiers();
     void boundsColdVisualResolutionDuringCameraMovement();
     void resolvesAppearancePreparationWithoutSceneObjects();
+    void cachesPreparedAppearanceByContentIdentity();
     void malformedAndUnknownInputsFailStatic();
 };
 
@@ -322,6 +324,53 @@ void UnitAnimationTests::resolvesAppearancePreparationWithoutSceneObjects()
     QCOMPARE(results.first().visualRevision, quint64(3));
     QVERIFY(results.first().providerResult.success);
     QCOMPARE(results.first().appearance.value("model").toString(), QString("unhuma"));
+}
+
+void UnitAnimationTests::cachesPreparedAppearanceByContentIdentity()
+{
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    QSharedPointer<ei::SProfileDatabaseSnapshot> database(new ei::SProfileDatabaseSnapshot);
+    database->cacheKey = QStringLiteral("database-content-a");
+    SUnitAppearancePreparationTask task;
+    task.unitKey = 1;
+    task.databaseGeneration = 1;
+    task.visualRevision = 1;
+    task.providerId = QStringLiteral("jmv.v1");
+    task.database = database;
+    task.request.model = QStringLiteral("unhuma");
+    task.request.primaryTexture = QStringLiteral("unhumaskin_01_x4");
+    task.request.bodyParts = QStringList() << QStringLiteral("hd") << QStringLiteral("bd");
+    task.request.dataSource = EUnitVisualDataSource::EmbeddedMob;
+
+    const QVector<SUnitAppearancePreparationResult> first
+        = resolveUnitAppearanceTasks({task}, cache.path());
+    QCOMPARE(first.size(), 1);
+    QVERIFY(first.first().providerResult.success);
+    QVERIFY(!first.first().cacheHit);
+
+    task.unitKey = 2;
+    task.databaseGeneration = 99;
+    task.visualRevision = 8;
+    const QVector<SUnitAppearancePreparationResult> second
+        = resolveUnitAppearanceTasks({task}, cache.path());
+    QCOMPARE(second.size(), 1);
+    QVERIFY(second.first().cacheHit);
+    QCOMPARE(second.first().unitKey, quintptr(2));
+    QCOMPARE(second.first().databaseGeneration, quint64(99));
+    QCOMPARE(second.first().appearance, first.first().appearance);
+
+    database->cacheKey = QStringLiteral("database-content-b");
+    const QVector<SUnitAppearancePreparationResult> changedDatabase
+        = resolveUnitAppearanceTasks({task}, cache.path());
+    QCOMPARE(changedDatabase.size(), 1);
+    QVERIFY(!changedDatabase.first().cacheHit);
+
+    task.request.primaryTexture = QStringLiteral("unhumaskin_02_x4");
+    const QVector<SUnitAppearancePreparationResult> changedUnit
+        = resolveUnitAppearanceTasks({task}, cache.path());
+    QCOMPARE(changedUnit.size(), 1);
+    QVERIFY(!changedUnit.first().cacheHit);
 }
 
 void UnitAnimationTests::malformedAndUnknownInputsFailStatic()

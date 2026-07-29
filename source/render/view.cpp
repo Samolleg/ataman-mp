@@ -6781,6 +6781,8 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
 {
     if(m_unitAppearanceWatcher && m_unitAppearanceWatcher->isRunning())
         return;
+    if(m_pProgress && m_pProgress->isVisible() && m_unitAppearanceProgressTotal == 0)
+        return;
 
     struct Candidate
     {
@@ -6805,7 +6807,24 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
                 }
     }
     if(candidates.isEmpty())
+    {
+        if(m_unitAppearanceProgressTotal > 0)
+        {
+            ei::log(eLogInfo, QString("Character data preparation complete total:%1 cached:%2 resolved:%3")
+                    .arg(m_unitAppearanceProgressTotal).arg(m_unitAppearanceCacheHits)
+                    .arg(m_unitAppearanceProgressCompleted - m_unitAppearanceCacheHits));
+            if(m_pProgress && (m_unitAppearanceProgressPending || m_pProgress->isVisible()))
+            {
+                m_pProgress->setFormat(QStringLiteral("%p%"));
+                m_pProgress->reset();
+            }
+            m_unitAppearanceProgressTotal = 0;
+            m_unitAppearanceProgressCompleted = 0;
+            m_unitAppearanceCacheHits = 0;
+            m_unitAppearanceProgressPending = false;
+        }
         return;
+    }
     std::sort(candidates.begin(), candidates.end(), [](const Candidate& left, const Candidate& right)
     {
         return left.distanceSquared < right.distanceSquared;
@@ -6825,6 +6844,31 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
     if(tasks.isEmpty())
         return;
 
+    if(m_unitAppearanceProgressTotal == 0)
+    {
+        m_unitAppearanceProgressTotal = candidates.size();
+        m_unitAppearanceProgressCompleted = 0;
+        m_unitAppearanceCacheHits = 0;
+        m_unitAppearanceProgressPending = true;
+        QTimer::singleShot(150, this, [this]()
+        {
+            if(!m_unitAppearanceProgressPending || !m_unitAppearanceWatcher
+                    || !m_unitAppearanceWatcher->isRunning() || !m_pProgress)
+                return;
+            m_pProgress->setRange(0, qMax(1, m_unitAppearanceProgressTotal));
+            m_pProgress->setValue(m_unitAppearanceProgressCompleted);
+            m_pProgress->setFormat(tr("Resolving character data... %v/%m"));
+            m_pProgress->setVisible(true);
+        });
+    }
+    else
+    {
+        const int expectedRemaining = qMax(0, m_unitAppearanceProgressTotal
+                                             - m_unitAppearanceProgressCompleted);
+        if(candidates.size() > expectedRemaining)
+            m_unitAppearanceProgressTotal += candidates.size() - expectedRemaining;
+    }
+
     if(!m_unitAppearanceWatcher)
     {
         m_unitAppearanceWatcher = new QFutureWatcher<QVector<SUnitAppearancePreparationResult>>(this);
@@ -6834,13 +6878,21 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
         {
             const QVector<SUnitAppearancePreparationResult> results
                 = m_unitAppearanceWatcher->result();
+            m_unitAppearanceProgressCompleted += results.size();
             for(const SUnitAppearancePreparationResult& result : results)
             {
+                if(result.cacheHit)
+                    ++m_unitAppearanceCacheHits;
                 const QPointer<CUnit> unit = m_unitAppearanceTargets.value(result.unitKey);
                 if(unit)
                     unit->acceptAppearancePreparation(result);
                 m_unitAppearanceTargets.remove(result.unitKey);
             }
+            if(m_pProgress && m_pProgress->isVisible())
+                m_pProgress->setValue(qMin(m_unitAppearanceProgressCompleted,
+                                           m_unitAppearanceProgressTotal));
+            m_unitAppearanceProgressPending = m_unitAppearanceProgressCompleted
+                < m_unitAppearanceProgressTotal;
             update();
         });
     }
