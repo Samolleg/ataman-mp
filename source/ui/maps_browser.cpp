@@ -85,6 +85,13 @@ SMapCatalogResult CMapsBrowser::refresh(const QVector<QString>& resourceRoots,
                                         const QString& collectionsRoot)
 {
     const SMapCatalogResult result = CMapCatalog::load(resourceRoots, mapRoots);
+    refresh(result, collectionsRoot);
+    return result;
+}
+
+void CMapsBrowser::refresh(const SMapCatalogResult& result,
+                           const QString& collectionsRoot)
+{
     m_entries = result.entries;
     m_collectionPaths.clear();
     QDir collectionDirectory(collectionsRoot);
@@ -102,7 +109,6 @@ SMapCatalogResult CMapsBrowser::refresh(const QVector<QString>& resourceRoots,
             .arg(complete).arg(m_entries.size()).arg(result.sourceArchive));
         m_status->setToolTip(result.messages.join('\n'));
     }
-    return result;
 }
 
 void CMapsBrowser::rebuildTree()

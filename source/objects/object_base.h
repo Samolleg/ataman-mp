@@ -2,6 +2,7 @@
 #define OBJECT_H
 
 #include <QVector>
+#include <QVector2D>
 #include <QMap>
 #include <QGLWidget>
 #include <QOpenGLFunctions>
@@ -29,10 +30,23 @@ void resetVisualAssemblyCacheTelemetry();
 SVisualAssemblyCacheTelemetry visualAssemblyCacheTelemetry();
 }
 
+enum class ENavigationVolumeKind : quint8
+{
+    Blocking,
+    Hard,
+    Easy,
+    Danger,
+    Bridge,
+    Ignored
+};
 struct SNavigationCollisionProxy
 {
-    QVector3D minimum;
-    QVector3D maximum;
+    QVector<QVector2D> footprint;
+    QVector<QVector3D> boxCorners;
+    float minimumZ{0.0f};
+    float maximumZ{0.0f};
+    ENavigationVolumeKind kind{ENavigationVolumeKind::Blocking};
+    bool authored{false};
     quint32 objectId{0};
     QString partName;
 };

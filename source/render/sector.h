@@ -8,6 +8,7 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
+#include <QSet>
 #include "types.h"
 #include "tile.h"
 
@@ -60,9 +61,17 @@ public:
     bool existsTileIndices(const QVector<int>& arrInd); // function for find incorrect\coorrupt tile indices
     void updateDrawData();
     bool previewCanonicalPayload(const QByteArray& payload);
+    bool previewCanonicalOverlayPayload(const QByteArray& payload);
+    bool previewCanonicalOverlayDelta(const QByteArray& beforePayload,
+                                      const QByteArray& afterPayload);
+    void setPreviewMaxZ(float maxZ);
 
 private:
     void updatePosition();
+    void updateWaterDrawData(bool rebuildIndices = true);
+    void updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices);
+    void generateWaterVertexData();
+    void updateBounds();
     void makeVertexData(QVector<QVector<SSecVertex>>& aLandVertex, QVector<STile>& aLandTile, QVector<QVector<SSecVertex>>& aWaterVertex, QVector<STile>& aWaterTile, float maxZ, int texCount);
     void generateVertexDataFromTile();
 
@@ -101,6 +110,7 @@ private:
     QVector<SWaterVertexData> m_arrAnimatedWaterVrtData;
     QOpenGLBuffer m_waterVertexBuf;
     QOpenGLBuffer m_waterIndexBuf;
+    int m_waterIndexCount{0};
     const QVector<SMaterial>* m_materials{nullptr};
     QVector3D m_boundsCenter;
     float m_boundsRadius{0.0f};

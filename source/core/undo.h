@@ -353,6 +353,35 @@ private:
     bool m_bSymmetric;
 };
 
+class CReplaceDiplomacyTableCommand: public QObject, public QUndoCommand
+{
+    Q_OBJECT
+public:
+    enum { Id = 144 };
+
+    CReplaceDiplomacyTableCommand(CMob* pMob,
+                                  const QList<QString>& names,
+                                  const QVector<QVector<uint>>& table,
+                                  const QString& description,
+                                  QUndoCommand* parent = nullptr);
+
+    void undo() override;
+    void redo() override;
+    int id() const override { return Id; }
+
+signals:
+    void diplomacyTableReplaced();
+
+private:
+    void apply(const QList<QString>& names, const QVector<QVector<uint>>& table);
+
+    CMob* m_pMob;
+    QList<QString> m_oldNames;
+    QVector<QVector<uint>> m_oldTable;
+    QList<QString> m_newNames;
+    QVector<QVector<uint>> m_newTable;
+};
+
 class CChangeActiveMobCommand: public QUndoCommand
 {
 public:

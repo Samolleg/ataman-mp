@@ -4,6 +4,7 @@
 #include <QDialog>
 
 #include "map_table_document.h"
+#include "map_table_change_report.h"
 #include "res_archive_document.h"
 
 class QCheckBox;
@@ -26,6 +27,9 @@ public:
     ~CMapTableEditorDialog() override;
     bool openArchive(const QString& path);
     bool selectZoneById(const QString& zoneId);
+    bool stageMinimapTextureForZone(const QString& zoneId,
+                                    const QString& textureName);
+    const QVector<SMapTableSaveReport>& saveReports() const { return m_saveReports; }
 
 private slots:
     void chooseArchive();
@@ -41,6 +45,7 @@ private slots:
     void exportText();
     void importText();
     void saveArchiveAs();
+    void viewExistingMinimap();
     void applyZoneFilter(const QString& text);
 
 private:
@@ -59,6 +64,8 @@ private:
     QString m_mapMemberName;
     CResArchiveDocument m_archive;
     CMapTableDocument m_table;
+    SMapTableMaps m_loadedMaps;
+    QVector<SMapTableSaveReport> m_saveReports;
     int m_selectedZone{-1};
     bool m_newZoneMode{false};
     bool m_persistUiState{true};
@@ -77,6 +84,7 @@ private:
     QSpinBox* m_sectorHeight{nullptr};
     QLineEdit* m_minimapEdit{nullptr};
     QLineEdit* m_objectivesEdit{nullptr};
+    QPushButton* m_viewMinimapButton{nullptr};
     QTableWidget* m_exitTable{nullptr};
     QPlainTextEdit* m_rawReview{nullptr};
     QString m_loadedRawText;

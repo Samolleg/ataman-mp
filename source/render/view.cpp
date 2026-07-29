@@ -31,6 +31,7 @@
 #include <algorithm>
 
 #include "view.h"
+#include "map_object_placement_policy.h"
 #include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
@@ -53,6 +54,7 @@
 #include "objects/magictrap.h"
 #include "mob\mob_parameters.h"
 #include "layout_components/progressview.h"
+#include "layout_components/connectors_ui.h"
 #include "layout_components/tablemanager.h"
 #include "layout_components/viewport_widget.h"
 #include "operationmanager.h"
@@ -80,12 +82,172 @@
 #include "endurance_document.h"
 #include "staged_save_validator.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_profile.h"
+#include "terrain_atlas_review_dialog.h"
 #include "ai_graph_document.h"
+#include "ai_graph_persistence.h"
 #include "ai_graph_preview_builder.h"
 
 class CLogic;
 
 namespace {
+class CCanvasResizePreview final : public QGraphicsView
+{
+public:
+    explicit CCanvasResizePreview(QWidget* parent = nullptr)
+        : QGraphicsView(parent), m_scene(new QGraphicsScene(this))
+    {
+        setScene(m_scene);
+        setAlignment(Qt::AlignCenter);
+        setDragMode(QGraphicsView::ScrollHandDrag);
+        setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+        setResizeAnchor(QGraphicsView::AnchorViewCenter);
+        setBackgroundBrush(QColor(28, 28, 28));
+        setFrameShape(QFrame::StyledPanel);
+    }
+
+    void setPlacementDrag(double pixelsPerTile, int offsetX, int offsetY,
+                          const std::function<void(int, int)>& handler)
+    {
+        m_pixelsPerTile = pixelsPerTile;
+        m_offsetX = offsetX;
+        m_offsetY = offsetY;
+        m_placementHandler = handler;
+    }
+
+    void setImage(const QImage& image)
+    {
+        const bool preserveView = m_item && m_userSized;
+        const QPointF previousCenter = mapToScene(viewport()->rect().center());
+        const QRectF previousRect = m_scene->sceneRect();
+        const QTransform previousTransform = transform();
+        const QPixmap pixmap = QPixmap::fromImage(image);
+        const QRectF nextRect(QPointF(0.0, 0.0), QSizeF(pixmap.size()));
+        if(m_item && m_item->boundingRect() == nextRect)
+        {
+            // Placement and resize controls replace preview pixels without
+            // changing its geometry. Avoid re-centering the view here: integer
+            // scrollbar rounding otherwise accumulates into visible drift and
+            // also changes the scene-space delta during right-button dragging.
+            m_item->setPixmap(pixmap);
+            return;
+        }
+        if(!m_item)
+            m_item = m_scene->addPixmap(pixmap);
+        else
+            m_item->setPixmap(pixmap);
+        m_scene->setSceneRect(nextRect);
+        if(preserveView && !previousRect.isEmpty())
+        {
+            setTransform(previousTransform);
+            const QPointF normalized((previousCenter.x() - previousRect.left())
+                                         / previousRect.width(),
+                                     (previousCenter.y() - previousRect.top())
+                                         / previousRect.height());
+            centerOn(nextRect.left() + normalized.x() * nextRect.width(),
+                     nextRect.top() + normalized.y() * nextRect.height());
+        }
+        else
+            fitImage();
+    }
+
+protected:
+    void wheelEvent(QWheelEvent* event) override
+    {
+        m_userSized = true;
+        const qreal factor = event->angleDelta().y() >= 0 ? 1.2 : 1.0 / 1.2;
+        scale(factor, factor);
+        event->accept();
+    }
+    void resizeEvent(QResizeEvent* event) override
+    {
+        QGraphicsView::resizeEvent(event);
+        if(!m_userSized)
+            fitImage();
+    }
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::RightButton && m_placementHandler
+           && m_pixelsPerTile > 0.0)
+        {
+            m_rightDragging = true;
+            m_rightDragStart = event->pos();
+            m_rightDragOffsetX = m_offsetX;
+            m_rightDragOffsetY = m_offsetY;
+            viewport()->setCursor(Qt::ClosedHandCursor);
+            event->accept();
+            return;
+        }
+        if(event->button() == Qt::LeftButton)
+            m_userSized = true;
+        QGraphicsView::mousePressEvent(event);
+    }
+    void mouseMoveEvent(QMouseEvent* event) override
+    {
+        if(m_rightDragging && m_placementHandler)
+        {
+            const QPointF delta = mapToScene(event->pos())
+                - mapToScene(m_rightDragStart);
+            m_placementHandler(
+                m_rightDragOffsetX + qRound(delta.x() / m_pixelsPerTile),
+                m_rightDragOffsetY + qRound(delta.y() / m_pixelsPerTile));
+            event->accept();
+            return;
+        }
+        QGraphicsView::mouseMoveEvent(event);
+    }
+    void mouseReleaseEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::RightButton && m_rightDragging)
+        {
+            m_rightDragging = false;
+            viewport()->unsetCursor();
+            event->accept();
+            return;
+        }
+        QGraphicsView::mouseReleaseEvent(event);
+    }
+
+private:
+    void fitImage()
+    {
+        m_userSized = false;
+        if(m_item)
+        {
+            fitInView(m_item, Qt::KeepAspectRatio);
+            centerOn(m_item);
+        }
+    }
+    QGraphicsScene* m_scene{nullptr};
+    QGraphicsPixmapItem* m_item{nullptr};
+    bool m_userSized{false};
+    bool m_rightDragging{false};
+    QPoint m_rightDragStart;
+    int m_rightDragOffsetX{0};
+    int m_rightDragOffsetY{0};
+    int m_offsetX{0};
+    int m_offsetY{0};
+    double m_pixelsPerTile{0.0};
+    std::function<void(int, int)> m_placementHandler;
+};
+
+bool isMinimapStaticGeometry(CNode* node)
+{
+    if(!node || dynamic_cast<CUnit*>(node))
+        return false;
+    switch(node->nodeType())
+    {
+    case ENodeType::eBaseType:
+    case ENodeType::eWorldObject:
+    case ENodeType::eTorch:
+    case ENodeType::eMagicTrap:
+    case ENodeType::eLever:
+        return true;
+    default:
+        return false;
+    }
+}
+
 QVector4D aiGraphLayerColor(int layer)
 {
     static const QVector4D colors[CAiGraphDocument::LayerCount] = {
@@ -163,6 +325,22 @@ private:
     bool m_skipInitialRedo{false};
 };
 
+class CTerrainVerticalScalePreviewCommand : public QUndoCommand
+{
+public:
+    CTerrainVerticalScalePreviewCommand(
+        CView* view, const STerrainVerticalScaleCommand& command)
+        : m_view(view), m_command(command)
+    {
+        setText(command.description);
+    }
+    void undo() override { m_view->applyTerrainVerticalScalePreview(m_command, false); }
+    void redo() override { m_view->applyTerrainVerticalScalePreview(m_command, true); }
+private:
+    CView* m_view;
+    STerrainVerticalScaleCommand m_command;
+};
+
 class CTerrainTilePreviewCommand : public QUndoCommand
 {
 public:
@@ -185,6 +363,31 @@ public:
 private:
     CView* m_view;
     STerrainTileCommand m_command;
+    bool m_skipInitialRedo{false};
+};
+
+class COverlaySurfacePreviewCommand : public QUndoCommand
+{
+public:
+    COverlaySurfacePreviewCommand(CView* view, const SOverlaySurfaceCommand& command,
+                                  bool alreadyApplied)
+        : m_view(view), m_command(command), m_skipInitialRedo(alreadyApplied)
+    {
+        setText(command.description);
+    }
+    void undo() override { m_view->applyOverlaySurfacePreview(m_command, false); }
+    void redo() override
+    {
+        if(m_skipInitialRedo)
+        {
+            m_skipInitialRedo = false;
+            return;
+        }
+        m_view->applyOverlaySurfacePreview(m_command, true);
+    }
+private:
+    CView* m_view;
+    SOverlaySurfaceCommand m_command;
     bool m_skipInitialRedo{false};
 };
 
@@ -519,6 +722,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
   ,m_terrainEditAvailable(false)
   ,m_sculptStrokeActive(false)
   ,m_sculptRepeatTimer(new QTimer(this))
+  ,m_overlayPointerTimer(new QTimer(this))
   ,m_tileGridVisible(false)
   ,m_lastLandscapeEditMode(-1)
   ,m_hasViewportMousePos(false)
@@ -552,12 +756,20 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     // A single cadence owns sculpt stamps. Mouse events only update the latest
     // target, preventing the timer and pointer stream from doing duplicate
     // canonical-sector rebuilds during a drag.
-    m_sculptRepeatTimer->setInterval(50);
+    // Keep sculpt feedback above the visibly choppy 20 Hz cadence. Overlay
+    // sectors now avoid inactive-tile and redundant land decoding work, so the
+    // same safe canonical transaction can be previewed at roughly 30 Hz.
+    m_sculptRepeatTimer->setInterval(33);
     connect(m_sculptRepeatTimer, &QTimer::timeout, this, [this]()
     {
-        if(m_sculptStrokeActive)
+        if(m_sculptStrokeActive && m_sculptPointerValid)
             sculptTerrainTowardLatestPoint();
     });
+    m_overlayPointerTimer->setSingleShot(true);
+    m_overlayPointerTimer->setTimerType(Qt::PreciseTimer);
+    m_overlayPointerTimer->setInterval(16);
+    connect(m_overlayPointerTimer, &QTimer::timeout,
+            this, &CView::updateOverlaySculptPointer);
     m_aiGraphRegenerationTimer = new QTimer(this);
     m_aiGraphRegenerationTimer->setSingleShot(true);
     m_aiGraphRegenerationTimer->setInterval(500);
@@ -571,7 +783,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
             return;
         }
         m_aiGraphRegenerationPending = false;
-        startAiGraphPreviewRegeneration();
+        beginAiGraphPreviewRegeneration(false);
     });
     // Character preparation must continue while the viewport is idle. The old
     // draw-driven scheduler stopped permanently when Qt had no other reason to
@@ -597,15 +809,30 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
     m_landscapeTools = tools;
     if(m_landscapeTools)
     {
+        // Landscape controls remain active while focus is in their dock. An
+        // application event filter also lets the physical Z/X/C/V positions
+        // work under non-Latin keyboard layouts.
+        qApp->installEventFilter(this);
         m_lastLandscapeEditMode = int(m_landscapeTools->editMode());
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::tilePickerRequested,
-                this, &CView::openMapParameters);
+                this, &CView::openAtlasTiles);
+        connect(m_landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
+                this, &CView::reviewTerrainAtlasProfile);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
                 this, &CView::exportTerrainPaintDiagnostic);
+        connect(m_landscapeTools, &CLandscapeTools::openMprSettingsRequested,
+                this, &CView::openMapParameters);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
                 this, &CView::syncLandscapeToolState);
+        connect(m_landscapeTools, &CLandscapeTools::brushGeometryChanged,
+                this, [this]()
+        {
+            m_terrainPaintOutlineGeometryDirty = true;
+            m_sculptOutlineGeometryDirty = true;
+            update();
+        });
         connect(m_landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
                 this, [this](qint32 terrainType)
         {
@@ -618,8 +845,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
             if(m_hasViewportMousePos)
             {
                 const bool land = CScene::getInstance()->isLandTileEditMode();
-                updatePreviewTile(getTerrainPos(m_lastViewportMousePos.x(),
-                                                 m_lastViewportMousePos.y(), land), land);
+                updatePreviewTile(getTerrainBrushPos(m_lastViewportMousePos.x(),
+                                                      m_lastViewportMousePos.y()), land);
             }
         });
         connect(m_landscapeTools, &CLandscapeTools::terrainVisibilityChanged,
@@ -693,6 +920,7 @@ void CView::setLandscapeInteractionSuspended(bool suspended)
     finishSculptStroke();
     endTileBrushGroup();
     m_sculptRepeatTimer->stop();
+    m_overlayPointerTimer->stop();
     m_sculptOutlineValid = false;
     m_terrainPaintOutlineValid = false;
     setPreviewTile(false);
@@ -712,10 +940,14 @@ void CView::closeLandscapeTools()
 void CView::syncLandscapeToolState()
 {
     finishSculptStroke();
+    m_overlayPointerTimer->stop();
+    m_sculptOutlineGeometryDirty = true;
+    m_terrainPaintOutlineGeometryDirty = true;
     if(m_landscapeTools)
     {
         const ELandscapeEditMode current = m_landscapeTools->editMode();
-        if(current != ELandscapeEditMode::Sculpt)
+        if(current != ELandscapeEditMode::Sculpt
+           && current != ELandscapeEditMode::OverlaySculpt)
             m_sculptOutlineValid = false;
         if(m_lastLandscapeEditMode >= 0
            && landscapeModeChangeRequiresBrushReset(
@@ -736,6 +968,8 @@ void CView::syncLandscapeToolState()
         if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
             changeOperation(EButtonOpSelect);
         setPreviewTile(false);
+        CStatusConnector::getInstance()->updateStatus("landscape.ico",
+            "LMB-sculpt, RMB-sample raw height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/flatten target, M/O-main terrain/overlays, L/Esc-close.");
         emit updateMsg(tr("Landscape sculpt mode enabled."));
         break;
     case ELandscapeEditMode::TilePaint:
@@ -743,10 +977,24 @@ void CView::syncLandscapeToolState()
         changeOperation(EButtonOpTilebrush);
         emit updateMsg(tr("Land tile painting enabled. Choose an atlas tile in Landscape Tools."));
         break;
+    case ELandscapeEditMode::OverlaySurface:
+        CScene::getInstance()->setLandTileEditMode(false);
+        changeOperation(EButtonOpTilebrush);
+        emit updateMsg(tr("Overlay surface coverage enabled. Add targets an existing overlay first and otherwise projects to land; Remove targets overlays only."));
+        break;
     case ELandscapeEditMode::OverlayPaint:
         CScene::getInstance()->setLandTileEditMode(false);
         changeOperation(EButtonOpTilebrush);
         emit updateMsg(tr("Overlay painting enabled for existing overlay cells only."));
+        break;
+    case ELandscapeEditMode::OverlaySculpt:
+        if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
+            changeOperation(EButtonOpSelect);
+        CScene::getInstance()->setLandTileEditMode(false);
+        setPreviewTile(false);
+        CStatusConnector::getInstance()->updateStatus("landscape.ico",
+            "LMB-sculpt overlay, RMB-sample raw overlay height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/flatten target, M/O-main terrain/overlays, L/Esc-close.");
+        emit updateMsg(tr("Overlay-only sculpting enabled for active surfaces."));
         break;
     }
     ensureManualTileSelection();
@@ -804,8 +1052,8 @@ void CView::ensureManualTileSelection()
         if(m_hasViewportMousePos)
         {
             const bool land = layer == ETerrainTileLayer::Land;
-            updatePreviewTile(getTerrainPos(m_lastViewportMousePos.x(),
-                                            m_lastViewportMousePos.y(), land), land);
+            updatePreviewTile(getTerrainBrushPos(m_lastViewportMousePos.x(),
+                                                 m_lastViewportMousePos.y()), land);
         }
         return;
     }
@@ -821,6 +1069,28 @@ CView::~CView()
 {
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();
+    m_sculptRepeatTimer->stop();
+    m_overlayPointerTimer->stop();
+    if(m_aiGraphRegenerationTimer)
+        m_aiGraphRegenerationTimer->stop();
+    if(m_aiGraphBuildWatcher)
+    {
+        QObject::disconnect(m_aiGraphBuildWatcher, nullptr, this, nullptr);
+        if(m_aiGraphBuildWatcher->isRunning())
+        {
+            m_aiGraphBuildWatcher->cancel();
+            m_aiGraphBuildWatcher->waitForFinished();
+        }
+        delete m_aiGraphBuildWatcher;
+        m_aiGraphBuildWatcher = nullptr;
+    }
+    if(m_aiGraphPreviewWidget)
+    {
+        m_aiGraphPreviewWidget->disconnect(this);
+        delete m_aiGraphPreviewWidget;
+        m_aiGraphPreviewWidget = nullptr;
+    }
+    closeMprSettingsDock();
 //    for(auto& param : m_arrParamWindow)
 //    {
 //        param->close();
@@ -1131,11 +1401,6 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphPreviewWidget->setObjectName(QStringLiteral("aiGraphPreviewWidget"));
     m_aiGraphPreviewWidget->setFixedWidth(520);
     m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
-    m_aiGraphPreviewWidget->setAttribute(Qt::WA_OpaquePaintEvent, true);
-    m_aiGraphPreviewWidget->setAutoFillBackground(true);
-    QPalette graphPalette = m_aiGraphPreviewWidget->palette();
-    graphPalette.setColor(QPalette::Window, QColor(25, 25, 25));
-    m_aiGraphPreviewWidget->setPalette(graphPalette);
     m_aiGraphPreviewWidget->setStyleSheet(
         "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; }"
         "QWidget#aiGraphPreviewBody, QLabel { background-color: rgb(25,25,25); color: white; }"
@@ -1188,11 +1453,18 @@ void CView::initAiGraphPreviewWidget()
         "Build a non-saving diagnostic graph from current terrain and static-object collision proxies."));
     m_aiGraphUseLoadedButton = new QToolButton(m_aiGraphPreviewBody);
     m_aiGraphUseLoadedButton->setCheckable(true);
-    m_aiGraphUseLoadedButton->setText(tr("Loaded graph override: OFF"));
+    m_aiGraphUseLoadedButton->setText(tr("Loaded preview override: OFF"));
     m_aiGraphUseLoadedButton->setToolTip(tr(
-        "Toggle between the graph loaded from the map and a regenerated diagnostic preview."));
+        "Toggle between the graph loaded from the map and the regenerated preview. "
+        "Test Current Map and Hot Reload stage the selected graph."));
+    m_aiGraphPersistButton = new QToolButton(m_aiGraphPreviewBody);
+    m_aiGraphPersistButton->setText(tr("Bake / Export..."));
+    m_aiGraphPersistButton->setToolTip(tr(
+        "Persist the selected loaded or regenerated graph as an exact runtime .grp, "
+        "embed it into the primary MOB, or switch the primary MOB to external graph ownership."));
     actions->addWidget(m_aiGraphUseLoadedButton);
     actions->addWidget(m_aiGraphRegenerateButton);
+    actions->addWidget(m_aiGraphPersistButton);
     body->addLayout(actions);
     layout->addWidget(m_aiGraphPreviewBody);
 
@@ -1228,12 +1500,28 @@ void CView::initAiGraphPreviewWidget()
         update();
     });
     connect(m_aiGraphRegenerateButton, &QToolButton::clicked,
-            this, &CView::startAiGraphPreviewRegeneration);
+            this, [this]() { startAiGraphPreviewRegeneration(); });
+    connect(m_aiGraphPersistButton, &QToolButton::clicked,
+            this, &CView::aiGraphPersistenceRequested);
     connect(m_aiGraphUseLoadedButton, &QToolButton::clicked, this, [this](bool loaded)
     {
         if(!loaded)
         {
-            startAiGraphPreviewRegeneration();
+            m_aiGraphLoadedOverride = false;
+            if(m_aiGraphRegeneratedDocument.isValid())
+            {
+                m_aiGraphDocument = m_aiGraphRegeneratedDocument;
+                m_aiGraphSource = m_aiGraphRegeneratedSource;
+                m_aiGraphOverlayDirty = true;
+            }
+            if(!m_aiGraphRegeneratedFresh
+               && (!m_aiGraphBuildWatcher || !m_aiGraphBuildWatcher->isRunning()))
+                beginAiGraphPreviewRegeneration(false);
+            else
+            {
+                syncAiGraphPreviewWidget();
+                update();
+            }
             return;
         }
         if(!m_aiGraphLoadedDocument.isValid())
@@ -1241,11 +1529,7 @@ void CView::initAiGraphPreviewWidget()
             m_aiGraphUseLoadedButton->setChecked(false);
             return;
         }
-        ++m_aiGraphBuildRequest;
-        m_aiGraphAutoRegenerationEnabled = false;
-        m_aiGraphRegenerationPending = false;
-        if(m_aiGraphRegenerationTimer)
-            m_aiGraphRegenerationTimer->stop();
+        m_aiGraphLoadedOverride = true;
         m_aiGraphDocument = m_aiGraphLoadedDocument;
         m_aiGraphSource = m_aiGraphLoadedSource;
         m_aiGraphOverlayDirty = true;
@@ -1293,19 +1577,27 @@ void CView::syncAiGraphPreviewWidget()
         ? tr("Show or hide the current AI graph layer in the viewport (N).")
         : tr("Load a MOB with an embedded graph or a matching external .grp file."));
     if(m_aiGraphRegenerateButton)
-        m_aiGraphRegenerateButton->setEnabled(m_terrainEditAvailable
-            && (!m_aiGraphBuildWatcher || !m_aiGraphBuildWatcher->isRunning()));
+    {
+        const bool running = m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning();
+        m_aiGraphRegenerateButton->setEnabled(m_terrainEditAvailable);
+        m_aiGraphRegenerateButton->setText(running
+            ? (m_aiGraphRegenerationPending ? tr("Regeneration queued")
+                                            : tr("Regenerate again"))
+            : tr("Regenerate preview"));
+    }
     if(m_aiGraphUseLoadedButton)
     {
-        const bool loadedOverride = m_aiGraphLoadedDocument.isValid()
-            && m_aiGraphSource == m_aiGraphLoadedSource;
         const QSignalBlocker blocker(m_aiGraphUseLoadedButton);
-        m_aiGraphUseLoadedButton->setChecked(loadedOverride);
-        m_aiGraphUseLoadedButton->setText(loadedOverride
-            ? tr("Loaded graph override: ON")
-            : tr("Loaded graph override: OFF"));
+        m_aiGraphUseLoadedButton->setChecked(m_aiGraphLoadedOverride);
+        m_aiGraphUseLoadedButton->setText(m_aiGraphLoadedOverride
+            ? tr("Loaded preview override: ON")
+            : tr("Loaded preview override: OFF"));
         m_aiGraphUseLoadedButton->setEnabled(m_aiGraphLoadedDocument.isValid());
     }
+    if(m_aiGraphPersistButton)
+        m_aiGraphPersistButton->setEnabled(
+            m_terrainEditAvailable && (m_aiGraphLoadedDocument.isValid()
+                                       || m_aiGraphRegeneratedDocument.isValid()));
     if(m_aiGraphPreviewBody->layout())
         m_aiGraphPreviewBody->layout()->activate();
     m_aiGraphPreviewWidget->adjustSize();
@@ -1322,33 +1614,25 @@ void CView::refreshAiGraphPreviewSource()
         m_aiGraphRegenerationTimer->stop();
     m_aiGraphDocument.clear();
     m_aiGraphLoadedDocument.clear();
+    m_aiGraphLoadedBytes.clear();
+    m_aiGraphRegeneratedDocument.clear();
+    m_aiGraphRegeneratedResult = SAiGraphPreviewBuildResult();
     m_aiGraphSource.clear();
     m_aiGraphLoadedSource.clear();
+    m_aiGraphRegeneratedSource.clear();
+    m_aiGraphRegeneratedFresh = false;
+    m_aiGraphLoadedOverride = false;
     m_aiGraphOpenLinks.clear();
     m_aiGraphNodes.clear();
     m_aiGraphIsolatedNodes.clear();
     m_aiGraphOverlayDirty = true;
 
-    QByteArray sourceBytes;
-    CMob* sourceMob = nullptr;
-    if(m_environmentMob && !m_environmentMob->aiGraphData().isEmpty())
-        sourceMob = m_environmentMob;
-    if(sourceMob)
-    {
-        sourceBytes = sourceMob->aiGraphData();
-        m_aiGraphSource = tr("Embedded: %1").arg(sourceMob->filePath().fileName());
-    }
-    else if(m_pLand && m_pLand->isMprLoad())
-    {
-        const QFileInfo mpr = m_pLand->filePath();
-        const QFileInfo external(QDir(mpr.absolutePath()).filePath(mpr.completeBaseName() + ".grp"));
-        QFile file(external.absoluteFilePath());
-        if(file.open(QIODevice::ReadOnly))
-        {
-            sourceBytes = file.readAll();
-            m_aiGraphSource = tr("External: %1").arg(external.fileName());
-        }
-    }
+    const SAiGraphPreviewSource selected = selectAiGraphPreviewSource(
+        m_environmentMob ? m_environmentMob->aiGraphData() : QByteArray(),
+        m_environmentMob ? m_environmentMob->filePath().fileName() : QString(),
+        (m_pLand && m_pLand->isMprLoad()) ? m_pLand->filePath() : QFileInfo());
+    const QByteArray sourceBytes = selected.bytes;
+    m_aiGraphSource = selected.label;
 
     if(!sourceBytes.isEmpty())
     {
@@ -1368,6 +1652,7 @@ void CView::refreshAiGraphPreviewSource()
             for(const QString& warning : warnings)
                 ei::log(eLogWarning, "AI graph preview: " + warning);
             m_aiGraphLoadedDocument = m_aiGraphDocument;
+            m_aiGraphLoadedBytes = sourceBytes;
             m_aiGraphLoadedSource = m_aiGraphSource;
         }
     }
@@ -1399,6 +1684,7 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
     input->graphHeight = m_aiGraphLoadedDocument.isValid()
         ? m_aiGraphLoadedDocument.height()
         : qCeil(float(m_terrainEdit.vertexCountY() - 1) / 4.0f);
+    input->maximumTerrainHeight = m_terrainEdit.maxZ();
     if(input->graphWidth * 4 != m_terrainEdit.vertexCountX() - 1
        || input->graphHeight * 4 != m_terrainEdit.vertexCountY() - 1)
     {
@@ -1409,33 +1695,69 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
     const int aiWidth = input->graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
     const int aiHeight = input->graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
     input->terrainHeights.resize(aiWidth * aiHeight);
-    const float maximumHeight = m_mprDocument.mapInfo().maxZ;
+    input->waterDepths.fill(0.0f, aiWidth * aiHeight);
+    input->terrainTypes.fill(quint8(eUndefined), aiWidth * aiHeight);
+    const QVector<SMaterial>& materials = m_pLand->materials();
     for(int y = 0; y < aiHeight; ++y)
         for(int x = 0; x < aiWidth; ++x)
         {
-            const float worldX = (x + 0.5f) * CAiGraphPreviewBuilder::AiTileWorldSize;
-            const float worldY = (y + 0.5f) * CAiGraphPreviewBuilder::AiTileWorldSize;
-            const int x0 = qBound(0, int(qFloor(worldX)), m_terrainEdit.vertexCountX() - 1);
-            const int y0 = qBound(0, int(qFloor(worldY)), m_terrainEdit.vertexCountY() - 1);
-            const int x1 = qMin(x0 + 1, m_terrainEdit.vertexCountX() - 1);
-            const int y1 = qMin(y0 + 1, m_terrainEdit.vertexCountY() - 1);
-            const float fx = qBound(0.0f, worldX - float(x0), 1.0f);
-            const float fy = qBound(0.0f, worldY - float(y0), 1.0f);
-            const float top = float(m_terrainEdit.height(x0, y0)) * (1.0f - fx)
-                            + float(m_terrainEdit.height(x1, y0)) * fx;
-            const float bottom = float(m_terrainEdit.height(x0, y1)) * (1.0f - fx)
-                               + float(m_terrainEdit.height(x1, y1)) * fx;
-            input->terrainHeights[y * aiWidth + x] =
-                (top * (1.0f - fy) + bottom * fy) * maximumHeight / 65535.0f;
+            const int index = y * aiWidth + x;
+            input->terrainHeights[index] = m_terrainEdit.navigationHeightSample(
+                x, y, ETerrainTileLayer::Land);
+            const int globalTileX = x / 4;
+            const int globalTileY = y / 4;
+            bool landAvailable = false;
+            const quint16 landPacked = m_terrainEdit.packedTile(
+                globalTileX, globalTileY, ETerrainTileLayer::Land, &landAvailable);
+            bool typeFound = false;
+            const qint32 terrainType = landAvailable
+                ? m_terrainEdit.tileType(landPacked, &typeFound) : qint32(eUndefined);
+            if(typeFound && terrainType >= 0 && terrainType < eLast)
+                input->terrainTypes[index] = quint8(terrainType);
+
+            bool overlayAvailable = false;
+            const qint16 materialIndex = m_terrainEdit.overlayMaterialIndex(
+                globalTileX, globalTileY, &overlayAvailable);
+            bool heightAvailable = false;
+            const float overlayHeight = m_terrainEdit.navigationHeightSample(
+                x, y, ETerrainTileLayer::Overlay, &heightAvailable, false);
+            if(heightAvailable)
+                input->waterDepths[index] = qMax(
+                    0.0f, overlayHeight - input->terrainHeights.at(index));
+
+            if(input->waterDepths.at(index) > 0.0f
+               && overlayAvailable && materialIndex >= 0
+               && materialIndex < materials.size()
+               && materials.at(materialIndex).type == eTerrainWater)
+            {
+                bool overlayTileAvailable = false;
+                const quint16 overlayPacked = m_terrainEdit.packedTile(
+                    globalTileX, globalTileY, ETerrainTileLayer::Overlay,
+                    &overlayTileAvailable);
+                bool overlayTypeFound = false;
+                const qint32 overlayType = overlayTileAvailable
+                    ? m_terrainEdit.tileType(overlayPacked, &overlayTypeFound)
+                    : qint32(eUndefined);
+                if(overlayTypeFound && overlayType >= 0 && overlayType < eLast)
+                    input->terrainTypes[index] = quint8(overlayType);
+            }
         }
 
+    QString traversalError;
+    input->terrainTraversal = CAiGraphPreviewBuilder::parseTerrainTraversalRegistry(
+        CObjectList::getInstance()->resourceData(QStringLiteral("tileDesc.reg")),
+        &traversalError);
+    if(input->terrainTraversal.isEmpty())
+        ei::log(eLogWarning, "AI graph preview: " + traversalError);
+
     input->collisionProxies.clear();
+    input->collisionMetadataApproximate = false;
     for(CMob* mob : m_aMob)
         if(mob)
             for(CNode* node : mob->nodes())
             {
                 if(!node || node->isMarkDeleted()
-                   || (node->nodeType() != eWorldObject && node->nodeType() != eLever))
+                   || !ei::contributesStaticNavigationCollision(node->nodeType()))
                     continue;
                 CObjectBase* object = dynamic_cast<CObjectBase*>(node);
                 if(!object)
@@ -1443,16 +1765,37 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                 for(const SNavigationCollisionProxy& source : object->navigationCollisionProxies())
                 {
                     SAiGraphCollisionProxy proxy;
-                    proxy.minimum = source.minimum;
-                    proxy.maximum = source.maximum;
+                    proxy.footprint = source.footprint;
+                    proxy.boxCorners = source.boxCorners;
+                    proxy.minimumZ = source.minimumZ;
+                    proxy.maximumZ = source.maximumZ;
+                    switch(source.kind)
+                    {
+                    case ENavigationVolumeKind::Hard:
+                        proxy.passability = EAiGraphObjectPassability::Hard; break;
+                    case ENavigationVolumeKind::Easy:
+                        proxy.passability = EAiGraphObjectPassability::Easy; break;
+                    case ENavigationVolumeKind::Danger:
+                        proxy.passability = EAiGraphObjectPassability::Danger; break;
+                    case ENavigationVolumeKind::Bridge:
+                        proxy.passability = EAiGraphObjectPassability::Bridge; break;
+                    case ENavigationVolumeKind::Ignored:
+                        proxy.passability = EAiGraphObjectPassability::Ignored; break;
+                    case ENavigationVolumeKind::Blocking:
+                    default:
+                        proxy.passability = EAiGraphObjectPassability::Blocking; break;
+                    }
+                    proxy.authored = source.authored;
                     proxy.objectId = source.objectId;
                     input->collisionProxies.append(proxy);
+                    input->collisionMetadataApproximate |= !source.authored;
                 }
             }
     return true;
 }
 
-bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
+bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error,
+                                           QString* sourceDescription)
 {
     if(data)
         data->clear();
@@ -1462,17 +1805,82 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
             *error = tr("No generated AI graph output buffer was provided.");
         return false;
     }
-    SAiGraphPreviewBuildInput input;
-    if(!captureAiGraphPreviewBuildInput(&input, error))
-        return false;
-    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
-    if(!result.valid)
+    if(!m_terrainEditAvailable || m_terrainEdit.vertexCountX() < 2
+       || m_terrainEdit.vertexCountY() < 2
+       || (m_terrainEdit.vertexCountX() - 1) % 4 != 0
+       || (m_terrainEdit.vertexCountY() - 1) % 4 != 0)
     {
         if(error)
-            *error = result.error;
+            *error = tr("The canonical terrain dimensions cannot produce a runtime AI graph.");
         return false;
     }
-    const QByteArray candidate = result.document.serialize(error);
+    const int expectedWidth = (m_terrainEdit.vertexCountX() - 1) / 4;
+    const int expectedHeight = (m_terrainEdit.vertexCountY() - 1) / 4;
+    CAiGraphDocument generated;
+    QByteArray candidate;
+    const bool preserveLoadedGraph = m_aiGraphLoadedOverride
+        && m_aiGraphLoadedDocument.isValid()
+        && !m_aiGraphLoadedBytes.isEmpty();
+    if(preserveLoadedGraph
+       && !m_aiGraphLoadedBytes.isEmpty())
+    {
+        generated = m_aiGraphLoadedDocument;
+        candidate = m_aiGraphLoadedBytes;
+        if(sourceDescription)
+            *sourceDescription = m_aiGraphLoadedSource;
+    }
+    else if(m_aiGraphRegeneratedFresh && m_aiGraphRegeneratedDocument.isValid())
+    {
+        generated = m_aiGraphRegeneratedDocument;
+        if(sourceDescription)
+            *sourceDescription = m_aiGraphRegeneratedSource;
+    }
+    else
+    {
+        SAiGraphPreviewBuildInput input;
+        if(!captureAiGraphPreviewBuildInput(&input, error))
+            return false;
+        const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+        if(!result.valid)
+        {
+            if(error)
+                *error = result.error;
+            return false;
+        }
+        generated = result.document;
+        if(sourceDescription)
+            *sourceDescription = tr("Freshly regenerated graph");
+    }
+    if(!preserveLoadedGraph)
+    {
+        QString recolorError;
+        if(!generated.recolorConnectedComponents(&recolorError))
+        {
+            if(error)
+                *error = tr("Endurance could not finalize the regenerated navigation graph. Nothing was changed. Keep using the loaded graph for testing and report this diagnostic: %1")
+                    .arg(recolorError);
+            return false;
+        }
+    }
+    QString compatibilityError;
+    QStringList compatibilityWarnings;
+    if(!generated.validateRuntimeCompatibility(expectedWidth, expectedHeight,
+                                                &compatibilityError,
+                                                &compatibilityWarnings,
+                                                preserveLoadedGraph))
+    {
+        if(error)
+            *error = preserveLoadedGraph
+                ? tr("The selected loaded AI graph is structurally incompatible with this map. Regenerate the preview or choose another graph: %1")
+                    .arg(compatibilityError)
+                : tr("Endurance could not finalize the regenerated navigation graph. Nothing was changed. Keep using the loaded graph for testing and report this diagnostic: %1")
+                    .arg(compatibilityError);
+        return false;
+    }
+    for(const QString& warning : compatibilityWarnings)
+        ei::log(eLogWarning, QStringLiteral("Preserved loaded AI graph warning: ") + warning);
+    if(candidate.isEmpty())
+        candidate = generated.serialize(error);
     if(candidate.isEmpty())
         return false;
     CAiGraphDocument reopened;
@@ -1484,6 +1892,19 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
                 .arg(reopenError);
         return false;
     }
+    QStringList reopenWarnings;
+    if(!reopened.validateRuntimeCompatibility(expectedWidth, expectedHeight,
+                                               &reopenError, &reopenWarnings,
+                                               preserveLoadedGraph))
+    {
+        if(error)
+            *error = preserveLoadedGraph
+                ? tr("The selected loaded AI graph failed validation after reopening: %1")
+                    .arg(reopenError)
+                : tr("Endurance could not verify the finalized regenerated navigation graph after reopening it. Nothing was changed. Keep using the loaded graph for testing and report this diagnostic: %1")
+                    .arg(reopenError);
+        return false;
+    }
     *data = candidate;
     return true;
 }
@@ -1491,13 +1912,43 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error)
 void CView::startAiGraphPreviewRegeneration()
 {
     if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
-        return;
-    if(m_aiGraphUseLoadedButton)
     {
-        const QSignalBlocker blocker(m_aiGraphUseLoadedButton);
-        m_aiGraphUseLoadedButton->setChecked(false);
-        m_aiGraphUseLoadedButton->setText(tr("Loaded graph override: OFF"));
+        // The QtConcurrent builder cannot be interrupted safely. Supersede its
+        // input revision and coalesce one fresh run instead of starting a
+        // second expensive job or leaving the button apparently inert.
+        ++m_aiGraphBuildRequest;
+        m_aiGraphRegeneratedFresh = false;
+        m_aiGraphRegenerationPending = true;
+        m_aiGraphLoadedOverride = false;
+        if(m_aiGraphRegeneratedDocument.isValid())
+        {
+            m_aiGraphDocument = m_aiGraphRegeneratedDocument;
+            m_aiGraphSource = m_aiGraphRegeneratedSource;
+            m_aiGraphOverlayDirty = true;
+        }
+        syncAiGraphPreviewWidget();
+        return;
     }
+    ++m_aiGraphBuildRequest;
+    m_aiGraphRegeneratedFresh = false;
+    beginAiGraphPreviewRegeneration(true);
+}
+
+void CView::refreshAiGraphOwnership()
+{
+    refreshAiGraphPreviewSource();
+}
+
+void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
+{
+    if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
+    {
+        m_aiGraphRegenerationPending = true;
+        syncAiGraphPreviewWidget();
+        return;
+    }
+    if(selectRegenerated)
+        m_aiGraphLoadedOverride = false;
     m_aiGraphRegenerationPending = false;
     if(m_aiGraphRegenerationTimer)
         m_aiGraphRegenerationTimer->stop();
@@ -1518,7 +1969,7 @@ void CView::startAiGraphPreviewRegeneration()
         {
             const quint64 request = m_aiGraphBuildWatcher->property("requestId").toULongLong();
             const SAiGraphPreviewBuildResult result = m_aiGraphBuildWatcher->result();
-            if(request != m_aiGraphBuildRequest)
+            if(request != m_aiGraphBuildRequest || m_aiGraphRegenerationPending)
             {
                 syncAiGraphPreviewWidget();
                 if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)
@@ -1533,24 +1984,39 @@ void CView::startAiGraphPreviewRegeneration()
                     m_aiGraphRegenerationTimer->start();
                 return;
             }
-            m_aiGraphDocument = result.document;
-            m_aiGraphSource = tr("Regenerated: %1 collision parts")
-                .arg(result.collisionProxyCount);
-            m_aiGraphOverlayDirty = true;
-            if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
-                m_aiGraphPreviewToggle->setChecked(true);
-            ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 human_blocked_tiles:%4")
+            m_aiGraphRegeneratedDocument = result.document;
+            m_aiGraphRegeneratedResult = result;
+            m_aiGraphRegeneratedSource = tr("Regenerated: %1/%2 authored collision parts, %3 bridge cells, %4 water samples")
+                .arg(result.authoredCollisionProxyCount).arg(result.collisionProxyCount)
+                .arg(result.bridgeAiTiles).arg(result.waterAiTiles);
+            m_aiGraphRegeneratedFresh = true;
+            if(!m_aiGraphLoadedOverride)
+            {
+                m_aiGraphDocument = m_aiGraphRegeneratedDocument;
+                m_aiGraphSource = m_aiGraphRegeneratedSource;
+                m_aiGraphOverlayDirty = true;
+                if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
+                    m_aiGraphPreviewToggle->setChecked(true);
+            }
+            ei::log(eLogInfo, QString("AI graph diagnostic regeneration complete dimensions:%1x%2 proxies:%3 authored_proxies:%4 bridge_tiles:%5 human_blocked_tiles:%6 coverage_tests:%7 total_ms:%8 collision_ms:%9 routes_ms:%10 settled_tiles:%11 early_exits:%12")
                 .arg(result.document.width()).arg(result.document.height())
-                .arg(result.collisionProxyCount).arg(result.blockedAiTiles));
+                .arg(result.collisionProxyCount).arg(result.authoredCollisionProxyCount)
+                .arg(result.bridgeAiTiles).arg(result.blockedAiTiles)
+                .arg(result.collisionCoverageTests).arg(result.buildMilliseconds)
+                .arg(result.collisionRasterMilliseconds).arg(result.routeBuildMilliseconds)
+                .arg(result.routeQueueSettledTiles).arg(result.routeSearchEarlyExits));
+            for(const QString& warning : result.warnings)
+                ei::log(eLogWarning, "AI graph preview: " + warning);
             syncAiGraphPreviewWidget();
             update();
             if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)
                 m_aiGraphRegenerationTimer->start();
         });
     }
-    const quint64 request = ++m_aiGraphBuildRequest;
+    const quint64 request = m_aiGraphBuildRequest;
     m_aiGraphBuildWatcher->setProperty("requestId", QVariant::fromValue(request));
-    m_aiGraphRegenerateButton->setEnabled(false);
+    m_aiGraphRegenerateButton->setEnabled(true);
+    m_aiGraphRegenerateButton->setText(tr("Regenerate again"));
     m_aiGraphSourceLabel->setText(tr("Regenerating diagnostic graph..."));
     ei::log(eLogInfo, QString("AI graph diagnostic regeneration started dimensions:%1x%2 proxies:%3")
         .arg(input.graphWidth).arg(input.graphHeight).arg(input.collisionProxies.size()));
@@ -1565,6 +2031,8 @@ void CView::scheduleAiGraphPreviewRegeneration()
     if(!m_aiGraphAutoRegenerationEnabled || !m_terrainEditAvailable
        || !m_aiGraphRegenerationTimer)
         return;
+    ++m_aiGraphBuildRequest;
+    m_aiGraphRegeneratedFresh = false;
     m_aiGraphRegenerationPending = true;
     m_aiGraphRegenerationTimer->start();
 }
@@ -2770,6 +3238,22 @@ bool CView::prepareForApplicationShutdown()
         m_timer->stop();
     if(m_mprModifyTimer)
         m_mprModifyTimer->stop();
+    m_sculptRepeatTimer->stop();
+    m_overlayPointerTimer->stop();
+    ++m_aiGraphBuildRequest;
+    m_aiGraphAutoRegenerationEnabled = false;
+    m_aiGraphRegenerationPending = false;
+    if(m_aiGraphRegenerationTimer)
+        m_aiGraphRegenerationTimer->stop();
+    if(m_aiGraphBuildWatcher)
+    {
+        QObject::disconnect(m_aiGraphBuildWatcher, nullptr, this, nullptr);
+        if(m_aiGraphBuildWatcher->isRunning())
+        {
+            m_aiGraphBuildWatcher->cancel();
+            m_aiGraphBuildWatcher->waitForFinished();
+        }
+    }
     if(!isValid())
         return false;
     makeCurrent();
@@ -2800,7 +3284,21 @@ void CView::rebuildAiGraphOverlayGeometry()
                 continue;
             QVector3D position((x * 8 + localX + 0.5f) * 0.5f,
                                (y * 8 + localY + 0.5f) * 0.5f, 0.0f);
-            if(!m_pLand->projectPt(position))
+            const bool regenerated = !m_aiGraphLoadedOverride
+                && m_aiGraphRegeneratedFresh && m_aiGraphRegeneratedResult.valid;
+            if(regenerated)
+            {
+                const int aiWidth = width * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+                const int aiX = x * CAiGraphPreviewBuilder::AiTilesPerGraphCell + localX;
+                const int aiY = y * CAiGraphPreviewBuilder::AiTilesPerGraphCell + localY;
+                const int aiIndex = aiY * aiWidth + aiX;
+                if(aiIndex >= 0
+                   && aiIndex < m_aiGraphRegeneratedResult.navigationSurfaceHeights.size())
+                    position.setZ(m_aiGraphRegeneratedResult.navigationSurfaceHeights.at(aiIndex));
+                else
+                    continue;
+            }
+            else if(!m_pLand->projectPt(position))
                 continue;
             position.setZ(position.z() + 0.20f);
             const int cell = y * width + x;
@@ -4646,32 +5144,39 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
 void CView::draw()
 {
 
-    QMatrix4x4 camMatrix = m_cam->update();
+    QMatrix4x4 camMatrix = m_minimapCaptureActive
+        ? m_minimapCaptureView : m_cam->update();
     QVector3D cameraAnchor, cameraPivot, cameraRotation;
     m_cam->getLocation(cameraAnchor, cameraPivot, cameraRotation);
     bool cameraEyeOk = false;
     const QVector3D renderedCameraEye = ei::cameraEyeFromView(camMatrix, &cameraEyeOk);
-    const QVector3D cameraPosition = cameraEyeOk ? renderedCameraEye : cameraAnchor;
+    const QVector3D cameraPosition = m_minimapCaptureActive
+        ? m_minimapCaptureCameraPosition
+        : (cameraEyeOk ? renderedCameraEye : cameraAnchor);
     const bool renderedCameraChanged = m_visualWarmupCameraValid
         && ((cameraAnchor - m_visualWarmupCameraAnchor).lengthSquared() > 0.000001f
             || (cameraPivot - m_visualWarmupCameraPivot).lengthSquared() > 0.000001f
             || (cameraRotation - m_visualWarmupCameraRotation).lengthSquared() > 0.000001f);
-    const bool cameraMoving = ei::cameraMotionActive(
-        renderedCameraChanged, m_cam->movementInputActive());
+    const bool cameraMoving = !m_minimapCaptureActive
+        && ei::cameraMotionActive(renderedCameraChanged,
+                                  m_cam->movementInputActive());
     m_visualWarmupCameraAnchor = cameraAnchor;
     m_visualWarmupCameraPivot = cameraPivot;
     m_visualWarmupCameraRotation = cameraRotation;
     m_visualWarmupCameraValid = true;
-    scheduleUnitAppearancePreparation(cameraPosition, cameraMoving);
+    if(!m_minimapCaptureActive)
+        scheduleUnitAppearancePreparation(cameraPosition, cameraMoving);
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
-    const bool animationEnabled = !animationOption || animationOption->value();
+    const bool animationEnabled = !m_minimapCaptureActive
+        && (!animationOption || animationOption->value());
     const COptBool* mipmappingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderTextureMipmapping")) : nullptr;
     CTextureList::getInstance()->setTerrainMipmappingEnabled(
-        !mipmappingOption || mipmappingOption->value());
+        m_minimapCaptureActive || (!mipmappingOption || mipmappingOption->value()));
     AnimationFrameContext::instance().beginFrame(cameraPosition,
-        QDateTime::currentMSecsSinceEpoch(), animationEnabled, cameraMoving);
+        m_minimapCaptureActive ? 0 : QDateTime::currentMSecsSinceEpoch(),
+        animationEnabled, cameraMoving);
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
     const bool cullingEnabled = !cullingOption || cullingOption->value();
@@ -4680,8 +5185,10 @@ void CView::draw()
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawLogic")) : nullptr;
     const COptBool* drawHelpOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawHelp")) : nullptr;
-    const bool drawLogic = drawLogicOption && drawLogicOption->value();
-    const bool drawHelp = drawHelpOption && drawHelpOption->value();
+    const bool drawLogic = !m_minimapCaptureActive
+        && drawLogicOption && drawLogicOption->value();
+    const bool drawHelp = !m_minimapCaptureActive
+        && drawHelpOption && drawHelpOption->value();
     const bool logicMode = CScene::getInstance()->getMode() == eEditModeLogic;
     const bool traverseHelpers = drawLogic || drawHelp || logicMode;
     const auto renderBool = [this](const char* name, bool fallback)
@@ -4694,20 +5201,27 @@ void CView::draw()
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
     const int requestedLightingMode = qBound(0,
         lightingModeOption ? lightingModeOption->value() : 2, 2);
-    const int lightingMode = m_openGlesCompatibility
-        ? qMin(requestedLightingMode, 1) : requestedLightingMode;
+    // Minimap capture needs authored region/cave colors on every renderer.
+    // ANGLE cannot use the shadow-atlas path, but capture disables shadows,
+    // fog, sky, and point lights, leaving the compatible environment diffuse.
+    const int lightingMode = m_minimapCaptureActive
+        ? (m_minimapCaptureUnlitPass ? 0 : 2)
+        : (m_openGlesCompatibility ? qMin(requestedLightingMode, 1)
+                                   : requestedLightingMode);
     const bool environmentEnabled = lightingMode == 2;
     // The viewport lighting-model selector owns environment activation. Keep
     // the resource sky in Full environment and out of the compatibility
     // modes instead of exposing a contradictory second Render setting.
-    const bool skyEnabled = environmentEnabled;
-    const bool fogEnabled = renderBool("renderFog", true);
-    const bool sceneLightsEnabled = renderBool("renderSceneLights", true);
+    const bool skyEnabled = environmentEnabled && !m_minimapCaptureActive;
+    const bool fogEnabled = !m_minimapCaptureActive && renderBool("renderFog", true);
+    const bool sceneLightsEnabled = !m_minimapCaptureActive
+        && renderBool("renderSceneLights", true);
     const COptInt* shadowQualityOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
     const int shadowQuality = qBound(0,
         shadowQualityOption ? shadowQualityOption->value() : 2, 2);
-    const bool shadowsEnabled = environmentEnabled && !m_openGlesCompatibility
+    const bool shadowsEnabled = !m_minimapCaptureActive
+        && environmentEnabled && !m_openGlesCompatibility
         && shadowQuality > 0
         && ensureShadowFramebuffers(shadowQuality);
     const COptInt* shadowDistanceOption = m_pSettings
@@ -4716,7 +5230,8 @@ void CView::draw()
     // by default while allowing large-scene authors to tune the preview.
     const float maximumShadowDistance = float(qBound(1,
         shadowDistanceOption ? shadowDistanceOption->value() : 320, 1024));
-    const bool overrideWorldTime = renderBool("overrideWorldTime", false);
+    const bool overrideWorldTime = !m_minimapCaptureActive
+        && renderBool("overrideWorldTime", false);
     const COptInt* timeOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderTimeOfDay")) : nullptr;
     const float previewTime = timeOption
@@ -4822,6 +5337,8 @@ void CView::draw()
 
     const auto visibleNodes = [this, &frustum, cullingEnabled, &performance](CMob* mob)
     {
+        if(m_minimapCaptureActive)
+            return mob ? mob->nodes().toVector() : QVector<CNode*>();
         SSpatialQueryStats stats;
         const QVector<CNode*> result = spatiallyVisibleNodes(
             mob, cullingEnabled ? &frustum : nullptr, &stats);
@@ -4837,6 +5354,14 @@ void CView::draw()
             performance.counters().spatialOverflowEntries += m_spatialOverflowNodes.value(mob).size();
         }
         return result;
+    };
+    const auto captureAllowsNode = [this](CNode* node)
+    {
+        if(!m_minimapCaptureActive)
+            return true;
+        return m_minimapCaptureIncludeStaticGeometry
+            && node && node->nodeState() != ENodeState::eHidden
+            && isMinimapStaticGeometry(node);
     };
     if(environmentEnabled && skyEnabled && !m_caveEnvironment)
         drawSkybox(camMatrix, environment);
@@ -4922,7 +5447,7 @@ void CView::draw()
         QSet<CNode*> colorSubmittedNodes;
         for(auto& mob: m_aMob) //TODO: draw inactive mobs with custom color|alfa or something
         {
-            if(!isMobVisible(mob))
+            if(!m_minimapCaptureActive && !isMobVisible(mob))
                 continue;
             if(mob->mobName() == m_activeMob->mobName())
                 continue; //skip drawing active mob
@@ -4930,9 +5455,12 @@ void CView::draw()
             const QVector<CNode*> candidates = visibleNodes(mob);
             for(CNode* node : candidates)
             {
+                if(!captureAllowsNode(node))
+                    continue;
                 // Selected nodes from every visible MOB are rendered in the
                 // final depth pass below, including locked MOBs.
-                if(node->nodeState() == ENodeState::eSelect)
+                if(!m_minimapCaptureActive
+                   && node->nodeState() == ENodeState::eSelect)
                     continue;
                 node->drawObjectVisual(false, &m_program);
                 colorSubmittedNodes.insert(node);
@@ -4959,7 +5487,10 @@ void CView::draw()
         const QVector<CNode*> activeCandidates = visibleNodes(m_activeMob);
         for(CNode* node : activeCandidates)
         {
-            if(isMobVisible(m_activeMob) && node->nodeState() != ENodeState::eSelect)
+            if((m_minimapCaptureActive || isMobVisible(m_activeMob))
+               && captureAllowsNode(node)
+               && (m_minimapCaptureActive
+                   || node->nodeState() != ENodeState::eSelect))
             {
                 node->drawObjectVisual(true, &m_program);
                 colorSubmittedNodes.insert(node);
@@ -4984,7 +5515,7 @@ void CView::draw()
                 * maximumShadowDistance;
             for(CMob* mob : m_aMob)
             {
-                if(!isMobVisible(mob))
+                if(!m_minimapCaptureActive && !isMobVisible(mob))
                     continue;
                 if(m_spatialIndexDirty)
                     rebuildSpatialIndices();
@@ -5033,7 +5564,7 @@ void CView::draw()
         logOpenGlErrors(QStringLiteral("draw/object-queue"));
         ei::gl::DepthFunc(GL_LEQUAL);
         for(CMob* mob : m_aMob)
-            if(isMobVisible(mob))
+            if(!m_minimapCaptureActive && isMobVisible(mob))
                 for(CNode* node : mob->nodes())
                     if(node->nodeState() == ENodeState::eSelect)
                     {
@@ -5083,9 +5614,10 @@ void CView::draw()
             ? overlayWorldSet->data(eWsTypeWindStr).toFloat() : 0.0f;
         const bool landscapeEditing = m_landscapeTools
             && m_landscapeTools->editingEnabled();
-        m_landProgram.setUniformValue("u_overlayMotionEnabled", !landscapeEditing);
+        m_landProgram.setUniformValue("u_overlayMotionEnabled",
+            !m_minimapCaptureActive && !landscapeEditing);
         m_landProgram.setUniformValue("u_overlayTimeSeconds",
-            m_overlayAnimationTimer.isValid()
+            !m_minimapCaptureActive && m_overlayAnimationTimer.isValid()
                 ? float(m_overlayAnimationTimer.elapsed()) / 1000.0f : 0.0f);
         m_landProgram.setUniformValue("u_overlayWindDirection", overlayWindDirection);
         m_landProgram.setUniformValue("u_overlayWindStrength", overlayWindStrength);
@@ -5099,7 +5631,8 @@ void CView::draw()
         m_landProgram.setUniformValue("transparency", 0.0f);
     }
 
-    drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
+    if(!m_minimapCaptureActive)
+        drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
     logOpenGlErrors(QStringLiteral("draw/particles"));
 
 
@@ -5107,7 +5640,8 @@ void CView::draw()
     if (!m_program.bind())
         close();
 
-    if (m_pLand && m_pLand->isMprLoad() && !m_aMob.isEmpty())
+    if (!m_minimapCaptureActive && m_pLand && m_pLand->isMprLoad()
+        && !m_aMob.isEmpty())
     {
         QMatrix4x4 mtrx;
         mtrx.setToIdentity();
@@ -5115,6 +5649,187 @@ void CView::draw()
         m_program.setUniformValue("u_viewMmatrix", mtrx);
         m_selectFrame->draw(&m_program);
     }
+}
+
+SMinimapSceneCaptureResult CView::captureMinimapScene(
+    bool includeLoadedStaticGeometry, int targetTextureSize)
+{
+    SMinimapSceneCaptureResult result;
+    result.targetTextureSize = targetTextureSize;
+    result.framingDescription = tr(
+        "Full MPR bounds at 128 pixels per sector; square game texture uses the larger #maps dimension without stretching");
+    result.orientationDescription = tr(
+        "Orthographic game orientation: world +X is right and world +Y is down");
+    if(!m_pLand || !m_pLand->isMprLoad())
+    {
+        result.bake.error = tr("Load an MPR before generating a minimap.");
+        return result;
+    }
+    result.sectorWidth = int(m_pLand->widthInWorldUnits() / 32u);
+    result.sectorHeight = int(m_pLand->heightInWorldUnits() / 32u);
+    const QSize reviewSize(result.sectorWidth * 128, result.sectorHeight * 128);
+    if(reviewSize.isEmpty())
+    {
+        result.bake.error = tr("The loaded MPR has invalid sector dimensions.");
+        return result;
+    }
+    if(!isValid())
+    {
+        result.bake.error = tr("The viewport renderer is not initialized.");
+        return result;
+    }
+
+    makeCurrent();
+    GLint maximumTextureSize = 0;
+    ei::gl::GetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+    if(maximumTextureSize <= 0 || reviewSize.width() > maximumTextureSize
+       || reviewSize.height() > maximumTextureSize)
+    {
+        result.bake.error = tr(
+            "The %1 x %2 full-resolution review exceeds this renderer's %3-pixel texture limit.")
+            .arg(reviewSize.width()).arg(reviewSize.height())
+            .arg(maximumTextureSize);
+        return result;
+    }
+
+    QHash<CNode*, ENodeState> restoredStates;
+    for(CMob* mob : m_aMob)
+        for(CNode* node : mob->nodes())
+        {
+            if(!node || node->isMarkDeleted())
+                continue;
+            if(dynamic_cast<CUnit*>(node))
+            {
+                ++result.excludedDynamicUnitCount;
+                continue;
+            }
+            if(!isMinimapStaticGeometry(node))
+                continue;
+            if(node->nodeState() == ENodeState::eHidden)
+            {
+                ++result.hiddenStaticObjectCount;
+                continue;
+            }
+            ++result.staticObjectCount;
+            if(includeLoadedStaticGeometry
+               && node->nodeState() == ENodeState::eSelect)
+            {
+                restoredStates.insert(node, node->nodeState());
+                node->setState(ENodeState::eDraw);
+            }
+        }
+
+    const QMatrix4x4 previousProjection = m_projection;
+    const bool previousLandscapeVisible = m_landscapeVisible;
+    const bool previousDrawLand = m_bDrawLand;
+    const bool previousDrawWater = m_bDrawWater;
+    const bool previousPreviewTile = m_bPreviewTile;
+    const bool previousTileGrid = m_tileGridVisible;
+    const auto restore = [&]()
+    {
+        for(auto state = restoredStates.constBegin(); state != restoredStates.constEnd(); ++state)
+            state.key()->setState(state.value());
+        m_projection = previousProjection;
+        m_landscapeVisible = previousLandscapeVisible;
+        m_bDrawLand = previousDrawLand;
+        m_bDrawWater = previousDrawWater;
+        m_bPreviewTile = previousPreviewTile;
+        m_tileGridVisible = previousTileGrid;
+        m_minimapCaptureActive = false;
+        m_minimapCaptureUnlitPass = false;
+        m_minimapCaptureIncludeStaticGeometry = false;
+        QOpenGLFramebufferObject::bindDefault();
+        ei::gl::Viewport(0, 0, width(), height());
+        update();
+    };
+
+    QOpenGLFramebufferObjectFormat format;
+    format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+    format.setSamples(0);
+    QOpenGLFramebufferObject target(reviewSize, format);
+    if(!target.isValid() || !target.bind())
+    {
+        restore();
+        result.bake.error = tr("Could not allocate the offscreen minimap capture target.");
+        return result;
+    }
+
+    const float worldWidth = float(m_pLand->widthInWorldUnits());
+    const float worldHeight = float(m_pLand->heightInWorldUnits());
+    const QVector3D center(worldWidth * 0.5f, worldHeight * 0.5f, 0.0f);
+    m_minimapCaptureCameraPosition = center + QVector3D(0.0f, 0.0f, 4096.0f);
+    m_minimapCaptureView.setToIdentity();
+    m_minimapCaptureView.lookAt(m_minimapCaptureCameraPosition, center,
+                                QVector3D(0.0f, 1.0f, 0.0f));
+    m_projection.setToIdentity();
+    m_projection.ortho(-worldWidth * 0.5f, worldWidth * 0.5f,
+                       -worldHeight * 0.5f, worldHeight * 0.5f,
+                       1.0f, 8192.0f);
+    m_minimapCaptureActive = true;
+    m_minimapCaptureIncludeStaticGeometry = includeLoadedStaticGeometry;
+    m_landscapeVisible = true;
+    m_bDrawLand = true;
+    m_bDrawWater = true;
+    m_bPreviewTile = false;
+    m_tileGridVisible = false;
+
+    ei::gl::Viewport(0, 0, reviewSize.width(), reviewSize.height());
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_TRUE);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
+    glFinish();
+    const QImage captured = target.toImage();
+    m_minimapCaptureUnlitPass = true;
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw();
+    glFinish();
+    const QImage unlitCaptured = target.toImage();
+    m_minimapCaptureUnlitPass = false;
+    restore();
+    if(captured.isNull() || captured.size() != reviewSize
+       || unlitCaptured.isNull() || unlitCaptured.size() != reviewSize)
+    {
+        result.bake.error = tr("The offscreen renderer returned an invalid minimap image.");
+        return result;
+    }
+
+    QVector<SMinimapBakeLayer> layers;
+    layers.append({EMinimapBakeLayerKind::Terrain,
+                   tr("loaded MPR terrain and overlays with authored environment lighting, without projected shadows"), captured});
+    result.staticGeometrySourcePresent = includeLoadedStaticGeometry
+        && !m_aMob.isEmpty();
+    if(result.staticGeometrySourcePresent)
+    {
+        QImage marker(reviewSize, QImage::Format_ARGB32_Premultiplied);
+        marker.fill(Qt::transparent);
+        layers.append({EMinimapBakeLayerKind::StaticGeometry,
+                       tr("%1 static object(s) from loaded MOB source(s)")
+                           .arg(result.staticObjectCount), marker});
+    }
+    SMinimapBakeOptions bakeOptions;
+    bakeOptions.textureSize = targetTextureSize;
+    result.bake = bakeMinimapLayers(result.sectorWidth, result.sectorHeight,
+                                    layers, bakeOptions);
+    QVector<SMinimapBakeLayer> unlitLayers = layers;
+    unlitLayers[0].image = unlitCaptured;
+    const SMinimapBakeResult unlitBake = bakeMinimapLayers(
+        result.sectorWidth, result.sectorHeight, unlitLayers, bakeOptions);
+    if(unlitBake.success)
+        result.unlitGameImage = unlitBake.gameImage;
+    if(result.bake.success)
+    {
+        result.bake.notes.append(tr("Excluded %1 dynamic unit(s).")
+                                 .arg(result.excludedDynamicUnitCount));
+        result.bake.notes.append(tr("Excluded %1 hidden static object(s).")
+                                 .arg(result.hiddenStaticObjectCount));
+        result.bake.notes.append(result.framingDescription);
+        result.bake.notes.append(result.orientationDescription);
+    }
+    return result;
 }
 
 void CView::loadLandscape(const QFileInfo& filePath)
@@ -5138,6 +5853,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
         && !canonicalReport.hasErrors()
         && m_terrainEdit.load(m_mprDocument, &canonicalReport)
         && !canonicalReport.hasErrors();
+    m_pLand->setCanonicalTerrainModel(
+        m_terrainEditAvailable ? &m_terrainEdit : nullptr);
     if(!m_terrainEditAvailable)
     {
         ei::log(eLogWarning, "Canonical terrain editing disabled for this MPR:\n"
@@ -5147,6 +5864,18 @@ void CView::loadLandscape(const QFileInfo& filePath)
     {
         ei::log(eLogInfo, QString("Canonical terrain preview ready: %1 x %2 vertices")
             .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
+        bool hasCanonicalWarning = false;
+        for(const SValidationFinding& finding : canonicalReport.findings())
+            hasCanonicalWarning = hasCanonicalWarning
+                || finding.severity == EValidationSeverity::Warning
+                || finding.severity == EValidationSeverity::Critical;
+        if(hasCanonicalWarning)
+        {
+            const QString warning = tr(
+                "MPR opened with pre-existing terrain warnings. Editing remains available; review the workflow log before saving.");
+            ei::log(eLogWarning, warning + "\n" + canonicalReport.toText());
+            emit updateMsg(warning);
+        }
     }
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
@@ -5170,6 +5899,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     updateTileForm(true);
     rebuildTerrainAutoCatalog();
     refreshAiGraphPreviewSource();
+    refreshMprSettingsDock();
     emit selectionStateChanged(nSelectedNodes() > 0);
     if(m_landscapeTools && m_landscapeTools->editingEnabled())
         syncLandscapeToolState();
@@ -5197,6 +5927,7 @@ void CView::unloadLand(bool promptForSave)
 
     m_mprModifyTimer->stop();
     m_overlayAnimationTimer.invalidate();
+    m_pLand->setCanonicalTerrainModel(nullptr);
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_terrainEdit = CTerrainEditModel();
@@ -5204,6 +5935,7 @@ void CView::unloadLand(bool promptForSave)
     m_terrainSemanticSeed = 0;
     m_mprDocument = CMprDocument();
     m_pLand->unloadMpr();
+    refreshMprSettingsDock();
     refreshAiGraphPreviewSource();
     m_caveEnvironment = false;
     for(CMob* mob : m_aMob)
@@ -5240,19 +5972,22 @@ void CView::saveLandAs()
 
     if(m_pLand->isDirty())
     {
-        const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
-        const QString destinationPath = QDir::cleanPath(fileName.absoluteFilePath());
-        const bool samePath = QString::compare(sourcePath, destinationPath,
-                                               Qt::CaseInsensitive) == 0;
-        saveChangedLandscapeDocument(fileName, samePath);
+        // Save As follows normal document semantics: after the candidate is
+        // staged, committed, freshly reopened, and verified, the destination
+        // becomes the active MPR baseline. A copy-only export, if added, must
+        // be a separately named command rather than surprising Save As users.
+        saveChangedLandscapeDocument(fileName, true);
         return;
     }
     //QFileInfo fileName("c:\\konst\\Проклятые Земли (Дополнение)\\Mods\\ferneo_mod\\Maps\\zone1gTest.mpr");
 
     if(saveLandscapeDocument(fileName))
     {
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, fileName.baseName());
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+        SMprSaveCommitResult unchangedSave;
+        unchangedSave.candidateSha256 = QString::fromLatin1(
+            QCryptographicHash::hash(m_mprDocument.originalBytes(),
+                                     QCryptographicHash::Sha256).toHex());
+        adoptCommittedLandscapeBaseline(fileName, unchangedSave);
     }
 }
 
@@ -5310,6 +6045,7 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
     CMprEditTransaction transaction(tr("Stage current landscape for map test"));
     CValidationReport localReport;
     if(!m_terrainEdit.appendSectorEdits(&transaction, &localReport)
+       || !m_mprDocument.appendMaxZEdit(m_terrainEdit.maxZ(), &transaction, &localReport)
        || localReport.hasErrors() || transaction.isEmpty())
     {
         if(report)
@@ -5383,6 +6119,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         : tr("Save canonical landscape copy"));
     CValidationReport transactionReport;
     if(!m_terrainEdit.appendSectorEdits(&transaction, &transactionReport)
+       || !m_mprDocument.appendMaxZEdit(m_terrainEdit.maxZ(), &transaction,
+                                        &transactionReport)
        || transactionReport.hasErrors() || transaction.isEmpty())
     {
         ei::log(eLogFatal, QString("Refusing changed MPR save because the canonical transaction failed path:%1 findings:%2")
@@ -5497,6 +6235,8 @@ bool CView::adoptCommittedLandscapeBaseline(const QFileInfo& destination,
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
                               destination.baseName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+    refreshMprSettingsDock();
+    emit loadedMapStateChanged();
     return true;
 }
 
@@ -6125,6 +6865,8 @@ void CView::updateTileForm(bool bGenerateNewTable)
         m_pTileForm->fillTable(m_pLand->mapName(), m_pLand->textureNum());
     m_pTileForm->setTileTypes(m_pLand->tileTypes());
     m_pTileForm->setMaterial(m_pLand->materials());
+    if(m_landscapeTools)
+        m_landscapeTools->setOverlayMaterials(m_pLand->materials());
     m_pTileForm->setAnimTile(m_pLand->animTiles());
 }
 
@@ -6136,36 +6878,49 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     const int position = program->attributeLocation("a_position");
     if(position < 0)
         return;
-    if(m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt)
+    if(m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt
+       || m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySculpt)
     {
         if(!m_sculptOutlineValid)
             return;
-        QVector<QVector3D> circle;
-        constexpr int segments = 64;
-        circle.reserve(segments);
-        const float radius = m_landscapeTools->radius();
-        for(int segment = 0; segment < segments; ++segment)
+        const bool landSculpt = m_landscapeTools->editMode()
+            == ELandscapeEditMode::Sculpt;
+        if(m_sculptOutlineGeometryDirty)
         {
-            const float angle = float(segment) * float(2.0 * M_PI / segments);
-            QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
-                            m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
-            if(!m_pLand->projectPt(point))
-                return;
-            point.setZ(point.z() + 0.12f);
-            circle.append(point);
+            m_sculptOutlineVertices.clear();
+            constexpr int segments = 64;
+            m_sculptOutlineVertices.reserve(segments);
+            const float radius = m_landscapeTools->radius();
+            for(int segment = 0; segment < segments; ++segment)
+            {
+                const float angle = float(segment) * float(2.0 * M_PI / segments);
+                QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
+                                m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
+                if(!m_pLand->projectPt(point, landSculpt)
+                   && (landSculpt || !m_pLand->projectPt(point, true)))
+                    continue;
+                point.setZ(point.z() + 0.12f);
+                m_sculptOutlineVertices.append(point);
+            }
+            m_sculptOutlineGeometryDirty = false;
         }
-        program->setUniformValue("customColor", QVector4D(1.0f, 0.52f, 0.10f, 0.95f));
-        program->setAttributeArray(position, circle.constData());
-        glDepthFunc(GL_LEQUAL);
+        program->setUniformValue("customColor", landSculpt
+            ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
+            : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
+        program->setAttributeArray(position, m_sculptOutlineVertices.constData());
+        // Keep the complete footprint legible when an overlay is thinner
+        // than the brush. Overlay points are preferred; land is only the
+        // terrain-aligned visual fallback outside the active surface.
+        glDepthFunc(GL_ALWAYS);
         glLineWidth(2.0f);
-        glDrawArrays(GL_LINE_LOOP, 0, circle.size());
+        glDrawArrays(GL_LINE_LOOP, 0, m_sculptOutlineVertices.size());
         glLineWidth(1.0f);
         glDepthFunc(GL_LESS);
         return;
     }
     if(!m_terrainPaintOutlineValid || m_landscapeTools->manualTileSelectionEnabled())
         return;
-    const bool landLayer = m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint;
+    const bool landLayer = m_terrainPaintProjectionLand;
     const int radius = qMax(0, int(qRound(m_landscapeTools->paintRadius())));
     const ETerrainTileBrushShape shape = m_landscapeTools->paintShape();
     const auto included = [this, radius, shape](int x, int y)
@@ -6176,46 +6931,54 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             ? qMax(dx, dy) <= radius
             : dx * dx + dy * dy <= radius * radius;
     };
-    QVector<QVector3D> lines;
-    const auto appendEdge = [this, &lines, landLayer](float x1, float y1, float x2, float y2)
+    if(m_terrainPaintOutlineGeometryDirty)
     {
-        QVector3D first(x1, y1, 0.0f);
-        QVector3D second(x2, y2, 0.0f);
-        if(!m_pLand->projectPt(first, landLayer)
-           || !m_pLand->projectPt(second, landLayer))
-            return;
-        first.setZ(first.z() + 0.12f);
-        second.setZ(second.z() + 0.12f);
-        lines.append(first);
-        lines.append(second);
-    };
-    for(int y = m_terrainPaintOutlineY - radius;
-        y <= m_terrainPaintOutlineY + radius; ++y)
-    {
-        for(int x = m_terrainPaintOutlineX - radius;
-            x <= m_terrainPaintOutlineX + radius; ++x)
+        m_terrainPaintOutlineVertices.clear();
+        const auto appendEdge = [this, landLayer](float x1, float y1,
+                                                  float x2, float y2)
         {
-            if(!included(x, y))
-                continue;
-            const float left = float(x * 2);
-            const float right = left + 2.0f;
-            const float bottom = float(y * 2);
-            const float top = bottom + 2.0f;
-            if(!included(x, y - 1)) appendEdge(left, bottom, right, bottom);
-            if(!included(x + 1, y)) appendEdge(right, bottom, right, top);
-            if(!included(x, y + 1)) appendEdge(right, top, left, top);
-            if(!included(x - 1, y)) appendEdge(left, top, left, bottom);
+            QVector3D first(x1, y1, 0.0f);
+            QVector3D second(x2, y2, 0.0f);
+            const bool firstProjected = m_pLand->projectPt(first, landLayer)
+                || (!landLayer && m_pLand->projectPt(first, true));
+            const bool secondProjected = m_pLand->projectPt(second, landLayer)
+                || (!landLayer && m_pLand->projectPt(second, true));
+            if(!firstProjected || !secondProjected)
+                return;
+            first.setZ(first.z() + 0.12f);
+            second.setZ(second.z() + 0.12f);
+            m_terrainPaintOutlineVertices.append(first);
+            m_terrainPaintOutlineVertices.append(second);
+        };
+        for(int y = m_terrainPaintOutlineY - radius;
+            y <= m_terrainPaintOutlineY + radius; ++y)
+        {
+            for(int x = m_terrainPaintOutlineX - radius;
+                x <= m_terrainPaintOutlineX + radius; ++x)
+            {
+                if(!included(x, y))
+                    continue;
+                const float left = float(x * 2);
+                const float right = left + 2.0f;
+                const float bottom = float(y * 2);
+                const float top = bottom + 2.0f;
+                if(!included(x, y - 1)) appendEdge(left, bottom, right, bottom);
+                if(!included(x + 1, y)) appendEdge(right, bottom, right, top);
+                if(!included(x, y + 1)) appendEdge(right, top, left, top);
+                if(!included(x - 1, y)) appendEdge(left, top, left, bottom);
+            }
         }
+        m_terrainPaintOutlineGeometryDirty = false;
     }
-    if(lines.isEmpty())
+    if(m_terrainPaintOutlineVertices.isEmpty())
         return;
     program->setUniformValue("customColor", landLayer
         ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
         : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
-    program->setAttributeArray(position, lines.constData());
+    program->setAttributeArray(position, m_terrainPaintOutlineVertices.constData());
     glDepthFunc(GL_LEQUAL);
     glLineWidth(2.0f);
-    glDrawArrays(GL_LINES, 0, lines.size());
+    glDrawArrays(GL_LINES, 0, m_terrainPaintOutlineVertices.size());
     glLineWidth(1.0f);
     glDepthFunc(GL_LESS);
 }
@@ -6223,6 +6986,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 void CView::rebuildTerrainAutoCatalog()
 {
     m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
+    m_terrainAtlasProfile = STerrainAtlasProfile();
     m_terrainMaterialRepresentatives.clear();
     m_terrainPaintAudit.clear();
     m_terrainPaintActions.clear();
@@ -6240,9 +7004,54 @@ void CView::rebuildTerrainAutoCatalog()
     if(!m_terrainEditAvailable || !m_pTileForm)
         return;
     CValidationReport report;
+    const QString mprNamespace = m_mprDocument.mapInfo().innerNamespace;
+    const int slotCount = m_pTileForm->tileImages().size();
+    const QByteArray atlasHash = CTerrainAtlasProfileInference::pixelSha256(
+        m_pTileForm->tileImages());
+    const QString profilePath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
+    bool reviewedProfileActive = false;
+    bool staleProfile = false;
+    // Authored namespace contracts are the primary truth. A generic inferred
+    // profile must never replace a known slot table merely because it was
+    // saved or approved previously.
     m_terrainAtlasAnalysis = CTerrainAtlasAnalyzer::analyze(
-        m_mprDocument.mapInfo().innerNamespace,
-        m_pTileForm->tileImages().size(), &report);
+        mprNamespace, slotCount, &report);
+    const bool authoredTemplateActive = m_terrainAtlasAnalysis.usable;
+    if(authoredTemplateActive)
+        m_terrainAtlasProfile = CTerrainAtlasProfileInference::fromAuthoredAnalysis(
+            mprNamespace, atlasHash, slotCount, m_terrainAtlasAnalysis, &report);
+    else if(QFileInfo::exists(profilePath))
+    {
+        STerrainAtlasProfile stored;
+        CValidationReport storedReport;
+        if(CTerrainAtlasProfileStore::load(mprNamespace, &stored, QString(), &storedReport)
+           && stored.validateBinding(mprNamespace, atlasHash, slotCount, &storedReport)
+           && CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+                  stored.provenance))
+        {
+            m_terrainAtlasProfile = stored;
+            if(stored.approved)
+            {
+                m_terrainAtlasAnalysis = stored.approvedAnalysis(&storedReport);
+                reviewedProfileActive = m_terrainAtlasAnalysis.usable;
+                if(!reviewedProfileActive)
+                {
+                    m_terrainAtlasProfile.approved = false;
+                    staleProfile = true;
+                }
+            }
+        }
+        else
+            staleProfile = true;
+        for(const SValidationFinding& finding : storedReport.findings())
+            report.add(finding.code, finding.severity, finding.message, finding.location);
+    }
+    if(!authoredTemplateActive && !reviewedProfileActive)
+        m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
+    if(m_terrainAtlasProfile.slotDefinitions.isEmpty())
+        m_terrainAtlasProfile = CTerrainAtlasProfileInference::propose(
+            mprNamespace, m_pTileForm->tileImages(),
+            m_mprDocument.mapInfo().tileTypes, terrainAtlasUsage(), &report);
     QVector<QPair<qint32, QString>> landChoices;
     QVector<QPair<qint32, QString>> underwaterChoices;
     QVector<QPair<qint32, QString>> overlayChoices;
@@ -6255,14 +7064,25 @@ void CView::rebuildTerrainAutoCatalog()
                 .arg(material.name).arg(material.pureVariantCount)));
         m_terrainMaterialRepresentatives.insert(material.id, material.representativeSlot);
     }
-    const QString status = m_terrainAtlasAnalysis.usable
+    QString status = m_terrainAtlasAnalysis.usable
         ? tr("%1 loaded: %2 land and %3 overlay materials.")
               .arg(m_terrainAtlasAnalysis.templateName)
               .arg(landChoices.size()).arg(overlayChoices.size())
-        : tr("No authored slot template is registered for namespace '%1'. Semantic painting is disabled.")
-              .arg(m_mprDocument.mapInfo().innerNamespace);
+        : tr("No approved semantic profile is available for namespace '%1'. Automatic painting is disabled; manual atlas tile mode remains available.")
+              .arg(mprNamespace);
+    if(authoredTemplateActive)
+        status = tr("Authored atlas layout loaded: %1 land and %2 overlay materials.")
+            .arg(landChoices.size()).arg(overlayChoices.size());
+    else if(reviewedProfileActive)
+        status = tr("Approved semantic profile loaded: %1 land and %2 overlay materials.")
+            .arg(landChoices.size()).arg(overlayChoices.size());
+    else if(staleProfile)
+        status += tr(" A saved auto-inferred profile is obsolete or failed its namespace/hash/slot binding; review the new proposal before use.");
+    else if(!m_terrainAtlasProfile.approved)
+        status += tr(" An inference proposal is ready for review.");
     m_landscapeTools->setPaintTerrainTypes(
         landChoices, underwaterChoices, overlayChoices, status);
+    updateTerrainAtlasViewerAnnotations(status);
     ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
         QString("Terrain namespace template: %1, %2 land materials, %3 overlay materials, %4/%5 described slots%6")
             .arg(m_terrainAtlasAnalysis.templateName)
@@ -6272,6 +7092,92 @@ void CView::rebuildTerrainAutoCatalog()
     emit updateMsg(m_terrainAtlasAnalysis.usable
         ? status
         : tr("This atlas layout is not registered; semantic terrain painting is disabled."));
+}
+
+QVector<STerrainAtlasSlotUsage> CView::terrainAtlasUsage() const
+{
+    const int slotCount = m_pTileForm ? m_pTileForm->tileImages().size() : 0;
+    QVector<STerrainAtlasSlotUsage> usage(slotCount);
+    for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
+        for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
+        {
+            bool landAvailable = false;
+            const SMprPackedTile land = SMprPackedTile::decode(m_terrainEdit.packedTile(
+                x, y, ETerrainTileLayer::Land, &landAvailable));
+            bool overlayAvailable = false;
+            const SMprPackedTile overlay = SMprPackedTile::decode(m_terrainEdit.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &overlayAvailable));
+            if(landAvailable && land.atlasSlot() >= 0 && land.atlasSlot() < slotCount)
+            {
+                ++usage[land.atlasSlot()].landCount;
+                if(overlayAvailable) ++usage[land.atlasSlot()].landBelowOverlayCount;
+            }
+            if(overlayAvailable && overlay.atlasSlot() >= 0 && overlay.atlasSlot() < slotCount)
+                ++usage[overlay.atlasSlot()].overlayCount;
+        }
+    return usage;
+}
+
+void CView::reviewTerrainAtlasProfile()
+{
+    if(!m_terrainEditAvailable || !m_pTileForm || m_pTileForm->tileImages().isEmpty())
+    {
+        emit updateMsg(tr("Load an MPR and its complete terrain atlas before reviewing semantic conversion."));
+        return;
+    }
+    const QString mprNamespace = m_mprDocument.mapInfo().innerNamespace;
+    const QByteArray hash = CTerrainAtlasProfileInference::pixelSha256(m_pTileForm->tileImages());
+    STerrainAtlasProfile profile = m_terrainAtlasProfile;
+    CValidationReport report;
+    if(profile.slotDefinitions.isEmpty()
+       || !profile.validateBinding(mprNamespace, hash, m_pTileForm->tileImages().size(), &report))
+    {
+        profile = CTerrainAtlasProfileInference::propose(
+            mprNamespace, m_pTileForm->tileImages(), m_mprDocument.mapInfo().tileTypes,
+            terrainAtlasUsage(), &report);
+    }
+    CTerrainAtlasReviewDialog dialog(profile, m_pTileForm->tileImages(), this);
+    if(dialog.exec() != QDialog::Accepted) return;
+    const STerrainAtlasProfile reviewed = dialog.reviewedProfile();
+    CValidationReport saveReport;
+    if(!CTerrainAtlasProfileStore::save(reviewed, QString(), &saveReport))
+    {
+        QMessageBox::warning(this, tr("Could not save semantic atlas profile"), saveReport.toText());
+        return;
+    }
+    rebuildTerrainAutoCatalog();
+    const QString savedPath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
+    emit updateMsg(reviewed.approved
+        ? tr("The reviewed semantic atlas profile is approved and automatic painting is enabled. Saved to %1")
+              .arg(QDir::toNativeSeparators(savedPath))
+        : tr("Semantic atlas draft saved to %1. Automatic painting remains disabled until approval.")
+              .arg(QDir::toNativeSeparators(savedPath)));
+}
+
+void CView::updateTerrainAtlasViewerAnnotations(const QString& status)
+{
+    if(!m_pTileForm) return;
+    QStringList annotations;
+    annotations.reserve(m_terrainAtlasProfile.atlasSlotCount);
+    QMap<qint32, STerrainAtlasProfileFamily> families;
+    for(const STerrainAtlasProfileFamily& family : m_terrainAtlasProfile.families)
+        families.insert(family.id, family);
+    for(const STerrainAtlasProfileSlot& slot : m_terrainAtlasProfile.slotDefinitions)
+    {
+        const qint32 ids[] = {slot.signature.northWest, slot.signature.northEast,
+                              slot.signature.southEast, slot.signature.southWest};
+        QStringList names;
+        for(qint32 id : ids)
+            names.append(families.contains(id) ? families.value(id).name : QString::number(id));
+        annotations.append(tr("Slot %1\nNW / NE / SE / SW: %2\n%3")
+            .arg(slot.slot).arg(names.join(QStringLiteral(" / ")))
+            .arg(slot.ambiguous ? tr("Needs review") : tr("Reviewed")));
+    }
+    m_pTileForm->setSemanticAnnotations(annotations,
+        m_terrainAtlasProfile.approved ? tr("semantic profile approved")
+        : (m_terrainAtlasAnalysis.usable ? tr("authored semantic template active")
+                                         : tr("semantic profile draft — automatic paint disabled")));
+    Q_UNUSED(status);
 }
 
 void CView::exportTerrainPaintDiagnostic()
@@ -6297,7 +7203,13 @@ void CView::exportTerrainPaintDiagnostic()
     root.insert("atlasSlotCount", m_pTileForm ? m_pTileForm->tileImages().size() : 0);
     root.insert("atlasPixelSha256", m_pTileForm
         ? QString::fromLatin1(terrainAtlasPixelSha256(m_pTileForm->tileImages())) : QString());
-    root.insert("analysisMode", "authored-namespace-template-v1");
+    root.insert("analysisMode", m_terrainAtlasProfile.approved
+        ? QStringLiteral("reviewed-semantic-profile-v1")
+        : (m_terrainAtlasAnalysis.usable
+            ? QStringLiteral("authored-namespace-template-v1")
+            : QStringLiteral("manual-atlas-only")));
+    root.insert("semanticProfileApproved", m_terrainAtlasProfile.approved);
+    root.insert("semanticProfileProvenance", m_terrainAtlasProfile.provenance);
     root.insert("paintLookupTransform", "mirror-grid-y-v1");
     root.insert("templateName", m_terrainAtlasAnalysis.templateName);
     root.insert("registeredMaterialCount", m_terrainAtlasAnalysis.materials.size());
@@ -6737,6 +7649,98 @@ QVector3D CView::getTerrainPos(bool bLand)
     return getTerrainPos(localCursorPos.x(), localCursorPos.y(), bLand);
 }
 
+QVector3D CView::getTerrainBrushPos(bool* hit)
+{
+    const QPoint localCursorPos = mapFromGlobal(QCursor::pos());
+    return getTerrainBrushPos(localCursorPos.x(), localCursorPos.y(), hit);
+}
+
+QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
+                                    bool* hit, bool forcePick)
+{
+    if(hit)
+        *hit = false;
+    const bool addingSurface = m_landscapeTools
+        && m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate;
+    if(addingSurface)
+    {
+        // Windows can deliver hundreds of pointer events per second. The add
+        // tool only commits on the brush cadence, so reuse a very recent CPU
+        // pick while dragging and force an exact pick on press/release.
+        if(!forcePick && m_overlayBrushPickTimer.isValid()
+           && m_overlayBrushPickTimer.elapsed() < 16
+           && m_overlayBrushPickCursor == QPoint(cursorPosX, cursorPosY))
+        {
+            if(m_terrainPaintProjectionLand != m_overlayBrushPickProjectionLand)
+                m_terrainPaintOutlineGeometryDirty = true;
+            m_terrainPaintProjectionLand = m_overlayBrushPickProjectionLand;
+            if(hit)
+                *hit = m_overlayBrushPickValid;
+            return m_overlayBrushPickPosition;
+        }
+        QElapsedTimer pickTimer;
+        pickTimer.start();
+        QVector3D pickedPosition;
+        bool picked = false;
+        bool pickedLand = true;
+        // Adding overlays is cell-based. Resolve the land ray once on the CPU,
+        // then locally project that XY onto an existing overlay when present.
+        // The former overlay-first path redrew the complete overlay pass and,
+        // on empty terrain, the complete land pass as well, with a synchronous
+        // depth readback after each draw for every pointer event.
+        QVector3D ground;
+        if(terrainPositionAt(QPoint(cursorPosX, cursorPosY), &ground, true))
+        {
+            QVector3D overlay = ground;
+            if(m_pLand->projectPt(overlay, false))
+            {
+                pickedPosition = overlay;
+                picked = true;
+                pickedLand = false;
+            }
+            else
+            {
+                pickedPosition = ground;
+                picked = true;
+            }
+        }
+        if(!picked)
+        {
+            // Preserve support for a disconnected overlay with no land beneath it.
+            bool overlayHit = false;
+            const QVector3D overlay = getTerrainPos(
+                cursorPosX, cursorPosY, false, &overlayHit);
+            if(overlayHit)
+            {
+                pickedPosition = overlay;
+                picked = true;
+                pickedLand = false;
+            }
+        }
+        m_overlayPickNsecs += pickTimer.nsecsElapsed();
+        ++m_overlayPickCount;
+        m_overlayBrushPickPosition = pickedPosition;
+        m_overlayBrushPickCursor = QPoint(cursorPosX, cursorPosY);
+        m_overlayBrushPickValid = picked;
+        m_overlayBrushPickProjectionLand = pickedLand;
+        m_overlayBrushPickTimer.restart();
+        if(m_terrainPaintProjectionLand != pickedLand)
+            m_terrainPaintOutlineGeometryDirty = true;
+        m_terrainPaintProjectionLand = pickedLand;
+        if(hit)
+            *hit = picked;
+        return pickedPosition;
+    }
+    const bool projectToLand = terrainBrushProjectsToLand();
+    if(m_terrainPaintProjectionLand != projectToLand)
+        m_terrainPaintOutlineGeometryDirty = true;
+    m_terrainPaintProjectionLand = projectToLand;
+    return getTerrainPos(cursorPosX, cursorPosY,
+                         m_terrainPaintProjectionLand, hit);
+}
+
 bool CView::loadMob(QFileInfo &filePath)
 {
     QElapsedTimer loadTimer;
@@ -7073,6 +8077,7 @@ void CView::saveAllMob()
     progress.setMinimumDuration(250);
     progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
                              & ~Qt::WindowCloseButtonHint);
+    CMob* failedMob = nullptr;
     for(int index = 0; index < dirtyMobs.size(); ++index)
     {
         CMob* mob = dirtyMobs.at(index);
@@ -7085,9 +8090,18 @@ void CView::saveAllMob()
             QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         };
         if(!mob->save(updateProgress))
+        {
+            failedMob = mob;
             break;
+        }
     }
     progress.setValue(progress.maximum());
+    progress.close();
+    if(failedMob)
+        QMessageBox::critical(this, tr("Endurance safe save"),
+            failedMob->lastSaveError().isEmpty()
+                ? tr("The MOB could not be saved safely.")
+                : failedMob->lastSaveError());
     if(m_activeMob && !m_activeMob->isDirty())
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
@@ -7112,6 +8126,12 @@ bool CView::saveMobDocument(CMob* mob, const QFileInfo& destination)
     };
     const bool saved = mob->saveAs(destination, updateProgress);
     progress.setValue(progress.maximum());
+    progress.close();
+    if(!saved)
+        QMessageBox::critical(this, tr("Endurance safe save"),
+            mob->lastSaveError().isEmpty()
+                ? tr("The MOB could not be saved safely.")
+                : mob->lastSaveError());
     return saved;
 }
 
@@ -7800,6 +8820,803 @@ void CView::resetSelectedId()
 
 void CView::openMapParameters()
 {
+    if(m_mprSettingsDock)
+    {
+        refreshMprSettingsDock();
+        m_mprSettingsDock->show();
+        m_mprSettingsDock->raise();
+        return;
+    }
+
+    QMainWindow* host = qobject_cast<QMainWindow*>(window());
+    if(!host)
+        return;
+
+    QDockWidget* dock = new QDockWidget(tr("MPR Settings"), host);
+    m_mprSettingsDock = dock;
+    dock->setObjectName(QStringLiteral("mprSettingsDock"));
+    dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    dock->setFeatures(QDockWidget::DockWidgetClosable |
+                      QDockWidget::DockWidgetMovable |
+                      QDockWidget::DockWidgetFloatable);
+    dock->setWindowFlags(dock->windowFlags() & ~Qt::WindowContextHelpButtonHint);
+    QWidget* container = new QWidget(dock);
+    dock->setWidget(container);
+    QVBoxLayout* containerLayout = new QVBoxLayout(container);
+    QStackedWidget* statePages = new QStackedWidget(container);
+    containerLayout->addWidget(statePages);
+    QLabel* noMpr = new QLabel(tr("No MPR loaded."), statePages);
+    noMpr->setAlignment(Qt::AlignCenter);
+    noMpr->setWordWrap(true);
+    statePages->addWidget(noMpr);
+    QWidget* panel = new QWidget(statePages);
+    statePages->addWidget(panel);
+    QVBoxLayout* layout = new QVBoxLayout(panel);
+    QTabWidget* tabs = new QTabWidget(panel);
+    layout->addWidget(tabs, 1);
+
+    QWidget* summaryPage = new QWidget(tabs);
+    QFormLayout* summaryForm = new QFormLayout(summaryPage);
+    QLabel* sourceValue = new QLabel(summaryPage);
+    sourceValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    sourceValue->setWordWrap(true);
+    QLabel* namespaceValue = new QLabel(summaryPage);
+    namespaceValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    QLabel* dimensionsValue = new QLabel(summaryPage);
+    QLabel* rangeValue = new QLabel(summaryPage);
+    QLabel* scaleValue = new QLabel(summaryPage);
+    QLabel* materialsValue = new QLabel(summaryPage);
+    summaryForm->addRow(tr("Source MPR"), sourceValue);
+    summaryForm->addRow(tr("Embedded namespace"), namespaceValue);
+    summaryForm->addRow(tr("Dimensions"), dimensionsValue);
+    summaryForm->addRow(tr("Height range"), rangeValue);
+    summaryForm->addRow(tr("Vertical scale (maxZ)"), scaleValue);
+    summaryForm->addRow(tr("Atlas / liquid materials"), materialsValue);
+    QLabel* summaryScaleExplanation = new QLabel(tr(
+        "maxZ maps the complete 0-65535 raw range into world height. Changing it either "
+        "scales the landscape or requantizes every height. Use Vertical scale to choose "
+        "the migration policy explicitly."), summaryPage);
+    summaryScaleExplanation->setWordWrap(true);
+    summaryForm->addRow(summaryScaleExplanation);
+    tabs->addTab(summaryPage, tr("Summary"));
+
+    QWidget* heightsPage = new QWidget(tabs);
+    QVBoxLayout* heightsLayout = new QVBoxLayout(heightsPage);
+    QFormLayout* operationForm = new QFormLayout;
+    QComboBox* operation = new QComboBox(heightsPage);
+    operation->addItem(tr("Offset all heights"));
+    operation->addItem(tr("Flatten whole map"));
+    operation->addItem(tr("Clamp to range"));
+    operation->addItem(tr("Normalize / remap range"));
+    operationForm->addRow(tr("Operation"), operation);
+
+    QStackedWidget* parameters = new QStackedWidget(heightsPage);
+    QSpinBox* offset = new QSpinBox(parameters);
+    offset->setRange(-65535, 65535);
+    offset->setSingleStep(100);
+    QWidget* offsetPage = new QWidget(parameters);
+    QFormLayout* offsetForm = new QFormLayout(offsetPage);
+    offsetForm->addRow(tr("Raw height delta"), offset);
+    parameters->addWidget(offsetPage);
+
+    QSpinBox* flatten = new QSpinBox(parameters);
+    flatten->setRange(0, 65535);
+    QWidget* flattenPage = new QWidget(parameters);
+    QFormLayout* flattenForm = new QFormLayout(flattenPage);
+    flattenForm->addRow(tr("Target raw height"), flatten);
+    parameters->addWidget(flattenPage);
+
+    QSpinBox* clampMinimum = new QSpinBox(parameters);
+    QSpinBox* clampMaximum = new QSpinBox(parameters);
+    clampMinimum->setRange(0, 65535);
+    clampMaximum->setRange(0, 65535);
+    QWidget* clampPage = new QWidget(parameters);
+    QFormLayout* clampForm = new QFormLayout(clampPage);
+    clampForm->addRow(tr("Minimum raw height"), clampMinimum);
+    clampForm->addRow(tr("Maximum raw height"), clampMaximum);
+    parameters->addWidget(clampPage);
+
+    QSpinBox* normalizeMinimum = new QSpinBox(parameters);
+    QSpinBox* normalizeMaximum = new QSpinBox(parameters);
+    normalizeMinimum->setRange(0, 65535);
+    normalizeMaximum->setRange(0, 65535);
+    QWidget* normalizePage = new QWidget(parameters);
+    QFormLayout* normalizeForm = new QFormLayout(normalizePage);
+    normalizeForm->addRow(tr("Output minimum"), normalizeMinimum);
+    normalizeForm->addRow(tr("Output maximum"), normalizeMaximum);
+    parameters->addWidget(normalizePage);
+    operationForm->addRow(parameters);
+    heightsLayout->addLayout(operationForm);
+
+    QLabel* operationExplanation = new QLabel(tr(
+        "These operations retain the current sector dimensions and vertex count. "
+        "They are applied as one undoable canonical terrain command and saved through "
+        "the validated MPR transaction."), heightsPage);
+    operationExplanation->setWordWrap(true);
+    heightsLayout->addWidget(operationExplanation);
+    QLabel* preview = new QLabel(heightsPage);
+    preview->setFrameShape(QFrame::StyledPanel);
+    preview->setWordWrap(true);
+    preview->setMinimumHeight(105);
+    heightsLayout->addWidget(preview);
+    QPushButton* apply = new QPushButton(tr("Apply undoable operation"), heightsPage);
+    heightsLayout->addWidget(apply, 0, Qt::AlignRight);
+    heightsLayout->addStretch(1);
+    tabs->addTab(heightsPage, tr("Height operations"));
+
+    QWidget* scalePage = new QWidget(tabs);
+    QVBoxLayout* scaleLayout = new QVBoxLayout(scalePage);
+    QFormLayout* scaleForm = new QFormLayout;
+    QDoubleSpinBox* scaleTarget = new QDoubleSpinBox(scalePage);
+    scaleTarget->setDecimals(6);
+    scaleTarget->setRange(0.000001, 1000000000.0);
+    scaleTarget->setSingleStep(1.0);
+    QComboBox* scalePolicy = new QComboBox(scalePage);
+    scalePolicy->addItem(tr("Scale terrain with vertical range"));
+    scalePolicy->addItem(tr("Preserve world heights by requantizing"));
+    QCheckBox* acceptScaleClamp = new QCheckBox(
+        tr("Allow vertices above the new range to clamp"), scalePage);
+    scaleForm->addRow(tr("New maxZ"), scaleTarget);
+    scaleForm->addRow(tr("Policy"), scalePolicy);
+    scaleForm->addRow(acceptScaleClamp);
+    scaleLayout->addLayout(scaleForm);
+    QLabel* scaleExplanation = new QLabel(tr(
+        "Scale terrain keeps every raw sample and changes world-space heights. "
+        "Preserve world heights requantizes raw samples and may introduce rounding. "
+        "Clamping is never accepted silently."), scalePage);
+    scaleExplanation->setWordWrap(true);
+    scaleLayout->addWidget(scaleExplanation);
+    QLabel* scalePreview = new QLabel(scalePage);
+    scalePreview->setFrameShape(QFrame::StyledPanel);
+    scalePreview->setWordWrap(true);
+    scalePreview->setMinimumHeight(110);
+    scaleLayout->addWidget(scalePreview);
+    QPushButton* applyScale = new QPushButton(tr("Apply undoable scale migration"), scalePage);
+    scaleLayout->addWidget(applyScale, 0, Qt::AlignRight);
+    scaleLayout->addStretch(1);
+    tabs->addTab(scalePage, tr("Vertical scale"));
+
+    QWidget* canvasPage = new QWidget(tabs);
+    QVBoxLayout* canvasLayout = new QVBoxLayout(canvasPage);
+    QFormLayout* canvasForm = new QFormLayout;
+    QSpinBox* canvasWidth = new QSpinBox(canvasPage);
+    QSpinBox* canvasHeight = new QSpinBox(canvasPage);
+    canvasWidth->setRange(1, 32);
+    canvasHeight->setRange(1, 32);
+    QSpinBox* canvasOffsetX = new QSpinBox(canvasPage);
+    QSpinBox* canvasOffsetY = new QSpinBox(canvasPage);
+    canvasOffsetX->setObjectName(QStringLiteral("mprCanvasOffsetX"));
+    canvasOffsetY->setObjectName(QStringLiteral("mprCanvasOffsetY"));
+    canvasOffsetX->setSuffix(tr(" tiles"));
+    canvasOffsetY->setSuffix(tr(" tiles"));
+    QCheckBox* closeCanvasEdges = new QCheckBox(
+        tr("Close outer edges by tapering land to raw height 0"), canvasPage);
+    QSpinBox* edgeTaperWidth = new QSpinBox(canvasPage);
+    edgeTaperWidth->setRange(1, 16);
+    edgeTaperWidth->setValue(2);
+    edgeTaperWidth->setSuffix(tr(" tiles"));
+    edgeTaperWidth->setEnabled(false);
+    canvasForm->addRow(tr("New width (sectors)"), canvasWidth);
+    canvasForm->addRow(tr("New height (sectors)"), canvasHeight);
+    canvasForm->addRow(tr("Original map left offset"), canvasOffsetX);
+    canvasForm->addRow(tr("Original map top offset"), canvasOffsetY);
+    canvasForm->addRow(closeCanvasEdges);
+    canvasForm->addRow(tr("Closed-edge width"), edgeTaperWidth);
+    QCheckBox* createCompanionMob = new QCheckBox(
+        tr("Create a translated companion MOB beside the resized MPR"), canvasPage);
+    QCheckBox* removeOutsideMobObjects = new QCheckBox(
+        tr("Remove objects whose origin lies outside the new canvas"), canvasPage);
+    removeOutsideMobObjects->setEnabled(false);
+    canvasForm->addRow(createCompanionMob);
+    canvasForm->addRow(removeOutsideMobObjects);
+    canvasLayout->addLayout(canvasForm);
+    QLabel* canvasExplanation = new QLabel(tr(
+        "Crop/expand is a structural Save As operation. Position the original map "
+        "directly on the resulting tile grid; right-drag the map in the preview or "
+        "enter its left/top tile offsets. Sector-aligned retained SEC payloads "
+        "stay byte-identical; other offsets are re-tiled and freshly validated. "
+        "Expansion projects the nearest land boundary and does not invent overlays. "
+        "Closed edges are explicitly lossy and deactivate overlays in the taper band. "
+        "The preview uses generated MPR terrain only; embedded minimaps and MOB geometry "
+        "are excluded. A companion MOB is always a new file; its objects are shifted "
+        "with the map, optionally clipped by object origin, and its stale embedded AI graph "
+        "is omitted. The 32 x 32 ceiling corresponds to the runtime's 256 x 256 "
+        "navigation-grid limit."), canvasPage);
+    canvasExplanation->setWordWrap(true);
+    canvasLayout->addWidget(canvasExplanation);
+    CCanvasResizePreview* canvasPreview = new CCanvasResizePreview(canvasPage);
+    canvasPreview->setMinimumSize(360, 250);
+    canvasLayout->addWidget(canvasPreview, 1);
+    QLabel* canvasSummary = new QLabel(canvasPage);
+    canvasSummary->setWordWrap(true);
+    canvasLayout->addWidget(canvasSummary);
+    QPushButton* saveResizedCanvas = new QPushButton(
+        tr("Resize canvas and Save As..."), canvasPage);
+    canvasLayout->addWidget(saveResizedCanvas, 0, Qt::AlignRight);
+    tabs->addTab(canvasPage, tr("Canvas resize"));
+
+    QSharedPointer<QImage> canvasSourcePreview(new QImage);
+    const auto canvasRequest = [this, canvasWidth, canvasHeight, canvasOffsetX,
+                                canvasOffsetY, closeCanvasEdges,
+                                edgeTaperWidth]() {
+        SMprCanvasResizeRequest request;
+        request.sectorCountX = quint32(canvasWidth->value());
+        request.sectorCountY = quint32(canvasHeight->value());
+        request.oldTileOffsetX = canvasOffsetX->value();
+        // The MPR/world Y axis grows northward, while the preview and user-facing
+        // placement grid grow downward from the top edge. Convert once here so
+        // preview placement, terrain sectors, and companion MOB translation agree.
+        const int oldTileHeight = int(m_mprDocument.mapInfo().sectorCountY) * 16;
+        request.oldTileOffsetY = canvasHeight->value() * 16 - oldTileHeight
+            - canvasOffsetY->value();
+        request.closeEdges = closeCanvasEdges->isChecked();
+        request.edgeTaperTiles = edgeTaperWidth->value();
+        return request;
+    };
+    const auto refreshCanvasPreview = [this, canvasWidth, canvasHeight,
+                                       canvasOffsetX, canvasOffsetY,
+                                       canvasPreview, canvasSummary,
+                                       saveResizedCanvas, canvasSourcePreview,
+                                       canvasRequest]() {
+        if(!m_pLand->isMprLoad() || !m_mprDocument.mapInfo().valid)
+            return;
+        const SMprCanvasResizeRequest request = canvasRequest();
+        const int oldWidth = int(m_mprDocument.mapInfo().sectorCountX);
+        const int oldHeight = int(m_mprDocument.mapInfo().sectorCountY);
+        {
+            const QSignalBlocker xBlocker(canvasOffsetX);
+            const QSignalBlocker yBlocker(canvasOffsetY);
+            canvasOffsetX->setRange(1 - oldWidth * 16,
+                                    canvasWidth->value() * 16 - 1);
+            canvasOffsetY->setRange(1 - oldHeight * 16,
+                                    canvasHeight->value() * 16 - 1);
+        }
+        const int visualOffsetX = canvasOffsetX->value();
+        const int visualOffsetY = canvasOffsetY->value();
+        const int retainedX = qMax(0, qMin(oldWidth * 16,
+            canvasWidth->value() * 16 - visualOffsetX)
+            - qMax(0, -visualOffsetX));
+        const int retainedY = qMax(0, qMin(oldHeight * 16,
+            canvasHeight->value() * 16 - visualOffsetY)
+            - qMax(0, -visualOffsetY));
+        const int retained = retainedX * retainedY;
+        canvasSummary->setText(tr(
+            "Original map offset: X %1, Y %2 tiles. Retain %3 x %4 (%5) source tile(s). "
+            "World bounds become %6 x %7 units.%8 Output is a new MPR; the source is not overwritten.")
+            .arg(visualOffsetX).arg(visualOffsetY)
+            .arg(retainedX).arg(retainedY).arg(retained)
+            .arg(canvasWidth->value() * 32).arg(canvasHeight->value() * 32)
+            .arg(request.closeEdges
+                 ? tr(" The outer %1 tile(s) will be tapered to raw 0.")
+                       .arg(request.edgeTaperTiles)
+                 : QString()));
+        saveResizedCanvas->setEnabled(retained > 0
+            && !(canvasWidth->value() == oldWidth
+                 && canvasHeight->value() == oldHeight
+                 && request.oldTileOffsetX == 0
+                 && request.oldTileOffsetY == 0
+                 && !request.closeEdges));
+
+        if(canvasSourcePreview->isNull())
+        {
+            const SMinimapSceneCaptureResult capture = captureMinimapScene(false, 256);
+            if(capture.bake.success)
+                *canvasSourcePreview = capture.bake.reviewImage.mirrored(false, true);
+        }
+        const QSize area(480, 300);
+        QImage preview(area, QImage::Format_ARGB32_Premultiplied);
+        preview.fill(QColor(28, 28, 28));
+        QPainter painter(&preview);
+        const double scale = qMin(double(area.width() - 16)
+                                      / (canvasWidth->value() * 16),
+                                  double(area.height() - 16)
+                                      / (canvasHeight->value() * 16));
+        const QRectF tileCanvasRect(8, 8, canvasWidth->value() * 16 * scale,
+                                    canvasHeight->value() * 16 * scale);
+        painter.fillRect(tileCanvasRect, QColor(48, 48, 48));
+        painter.save();
+        painter.setClipRect(tileCanvasRect);
+        if(!canvasSourcePreview->isNull())
+        {
+            const QRectF oldRect(tileCanvasRect.left() + visualOffsetX * scale,
+                                 tileCanvasRect.top() + visualOffsetY * scale,
+                                 oldWidth * 16 * scale, oldHeight * 16 * scale);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            painter.drawImage(oldRect, *canvasSourcePreview);
+        }
+        painter.restore();
+        painter.setPen(QPen(QColor(70, 185, 95), 2));
+        painter.drawRect(tileCanvasRect);
+        if(scale * 16.0 >= 10.0)
+        {
+            painter.setPen(QPen(QColor(255, 255, 255, 45), 1));
+            for(int x = 1; x < canvasWidth->value(); ++x)
+                painter.drawLine(QPointF(tileCanvasRect.left() + x * 16 * scale,
+                                         tileCanvasRect.top()),
+                                 QPointF(tileCanvasRect.left() + x * 16 * scale,
+                                         tileCanvasRect.bottom()));
+            for(int y = 1; y < canvasHeight->value(); ++y)
+                painter.drawLine(QPointF(tileCanvasRect.left(),
+                                         tileCanvasRect.top() + y * 16 * scale),
+                                 QPointF(tileCanvasRect.right(),
+                                         tileCanvasRect.top() + y * 16 * scale));
+        }
+        painter.end();
+        canvasPreview->setImage(preview);
+        canvasPreview->setPlacementDrag(scale, visualOffsetX, visualOffsetY,
+            [canvasOffsetX, canvasOffsetY](int x, int y) {
+                canvasOffsetX->setValue(x);
+                canvasOffsetY->setValue(y);
+            });
+    };
+    connect(canvasWidth, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(canvasHeight, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(canvasOffsetX, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(canvasOffsetY, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(closeCanvasEdges, &QCheckBox::toggled, dock,
+            [edgeTaperWidth, refreshCanvasPreview](bool checked) {
+        edgeTaperWidth->setEnabled(checked);
+        refreshCanvasPreview();
+    });
+    connect(edgeTaperWidth, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+            [refreshCanvasPreview](int) { refreshCanvasPreview(); });
+    connect(createCompanionMob, &QCheckBox::toggled, dock,
+            [removeOutsideMobObjects](bool checked) {
+        removeOutsideMobObjects->setEnabled(checked);
+    });
+    connect(saveResizedCanvas, &QPushButton::clicked, dock,
+            [this, dock, canvasRequest, canvasSummary, createCompanionMob,
+             removeOutsideMobObjects]() {
+        const SMprCanvasResizeRequest resize = canvasRequest();
+        if(createCompanionMob->isChecked() && !m_activeMob)
+        {
+            QMessageBox::warning(dock, tr("No companion MOB"), tr(
+                "Load and activate the MOB that should accompany this resized map, or disable "
+                "the companion MOB option. No file was changed."));
+            return;
+        }
+        QProgressDialog progress(tr("Validating the current MPR..."), QString(),
+                                 0, 8, dock);
+        progress.setWindowTitle(tr("Resizing MPR canvas"));
+        progress.setWindowModality(Qt::ApplicationModal);
+        progress.setCancelButton(nullptr);
+        progress.setMinimumDuration(0);
+        progress.setValue(0);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QByteArray currentBytes;
+        CValidationReport currentReport;
+        if(!buildValidatedLandscapeCandidate(&currentBytes, &currentReport))
+        {
+            QMessageBox::critical(dock, tr("Cannot stage current MPR"),
+                currentReport.toText().trimmed());
+            return;
+        }
+        progress.setLabelText(tr("Reopening the validated resize baseline..."));
+        progress.setValue(1);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        CMprDocument resizeBaseline;
+        CValidationReport resizeBaselineReport;
+        if(!resizeBaseline.loadBytes(currentBytes, QStringLiteral("resize-baseline.mpr"),
+                                     &resizeBaselineReport)
+           || resizeBaselineReport.hasErrors())
+        {
+            QMessageBox::critical(dock, tr("Cannot stage current MPR"),
+                resizeBaselineReport.toText().trimmed());
+            return;
+        }
+        progress.setValue(2);
+        progress.hide();
+        const QString suggested = QDir(m_pLand->filePath().absolutePath()).filePath(
+            m_pLand->filePath().completeBaseName() + QStringLiteral("-resized.mpr"));
+        const QFileInfo destination(QFileDialog::getSaveFileName(
+            dock, tr("Save resized MPR as..."), suggested, tr("Landscape (*.mpr)")));
+        if(destination.filePath().isEmpty())
+            return;
+        QFileInfo mobDestination;
+        QByteArray mobCandidate;
+        CMob::SCanvasCropResult mobCrop;
+        if(createCompanionMob->isChecked())
+        {
+            mobDestination = QFileInfo(QDir(destination.absolutePath()).filePath(
+                destination.completeBaseName() + QStringLiteral(".mob")));
+            if(mobDestination.exists())
+            {
+                QMessageBox::warning(dock, tr("Companion MOB already exists"), tr(
+                    "The companion operation never overwrites an existing MOB:\n%1\n\n"
+                    "Choose another resized MPR name. No file was changed.")
+                        .arg(mobDestination.absoluteFilePath()));
+                return;
+            }
+            progress.setLabelText(tr("Building and validating the companion MOB..."));
+            progress.setValue(3);
+            progress.show();
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            CValidationReport mobReport;
+            if(!m_activeMob->buildCanvasCropCandidate(
+                   float(resize.oldTileOffsetX * 2),
+                   float(resize.oldTileOffsetY * 2),
+                   float(resize.sectorCountX * 32),
+                   float(resize.sectorCountY * 32),
+                   removeOutsideMobObjects->isChecked(),
+                   resize.closeEdges ? float(resize.edgeTaperTiles * 2) : 0.0f,
+                   &mobCandidate, &mobCrop, &mobReport))
+            {
+                QMessageBox::critical(dock, tr("Cannot stage companion MOB"),
+                    mobReport.toText().trimmed());
+                return;
+            }
+        }
+        progress.hide();
+        const QString ignoredMobNotice = !m_aMob.isEmpty()
+            && !createCompanionMob->isChecked()
+            ? tr("\nLoaded MOB files will be ignored. Their files and object coordinates "
+                 "will remain unchanged.")
+            : QString();
+        if(QMessageBox::question(dock, tr("Create resized MPR"),
+            tr("%1%2%3\n\nCreate the separately named output now? Retained data will be staged, "
+               "freshly reopened, backed up if the MPR destination exists, and replaced atomically.")
+                .arg(canvasSummary->text(), createCompanionMob->isChecked()
+                    ? tr("\nCompanion MOB: %1 (%2 translated, %3 removed; %4 on the closed-edge band; stale embedded graph omitted: %5)")
+                        .arg(mobDestination.absoluteFilePath())
+                        .arg(mobCrop.translatedObjects).arg(mobCrop.removedObjects)
+                        .arg(mobCrop.removedTaperObjects)
+                        .arg(mobCrop.removedEmbeddedAiGraph ? tr("yes") : tr("not present"))
+                    : QString(), ignoredMobNotice)) != QMessageBox::Yes)
+            return;
+
+        progress.setLabelText(tr("Building resized MPR candidate..."));
+        progress.setValue(4);
+        progress.show();
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        SMprSaveCommitRequest commitRequest;
+        commitRequest.source = m_pLand->filePath();
+        commitRequest.destination = destination;
+        const SMprSaveCommitResult result = commitStagedMprCanvasResize(
+            m_mprDocument, resizeBaseline, resize, commitRequest);
+        progress.setValue(6);
+        if(!result.success)
+        {
+            ei::log(eLogFatal, QString("MPR canvas resize failed phase:%1 error:%2")
+                .arg(result.phase, result.error));
+            QMessageBox::critical(dock, tr("MPR canvas resize failed"),
+                tr("No source file was changed.\n\n%1").arg(result.error));
+            return;
+        }
+        CMob* companionSourceMob = createCompanionMob->isChecked() ? m_activeMob : nullptr;
+        if(createCompanionMob->isChecked())
+        {
+            progress.setLabelText(tr("Committing the companion MOB..."));
+            progress.setValue(7);
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            QSaveFile mobOutput(mobDestination.absoluteFilePath());
+            if(!mobOutput.open(QIODevice::WriteOnly)
+               || mobOutput.write(mobCandidate) != mobCandidate.size()
+               || !mobOutput.commit())
+            {
+                QMessageBox::critical(dock, tr("Companion MOB write failed"), tr(
+                    "The resized MPR was created, but the new companion MOB could not be "
+                    "committed. The source MOB was not changed.\n\n%1")
+                        .arg(mobOutput.errorString()));
+                return;
+            }
+        }
+        ei::log(eLogInfo, QString("MPR canvas resize committed path:%1 sha256:%2 %3")
+            .arg(destination.absoluteFilePath(), result.candidateSha256,
+                 result.semanticDiff));
+        progress.setLabelText(tr("Opening the resized map files..."));
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        unloadLand(false);
+        loadLandscape(destination);
+        bool companionReloaded = false;
+        if(companionSourceMob)
+        {
+            QFileInfo companionPath(mobDestination);
+            companionReloaded = loadMob(companionPath);
+            if(companionReloaded)
+                unloadMobDocument(companionSourceMob, false);
+            else
+                ei::log(eLogWarning, QString(
+                    "Resized companion MOB was committed but could not be loaded path:%1")
+                    .arg(mobDestination.absoluteFilePath()));
+        }
+        progress.setValue(8);
+        progress.close();
+        QMessageBox::information(dock, tr("Resized MPR created"),
+            tr("Created and opened:\n%1%2\n\nSHA-256: %3")
+                .arg(destination.absoluteFilePath(),
+                     createCompanionMob->isChecked()
+                         ? tr("\nCompanion MOB: %1 (%2)")
+                               .arg(mobDestination.absoluteFilePath(),
+                                    companionReloaded ? tr("loaded")
+                                                      : tr("created; load manually"))
+                         : QString(),
+                     result.candidateSha256));
+    });
+
+    QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, panel);
+    QPushButton* atlas = buttons->addButton(tr("Open Atlas Tiles..."),
+                                            QDialogButtonBox::ActionRole);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, dock, &QDockWidget::hide);
+    connect(atlas, &QPushButton::clicked, dock, [this]() { openAtlasTiles(); });
+
+    const auto refreshSummary = [this, dimensionsValue, rangeValue, scaleValue,
+                                 materialsValue, flatten, clampMinimum,
+                                 clampMaximum, normalizeMinimum,
+                                 normalizeMaximum]() {
+        const SMprMapInfo& map = m_mprDocument.mapInfo();
+        const STerrainHeightRange range = m_terrainEdit.heightRange();
+        dimensionsValue->setText(tr("%1 x %2 sectors; %3 x %4 tiles; %5 x %6 vertices")
+            .arg(map.sectorCountX).arg(map.sectorCountY)
+            .arg(map.sectorCountX * 16).arg(map.sectorCountY * 16)
+            .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
+        rangeValue->setText(tr("raw %1 to %2; world %3 to %4")
+            .arg(range.minimumRaw).arg(range.maximumRaw)
+            .arg(range.minimumWorld, 0, 'f', 4)
+            .arg(range.maximumWorld, 0, 'f', 4));
+        scaleValue->setText(tr("%1 world units; %2 per raw step")
+            .arg(m_terrainEdit.maxZ(), 0, 'g', 8)
+            .arg(range.worldUnitsPerRawStep, 0, 'g', 8));
+        materialsValue->setText(tr("%1 atlas slots; %2 liquid material record(s)")
+            .arg(map.tileCount).arg(map.materialCount));
+        flatten->setValue(range.minimumRaw);
+        clampMinimum->setValue(range.minimumRaw);
+        clampMaximum->setValue(range.maximumRaw);
+        normalizeMinimum->setValue(range.minimumRaw);
+        normalizeMaximum->setValue(range.maximumRaw);
+    };
+
+    const auto makeScaleCommand = [this, scaleTarget, scalePolicy,
+                                   acceptScaleClamp](CValidationReport* report) {
+        const ETerrainVerticalScalePolicy policy = scalePolicy->currentIndex() == 0
+            ? ETerrainVerticalScalePolicy::ScaleTerrain
+            : ETerrainVerticalScalePolicy::PreserveWorldHeights;
+        return m_terrainEdit.makeVerticalScale(float(scaleTarget->value()), policy,
+                                               acceptScaleClamp->isChecked(), report);
+    };
+    const auto refreshScalePreview = [this, makeScaleCommand, scalePreview,
+                                      applyScale, acceptScaleClamp, scalePolicy]() {
+        acceptScaleClamp->setEnabled(scalePolicy->currentIndex() == 1);
+        CValidationReport report;
+        const STerrainVerticalScaleCommand command = makeScaleCommand(&report);
+        if(!command.valid)
+        {
+            scalePreview->setText(report.toText().trimmed().isEmpty()
+                ? tr("The requested migration is invalid.")
+                : report.toText().trimmed());
+            applyScale->setEnabled(false);
+            return;
+        }
+        if(command.isEmpty())
+        {
+            scalePreview->setText(tr("No change: maxZ already has this value."));
+            applyScale->setEnabled(false);
+            return;
+        }
+        const STerrainHeightRange before = m_terrainEdit.heightRange();
+        if(command.policy == ETerrainVerticalScalePolicy::ScaleTerrain)
+        {
+            scalePreview->setText(tr(
+                "Raw height samples remain unchanged; packed normals are rebuilt in every SEC.\n"
+                "World height range: %1-%2 -> %3-%4.\n"
+                "The MP maxZ field and derived SEC normals change; terrain and navigation scale vertically.")
+                .arg(before.minimumWorld, 0, 'f', 4)
+                .arg(before.maximumWorld, 0, 'f', 4)
+                .arg(float(before.minimumRaw) * command.afterMaxZ / 65535.0f, 0, 'f', 4)
+                .arg(float(before.maximumRaw) * command.afterMaxZ / 65535.0f, 0, 'f', 4));
+        }
+        else
+        {
+            scalePreview->setText(tr(
+                "%1 vertex/vertices will be requantized across the affected SEC members.\n"
+                "%2 value(s) round; %3 value(s) clamp. Maximum world-height error: %4.")
+                .arg(command.heights.deltas.size()).arg(command.roundedVertexCount)
+                .arg(command.clampedVertexCount)
+                .arg(command.maximumWorldError, 0, 'g', 8));
+        }
+        applyScale->setEnabled(true);
+    };
+
+    const auto makeCommand = [this, operation, offset, flatten, clampMinimum,
+                              clampMaximum, normalizeMinimum,
+                              normalizeMaximum](CValidationReport* report) {
+        switch(operation->currentIndex())
+        {
+        case 0: return m_terrainEdit.makeGlobalOffset(float(offset->value()), report);
+        case 1: return m_terrainEdit.makeGlobalFlatten(quint16(flatten->value()));
+        case 2: return m_terrainEdit.makeGlobalClamp(
+                    quint16(clampMinimum->value()), quint16(clampMaximum->value()), report);
+        default: return m_terrainEdit.makeGlobalNormalize(
+                    quint16(normalizeMinimum->value()), quint16(normalizeMaximum->value()), report);
+        }
+    };
+    const auto refreshPreview = [this, makeCommand, preview, apply]() {
+        CValidationReport report;
+        const STerrainHeightCommand command = makeCommand(&report);
+        if(report.hasErrors())
+        {
+            preview->setText(report.toText());
+            apply->setEnabled(false);
+            return;
+        }
+        if(command.isEmpty())
+        {
+            preview->setText(tr("No vertices would change. The MPR will remain clean."));
+            apply->setEnabled(false);
+            return;
+        }
+        CValidationReport diagnosticReport;
+        const STerrainEditDiagnostics diagnostics = m_terrainEdit.diagnose(
+            command, QVector<STerrainObjectHeightProbe>(),
+            STerrainDiagnosticPolicy(), &diagnosticReport);
+        if(!diagnostics.valid)
+        {
+            preview->setText(diagnosticReport.toText().trimmed().isEmpty()
+                ? tr("The requested operation is invalid for the current terrain.")
+                : diagnosticReport.toText().trimmed());
+            apply->setEnabled(false);
+            return;
+        }
+        if(command.requiresMaxZDecision())
+        {
+            preview->setText(tr(
+                "The requested operation would exceed the current raw range. "
+                "It is refused until you choose an explicit clamp or maxZ migration policy."));
+            apply->setEnabled(false);
+            return;
+        }
+        preview->setText(tr(
+            "%1 unique vertices across %2 sector(s) would change.\n"
+            "Changed values: raw %3-%4 -> %5-%6.\n"
+            "The vertex count remains %7 and the operation is undoable.")
+            .arg(diagnostics.changedVertexCount).arg(diagnostics.affectedSectorCount)
+            .arg(diagnostics.minimumBefore).arg(diagnostics.maximumBefore)
+            .arg(diagnostics.minimumAfter).arg(diagnostics.maximumAfter)
+            .arg(m_terrainEdit.vertexCountX() * m_terrainEdit.vertexCountY()));
+        apply->setEnabled(true);
+    };
+    connect(operation, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            parameters, &QStackedWidget::setCurrentIndex);
+    connect(operation, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            dock, [refreshPreview](int) { refreshPreview(); });
+    const QList<QSpinBox*> editors = {offset, flatten, clampMinimum, clampMaximum,
+                                      normalizeMinimum, normalizeMaximum};
+    for(QSpinBox* editor : editors)
+        connect(editor, QOverload<int>::of(&QSpinBox::valueChanged),
+                dock, [refreshPreview](int) { refreshPreview(); });
+    connect(apply, &QPushButton::clicked, dock,
+            [this, dock, makeCommand, refreshPreview, refreshSummary]() {
+        if(!m_pLand->isMprLoad() || !m_terrainEditAvailable)
+            return;
+        CValidationReport report;
+        const STerrainHeightCommand command = makeCommand(&report);
+        const STerrainEditDiagnostics diagnostics = m_terrainEdit.diagnose(command);
+        if(report.hasErrors() || command.isEmpty() || !diagnostics.valid
+           || command.requiresMaxZDecision())
+        {
+            refreshPreview();
+            return;
+        }
+        if(QMessageBox::question(dock, tr("Apply MPR height operation"),
+            tr("Apply %1 to %2 vertices in %3 sector(s)?\n\n"
+               "This changes the terrain preview immediately and is one undoable action.")
+                .arg(command.description)
+                .arg(diagnostics.changedVertexCount)
+                .arg(diagnostics.affectedSectorCount)) != QMessageBox::Yes)
+            return;
+        m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
+        refreshSummary();
+        refreshPreview();
+    });
+    connect(scaleTarget, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            dock, [refreshScalePreview](double) { refreshScalePreview(); });
+    connect(scalePolicy, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            dock, [refreshScalePreview](int) { refreshScalePreview(); });
+    connect(acceptScaleClamp, &QCheckBox::toggled,
+            dock, [refreshScalePreview](bool) { refreshScalePreview(); });
+    connect(applyScale, &QPushButton::clicked, dock,
+            [this, dock, makeScaleCommand, refreshScalePreview]() {
+        CValidationReport report;
+        const STerrainVerticalScaleCommand command = makeScaleCommand(&report);
+        if(!command.valid || command.isEmpty())
+        {
+            refreshScalePreview();
+            return;
+        }
+        const QString detail = command.policy == ETerrainVerticalScalePolicy::ScaleTerrain
+            ? tr("Raw height samples remain unchanged; world heights scale with maxZ and derived SEC normals are rebuilt.")
+            : tr("%1 vertices will be requantized; %2 will clamp; maximum world-height error is %3.")
+                .arg(command.heights.deltas.size()).arg(command.clampedVertexCount)
+                .arg(command.maximumWorldError, 0, 'g', 8);
+        if(QMessageBox::question(dock, tr("Apply vertical-scale migration"),
+            tr("Change maxZ from %1 to %2?\n\n%3\n\n"
+               "This is one undoable action and will be saved through staged MPR validation.")
+                .arg(command.beforeMaxZ, 0, 'g', 8)
+                .arg(command.afterMaxZ, 0, 'g', 8).arg(detail)) != QMessageBox::Yes)
+            return;
+        m_pUndoStack->push(new CTerrainVerticalScalePreviewCommand(this, command));
+    });
+    m_refreshMprSettingsDock = [this, statePages, panel, sourceValue,
+                                namespaceValue, refreshSummary, refreshPreview,
+                                scaleTarget, refreshScalePreview, canvasWidth,
+                                canvasHeight, canvasOffsetX, canvasOffsetY,
+                                createCompanionMob, removeOutsideMobObjects,
+                                canvasSourcePreview,
+                                refreshCanvasPreview]() {
+        const bool loaded = m_pLand->isMprLoad() && m_terrainEditAvailable;
+        statePages->setCurrentIndex(loaded ? 1 : 0);
+        panel->setEnabled(loaded);
+        if(!loaded)
+            return;
+        sourceValue->setText(m_pLand->filePath().absoluteFilePath());
+        namespaceValue->setText(m_mprDocument.mapInfo().innerNamespace);
+        refreshSummary();
+        refreshPreview();
+        {
+            const QSignalBlocker blocker(scaleTarget);
+            scaleTarget->setValue(m_terrainEdit.maxZ());
+        }
+        refreshScalePreview();
+        createCompanionMob->setEnabled(m_activeMob != nullptr);
+        if(!m_activeMob)
+        {
+            createCompanionMob->setChecked(false);
+            removeOutsideMobObjects->setChecked(false);
+        }
+        if(canvasWidth->value() < 1 || canvasHeight->value() < 1
+           || canvasWidth->property("sourceWidth").toUInt()
+                != m_mprDocument.mapInfo().sectorCountX
+           || canvasHeight->property("sourceHeight").toUInt()
+                != m_mprDocument.mapInfo().sectorCountY)
+        {
+            const QSignalBlocker widthBlocker(canvasWidth);
+            const QSignalBlocker heightBlocker(canvasHeight);
+            canvasWidth->setValue(int(m_mprDocument.mapInfo().sectorCountX));
+            canvasHeight->setValue(int(m_mprDocument.mapInfo().sectorCountY));
+            canvasWidth->setProperty("sourceWidth", m_mprDocument.mapInfo().sectorCountX);
+            canvasHeight->setProperty("sourceHeight", m_mprDocument.mapInfo().sectorCountY);
+            const QSignalBlocker offsetXBlocker(canvasOffsetX);
+            const QSignalBlocker offsetYBlocker(canvasOffsetY);
+            canvasOffsetX->setRange(1 - int(m_mprDocument.mapInfo().sectorCountX) * 16,
+                                    canvasWidth->value() * 16 - 1);
+            canvasOffsetY->setRange(1 - int(m_mprDocument.mapInfo().sectorCountY) * 16,
+                                    canvasHeight->value() * 16 - 1);
+            canvasOffsetX->setValue(0);
+            canvasOffsetY->setValue(0);
+            *canvasSourcePreview = QImage();
+        }
+        refreshCanvasPreview();
+    };
+    connect(m_pUndoStack, &QUndoStack::indexChanged, dock,
+            [this](int) { refreshMprSettingsDock(); });
+    refreshMprSettingsDock();
+    host->addDockWidget(Qt::RightDockWidgetArea, dock);
+    dock->resize(620, 520);
+    dock->show();
+    dock->raise();
+}
+
+void CView::closeMprSettingsDock()
+{
+    m_refreshMprSettingsDock = {};
+    if(!m_mprSettingsDock)
+        return;
+    delete m_mprSettingsDock.data();
+    m_mprSettingsDock = nullptr;
+}
+
+void CView::refreshMprSettingsDock()
+{
+    if(m_refreshMprSettingsDock)
+        m_refreshMprSettingsDock();
+}
+
+void CView::openAtlasTiles()
+{
     if(!m_pLand->isMprLoad())
         return;
 
@@ -7820,7 +9637,8 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
+    const bool pickLand = bLand || (!bLand && m_terrainPaintProjectionLand);
+    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
         return;
 
     m_pTileForm->selectTile(pTile->tileIndex());
@@ -7865,23 +9683,119 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
+    // Coverage activation always resolves the logical cell from canonical
+    // land. The hover/outline may sit on an existing overlay, but choosing the
+    // cell through that thin/disconnected surface would make interpolated add
+    // strokes skip land gaps.
+    const bool pickLand = bLand || (!bLand
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate);
+    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
         return;
 
     STerrainTileBrush brush;
     brush.centerX = tileLoc.xSec * 16 + tileLoc.col;
     brush.centerY = tileLoc.ySec * 16 + tileLoc.row;
     const QPoint brushCenter(brush.centerX, brush.centerY);
-    if(m_tilePaintStrokeActive && m_lastTerrainPaintCenterValid
+    // A press can miss a disconnected overlay while a later drag sample hits
+    // land or an existing surface. Never allow that first valid sample to
+    // mutate the canonical model without opening an undo-owned stroke.
+    beginTileBrushGroup();
+    if(!m_tileBrushStrokePolicy.isActive())
+    {
+        ei::log(eLogWarning,
+            "Terrain paint sample refused because no undo-owned stroke is active");
+        return;
+    }
+    if(m_tileBrushStrokePolicy.isActive() && m_lastTerrainPaintCenterValid
        && m_lastTerrainPaintCenter == brushCenter
        && m_lastTerrainPaintLayerLand == bLand)
         return;
+    if(m_lastTerrainPaintCenterValid)
+        m_tileStrokeMaximumCenterJump = qMax(m_tileStrokeMaximumCenterJump,
+            qMax(qAbs(brushCenter.x() - m_lastTerrainPaintCenter.x()),
+                 qAbs(brushCenter.y() - m_lastTerrainPaintCenter.y())));
+    if(!m_tileStrokeBoundsValid)
+    {
+        m_tileStrokeMinimumX = m_tileStrokeMaximumX = brushCenter.x();
+        m_tileStrokeMinimumY = m_tileStrokeMaximumY = brushCenter.y();
+        m_tileStrokeBoundsValid = true;
+    }
+    else
+    {
+        m_tileStrokeMinimumX = qMin(m_tileStrokeMinimumX, brushCenter.x());
+        m_tileStrokeMinimumY = qMin(m_tileStrokeMinimumY, brushCenter.y());
+        m_tileStrokeMaximumX = qMax(m_tileStrokeMaximumX, brushCenter.x());
+        m_tileStrokeMaximumY = qMax(m_tileStrokeMaximumY, brushCenter.y());
+    }
     m_lastTerrainPaintCenter = brushCenter;
     m_lastTerrainPaintCenterValid = true;
     m_lastTerrainPaintLayerLand = bLand;
     brush.radius = m_landscapeTools->paintRadius();
     brush.shape = m_landscapeTools->paintShape();
     CValidationReport report;
+    if(!bLand && m_landscapeTools->overlaySurfaceOperation()
+                     != EOverlaySurfaceOperation::PaintExisting)
+    {
+        QElapsedTimer overlayCommandTimer;
+        overlayCommandTimer.start();
+        SOverlaySurfaceCommand surfaceCommand;
+        if(m_landscapeTools->overlaySurfaceOperation()
+           == EOverlaySurfaceOperation::Deactivate)
+        {
+            surfaceCommand = m_terrainEdit.makeOverlayDeactivation(brush, &report);
+        }
+        else
+        {
+            bool materialSelected = false;
+            const qint16 material = m_landscapeTools->overlayMaterialIndex(&materialSelected);
+            int selectedIndex = -1;
+            int selectedRotation = 0;
+            if(m_landscapeTools->manualTileSelectionEnabled())
+                m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
+            else
+            {
+                bool terrainSelected = false;
+                const qint32 terrainType = m_landscapeTools->paintTerrainType(&terrainSelected);
+                if(terrainSelected)
+                    selectedIndex = m_terrainMaterialRepresentatives.value(terrainType, -1);
+            }
+            if(!materialSelected || selectedIndex < 0)
+            {
+                emit updateMsg(tr("Adding an overlay requires an existing liquid material and atlas tile family."));
+                return;
+            }
+            surfaceCommand = m_terrainEdit.makeOverlayActivation(
+                brush, material, quint8(selectedIndex / 64), quint8(selectedIndex % 64),
+                quint8(selectedRotation & 3), &report);
+        }
+        m_overlayCommandNsecs += overlayCommandTimer.nsecsElapsed();
+        ++m_tileStrokeActions;
+        if(surfaceCommand.isEmpty())
+        {
+            if(report.hasErrors())
+            {
+                ++m_tileStrokeRefused;
+                emit updateMsg(report.toText());
+            }
+            else
+                ++m_tileStrokeNoOps;
+            return;
+        }
+        if(!applyOverlaySurfacePreview(surfaceCommand, true))
+        {
+            ++m_tileStrokeRefused;
+            emit updateMsg(tr("Overlay surface edit was refused; no undo entry was created."));
+            return;
+        }
+        ++m_tileStrokeApplied;
+        m_tileStrokeChangedTiles += surfaceCommand.sectors.size();
+        appendOverlaySurfaceCommand(&m_overlaySurfaceStrokeCommand, surfaceCommand);
+        if(surfaceCommand.heightClampedVertexCount > 0)
+            emit updateMsg(tr("Added overlay surface; %1 vertex/vertices were clamped to MPR maxZ and may overlap the land until the terrain or maxZ is adjusted.")
+                               .arg(surfaceCommand.heightClampedVertexCount));
+        return;
+    }
     const ETerrainTileLayer layer = bLand
         ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
     const CTerrainTransitionCatalog& manualCatalog = !bLand
@@ -7908,8 +9822,9 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         selected.atlasIndex = quint8(selectedIndex / 64);
         selected.tileIndex = quint8(selectedIndex % 64);
         selected.rotation = quint8(selectedRotation & 3);
-        bool layerCompatible = false;
-        manualCatalog.signatureForPacked(selected.encode(), &layerCompatible);
+        bool layerCompatible = !m_terrainAtlasAnalysis.usable;
+        if(m_terrainAtlasAnalysis.usable)
+            manualCatalog.signatureForPacked(selected.encode(), &layerCompatible);
         if(!layerCompatible)
         {
             emit updateMsg(layer == ETerrainTileLayer::Land
@@ -7967,7 +9882,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             ++m_tileStrokeNoOps;
         if(report.hasErrors())
             ei::log(eLogWarning, "Semantic terrain paint refused:\n" + report.toText());
-        if(!m_tilePaintStrokeActive || report.hasErrors())
+        if(!m_tileBrushStrokePolicy.isActive() || report.hasErrors())
             emit updateMsg(report.findings().isEmpty()
                 ? tr("The terrain material is already resolved at this brush position.")
                 : report.toText());
@@ -8009,7 +9924,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             .arg(audit.semantic.solverMode).arg(audit.semantic.solverNodes);
     // The exported diagnostic retains every action. Keep synchronous workflow
     // logging off the pointer hot path and emit one summary on release.
-    if(!m_tilePaintStrokeActive || audit.outcome == QStringLiteral("refused"))
+    if(!m_tileBrushStrokePolicy.isActive() || audit.outcome == QStringLiteral("refused"))
         ei::log(audit.outcome == QStringLiteral("refused") ? eLogWarning : eLogInfo,
                 actionLog);
 }
@@ -8072,7 +9987,8 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, bLand))
+    const bool pickLand = bLand || (!bLand && m_terrainPaintProjectionLand);
+    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
     {
         m_terrainPaintOutlineValid = false;
         return;
@@ -8080,8 +9996,14 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 
     if(!manualTilePaintingEnabled())
     {
-        m_terrainPaintOutlineX = tileLoc.xSec * 16 + tileLoc.col;
-        m_terrainPaintOutlineY = tileLoc.ySec * 16 + tileLoc.row;
+        const int outlineX = tileLoc.xSec * 16 + tileLoc.col;
+        const int outlineY = tileLoc.ySec * 16 + tileLoc.row;
+        if(!m_terrainPaintOutlineValid
+           || m_terrainPaintOutlineX != outlineX
+           || m_terrainPaintOutlineY != outlineY)
+            m_terrainPaintOutlineGeometryDirty = true;
+        m_terrainPaintOutlineX = outlineX;
+        m_terrainPaintOutlineY = outlineY;
         m_terrainPaintOutlineValid = true;
         setPreviewTile(false);
         unsetCursor();
@@ -8147,6 +10069,37 @@ float CView::terrainPaintStampSpacing() const
     return qMax(2.0f, float(m_landscapeTools->paintRadius()) * 2.0f);
 }
 
+void CView::onLandscapeToolsShown()
+{
+    if(!m_terrainEditAvailable || !m_pLand || !m_pLand->isMprLoad()
+       || !m_pTileForm || m_pTileForm->tileImages().isEmpty()
+       || m_terrainAtlasAnalysis.usable)
+        return;
+    const QString binding = m_mprDocument.mapInfo().innerNamespace
+        + QLatin1Char(':')
+        + QString::fromLatin1(CTerrainAtlasProfileInference::pixelSha256(
+              m_pTileForm->tileImages()).toHex());
+    if(binding == m_lastAtlasReviewPromptBinding)
+        return;
+    m_lastAtlasReviewPromptBinding = binding;
+    if(QMessageBox::question(this, tr("Prepare terrain materials"), tr(
+        "This map's atlas does not yet have an approved semantic material profile. "
+        "Automatic terrain and overlay painting will remain unavailable; manual atlas-tile painting still works.\n\n"
+        "Generate the review proposal now? The review process only describes existing atlas tiles and does not modify the MPR or texture resources."),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) == QMessageBox::Yes)
+        reviewTerrainAtlasProfile();
+}
+
+bool CView::terrainBrushProjectsToLand() const
+{
+    if(CScene::getInstance()->isLandTileEditMode())
+        return true;
+    return m_landscapeTools
+        && m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate;
+}
+
 void CView::showOutliner(bool bShow)
 {
     emit showOutlinerSignal(bShow);
@@ -8162,12 +10115,52 @@ void CView::pickQuickAccessTile(int index)
 
 void CView::endTileBrushGroup()
 {
-    if(m_tilePaintStrokeActive)
+    if(m_tileBrushStrokePolicy.finish())
     {
-        m_tilePaintStrokeActive = false;
-        if(m_pUndoStack && !m_tileStrokeCommand.isEmpty())
+        const int undoIndexBefore = m_pUndoStack ? m_pUndoStack->index() : -1;
+        if(!m_overlaySurfaceStrokeCommand.isEmpty())
+        {
+            CValidationReport report;
+            const SOverlaySurfaceCommand exactCommand =
+                m_terrainEdit.makeOverlaySurfaceCommand(
+                    m_overlaySurfaceStrokeBaseline,
+                    m_overlaySurfaceStrokeCommand.description, &report);
+            if(report.hasErrors())
+            {
+                ei::log(eLogWarning, "Overlay stroke snapshot reconciliation failed:\n"
+                    + report.toText());
+                emit updateMsg(report.toText());
+            }
+            else
+                m_overlaySurfaceStrokeCommand = exactCommand;
+        }
+        QString committedDescription;
+        int committedSectorCount = 0;
+        if(m_pUndoStack && !m_overlaySurfaceStrokeCommand.isEmpty())
+        {
+            committedDescription = m_overlaySurfaceStrokeCommand.description;
+            committedSectorCount = m_overlaySurfaceStrokeCommand.sectors.size();
+            m_pUndoStack->push(new COverlaySurfacePreviewCommand(
+                this, m_overlaySurfaceStrokeCommand, true));
+        }
+        else if(m_pUndoStack && !m_tileStrokeCommand.isEmpty())
+        {
+            committedDescription = m_tileStrokeCommand.description;
             m_pUndoStack->push(new CTerrainTilePreviewCommand(
                 this, m_tileStrokeCommand, true));
+        }
+        const int undoIndexAfter = m_pUndoStack ? m_pUndoStack->index() : -1;
+        if(!committedDescription.isEmpty())
+            ei::log(eLogInfo, QString(
+                "Terrain stroke undo transaction committed: stroke=%1 description=%2 sectors=%3 history=%4->%5")
+                    .arg(m_tileBrushCommandId).arg(committedDescription)
+                    .arg(committedSectorCount).arg(undoIndexBefore)
+                    .arg(undoIndexAfter));
+        else if(m_tileStrokeApplied > 0)
+            ei::log(eLogFatal, QString(
+                "Terrain stroke safety invariant failed: stroke=%1 applied=%2 history=%3; no undo command was committed")
+                    .arg(m_tileBrushCommandId).arg(m_tileStrokeApplied)
+                    .arg(undoIndexBefore));
         m_pLand->setDirty(m_terrainEdit.isDirty());
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
@@ -8180,6 +10173,17 @@ void CView::endTileBrushGroup()
                 .arg(m_tileStrokeApplied).arg(m_tileStrokeNoOps)
                 .arg(m_tileStrokeRefused).arg(m_tileStrokeChangedTiles)
                 .arg(m_tileStrokeSolverNodes));
+        if(!m_overlaySurfaceStrokeCommand.isEmpty())
+            ei::log(eLogInfo, QString(
+                "Overlay paint timing: commandMs=%1 modelMs=%2 renderMs=%3 pickMs=%4 picks=%5 previewSectors=%6 footprint=%7,%8-%9,%10 maxCenterJump=%11")
+                .arg(double(m_overlayCommandNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayModelNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayRenderNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayPickNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(m_overlayPickCount).arg(m_overlayPreviewSectorCount)
+                .arg(m_tileStrokeMinimumX).arg(m_tileStrokeMinimumY)
+                .arg(m_tileStrokeMaximumX).arg(m_tileStrokeMaximumY)
+                .arg(m_tileStrokeMaximumCenterJump));
     }
     m_lastTerrainPaintCenterValid = false;
     ++m_tileBrushCommandId;
@@ -8187,11 +10191,12 @@ void CView::endTileBrushGroup()
 
 void CView::beginTileBrushGroup()
 {
-    if(m_tilePaintStrokeActive || !m_pUndoStack)
+    if(!m_tileBrushStrokePolicy.ensureForValidSample(true, m_pUndoStack != nullptr))
         return;
-    m_tilePaintStrokeActive = true;
     m_tileStrokeCommand = STerrainTileCommand();
     m_tileStrokeCommand.description = tr("Paint terrain tiles");
+    m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
+    m_overlaySurfaceStrokeBaseline = m_terrainEdit.overlaySurfaceSnapshot();
     m_lastTerrainPaintCenterValid = false;
     m_tileStrokeActions = 0;
     m_tileStrokeApplied = 0;
@@ -8199,6 +10204,14 @@ void CView::beginTileBrushGroup()
     m_tileStrokeRefused = 0;
     m_tileStrokeChangedTiles = 0;
     m_tileStrokeSolverNodes = 0;
+    m_tileStrokeBoundsValid = false;
+    m_tileStrokeMaximumCenterJump = 0;
+    m_overlayCommandNsecs = 0;
+    m_overlayModelNsecs = 0;
+    m_overlayRenderNsecs = 0;
+    m_overlayPickNsecs = 0;
+    m_overlayPickCount = 0;
+    m_overlayPreviewSectorCount = 0;
 }
 
 bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool forward)
@@ -8214,15 +10227,20 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
     QSet<QPair<int, int>> sectors;
     for(const STerrainTileDelta& delta : command.deltas)
     {
-        m_pLand->previewCanonicalTile(delta.globalX, delta.globalY,
-            delta.layer == ETerrainTileLayer::Land,
-            forward ? delta.after : delta.before, false);
         sectors.insert(qMakePair(delta.globalX / 16, delta.globalY / 16));
     }
-    for(const QPair<int, int>& sector : sectors)
-        m_pLand->updateSectorDrawData(sector.first, sector.second);
+    if(m_terrainPreviewBatchActive)
+        m_pendingTilePreviewSectors.unite(sectors);
+    else
+        for(const QPair<int, int>& sector : sectors)
+            if(!m_pLand->previewCanonicalSector(
+                    sector.first, sector.second,
+                    m_terrainEdit.sectorPayload(sector.first, sector.second)))
+                ei::log(eLogWarning, QString(
+                    "Tile model changed but preview renderer rejected sector %1,%2")
+                        .arg(sector.first).arg(sector.second));
     m_pLand->setDirty(m_terrainEdit.isDirty());
-    if(!m_tilePaintStrokeActive)
+    if(!m_tileBrushStrokePolicy.isActive())
     {
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
@@ -8231,8 +10249,121 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
             : tr("Painted %1 atlas tile(s), including bounded seam updates.")
                   .arg(command.deltas.size()));
     }
-    update();
+    if(!m_terrainPreviewBatchActive)
+        update();
     return true;
+}
+
+bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
+                                       bool forward)
+{
+    if(!m_terrainEditAvailable)
+        return false;
+    QElapsedTimer phaseTimer;
+    phaseTimer.start();
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, forward, &report))
+    {
+        ei::log(eLogWarning, "Overlay surface preview command refused:\n" + report.toText());
+        return false;
+    }
+    m_overlayModelNsecs += phaseTimer.nsecsElapsed();
+    phaseTimer.restart();
+    for(const SOverlaySectorDelta& delta : command.sectors)
+    {
+        const QPair<int, int> sector(delta.sectorX, delta.sectorY);
+        if(m_terrainPreviewBatchActive)
+        {
+            m_pendingOverlayPreviewSectors.insert(sector);
+            continue;
+        }
+        // Use the same proven full-sector renderer refresh as ordinary terrain
+        // sculpt. The former overlay-only delta path mutated a VBO that was
+        // still owned by the in-flight frame, creating a GPU synchronization
+        // point even though its CPU-side timing appeared cheap.
+        if(!m_pLand->previewCanonicalSector(
+                delta.sectorX, delta.sectorY,
+                m_terrainEdit.sectorPayload(delta.sectorX, delta.sectorY)))
+            ei::log(eLogWarning, QString(
+                "Overlay model changed but preview renderer rejected sector %1,%2")
+                    .arg(delta.sectorX).arg(delta.sectorY));
+    }
+    if(!m_terrainPreviewBatchActive)
+    {
+        m_overlayRenderNsecs += phaseTimer.nsecsElapsed();
+        m_overlayPreviewSectorCount += command.sectors.size();
+    }
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    m_sculptOutlineGeometryDirty = true;
+    m_terrainPaintOutlineGeometryDirty = true;
+    m_aiGraphOverlayDirty = true;
+    // Terrain sculpt already defers title/status work until stroke release.
+    // Keep overlay stamps on the same hot-path contract.
+    if(!m_sculptStrokeActive && !m_tileBrushStrokePolicy.isActive())
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                                  m_terrainEdit.isDirty() ? "*" : "");
+    if(!m_terrainPreviewBatchActive)
+        update();
+    return true;
+}
+
+void CView::beginTerrainPreviewBatch()
+{
+    if(m_terrainPreviewBatchActive)
+        return;
+    m_pendingTerrainPreviewSectors.clear();
+    m_pendingOverlayPreviewSectors.clear();
+    m_pendingTilePreviewSectors.clear();
+    m_terrainPreviewBatchActive = true;
+}
+
+void CView::endTerrainPreviewBatch()
+{
+    if(!m_terrainPreviewBatchActive)
+        return;
+    m_terrainPreviewBatchActive = false;
+    const QSet<QPair<int, int>> terrainSectors = m_pendingTerrainPreviewSectors;
+    QSet<QPair<int, int>> overlaySectors = m_pendingOverlayPreviewSectors;
+    QSet<QPair<int, int>> tileSectors = m_pendingTilePreviewSectors;
+    m_pendingTerrainPreviewSectors.clear();
+    m_pendingOverlayPreviewSectors.clear();
+    m_pendingTilePreviewSectors.clear();
+
+    for(const QPair<int, int>& sector : terrainSectors)
+    {
+        overlaySectors.remove(sector);
+        tileSectors.remove(sector);
+        if(!m_pLand->previewCanonicalSector(
+            sector.first, sector.second,
+            m_terrainEdit.sectorPayload(sector.first, sector.second)))
+            ei::log(eLogWarning, QString(
+                "Batched terrain preview rejected sector %1,%2")
+                    .arg(sector.first).arg(sector.second));
+    }
+    for(const QPair<int, int>& sector : overlaySectors)
+    {
+        QElapsedTimer overlayRenderTimer;
+        overlayRenderTimer.start();
+        tileSectors.remove(sector);
+        if(!m_pLand->previewCanonicalSector(
+            sector.first, sector.second,
+            m_terrainEdit.sectorPayload(sector.first, sector.second)))
+            ei::log(eLogWarning, QString(
+                "Batched overlay preview rejected sector %1,%2")
+                    .arg(sector.first).arg(sector.second));
+        m_overlayRenderNsecs += overlayRenderTimer.nsecsElapsed();
+        ++m_overlayPreviewSectorCount;
+    }
+    for(const QPair<int, int>& sector : tileSectors)
+        if(!m_pLand->previewCanonicalSector(
+                sector.first, sector.second,
+                m_terrainEdit.sectorPayload(sector.first, sector.second)))
+            ei::log(eLogWarning, QString(
+                "Batched tile preview rejected sector %1,%2")
+                    .arg(sector.first).arg(sector.second));
+
+    if(!terrainSectors.isEmpty() || !overlaySectors.isEmpty() || !tileSectors.isEmpty())
+        update();
 }
 
 bool CView::onExit()
@@ -8694,11 +10825,62 @@ void CView::mousePressEvent(QMouseEvent* event)
         return;
     }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
+        && m_terrainEditAvailable && event->button() == Qt::RightButton)
+    {
+        QVector3D position;
+        bool positionValid = false;
+        if(m_landscapeTools->overlaySculptEnabled())
+            positionValid = terrainPositionAt(event->pos(), &position, false);
+        else
+            position = getTerrainPos(event->x(), event->y(), true, &positionValid);
+        updateLandscapeSculptCoordinates(position, positionValid);
+        if(positionValid)
+        {
+            const quint16 rawHeight = rawTerrainHeight(position.z());
+            m_landscapeTools->setFlattenHeight(rawHeight);
+            emit updateMsg(tr("Sampled %1 raw height %2 as the Flatten target.")
+                .arg(m_landscapeTools->overlaySculptEnabled()
+                     ? tr("overlay") : tr("terrain"))
+                .arg(rawHeight));
+        }
+        event->accept();
+        return;
+    }
+    if(m_landscapeTools && m_landscapeTools->sculptEnabled()
         && m_terrainEditAvailable && event->button() == Qt::LeftButton)
     {
+        const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
+        if(overlaySculpt)
+            m_overlayPointerTimer->stop();
+        m_overlayCommandNsecs = 0;
+        m_overlayModelNsecs = 0;
+        m_overlayRenderNsecs = 0;
+        m_overlayPickNsecs = 0;
+        m_overlayPickCount = 0;
+        m_overlayPreviewSectorCount = 0;
+        QVector3D position;
+        QElapsedTimer pickTimer;
+        if(overlaySculpt)
+            pickTimer.start();
+        const bool positionValid = overlaySculpt
+            ? terrainPositionAt(event->pos(), &position, false)
+            : (position = getTerrainPos(event->x(), event->y(), true), true);
+        if(overlaySculpt)
+        {
+            m_overlayPickNsecs += pickTimer.nsecsElapsed();
+            ++m_overlayPickCount;
+        }
+        if(!positionValid)
+        {
+            m_sculptOutlineValid = false;
+            event->accept();
+            return;
+        }
         m_sculptStrokeActive = true;
-        m_lastSculptPoint = getTerrainPos(event->x(), event->y(), true);
+        m_sculptPointerValid = true;
+        m_lastSculptPoint = position;
         m_sculptOutlineCenter = m_lastSculptPoint;
+        m_sculptOutlineGeometryDirty = true;
         m_sculptOutlineValid = true;
         m_lastSculptStampPoint = m_lastSculptPoint;
         m_sculptStrokeChanged = false;
@@ -8706,7 +10888,10 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptStrokeVertices = 0;
         m_sculptStrokeCommand = STerrainHeightCommand();
         m_sculptStrokeCommand.description = tr("Sculpt terrain");
-        sculptTerrainAt(m_lastSculptPoint);
+        m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
+        m_overlaySurfaceStrokeCommand.description = tr("Sculpt overlay height");
+        m_overlaySurfaceStrokeBaseline = m_terrainEdit.overlaySurfaceSnapshot();
+        sculptTerrainAt(m_lastSculptPoint, 1.0f);
         m_sculptRepeatTimer->start();
         event->accept();
         return;
@@ -8714,7 +10899,7 @@ void CView::mousePressEvent(QMouseEvent* event)
     m_pOp->mousePressEvent(event);
 }
 
-void CView::sculptTerrainAt(const QVector3D& position)
+void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
 {
     if(!m_terrainEditAvailable || !m_landscapeTools)
         return;
@@ -8723,34 +10908,120 @@ void CView::sculptTerrainAt(const QVector3D& position)
     brush.centerX = position.x();
     brush.centerY = position.y();
     brush.radius = m_landscapeTools->radius();
-    brush.falloff = ETerrainBrushFalloff::Smooth;
+    brush.falloff = m_landscapeTools->falloff();
+    const float blendStrength = landscapeSculptEffectiveStrength(
+        m_landscapeTools->strength(), stampFraction);
+    const float rawDelta = m_landscapeTools->rawDelta()
+        * m_landscapeTools->strength() * stampFraction;
+
+    if(m_landscapeTools->overlaySculptEnabled())
+    {
+        QElapsedTimer overlayCommandTimer;
+        overlayCommandTimer.start();
+        CValidationReport report;
+        SOverlaySurfaceCommand overlayCommand;
+        switch(m_landscapeTools->sculptTool())
+        {
+        case ELandscapeSculptTool::Raise:
+            overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
+                brush, rawDelta,
+                &report, true);
+            break;
+        case ELandscapeSculptTool::Lower:
+            overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
+                brush, -rawDelta,
+                &report, true);
+            break;
+        case ELandscapeSculptTool::Flatten:
+            overlayCommand = m_terrainEdit.makeOverlayFlatten(
+                brush, m_landscapeTools->flattenHeight(),
+                blendStrength, &report);
+            break;
+        case ELandscapeSculptTool::Smooth:
+            overlayCommand = m_terrainEdit.makeOverlaySmooth(
+                brush, blendStrength, &report);
+            break;
+        }
+        m_overlayCommandNsecs += overlayCommandTimer.nsecsElapsed();
+        if(overlayCommand.isEmpty())
+        {
+            if(report.hasErrors())
+                emit updateMsg(report.toText());
+            return;
+        }
+        if(applyOverlaySurfacePreview(overlayCommand, true))
+        {
+            appendOverlaySurfaceCommand(&m_overlaySurfaceStrokeCommand, overlayCommand);
+            m_sculptStrokeChanged = true;
+            ++m_sculptStrokeStamps;
+            m_sculptStrokeVertices += overlayCommand.sectors.size();
+        }
+        return;
+    }
+
+    if(m_landscapeTools->overlaySculptEnabled())
+    {
+        CValidationReport report;
+        SOverlaySurfaceCommand overlayCommand;
+        switch(m_landscapeTools->sculptTool())
+        {
+        case ELandscapeSculptTool::Raise:
+            overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
+                brush, m_landscapeTools->rawDelta() * m_landscapeTools->strength(),
+                &report);
+            break;
+        case ELandscapeSculptTool::Lower:
+            overlayCommand = m_terrainEdit.makeOverlayRaiseLower(
+                brush, -m_landscapeTools->rawDelta() * m_landscapeTools->strength(),
+                &report);
+            break;
+        case ELandscapeSculptTool::Flatten:
+            overlayCommand = m_terrainEdit.makeOverlayFlatten(
+                brush, m_landscapeTools->flattenHeight(),
+                m_landscapeTools->strength(), &report);
+            break;
+        case ELandscapeSculptTool::Smooth:
+            overlayCommand = m_terrainEdit.makeOverlaySmooth(
+                brush, m_landscapeTools->strength(), &report);
+            break;
+        }
+        if(overlayCommand.isEmpty())
+        {
+            if(report.hasErrors())
+                emit updateMsg(report.toText());
+            return;
+        }
+        if(applyOverlaySurfacePreview(overlayCommand, true))
+        {
+            appendOverlaySurfaceCommand(&m_overlaySurfaceStrokeCommand, overlayCommand);
+            m_sculptStrokeChanged = true;
+            ++m_sculptStrokeStamps;
+            m_sculptStrokeVertices += overlayCommand.sectors.size();
+        }
+        return;
+    }
 
     STerrainHeightCommand command;
     switch(m_landscapeTools->sculptTool())
     {
     case ELandscapeSculptTool::Raise:
         command = m_terrainEdit.makeRaiseLower(
-            brush, m_landscapeTools->rawDelta() * m_landscapeTools->strength());
+            brush, rawDelta, true);
         break;
     case ELandscapeSculptTool::Lower:
         command = m_terrainEdit.makeRaiseLower(
-            brush, -m_landscapeTools->rawDelta() * m_landscapeTools->strength());
+            brush, -rawDelta, true);
         break;
     case ELandscapeSculptTool::Flatten:
         command = m_terrainEdit.makeFlatten(
-            brush, m_landscapeTools->flattenHeight(), m_landscapeTools->strength());
+            brush, m_landscapeTools->flattenHeight(), blendStrength);
         break;
     case ELandscapeSculptTool::Smooth:
-        command = m_terrainEdit.makeSmooth(brush, m_landscapeTools->strength());
+        command = m_terrainEdit.makeSmooth(brush, blendStrength);
         break;
     }
     if(command.isEmpty())
         return;
-    if(command.requiresMaxZDecision())
-    {
-        emit updateMsg(tr("Sculpt stamp refused: it would clamp the MPR raw-height range."));
-        return;
-    }
     if(m_sculptStrokeActive)
     {
         if(applyTerrainHeightPreview(command, true))
@@ -8770,12 +11041,16 @@ void CView::sculptTerrainTowardLatestPoint()
     // events enqueue unbounded work. Stationary holds still receive one stamp.
     const int steps = distance > spacing
         ? qMin(8, qMax(1, int(std::ceil(distance / spacing)))) : 1;
+    const float substepFraction = landscapeSculptSubstepFraction(steps);
     const QVector3D start = m_lastSculptStampPoint;
+    beginTerrainPreviewBatch();
     for(int step = 1; step <= steps; ++step)
     {
         const float ratio = float(step) / float(steps);
-        sculptTerrainAt(start * (1.0f - ratio) + m_lastSculptPoint * ratio);
+        sculptTerrainAt(start * (1.0f - ratio) + m_lastSculptPoint * ratio,
+                        substepFraction);
     }
+    endTerrainPreviewBatch();
     m_lastSculptStampPoint = m_lastSculptPoint;
 }
 
@@ -8810,16 +11085,19 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
                 if(x >= 0 && y >= 0)
                     sectors.insert(qMakePair(x, y));
     }
-    for(const QPair<int, int>& sector : sectors)
-    {
-        if(!m_pLand->previewCanonicalSector(
-            sector.first, sector.second,
-            m_terrainEdit.sectorPayload(sector.first, sector.second)))
+    if(m_terrainPreviewBatchActive)
+        m_pendingTerrainPreviewSectors.unite(sectors);
+    else
+        for(const QPair<int, int>& sector : sectors)
         {
-            ei::log(eLogWarning, QString("Terrain preview renderer rejected sector %1,%2")
-                .arg(sector.first).arg(sector.second));
+            if(!m_pLand->previewCanonicalSector(
+                sector.first, sector.second,
+                m_terrainEdit.sectorPayload(sector.first, sector.second)))
+            {
+                ei::log(eLogWarning, QString("Terrain preview renderer rejected sector %1,%2")
+                    .arg(sector.first).arg(sector.second));
+            }
         }
-    }
     if(m_sculptStrokeActive)
     {
         m_sculptStrokeChanged = true;
@@ -8832,6 +11110,8 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
             mob->reprojectForCurrentTerrain();
     }
     m_pLand->setDirty(m_terrainEdit.isDirty());
+    m_sculptOutlineGeometryDirty = true;
+    m_terrainPaintOutlineGeometryDirty = true;
     m_aiGraphOverlayDirty = true;
     if(!m_sculptStrokeActive)
     {
@@ -8840,6 +11120,59 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
         emit updateMsg(tr("Terrain preview changed %1 vertices in %2 sector(s); navigation data may need review.")
             .arg(command.deltas.size()).arg(sectors.size()));
     }
+    if(!m_terrainPreviewBatchActive)
+        update();
+    return true;
+}
+
+bool CView::applyTerrainVerticalScalePreview(
+    const STerrainVerticalScaleCommand& command, bool forward)
+{
+    if(!m_terrainEditAvailable)
+        return false;
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, forward, &report))
+    {
+        ei::log(eLogWarning, "Vertical-scale preview command refused:\n" + report.toText());
+        return false;
+    }
+    if(!m_pLand->previewCanonicalMaxZ(m_terrainEdit.maxZ()))
+    {
+        m_terrainEdit.apply(command, !forward, nullptr);
+        ei::log(eLogWarning, "Vertical-scale preview renderer refused maxZ");
+        return false;
+    }
+
+    QSet<QPair<int, int>> sectors;
+    const int sectorCountX = int(m_mprDocument.mapInfo().sectorCountX);
+    const int sectorCountY = int(m_mprDocument.mapInfo().sectorCountY);
+    for(const STerrainHeightDelta& delta : command.heights.deltas)
+    {
+        QVector<int> xs{qMin(delta.globalX / 32, sectorCountX - 1)};
+        QVector<int> ys{qMin(delta.globalY / 32, sectorCountY - 1)};
+        if(delta.globalX > 0 && delta.globalX % 32 == 0)
+            xs.append(xs.front() - 1);
+        if(delta.globalY > 0 && delta.globalY % 32 == 0)
+            ys.append(ys.front() - 1);
+        for(int x : xs)
+            for(int y : ys)
+                if(x >= 0 && y >= 0)
+                    sectors.insert(qMakePair(x, y));
+    }
+    for(const QPair<int, int>& sector : sectors)
+        m_pLand->previewCanonicalSector(sector.first, sector.second,
+            m_terrainEdit.sectorPayload(sector.first, sector.second));
+
+    for(CMob* mob : m_aMob)
+        mob->reprojectForCurrentTerrain();
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    m_aiGraphOverlayDirty = true;
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                              m_terrainEdit.isDirty() ? "*" : "");
+    emit updateMsg(tr("Vertical range changed to %1; %2 vertex/vertices were requantized and navigation data may need review.")
+        .arg(m_terrainEdit.maxZ(), 0, 'g', 8)
+        .arg(command.heights.deltas.size()));
+    refreshMprSettingsDock();
     update();
     return true;
 }
@@ -8912,6 +11245,55 @@ void CView::importTerrainHeightmap()
     m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
 }
 
+void CView::updateOverlaySculptPointer()
+{
+    if(!m_landscapeTools || !m_landscapeTools->overlaySculptEnabled()
+       || !m_terrainEditAvailable || m_landscapeInteractionSuspended
+       || !m_hasViewportMousePos)
+        return;
+    QElapsedTimer pickTimer;
+    pickTimer.start();
+    QVector3D position;
+    const bool valid = terrainPositionAt(m_lastViewportMousePos, &position, false);
+    m_overlayPickNsecs += pickTimer.nsecsElapsed();
+    ++m_overlayPickCount;
+    m_sculptPointerValid = valid;
+    if(valid)
+    {
+        if(!m_sculptOutlineValid
+           || (m_sculptOutlineCenter - position).lengthSquared() > 0.000001f)
+            m_sculptOutlineGeometryDirty = true;
+        m_sculptOutlineCenter = position;
+        if(m_sculptStrokeActive)
+            m_lastSculptPoint = position;
+    }
+    m_sculptOutlineValid = valid;
+    updateLandscapeSculptCoordinates(position, valid);
+    update();
+}
+
+quint16 CView::rawTerrainHeight(float worldHeight) const
+{
+    if(m_terrainEdit.maxZ() <= 0.0f)
+        return 0;
+    return quint16(qBound(0, qRound(double(worldHeight) * 65535.0
+                                    / double(m_terrainEdit.maxZ())), 65535));
+}
+
+void CView::updateLandscapeSculptCoordinates(const QVector3D& position, bool valid)
+{
+    if(!m_pOp)
+        return;
+    if(!valid)
+    {
+        m_pOp->updateMouseCoords(tr("not defined"));
+        return;
+    }
+    m_pOp->updateMouseCoords(tr("%1 | Raw: %2")
+        .arg(util::makeString(position, true))
+        .arg(rawTerrainHeight(position.z())));
+}
+
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
     m_lastViewportMousePos = event->pos();
@@ -8927,19 +11309,45 @@ void CView::mouseMoveEvent(QMouseEvent* event)
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
        && m_terrainEditAvailable)
     {
-        m_sculptOutlineCenter = getTerrainPos(event->x(), event->y(), true);
-        m_sculptOutlineValid = true;
+        const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
+        if(overlaySculpt)
+        {
+            if(!m_overlayPointerTimer->isActive())
+                m_overlayPointerTimer->start();
+            if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton))
+            {
+                event->accept();
+                return;
+            }
+            m_pOp->mouseMoveEvent(event);
+            return;
+        }
+        QVector3D position;
+        bool positionValid = false;
+        position = getTerrainPos(event->x(), event->y(), true, &positionValid);
+        m_sculptPointerValid = positionValid;
+        if(positionValid)
+        {
+            if(!m_sculptOutlineValid
+               || (m_sculptOutlineCenter - position).lengthSquared() > 0.000001f)
+                m_sculptOutlineGeometryDirty = true;
+            m_sculptOutlineCenter = position;
+            updateLandscapeSculptCoordinates(position, true);
+        }
+        else
+            updateLandscapeSculptCoordinates(position, false);
+        m_sculptOutlineValid = positionValid;
         update();
-    }
-    if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton)
-        && m_landscapeTools && m_terrainEditAvailable)
-    {
-        const QVector3D position = getTerrainPos(event->x(), event->y(), true);
-        m_lastSculptPoint = position;
-        // The repeat timer applies the latest point. This keeps pointer input
-        // responsive and caps canonical preview work to one stamp per tick.
-        event->accept();
-        return;
+        if(m_sculptStrokeActive && (event->buttons() & Qt::LeftButton))
+        {
+            if(positionValid)
+                m_lastSculptPoint = position;
+            // The repeat timer applies the latest valid point. This keeps
+            // pointer input responsive and prevents a stale overlay point from
+            // continuing to sculpt after the cursor leaves the surface.
+            event->accept();
+            return;
+        }
     }
     m_pOp->mouseMoveEvent(event);
 }
@@ -8958,7 +11366,13 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
     }
     if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
     {
-        if(m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint) > 0.01f)
+        if(m_landscapeTools && m_landscapeTools->overlaySculptEnabled())
+        {
+            m_overlayPointerTimer->stop();
+            updateOverlaySculptPointer();
+        }
+        if(m_sculptPointerValid
+           && m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint) > 0.01f)
             sculptTerrainTowardLatestPoint();
         finishSculptStroke();
         event->accept();
@@ -9150,7 +11564,8 @@ void CView::moveCameraToPoint(const QVector3D& position)
     }
 }
 
-bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* position)
+bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
+                              bool land)
 {
     if(!position || !m_pLand || !m_pLand->isMprLoad()
        || !rect().contains(viewportPosition) || width() <= 0 || height() <= 0)
@@ -9164,16 +11579,36 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
     const QVector3D rayEnd = QVector3D(float(viewportPosition.x()), screenY, 1.0f)
         .unproject(view, m_projection, viewport);
 
+    const QVector3D ray = rayEnd - rayStart;
+    float firstT = 0.0f;
+    float lastT = 1.0f;
+    const float minimumTerrainZ = -2.0f;
+    const float maximumTerrainZ = m_terrainEditAvailable
+        ? m_terrainEdit.maxZ() + 2.0f : 65537.0f;
+    if(qAbs(ray.z()) > 0.00001f)
+    {
+        const float lowerT = (minimumTerrainZ - rayStart.z()) / ray.z();
+        const float upperT = (maximumTerrainZ - rayStart.z()) / ray.z();
+        firstT = qMax(0.0f, qMin(lowerT, upperT));
+        lastT = qMin(1.0f, qMax(lowerT, upperT));
+        if(firstT > lastT)
+            return false;
+    }
+    const QVector3D firstPoint = rayStart + ray * firstT;
+    const QVector3D lastPoint = rayStart + ray * lastT;
+    const float planarDistance = QVector2D(lastPoint - firstPoint).length();
+    const int steps = qBound(32, int(std::ceil(planarDistance / 0.75f)), 256);
+
     bool havePrevious = false;
-    float previousT = 0.0f;
+    float previousT = firstT;
     float previousDelta = 0.0f;
-    constexpr int steps = 512;
     for(int step = 0; step <= steps; ++step)
     {
-        const float t = float(step) / float(steps);
-        const QVector3D rayPoint = rayStart + (rayEnd - rayStart) * t;
+        const float ratio = float(step) / float(steps);
+        const float t = firstT + (lastT - firstT) * ratio;
+        const QVector3D rayPoint = rayStart + ray * t;
         QVector3D terrain(rayPoint.x(), rayPoint.y(), 0.0f);
-        if(!CLandscape::getInstance()->projectPt(terrain))
+        if(!CLandscape::getInstance()->projectPt(terrain, land))
         {
             havePrevious = false;
             continue;
@@ -9187,9 +11622,9 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
             for(int iteration = 0; iteration < 14; ++iteration)
             {
                 const float middle = (low + high) * 0.5f;
-                const QVector3D sample = rayStart + (rayEnd - rayStart) * middle;
+                const QVector3D sample = rayStart + ray * middle;
                 QVector3D ground(sample.x(), sample.y(), 0.0f);
-                if(!CLandscape::getInstance()->projectPt(ground))
+                if(!CLandscape::getInstance()->projectPt(ground, land))
                 {
                     low = middle;
                     continue;
@@ -9208,6 +11643,16 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
         previousDelta = delta;
     }
     return false;
+}
+
+bool CView::projectToRegeneratedNavigation(const QPointF& requested,
+                                           QVector3D* position,
+                                           float maximumDistance) const
+{
+    if(!m_aiGraphRegeneratedFresh || !m_aiGraphRegeneratedResult.valid)
+        return false;
+    return m_aiGraphRegeneratedResult.projectHumanPosition(
+        requested, position, maximumDistance);
 }
 
 void CView::anchorCameraRotationToViewportCenter()
@@ -9233,7 +11678,28 @@ void CView::wheelEvent(QWheelEvent* event)
                                                 event->delta(), event->pixelDelta().y());
             if(step == 0)
                 return;
-            if(event->modifiers() & Qt::ShiftModifier)
+            if((event->modifiers() & (Qt::AltModifier | Qt::ShiftModifier))
+               == (Qt::AltModifier | Qt::ShiftModifier))
+            {
+                if(m_landscapeTools->sculptTool() == ELandscapeSculptTool::Flatten)
+                {
+                    m_landscapeTools->adjustFlattenHeight(step);
+                    emit updateMsg(tr("Flatten target: %1 raw units").arg(
+                        m_landscapeTools->flattenHeight()));
+                }
+                else if(m_landscapeTools->sculptTool() == ELandscapeSculptTool::Raise
+                        || m_landscapeTools->sculptTool() == ELandscapeSculptTool::Lower)
+                {
+                    m_landscapeTools->adjustRawDelta(step);
+                    emit updateMsg(tr("Raise/lower step: %1 raw units").arg(
+                        m_landscapeTools->rawDelta(), 0, 'f', 0));
+                }
+                else
+                {
+                    emit updateMsg(tr("Smooth has no height-step control."));
+                }
+            }
+            else if(event->modifiers() & Qt::ShiftModifier)
             {
                 m_landscapeTools->adjustSculptStrength(step);
                 emit updateMsg(tr("Sculpt strength: %1").arg(
@@ -9386,6 +11852,7 @@ void CView::changeOperation(EButtonOp type)
     cancelPendingOperation();
     if(type != EButtonOpTilebrush && m_landscapeTools
         && (m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
+            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
             || m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint))
         m_landscapeTools->setEditingEnabled(false, false);
     switch (type) {
@@ -9475,7 +11942,14 @@ bool CView::cancelPendingOperation()
 
 bool CView::hasPendingOperation() const
 {
-    return m_pOp && m_pOp->operationMethod() != eOperationMethodSelect;
+    if(!m_pOp || m_pOp->operationMethod() == eOperationMethodSelect)
+        return false;
+    // Landscape editing is a persistent selected tool. It is only unsafe to
+    // snapshot while a mouse stroke is actively accumulating; merely leaving
+    // Landscape Tools open must not suppress recovery autosaves indefinitely.
+    if(m_pOp->operationMethod() == eOperationMethodTileBrush)
+        return m_sculptStrokeActive || m_tileBrushStrokePolicy.isActive();
+    return true;
 }
 
 bool CView::prepareDocumentTransition()
@@ -10086,6 +12560,138 @@ void CView::hideSelectedNodes()
                 pNode->setState(ENodeState::eHidden);
     }
     viewParameters();
+    emit mobStateChanged();
+}
+
+QPolygonF CView::minimapCameraFootprint() const
+{
+    QVector<QPointF> groundPoints;
+    if(!m_cam || width() <= 0 || height() <= 0)
+        return QPolygonF();
+    const QRect viewport(0, 0, width(), height());
+    const QMatrix4x4 view = m_cam->viewMatrix();
+    const auto appendGroundIntersection = [&](const QPointF& screen) {
+        const float screenY = float(height()) - float(screen.y());
+        const QVector3D nearPoint = QVector3D(float(screen.x()), screenY, 0.0f)
+            .unproject(view, m_projection, viewport);
+        const QVector3D farPoint = QVector3D(float(screen.x()), screenY, 1.0f)
+            .unproject(view, m_projection, viewport);
+        const QVector3D ray = farPoint - nearPoint;
+        if(qAbs(ray.z()) < 0.000001f)
+            return;
+        const float t = -nearPoint.z() / ray.z();
+        if(t < 0.0f)
+            return; // This screen ray looks above the ground-plane horizon.
+        const QVector3D ground = nearPoint + ray * t;
+        if(qIsFinite(ground.x()) && qIsFinite(ground.y()))
+            groundPoints.append(QPointF(ground.x(), ground.y()));
+    };
+
+    // Sampling the viewport boundary handles a horizon that crosses a side of
+    // the screen. The visible ground is convex, so its hull cannot acquire the
+    // self-crossing bow-tie produced by joining four invalid corner rays.
+    const int edgeSteps = 32;
+    for(int i = 0; i <= edgeSteps; ++i)
+    {
+        const qreal u = qreal(i) / edgeSteps;
+        appendGroundIntersection(QPointF(u * width(), 0.0));
+        appendGroundIntersection(QPointF(width(), u * height()));
+        appendGroundIntersection(QPointF((1.0 - u) * width(), height()));
+        appendGroundIntersection(QPointF(0.0, (1.0 - u) * height()));
+    }
+    if(groundPoints.size() < 3)
+        return QPolygonF();
+
+    std::sort(groundPoints.begin(), groundPoints.end(),
+              [](const QPointF& a, const QPointF& b) {
+        return a.x() < b.x() || (a.x() == b.x() && a.y() < b.y());
+    });
+    const auto cross = [](const QPointF& origin, const QPointF& a,
+                          const QPointF& b) {
+        return (a.x() - origin.x()) * (b.y() - origin.y())
+             - (a.y() - origin.y()) * (b.x() - origin.x());
+    };
+    QVector<QPointF> hull;
+    for(const QPointF& point : groundPoints)
+    {
+        while(hull.size() >= 2
+              && cross(hull[hull.size() - 2], hull.last(), point) <= 0.0)
+            hull.removeLast();
+        hull.append(point);
+    }
+    const int lowerSize = hull.size();
+    for(int i = groundPoints.size() - 2; i >= 0; --i)
+    {
+        const QPointF point = groundPoints[i];
+        while(hull.size() > lowerSize
+              && cross(hull[hull.size() - 2], hull.last(), point) <= 0.0)
+            hull.removeLast();
+        hull.append(point);
+    }
+    if(!hull.isEmpty())
+        hull.removeLast();
+
+    CLandscape* landscape = CLandscape::getInstance();
+    const qreal mapWidth = landscape ? landscape->widthInWorldUnits() : 0.0;
+    const qreal mapHeight = landscape ? landscape->heightInWorldUnits() : 0.0;
+    if(mapWidth <= 0.0 || mapHeight <= 0.0 || hull.size() < 3)
+        return QPolygonF(hull);
+
+    // Clip the convex footprint to the map. Apart from keeping the overlay on
+    // the texture, this bounds near-horizon intersections that approach infinity.
+    const auto clipEdge = [](const QVector<QPointF>& input,
+                             const std::function<bool(const QPointF&)>& inside,
+                             const std::function<QPointF(const QPointF&, const QPointF&)>& intersect) {
+        QVector<QPointF> output;
+        if(input.isEmpty()) return output;
+        QPointF previous = input.last();
+        bool previousInside = inside(previous);
+        for(const QPointF& current : input)
+        {
+            const bool currentInside = inside(current);
+            if(currentInside != previousInside)
+                output.append(intersect(previous, current));
+            if(currentInside)
+                output.append(current);
+            previous = current;
+            previousInside = currentInside;
+        }
+        return output;
+    };
+    QVector<QPointF> clipped = hull;
+    clipped = clipEdge(clipped, [](const QPointF& p) { return p.x() >= 0.0; },
+        [](const QPointF& a, const QPointF& b) {
+            const qreal t = -a.x() / (b.x() - a.x());
+            return QPointF(0.0, a.y() + t * (b.y() - a.y()));
+        });
+    clipped = clipEdge(clipped, [mapWidth](const QPointF& p) { return p.x() <= mapWidth; },
+        [mapWidth](const QPointF& a, const QPointF& b) {
+            const qreal t = (mapWidth - a.x()) / (b.x() - a.x());
+            return QPointF(mapWidth, a.y() + t * (b.y() - a.y()));
+        });
+    clipped = clipEdge(clipped, [](const QPointF& p) { return p.y() >= 0.0; },
+        [](const QPointF& a, const QPointF& b) {
+            const qreal t = -a.y() / (b.y() - a.y());
+            return QPointF(a.x() + t * (b.x() - a.x()), 0.0);
+        });
+    clipped = clipEdge(clipped, [mapHeight](const QPointF& p) { return p.y() <= mapHeight; },
+        [mapHeight](const QPointF& a, const QPointF& b) {
+            const qreal t = (mapHeight - a.y()) / (b.y() - a.y());
+            return QPointF(a.x() + t * (b.x() - a.x()), mapHeight);
+        });
+    return QPolygonF(clipped);
+}
+
+void CView::moveCameraToMinimapPoint(const QPointF& worldPosition)
+{
+    if(!m_cam) return;
+    QVector3D position;
+    QVector3D pivot;
+    QVector3D rotation;
+    m_cam->getLocation(position, pivot, rotation);
+    m_cam->moveTo(QVector3D(float(worldPosition.x()),
+                            float(worldPosition.y()), pivot.z()));
+    update();
 }
 
 void CView::unHideAll()
@@ -10098,7 +12704,7 @@ void CView::unHideAll()
         if(pNode->nodeState() == ENodeState::eHidden)
             pNode->setState(ENodeState::eDraw);
     }
-
+    emit mobStateChanged();
 }
 
 void CView::setDirtyMpr()
@@ -10116,20 +12722,87 @@ void CView::finishSculptStroke()
         return;
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
-    if(m_pUndoStack && !m_sculptStrokeCommand.isEmpty())
+    m_sculptPointerValid = false;
+    if(!m_overlaySurfaceStrokeCommand.isEmpty())
+    {
+        CValidationReport report;
+        const SOverlaySurfaceCommand exactCommand =
+            m_terrainEdit.makeOverlaySurfaceCommand(
+                m_overlaySurfaceStrokeBaseline,
+                m_overlaySurfaceStrokeCommand.description, &report);
+        if(report.hasErrors())
+        {
+            ei::log(eLogWarning, "Overlay sculpt snapshot reconciliation failed:\n"
+                + report.toText());
+            emit updateMsg(report.toText());
+        }
+        else
+            m_overlaySurfaceStrokeCommand = exactCommand;
+    }
+    const bool overlayStroke = !m_overlaySurfaceStrokeCommand.isEmpty();
+    STerrainEditDiagnostics terrainDiagnostics;
+    int maximumRawDelta = 0;
+    if(!overlayStroke && !m_sculptStrokeCommand.isEmpty())
+    {
+        CTerrainEditModel baseline = m_terrainEdit;
+        CValidationReport restoreReport;
+        if(baseline.apply(m_sculptStrokeCommand, false, &restoreReport, false))
+        {
+            STerrainDiagnosticPolicy policy;
+            policy.steepSlopeDegrees = 60.0f;
+            terrainDiagnostics = baseline.diagnose(
+                m_sculptStrokeCommand, QVector<STerrainObjectHeightProbe>(), policy);
+        }
+        for(const STerrainHeightDelta& delta : m_sculptStrokeCommand.deltas)
+            maximumRawDelta = qMax(maximumRawDelta,
+                qAbs(int(delta.after) - int(delta.before)));
+        ei::log(eLogInfo, QString(
+            "Sculpt stroke diagnostic: step=%1 raw strength=%2 radius=%3 stamps=%4 vertices=%5 maxRawDelta=%6 maxSlope=%7 risk=%8")
+            .arg(m_landscapeTools ? m_landscapeTools->rawDelta() : 0.0f, 0, 'f', 2)
+            .arg(m_landscapeTools ? m_landscapeTools->strength() : 0.0f, 0, 'f', 2)
+            .arg(m_landscapeTools ? m_landscapeTools->radius() : 0.0f, 0, 'f', 2)
+            .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices)
+            .arg(maximumRawDelta)
+            .arg(terrainDiagnostics.maximumSlopeAfterDegrees, 0, 'f', 2)
+            .arg(terrainDiagnostics.steepSlopeRisk ? "yes" : "no"));
+    }
+    if(m_pUndoStack && overlayStroke)
+        m_pUndoStack->push(new COverlaySurfacePreviewCommand(
+            this, m_overlaySurfaceStrokeCommand, true));
+    else if(m_pUndoStack && !m_sculptStrokeCommand.isEmpty())
         m_pUndoStack->push(new CTerrainHeightPreviewCommand(
             this, m_sculptStrokeCommand, true));
     if(m_sculptStrokeChanged)
     {
-        for(CMob* mob : m_aMob)
-            mob->reprojectForCurrentTerrain();
+        if(!overlayStroke)
+            for(CMob* mob : m_aMob)
+                mob->reprojectForCurrentTerrain();
         m_pLand->setDirty(m_terrainEdit.isDirty());
         m_staticShadowFingerprint.clear();
         m_farStaticShadowFingerprint.clear();
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
-        emit updateMsg(tr("Sculpt stroke: %1 stamp(s), %2 vertex updates; MOB placement and navigation may need review.")
-            .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
+        if(overlayStroke)
+        {
+            emit updateMsg(tr("Overlay sculpt stroke: %1 stamp(s), %2 sector update(s); liquid navigation may need review.")
+                .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
+            ei::log(eLogInfo, QString(
+                "Overlay sculpt timing: commandMs=%1 modelMs=%2 renderMs=%3 pickMs=%4 picks=%5 previewSectors=%6 stamps=%7")
+                .arg(double(m_overlayCommandNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayModelNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayRenderNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayPickNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(m_overlayPickCount).arg(m_overlayPreviewSectorCount)
+                .arg(m_sculptStrokeStamps));
+        }
+        else if(terrainDiagnostics.steepSlopeRisk)
+            emit updateMsg(tr(
+                "Sculpt stroke created a steep local slope (%1 degrees, max raw change %2). Terrain remains seam-consistent, but inspect it for cliffs or exposed backfaces.")
+                .arg(terrainDiagnostics.maximumSlopeAfterDegrees, 0, 'f', 1)
+                .arg(maximumRawDelta));
+        else
+            emit updateMsg(tr("Sculpt stroke: %1 stamp(s), %2 vertex updates; MOB placement and navigation may need review.")
+                .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
     }
 }
 

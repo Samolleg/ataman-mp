@@ -12,6 +12,14 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
+struct SMaterial;
+
+enum class EOverlaySurfaceOperation
+{
+    PaintExisting,
+    Activate,
+    Deactivate
+};
 
 enum class ELandscapeSculptTool
 {
@@ -28,24 +36,34 @@ public:
     explicit CLandscapeTools(QWidget* parent = nullptr);
 
     bool sculptEnabled() const;
+    bool overlaySculptEnabled() const;
     bool editingEnabled() const;
     bool tilePaintEnabled() const;
     bool overlayPaintEnabled() const;
+    bool overlaySurfaceEnabled() const;
     ELandscapeEditMode editMode() const;
     void activateMode(ELandscapeEditMode mode, bool notify = true);
     void setEditingEnabled(bool enabled, bool notify = true);
     ELandscapeSculptTool sculptTool() const;
+    void setSculptTool(ELandscapeSculptTool tool);
     float radius() const;
     float strength() const;
     float rawDelta() const;
     quint16 flattenHeight() const;
+    void setFlattenHeight(quint16 height);
+    ETerrainBrushFalloff falloff() const;
     bool flipHeightmapVertically() const;
     float paintRadius() const;
     ETerrainTileBrushShape paintShape() const;
     bool manualTileSelectionEnabled() const;
     bool landFamiliesAllowedInOverlay() const;
+    EOverlaySurfaceOperation overlaySurfaceOperation() const;
+    qint16 overlayMaterialIndex(bool* selected = nullptr) const;
+    void setOverlayMaterials(const QVector<SMaterial>& materials);
     void adjustSculptRadius(int steps);
     void adjustSculptStrength(int steps);
+    void adjustRawDelta(int steps);
+    void adjustFlattenHeight(int steps);
     void adjustPaintSize(int steps);
     void adjustPaintTerrainType(int steps);
     qint32 paintTerrainType(bool* selected = nullptr) const;
@@ -64,8 +82,11 @@ public:
 signals:
     void importHeightmapRequested();
     void tilePickerRequested();
+    void atlasProfileReviewRequested();
     void exportPaintDiagnosticRequested();
+    void openMprSettingsRequested();
     void editingStateChanged();
+    void brushGeometryChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
     void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
 
@@ -77,6 +98,10 @@ private:
     QDoubleSpinBox* m_strength;
     QDoubleSpinBox* m_delta;
     QSpinBox* m_flatten;
+    QComboBox* m_falloff;
+    QLabel* m_deltaLabel;
+    QLabel* m_flattenLabel;
+    QLabel* m_falloffLabel;
     QCheckBox* m_flipVertical;
     QComboBox* m_paintTerrainType;
     QDoubleSpinBox* m_paintRadius;
@@ -84,6 +109,10 @@ private:
     QCheckBox* m_manualTileSelection;
     QCheckBox* m_showUnderwaterFamilies;
     QCheckBox* m_allowLandFamiliesInOverlay;
+    QComboBox* m_overlaySurfaceOperation;
+    QComboBox* m_overlayMaterial;
+    QLabel* m_overlaySurfaceOperationLabel;
+    QLabel* m_overlayMaterialLabel;
     QCheckBox* m_showMainTerrain;
     QCheckBox* m_showOverlays;
     QLabel* m_tilesetStatus;

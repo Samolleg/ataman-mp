@@ -19,6 +19,7 @@
 
 class CSector;
 class CTile;
+class CTerrainEditModel;
 
 struct SMapHeader
 {
@@ -72,6 +73,8 @@ public:
     bool projectPt(QVector<QVector3D>& aPoint);
     void projectPositions(QList<CNode*>& aNode);
     void projectPosition(CNode* pNode);
+    void setCanonicalTerrainModel(const CTerrainEditModel* model)
+    { m_canonicalTerrain = model; }
     bool pickTile(QVector3D& point, CTile*& pTileOut, STileLocation& tileLoc, bool bLand = true);
     void setTile(const QMap<STileLocation, STileInfo>& arrTileInfo);
     const QFileInfo& filePath() {return m_filePath;}
@@ -87,6 +90,11 @@ public:
     void setAnimTils(const QVector<SAnimTile>& arrAnimTile) {m_aAnimTile = arrAnimTile;}
     void updateSectorDrawData(int xSec, int ySec);
     bool previewCanonicalSector(int xSec, int ySec, const QByteArray& payload);
+    bool previewCanonicalOverlaySector(int xSec, int ySec, const QByteArray& payload);
+    bool previewCanonicalOverlaySectorDelta(int xSec, int ySec,
+                                            const QByteArray& beforePayload,
+                                            const QByteArray& afterPayload);
+    bool previewCanonicalMaxZ(float maxZ);
     bool previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile,
                               bool updateSector = true);
     void setDirty(bool bDirty) {m_bDirty = bDirty;}
@@ -113,6 +121,7 @@ private:
     QByteArray m_originalMprData;
     QVector<int> m_arrIncorectTiles;
     bool m_bDirty;
+    const CTerrainEditModel* m_canonicalTerrain;
 };
 
 

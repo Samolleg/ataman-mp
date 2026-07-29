@@ -3,13 +3,22 @@
 #include <QSet>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
+#include <QTextCodec>
+#include <QtEndian>
+
+#include <limits>
 
 #include "endurance_document.h"
+#include "ai_graph_document.h"
+#include "ai_graph_persistence.h"
 #include "landscape_edit_policy.h"
 #include "operation_history_policy.h"
+#include "tile_brush_stroke_policy.h"
 #include "terrain_edit_model.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_profile.h"
 #include "staged_save_validator.h"
+#include "backup_manager.h"
 
 namespace {
 QByteArray section(quint32 type, const QByteArray& payload = QByteArray())
@@ -112,14 +121,14 @@ QByteArray emptyMpr()
     return bytes;
 }
 
-QByteArray syntheticMp()
+QByteArray syntheticMp(quint32 sectorCountX = 1, quint32 sectorCountY = 1)
 {
     QByteArray bytes;
     QDataStream stream(&bytes, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);
     stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
     stream << quint32(0xCE4AF672) << float(100.0f)
-           << quint32(1) << quint32(1)
+           << sectorCountX << sectorCountY
            << quint32(2) << quint32(512)
            << quint32(3) << quint32(64)
            << quint16(2) << quint32(0);
@@ -153,7 +162,7 @@ QByteArray syntheticOverlaySector()
     return bytes;
 }
 
-QByteArray syntheticMpr()
+QByteArray syntheticMpr(const QByteArray& sectorPayload = syntheticOverlaySector())
 {
     struct Member
     {
@@ -165,7 +174,7 @@ QByteArray syntheticMpr()
     QVector<Member> members;
     members.append({QByteArray("unknown.bin"), QByteArray("opaque-unknown-payload"), 0x10203040, 0});
     members.append({QByteArray("CaveSet.MP"), syntheticMp(), 0x50607080, 0});
-    members.append({QByteArray("CaveSet000000.SEC"), syntheticOverlaySector(), 0x90A0B0C0, 0});
+    members.append({QByteArray("CaveSet000000.SEC"), sectorPayload, 0x90A0B0C0, 0});
 
     QByteArray bytes(16, '\0');
     for(int index = 0; index < members.size(); ++index)
@@ -197,6 +206,50 @@ QByteArray syntheticMpr()
     return bytes;
 }
 
+QByteArray syntheticTwoSectorMpr(const QByteArray& leftSector,
+                                 const QByteArray& rightSector)
+{
+    struct Member
+    {
+        QByteArray name;
+        QByteArray payload;
+        quint32 timestamp;
+        quint32 offset;
+    };
+    QVector<Member> members;
+    members.append({QByteArray("CaveSet.MP"), syntheticMp(2, 1), 0x10203040, 0});
+    members.append({QByteArray("CaveSet000000.SEC"), leftSector, 0x50607080, 0});
+    members.append({QByteArray("CaveSet001000.SEC"), rightSector, 0x90A0B0C0, 0});
+
+    QByteArray bytes(16, '\0');
+    for(int index = 0; index < members.size(); ++index)
+    {
+        members[index].offset = quint32(bytes.size());
+        bytes.append(members.at(index).payload);
+        const int padding = (16 - (bytes.size() % 16)) % 16;
+        bytes.append(QByteArray(padding, char(0xC0 + index)));
+    }
+    const quint32 tableOffset = quint32(bytes.size());
+    QByteArray names;
+    QDataStream table(&bytes, QIODevice::Append);
+    table.setByteOrder(QDataStream::LittleEndian);
+    for(const Member& member : members)
+    {
+        table << quint32(-1) << quint32(member.payload.size()) << member.offset
+              << member.timestamp << quint16(member.name.size()) << quint32(names.size());
+        names.append(member.name);
+    }
+    bytes.append(names);
+
+    QByteArray header;
+    QDataStream headerStream(&header, QIODevice::WriteOnly);
+    headerStream.setByteOrder(QDataStream::LittleEndian);
+    headerStream << quint32(0x019CE23C) << quint32(members.size())
+                 << tableOffset << quint32(names.size());
+    bytes.replace(0, header.size(), header);
+    return bytes;
+}
+
 QByteArray syntheticLandSector(quint16 height)
 {
     QByteArray bytes;
@@ -209,6 +262,64 @@ QByteArray syntheticLandSector(quint16 height)
                    << quint32((1000u << 22) | (1000u << 11) | 1000u);
     bytes.append(QByteArray(16 * 16 * 2, '\0'));
     return bytes;
+}
+
+void setSyntheticLandVertex(QByteArray* sector, int x, int y,
+                            qint8 xOffset, qint8 yOffset, quint16 height)
+{
+    Q_ASSERT(sector);
+    Q_ASSERT(x >= 0 && x < 33 && y >= 0 && y < 33);
+    const int offset = 5 + (y * 33 + x) * 8;
+    (*sector)[offset] = char(xOffset);
+    (*sector)[offset + 1] = char(yOffset);
+    uchar encoded[2];
+    qToLittleEndian<quint16>(height, encoded);
+    (*sector)[offset + 2] = char(encoded[0]);
+    (*sector)[offset + 3] = char(encoded[1]);
+}
+
+quint32 testReadU32(const QByteArray& bytes, int offset)
+{
+    QDataStream stream(bytes.mid(offset, 4));
+    stream.setByteOrder(QDataStream::LittleEndian);
+    quint32 value = 0;
+    stream >> value;
+    return value;
+}
+
+QByteArray runtimeMprLookup(const QByteArray& archive, const QString& requested)
+{
+    const quint32 count = testReadU32(archive, 4);
+    const quint32 tableOffset = testReadU32(archive, 8);
+    const quint32 namesLength = testReadU32(archive, 12);
+    if(!count || tableOffset + count * 22 + namesLength > quint32(archive.size()))
+        return {};
+    QTextCodec* codec = QTextCodec::codecForName("CP1251");
+    const QByteArray wanted = codec->fromUnicode(requested.toLower());
+    quint32 sum = 0;
+    for(const unsigned char byte : wanted)
+        sum += byte;
+    quint32 slot = sum % count;
+    QSet<quint32> visited;
+    while(slot != quint32(-1) && slot < count && !visited.contains(slot))
+    {
+        visited.insert(slot);
+        const int entry = int(tableOffset + slot * 22);
+        const quint32 next = testReadU32(archive, entry);
+        const quint32 size = testReadU32(archive, entry + 4);
+        const quint32 offset = testReadU32(archive, entry + 8);
+        QDataStream nameStream(archive.mid(entry + 16, 2));
+        nameStream.setByteOrder(QDataStream::LittleEndian);
+        quint16 nameLength = 0;
+        nameStream >> nameLength;
+        const quint32 nameOffset = testReadU32(archive, entry + 18);
+        const QByteArray encoded = archive.mid(
+            int(tableOffset + count * 22 + nameOffset), nameLength);
+        if(codec->toUnicode(encoded).compare(requested, Qt::CaseInsensitive) == 0)
+            return archive.mid(int(offset), int(size));
+        slot = next;
+    }
+    return {};
 }
 
 quint32 sectorPackedNormal(const QByteArray& sector, int x, int y)
@@ -224,6 +335,16 @@ quint32 sectorPackedNormal(const QByteArray& sector, int x, int y)
 quint16 sectorHeight(const QByteArray& sector, int x, int y)
 {
     const int offset = 5 + (y * 33 + x) * 8 + 2;
+    QDataStream stream(sector.mid(offset, 2));
+    stream.setByteOrder(QDataStream::LittleEndian);
+    quint16 value = 0;
+    stream >> value;
+    return value;
+}
+
+quint16 overlaySectorHeight(const QByteArray& sector, int x, int y)
+{
+    const int offset = 5 + 33 * 33 * 8 + (y * 33 + x) * 8 + 2;
     QDataStream stream(sector.mid(offset, 2));
     stream.setByteOrder(QDataStream::LittleEndian);
     quint16 value = 0;
@@ -259,6 +380,22 @@ const SMobSection* firstSectionOfType(const QVector<SMobSection>& sections, quin
     }
     return nullptr;
 }
+
+QByteArray syntheticValidAiGraph(quint8 localPosition, quint16 component)
+{
+    QVector<SAiGraphLayer> layers(CAiGraphDocument::LayerCount);
+    for(SAiGraphLayer& layer : layers)
+    {
+        layer.weights.fill(qint16(-1), CAiGraphDocument::DirectionCount);
+        layer.packedPositions = QByteArray(1, char(localPosition));
+        layer.components.fill(component, 1);
+    }
+    CAiGraphDocument graph;
+    QString error;
+    if(!graph.initializePreview(1, 1, layers, &error))
+        return QByteArray();
+    return graph.serialize(&error);
+}
 }
 
 class EnduranceDocumentTests : public QObject
@@ -267,10 +404,22 @@ class EnduranceDocumentTests : public QObject
 
 private slots:
     void persistentPaintOperationSurvivesHistoryNavigation();
+    void tileBrushFirstValidSampleOwnsUndoStroke();
     void persistentPaintOperationSurvivesDocumentTransition();
     void landscapeLayerChangesResetBrushSelection();
     void landscapeWheelDirectionUsesAvailableDelta();
+    void sculptCadenceIsIndependentOfSpatialInterpolation();
     void unchangedMobIsByteIdentical();
+    void mobGraphRemovalPreservesAllOtherTopLevelBytes();
+    void mobGraphReplacementAndInsertionAreExact();
+    void mobGraphOwnershipReplacementClosesRaceCheckBeforeCommit();
+    void aiGraphPersistenceUsesExactMprBasenameAndReportsShadowing();
+    void aiGraphPersistenceConfirmationNamesSourceAndNonUndoableSave();
+    void aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt();
+    void aiGraphFileCommitIsValidatedBackedUpAndAtomic();
+    void aiGraphOwnershipSwitchValidationNeverRewritesExternalFile();
+    void existingGraphComponentReuseIsWarningNotBlocker();
+    void generatedGraphComponentReuseIsRecoloredAutomatically();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
     void unknownLeafIsPreservedAsOpaque();
@@ -298,15 +447,31 @@ private slots:
     void projectionSaveCandidateIsProvenanceChecked();
     void topologyPreservingLeafEditsAreAuthorizedTogether();
     void projectionSaveCandidateRejectsStructuralEdit();
+    void ownedRootProjectionAddsDiplomacyAndScriptLosslessly();
+    void ownedRootProjectionRejectsUnknownStructuralEdit();
     void transactionRejectsStaleProvenance();
     void cp1251EncodingIsStrict();
     void unchangedMprIsByteIdentical();
+    void mprCanvasResizeCropsAndRenamesRetainedSectorLosslessly();
+    void mprCanvasResizeExpandsBoundaryWithRuntimeReachableMembers();
+    void mprCanvasResizeSupportsTileOffsetsWithoutSeams();
+    void mprCanvasResizeClosedEdgeTapersAndDeactivatesOverlay();
+    void mprCanvasResizeAcceptsStructural32By32Ceiling();
+    void mprCanvasResizeRejectsInvalidOrEmptyIntersection();
+    void mprCanvasResizeCommitIsSaveAsOnlyAndAtomic();
+    void newMprFromTemplateIsDeterministicSeamSafeAndRuntimeReachable();
+    void newMprRejectsInventedNamespaceAndInvalidDimensions();
+    void generatedMprCommitIsValidatedBackedUpAndAtomic();
+    void mprRecoveryAutosaveUsesValidatedCandidateAndLeavesSourceUntouched();
     void syntheticMprPreservesArchiveNamespaceAndInactiveSentinel();
     void mprSectorPatchIsProvenanceCheckedAndLocal();
-    void mprLengthChangingAndStaleTransactionsFailClosed();
+    void mprMaxZPatchIsProvenanceCheckedAndLocal();
+    void mprVerticalScaleTransactionReopensWithDerivedNormals();
+    void mprLengthChangingTransactionsRelocateAndStaleFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
     void stagedMprTransactionProvesExactSemanticScopeWithoutDestination();
     void mprSaveCoordinatorBacksUpAndAtomicallyCommits();
+    void mprSaveCoordinatorCommitsLengthChangingOverlay();
     void mprSaveCoordinatorReplacesSourceAndRebasesTerrain();
     void mprSaveCoordinatorRejectsSourceRace();
     void mprSaveCoordinatorFailuresLeaveDestinationUntouched();
@@ -315,16 +480,31 @@ private slots:
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
     void terrainHeightmapImportIsDeterministicAndSeamAware();
+    void globalTerrainHeightOperationsKeepDimensionsAndSeams();
+    void terrainVerticalScalePoliciesAreUndoableAndExplicit();
+    void globalTerrainHeightOperationsRejectInvalidRanges();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
+    void terrainSurfaceSamplingMatchesRuntimeCellSelection();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
+    void semanticAtlasProposalIsDeterministicAndApprovalGated();
+    void semanticAtlasTransitionsCannotTransitivelyMergeMaterialAnchors();
+    void semanticAtlasTransitionsCrossTileTypeMetadata();
+    void authoredAtlasProfileMatchesZone1Catalog();
+    void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
+    void semanticAtlasReviewEditsAndStoreAreDeterministic();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
+    void overlayActivationDeactivationIsLosslessAndUndoable();
+    void overlaySculptChangesOnlyActiveOverlayGeometry();
+    void overlaySculptSynchronizesSectorSeam();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
+    void emptyGeneratedMobCanAcceptFirstRawObject();
+    void generatedMobCommitIsValidatedBackedUpAndAtomic();
 };
 
 void EnduranceDocumentTests::persistentPaintOperationSurvivesHistoryNavigation()
@@ -334,6 +514,28 @@ void EnduranceDocumentTests::persistentPaintOperationSurvivesHistoryNavigation()
     QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodMoveAxis));
     QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodRotateAxis));
     QVERIFY(!operationAllowsHistoryNavigation(eOperationMethodScaleAxis));
+}
+
+void EnduranceDocumentTests::tileBrushFirstValidSampleOwnsUndoStroke()
+{
+    CTileBrushStrokePolicy policy;
+    QVERIFY(!policy.ensureForValidSample(false, true));
+    QVERIFY(!policy.isActive());
+
+    // Regression: the press misses empty overlay space, then a move reaches an
+    // existing surface. That first valid move must open the transaction.
+    QVERIFY(policy.ensureForValidSample(true, true));
+    QVERIFY(policy.isActive());
+    QVERIFY(!policy.ensureForValidSample(true, true));
+    QVERIFY(policy.finish());
+    QVERIFY(!policy.isActive());
+
+    // A valid release after a missed press is also a complete one-sample
+    // stroke. With no history owner, no mutation may start.
+    QVERIFY(policy.ensureForValidSample(true, true));
+    QVERIFY(policy.finish());
+    QVERIFY(!policy.ensureForValidSample(true, false));
+    QVERIFY(!policy.isActive());
 }
 
 void EnduranceDocumentTests::landscapeLayerChangesResetBrushSelection()
@@ -377,6 +579,308 @@ void EnduranceDocumentTests::landscapeWheelDirectionUsesAvailableDelta()
     QCOMPARE(landscapeWheelStep(0, 0, 7), 1);
     QCOMPARE(landscapeWheelStep(0, 0, -7), -1);
     QCOMPARE(landscapeWheelStep(0, 0, 0), 0);
+}
+
+void EnduranceDocumentTests::sculptCadenceIsIndependentOfSpatialInterpolation()
+{
+    const float oneStepFraction = landscapeSculptSubstepFraction(1);
+    const float eightStepFraction = landscapeSculptSubstepFraction(8);
+    QCOMPARE(oneStepFraction, 1.0f);
+    QVERIFY(qAbs(eightStepFraction * 8.0f - oneStepFraction) < 0.000001f);
+
+    const float stepSize = 5000.0f;
+    const float strength = 0.35f;
+    const float stationaryRaw = stepSize * strength * oneStepFraction;
+    float movingRaw = 0.0f;
+    for(int step = 0; step < 8; ++step)
+        movingRaw += stepSize * strength * eightStepFraction;
+    QVERIFY(qAbs(stationaryRaw - 1750.0f) < 0.0001f);
+    QVERIFY(qAbs(movingRaw - stationaryRaw) < 0.0001f);
+
+    const float oneStampBlend = landscapeSculptEffectiveStrength(strength, 1.0f);
+    float subdividedRemaining = 1.0f;
+    for(int step = 0; step < 8; ++step)
+        subdividedRemaining *= 1.0f - landscapeSculptEffectiveStrength(
+            strength, eightStepFraction);
+    QVERIFY(qAbs(oneStampBlend - (1.0f - subdividedRemaining)) < 0.00001f);
+}
+
+void EnduranceDocumentTests::mobGraphRemovalPreservesAllOtherTopLevelBytes()
+{
+    const QByteArray root = validMob(section(0xB000, object(42, "bridge")));
+    const QByteArray graph = section(0x31415926, QByteArray(64, '\x5a'));
+    CMobDocument document;
+    CValidationReport loadReport;
+    QVERIFY2(document.loadBytes(root + graph, "graph-source.mob", &loadReport),
+             qPrintable(loadReport.toText()));
+    QVERIFY(document.hasEmbeddedAiGraph());
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(document.removeEmbeddedAiGraph(&candidate, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(candidate, root);
+    CMobDocument reopened;
+    QVERIFY(reopened.loadBytes(candidate, "graphless-result.mob", &report));
+    QVERIFY(!reopened.hasEmbeddedAiGraph());
+    QVERIFY(!reopened.hasSection(0x1E00)); // VSS_SECTION is deliberately absent.
+}
+
+void EnduranceDocumentTests::mobGraphReplacementAndInsertionAreExact()
+{
+    const QByteArray root = validMob(section(0xB000, object(42, "bridge")));
+    const QByteArray oldGraph(64, '\x2a');
+    const QByteArray newGraph(96, '\x5b');
+
+    CMobDocument withGraph;
+    CValidationReport report;
+    QVERIFY2(withGraph.loadBytes(root + section(0x31415926, oldGraph),
+                                 "graph-source.mob", &report),
+             qPrintable(report.toText()));
+    QByteArray replaced;
+    QVERIFY2(withGraph.replaceEmbeddedAiGraph(newGraph, &replaced, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(replaced, root + section(0x31415926, newGraph));
+
+    CMobDocument reopenedReplacement;
+    QVERIFY(reopenedReplacement.loadBytes(replaced, "graph-replaced.mob", &report));
+    QByteArray extracted;
+    QVERIFY(reopenedReplacement.embeddedAiGraph(&extracted, &report));
+    QCOMPARE(extracted, newGraph);
+
+    CMobDocument graphless;
+    QVERIFY(graphless.loadBytes(root, "graphless-source.mob", &report));
+    QByteArray inserted;
+    QVERIFY2(graphless.replaceEmbeddedAiGraph(newGraph, &inserted, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(inserted, root + section(0x31415926, newGraph));
+}
+
+void EnduranceDocumentTests::mobGraphOwnershipReplacementClosesRaceCheckBeforeCommit()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray graph = section(0x31415926, QByteArray(64, '\x5a'));
+    const QByteArray baseline = validMob(section(0xB000, object(42, "bridge")))
+        + graph;
+
+    CMobDocument document;
+    CValidationReport report;
+    QVERIFY2(document.loadBytes(baseline, "embedded-source.mob", &report),
+             qPrintable(report.toText()));
+    QByteArray graphless;
+    QVERIFY2(document.removeEmbeddedAiGraph(&graphless, &report),
+             qPrintable(report.toText()));
+
+    const QString path = directory.filePath(QStringLiteral("zone6.mob"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(baseline), qint64(baseline.size()));
+    file.close();
+
+    QString error;
+    QVERIFY2(atomicallyReplaceVerifiedFile(QFileInfo(path), baseline, graphless,
+                                           &error),
+             qPrintable(error));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), graphless);
+    file.close();
+
+    QVERIFY(!atomicallyReplaceVerifiedFile(QFileInfo(path), baseline, baseline,
+                                            &error));
+    QVERIFY(error.contains(QStringLiteral("changed"), Qt::CaseInsensitive));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), graphless);
+}
+
+void EnduranceDocumentTests::aiGraphPersistenceUsesExactMprBasenameAndReportsShadowing()
+{
+    const QFileInfo zone6("C:/maps/zone6.mpr");
+    const QFileInfo frozen("C:/maps/zone6_2.mpr");
+    QCOMPARE(aiGraphRuntimeSiblingPath(zone6), QString("C:/maps/zone6.grp"));
+    QCOMPARE(aiGraphRuntimeSiblingPath(frozen), QString("C:/maps/zone6_2.grp"));
+    QVERIFY(aiGraphEmbeddedSourceShadowsExternal(true));
+    QVERIFY(!aiGraphEmbeddedSourceShadowsExternal(false));
+
+    const QString warning = aiGraphSharedMobWarning(
+        QStringLiteral("zone6.mob"),
+        QStringList() << "gz6g / zone6" << "gz6f / zone6_2");
+    QVERIFY(warning.contains("zone6.mob"));
+    QVERIFY(warning.contains("zone6_2"));
+    QVERIFY(warning.contains("both", Qt::CaseInsensitive));
+}
+
+void EnduranceDocumentTests::aiGraphPersistenceConfirmationNamesSourceAndNonUndoableSave()
+{
+    const QString source = QStringLiteral("External: zone6.grp");
+    const QString notice = aiGraphPersistenceActionNotice(source);
+    QVERIFY(notice.contains(source));
+    QVERIFY(notice.contains(QStringLiteral("uses exactly this selected graph")));
+    QVERIFY(notice.contains(QStringLiteral("save the primary MOB immediately")));
+    QVERIFY(notice.contains(QStringLiteral("create a backup")));
+    QVERIFY(notice.contains(QStringLiteral("cannot be reversed")));
+    QVERIFY(notice.contains(QStringLiteral("Edit > Undo")));
+}
+
+void EnduranceDocumentTests::aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray externalGraph = syntheticValidAiGraph(0x31, 3);
+    const QByteArray embeddedGraph = syntheticValidAiGraph(0x42, 4);
+    QFile external(directory.filePath("zone6_2.grp"));
+    QVERIFY(external.open(QIODevice::WriteOnly));
+    QCOMPARE(external.write(externalGraph), qint64(externalGraph.size()));
+    external.close();
+    QFile wrong(directory.filePath("zone6.grp"));
+    QVERIFY(wrong.open(QIODevice::WriteOnly));
+    QCOMPARE(wrong.write(embeddedGraph), qint64(embeddedGraph.size()));
+    wrong.close();
+
+    const QFileInfo mpr(directory.filePath("zone6_2.mpr"));
+    const SAiGraphPreviewSource selected = selectAiGraphPreviewSource(
+        QByteArray(), QStringLiteral("secondary.mob"), mpr);
+    QCOMPARE(selected.bytes, externalGraph);
+    QCOMPARE(selected.path, QDir::cleanPath(directory.filePath("zone6_2.grp")));
+    QVERIFY(selected.label.contains("zone6_2.grp"));
+    QVERIFY(!selected.embedded);
+
+    const SAiGraphPreviewSource shadowed = selectAiGraphPreviewSource(
+        embeddedGraph, QStringLiteral("zone6.mob"), mpr);
+    QCOMPARE(shadowed.bytes, embeddedGraph);
+    QVERIFY(shadowed.embedded);
+    QVERIFY(shadowed.path.isEmpty());
+    QVERIFY(shadowed.label.contains("zone6.mob"));
+}
+
+void EnduranceDocumentTests::aiGraphFileCommitIsValidatedBackedUpAndAtomic()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray original = syntheticValidAiGraph(0x11, 1);
+    const QByteArray replacement = syntheticValidAiGraph(0x22, 2);
+    QVERIFY(!original.isEmpty());
+    QVERIFY(!replacement.isEmpty());
+    QVERIFY(original != replacement);
+
+    const QFileInfo destination(directory.filePath("zone6_2.grp"));
+    QFile file(destination.absoluteFilePath());
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(original), qint64(original.size()));
+    file.close();
+
+    SAiGraphFileCommitRequest request;
+    request.destination = destination;
+    request.graphBytes = replacement;
+    request.backupRootOverride = directory.filePath("backups");
+    const SAiGraphFileCommitResult committed = commitValidatedAiGraphFile(request);
+    QVERIFY2(committed.success, qPrintable(committed.error));
+    QVERIFY(!committed.noOp);
+    QVERIFY(QFileInfo::exists(committed.backupPath));
+    QFile reopened(destination.absoluteFilePath());
+    QVERIFY(reopened.open(QIODevice::ReadOnly));
+    QCOMPARE(reopened.readAll(), replacement);
+
+    request.graphBytes = original;
+    request.simulateAtomicCommitFailure = true;
+    const SAiGraphFileCommitResult failed = commitValidatedAiGraphFile(request);
+    QVERIFY(!failed.success);
+    QCOMPARE(failed.phase, QString("atomic-replacement"));
+    QFile unchanged(destination.absoluteFilePath());
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), replacement);
+
+    SAiGraphFileCommitRequest invalid;
+    invalid.destination = QFileInfo(directory.filePath("invalid.grp"));
+    invalid.graphBytes = QByteArray("not-a-graph");
+    const SAiGraphFileCommitResult refused = commitValidatedAiGraphFile(invalid);
+    QVERIFY(!refused.success);
+    QVERIFY(!invalid.destination.exists());
+}
+
+void EnduranceDocumentTests::aiGraphOwnershipSwitchValidationNeverRewritesExternalFile()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString graphPath = directory.filePath("zone6.grp");
+    const QByteArray graphBytes = syntheticValidAiGraph(0x35, 7);
+    QFile graph(graphPath);
+    QVERIFY(graph.open(QIODevice::WriteOnly));
+    QCOMPARE(graph.write(graphBytes), qint64(graphBytes.size()));
+    graph.close();
+
+    QString error;
+    QVERIFY2(validateExistingAiGraphFile(QFileInfo(graphPath), 1, 1,
+                                         nullptr, &error),
+             qPrintable(error));
+    QVERIFY(graph.open(QIODevice::ReadOnly));
+    QCOMPARE(graph.readAll(), graphBytes);
+    graph.close();
+
+    const QString missingPath = directory.filePath("missing.grp");
+    QVERIFY(!validateExistingAiGraphFile(QFileInfo(missingPath), 1, 1,
+                                          nullptr, &error));
+    QVERIFY(!QFileInfo::exists(missingPath));
+    QVERIFY(graph.open(QIODevice::ReadOnly));
+    QCOMPARE(graph.readAll(), graphBytes);
+}
+
+void EnduranceDocumentTests::existingGraphComponentReuseIsWarningNotBlocker()
+{
+    QVector<SAiGraphLayer> layers(CAiGraphDocument::LayerCount);
+    for(SAiGraphLayer& layer : layers)
+    {
+        layer.weights.fill(qint16(-1), 2 * CAiGraphDocument::DirectionCount);
+        layer.packedPositions = QByteArray(2, char(0x11));
+        layer.components.fill(1, 2);
+    }
+    CAiGraphDocument graph;
+    QString error;
+    QVERIFY2(graph.initializePreview(2, 1, layers, &error), qPrintable(error));
+    QVERIFY(!graph.validateRuntimeCompatibility(2, 1, &error));
+    QVERIFY(error.contains(QStringLiteral("disconnected"), Qt::CaseInsensitive));
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("legacy.grp"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray bytes = graph.serialize(&error);
+    QCOMPARE(file.write(bytes), qint64(bytes.size()));
+    file.close();
+
+    QStringList warnings;
+    QVERIFY2(validateExistingAiGraphFile(QFileInfo(path), 2, 1,
+                                         &warnings, &error), qPrintable(error));
+    QVERIFY(!warnings.isEmpty());
+    QVERIFY(warnings.join(QStringLiteral("\n")).contains(
+        QStringLiteral("long-distance"), Qt::CaseInsensitive));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), bytes);
+}
+
+void EnduranceDocumentTests::generatedGraphComponentReuseIsRecoloredAutomatically()
+{
+    QVector<SAiGraphLayer> layers(CAiGraphDocument::LayerCount);
+    for(SAiGraphLayer& layer : layers)
+    {
+        layer.weights.fill(qint16(-1), 2 * CAiGraphDocument::DirectionCount);
+        layer.packedPositions = QByteArray(2, char(0x11));
+        layer.components.fill(1, 2);
+    }
+    CAiGraphDocument graph;
+    QString error;
+    QVERIFY2(graph.initializePreview(2, 1, layers, &error), qPrintable(error));
+    QVERIFY(!graph.validateRuntimeCompatibility(2, 1, &error));
+
+    QVERIFY2(graph.recolorConnectedComponents(&error), qPrintable(error));
+    QVERIFY2(graph.validateRuntimeCompatibility(2, 1, &error), qPrintable(error));
+    QVERIFY(graph.component(0, 0, 0) != graph.component(0, 1, 0));
+
+    const QByteArray bytes = graph.serialize(&error);
+    QVERIFY2(!bytes.isEmpty(), qPrintable(error));
+    CAiGraphDocument reopened;
+    QVERIFY2(reopened.parse(bytes, &error), qPrintable(error));
+    QVERIFY2(reopened.validateRuntimeCompatibility(2, 1, &error), qPrintable(error));
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()
@@ -1231,6 +1735,493 @@ void EnduranceDocumentTests::unchangedMprIsByteIdentical()
     QVERIFY(!document.isDirty());
 }
 
+void EnduranceDocumentTests::ownedRootProjectionAddsDiplomacyAndScriptLosslessly()
+{
+    const QByteArray unknownBefore = section(0xDEADBEEF, "opaque-before");
+    const QByteArray unknownAfter = section(0xFEEDC0DE, "opaque-after");
+    const QByteArray objects = section(0xB000, object(42, "trap"));
+    const QByteArray trailingGraph = section(0x31415926,
+                                             syntheticValidAiGraph(0x31, 7));
+    const QByteArray sourceBytes = validMob(unknownBefore + objects + unknownAfter)
+        + trailingGraph;
+    const QByteArray cleanBytes = validMob(objects) + trailingGraph;
+    const QByteArray diplomacy = section(0xDDDDDDD1,
+        section(0xDDDDDDD2, QByteArray(32 * 32 * int(sizeof(quint32)), '\0')) +
+        stringArray(0xDDDDDDD3, QStringList() << "Neutral"));
+    const QByteArray script = encryptedScript("function main() end");
+    const QByteArray editedBytes = validMob(script + diplomacy + objects) + trailingGraph;
+
+    CMobEditTransaction transaction;
+    QByteArray candidate;
+    QString saveClass;
+    CValidationReport report;
+    QVERIFY2(CMobDocument::buildOwnedRootProjectionCandidate(
+        sourceBytes, "owned-root-source.mob", cleanBytes, editedBytes,
+        &transaction, &candidate, &saveClass, &report), qPrintable(report.toText()));
+    QCOMPARE(saveClass, QString("OWNED_ROOT_STRUCTURE"));
+    QCOMPARE(candidate, validMob(unknownBefore + script + diplomacy + objects + unknownAfter)
+                            + trailingGraph);
+
+    CMobDocument reopened;
+    QVERIFY2(reopened.loadBytes(candidate, "owned-root-candidate.mob", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(reopened.objects().size(), 1);
+    QCOMPARE(reopened.objects().front().nid, quint32(42));
+}
+
+void EnduranceDocumentTests::ownedRootProjectionRejectsUnknownStructuralEdit()
+{
+    const QByteArray sourceBytes = validMob(section(0xB000, object(42, "trap")));
+    const QByteArray editedBytes = validMob(section(0xCAFEBABE, "invented") +
+                                             section(0xB000, object(42, "trap")));
+    CMobEditTransaction transaction;
+    QByteArray candidate("must-clear");
+    QString saveClass;
+    CValidationReport report;
+    QVERIFY(!CMobDocument::buildOwnedRootProjectionCandidate(
+        sourceBytes, "owned-root-source.mob", sourceBytes, editedBytes,
+        &transaction, &candidate, &saveClass, &report));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::mprCanvasResizeCropsAndRenamesRetainedSectorLosslessly()
+{
+    const QByteArray left = syntheticLandSector(1200);
+    const QByteArray right = syntheticLandSector(42000);
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticTwoSectorMpr(left, right),
+                                "crop-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 1;
+    request.sectorCountY = 1;
+    request.oldTileOffsetX = -16;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+    QVERIFY(candidate != baseline.originalBytes());
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "crop-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.mapInfo().sectorCountX, quint32(1));
+    QCOMPARE(reopened.mapInfo().sectorCountY, quint32(1));
+    QCOMPARE(reopened.memberPayload("CaveSet000000.SEC"), right);
+    QVERIFY(reopened.memberPayload("CaveSet001000.SEC").isEmpty());
+}
+
+void EnduranceDocumentTests::mprCanvasResizeExpandsBoundaryWithRuntimeReachableMembers()
+{
+    const QByteArray source = syntheticLandSector(17321);
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(source), "expand-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 3;
+    request.sectorCountY = 2;
+    request.oldTileOffsetX = 16;
+    request.oldTileOffsetY = 16;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "expand-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.mapInfo().sectorCountX, quint32(3));
+    QCOMPARE(reopened.mapInfo().sectorCountY, quint32(2));
+    QCOMPARE(reopened.memberPayload("unknown.bin"), QByteArray("opaque-unknown-payload"));
+    QCOMPARE(reopened.memberPayload("CaveSet001001.SEC"), source);
+    QCOMPARE(sectorHeight(reopened.memberPayload("CaveSet000000.SEC"), 0, 0),
+             quint16(17321));
+
+    for(const SMprArchiveMember& member : reopened.members())
+        QCOMPARE(runtimeMprLookup(candidate, member.name), member.payload);
+}
+
+void EnduranceDocumentTests::mprCanvasResizeSupportsTileOffsetsWithoutSeams()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticTwoSectorMpr(
+                                    syntheticLandSector(1200),
+                                    syntheticLandSector(42000)),
+                                "tile-offset-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 3;
+    request.sectorCountY = 1;
+    request.oldTileOffsetX = 3;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "tile-offset-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(sectorHeight(reopened.memberPayload("CaveSet000000.SEC"), 6, 10),
+             quint16(1200));
+    QCOMPARE(sectorHeight(reopened.memberPayload("CaveSet001000.SEC"), 6, 10),
+             quint16(42000));
+    QCOMPARE(sectorHeight(reopened.memberPayload("CaveSet000000.SEC"), 32, 10),
+             sectorHeight(reopened.memberPayload("CaveSet001000.SEC"), 0, 10));
+}
+
+void EnduranceDocumentTests::mprCanvasResizeClosedEdgeTapersAndDeactivatesOverlay()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(), "taper-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 1;
+    request.sectorCountY = 1;
+    request.closeEdges = true;
+    request.edgeTaperTiles = 2;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "taper-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.sectors().size(), 1);
+    const SMprSectorInfo& sector = reopened.sectors().first();
+    QVERIFY(sector.hasOverlay);
+    QCOMPARE(sector.overlayMaterialIndices.at(1), qint16(-1));
+    QVERIFY(sector.overlayMaterialIndices.at(5 * 16 + 5) >= 0);
+}
+
+void EnduranceDocumentTests::mprCanvasResizeAcceptsStructural32By32Ceiling()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(syntheticLandSector(500)),
+                                "maximum-source.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+    SMprCanvasResizeRequest request;
+    request.sectorCountX = 32;
+    request.sectorCountY = 32;
+    QByteArray candidate;
+    CValidationReport report;
+    QVERIFY2(baseline.buildResizedCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.loadBytes(candidate, "maximum-result.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.sectors().size(), 32 * 32);
+    QCOMPARE(reopened.mapInfo().sectorCountX * 8, quint32(256));
+    QCOMPARE(reopened.mapInfo().sectorCountY * 8, quint32(256));
+}
+
+void EnduranceDocumentTests::mprCanvasResizeRejectsInvalidOrEmptyIntersection()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY(baseline.loadBytes(syntheticMpr(syntheticLandSector(500)),
+                               "refusal-source.mpr", &loadReport));
+    QByteArray candidate("must-clear");
+    CValidationReport tooLargeReport;
+    SMprCanvasResizeRequest tooLarge;
+    tooLarge.sectorCountX = 33;
+    tooLarge.sectorCountY = 1;
+    QVERIFY(!baseline.buildResizedCanvas(tooLarge, &candidate, &tooLargeReport));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(tooLargeReport.hasErrors());
+
+    CValidationReport emptyReport;
+    SMprCanvasResizeRequest empty;
+    empty.sectorCountX = 1;
+    empty.sectorCountY = 1;
+    empty.oldTileOffsetX = 32;
+    QVERIFY(!baseline.buildResizedCanvas(empty, &candidate, &emptyReport));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(emptyReport.hasErrors());
+}
+
+void EnduranceDocumentTests::mprCanvasResizeCommitIsSaveAsOnlyAndAtomic()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QFileInfo source(root.filePath("source.mpr"));
+    QFile sourceFile(source.absoluteFilePath());
+    QVERIFY(sourceFile.open(QIODevice::WriteOnly));
+    const QByteArray sourceBytes = syntheticMpr(syntheticLandSector(1000));
+    QCOMPARE(sourceFile.write(sourceBytes), qint64(sourceBytes.size()));
+    sourceFile.close();
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY(baseline.load(source, &report));
+
+    SMprCanvasResizeRequest resize;
+    resize.sectorCountX = 2;
+    resize.sectorCountY = 1;
+    SMprSaveCommitRequest overwriteSource;
+    overwriteSource.source = source;
+    overwriteSource.destination = source;
+    overwriteSource.backupRootOverride = root.filePath("backups");
+    const SMprSaveCommitResult refused = commitStagedMprCanvasResize(
+        baseline, baseline, resize, overwriteSource);
+    QVERIFY(!refused.success);
+    QFile unchanged(source.absoluteFilePath());
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), sourceBytes);
+
+    const QFileInfo destination(root.filePath("resized.mpr"));
+    SMprSaveCommitRequest commit;
+    commit.source = source;
+    commit.destination = destination;
+    commit.backupRootOverride = root.filePath("backups");
+    const SMprSaveCommitResult result = commitStagedMprCanvasResize(
+        baseline, baseline, resize, commit);
+    QVERIFY2(result.success, qPrintable(result.error));
+    QVERIFY(destination.exists());
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.load(destination, &reopenReport), qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.mapInfo().sectorCountX, quint32(2));
+    QCOMPARE(reopened.mapInfo().sectorCountY, quint32(1));
+}
+
+void EnduranceDocumentTests::newMprFromTemplateIsDeterministicSeamSafeAndRuntimeReachable()
+{
+    CMprDocument terrainTemplate;
+    CValidationReport templateReport;
+    QVERIFY2(terrainTemplate.loadBytes(syntheticMpr(), "template.mpr", &templateReport),
+             qPrintable(templateReport.toText()));
+    SMprCreationRequest request;
+    request.innerNamespace = QStringLiteral("NewLand");
+    request.sectorCountX = 2;
+    request.sectorCountY = 2;
+    request.maxZ = 250.0f;
+    request.flatRawHeight = 23456;
+    SMprPackedTile initialTile;
+    initialTile.tileIndex = 1;
+    initialTile.atlasIndex = 0;
+    initialTile.rotation = 2;
+    request.initialPackedTile = initialTile.encode();
+    request.closeEdges = true;
+    request.edgeTaperTiles = 2;
+    QByteArray first;
+    QByteArray second;
+    CValidationReport firstReport;
+    CValidationReport secondReport;
+    QVERIFY2(terrainTemplate.buildNewCanvas(request, &first, &firstReport),
+             qPrintable(firstReport.toText()));
+    QVERIFY2(terrainTemplate.buildNewCanvas(request, &second, &secondReport),
+             qPrintable(secondReport.toText()));
+    QCOMPARE(first, second);
+
+    CMprDocument created;
+    CValidationReport createdReport;
+    QVERIFY2(created.loadBytes(first, "created.mpr", &createdReport),
+             qPrintable(createdReport.toText()));
+    QCOMPARE(created.mapInfo().innerNamespace, QStringLiteral("NewLand"));
+    QCOMPARE(created.mapInfo().sectorCountX, quint32(2));
+    QCOMPARE(created.mapInfo().sectorCountY, quint32(2));
+    QCOMPARE(created.mapInfo().maxZ, 250.0f);
+    QCOMPARE(created.mapInfo().textureCount, terrainTemplate.mapInfo().textureCount);
+    QCOMPARE(created.mapInfo().materialCount, terrainTemplate.mapInfo().materialCount);
+    QCOMPARE(created.mapInfo().tileTypes, terrainTemplate.mapInfo().tileTypes);
+    QCOMPARE(created.sectors().size(), 4);
+    CTerrainEditModel terrain;
+    CValidationReport terrainReport;
+    QVERIFY2(terrain.load(created, &terrainReport), qPrintable(terrainReport.toText()));
+    QVERIFY(!terrain.hasSeamConflicts());
+    QCOMPARE(sectorHeight(created.memberPayload("NewLand000000.SEC"), 32, 20),
+             sectorHeight(created.memberPayload("NewLand001000.SEC"), 0, 20));
+    QVERIFY(terrain.height(0, 0) < request.flatRawHeight);
+    QCOMPARE(terrain.height(32, 32), request.flatRawHeight);
+    for(const SMprArchiveMember& member : created.members())
+        QCOMPARE(runtimeMprLookup(first, member.name), member.payload);
+
+    SMprCreationRequest heightmapRequest = request;
+    heightmapRequest.closeEdges = false;
+    heightmapRequest.heightmapWidth = 2;
+    heightmapRequest.heightmapHeight = 2;
+    heightmapRequest.heightmapSamples = {0.0f, 1.0f, 0.25f, 0.75f};
+    heightmapRequest.heightmapMinimumRaw = 1000.0f;
+    heightmapRequest.heightmapMaximumRaw = 5000.0f;
+    QByteArray heightmapped;
+    CValidationReport heightmapReport;
+    QVERIFY2(terrainTemplate.buildNewCanvas(heightmapRequest, &heightmapped,
+                                             &heightmapReport),
+             qPrintable(heightmapReport.toText()));
+    CMprDocument heightmappedDocument;
+    QVERIFY(heightmappedDocument.loadBytes(heightmapped, "heightmapped.mpr",
+                                            &heightmapReport));
+    CTerrainEditModel heightmappedTerrain;
+    QVERIFY(heightmappedTerrain.load(heightmappedDocument, &heightmapReport));
+    QCOMPARE(heightmappedTerrain.height(0, 0), quint16(1000));
+    QCOMPARE(heightmappedTerrain.height(64, 0), quint16(5000));
+    QCOMPARE(heightmappedTerrain.height(0, 64), quint16(2000));
+    QCOMPARE(heightmappedTerrain.height(64, 64), quint16(4000));
+    QVERIFY(!heightmappedTerrain.hasSeamConflicts());
+
+    heightmapRequest.heightmapMinimumRaw = 5000.0f;
+    heightmapRequest.heightmapMaximumRaw = 1000.0f;
+    QByteArray invertedHeightmapped;
+    CValidationReport invertedHeightmapReport;
+    QVERIFY2(terrainTemplate.buildNewCanvas(heightmapRequest,
+                                             &invertedHeightmapped,
+                                             &invertedHeightmapReport),
+             qPrintable(invertedHeightmapReport.toText()));
+    CMprDocument invertedHeightmappedDocument;
+    QVERIFY(invertedHeightmappedDocument.loadBytes(invertedHeightmapped,
+        "inverted-heightmapped.mpr", &invertedHeightmapReport));
+    CTerrainEditModel invertedHeightmappedTerrain;
+    QVERIFY(invertedHeightmappedTerrain.load(invertedHeightmappedDocument,
+                                              &invertedHeightmapReport));
+    QCOMPARE(invertedHeightmappedTerrain.height(0, 0), quint16(5000));
+    QCOMPARE(invertedHeightmappedTerrain.height(64, 0), quint16(1000));
+    QCOMPARE(invertedHeightmappedTerrain.height(0, 64), quint16(4000));
+    QCOMPARE(invertedHeightmappedTerrain.height(64, 64), quint16(2000));
+    QVERIFY(!invertedHeightmappedTerrain.hasSeamConflicts());
+
+    SMprCreationRequest overlayRequest = request;
+    overlayRequest.closeEdges = false;
+    overlayRequest.createOverlayPlane = true;
+    overlayRequest.overlayRawHeight = 42000;
+    overlayRequest.overlayPackedTile = initialTile.encode();
+    overlayRequest.overlayMaterialIndex = 1;
+    overlayRequest.taperOverlayEdges = true;
+    overlayRequest.overlayEdgeTaperTiles = 2;
+    QByteArray overlaid;
+    CValidationReport overlayReport;
+    QVERIFY2(terrainTemplate.buildNewCanvas(overlayRequest, &overlaid,
+                                             &overlayReport),
+             qPrintable(overlayReport.toText()));
+    CMprDocument overlaidDocument;
+    QVERIFY2(overlaidDocument.loadBytes(overlaid, "overlaid.mpr", &overlayReport),
+             qPrintable(overlayReport.toText()));
+    QCOMPARE(overlaidDocument.sectors().size(), 4);
+    for(const SMprSectorInfo& sector : overlaidDocument.sectors())
+        QVERIFY(sector.hasOverlay);
+    CTerrainEditModel overlaidTerrain;
+    QVERIFY2(overlaidTerrain.load(overlaidDocument, &overlayReport),
+             qPrintable(overlayReport.toText()));
+    QVERIFY(!overlaidTerrain.hasSeamConflicts());
+    bool overlayAvailable = false;
+    QCOMPARE(overlaidTerrain.overlayMaterialIndex(10, 10, &overlayAvailable),
+             qint16(1));
+    QVERIFY(overlayAvailable);
+    QCOMPARE(overlaidTerrain.packedTile(10, 10,
+        ETerrainTileLayer::Overlay, &overlayAvailable), initialTile.encode());
+    QVERIFY(overlayAvailable);
+    QCOMPARE(overlaySectorHeight(
+        overlaidDocument.memberPayload("NewLand000000.SEC"), 16, 16),
+        quint16(42000));
+    QCOMPARE(overlaySectorHeight(
+        overlaidDocument.memberPayload("NewLand000000.SEC"), 0, 0),
+        quint16(0));
+    QCOMPARE(overlaySectorHeight(
+        overlaidDocument.memberPayload("NewLand000000.SEC"), 32, 20),
+        overlaySectorHeight(
+            overlaidDocument.memberPayload("NewLand001000.SEC"), 0, 20));
+}
+
+void EnduranceDocumentTests::newMprRejectsInventedNamespaceAndInvalidDimensions()
+{
+    CMprDocument terrainTemplate;
+    CValidationReport templateReport;
+    QVERIFY(terrainTemplate.loadBytes(syntheticMpr(), "template.mpr", &templateReport));
+    QByteArray candidate("must-clear");
+    SMprCreationRequest invalid;
+    invalid.innerNamespace = QStringLiteral("bad/name");
+    CValidationReport namespaceReport;
+    QVERIFY(!terrainTemplate.buildNewCanvas(invalid, &candidate, &namespaceReport));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(namespaceReport.hasErrors());
+    invalid.innerNamespace = QStringLiteral("valid");
+    invalid.sectorCountX = 33;
+    CValidationReport dimensionReport;
+    QVERIFY(!terrainTemplate.buildNewCanvas(invalid, &candidate, &dimensionReport));
+    QVERIFY(candidate.isEmpty());
+}
+
+void EnduranceDocumentTests::generatedMprCommitIsValidatedBackedUpAndAtomic()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    CMprDocument terrainTemplate;
+    CValidationReport report;
+    QVERIFY(terrainTemplate.loadBytes(syntheticMpr(), "template.mpr", &report));
+    SMprCreationRequest request;
+    request.innerNamespace = QStringLiteral("Created");
+    QByteArray candidate;
+    QVERIFY2(terrainTemplate.buildNewCanvas(request, &candidate, &report),
+             qPrintable(report.toText()));
+    const QFileInfo destination(directory.filePath("created.mpr"));
+    SMprSaveCommitRequest commit;
+    commit.destination = destination;
+    commit.backupRootOverride = directory.filePath("backups");
+    const SMprSaveCommitResult created = commitGeneratedMpr(candidate, commit);
+    QVERIFY2(created.success, qPrintable(created.error));
+    QVERIFY(created.backupPath.isEmpty());
+    QFile result(destination.absoluteFilePath());
+    QVERIFY(result.open(QIODevice::ReadOnly));
+    QCOMPARE(result.readAll(), candidate);
+    result.close();
+
+    QByteArray replacement = candidate;
+    replacement.append('x');
+    commit.simulateAtomicCommitFailure = true;
+    const SMprSaveCommitResult failed = commitGeneratedMpr(replacement, commit);
+    QVERIFY(!failed.success);
+    QFile unchanged(destination.absoluteFilePath());
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), candidate);
+}
+
+void EnduranceDocumentTests::mprRecoveryAutosaveUsesValidatedCandidateAndLeavesSourceUntouched()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray original = syntheticMpr(syntheticLandSector(1000));
+    const QFileInfo source(directory.filePath("source.mpr"));
+    QFile sourceFile(source.absoluteFilePath());
+    QVERIFY(sourceFile.open(QIODevice::WriteOnly));
+    QCOMPARE(sourceFile.write(original), qint64(original.size()));
+    sourceFile.close();
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY(baseline.load(source, &report));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline, &report));
+    const STerrainHeightCommand flatten = terrain.makeGlobalFlatten(2222);
+    QVERIFY(terrain.apply(flatten, true, &report, true));
+    CMprEditTransaction transaction(QStringLiteral("autosave terrain"));
+    QVERIFY(terrain.appendSectorEdits(&transaction, &report));
+    QByteArray candidate;
+    QVERIFY(baseline.applyTransaction(transaction, &candidate, &report));
+    QVERIFY(candidate != original);
+    const SBackupResult snapshot = CBackupManager(
+        directory.filePath("backups")).snapshotAutosave(source, candidate);
+    QVERIFY2(snapshot.success, qPrintable(snapshot.error));
+    QFile autosave(snapshot.backupPath);
+    QVERIFY(autosave.open(QIODevice::ReadOnly));
+    QCOMPARE(autosave.readAll(), candidate);
+    QFile untouched(source.absoluteFilePath());
+    QVERIFY(untouched.open(QIODevice::ReadOnly));
+    QCOMPARE(untouched.readAll(), original);
+}
+
 void EnduranceDocumentTests::syntheticMprPreservesArchiveNamespaceAndInactiveSentinel()
 {
     const QByteArray bytes = syntheticMpr();
@@ -1314,20 +2305,119 @@ void EnduranceDocumentTests::mprSectorPatchIsProvenanceCheckedAndLocal()
     QCOMPARE(diff.entries().front().memberName, sector.name);
 }
 
-void EnduranceDocumentTests::mprLengthChangingAndStaleTransactionsFailClosed()
+void EnduranceDocumentTests::mprMaxZPatchIsProvenanceCheckedAndLocal()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(), "maxz-baseline.mpr", &loadReport),
+             qPrintable(loadReport.toText()));
+    const float originalMaxZ = baseline.mapInfo().maxZ;
+
+    CMprEditTransaction noOp("no-op maxZ");
+    QVERIFY(baseline.appendMaxZEdit(originalMaxZ, &noOp));
+    QVERIFY(noOp.isEmpty());
+
+    CMprEditTransaction transaction("change synthetic maxZ");
+    CValidationReport editReport;
+    QVERIFY2(baseline.appendMaxZEdit(originalMaxZ * 1.5f, &transaction, &editReport),
+             qPrintable(editReport.toText()));
+    QCOMPARE(transaction.edits().size(), 1);
+    QCOMPARE(transaction.edits().front().memberName, baseline.mapInfo().memberName);
+
+    QByteArray candidateBytes;
+    QVERIFY2(baseline.applyTransaction(transaction, &candidateBytes, &editReport),
+             qPrintable(editReport.toText()));
+    QCOMPARE(candidateBytes.size(), baseline.originalBytes().size());
+
+    CMprDocument candidate;
+    CValidationReport reopenReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "maxz-candidate.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(candidate.mapInfo().maxZ, originalMaxZ * 1.5f);
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(candidate.memberPayload(baseline.sectors().front().memberName),
+             baseline.memberPayload(baseline.sectors().front().memberName));
+    const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, candidate);
+    QCOMPARE(diff.entries().size(), 1);
+    QCOMPARE(diff.entries().front().memberName, baseline.mapInfo().memberName);
+
+    CMprEditTransaction invalid("invalid maxZ");
+    CValidationReport invalidReport;
+    QVERIFY(!baseline.appendMaxZEdit(0.0f, &invalid, &invalidReport));
+    QVERIFY(invalid.isEmpty());
+    QVERIFY(invalidReport.hasErrors());
+    QVERIFY(!baseline.appendMaxZEdit(-1.0f, &invalid));
+    QVERIFY(!baseline.appendMaxZEdit(std::numeric_limits<float>::infinity(), &invalid));
+    QVERIFY(!baseline.appendMaxZEdit(std::numeric_limits<float>::quiet_NaN(), &invalid));
+    QVERIFY(!baseline.appendMaxZEdit(originalMaxZ * 2.0f, nullptr));
+}
+
+void EnduranceDocumentTests::mprVerticalScaleTransactionReopensWithDerivedNormals()
+{
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(), "scale-baseline.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(baseline, &report), qPrintable(report.toText()));
+    const STerrainVerticalScaleCommand scale = terrain.makeVerticalScale(
+        baseline.mapInfo().maxZ * 1.25f,
+        ETerrainVerticalScalePolicy::ScaleTerrain);
+    QVERIFY(scale.valid);
+    QVERIFY(terrain.apply(scale, true, &report));
+
+    CMprEditTransaction transaction("scale maxZ and rebuild derived normals");
+    QVERIFY2(terrain.appendSectorEdits(&transaction, &report), qPrintable(report.toText()));
+    QVERIFY2(baseline.appendMaxZEdit(terrain.maxZ(), &transaction, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(transaction.edits().size(), 2);
+
+    QByteArray candidateBytes;
+    QVERIFY2(baseline.applyTransaction(transaction, &candidateBytes, &report),
+             qPrintable(report.toText()));
+    CMprDocument candidate;
+    CValidationReport reopenReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "scale-candidate.mpr", &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(candidate.mapInfo().maxZ, scale.afterMaxZ);
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    const CMprSemanticDiff diff = CMprSemanticDiff::compare(baseline, candidate);
+    QCOMPARE(diff.entries().size(), 2);
+    QVERIFY(std::any_of(diff.entries().constBegin(), diff.entries().constEnd(),
+        [&baseline](const SMprDocumentDiffEntry& entry) {
+            return entry.memberName == baseline.mapInfo().memberName;
+        }));
+    QVERIFY(std::any_of(diff.entries().constBegin(), diff.entries().constEnd(),
+        [&baseline](const SMprDocumentDiffEntry& entry) {
+            return entry.memberName == baseline.sectors().front().memberName;
+        }));
+}
+
+void EnduranceDocumentTests::mprLengthChangingTransactionsRelocateAndStaleFailClosed()
 {
     CMprDocument document;
     CValidationReport loadReport;
     QVERIFY(document.loadBytes(syntheticMpr(), "synthetic.mpr", &loadReport));
     const SMprArchiveMember sector = document.members().at(2);
 
-    CMprEditTransaction lengthChange("unproven overlay structure change");
+    CMprEditTransaction lengthChange("proven append-only overlay structure change");
     lengthChange.replaceMemberPayload(sector.name, sector.sha256, sector.payload + QByteArray("x"));
-    QByteArray output("must be cleared");
+    QByteArray output;
     CValidationReport lengthReport;
-    QVERIFY(!document.applyTransaction(lengthChange, &output, &lengthReport));
-    QVERIFY(output.isEmpty());
-    QVERIFY(lengthReport.hasErrors());
+    QVERIFY2(document.applyTransaction(lengthChange, &output, &lengthReport),
+             qPrintable(lengthReport.toText()));
+    CMprDocument relocated;
+    CValidationReport relocatedReport;
+    QVERIFY2(relocated.loadBytes(output, "relocated.mpr", &relocatedReport),
+             qPrintable(relocatedReport.toText()));
+    QCOMPARE(relocated.memberPayload(sector.name), sector.payload + QByteArray("x"));
+    QCOMPARE(relocated.memberPayload("unknown.bin"), document.memberPayload("unknown.bin"));
+    QCOMPARE(relocated.memberPayload("caveset.mp"), document.memberPayload("caveset.mp"));
+    QCOMPARE(relocated.members().at(2).nextIndex, sector.nextIndex);
+    QCOMPARE(relocated.members().at(2).lastWriteTime, sector.lastWriteTime);
+    QCOMPARE(relocated.members().at(2).encodedName, sector.encodedName);
+    QVERIFY(relocated.members().at(2).dataOffset != sector.dataOffset);
+    QVERIFY(output.size() > document.originalBytes().size());
 
     CMprEditTransaction stale("stale edit");
     stale.replaceMemberPayload(sector.name, QByteArray(64, '0'), sector.payload);
@@ -1437,6 +2527,59 @@ void EnduranceDocumentTests::mprSaveCoordinatorBacksUpAndAtomicallyCommits()
     QCOMPARE(QString::fromLatin1(QCryptographicHash::hash(
                  committed, QCryptographicHash::Sha256).toHex()),
              result.candidateSha256);
+}
+
+void EnduranceDocumentTests::mprSaveCoordinatorCommitsLengthChangingOverlay()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray original = syntheticMpr(syntheticLandSector(900));
+    const QString sourcePath = dir.filePath("source.mpr");
+    const QString destinationPath = dir.filePath("destination.mpr");
+    for(const QString& path : {sourcePath, destinationPath})
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(original), qint64(original.size()));
+    }
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.load(QFileInfo(sourcePath), &report), qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline));
+    STerrainTileBrush point;
+    point.centerX = 4.0f;
+    point.centerY = 5.0f;
+    point.radius = 0.0f;
+    const SOverlaySurfaceCommand activation = terrain.makeOverlayActivation(
+        point, 1, 0, 1, 0, &report);
+    QVERIFY2(!activation.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(terrain.apply(activation, true, &report));
+    CMprEditTransaction transaction("commit structural overlay activation");
+    QVERIFY(terrain.appendSectorEdits(&transaction, &report));
+
+    SMprSaveCommitRequest request;
+    request.source = QFileInfo(sourcePath);
+    request.destination = QFileInfo(destinationPath);
+    request.backupRootOverride = dir.filePath("backups");
+    const SMprSaveCommitResult result =
+        commitStagedMprTransaction(baseline, transaction, request);
+    QVERIFY2(result.success, qPrintable(result.phase + ": " + result.error));
+    QCOMPARE(result.changedMembers,
+             QStringList({QStringLiteral("CaveSet000000.SEC")}));
+    QFile backup(result.backupPath);
+    QVERIFY(backup.open(QIODevice::ReadOnly));
+    QCOMPARE(backup.readAll(), original);
+    CMprDocument reopened;
+    CValidationReport reopenReport;
+    QVERIFY2(reopened.load(QFileInfo(destinationPath), &reopenReport),
+             qPrintable(reopenReport.toText()));
+    QCOMPARE(reopened.sectors().front().type, quint8(3));
+    CTerrainEditModel rebound;
+    QVERIFY(rebound.load(reopened));
+    bool available = false;
+    QCOMPARE(rebound.overlayMaterialIndex(4, 5, &available), qint16(1));
+    QVERIFY(available);
 }
 
 void EnduranceDocumentTests::mprSaveCoordinatorReplacesSourceAndRebasesTerrain()
@@ -1783,6 +2926,33 @@ void EnduranceDocumentTests::canonicalTerrainSeamsAreEditedAndUndoneTogether()
     for(int index = 0; index < firstTransaction.edits().size(); ++index)
         QCOMPARE(redoneTransaction.edits().at(index).replacementPayload,
                  firstTransaction.edits().at(index).replacementPayload);
+
+    // Fresh reopen alone is insufficient: a RES/MPR can parse while two SECs
+    // disagree about their shared land edge. Staging must reject a newly split
+    // seam before the candidate can replace or be saved beside the source.
+    CMprDocument seamBaseline;
+    CValidationReport seamBaselineReport;
+    QVERIFY2(seamBaseline.loadBytes(syntheticTwoSectorMpr(
+                sources.at(0).payload, sources.at(1).payload),
+            "synthetic-two-sector.mpr", &seamBaselineReport),
+        qPrintable(seamBaselineReport.toText()));
+    QByteArray brokenRight = sources.at(1).payload;
+    const int splitHeightOffset = 5 + (10 * 33) * 8 + 2;
+    brokenRight[splitHeightOffset] = char(0);
+    brokenRight[splitHeightOffset + 1] = char(0);
+    const SMprSectorInfo rightInfo = seamBaseline.sectors().at(1);
+    const SMprArchiveMember rightMember = seamBaseline.members().at(
+        rightInfo.memberIndex);
+    CMprEditTransaction splitSeam("reject split shared SEC seam");
+    splitSeam.replaceMemberPayload(rightMember.name, rightMember.sha256,
+                                   brokenRight);
+    QTemporaryDir seamStage;
+    QVERIFY(seamStage.isValid());
+    const SStagedMprTransactionValidation rejected =
+        validateStagedMprTransaction(seamBaseline, splitSeam,
+            QFileInfo(seamStage.filePath("split-seam.mpr")));
+    QVERIFY(!rejected.success);
+    QVERIFY(rejected.error.contains("conflicting shared SEC land vertices"));
 }
 
 void EnduranceDocumentTests::terrainBrushToolsAreDeterministicAndFailClosed()
@@ -1902,6 +3072,229 @@ void EnduranceDocumentTests::terrainHeightmapImportIsDeterministicAndSeamAware()
     QVERIFY(invalidReport.hasErrors());
 }
 
+void EnduranceDocumentTests::globalTerrainHeightOperationsKeepDimensionsAndSeams()
+{
+    const QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(2, 1, 100.0f, sources));
+    const int vertexCountX = terrain.vertexCountX();
+    const int vertexCountY = terrain.vertexCountY();
+    const int uniqueVertexCount = vertexCountX * vertexCountY;
+    QCOMPARE(vertexCountX, 65);
+    QCOMPARE(vertexCountY, 33);
+
+    STerrainBrush point;
+    point.radius = 0.0f;
+    point.falloff = ETerrainBrushFalloff::Constant;
+    point.centerX = 32.0f;
+    point.centerY = 10.0f;
+    QVERIFY(terrain.apply(terrain.makeFlatten(point, 2000, 1.0f), true));
+    point.centerX = 64.0f;
+    QVERIFY(terrain.apply(terrain.makeFlatten(point, 3000, 1.0f), true));
+
+    const STerrainHeightRange before = terrain.heightRange();
+    QCOMPARE(before.vertexCount, uniqueVertexCount);
+    QCOMPARE(before.minimumRaw, quint16(1000));
+    QCOMPARE(before.maximumRaw, quint16(3000));
+    QCOMPARE(before.minimumWorld, 1000.0f * 100.0f / 65535.0f);
+    QCOMPARE(before.maximumWorld, 3000.0f * 100.0f / 65535.0f);
+
+    const STerrainHeightCommand normalize =
+        terrain.makeGlobalNormalize(10000, 30000);
+    QCOMPARE(normalize.deltas.size(), uniqueVertexCount);
+    int seamDeltaCount = 0;
+    for(const STerrainHeightDelta& delta : normalize.deltas)
+        if(delta.globalX == 32 && delta.globalY == 10)
+        {
+            QCOMPARE(delta.after, quint16(20000));
+            ++seamDeltaCount;
+        }
+    QCOMPARE(seamDeltaCount, 1);
+
+    CTerrainEditHistory history;
+    QVERIFY(history.execute(&terrain, normalize));
+    QCOMPARE(terrain.vertexCountX(), vertexCountX);
+    QCOMPARE(terrain.vertexCountY(), vertexCountY);
+    QCOMPARE(terrain.height(32, 10), quint16(20000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(0, 0), 32, 10), quint16(20000));
+    QCOMPARE(sectorHeight(terrain.sectorPayload(1, 0), 0, 10), quint16(20000));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(10000));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(30000));
+    QVERIFY(terrain.makeGlobalNormalize(10000, 30000).isEmpty());
+
+    const STerrainHeightCommand clamp = terrain.makeGlobalClamp(15000, 25000);
+    QVERIFY(!clamp.isEmpty());
+    QVERIFY(history.execute(&terrain, clamp));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(15000));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(25000));
+    QVERIFY(terrain.makeGlobalClamp(15000, 25000).isEmpty());
+
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(10000));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(30000));
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.height(32, 10), quint16(2000));
+    QCOMPARE(terrain.height(64, 10), quint16(3000));
+    QVERIFY(history.redo(&terrain));
+    QVERIFY(history.redo(&terrain));
+    QCOMPARE(terrain.vertexCountX() * terrain.vertexCountY(), uniqueVertexCount);
+
+    const STerrainHeightCommand flatten = terrain.makeGlobalFlatten(12345);
+    QVERIFY(!flatten.isEmpty());
+    QVERIFY(terrain.apply(flatten, true));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(12345));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(12345));
+    QVERIFY(terrain.makeGlobalFlatten(12345).isEmpty());
+}
+
+void EnduranceDocumentTests::terrainVerticalScalePoliciesAreUndoableAndExplicit()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(1, 1, 100.0f,
+                                twoSectorTerrain(1000).mid(0, 1)));
+    const float originalWorld = terrain.heightRange().minimumWorld;
+
+    const STerrainVerticalScaleCommand scale = terrain.makeVerticalScale(
+        200.0f, ETerrainVerticalScalePolicy::ScaleTerrain);
+    QVERIFY(scale.valid);
+    QVERIFY(scale.heights.isEmpty());
+    QVERIFY(terrain.apply(scale, true));
+    QCOMPARE(terrain.maxZ(), 200.0f);
+    QCOMPARE(terrain.height(0, 0), quint16(1000));
+    QCOMPARE(terrain.heightRange().minimumWorld, originalWorld * 2.0f);
+    QVERIFY(terrain.isDirty());
+    QVERIFY(terrain.apply(scale, false));
+    QCOMPARE(terrain.maxZ(), 100.0f);
+    QCOMPARE(terrain.height(0, 0), quint16(1000));
+    QVERIFY(!terrain.isDirty());
+
+    const STerrainVerticalScaleCommand preserve = terrain.makeVerticalScale(
+        150.0f, ETerrainVerticalScalePolicy::PreserveWorldHeights);
+    QVERIFY(preserve.valid);
+    QCOMPARE(preserve.heights.deltas.size(), terrain.vertexCountX() * terrain.vertexCountY());
+    QCOMPARE(preserve.heights.deltas.front().after, quint16(667));
+    QVERIFY(preserve.roundedVertexCount > 0);
+    QVERIFY(preserve.maximumWorldError > 0.0f);
+    QVERIFY(terrain.apply(preserve, true));
+    QCOMPARE(terrain.maxZ(), 150.0f);
+    QCOMPARE(terrain.height(0, 0), quint16(667));
+    QVERIFY(qAbs(terrain.heightRange().minimumWorld - originalWorld)
+            <= preserve.maximumWorldError + 1.0e-6f);
+    QVERIFY(terrain.apply(preserve, false));
+    QCOMPARE(terrain.maxZ(), 100.0f);
+    QCOMPARE(terrain.height(0, 0), quint16(1000));
+    QVERIFY(!terrain.isDirty());
+
+    CValidationReport refusedReport;
+    const STerrainVerticalScaleCommand refused = terrain.makeVerticalScale(
+        1.0f, ETerrainVerticalScalePolicy::PreserveWorldHeights,
+        false, &refusedReport);
+    QVERIFY(!refused.valid);
+    QVERIFY(refused.clampedVertexCount > 0);
+    QVERIFY(refusedReport.hasErrors());
+    const STerrainVerticalScaleCommand accepted = terrain.makeVerticalScale(
+        1.0f, ETerrainVerticalScalePolicy::PreserveWorldHeights, true);
+    QVERIFY(accepted.valid);
+    QVERIFY(accepted.clampedVertexCount > 0);
+    QVERIFY(terrain.apply(accepted, true));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(65535));
+    QVERIFY(terrain.apply(accepted, false));
+    QVERIFY(!terrain.isDirty());
+
+    CValidationReport tinyReport;
+    const STerrainVerticalScaleCommand tiny = terrain.makeVerticalScale(
+        std::numeric_limits<float>::min(),
+        ETerrainVerticalScalePolicy::PreserveWorldHeights,
+        false, &tinyReport);
+    QVERIFY(!tiny.valid);
+    QCOMPARE(tiny.clampedVertexCount,
+             terrain.vertexCountX() * terrain.vertexCountY());
+    QVERIFY(tinyReport.hasErrors());
+}
+
+void EnduranceDocumentTests::globalTerrainHeightOperationsRejectInvalidRanges()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(1, 1, 100.0f, twoSectorTerrain(1000).mid(0, 1)));
+
+    CValidationReport clampReport;
+    QVERIFY(terrain.makeGlobalClamp(2000, 1000, &clampReport).isEmpty());
+    QVERIFY(clampReport.hasErrors());
+
+    CValidationReport normalizeRangeReport;
+    QVERIFY(terrain.makeGlobalNormalize(2000, 1000,
+                                        &normalizeRangeReport).isEmpty());
+    QVERIFY(normalizeRangeReport.hasErrors());
+
+    CValidationReport flatReport;
+    QVERIFY(terrain.makeGlobalNormalize(1000, 5000, &flatReport).isEmpty());
+    QVERIFY(flatReport.hasErrors());
+
+    CValidationReport nonFiniteReport;
+    QVERIFY(terrain.makeGlobalOffset(
+        std::numeric_limits<float>::quiet_NaN(), &nonFiniteReport).isEmpty());
+    QVERIFY(nonFiniteReport.hasErrors());
+    QVERIFY(terrain.makeGlobalOffset(0.0f).isEmpty());
+
+    const STerrainHeightCommand saturated = terrain.makeGlobalOffset(70000.0f);
+    QCOMPARE(saturated.deltas.size(), terrain.vertexCountX() * terrain.vertexCountY());
+    QVERIFY(saturated.requiresMaxZDecision());
+    CValidationReport blockedReport;
+    QVERIFY(!terrain.apply(saturated, true, &blockedReport));
+    QVERIFY(blockedReport.hasErrors());
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(1000));
+    QVERIFY(terrain.apply(saturated, true, nullptr, true));
+    QCOMPARE(terrain.heightRange().minimumRaw, quint16(65535));
+    QCOMPARE(terrain.heightRange().maximumRaw, quint16(65535));
+}
+
+void EnduranceDocumentTests::terrainSurfaceSamplingMatchesRuntimeCellSelection()
+{
+    CTerrainEditModel flat;
+    QVERIFY(flat.loadSources(1, 1, 100.0f,
+                             twoSectorTerrain(32767).mid(0, 1)));
+    bool available = false;
+    QCOMPARE(flat.terrainSurfaceHeight(4.25f, 7.75f, &available), 50.0f);
+    QVERIFY(available);
+
+    QByteArray triangleSector = syntheticLandSector(0);
+    setSyntheticLandVertex(&triangleSector, 1, 0, 0, 0, 65534);
+    STerrainSectorSource triangleSource;
+    triangleSource.sectorX = 0;
+    triangleSource.sectorY = 0;
+    triangleSource.memberName = "triangle.SEC";
+    triangleSource.payload = triangleSector;
+    CTerrainEditModel triangle;
+    QVERIFY(triangle.loadSources(1, 1, 100.0f,
+                                 QVector<STerrainSectorSource>() << triangleSource));
+    const float triangleHeight = triangle.terrainSurfaceHeight(0.75f, 0.25f,
+                                                                &available);
+    QVERIFY(available);
+    QVERIFY(qAbs(triangleHeight - 50.0f) < 0.0001f);
+
+    // Nearest-cell selection initially starts in cell 1 for this point. The
+    // runtime displaced-cell correction must walk back into cell 0 instead of
+    // extrapolating the elevated neighboring cell's triangle.
+    QByteArray correctedSector = syntheticLandSector(0);
+    setSyntheticLandVertex(&correctedSector, 2, 1, 0, 0, 65534);
+    setSyntheticLandVertex(&correctedSector, 1, 2, 0, 0, 65534);
+    setSyntheticLandVertex(&correctedSector, 2, 2, 0, 0, 65534);
+    STerrainSectorSource correctedSource;
+    correctedSource.sectorX = 0;
+    correctedSource.sectorY = 0;
+    correctedSource.memberName = "corrected.SEC";
+    correctedSource.payload = correctedSector;
+    CTerrainEditModel corrected;
+    QVERIFY(corrected.loadSources(1, 1, 100.0f,
+                                  QVector<STerrainSectorSource>() << correctedSource));
+    QCOMPARE(corrected.terrainSurfaceHeight(0.6f, 0.6f, &available), 0.0f);
+    QVERIFY(available);
+
+    // Client terrain queries clamp to the final complete cell.
+    QCOMPARE(flat.terrainSurfaceHeight(-20.0f, 200.0f, &available), 50.0f);
+    QVERIFY(available);
+}
+
 void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()
 {
     CTerrainEditModel terrain;
@@ -1914,6 +3307,12 @@ void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()
     const STerrainHeightCommand saturated = terrain.makeRaiseLower(brush, 70000.0f);
     QCOMPARE(saturated.deltas.size(), 1);
     QVERIFY(saturated.requiresMaxZDecision());
+
+    const STerrainHeightCommand saturatedBrush = terrain.makeRaiseLower(
+        brush, -70000.0f, true);
+    QCOMPARE(saturatedBrush.deltas.size(), 1);
+    QVERIFY(!saturatedBrush.requiresMaxZDecision());
+    QCOMPARE(saturatedBrush.deltas.front().after, quint16(0));
 
     STerrainObjectHeightProbe object;
     object.identity = "synthetic object 7";
@@ -2255,6 +3654,48 @@ void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceS
         0x424F554Eu, &repeatedHardEdgeReport).isEmpty());
     QVERIFY(!repeatedHardEdgeReport.hasErrors());
     QVERIFY(hardEdgeTerrain.apply(hardEdgePaint, false));
+
+    // A valid material must repair an unknown packed value inside the brush,
+    // while an unknown value in the transition ring remains untouched. This
+    // is the recovery contract for legacy/hand-authored or damaged cells.
+    CTerrainEditModel recoveryTerrain;
+    QVERIFY(recoveryTerrain.load(baseline));
+    STerrainTileBrush unknownPoint = boundedBrush;
+    unknownPoint.radius = 0.0f;
+    const quint16 unknownPacked = quint16(1 << 14); // valid slot/rotation, absent from catalog
+    STerrainTileCommand unknownCoreSetup = recoveryTerrain.makeTilePaint(
+        unknownPoint, ETerrainTileLayer::Land, 0, 0, 1);
+    QCOMPARE(unknownCoreSetup.deltas.size(), 1);
+    QVERIFY(recoveryTerrain.apply(unknownCoreSetup, true));
+    unknownPoint.centerX = 9.0f;
+    STerrainTileCommand unknownRingSetup = recoveryTerrain.makeTilePaint(
+        unknownPoint, ETerrainTileLayer::Land, 0, 0, 1);
+    QCOMPARE(unknownRingSetup.deltas.size(), 1);
+    QVERIFY(recoveryTerrain.apply(unknownRingSetup, true));
+    QCOMPARE(recoveryTerrain.packedTile(
+        8, 8, ETerrainTileLayer::Land), unknownPacked);
+    QCOMPARE(recoveryTerrain.packedTile(
+        9, 8, ETerrainTileLayer::Land), unknownPacked);
+    bool unknownIsAuthored = false;
+    hardEdgeCatalog.gridSignatureForPacked(unknownPacked, &unknownIsAuthored);
+    QVERIFY(!unknownIsAuthored);
+    unknownPoint.centerX = 8.0f;
+    CValidationReport recoveryReport;
+    const STerrainTileCommand recoveryPaint = recoveryTerrain.makeSemanticTilePaint(
+        unknownPoint, ETerrainTileLayer::Land, 2, hardEdgeCatalog,
+        0x5245434Fu, &recoveryReport);
+    QVERIFY2(!recoveryPaint.isEmpty(), qPrintable(recoveryReport.toText()));
+    QVERIFY(!recoveryReport.hasErrors());
+    QVERIFY(recoveryReport.toText().contains("terrain.semantic_unknown_recovery"));
+    QVERIFY(recoveryTerrain.apply(recoveryPaint, true));
+    bool recoveredFound = false;
+    const STerrainTransitionSignature recovered =
+        hardEdgeCatalog.gridSignatureForPacked(recoveryTerrain.packedTile(
+            8, 8, ETerrainTileLayer::Land), &recoveredFound);
+    QVERIFY(recoveredFound);
+    QCOMPARE(recovered.northWest, qint32(2));
+    QCOMPARE(recoveryTerrain.packedTile(
+        9, 8, ETerrainTileLayer::Land), unknownPacked);
 
     // A one-corner approximation is accepted only when it remains anchored to
     // the painted core, contains no new family, and every existing tile at the
@@ -2707,6 +4148,206 @@ void EnduranceDocumentTests::zone1NamespaceTemplateSeparatesLandOverlayAndVarian
     CValidationReport countReport;
     QVERIFY(!CTerrainAtlasAnalyzer::analyze("zone1", 448, &countReport).usable);
     QVERIFY(countReport.hasErrors());
+}
+
+void EnduranceDocumentTests::semanticAtlasProposalIsDeterministicAndApprovalGated()
+{
+    const auto tile = [](const QColor& nw, const QColor& ne,
+                         const QColor& se, const QColor& sw) {
+        QImage image(18, 18, QImage::Format_RGBA8888);
+        for(int y = 0; y < image.height(); ++y)
+            for(int x = 0; x < image.width(); ++x)
+            {
+                const bool east = x >= image.width() / 2;
+                const bool south = y >= image.height() / 2;
+                image.setPixelColor(x, y, south ? (east ? se : sw)
+                                                 : (east ? ne : nw));
+            }
+        return image;
+    };
+    const QColor soil(110, 70, 40), grass(35, 125, 45);
+    const QColor water(25, 65, 150), submerged(55, 50, 40);
+    QVector<QImage> images;
+    images << tile(soil, soil, soil, soil)
+           << tile(soil, grass, grass, soil)
+           << tile(grass, grass, grass, grass)
+           << tile(water, water, water, water)
+           << tile(submerged, submerged, submerged, submerged);
+    const QVector<qint32> tileTypes({1, 1, 1, 6, 4});
+    QVector<STerrainAtlasSlotUsage> usage(images.size());
+    usage[0].landCount = 40;
+    usage[1].landCount = 12;
+    usage[2].landCount = 25;
+    usage[3].overlayCount = 30;
+    usage[4].landCount = 30;
+    usage[4].landBelowOverlayCount = 30;
+
+    CValidationReport firstReport;
+    const STerrainAtlasProfile first = CTerrainAtlasProfileInference::propose(
+        "synthetic_forest", images, tileTypes, usage, &firstReport);
+    const STerrainAtlasProfile second = CTerrainAtlasProfileInference::propose(
+        "synthetic_forest", images, tileTypes, usage);
+    QCOMPARE(first.toJson(), second.toJson());
+    QCOMPARE(first.atlasSlotCount, images.size());
+    QCOMPARE(first.atlasPixelSha256.size(), 64);
+    QVERIFY(!first.approved);
+    QCOMPARE(first.slotDefinitions.size(), images.size());
+
+    const STerrainAtlasProfileSlot transition = first.slotDefinitions.at(1);
+    QCOMPARE(transition.signature.northWest, transition.signature.southWest);
+    QCOMPARE(transition.signature.northEast, transition.signature.southEast);
+    QVERIFY(transition.signature.northWest != transition.signature.northEast);
+    int overlayFamilies = 0, underwaterFamilies = 0;
+    for(const STerrainAtlasProfileFamily& family : first.families)
+    {
+        overlayFamilies += family.layer == ETerrainAtlasLayer::Overlay;
+        underwaterFamilies += family.underwater;
+        QVERIFY(!family.ambiguous);
+    }
+    QCOMPARE(overlayFamilies, 1);
+    QCOMPARE(underwaterFamilies, 1);
+
+    CValidationReport gateReport;
+    QVERIFY(!first.approvedAnalysis(&gateReport).usable);
+    QVERIFY(gateReport.hasErrors());
+
+    STerrainAtlasProfile approved = first;
+    approved.approved = true;
+    CValidationReport analysisReport;
+    const STerrainAtlasAnalysis analysis = approved.approvedAnalysis(&analysisReport);
+    QVERIFY2(analysis.usable, qPrintable(analysisReport.toText()));
+    bool found = false;
+    const quint16 packed = analysis.landCatalog.selectForPaint(
+        transition.signature, 3, 7, 99, &found);
+    QVERIFY(found);
+    bool decoded = false;
+    const STerrainTransitionSignature decodedSignature =
+        analysis.landCatalog.gridSignatureForPacked(packed, &decoded);
+    QVERIFY(decoded);
+    QCOMPARE(decodedSignature, transition.signature);
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath("semantic-atlas-profile.json");
+    CValidationReport saveReport;
+    QVERIFY2(approved.save(path, &saveReport), qPrintable(saveReport.toText()));
+    STerrainAtlasProfile reopened;
+    CValidationReport loadReport;
+    QVERIFY2(STerrainAtlasProfile::load(path, &reopened, &loadReport),
+             qPrintable(loadReport.toText()));
+    QCOMPARE(reopened.toJson(), approved.toJson());
+    const QByteArray json = QJsonDocument(reopened.toJson()).toJson();
+    QVERIFY(!json.contains(".mpr"));
+    QVERIFY(!json.contains(".mmp"));
+    QVERIFY(!json.contains("Maps\\"));
+}
+
+void EnduranceDocumentTests::semanticAtlasProfileRejectsBindingMismatchAndAmbiguity()
+{
+    QImage image(12, 12, QImage::Format_RGBA8888);
+    image.fill(QColor(80, 100, 60));
+    QVector<STerrainAtlasSlotUsage> usage(1);
+    usage[0].landCount = 5;
+    usage[0].overlayCount = 5;
+    CValidationReport proposalReport;
+    STerrainAtlasProfile profile = CTerrainAtlasProfileInference::propose(
+        "synthetic_mixed", QVector<QImage>({image}), QVector<qint32>({1}),
+        usage, &proposalReport);
+    QVERIFY(!profile.families.isEmpty());
+    QVERIFY(profile.families.front().ambiguous);
+    QVERIFY(proposalReport.toText().contains("both land and overlay"));
+
+    profile.approved = true;
+    CValidationReport ambiguousReport;
+    QVERIFY(!profile.approvedAnalysis(&ambiguousReport).usable);
+    QVERIFY(ambiguousReport.hasErrors());
+
+    CValidationReport namespaceReport;
+    QVERIFY(!profile.validateBinding("another_namespace", profile.atlasPixelSha256,
+                                     1, &namespaceReport));
+    QVERIFY(namespaceReport.toText().contains("another MPR namespace"));
+    CValidationReport hashReport;
+    QVERIFY(!profile.validateBinding(profile.mprNamespace, QByteArray(64, '0'),
+                                     1, &hashReport));
+    QVERIFY(hashReport.toText().contains("pixels no longer match"));
+    CValidationReport countReport;
+    QVERIFY(!profile.validateBinding(profile.mprNamespace, profile.atlasPixelSha256,
+                                     2, &countReport));
+    QVERIFY(countReport.toText().contains("slot count"));
+}
+
+void EnduranceDocumentTests::semanticAtlasReviewEditsAndStoreAreDeterministic()
+{
+    STerrainAtlasProfile profile;
+    profile.mprNamespace = "synthetic/review namespace";
+    profile.atlasPixelSha256 = QByteArray(64, 'a');
+    profile.atlasSlotCount = 3;
+    profile.provenance = "synthetic-test";
+    STerrainAtlasProfileFamily soil;
+    soil.id = 1; soil.name = "Soil";
+    STerrainAtlasProfileFamily grass;
+    grass.id = 2; grass.name = "Grass";
+    profile.families << soil << grass;
+    const auto slot = [](int index, qint32 nw, qint32 ne, qint32 se, qint32 sw) {
+        STerrainAtlasProfileSlot value;
+        value.slot = index;
+        value.signature.northWest = nw;
+        value.signature.northEast = ne;
+        value.signature.southEast = se;
+        value.signature.southWest = sw;
+        return value;
+    };
+    profile.slotDefinitions << slot(0, 1, 1, 1, 1)
+                            << slot(1, 1, 2, 2, 1)
+                            << slot(2, 2, 2, 2, 2);
+    CValidationReport normalizeReport;
+    QVERIFY2(profile.normalizeMembership(&normalizeReport),
+             qPrintable(normalizeReport.toText()));
+    QCOMPARE(profile.families.at(0).memberSlots, QVector<int>({0, 1}));
+    QCOMPARE(profile.families.at(1).memberSlots, QVector<int>({1, 2}));
+
+    CValidationReport splitReport;
+    QVERIFY2(profile.splitFamily(2, QVector<int>({2}), "Meadow", &splitReport),
+             qPrintable(splitReport.toText()));
+    QCOMPARE(profile.families.size(), 3);
+    QCOMPARE(profile.slotDefinitions.at(2).signature.northWest, qint32(3));
+    QVERIFY(profile.families.at(1).ambiguous);
+    QVERIFY(profile.families.at(2).ambiguous);
+    QVERIFY(!profile.approved);
+
+    CValidationReport badMergeReport;
+    profile.families[2].layer = ETerrainAtlasLayer::Overlay;
+    QVERIFY(!profile.mergeFamilies(QVector<qint32>({1, 3}), "Invalid",
+                                   &badMergeReport));
+    QVERIFY(badMergeReport.toText().contains("Land and overlay"));
+    profile.families[2].layer = ETerrainAtlasLayer::Land;
+    CValidationReport mergeReport;
+    QVERIFY2(profile.mergeFamilies(QVector<qint32>({1, 3}), "Soil and meadow",
+                                   &mergeReport), qPrintable(mergeReport.toText()));
+    QCOMPARE(profile.families.size(), 2);
+    QCOMPARE(profile.slotDefinitions.at(2).signature.northWest, qint32(1));
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = CTerrainAtlasProfileStore::profilePath(
+        profile.mprNamespace, directory.path());
+    QVERIFY(path.contains("synthetic_review_namespace-"));
+    QVERIFY(path.endsWith(".semantic-atlas.json"));
+    QVERIFY(CTerrainAtlasProfileStore::profilePath(
+        "synthetic review namespace", directory.path()) != path);
+    CValidationReport saveReport;
+    QVERIFY2(CTerrainAtlasProfileStore::save(profile, directory.path(), &saveReport),
+             qPrintable(saveReport.toText()));
+    STerrainAtlasProfile loaded;
+    CValidationReport loadReport;
+    QVERIFY2(CTerrainAtlasProfileStore::load(profile.mprNamespace, &loaded,
+        directory.path(), &loadReport), qPrintable(loadReport.toText()));
+    QCOMPARE(loaded.toJson(), profile.toJson());
+
+    CValidationReport staleReport;
+    QVERIFY(!loaded.validateBinding(profile.mprNamespace, QByteArray(64, 'b'),
+                                    profile.atlasSlotCount, &staleReport));
+    QVERIFY(staleReport.toText().contains("pixels no longer match"));
 }
 
 void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValues()
@@ -3766,6 +5407,536 @@ void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay(
     QCOMPARE(diff.entries().front().memberName, edit.memberName);
 }
 
+void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable()
+{
+    QByteArray landSector = syntheticLandSector(1200);
+    landSector.append("preserved-sec-tail");
+    CMprDocument baseline;
+    CValidationReport baselineReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(landSector),
+                                "overlay-activation-baseline.mpr", &baselineReport),
+             qPrintable(baselineReport.toText()));
+    QCOMPARE(baseline.sectors().front().type, quint8(0));
+
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline));
+
+    // The first multi-cell stroke that upgrades a type-0 SEC must populate
+    // every requested cell using the new layout offsets. No second click may
+    // be required to repair stale pre-upgrade offsets.
+    CTerrainEditModel firstStrokeTerrain;
+    QVERIFY(firstStrokeTerrain.load(baseline));
+    STerrainTileBrush firstStroke;
+    firstStroke.centerX = 8.0f;
+    firstStroke.centerY = 8.0f;
+    firstStroke.radius = 1.0f;
+    firstStroke.shape = ETerrainTileBrushShape::Circle;
+    CValidationReport firstStrokeReport;
+    const SOverlaySurfaceCommand firstStrokeActivation =
+        firstStrokeTerrain.makeOverlayActivation(
+            firstStroke, 1, 0, 1, 2, &firstStrokeReport);
+    QVERIFY2(!firstStrokeActivation.isEmpty(),
+             qPrintable(firstStrokeReport.toText()));
+    QVERIFY(firstStrokeTerrain.apply(firstStrokeActivation, true,
+                                     &firstStrokeReport));
+    int activeFirstStrokeCells = 0;
+    for(int y = 7; y <= 9; ++y)
+        for(int x = 7; x <= 9; ++x)
+        {
+            bool active = false;
+            const qint16 material = firstStrokeTerrain.overlayMaterialIndex(
+                x, y, &active);
+            const bool expected = qAbs(x - 8) + qAbs(y - 8) <= 1;
+            QCOMPARE(active, expected);
+            if(expected)
+            {
+                QCOMPARE(material, qint16(1));
+                ++activeFirstStrokeCells;
+            }
+        }
+    QCOMPARE(activeFirstStrokeCells, 5);
+    // Upgrading coverage is allowed to append an overlay vertex/tile/material
+    // layout, but the complete land vertex block is immutable. A historical
+    // multi-cell activation reused stale type-0 offsets after the first cell
+    // and wrote later overlay records into the SEC header/land vertices.
+    QCOMPARE(firstStrokeActivation.sectors.front().afterPayload.mid(
+                 5, 33 * 33 * 8),
+             landSector.mid(5, 33 * 33 * 8));
+    QVERIFY(firstStrokeTerrain.makeOverlayActivation(
+        firstStroke, 1, 0, 1, 2).isEmpty());
+
+    // A live stroke may touch the same SEC many times. Its merged undo command
+    // must retain the first byte payload and the final byte payload exactly;
+    // otherwise material recolors from a later stamp can survive full undo.
+    CTerrainEditModel mergedStrokeTerrain;
+    QVERIFY(mergedStrokeTerrain.load(baseline));
+    SOverlaySurfaceCommand mergedStroke;
+    const SOverlaySurfaceCommand mergedFirst =
+        mergedStrokeTerrain.makeOverlayActivation(firstStroke, 1, 0, 1, 2);
+    QVERIFY(!mergedFirst.isEmpty());
+    QVERIFY(mergedStrokeTerrain.apply(mergedFirst, true));
+    appendOverlaySurfaceCommand(&mergedStroke, mergedFirst);
+    STerrainTileBrush recolorPoint;
+    recolorPoint.centerX = 8.0f;
+    recolorPoint.centerY = 8.0f;
+    const SOverlaySurfaceCommand mergedSecond =
+        mergedStrokeTerrain.makeOverlayActivation(recolorPoint, 0, 0, 2, 1);
+    QVERIFY(!mergedSecond.isEmpty());
+    QVERIFY(mergedStrokeTerrain.apply(mergedSecond, true));
+    appendOverlaySurfaceCommand(&mergedStroke, mergedSecond);
+    QCOMPARE(mergedStroke.sectors.size(), 1);
+    QCOMPARE(mergedStroke.sectors.front().beforePayload, landSector);
+    const QByteArray mergedFinal = mergedStrokeTerrain.sectorPayload(0, 0);
+    QCOMPARE(mergedStroke.sectors.front().afterPayload, mergedFinal);
+    QVERIFY(mergedStrokeTerrain.apply(mergedStroke, false));
+    QCOMPARE(mergedStrokeTerrain.sectorPayload(0, 0), landSector);
+    QVERIFY(mergedStrokeTerrain.apply(mergedStroke, true));
+    QCOMPARE(mergedStrokeTerrain.sectorPayload(0, 0), mergedFinal);
+
+    // A continuous Add Surface stroke may begin on land-only cells and then
+    // enter an already-active overlay, including across a SEC boundary. The
+    // whole gesture must remain one exactly reversible transaction.
+    CMprDocument mixedBaseline;
+    CValidationReport mixedReport;
+    QVERIFY2(mixedBaseline.loadBytes(syntheticTwoSectorMpr(
+                 syntheticLandSector(1200), syntheticLandSector(1200)),
+                 "overlay-mixed-stroke-baseline.mpr", &mixedReport),
+             qPrintable(mixedReport.toText()));
+    CTerrainEditModel mixedTerrain;
+    QVERIFY(mixedTerrain.load(mixedBaseline));
+    STerrainTileBrush existingOverlay;
+    existingOverlay.centerX = 24.0f;
+    existingOverlay.centerY = 8.0f;
+    existingOverlay.radius = 3.0f;
+    const SOverlaySurfaceCommand existingActivation =
+        mixedTerrain.makeOverlayActivation(existingOverlay, 1, 0, 1, 0,
+                                           &mixedReport);
+    QVERIFY2(!existingActivation.isEmpty(), qPrintable(mixedReport.toText()));
+    QVERIFY(mixedTerrain.apply(existingActivation, true, &mixedReport));
+    const QByteArray mixedInitialLeft = mixedTerrain.sectorPayload(0, 0);
+    const QByteArray mixedInitialRight = mixedTerrain.sectorPayload(1, 0);
+    const SOverlaySurfaceSnapshot mixedSnapshot =
+        mixedTerrain.overlaySurfaceSnapshot();
+
+    SOverlaySurfaceCommand mixedStroke;
+    for(int centerX = 8; centerX <= 24; ++centerX)
+    {
+        STerrainTileBrush stampBrush;
+        stampBrush.centerX = float(centerX);
+        stampBrush.centerY = 8.0f;
+        stampBrush.radius = 1.0f;
+        const SOverlaySurfaceCommand stamp = mixedTerrain.makeOverlayActivation(
+            stampBrush, 0, 0, 2, 0, &mixedReport);
+        if(stamp.isEmpty())
+            continue;
+        QVERIFY2(mixedTerrain.apply(stamp, true, &mixedReport),
+                 qPrintable(mixedReport.toText()));
+        appendOverlaySurfaceCommand(&mixedStroke, stamp);
+    }
+    QVERIFY(!mixedStroke.isEmpty());
+    const QByteArray mixedFinalLeft = mixedTerrain.sectorPayload(0, 0);
+    const QByteArray mixedFinalRight = mixedTerrain.sectorPayload(1, 0);
+    const SOverlaySurfaceCommand exactMixedStroke =
+        mixedTerrain.makeOverlaySurfaceCommand(
+            mixedSnapshot, QStringLiteral("mixed absent-to-existing stroke"),
+            &mixedReport);
+    QVERIFY2(!exactMixedStroke.isEmpty(), qPrintable(mixedReport.toText()));
+    QVERIFY(mixedTerrain.apply(exactMixedStroke, false, &mixedReport));
+    QCOMPARE(mixedTerrain.sectorPayload(0, 0), mixedInitialLeft);
+    QCOMPARE(mixedTerrain.sectorPayload(1, 0), mixedInitialRight);
+    QVERIFY2(mixedTerrain.apply(exactMixedStroke, true, &mixedReport),
+             qPrintable(mixedReport.toText()));
+    QCOMPARE(mixedTerrain.sectorPayload(0, 0), mixedFinalLeft);
+    QCOMPARE(mixedTerrain.sectorPayload(1, 0), mixedFinalRight);
+
+    // Defense in depth: even a structurally sized overlay command must not be
+    // serializable if it detached land bytes from the canonical lattice.
+    SOverlaySurfaceCommand corruptLand;
+    corruptLand.description = QStringLiteral("synthetic corrupt overlay payload");
+    SOverlaySectorDelta corruptDelta;
+    corruptDelta.sectorX = 0;
+    corruptDelta.sectorY = 0;
+    corruptDelta.beforePayload = firstStrokeTerrain.sectorPayload(0, 0);
+    corruptDelta.afterPayload = corruptDelta.beforePayload;
+    const int corruptLandHeight = 5 + (4 * 33 + 4) * 8 + 2;
+    corruptDelta.afterPayload[corruptLandHeight] = char(
+        quint8(corruptDelta.afterPayload.at(corruptLandHeight)) ^ quint8(0x5A));
+    corruptLand.sectors.append(corruptDelta);
+    QVERIFY(firstStrokeTerrain.apply(corruptLand, true, &firstStrokeReport));
+    CMprEditTransaction corruptTransaction("reject detached overlay land bytes");
+    CValidationReport corruptSaveReport;
+    QVERIFY(!firstStrokeTerrain.appendSectorEdits(
+        &corruptTransaction, &corruptSaveReport));
+    QVERIFY(corruptSaveReport.toText().contains("terrain.land_vertex_integrity"));
+    QVERIFY(firstStrokeTerrain.apply(corruptLand, false, &firstStrokeReport));
+
+    STerrainTileBrush point;
+    point.centerX = 2.0f;
+    point.centerY = 3.0f;
+    point.radius = 0.0f;
+    CValidationReport activationReport;
+    const SOverlaySurfaceCommand activation = terrain.makeOverlayActivation(
+        point, 1, 0, 1, 2, &activationReport);
+    QVERIFY2(!activation.isEmpty(), qPrintable(activationReport.toText()));
+    QCOMPARE(activation.sectors.size(), 1);
+    QCOMPARE(activation.sectors.front().beforePayload, landSector);
+    QCOMPARE(activation.sectors.front().afterPayload.size(),
+             landSector.size() + 33 * 33 * 8 + 2 * 16 * 16 * 2);
+    QVERIFY(activation.sectors.front().afterPayload.endsWith("preserved-sec-tail"));
+
+    COverlaySurfaceEditHistory history;
+    QVERIFY(history.execute(&terrain, activation));
+    bool available = false;
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(1));
+    QVERIFY(available);
+    const quint16 activatedTile = terrain.packedTile(
+        2, 3, ETerrainTileLayer::Overlay, &available);
+    QVERIFY(available);
+    QCOMPARE(SMprPackedTile::decode(activatedTile).rotation, quint8(2));
+    const QByteArray activatedPayload = terrain.sectorPayload(0, 0);
+    const int activatedOverlayVertex = 5 + 33 * 33 * 8 + (6 * 33 + 4) * 8 + 2;
+    QDataStream activatedHeightStream(activatedPayload.mid(activatedOverlayVertex, 2));
+    activatedHeightStream.setByteOrder(QDataStream::LittleEndian);
+    quint16 activatedHeight = 0;
+    activatedHeightStream >> activatedHeight;
+    QCOMPARE(activatedHeight, quint16(1214));
+    QCOMPARE(terrain.overlayMaterialIndex(3, 3, &available), qint16(-1));
+    QVERIFY(!available);
+    QVERIFY(terrain.makeOverlayActivation(point, 1, 0, 1, 2).isEmpty());
+    const SOverlaySurfaceCommand materialChange = terrain.makeOverlayActivation(
+        point, 0, 0, 1, 2);
+    QVERIFY(!materialChange.isEmpty());
+    QVERIFY(terrain.apply(materialChange, true));
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(0));
+    QVERIFY(available);
+    QVERIFY(terrain.apply(materialChange, false));
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(1));
+
+    CMprEditTransaction transaction("activate one synthetic overlay cell");
+    QVERIFY(terrain.appendSectorEdits(&transaction));
+    QByteArray candidateBytes;
+    QVERIFY(baseline.applyTransaction(transaction, &candidateBytes));
+    CMprDocument candidate;
+    CValidationReport candidateReport;
+    QVERIFY2(candidate.loadBytes(candidateBytes, "overlay-activation-candidate.mpr",
+                                 &candidateReport), qPrintable(candidateReport.toText()));
+    QCOMPARE(candidate.sectors().front().type, quint8(3));
+    QCOMPARE(candidate.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(candidate.memberPayload("caveset.mp"), baseline.memberPayload("caveset.mp"));
+    QVERIFY(candidate.memberPayload("caveset000000.sec").endsWith("preserved-sec-tail"));
+    QTemporaryDir stagedDirectory;
+    QVERIFY(stagedDirectory.isValid());
+    const SStagedMprTransactionValidation staged = validateStagedMprTransaction(
+        baseline, transaction, QFileInfo(stagedDirectory.filePath("overlay-created.mpr")));
+    QVERIFY2(staged.success, qPrintable(staged.error));
+    QCOMPARE(staged.changedMembers, QStringList({QStringLiteral("CaveSet000000.SEC")}));
+    CTerrainEditModel reopened;
+    QVERIFY(reopened.load(candidate));
+    QCOMPARE(reopened.overlayMaterialIndex(2, 3, &available), qint16(1));
+    QVERIFY(available);
+
+    const SOverlaySurfaceCommand deactivation = terrain.makeOverlayDeactivation(point);
+    QVERIFY(!deactivation.isEmpty());
+    QVERIFY(history.execute(&terrain, deactivation));
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(-1));
+    QVERIFY(!available);
+    const QByteArray activePayload = deactivation.sectors.front().beforePayload;
+    QByteArray deactivatedPayload = deactivation.sectors.front().afterPayload;
+    const int materialOffset = 5 + 2 * 33 * 33 * 8 + 2 * 16 * 16 * 2
+        + (3 * 16 + 2) * 2;
+    deactivatedPayload.replace(materialOffset, 2, activePayload.mid(materialOffset, 2));
+    QCOMPARE(deactivatedPayload, activePayload);
+
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(1));
+    QVERIFY(available);
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.sectorPayload(0, 0), landSector);
+    QVERIFY(!terrain.isDirty());
+    QVERIFY(history.redo(&terrain));
+    QVERIFY(history.redo(&terrain));
+
+    SOverlaySurfaceCommand stale = activation;
+    CValidationReport staleReport;
+    const QByteArray beforeRejected = terrain.sectorPayload(0, 0);
+    QVERIFY(!terrain.apply(stale, true, &staleReport));
+    QVERIFY(staleReport.hasErrors());
+    QCOMPARE(terrain.sectorPayload(0, 0), beforeRejected);
+
+    // Re-adding a cell removed during the current edit session must initialize
+    // from current land, not resurrect arbitrary source overlay geometry.
+    QByteArray raisedSource = activation.sectors.front().afterPayload;
+    const int raisedOverlayVertex = 5 + 33 * 33 * 8 + (6 * 33 + 4) * 8 + 2;
+    raisedSource[raisedOverlayVertex] = char(0x60);
+    raisedSource[raisedOverlayVertex + 1] = char(0xEA); // 60000
+    CMprDocument dormantBaseline;
+    CValidationReport dormantReport;
+    QVERIFY2(dormantBaseline.loadBytes(syntheticMpr(raisedSource),
+                                       "overlay-dormant-source.mpr", &dormantReport),
+             qPrintable(dormantReport.toText()));
+    CTerrainEditModel dormantTerrain;
+    QVERIFY(dormantTerrain.load(dormantBaseline));
+    const SOverlaySurfaceCommand removeDormant =
+        dormantTerrain.makeOverlayDeactivation(point, &dormantReport);
+    QVERIFY(dormantTerrain.apply(removeDormant, true, &dormantReport));
+    const SOverlaySurfaceCommand recreateDormant = dormantTerrain.makeOverlayActivation(
+        point, 1, 0, 1, 2, &dormantReport);
+    QVERIFY2(!recreateDormant.isEmpty(), qPrintable(dormantReport.toText()));
+    QDataStream recreatedHeightStream(
+        recreateDormant.sectors.front().afterPayload.mid(raisedOverlayVertex, 2));
+    recreatedHeightStream.setByteOrder(QDataStream::LittleEndian);
+    quint16 recreatedHeight = 0;
+    recreatedHeightStream >> recreatedHeight;
+    QCOMPARE(recreatedHeight, quint16(1214));
+
+    // A maxed land vertex cannot receive positive raw clearance. Activation
+    // stays local and succeeds by clamping only the new overlay surface.
+    CMprDocument maxedBaseline;
+    CValidationReport maxedReport;
+    QVERIFY(maxedBaseline.loadBytes(syntheticMpr(syntheticLandSector(65535)),
+                                    "overlay-maxz.mpr", &maxedReport));
+    CTerrainEditModel maxedTerrain;
+    QVERIFY(maxedTerrain.load(maxedBaseline));
+    const SOverlaySurfaceCommand maxedActivation = maxedTerrain.makeOverlayActivation(
+        point, 1, 0, 1, 0, &maxedReport);
+    QVERIFY2(!maxedActivation.isEmpty(), qPrintable(maxedReport.toText()));
+    QVERIFY(!maxedReport.hasErrors());
+    QCOMPARE(maxedActivation.heightClampedVertexCount, 9);
+    QDataStream maxedHeightStream(
+        maxedActivation.sectors.front().afterPayload.mid(activatedOverlayVertex, 2));
+    maxedHeightStream.setByteOrder(QDataStream::LittleEndian);
+    quint16 maxedHeight = 0;
+    maxedHeightStream >> maxedHeight;
+    QCOMPARE(maxedHeight, quint16(65535));
+}
+
+void EnduranceDocumentTests::semanticAtlasTransitionsCannotTransitivelyMergeMaterialAnchors()
+{
+    const auto tile = [](const QColor& west, const QColor& east) {
+        QImage image(18, 18, QImage::Format_RGBA8888);
+        for(int y = 0; y < image.height(); ++y)
+            for(int x = 0; x < image.width(); ++x)
+                image.setPixelColor(x, y, x < image.width() / 2 ? west : east);
+        return image;
+    };
+    const QColor dark(20, 20, 20), step1(40, 40, 40);
+    const QColor step2(60, 60, 60), light(80, 80, 80);
+    QVector<QImage> images;
+    images << tile(dark, dark) << tile(dark, step1)
+           << tile(step1, step2) << tile(step2, light)
+           << tile(light, light);
+    QVector<STerrainAtlasSlotUsage> usage(images.size());
+    for(STerrainAtlasSlotUsage& item : usage)
+        item.landCount = 1;
+    const STerrainAtlasProfile profile = CTerrainAtlasProfileInference::propose(
+        "synthetic_chain", images, QVector<qint32>(images.size(), 1), usage);
+    const qint32 darkFamily = profile.slotDefinitions.front().signature.northWest;
+    const qint32 lightFamily = profile.slotDefinitions.back().signature.northWest;
+    QVERIFY(darkFamily > 0);
+    QVERIFY(lightFamily > 0);
+    QVERIFY(darkFamily != lightFamily);
+    QCOMPARE(profile.families.size(), 2);
+}
+
+void EnduranceDocumentTests::semanticAtlasTransitionsCrossTileTypeMetadata()
+{
+    const auto tile = [](const QColor& west, const QColor& east) {
+        QImage image(18, 18, QImage::Format_RGBA8888);
+        for(int y = 0; y < image.height(); ++y)
+            for(int x = 0; x < image.width(); ++x)
+                image.setPixelColor(x, y, x < image.width() / 2 ? west : east);
+        return image;
+    };
+    const QColor grass(20, 110, 30);
+    const QColor stone(175, 175, 165);
+    QVector<QImage> images({tile(grass, grass), tile(stone, stone),
+                            tile(grass, stone)});
+    QVector<qint32> tileTypes({0, 1, 6});
+    QVector<STerrainAtlasSlotUsage> usage(images.size());
+    for(STerrainAtlasSlotUsage& item : usage)
+        item.landCount = 1;
+    const STerrainAtlasProfile profile = CTerrainAtlasProfileInference::propose(
+        "cross_type", images, tileTypes, usage);
+    QCOMPARE(profile.provenance, CTerrainAtlasProfileInference::currentProvenance());
+    QCOMPARE(profile.families.size(), 2);
+    const STerrainTransitionSignature transition = profile.slotDefinitions.at(2).signature;
+    QVERIFY(transition.northWest != transition.northEast);
+    QCOMPARE(transition.northWest, transition.southWest);
+    QCOMPARE(transition.northEast, transition.southEast);
+    QVERIFY(CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+        profile.provenance));
+    QVERIFY(!CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+        "decoded-atlas-pixels+mpr-tile-types+observed-map-usage-v1"));
+    QVERIFY(CTerrainAtlasProfileInference::isCompatibleInferenceProvenance(
+        "user-authored-custom-profile"));
+}
+
+void EnduranceDocumentTests::authoredAtlasProfileMatchesZone1Catalog()
+{
+    CValidationReport report;
+    const STerrainAtlasAnalysis analysis = CTerrainAtlasAnalyzer::analyze(
+        "zone1", 512, &report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+    const STerrainAtlasProfile profile =
+        CTerrainAtlasProfileInference::fromAuthoredAnalysis(
+            "zone1", QByteArray("synthetic-hash"), 512, analysis, &report);
+    QVERIFY2(profile.approved, qPrintable(report.toText()));
+    QCOMPARE(profile.slotDefinitions.size(), 512);
+    QVERIFY(profile.provenance.startsWith("authored-template:"));
+    for(int slot : {0, 134, 511})
+    {
+        SMprPackedTile packed;
+        packed.atlasIndex = quint8(slot / 64);
+        packed.tileIndex = quint8(slot % 64);
+        bool landFound = false, overlayFound = false;
+        const STerrainTransitionSignature land =
+            analysis.landCatalog.gridSignatureForPacked(packed.encode(), &landFound);
+        const STerrainTransitionSignature overlay =
+            analysis.overlayCatalog.gridSignatureForPacked(packed.encode(), &overlayFound);
+        QCOMPARE(landFound, !overlayFound);
+        const STerrainTransitionSignature expected = landFound ? land : overlay;
+        const STerrainTransitionSignature actual = profile.slotDefinitions.at(slot).signature;
+        QCOMPARE(actual.northWest, expected.northWest);
+        QCOMPARE(actual.northEast, expected.northEast);
+        QCOMPARE(actual.southEast, expected.southEast);
+        QCOMPARE(actual.southWest, expected.southWest);
+    }
+    QVERIFY(std::any_of(profile.families.cbegin(), profile.families.cend(),
+        [](const STerrainAtlasProfileFamily& family) {
+            return family.name == QStringLiteral("Stone / lime");
+        }));
+}
+
+void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()
+{
+    const QByteArray landSector = syntheticLandSector(1200);
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(landSector),
+                                "overlay-sculpt-baseline.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline));
+    STerrainTileBrush cell;
+    cell.centerX = 2.0f;
+    cell.centerY = 3.0f;
+    cell.radius = 0.0f;
+    const SOverlaySurfaceCommand activation = terrain.makeOverlayActivation(
+        cell, 1, 0, 1, 0, &report);
+    QVERIFY2(!activation.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(terrain.apply(activation, true, &report));
+    const QByteArray activePayload = terrain.sectorPayload(0, 0);
+
+    STerrainBrush brush;
+    brush.centerX = 5.0f;
+    brush.centerY = 7.0f;
+    brush.radius = 1.5f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const SOverlaySurfaceCommand sculpt = terrain.makeOverlayRaiseLower(
+        brush, 100.0f, &report);
+    QVERIFY2(!sculpt.isEmpty(), qPrintable(report.toText()));
+    QCOMPARE(sculpt.sectors.size(), 1);
+    const QByteArray sculpted = sculpt.sectors.front().afterPayload;
+    const int landVertexEnd = 5 + 33 * 33 * 8;
+    QCOMPARE(sculpted.left(landVertexEnd), activePayload.left(landVertexEnd));
+    const int overlayTileOffset = 5 + 2 * 33 * 33 * 8 + 16 * 16 * 2;
+    QCOMPARE(sculpted.mid(overlayTileOffset), activePayload.mid(overlayTileOffset));
+    QVERIFY(sculpted.mid(5 + 33 * 33 * 8, 33 * 33 * 8)
+            != activePayload.mid(5 + 33 * 33 * 8, 33 * 33 * 8));
+
+    COverlaySurfaceEditHistory history;
+    QVERIFY(history.execute(&terrain, sculpt, &report));
+    QVERIFY(terrain.sectorPayload(0, 0) != activePayload);
+    QVERIFY(history.undo(&terrain, &report));
+    QCOMPARE(terrain.sectorPayload(0, 0), activePayload);
+    QVERIFY(history.redo(&terrain, &report));
+    QCOMPARE(terrain.sectorPayload(0, 0), sculpted);
+
+    STerrainBrush inactive;
+    inactive.centerX = 20.0f;
+    inactive.centerY = 20.0f;
+    inactive.radius = 1.0f;
+    QVERIFY(terrain.makeOverlayRaiseLower(inactive, 100.0f, &report).isEmpty());
+}
+
+void EnduranceDocumentTests::overlaySculptSynchronizesSectorSeam()
+{
+    QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
+    for(STerrainSectorSource& source : sources)
+        source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel terrain;
+    QVector<qint32> tileTypes(64, 0);
+    CValidationReport report;
+    QVERIFY2(terrain.loadSources(2, 1, 100.0f, sources, &report,
+                                 1, tileTypes, 2), qPrintable(report.toText()));
+    STerrainTileBrush cells;
+    cells.centerX = 15.5f;
+    cells.centerY = 3.0f;
+    cells.radius = 0.6f;
+    cells.shape = ETerrainTileBrushShape::Square;
+    const SOverlaySurfaceCommand activation = terrain.makeOverlayActivation(
+        cells, 1, 0, 1, 0, &report);
+    QVERIFY2(!activation.isEmpty(), qPrintable(report.toText()));
+    QCOMPARE(activation.sectors.size(), 2);
+    QVERIFY(terrain.apply(activation, true, &report));
+
+    STerrainBrush brush;
+    brush.centerX = 32.0f;
+    brush.centerY = 7.0f;
+    brush.radius = 1.5f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const SOverlaySurfaceCommand sculpt = terrain.makeOverlayRaiseLower(
+        brush, 200.0f, &report);
+    QVERIFY2(!sculpt.isEmpty(), qPrintable(report.toText()));
+    QCOMPARE(sculpt.sectors.size(), 2);
+    QVERIFY(terrain.apply(sculpt, true, &report));
+    const QByteArray left = terrain.sectorPayload(0, 0);
+    const QByteArray right = terrain.sectorPayload(1, 0);
+    const int overlayBase = 5 + 33 * 33 * 8;
+    const int leftVertex = overlayBase + (7 * 33 + 32) * 8;
+    const int rightVertex = overlayBase + (7 * 33) * 8;
+    QCOMPARE(left.mid(leftVertex, 8), right.mid(rightVertex, 8));
+
+    // Shipped maps can retain two active overlay sheets that touch the same
+    // SEC-boundary coordinate with different heights or offsets. Sculpt the
+    // sheet beneath the brush instead of rejecting the complete stamp or
+    // silently welding the unrelated sheet to it.
+    SOverlaySurfaceCommand introduceConflict;
+    introduceConflict.description = QStringLiteral("synthetic overlay-sheet conflict");
+    SOverlaySectorDelta conflictDelta;
+    conflictDelta.sectorX = 1;
+    conflictDelta.sectorY = 0;
+    conflictDelta.beforePayload = terrain.sectorPayload(1, 0);
+    conflictDelta.afterPayload = conflictDelta.beforePayload;
+    const quint16 rightBefore = qFromLittleEndian<quint16>(
+        reinterpret_cast<const uchar*>(conflictDelta.afterPayload.constData()
+                                       + rightVertex + 2));
+    qToLittleEndian<quint16>(quint16(rightBefore + 1000),
+        reinterpret_cast<uchar*>(conflictDelta.afterPayload.data()
+                                 + rightVertex + 2));
+    introduceConflict.sectors.append(conflictDelta);
+    QVERIFY(terrain.apply(introduceConflict, true, &report));
+
+    brush.centerX = 31.5f; // Prefer the left connected sheet at the boundary.
+    CValidationReport conflictSculptReport;
+    const SOverlaySurfaceCommand conflictSculpt = terrain.makeOverlayRaiseLower(
+        brush, 200.0f, &conflictSculptReport, true);
+    QVERIFY2(!conflictSculpt.isEmpty(), qPrintable(conflictSculptReport.toText()));
+    QVERIFY2(!conflictSculptReport.hasErrors(),
+             qPrintable(conflictSculptReport.toText()));
+    QVERIFY(terrain.apply(conflictSculpt, true, &conflictSculptReport));
+    const QByteArray conflictLeft = terrain.sectorPayload(0, 0);
+    const QByteArray conflictRight = terrain.sectorPayload(1, 0);
+    const quint16 leftAfter = qFromLittleEndian<quint16>(
+        reinterpret_cast<const uchar*>(conflictLeft.constData()
+                                       + leftVertex + 2));
+    const quint16 rightAfter = qFromLittleEndian<quint16>(
+        reinterpret_cast<const uchar*>(conflictRight.constData()
+                                       + rightVertex + 2));
+    QCOMPARE(leftAfter, quint16(rightBefore + 200));
+    QCOMPARE(rightAfter, quint16(rightBefore + 1000));
+}
+
 void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()
 {
     QVector<STerrainSectorSource> sources = twoSectorTerrain(1000);
@@ -3830,6 +6001,109 @@ void EnduranceDocumentTests::stagedMobIsReopenedWithoutCreatingDestination()
     QCOMPARE(result.size, qint64(bytes.size()));
     QVERIFY(!destination.exists());
     QCOMPARE(QDir(dir.path()).entryList(QDir::Files).size(), 0);
+}
+
+void EnduranceDocumentTests::emptyGeneratedMobCanAcceptFirstRawObject()
+{
+    const QByteArray range = section(0xFF02,
+        section(0xFF05, u32(1000)) + section(0xFF06, u32(1999)));
+    const QByteArray unknownTopLevel = section(0x31415926, QByteArray(32, '\x5a'));
+    const QByteArray legacyEmpty = validMob(
+        section(0xD000) + section(0xFF00, range)) + unknownTopLevel;
+
+    CMobDocument document;
+    CValidationReport report;
+    QVERIFY2(document.loadBytes(legacyEmpty, "legacy-empty-generated.mob", &report),
+             qPrintable(report.toText()));
+    QVERIFY(document.objects().isEmpty());
+    QVERIFY(!document.hasSection(0xB000));
+
+    QByteArray upgraded;
+    QVERIFY2(document.ensureEmptyObjectSection(&upgraded, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(upgraded, validMob(section(0xD000) + section(0xFF00, range)
+                                + section(0xB000)) + unknownTopLevel);
+
+    CMobDocument reopened;
+    QVERIFY2(reopened.loadBytes(upgraded, "upgraded-empty-generated.mob", &report),
+             qPrintable(report.toText()));
+    QVERIFY(reopened.hasSection(0xB000));
+    QCOMPARE(reopened.objects().size(), 0);
+
+    const QByteArray donor = object(334, "tree");
+    const QByteArray donorHash = QCryptographicHash::hash(
+        donor, QCryptographicHash::Sha256);
+    QByteArray withFirstObject;
+    QVERIFY2(reopened.rebuildObjectSequenceFromRaw(
+        QVector<QByteArray>() << donor, QVector<QByteArray>() << donorHash,
+        &withFirstObject, &report), qPrintable(report.toText()));
+    CMobDocument finalDocument;
+    QVERIFY2(finalDocument.loadBytes(withFirstObject, "first-object.mob", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(finalDocument.objects().size(), 1);
+    QCOMPARE(finalDocument.objects().first().nid, quint32(334));
+    QCOMPARE(withFirstObject.right(unknownTopLevel.size()), unknownTopLevel);
+}
+
+void EnduranceDocumentTests::generatedMobCommitIsValidatedBackedUpAndAtomic()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QFileInfo destination(dir.filePath("new-autozone.mob"));
+    const QFileInfo backupRoot(dir.filePath("backups"));
+
+    const QByteArray range = section(0xFF02,
+        section(0xFF05, u32(1000)) + section(0xFF06, u32(1999)));
+    const QByteArray incompleteCandidate = validMob(
+        section(0xD000) + section(0xFF00, range));
+    const QByteArray candidate = validMob(
+        section(0xD000) + section(0xFF00, range) + section(0xB000));
+
+    SMobSaveCommitRequest request;
+    request.destination = destination;
+    request.backupRootOverride = backupRoot.absoluteFilePath();
+    const SMobSaveCommitResult incomplete = commitGeneratedMob(
+        incompleteCandidate, request);
+    QVERIFY(!incomplete.success);
+    QVERIFY(incomplete.error.contains(QStringLiteral("OBJECT_SECTION")));
+    QVERIFY(!destination.exists());
+    const SMobSaveCommitResult created = commitGeneratedMob(candidate, request);
+    QVERIFY2(created.success, qPrintable(created.error));
+    QCOMPARE(created.phase, QStringLiteral("complete"));
+    QVERIFY(created.backupPath.isEmpty());
+
+    CMobDocument reopened;
+    CValidationReport report;
+    QVERIFY(reopened.load(destination, &report));
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(reopened.isQuestMob());
+    QCOMPARE(reopened.objects().size(), 0);
+    QVERIFY(reopened.hasSection(0xB000));
+    QCOMPARE(reopened.idRanges().size(), 1);
+    QVERIFY(!reopened.hasEmbeddedAiGraph());
+
+    const QByteArray replacement = validMob(
+        section(0xD000) + section(0xFF00,
+            section(0xFF02, section(0xFF05, u32(2000))
+                              + section(0xFF06, u32(2999))))
+            + section(0xB000));
+    const SMobSaveCommitResult replaced = commitGeneratedMob(replacement, request);
+    QVERIFY2(replaced.success, qPrintable(replaced.error));
+    QVERIFY(!replaced.backupPath.isEmpty());
+    QVERIFY(QFileInfo::exists(replaced.backupPath));
+
+#ifdef QT_TESTLIB_LIB
+    request.simulateAtomicCommitFailure = true;
+    QFile current(destination.absoluteFilePath());
+    QVERIFY(current.open(QIODevice::ReadOnly));
+    const QByteArray committedBeforeFailure = current.readAll();
+    current.close();
+    const SMobSaveCommitResult failed = commitGeneratedMob(candidate, request);
+    QVERIFY(!failed.success);
+    QFile after(destination.absoluteFilePath());
+    QVERIFY(after.open(QIODevice::ReadOnly));
+    QCOMPARE(after.readAll(), committedBeforeFailure);
+#endif
 }
 
 QTEST_APPLESS_MAIN(EnduranceDocumentTests)

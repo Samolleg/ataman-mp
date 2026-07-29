@@ -181,6 +181,7 @@ public:
     void synchronizePointerAfterCameraNavigation(const QPoint& position) override;
 private:
     QVector3D m_lastLandPos;
+    bool m_lastLandPosValid{false};
 };
 
 #endif // COPERATIONMANAGER_H

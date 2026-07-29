@@ -3,6 +3,7 @@
 #include <QTextBlock>
 #include <QMenu>
 #include <QCloseEvent>
+#include <QInputDialog>
 
 #include "mob_parameters.h"
 #include "ui_mob_parameters.h"
@@ -23,6 +24,21 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
   ,m_pShortcut(nullptr)
 {
     ui->setupUi(this);
+    ui->verticalLayout_2->removeWidget(ui->diplomacyButton);
+    ui->verticalLayout_3->insertWidget(1, ui->diplomacyButton);
+    ui->diplomacyButton->setText(tr("Diplomacy..."));
+    ui->diplomacyButton->setToolTip(tr(
+        "Edit or initialize this MOB's 32-player diplomacy table. Magic-trap "
+        "hostility is derived from this table at runtime; the trap's stored "
+        "diplomacy value is not sufficient."));
+    QMenu* diplomacyMenu = new QMenu(ui->diplomacyButton);
+    diplomacyMenu->addAction(tr("Edit table"), this,
+                             SLOT(on_diplomacyButton_clicked()));
+    diplomacyMenu->addAction(tr("Copy from loaded MOB..."), this,
+                             SLOT(copyDiplomacyFromLoadedMob()));
+    diplomacyMenu->addAction(tr("Create default 32-player table"), this,
+                             SLOT(createNeutralDiplomacyTable()));
+    ui->diplomacyButton->setMenu(diplomacyMenu);
     initLineEdit();
 
     m_pUndoStack.reset(new QUndoStack(this));
@@ -237,7 +253,9 @@ void CMobParameters::on_diplomacyButton_clicked()
     QVector<QVector<uint>> dipTable = m_pCurMob->diplomacyField();
     if(dipName.isEmpty() || dipTable.isEmpty())
     {
-        QMessageBox::information(nullptr, "Info", "This mob has no diplomacy table");
+        QMessageBox::information(this, tr("No diplomacy table"), tr(
+            "This MOB has no diplomacy table. Use the arrow menu to copy the "
+            "intended table from a loaded source MOB, or create a neutral table."));
         return;
     }
 
@@ -260,6 +278,69 @@ void CMobParameters::on_diplomacyButton_clicked()
     //m_pTable->setFixedSize(m_pTable->horizontalHeader()->length()+m_pTable->verticalHeader()->width(), m_pTable->verticalHeader()->length()+m_pTable->horizontalHeader()->height());
     m_pTable->show();
     //todo: disable mob parameter widget, connect to table close signal to enable main window again
+}
+
+void CMobParameters::createNeutralDiplomacyTable()
+{
+    if(!m_pCurMob)
+        return;
+    if(QMessageBox::question(this, tr("Create diplomacy table"), tr(
+        "Create the default zero-valued 32-player diplomacy table?\n\n"
+        "It contains no hostile relations, so it does not make magic traps "
+        "hostile. For a copied "
+        "trap, copying diplomacy from its source MOB is usually correct."))
+       != QMessageBox::Yes)
+        return;
+
+    QList<QString> names;
+    QVector<QVector<uint>> table(32, QVector<uint>(32, 0));
+    for(int index = 0; index < 32; ++index)
+        names.append(QString("Player-%1").arg(index));
+    auto* command = new CReplaceDiplomacyTableCommand(
+        m_pCurMob, names, table, tr("Created default diplomacy table"));
+    connect(command, SIGNAL(diplomacyTableReplaced()),
+            this, SLOT(updateDiplomacyTable()));
+    m_pUndoStack->push(command);
+}
+
+void CMobParameters::copyDiplomacyFromLoadedMob()
+{
+    if(!m_pCurMob || !m_pView)
+        return;
+    QVector<CMob*> sources;
+    QStringList labels;
+    for(CMob* mob : m_pView->mobs())
+    {
+        if(!mob || mob == m_pCurMob || mob->diplomacyNames().size() != 32
+           || mob->diplomacyField().size() != 32)
+            continue;
+        sources.append(mob);
+        labels.append(QString("%1 — %2")
+            .arg(mob->mobName(), mob->filePath().absoluteFilePath()));
+    }
+    if(sources.isEmpty())
+    {
+        QMessageBox::information(this, tr("No diplomacy source"), tr(
+            "No other loaded MOB has a complete diplomacy table. Load the "
+            "primary/source MOB, then try again."));
+        return;
+    }
+    bool accepted = false;
+    const QString choice = QInputDialog::getItem(
+        this, tr("Copy diplomacy table"), tr("Source MOB:"), labels, 0, false,
+        &accepted);
+    if(!accepted)
+        return;
+    const int index = labels.indexOf(choice);
+    if(index < 0 || index >= sources.size())
+        return;
+    CMob* source = sources.at(index);
+    auto* command = new CReplaceDiplomacyTableCommand(
+        m_pCurMob, source->diplomacyNames(), source->diplomacyField(),
+        tr("Copied diplomacy from %1").arg(source->mobName()));
+    connect(command, SIGNAL(diplomacyTableReplaced()),
+            this, SLOT(updateDiplomacyTable()));
+    m_pUndoStack->push(command);
 }
 
 void CMobParameters::tableItemClicked(int r, int c)

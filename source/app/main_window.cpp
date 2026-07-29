@@ -28,10 +28,12 @@
 #include <QComboBox>
 #include <QSlider>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QSignalBlocker>
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QFormLayout>
 #include <QActionGroup>
 #include <QInputDialog>
 #include <QTreeWidget>
@@ -58,6 +60,9 @@
 #include <QVariant>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QImage>
+#include <QImageReader>
+#include <QRegularExpressionValidator>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <cmath>
@@ -89,10 +94,19 @@
 #include "jmv_map_test_launcher.h"
 #include "resource_profile.h"
 #include "endurance_document.h"
+#include "ai_graph_document.h"
+#include "ai_graph_persistence.h"
+#include "mpr_document.h"
+#include "terrain_edit_model.h"
+#include "staged_save_validator.h"
 #include "landscape_tools.h"
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
+#include "minimap_export_dialog.h"
+#include "viewport_minimap_widget.h"
+#include "mmp_codec.h"
+#include "mmp_inspector.h"
 #include "script_reference_analyzer.h"
 #include "unit.h"
 
@@ -106,6 +120,130 @@ constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
 constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
 constexpr int kLoadedMapMob = 2;
+
+struct SNewMprHeightmap
+{
+    QImage image;
+    QString error;
+};
+
+SNewMprHeightmap loadNewMprHeightmap(const QString& path)
+{
+    SNewMprHeightmap result;
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))
+    {
+        result.error = QObject::tr("The selected file could not be opened: %1")
+            .arg(file.errorString());
+        return result;
+    }
+    QImageReader reader(&file);
+    reader.setAutoTransform(false);
+    result.image = reader.read();
+    if(result.image.isNull())
+        result.error = QObject::tr("The selected image could not be decoded: %1")
+            .arg(reader.errorString());
+    return result;
+}
+
+class CNewMprCanvasPreview final : public QWidget
+{
+public:
+    explicit CNewMprCanvasPreview(QWidget* parent = nullptr) : QWidget(parent)
+    {
+        setMinimumSize(420, 260);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        setToolTip(QObject::tr(
+            "The image is stretched to the complete terrain canvas. North is at the top. "
+            "Thin lines are tiles; stronger lines are 16-tile SEC sectors."));
+    }
+
+    void setCanvas(int sectorsX, int sectorsY, const QImage& heightmap,
+                   bool flipVertically, bool overlayEnabled,
+                   bool terrainTapered, bool overlayTapered)
+    {
+        m_sectorsX = qMax(1, sectorsX);
+        m_sectorsY = qMax(1, sectorsY);
+        m_heightmap = heightmap;
+        m_flipVertically = flipVertically;
+        m_overlayEnabled = overlayEnabled;
+        m_terrainTapered = terrainTapered;
+        m_overlayTapered = overlayTapered;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.fillRect(rect(), QColor(28, 28, 28));
+        const int tilesX = m_sectorsX * 16;
+        const int tilesY = m_sectorsY * 16;
+        QRectF available = QRectF(rect()).adjusted(24, 24, -24, -30);
+        const qreal scale = qMin(available.width() / qreal(tilesX),
+                                 available.height() / qreal(tilesY));
+        const QSizeF size(tilesX * scale, tilesY * scale);
+        const QRectF mapRect(available.center().x() - size.width() / 2.0,
+                             available.center().y() - size.height() / 2.0,
+                             size.width(), size.height());
+        painter.fillRect(mapRect, QColor(72, 72, 72));
+        if(!m_heightmap.isNull())
+        {
+            QImage image = m_flipVertically
+                ? m_heightmap.mirrored(false, true) : m_heightmap;
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            painter.drawImage(mapRect, image);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        }
+        if(m_terrainTapered)
+        {
+            painter.setPen(QPen(QColor(0, 0, 0, 150), qMax(2.0, scale * 2.0)));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRect(mapRect.adjusted(scale, scale, -scale, -scale));
+        }
+        if(m_overlayEnabled)
+        {
+            painter.fillRect(mapRect, QColor(40, 145, 220, 62));
+            painter.setPen(QPen(QColor(80, 190, 255, 210),
+                                m_overlayTapered ? 3.0 : 1.5));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRect(mapRect.adjusted(1, 1, -1, -1));
+        }
+        if(scale >= 3.0)
+        {
+            painter.setPen(QPen(QColor(255, 255, 255, 35), 1));
+            for(int x = 1; x < tilesX; ++x)
+                painter.drawLine(QPointF(mapRect.left() + x * scale, mapRect.top()),
+                                 QPointF(mapRect.left() + x * scale, mapRect.bottom()));
+            for(int y = 1; y < tilesY; ++y)
+                painter.drawLine(QPointF(mapRect.left(), mapRect.top() + y * scale),
+                                 QPointF(mapRect.right(), mapRect.top() + y * scale));
+        }
+        painter.setPen(QPen(QColor(255, 196, 64, 190), 1.5));
+        for(int x = 0; x <= m_sectorsX; ++x)
+            painter.drawLine(QPointF(mapRect.left() + x * 16 * scale, mapRect.top()),
+                             QPointF(mapRect.left() + x * 16 * scale, mapRect.bottom()));
+        for(int y = 0; y <= m_sectorsY; ++y)
+            painter.drawLine(QPointF(mapRect.left(), mapRect.top() + y * 16 * scale),
+                             QPointF(mapRect.right(), mapRect.top() + y * 16 * scale));
+        painter.setPen(QColor(220, 220, 220));
+        painter.drawText(QRectF(0, 2, width(), 20), Qt::AlignCenter,
+                         QObject::tr("NORTH"));
+        painter.drawText(QRectF(0, height() - 24, width(), 20), Qt::AlignCenter,
+                         QObject::tr("%1 x %2 tiles (%3 x %4 sectors)")
+                             .arg(tilesX).arg(tilesY)
+                             .arg(m_sectorsX).arg(m_sectorsY));
+    }
+
+private:
+    int m_sectorsX{1};
+    int m_sectorsY{1};
+    QImage m_heightmap;
+    bool m_flipVertically{false};
+    bool m_overlayEnabled{false};
+    bool m_terrainTapered{false};
+    bool m_overlayTapered{false};
+};
 
 QIcon entranceVisibilityIcon(bool visible, const QColor& color)
 {
@@ -424,7 +562,24 @@ MainWindow::MainWindow(QWidget* parent) :
             [this](const QPoint& point)
     {
         QTreeWidgetItem* item = m_loadedMapTree->itemAt(point);
-        if(!item || item->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMob)
+        if(!item)
+            return;
+        const int kind = item->data(0, kLoadedMapKindRole).toInt();
+        if(kind == kLoadedMapMpr)
+        {
+            if(!item->isSelected())
+                m_loadedMapTree->setCurrentItem(item, 0,
+                    QItemSelectionModel::ClearAndSelect);
+            updateDocumentActionAvailability();
+            QMenu menu(this);
+            menu.addAction(m_ui->actionMap_parameters);
+            menu.addSeparator();
+            menu.addAction(m_ui->actionSave_landscape_MPR);
+            menu.addAction(m_ui->actionSave_landscape_MPR_as);
+            menu.exec(m_loadedMapTree->viewport()->mapToGlobal(point));
+            return;
+        }
+        if(kind != kLoadedMapMob)
             return;
         if(!item->isSelected())
             m_loadedMapTree->setCurrentItem(item, 0,
@@ -498,7 +653,8 @@ MainWindow::MainWindow(QWidget* parent) :
             }
             if(proceed && saveDirty)
                 for(CMob* dirtyMob : dirty)
-                    if(!dirtyMob->save()) { proceed = false; break; }
+                    if(!m_pView->saveMobDocument(dirtyMob, dirtyMob->filePath()))
+                    { proceed = false; break; }
             if(proceed)
                 for(CMob* selectedMob : selectedMobs)
                     if(selectedMob && m_pView->mobs().contains(selectedMob))
@@ -579,6 +735,7 @@ MainWindow::MainWindow(QWidget* parent) :
                                       QDockWidget::DockWidgetFloatable);
     m_landscapeToolsDock->setWidget(m_landscapeTools);
     addDockWidget(Qt::RightDockWidgetArea, m_landscapeToolsDock);
+    splitDockWidget(m_landscapeToolsDock, m_loadedMapDock, Qt::Vertical);
     m_landscapeToolsDock->hide();
     m_landscapeToolsAction = viewMenu->addAction(tr("Landscape Tools"));
     m_landscapeToolsAction->setCheckable(true);
@@ -614,6 +771,7 @@ MainWindow::MainWindow(QWidget* parent) :
         }
         dialog.selectZoneById(zoneId);
         dialog.exec();
+        processMapTableSaveReports(dialog.saveReports());
     });
     connect(m_mapsBrowser, &CMapsBrowser::duplicateMapAsCollectionRequested,
             this, &MainWindow::duplicateMapAsCollection);
@@ -630,7 +788,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_mapsBrowser, &CMapsBrowser::newCollectionRequested,
             this, &MainWindow::newCollection);
     connect(m_mapsBrowser, &CMapsBrowser::refreshRequested,
-            this, [this]() { refreshMapsBrowser(); refreshMapTestContext(); });
+            this, [this]() { refreshActiveCatalog(true); });
     m_externalScriptAction = new QAction(tr("Open MOB Script in External Editor"), this);
     m_ui->menuEdit->addAction(m_externalScriptAction);
     connect(m_externalScriptAction, &QAction::triggered, this, [this]()
@@ -685,6 +843,8 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
     QAction* repairMobFamily = new QAction(tr("Review and Repair NID Collisions..."), this);
     QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
+    QAction* generateMinimapAction = new QAction(tr("Export Minimap..."), this);
+    QAction* persistAiGraphAction = new QAction(tr("Bake / Export AI Graph..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. JMV uses hash-owned temporary aliases in the mod Maps directory; source maps are never overwritten."));
     m_stopMapTestAction = new QAction(tr("Stop Test"), this);
@@ -699,6 +859,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(validateSelectedMobs);
     m_ui->menuTools->addAction(repairMobFamily);
     m_ui->menuTools->addAction(openMapCatalog);
+    m_ui->menuTools->addAction(generateMinimapAction);
+    m_ui->menuTools->addAction(persistAiGraphAction);
     m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(m_stopMapTestAction);
     m_ui->menuTools->addAction(openBackupFolder);
@@ -711,7 +873,12 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         CMapTableEditorDialog dialog(this);
         dialog.exec();
+        processMapTableSaveReports(dialog.saveReports());
     });
+    connect(generateMinimapAction, &QAction::triggered,
+            this, &MainWindow::generateMinimap);
+    connect(persistAiGraphAction, &QAction::triggered,
+            this, &MainWindow::persistAiGraph);
     connect(openBackupFolder, &QAction::triggered, this, [this]()
     {
         QString error;
@@ -864,14 +1031,6 @@ MainWindow::MainWindow(QWidget* parent) :
     restoreState(uiSettings.value("ui/mainWindowState").toByteArray());
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
-    const int storedLandscapeArea = uiSettings.value(
-        "ui/landscapeDockArea", int(dockWidgetArea(m_landscapeToolsDock))).toInt();
-    if(storedLandscapeArea == int(Qt::LeftDockWidgetArea)
-       || storedLandscapeArea == int(Qt::RightDockWidgetArea))
-        m_landscapeDockArea = Qt::DockWidgetArea(storedLandscapeArea);
-    m_landscapeDockHeight = qBound(260,
-        uiSettings.value("ui/landscapeDockHeight", 420).toInt(), 900);
-    m_landscapeDockFloating = m_landscapeToolsDock->isFloating();
     // Landscape editing is an explicit working mode, not session layout.
     // Always start closed while preserving the user's last sculpt controls.
     m_landscapeToolsDock->hide();
@@ -1007,6 +1166,57 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->setMinimumSize(QSize(200, 200));
     m_pView->setMouseTracking(true);
     createViewportToolbars();
+    m_viewportMinimap = new CViewportMinimapWidget(m_pView);
+    m_viewportMinimap->hide();
+    m_minimapRefreshTimer = new QTimer(this);
+    m_minimapRefreshTimer->setSingleShot(true);
+    connect(m_minimapRefreshTimer, &QTimer::timeout,
+            this, &MainWindow::refreshViewportMinimap);
+    m_minimapCameraTimer = new QTimer(this);
+    m_minimapCameraTimer->setInterval(75);
+    connect(m_minimapCameraTimer, &QTimer::timeout, this, [this]() {
+        if(!m_pView || !m_viewportMinimap
+           || !CLandscape::getInstance()->isMprLoad())
+            return;
+        const double worldWidth = CLandscape::getInstance()->widthInWorldUnits();
+        const double worldHeight = CLandscape::getInstance()->heightInWorldUnits();
+        if(worldWidth <= 0.0 || worldHeight <= 0.0) return;
+        QPolygonF normalized;
+        for(const QPointF& point : m_pView->minimapCameraFootprint())
+            normalized << QPointF(point.x() / worldWidth,
+                                  1.0 - point.y() / worldHeight);
+        m_viewportMinimap->setCameraFootprint(normalized);
+    });
+    m_minimapCameraTimer->start();
+    connect(m_viewportMinimap, &CViewportMinimapWidget::exportRequested,
+            this, &MainWindow::generateMinimap);
+    connect(m_viewportMinimap, &CViewportMinimapWidget::sizeModeChanged,
+            this, &MainWindow::positionViewportMinimap);
+    connect(m_viewportMinimap, &CViewportMinimapWidget::regenerationRequested,
+            this, [this]() { scheduleViewportMinimapRefresh(0, true); });
+    connect(m_viewportMinimap, &CViewportMinimapWidget::generationLockRequested,
+            this, &MainWindow::setMinimapGenerationLocked);
+    connect(m_viewportMinimap, &CViewportMinimapWidget::cameraMoveRequested,
+            m_pView, &CView::moveCameraToMinimapPoint);
+    connect(m_viewportMinimap, &CViewportMinimapWidget::sourceModeChanged,
+            this, [this](bool generated) {
+        statusBar()->showMessage(generated
+            ? tr("Generated minimap preview will be staged automatically for Test Current Map.")
+            : tr("Embedded minimap selected; Test Current Map will use the active profile texture."),
+            5000);
+    });
+    connect(m_pView, &CView::loadedMapStateChanged,
+            this, [this]() { scheduleViewportMinimapRefresh(); });
+    connect(m_pView, &CView::aiGraphPersistenceRequested,
+            this, &MainWindow::persistAiGraph);
+    connect(m_pView, &CView::mobStateChanged,
+            this, [this]() { scheduleViewportMinimapRefresh(); });
+    connect(m_pView, &CView::updateMainWindowTitle,
+            this, [this](eTitleTypeData type, const QString&) {
+        if(type == eTitleTypeData::eTitleTypeDataMprDirtyFlag
+           || type == eTitleTypeData::eTitleTypeDataDirtyFlag)
+            scheduleViewportMinimapRefresh();
+    });
     m_ui->workspaceSplitter->setStretchFactor(0, 1);
     if(firstRunSetup)
     {
@@ -1030,7 +1240,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
     m_pView->attachLandscapeTools(m_landscapeTools);
-    m_ui->actionMap_parameters->setText(tr("MPR Atlas Tiles..."));
+    m_ui->actionMap_parameters->setText(tr("MPR Settings..."));
     m_ui->tileBrushButton->setText(tr("Landscape Tools"));
     m_ui->tileBrushButton->setIcon(*ei::icon("landscape.ico"));
     m_ui->tileBrushButton->setIconSize(QSize(32, 32));
@@ -1100,13 +1310,11 @@ MainWindow::MainWindow(QWidget* parent) :
                         m_ui->workspaceSplitter->saveState());
             setProperty("enduranceMenuVisible", menuBar()->isVisible());
             setProperty("enduranceStatusVisible", statusBar()->isVisible());
-            m_suppressLandscapeDockRestore = true;
             for(QDockWidget* dock : findChildren<QDockWidget*>())
             {
                 dock->setProperty("enduranceWasVisible", dock->isVisible());
                 dock->hide();
             }
-            m_suppressLandscapeDockRestore = false;
             for(QToolBar* toolbar : findChildren<QToolBar*>())
             {
                 toolbar->setProperty("enduranceWasVisible", toolbar->isVisible());
@@ -1214,25 +1422,6 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::hideLandscapeToolsSignal,
             this, &MainWindow::hideLandscapeTools);
-    connect(m_landscapeToolsDock, &QDockWidget::topLevelChanged, this, [this](bool floating)
-    {
-        if(m_restoringLandscapeDockLayout)
-            return;
-        m_landscapeDockFloating = floating;
-        if(!floating)
-        {
-            const Qt::DockWidgetArea area = dockWidgetArea(m_landscapeToolsDock);
-            if(area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea)
-                m_landscapeDockArea = area;
-        }
-    });
-    connect(m_landscapeToolsDock, &QDockWidget::dockLocationChanged,
-            this, [this](Qt::DockWidgetArea area)
-    {
-        if(!m_restoringLandscapeDockLayout
-           && (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea))
-            m_landscapeDockArea = area;
-    });
     const auto applyLandscapeVisibility = [this](bool visible)
     {
         if(m_landscapeToolsAction)
@@ -1250,16 +1439,24 @@ MainWindow::MainWindow(QWidget* parent) :
             const QSignalBlocker blocker(m_ui->tileBrushButton);
             m_ui->tileBrushButton->setChecked(visible);
         }
+        if(m_ui->selectButton) m_ui->selectButton->setVisible(!visible);
+        if(m_ui->moveButton) m_ui->moveButton->setVisible(!visible);
+        if(m_ui->rotateButton) m_ui->rotateButton->setVisible(!visible);
+        if(m_ui->scaleButton) m_ui->scaleButton->setVisible(!visible);
+        if(!m_pView)
+            return;
+        if(!visible)
+        {
+            // Layer isolation belongs to Landscape Tools. Closing it restores
+            // the ordinary viewport instead of leaving terrain hidden.
+            m_pView->setDrawLand(true);
+            m_pView->setDrawWater(true);
+        }
         m_pView->setLandscapeEditingEnabled(visible);
         if(visible)
             m_landscapeToolsDock->raise();
-        else
-        {
-            if(!m_landscapeToolsDock->isFloating())
-                m_landscapeDockHeight = qBound(260, m_landscapeToolsDock->height(), 900);
-            if(!m_suppressLandscapeDockRestore)
-                restoreLayoutAfterLandscapeTools();
-        }
+        // Like Maps and Collections, hiding Landscape Tools changes only
+        // visibility. Qt retains its dock area, split, tab, and floating state.
     };
     connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this,
             [this, applyLandscapeVisibility](bool visible)
@@ -1278,7 +1475,8 @@ MainWindow::MainWindow(QWidget* parent) :
                                     applyLandscapeVisibility]()
         {
             if(visibilityGeneration != m_landscapeVisibilityGeneration
-               || !m_landscapeToolsDock || m_landscapeToolsDock->isVisible())
+               || !m_pView || !m_landscapeToolsDock
+               || m_landscapeToolsDock->isVisible())
                 return;
             applyLandscapeVisibility(false);
         });
@@ -1306,8 +1504,7 @@ MainWindow::MainWindow(QWidget* parent) :
     CObjectList::getInstance()->attachSettings(m_settings.get());
     m_createDialog.get()->attach(m_pView, m_undoStack);
     rebuildRecentFilesMenu();
-    refreshMapsBrowser();
-    refreshMapTestContext();
+    refreshActiveCatalog(false);
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
     updateLoadedMapPanel();
@@ -1374,6 +1571,8 @@ MainWindow::MainWindow(QWidget* parent) :
 MainWindow::~MainWindow()
 {
     saveUiState();
+    delete m_minimapExportDialog;
+    m_minimapExportDialog = nullptr;
     if(m_pView && m_pView->prepareForApplicationShutdown())
         delete m_pView;
     else if(m_pView)
@@ -1782,6 +1981,8 @@ void MainWindow::runUndoToIndex(int targetIndex)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_pView && watched == m_pView && event->type() == QEvent::Resize)
+        positionViewportMinimap();
     if(m_pView && watched == m_pView && event->type() == QEvent::KeyPress)
     {
         QKeyEvent* key = static_cast<QKeyEvent*>(event);
@@ -1900,7 +2101,13 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 return false;
             QVector3D preview;
             if(m_pView->terrainPositionAt(mouse->pos(), &preview))
+            {
+                QVector3D navigationPreview;
+                if(m_pView->projectToRegeneratedNavigation(
+                       QPointF(preview.x(), preview.y()), &navigationPreview))
+                    preview = navigationPreview;
                 m_pView->setTestSpawnMarker(preview, false);
+            }
             else
                 m_pView->clearTestSpawnMarker();
         }
@@ -1926,9 +2133,29 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                     entrance ? entrance->exitId : 1,
                     mapTestObstacles());
                 QVector3D resolved(plan.position.x(), plan.position.y(), 0.0f);
-                if(!plan.valid || !CLandscape::getInstance()->projectPt(resolved))
+                QVector3D navigationResolved;
+                if(m_pView->projectToRegeneratedNavigation(
+                       QPointF(requested.x(), requested.y()), &navigationResolved))
                 {
-                    statusBar()->showMessage(tr("No clear terrain spawn was found near that point. Pick another location."), 5000);
+                    resolved = navigationResolved;
+                    plan.valid = true;
+                    plan.unobstructed = true;
+                    plan.position = QPointF(resolved.x(), resolved.y());
+                    plan.requestedPosition = QPointF(requested.x(), requested.y());
+                    plan.custom = true;
+                    plan.exitId = entrance ? entrance->exitId : 1;
+                    const QPointF graphAdjustment = plan.position - plan.requestedPosition;
+                    plan.adjusted = graphAdjustment.x() * graphAdjustment.x()
+                        + graphAdjustment.y() * graphAdjustment.y() > 0.0001;
+                    plan.reason = plan.adjusted
+                        ? tr("The regenerated navigation preview moved the spawn to the nearest passable point.")
+                        : tr("The regenerated navigation preview confirms this passable point.");
+                }
+                else if(plan.valid && !CLandscape::getInstance()->projectPt(resolved))
+                    plan.valid = false;
+                if(!plan.valid)
+                {
+                    statusBar()->showMessage(tr("No passable spawn was found near that point. Pick another location."), 5000);
                     return true;
                 }
                 m_customSpawn = plan;
@@ -2174,31 +2401,51 @@ void MainWindow::updateEntranceOverlays()
     updateCustomSpawnControls();
 }
 
-void MainWindow::refreshMapTestContext()
+void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadCatalog)
 {
+    const int previousEntranceIndex = m_entranceCombo
+        ? m_entranceCombo->currentData().toInt() : -1;
+    const QString previousRouteKey = mapTravelRouteKey(m_validEntrances,
+                                                        previousEntranceIndex);
     m_mapTestEntry = SMapCatalogEntry();
     m_borrowedMapIdentity = false;
-    m_customSpawn = SMapSpawnPlan();
-    m_customSpawnPosition = QVector3D();
-    m_customSpawnContextKey.clear();
-    m_pickSpawnPending = false;
-    m_movingCustomSpawn = false;
-    m_customSpawnSelected = false;
-    m_suppressSpawnRelease = false;
-    if(m_pView)
-        m_pView->clearTestSpawnMarker();
-    if(m_playFromHereButton)
+    if(!preserveWorkspaceState)
     {
-        const QSignalBlocker blocker(m_playFromHereButton);
-        m_playFromHereButton->setChecked(false);
+        m_customSpawn = SMapSpawnPlan();
+        m_customSpawnPosition = QVector3D();
+        m_customSpawnContextKey.clear();
+        m_pickSpawnPending = false;
+        m_movingCustomSpawn = false;
+        m_customSpawnSelected = false;
+        m_suppressSpawnRelease = false;
+        if(m_pView)
+            m_pView->clearTestSpawnMarker();
+        if(m_playFromHereButton)
+        {
+            const QSignalBlocker blocker(m_playFromHereButton);
+            m_playFromHereButton->setChecked(false);
+        }
+        if(m_spawnPositionLabel)
+            m_spawnPositionLabel->setText(tr("Entrance spawn"));
     }
-    if(m_spawnPositionLabel)
-        m_spawnPositionLabel->setText(tr("Entrance spawn"));
     updateOutlinerSelectionPath();
 
     // refreshMapsBrowser() owns the potentially expensive archive/map-root
     // scan. Map identity changes only query that already-current snapshot;
-    // loading a map must not rescan the same resources a second time.
+    // loading a map must not rescan the same resources a second time. Explicit
+    // catalog-refresh callers can still request a fresh snapshot.
+    if(reloadCatalog)
+    {
+        QVector<QString> resources;
+        QVector<QString> maps;
+        if(COptStringList* value = dynamic_cast<COptStringList*>(
+               m_settings->opt(eOptSetResource, "resourceRoots")))
+            resources = value->value();
+        if(COptStringList* value = dynamic_cast<COptStringList*>(
+               m_settings->opt(eOptSetResource, "mapRoots")))
+            maps = value->value();
+        m_mapCatalog = CMapCatalog::load(resources, maps);
+    }
     if(CLandscape::getInstance()->isMprLoad())
     {
         // An explicitly unmapped collection must stay unmapped. Do not infer
@@ -2233,8 +2480,19 @@ void MainWindow::refreshMapTestContext()
     if(m_pView)
         m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.zoneType);
     populateEntranceCombo();
+    if(preserveWorkspaceState && !previousRouteKey.isEmpty())
+    {
+        for(int index = 0; index < m_validEntrances.size(); ++index)
+            if(mapTravelRouteKey(m_validEntrances, index) == previousRouteKey)
+            {
+                m_entranceCombo->setCurrentIndex(m_entranceCombo->findData(index));
+                break;
+            }
+        updateEntranceOverlays();
+    }
     updateCustomSpawnControls();
     updateMapTestAction();
+    refreshViewportMinimapSources();
 }
 
 void MainWindow::chooseBorrowedMapIdentity()
@@ -2528,10 +2786,6 @@ void MainWindow::createViewportToolbars()
                 return;
             if(operation.type == EButtonOpTilebrush)
             {
-                if(!m_landscapeToolsDock->isVisible())
-                {
-                    m_pView->prepareLandscapeTilePainting(false);
-                }
                 toggleLandscapeTools();
                 m_pView->setFocus();
                 return;
@@ -2986,62 +3240,36 @@ void MainWindow::launchCurrentMapTest()
             tr("The current MOB edits could not be staged safely:\n\n%1").arg(mobReport.toText()));
         return;
     }
-    SMapGraphSource graphSource;
-    QString graphError;
-    if(!CJmvMapTestLauncher::resolveMapGraphSource(
-           mobData, landscape->filePath(), entry.mprName,
-           profile.mapDirectories, &graphSource, &graphError))
+    progress->setLabelText(tr("Preparing and validating the selected run-local AI graph..."));
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    QByteArray generatedAiGraphData;
+    QString generatedGraphError;
+    QString generatedGraphSource;
+    if(!m_pView->buildGeneratedAiGraphCandidate(
+           &generatedAiGraphData, &generatedGraphError, &generatedGraphSource))
     {
-        QMessageBox::critical(this, tr("Map test launch"), graphError);
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("Endurance could not prepare a runtime-compatible AI graph for "
+               "the current terrain and objects:\n\n%1")
+                .arg(generatedGraphError));
         return;
     }
-    bool allowMissingAiGraph = false;
-    QByteArray generatedAiGraphData;
-    if(graphSource.missing)
+    CMobDocument stagedMobDocument;
+    CValidationReport stagedMobReport;
+    if(!stagedMobDocument.loadBytes(mobData, mob->filePath().fileName(),
+                                    &stagedMobReport)
+       || stagedMobReport.hasErrors()
+       || !stagedMobDocument.removeEmbeddedAiGraph(&mobData, &stagedMobReport)
+       || stagedMobReport.hasErrors())
     {
-        if(mob->nodes().isEmpty())
-        {
-            progress->setLabelText(tr("Generating a temporary AI graph for the empty MOB..."));
-            progress->setValue(4);
-            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-            QString generatedGraphError;
-            if(!m_pView->buildGeneratedAiGraphCandidate(
-                   &generatedAiGraphData, &generatedGraphError))
-            {
-                QMessageBox::critical(this, tr("Map test launch"),
-                    tr("The zero-object MOB has no AI graph, and Endurance could not generate a safe run-local graph:\n\n%1")
-                        .arg(generatedGraphError));
-                return;
-            }
-            ei::log(eLogInfo, QString("Generated run-local AI graph for zero-object MOB bytes:%1")
-                .arg(generatedAiGraphData.size()));
-        }
-        else
-        {
-            progress->hide();
-            QMessageBox graphWarning(QMessageBox::Warning,
-            tr("AI graph not found"),
-            tr("The primary MOB has no embedded AI_GRAPH and no matching %1.grp was found beside the open MPR or in the active profile Maps folders.\n\n"
-               "Endurance can temporarily use the runtime's graph-generator loading exception for this owned test process. It does not generate a graph: AI navigation and graph-dependent behavior may be unavailable or unreliable. The source map will not be changed.\n\n"
-               "Start anyway?")
-                .arg(landscape->filePath().completeBaseName()),
-            QMessageBox::NoButton, this);
-            QPushButton* startAnyway = graphWarning.addButton(
-                tr("Start Anyway"), QMessageBox::AcceptRole);
-            graphWarning.addButton(QMessageBox::Cancel);
-            graphWarning.setDefaultButton(QMessageBox::Cancel);
-            graphWarning.exec();
-            if(graphWarning.clickedButton() != startAnyway)
-                return;
-            allowMissingAiGraph = true;
-            ei::log(eLogWarning,
-                QString("User accepted graphless %1 for MPR:%2 primary-MOB:%3")
-                .arg(hotReloadRequested ? "hot reload" : "map test",
-                     landscape->filePath().absoluteFilePath(),
-                     mob->filePath().absoluteFilePath()));
-            progress->show();
-        }
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("The run-local MOB copy could not be prepared for the generated AI graph:\n\n%1")
+                .arg(stagedMobReport.toText().trimmed()));
+        return;
     }
+    ei::log(eLogInfo, QString(
+        "Prepared selected run-local AI graph source:%1 bytes:%2 primaryMobGraphStripped:true")
+        .arg(generatedGraphSource).arg(generatedAiGraphData.size()));
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     for(CMob* supplemental : m_pView->mobs())
     {
@@ -3116,8 +3344,10 @@ void MainWindow::launchCurrentMapTest()
     input.embeddedScript = mob->script();
     input.mapEntry = entry;
     input.spawn = spawn;
-    QVector3D runtimeSpawn(spawn.position.x(), spawn.position.y(), 0.0f);
-    if(!CLandscape::getInstance()->projectPt(runtimeSpawn))
+    QVector3D runtimeSpawn = customForCurrentMap
+        ? m_customSpawnPosition
+        : QVector3D(spawn.position.x(), spawn.position.y(), 0.0f);
+    if(!customForCurrentMap && !CLandscape::getInstance()->projectPt(runtimeSpawn))
     {
         QMessageBox::warning(this, tr("Map test launch"),
             tr("The selected entrance could not be projected onto the loaded terrain."));
@@ -3132,7 +3362,20 @@ void MainWindow::launchCurrentMapTest()
     input.syntheticMapIdentity = loosePair;
     input.mapSizeX = int(landscape->widthInWorldUnits() / 32u);
     input.mapSizeY = int(landscape->heightInWorldUnits() / 32u);
-    input.allowMissingAiGraph = allowMissingAiGraph;
+    input.allowMissingAiGraph = false;
+    const bool usesGeneratedMinimap = isJmv
+        && m_viewportMinimap && m_viewportMinimap->usesGeneratedPreview();
+    if(usesGeneratedMinimap && !ensureGeneratedMinimap())
+    {
+        QMessageBox::warning(this, tr("Map test launch"), tr(
+            "Generated minimap mode is selected, but the current preview could not be captured. "
+            "Choose Embedded in the viewport minimap or resolve the capture error before testing."));
+        return;
+    }
+    if(usesGeneratedMinimap)
+    {
+        input.temporaryMinimapMmp = m_generatedMinimapMmp;
+    }
     if(isBase && !hotReloadRequested)
     {
         const QStringList levels = {
@@ -3161,19 +3404,600 @@ void MainWindow::launchCurrentMapTest()
         QMessageBox::critical(this,
             hotReloadRequested ? tr("Hot reload") : tr("Map test launch"), error);
     }
-    else if(hotReloadRequested)
+    else
     {
-        // Keep this application-modal progress window alive until the bridge
-        // commits or rejects the staged generation. The launcher focuses the
-        // game only after hotReloadFinished, so editor input stays blocked.
-        progress->setRange(0, 0);
-        progress->setLabelText(tr("Applying the staged map generation in the game..."));
-        m_hotReloadProgress = progress.take();
-        statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
+        if(usesGeneratedMinimap)
+        {
+            statusBar()->showMessage(tr(
+                hotReloadRequested
+                    ? "The selected generated minimap was staged for this hot-reload generation."
+                    : "The generated minimap was staged under a run-unique texture name in this test's private RES and map table."),
+                7000);
+        }
+        if(hotReloadRequested)
+        {
+            // Keep this application-modal progress window alive until the bridge
+            // commits or rejects the staged generation. The launcher focuses the
+            // game only after hotReloadFinished, so editor input stays blocked.
+            progress->setRange(0, 0);
+            progress->setLabelText(tr("Applying the staged map generation in the game..."));
+            m_hotReloadProgress = progress.take();
+            statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
+        }
     }
     if(progress)
         progress->setValue(6);
     updateMapTestAction();
+}
+
+void MainWindow::scheduleViewportMinimapRefresh(int delayMs, bool force)
+{
+    Q_UNUSED(force);
+    if(!m_minimapRefreshTimer || m_minimapCaptureRunning)
+        return;
+    if(m_minimapGenerationLocked)
+        return;
+    if(m_workspaceLoadInProgress)
+    {
+        m_minimapRefreshTimer->stop();
+        return;
+    }
+    if(!CLandscape::getInstance()->isMprLoad())
+    {
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
+        m_generatedMinimapContextKey.clear();
+        m_minimapGenerationLocked = false;
+        m_viewportMinimap->setGenerationLocked(false);
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setGenerationLocked(false);
+        if(m_viewportMinimap)
+        {
+            m_viewportMinimap->clearGeneratedPreview();
+            m_viewportMinimap->hide();
+        }
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setUnavailable(tr("No map loaded."));
+        return;
+    }
+    if(m_mapTestEntry.isBriefing())
+    {
+        m_minimapRefreshTimer->stop();
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
+        m_generatedMinimapContextKey.clear();
+        m_viewportMinimap->clearGeneratedPreview(
+            tr("Minimaps are not available in briefing zones."));
+        m_viewportMinimap->setCameraFootprint(QPolygonF());
+        m_viewportMinimap->hide();
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setUnavailable(
+                tr("Minimaps are not available in briefing zones."));
+        return;
+    }
+    m_minimapRefreshTimer->start(qMax(0, delayMs));
+}
+
+void MainWindow::refreshViewportMinimapSources()
+{
+    if(!m_viewportMinimap)
+        return;
+    CLandscape* landscape = CLandscape::getInstance();
+    m_viewportMinimap->setMapDimensions(
+        landscape && landscape->isMprLoad()
+            ? int(landscape->widthInWorldUnits() / 32u) : 0,
+        landscape && landscape->isMprLoad()
+            ? int(landscape->heightInWorldUnits() / 32u) : 0);
+    const QString context = currentMapContextKey();
+    const bool contextChanged = context != m_minimapSourceContextKey;
+    if(contextChanged)
+    {
+        m_minimapSourceContextKey = context;
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
+        m_generatedMinimapContextKey.clear();
+        m_minimapGenerationLocked = false;
+        m_viewportMinimap->setGenerationLocked(false);
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setGenerationLocked(false);
+        m_viewportMinimap->clearGeneratedPreview();
+        m_viewportMinimap->clearEmbeddedPreview();
+    }
+    if(!landscape || !landscape->isMprLoad())
+    {
+        m_viewportMinimap->hide();
+        m_viewportMinimap->setCameraFootprint(QPolygonF());
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setUnavailable(tr("No map loaded."));
+        return;
+    }
+    if(m_mapTestEntry.isBriefing())
+    {
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
+        m_generatedMinimapContextKey.clear();
+        m_embeddedMinimapImage = QImage();
+        m_embeddedMinimapName.clear();
+        m_embeddedMinimapSource.clear();
+        m_viewportMinimap->clearGeneratedPreview(
+            tr("Minimaps are not available in briefing zones."));
+        m_viewportMinimap->clearEmbeddedPreview();
+        m_viewportMinimap->setCameraFootprint(QPolygonF());
+        m_viewportMinimap->hide();
+        if(m_minimapExportDialog)
+            m_minimapExportDialog->setUnavailable(
+                tr("Minimaps are not available in briefing zones."));
+        return;
+    }
+    QString textureName = m_mapTestEntry.minimapTexture.trimmed();
+    QString source;
+    QImage embedded;
+    ei::SMmpInspection embeddedInspection;
+    if(!textureName.isEmpty())
+    {
+        QString memberName = textureName;
+        if(!memberName.endsWith(".mmp", Qt::CaseInsensitive))
+            memberName += ".mmp";
+        const QByteArray bytes = CObjectList::getInstance()->resourceData(memberName, &source);
+        embeddedInspection = ei::inspectMmp(bytes);
+        if(embeddedInspection.valid)
+            embedded = embeddedInspection.baseImage;
+    }
+    m_minimapTargetTextureSize = 1024;
+    m_minimapTargetDxt1 = true;
+    m_minimapExportProfileDescription = tr(
+        "1024 x 1024 DXT1 (JMV zone default; no embedded profile available)");
+    if(embeddedInspection.valid && embeddedInspection.width == embeddedInspection.height
+       && embeddedInspection.width >= 64 && embeddedInspection.width <= 2048
+       && (embeddedInspection.width & (embeddedInspection.width - 1)) == 0)
+    {
+        m_minimapTargetTextureSize = embeddedInspection.width;
+        m_minimapTargetDxt1 = embeddedInspection.formatName == QStringLiteral("DXT1");
+        if(embeddedInspection.formatName != QStringLiteral("DXT1")
+           && embeddedInspection.formatName != QStringLiteral("8888"))
+            m_minimapTargetDxt1 = true;
+        m_minimapExportProfileDescription = tr("%1 x %1 %2 (matched embedded %3)")
+            .arg(m_minimapTargetTextureSize)
+            .arg(m_minimapTargetDxt1 ? QStringLiteral("DXT1")
+                                      : QStringLiteral("8888"), textureName);
+    }
+    if(!embedded.isNull())
+        m_viewportMinimap->setEmbeddedPreview(textureName, embedded, source);
+    else
+        m_viewportMinimap->clearEmbeddedPreview(textureName);
+    m_embeddedMinimapImage = embedded;
+    m_embeddedMinimapName = textureName;
+    m_embeddedMinimapSource = source;
+    if(m_minimapExportDialog)
+        m_minimapExportDialog->setMapContext(
+            embedded, textureName, m_mapTestEntry.zoneId,
+            m_mapTestEntry.minimapTexture,
+            landscape && landscape->isMprLoad()
+                ? int(landscape->widthInWorldUnits() / 32u) : 0,
+            landscape && landscape->isMprLoad()
+                ? int(landscape->heightInWorldUnits() / 32u) : 0);
+    if(contextChanged)
+        m_viewportMinimap->preferGenerated(embedded.isNull());
+    m_viewportMinimap->show();
+    positionViewportMinimap();
+    m_viewportMinimap->raise();
+    scheduleViewportMinimapRefresh(0);
+}
+
+void MainWindow::refreshViewportMinimap()
+{
+    if(m_minimapCaptureRunning || !m_pView || !m_viewportMinimap
+       || !CLandscape::getInstance()->isMprLoad()
+       || m_mapTestEntry.isBriefing())
+        return;
+    m_minimapCaptureRunning = true;
+    const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
+    SMinimapSceneCaptureResult capture = m_pView->captureMinimapScene(
+        includeLoadedStaticGeometry, m_minimapTargetTextureSize);
+    capture.targetDxt1 = m_minimapTargetDxt1;
+    capture.exportProfileDescription = m_minimapExportProfileDescription;
+    if(!capture.bake.success)
+    {
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapContextKey.clear();
+        m_viewportMinimap->clearGeneratedPreview(capture.bake.error);
+        m_minimapCaptureRunning = false;
+        return;
+    }
+    if(m_minimapExportDialog)
+        m_minimapExportDialog->setCapture(capture);
+    const SMinimapGradeSettings activeGrade = m_minimapExportDialog
+        ? m_minimapExportDialog->gradeSettings() : m_minimapGrade;
+    if(!applyMinimapCapture(capture, activeGrade))
+    {
+        m_minimapCaptureRunning = false;
+        return;
+    }
+    m_viewportMinimap->show();
+    positionViewportMinimap();
+    m_viewportMinimap->raise();
+    m_minimapCaptureRunning = false;
+}
+
+bool MainWindow::applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
+                                     const SMinimapGradeSettings& grade)
+{
+    const QImage graded = gradeMinimapImage(
+        capture.unlitGameImage, capture.bake.gameImage, grade);
+    QString diagnostic;
+    const QByteArray mmp = m_minimapTargetDxt1
+        ? ei::encodeMmpDxt1(graded, &diagnostic)
+        : ei::encodeMmp8888(graded, &diagnostic);
+    if(mmp.isEmpty())
+    {
+        m_generatedMinimapMmp.clear();
+        m_generatedMinimapImage = QImage();
+        m_generatedMinimapContextKey.clear();
+        m_viewportMinimap->clearGeneratedPreview(
+            tr("Generated preview encoding failed: %1").arg(diagnostic));
+        return false;
+    }
+    m_minimapGrade = grade;
+    m_generatedMinimapMmp = mmp;
+    m_generatedMinimapImage = graded;
+    m_generatedMinimapContextKey = currentMapContextKey();
+    m_viewportMinimap->setGeneratedPreview(
+        graded, capture.bake.incomplete,
+        tr("Generated: %1 static objects; %2 hidden; %3 units excluded\n%4")
+            .arg(capture.staticObjectCount).arg(capture.hiddenStaticObjectCount)
+            .arg(capture.excludedDynamicUnitCount)
+            .arg(m_minimapExportProfileDescription));
+    return true;
+}
+
+void MainWindow::setMinimapGenerationLocked(bool locked)
+{
+    if(locked && (!m_viewportMinimap
+                  || !m_viewportMinimap->hasGeneratedPreview()))
+        locked = false;
+    m_minimapGenerationLocked = locked;
+    if(m_viewportMinimap)
+        m_viewportMinimap->setGenerationLocked(locked);
+    if(m_minimapExportDialog)
+        m_minimapExportDialog->setGenerationLocked(locked);
+    statusBar()->showMessage(locked
+        ? tr("Generated minimap locked; automatic regeneration is paused.")
+        : tr("Generated minimap unlocked; automatic regeneration is enabled."),
+        4000);
+    if(!locked)
+        scheduleViewportMinimapRefresh(0, true);
+}
+
+bool MainWindow::ensureGeneratedMinimap()
+{
+    if(m_minimapRefreshTimer && m_minimapRefreshTimer->isActive())
+    {
+        m_minimapRefreshTimer->stop();
+        refreshViewportMinimap();
+    }
+    if(!m_generatedMinimapMmp.isEmpty()
+       && m_generatedMinimapContextKey == currentMapContextKey())
+        return true;
+    refreshViewportMinimap();
+    return !m_generatedMinimapMmp.isEmpty()
+        && m_generatedMinimapContextKey == currentMapContextKey();
+}
+
+void MainWindow::positionViewportMinimap()
+{
+    if(!m_pView || !m_viewportMinimap)
+        return;
+    const int margin = 10;
+    m_viewportMinimap->move(
+        qMax(margin, m_pView->width() - m_viewportMinimap->width() - margin),
+        margin);
+    m_viewportMinimap->raise();
+}
+
+void MainWindow::persistAiGraph()
+{
+    if(!m_pView || !CLandscape::getInstance()->isMprLoad())
+    {
+        QMessageBox::information(this, tr("Bake / Export AI Graph"),
+            tr("Load an MPR and its primary MOB before persisting an AI graph."));
+        return;
+    }
+    CMob* primaryMob = mapTestStagingMob();
+    if(!primaryMob)
+    {
+        QMessageBox::information(this, tr("Bake / Export AI Graph"),
+            tr("Load the primary MOB before baking or exporting an AI graph."));
+        return;
+    }
+
+    QByteArray graphBytes;
+    QString graphError;
+    QString graphSource;
+    if(!m_pView->buildGeneratedAiGraphCandidate(
+           &graphBytes, &graphError, &graphSource))
+    {
+        QMessageBox::critical(this, tr("Bake / Export AI Graph"),
+            tr("Endurance could not prepare a runtime-compatible AI graph:\n\n%1")
+                .arg(graphError));
+        return;
+    }
+
+    const QFileInfo activeMpr(CLandscape::getInstance()->filePath());
+    const QString externalPath = aiGraphRuntimeSiblingPath(activeMpr);
+    const bool embedded = !primaryMob->aiGraphData().isEmpty();
+    QStringList mapOwners;
+    const QString primaryBase = primaryMob->filePath().completeBaseName();
+    for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+    {
+        const QString registeredMob = QFileInfo(entry.mobName).completeBaseName();
+        if(!registeredMob.isEmpty()
+           && registeredMob.compare(primaryBase, Qt::CaseInsensitive) == 0)
+            mapOwners.append(QStringLiteral("%1 / %2")
+                .arg(entry.zoneId, entry.mprName));
+    }
+    mapOwners.removeDuplicates();
+    const QString sharedWarning = aiGraphSharedMobWarning(
+        primaryMob->filePath().fileName(), mapOwners);
+
+    QString detail = aiGraphPersistenceActionNotice(graphSource) + tr(
+        "\n\nActive MPR: %1\n"
+        "Runtime external graph: %2\n"
+        "Primary MOB: %3\n\n"
+        "Runtime priority is the primary MOB's embedded graph first, then the exact active-MPR sibling .grp.")
+        .arg(activeMpr.fileName(), externalPath,
+             primaryMob->filePath().absoluteFilePath());
+    if(embedded)
+        detail += tr("\n\nThe primary MOB currently has an embedded graph. Export Runtime .grp writes the selected graph. Switch MOB to External .grp never writes the existing .grp; it only validates that file and removes embedded ownership from the MOB.");
+    if(primaryMob->isDirty())
+        detail += tr("\n\nThe primary MOB has unsaved edits. Bake or Switch will commit those edits together with the graph through the verified MOB save path.");
+    if(!sharedWarning.isEmpty())
+        detail += QStringLiteral("\n\n") + sharedWarning;
+
+    QMessageBox prompt(this);
+    prompt.setWindowTitle(tr("Bake / Export AI Graph"));
+    prompt.setIcon(QMessageBox::Question);
+    prompt.setText(tr("Choose how '%1' should be persisted.").arg(graphSource));
+    prompt.setInformativeText(detail);
+    QPushButton* exportButton = prompt.addButton(
+        tr("Export Runtime .grp"), QMessageBox::AcceptRole);
+    QPushButton* bakeButton = prompt.addButton(
+        tr("Bake into Primary MOB"), QMessageBox::ActionRole);
+    QPushButton* switchButton = prompt.addButton(
+        tr("Switch MOB to External .grp"), QMessageBox::ActionRole);
+    prompt.addButton(QMessageBox::Cancel);
+    prompt.exec();
+    QAbstractButton* selected = prompt.clickedButton();
+    if(selected != exportButton && selected != bakeButton
+       && selected != switchButton)
+        return;
+
+    QProgressDialog progress(tr("Preparing AI graph persistence..."), QString(),
+                             0, 6, this);
+    configureBlockingProgress(&progress);
+    progress.show();
+    const auto updateProgress = [&progress](const QString& message,
+                                             int value, int maximum)
+    {
+        progress.setMaximum(maximum);
+        progress.setValue(value);
+        progress.setLabelText(message);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    };
+    const auto exportExternal = [&]() -> SAiGraphFileCommitResult
+    {
+        updateProgress(tr("Staging and validating %1...")
+                           .arg(QFileInfo(externalPath).fileName()), 1, 6);
+        SAiGraphFileCommitRequest request;
+        request.destination = QFileInfo(externalPath);
+        request.graphBytes = graphBytes;
+        return commitValidatedAiGraphFile(request);
+    };
+
+    QString successText;
+    QString failureText;
+    if(selected == exportButton)
+    {
+        const SAiGraphFileCommitResult result = exportExternal();
+        if(!result.success)
+            failureText = tr("The runtime .grp was not changed.\n\nPhase: %1\n%2")
+                .arg(result.phase, result.error);
+        else
+        {
+            successText = result.noOp
+                ? tr("The exact runtime .grp already contained the selected graph:\n%1")
+                    .arg(externalPath)
+                : tr("Exported and freshly validated the exact runtime .grp:\n%1")
+                    .arg(externalPath);
+            if(embedded)
+                successText += tr("\n\nIt is currently shadowed by the primary MOB's embedded graph.");
+        }
+    }
+    else if(selected == bakeButton)
+    {
+        if(!primaryMob->persistAiGraph(&graphBytes, &graphError, updateProgress))
+            failureText = tr("The primary MOB was not changed.\n\n%1")
+                .arg(graphError);
+        else
+            successText = tr("Baked the selected graph into %1. It now has runtime priority over any sibling .grp.")
+                .arg(primaryMob->filePath().fileName());
+    }
+    else
+    {
+        updateProgress(tr("Validating existing %1 without changing it...")
+                           .arg(QFileInfo(externalPath).fileName()), 1, 6);
+        CAiGraphDocument selectedGraph;
+        QString selectedGraphError;
+        QStringList ownershipWarnings;
+        const bool selectedGraphParsed = selectedGraph.parse(
+            graphBytes, &selectedGraphError);
+        if(!selectedGraphParsed)
+            failureText = tr("The selected graph dimensions could not be established. Nothing was changed.\n\n%1")
+                .arg(selectedGraphError);
+        else if(!validateExistingAiGraphFile(
+                    QFileInfo(externalPath), selectedGraph.width(),
+                    selectedGraph.height(), &ownershipWarnings, &graphError))
+            failureText = tr("The embedded graph was left untouched because no valid existing runtime .grp is available. Export a graph first, then retry the ownership switch.\n\n%1")
+                .arg(graphError);
+        else if(!primaryMob->persistAiGraph(nullptr, &graphError, updateProgress))
+            failureText = tr("The existing runtime .grp was not changed, but the embedded graph could not be removed. The MOB still shadows the external file, so runtime ownership has not changed.\n\n%1")
+                .arg(graphError);
+        else
+        {
+            successText = tr("Preserved the existing runtime graph %1 unchanged and removed the embedded graph from %2. The active MPR now resolves that sibling .grp at runtime.")
+                .arg(externalPath, primaryMob->filePath().fileName());
+            if(!ownershipWarnings.isEmpty())
+            {
+                successText += tr("\n\nExisting graph warning: %1")
+                    .arg(ownershipWarnings.join(QStringLiteral("\n")));
+                for(const QString& warning : ownershipWarnings)
+                    ei::log(eLogWarning, QStringLiteral(
+                        "Preserved external AI graph warning: ") + warning);
+            }
+        }
+    }
+    progress.setValue(progress.maximum());
+    progress.close();
+
+    if(!failureText.isEmpty())
+    {
+        QMessageBox::critical(this, tr("Bake / Export AI Graph"), failureText);
+        return;
+    }
+    m_pView->refreshAiGraphOwnership();
+    if(primaryMob == m_pView->currentMob())
+        m_pView->changeCurrentMob(primaryMob);
+    else
+        updateLoadedMapPanel();
+    QMessageBox::information(this, tr("Bake / Export AI Graph"), successText);
+}
+
+void MainWindow::generateMinimap()
+{
+    if(!m_pView || !CLandscape::getInstance()->isMprLoad())
+    {
+        QMessageBox::information(this, tr("Export Minimap"),
+            tr("Load an MPR or collection before exporting a minimap."));
+        return;
+    }
+    if(m_mapTestEntry.isBriefing())
+    {
+        if(m_minimapExportDialog)
+        {
+            m_minimapExportDialog->setUnavailable(
+                tr("Minimaps are not available in briefing zones."));
+            m_minimapExportDialog->show();
+            m_minimapExportDialog->raise();
+            m_minimapExportDialog->activateWindow();
+        }
+        else
+            QMessageBox::information(this, tr("Export Minimap"),
+                tr("Minimaps are not available in briefing zones."));
+        return;
+    }
+    if(m_minimapExportDialog)
+    {
+        m_minimapExportDialog->show();
+        m_minimapExportDialog->raise();
+        m_minimapExportDialog->activateWindow();
+        return;
+    }
+    const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
+    SMinimapSceneCaptureResult capture;
+    SMinimapGradeSettings dialogGrade = m_minimapGrade;
+    if(m_minimapGenerationLocked && !m_generatedMinimapImage.isNull())
+    {
+        capture.bake.success = true;
+        capture.bake.gameImage = m_generatedMinimapImage;
+        capture.bake.reviewImage = m_generatedMinimapImage;
+        capture.unlitGameImage = m_generatedMinimapImage;
+        CLandscape* landscape = CLandscape::getInstance();
+        capture.sectorWidth = landscape
+            ? int(landscape->widthInWorldUnits() / 32u) : 0;
+        capture.sectorHeight = landscape
+            ? int(landscape->heightInWorldUnits() / 32u) : 0;
+        capture.targetTextureSize = m_generatedMinimapImage.width();
+        capture.targetDxt1 = m_minimapTargetDxt1;
+        capture.exportProfileDescription = m_minimapExportProfileDescription;
+        capture.framingDescription = tr("Applied and locked generated texture");
+        capture.orientationDescription = tr("Game payload orientation; editor comparison is corrected vertically");
+        dialogGrade = {100, 100, 100, 100};
+    }
+    else
+    {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        capture = m_pView->captureMinimapScene(
+            includeLoadedStaticGeometry, m_minimapTargetTextureSize);
+        QApplication::restoreOverrideCursor();
+        capture.targetDxt1 = m_minimapTargetDxt1;
+        capture.exportProfileDescription = m_minimapExportProfileDescription;
+    }
+    if(!capture.bake.success)
+    {
+        QMessageBox::warning(this, tr("Export Minimap"), capture.bake.error);
+        return;
+    }
+
+    // Reusing an authored catalog texture name is explicit provenance, not a
+    // generated default. Standalone/unregistered MPRs intentionally start
+    // blank so the author must choose their namespace.
+    const QString suggestedName = m_mapTestEntry.minimapTexture;
+    m_minimapExportDialog = new CMinimapExportDialog(
+        capture, m_embeddedMinimapImage, m_embeddedMinimapName, suggestedName,
+        m_mapTestEntry.zoneId, dialogGrade, m_minimapGenerationLocked, this);
+    connect(m_minimapExportDialog, &CMinimapExportDialog::regenerationRequested,
+            this, [this]() {
+        if(!m_minimapExportDialog || !m_pView
+           || !CLandscape::getInstance()->isMprLoad())
+            return;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        SMinimapSceneCaptureResult refreshed = m_pView->captureMinimapScene(
+            !m_pView->mobs().isEmpty(), m_minimapTargetTextureSize);
+        QApplication::restoreOverrideCursor();
+        refreshed.targetDxt1 = m_minimapTargetDxt1;
+        refreshed.exportProfileDescription = m_minimapExportProfileDescription;
+        if(refreshed.bake.success)
+            m_minimapExportDialog->setCapture(refreshed);
+    });
+    connect(m_minimapExportDialog, &CMinimapExportDialog::appliedAndLocked,
+            this, [this]() {
+        if(!m_minimapExportDialog
+           || !applyMinimapCapture(m_minimapExportDialog->capture(),
+                                   m_minimapExportDialog->gradeSettings()))
+            return;
+        m_minimapGenerationLocked = true;
+        m_viewportMinimap->preferGenerated(true);
+        setMinimapGenerationLocked(true);
+        statusBar()->showMessage(tr("Generated minimap applied and locked."), 5000);
+    });
+    connect(m_minimapExportDialog, &CMinimapExportDialog::lockStateRequested,
+            this, &MainWindow::setMinimapGenerationLocked);
+    connect(m_minimapExportDialog,
+            &CMinimapExportDialog::catalogRegistrationReady,
+            this, &MainWindow::registerExportedMinimap);
+    m_minimapExportDialog->show();
+    m_minimapExportDialog->raise();
+    m_minimapExportDialog->activateWindow();
+}
+
+void MainWindow::registerExportedMinimap(const QString& textureName)
+{
+    if(m_mapCatalog.sourceArchive.isEmpty())
+    {
+        QMessageBox::warning(this, tr("Register minimap"), tr(
+            "Texture export succeeded, but the active catalog archive is unavailable. No catalog reference was changed."));
+        return;
+    }
+    CMapTableEditorDialog catalog(this);
+    if(!catalog.openArchive(m_mapCatalog.sourceArchive)
+       || !catalog.stageMinimapTextureForZone(m_mapTestEntry.zoneId,
+                                               textureName))
+    {
+        QMessageBox::warning(this, tr("Register minimap"), tr(
+            "Texture export succeeded, but the selected zone could not be staged in Map Catalog Editor. No catalog reference was changed."));
+        return;
+    }
+    catalog.exec();
+    processMapTableSaveReports(catalog.saveReports());
 }
 
 void MainWindow::refreshMapsBrowser()
@@ -3189,6 +4013,107 @@ void MainWindow::refreshMapsBrowser()
     QDir().mkpath(CCollectionDocument::defaultDirectory());
     m_mapCatalog = m_mapsBrowser->refresh(
         resources, maps, CCollectionDocument::defaultDirectory());
+}
+
+void MainWindow::refreshActiveCatalog(bool preserveWorkspaceState)
+{
+    QVector<QString> resources;
+    QVector<QString> maps;
+    if(COptStringList* option = dynamic_cast<COptStringList*>(
+           m_settings->opt(eOptSetResource, "resourceRoots")))
+        resources = option->value();
+    if(COptStringList* option = dynamic_cast<COptStringList*>(
+           m_settings->opt(eOptSetResource, "mapRoots")))
+        maps = option->value();
+
+    const SMapCatalogEntry previousEntry = m_mapTestEntry;
+    m_mapCatalog = CMapCatalog::load(resources, maps);
+    QDir().mkpath(CCollectionDocument::defaultDirectory());
+    if(m_mapsBrowser)
+        m_mapsBrowser->refresh(m_mapCatalog, CCollectionDocument::defaultDirectory());
+
+    if(!preserveWorkspaceState || !CLandscape::getInstance()->isMprLoad())
+    {
+        refreshMapTestContext(false, false);
+        return;
+    }
+
+    SMapCatalogEntry updatedEntry;
+    for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+        if(!m_openedMapZoneId.isEmpty()
+           && entry.zoneId.compare(m_openedMapZoneId, Qt::CaseInsensitive) == 0)
+        {
+            updatedEntry = entry;
+            break;
+        }
+    const QString loadedMpr = QFileInfo(
+        CLandscape::getInstance()->filePath()).absoluteFilePath();
+    CMob* primaryMob = mapTestStagingMob();
+    const QString loadedMob = primaryMob
+        ? primaryMob->filePath().absoluteFilePath() : QString();
+    const bool physicalMismatch = !updatedEntry.zoneId.isEmpty()
+        && (!updatedEntry.mprPath.isEmpty() || !updatedEntry.mobPath.isEmpty())
+        && (QFileInfo(updatedEntry.mprPath).absoluteFilePath().compare(
+                loadedMpr, Qt::CaseInsensitive) != 0
+            || QFileInfo(updatedEntry.mobPath).absoluteFilePath().compare(
+                loadedMob, Qt::CaseInsensitive) != 0);
+
+    if(physicalMismatch && m_workspaceIdentityKind.compare(
+           "map", Qt::CaseInsensitive) == 0)
+    {
+        const QMessageBox::StandardButton answer = QMessageBox::question(
+            this, tr("Catalog resources changed"),
+            tr("The active catalog now maps %1 to a different MPR or MOB. Reload the updated pair now?\n\n"
+               "Reload Now uses the normal unsaved-change checks. Keep Working preserves the current workspace; the catalog save is already complete.")
+                .arg(m_openedMapZoneId),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if(answer == QMessageBox::Yes)
+        {
+            openMapPair(updatedEntry.mprPath, updatedEntry.mobPath,
+                        updatedEntry.zoneId);
+            return;
+        }
+        m_mapTestEntry = SMapCatalogEntry();
+        populateEntranceCombo();
+        updateMapTestAction();
+        statusBar()->showMessage(
+            tr("Catalog changed — workspace refresh deferred; map testing is unavailable."),
+            8000);
+        return;
+    }
+
+    refreshMapTestContext(true, false);
+    if(physicalMismatch && !m_currentCollectionPath.isEmpty())
+        statusBar()->showMessage(tr(
+            "Catalog metadata refreshed. The collection keeps its explicit MPR/MOB composition, which now differs from map.txt."), 8000);
+    else if(!previousEntry.zoneId.isEmpty() && updatedEntry.zoneId.isEmpty()
+            && !m_openedMapZoneId.isEmpty())
+        statusBar()->showMessage(tr(
+            "Catalog refreshed; the loaded workspace identity is no longer registered."), 8000);
+}
+
+void MainWindow::processMapTableSaveReports(
+    const QVector<SMapTableSaveReport>& reports)
+{
+    if(reports.isEmpty())
+        return;
+    const QString activeArchive = QFileInfo(
+        m_mapCatalog.sourceArchive).absoluteFilePath();
+    const SMapTableSaveReport* activeReport = nullptr;
+    for(const SMapTableSaveReport& report : reports)
+        if(QFileInfo(report.destinationArchive).absoluteFilePath().compare(
+               activeArchive, Qt::CaseInsensitive) == 0)
+            activeReport = &report;
+    if(!activeReport)
+    {
+        statusBar()->showMessage(tr(
+            "Catalog saved outside the active resource profile; the active map list was not refreshed."), 7000);
+        return;
+    }
+    refreshActiveCatalog(true);
+    statusBar()->showMessage(tr("Active catalog refreshed: %1 (%2)")
+        .arg(activeReport->changes.affectedZoneIds().join(", "),
+             activeReport->changes.categories.join(", ")), 7000);
 }
 
 QVector<QString> MainWindow::activeMapRoots() const
@@ -3329,6 +4254,10 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     QElapsedTimer elapsed;
     elapsed.start();
     const QByteArray previousDigest = m_familyValidation.findingDigest();
+    bool previouslyMissingTrapDiplomacy = false;
+    for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+        previouslyMissingTrapDiplomacy = previouslyMissingTrapDiplomacy
+            || finding.code == "diplomacy.magic_trap_table_missing";
     m_familyValidation = report;
     // Visual providers resolve against live profile/database/resource state on
     // the GUI-owned unit projection. Surface their fail-closed diagnostics in
@@ -3418,6 +4347,15 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     }
     m_ui->treeWidget->setValidationNids(criticalNids, warningNids);
     updateMobFamilyValidationPanel();
+    bool newlyMissingTrapDiplomacy = false;
+    for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+        newlyMissingTrapDiplomacy = newlyMissingTrapDiplomacy
+            || finding.code == "diplomacy.magic_trap_table_missing";
+    if(newlyMissingTrapDiplomacy && !previouslyMissingTrapDiplomacy && m_validationDock)
+    {
+        m_validationDock->show();
+        m_validationDock->raise();
+    }
     ei::log(eLogInfo, QString("MOB validation UI applied context:%1 elapsedMs:%2 members:%3 findings:%4")
             .arg(m_familyValidation.familyLabel).arg(elapsed.elapsed())
             .arg(m_familyValidation.members.size()).arg(m_familyValidation.findings.size()));
@@ -3498,6 +4436,32 @@ void MainWindow::updateMobFamilyValidationPanel()
                       QString("%1 %2\n%3\n%4")
                           .arg(severity, finding.category, finding.message,
                                finding.locations.join('\n')));
+        if(finding.hasNid)
+        {
+            const QVector<SMobNidOwner> owners = m_familyValidation.nidOwners.value(finding.nid);
+            const SMobNidOwner* matchingOwner = nullptr;
+            for(const SMobNidOwner& owner : owners)
+            {
+                for(const QString& location : finding.locations)
+                {
+                    if(location.startsWith(owner.mobPath + ":", Qt::CaseInsensitive)
+                       || location.compare(owner.mobPath, Qt::CaseInsensitive) == 0)
+                    {
+                        matchingOwner = &owner;
+                        break;
+                    }
+                }
+                if(matchingOwner)
+                    break;
+            }
+            if(matchingOwner)
+            {
+                item->setData(0, kValidationPathRole, matchingOwner->mobPath);
+                item->setData(0, kValidationNidRole, matchingOwner->nid);
+                item->setData(0, kValidationSectionRole, matchingOwner->sectionPath);
+                item->setToolTip(1, tr("Double-click to load its MOB if needed, then select this object."));
+            }
+        }
         for(const QString& location : finding.locations)
             new QTreeWidgetItem(item, QStringList() << QString() << tr("Location")
                                                     << location << QString());
@@ -4496,7 +5460,8 @@ void MainWindow::updateLoadedMapPanel()
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
     if(hasMpr)
     {
-        root->setText(0, CLandscape::getInstance()->filePath().fileName());
+        root->setText(0, CLandscape::getInstance()->filePath().fileName()
+                      + (CLandscape::getInstance()->isDirty() ? " *" : ""));
         root->setText(2, tr("MPR"));
         root->setToolTip(0, CLandscape::getInstance()->filePath().absoluteFilePath());
         root->setFlags(root->flags() | Qt::ItemIsUserCheckable);
@@ -4653,7 +5618,10 @@ void MainWindow::updateDocumentActionAvailability()
     const bool hasActiveMob = m_pView && m_pView->hasActiveMob();
     const bool hasAnyMob = m_pView && !m_pView->mobs().isEmpty();
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
+    const bool dirtyMpr = hasMpr && CLandscape::getInstance()->isDirty();
     m_ui->actionOpen->setEnabled(idle);
+    m_ui->actionNew_MPR->setEnabled(idle);
+    m_ui->actionNew_MOB->setEnabled(idle);
     m_ui->actionOpen_MPR->setEnabled(idle);
     m_ui->actionOpen_MOB->setEnabled(idle);
     m_ui->actionOpen_recent->setEnabled(idle);
@@ -4662,9 +5630,9 @@ void MainWindow::updateDocumentActionAvailability()
     m_ui->actionSave->setEnabled(idle && hasActiveMob);
     m_ui->actionSave_as->setEnabled(idle && hasActiveMob);
     m_ui->actionSave_all_MOB_s->setEnabled(idle && hasAnyMob);
-    m_ui->actionSave_landscape_MPR->setEnabled(idle && hasMpr);
+    m_ui->actionSave_landscape_MPR->setEnabled(idle && dirtyMpr);
     m_ui->actionSave_landscape_MPR_as->setEnabled(idle && hasMpr);
-    m_ui->actionMap_parameters->setEnabled(idle && hasMpr);
+    m_ui->actionMap_parameters->setEnabled(idle);
     m_ui->actionClose_all->setEnabled(idle && (hasAnyMob || hasMpr));
 }
 
@@ -4691,6 +5659,7 @@ void MainWindow::endWorkspaceLoad()
     ei::log(eLogInfo, "Workspace load finished");
     updateDocumentActionAvailability();
     updateMapTestAction();
+    refreshViewportMinimapSources();
 }
 
 void MainWindow::showLandscapeTools()
@@ -4700,42 +5669,14 @@ void MainWindow::showLandscapeTools()
     if(m_landscapeToolsDock->isVisible())
     {
         m_landscapeToolsDock->raise();
+        if(m_pView)
+            m_pView->onLandscapeToolsShown();
         return;
     }
-
-    // Preserve the user's exact ordinary workspace. Landscape Tools is a
-    // temporary editing mode; hiding it must put Loaded Map, Outliner, and
-    // Properties back at their pre-landscape sizes.
-    m_layoutBeforeLandscapeTools = saveState();
-    m_restoringLandscapeDockLayout = true;
-    if(m_landscapeDockFloating)
-        m_landscapeToolsDock->setFloating(true);
-    else
-    {
-        m_landscapeToolsDock->setFloating(false);
-        addDockWidget(m_landscapeDockArea, m_landscapeToolsDock);
-        QDockWidget* anchor = m_landscapeDockArea == Qt::LeftDockWidgetArea
-            ? m_mapsDock : m_loadedMapDock;
-        if(anchor && anchor != m_landscapeToolsDock)
-            // Landscape Tools owns the top slot; Loaded Map/Maps Browser moves
-            // below it, matching the established landscape workspace.
-            splitDockWidget(m_landscapeToolsDock, anchor, Qt::Vertical);
-    }
-    m_restoringLandscapeDockLayout = false;
-
     m_landscapeToolsDock->show();
     m_landscapeToolsDock->raise();
-    if(!m_landscapeToolsDock->isFloating())
-    {
-        QTimer::singleShot(0, this, [this]()
-        {
-            if(!m_landscapeToolsDock || !m_landscapeToolsDock->isVisible()
-               || m_landscapeToolsDock->isFloating())
-                return;
-            resizeDocks(QList<QDockWidget*>() << m_landscapeToolsDock,
-                        QList<int>() << m_landscapeDockHeight, Qt::Vertical);
-        });
-    }
+    if(m_pView)
+        m_pView->onLandscapeToolsShown();
 }
 
 void MainWindow::hideLandscapeTools()
@@ -4815,33 +5756,17 @@ void MainWindow::handleEscapeShortcut()
     m_pView->setFocus();
 }
 
-void MainWindow::restoreLayoutAfterLandscapeTools()
-{
-    if(m_restoringLandscapeDockLayout || m_layoutBeforeLandscapeTools.isEmpty())
-        return;
-    const QByteArray state = m_layoutBeforeLandscapeTools;
-    m_layoutBeforeLandscapeTools.clear();
-    m_restoringLandscapeDockLayout = true;
-    restoreState(state);
-    m_restoringLandscapeDockLayout = false;
-}
-
 void MainWindow::saveUiState()
 {
     if(m_uiStateSaved || !m_ui)
         return;
     if(m_landscapeToolsDock)
-    {
         hideLandscapeTools();
-        restoreLayoutAfterLandscapeTools();
-    }
     QSettings uiSettings;
     uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
     uiSettings.setValue("ui/mainWindowState", saveState());
     uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
     uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
-    uiSettings.setValue("ui/landscapeDockArea", int(m_landscapeDockArea));
-    uiSettings.setValue("ui/landscapeDockHeight", m_landscapeDockHeight);
     uiSettings.sync();
     m_uiStateSaved = true;
 }
@@ -5200,6 +6125,8 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
 
 void MainWindow::beginAutosaveCountdown()
 {
+    if(m_shutdownInProgress)
+        return;
     if(!m_pView || m_pView->hasPendingOperation())
     {
         ei::log(eLogInfo, "Recovery autosave countdown deferred while an edit operation is pending");
@@ -5277,6 +6204,8 @@ void MainWindow::beginAutosaveCountdown()
 
 void MainWindow::performAutosave()
 {
+    if(m_shutdownInProgress)
+        return;
     ei::log(eLogInfo, QString("Recovery autosave tick active:%1 intervalMs:%2")
             .arg(m_autosaveTimer && m_autosaveTimer->isActive())
             .arg(m_autosaveTimer ? m_autosaveTimer->interval() : -1));
@@ -5315,12 +6244,33 @@ void MainWindow::performAutosave()
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isMprLoad() && landscape->isDirty())
     {
-        // A changed MPR may only be emitted through CView's provenance-checked
-        // MprDocument/SEC transaction path. CLandscape's inherited rebuilding
-        // serializer is intentionally not exposed to recovery autosave.
-        ++failed;
-        ei::log(eLogWarning, QString("Recovery autosave skipped changed MPR until the lossless transaction path is available path:%1")
-            .arg(landscape->filePath().absoluteFilePath()));
+        QByteArray candidate;
+        CValidationReport report;
+        if(!m_pView->buildValidatedLandscapeCandidate(&candidate, &report))
+        {
+            ++failed;
+            ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MPR path:%1 findings:%2")
+                .arg(landscape->filePath().absoluteFilePath(),
+                     report.toText().trimmed()));
+        }
+        else
+        {
+            const SBackupResult result = manager.snapshotAutosave(
+                landscape->filePath(), candidate);
+            if(result.success)
+            {
+                written += result.skipped ? 0 : 1;
+                ei::log(eLogInfo, QString("Recovery autosave MPR path:%1 sha256:%2 skipped:%3")
+                    .arg(landscape->filePath().absoluteFilePath(),
+                         result.sha256).arg(result.skipped));
+            }
+            else
+            {
+                ++failed;
+                ei::log(eLogWarning, QString("Recovery autosave failed MPR path:%1 error:%2")
+                    .arg(landscape->filePath().absoluteFilePath(), result.error));
+            }
+        }
     }
     if(written > 0)
         statusBar()->showMessage(tr("Recovery autosave created %1 new generation(s).").arg(written), 4000);
@@ -5363,6 +6313,715 @@ void MainWindow::on_actionOpen_MPR_triggered()
     opt->setValue(fileName.dir().path());
     if(replaceLoadedLandscape(fileName))
         rememberRecentFile(fileName);
+}
+
+void MainWindow::on_actionNew_MPR_triggered()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Create New MPR"));
+    dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
+    dialog.resize(760, 820);
+    QVBoxLayout* root = new QVBoxLayout(&dialog);
+    QLabel* explanation = new QLabel(tr(
+        "A new landscape reuses the exact atlas, material, and animation metadata from a proven template MPR. "
+        "Endurance creates fresh MP/SEC members and does not invent a MOB or map.txt registration. "
+        "If you change the namespace, matching atlas textures must already exist in the active resource profile."), &dialog);
+    explanation->setWordWrap(true);
+    root->addWidget(explanation);
+    QFormLayout* form = new QFormLayout;
+    root->addLayout(form);
+
+    QLineEdit* templatePath = new QLineEdit(&dialog);
+    templatePath->setToolTip(tr(
+        "A proven MPR whose atlas namespace, tile metadata, liquid materials, animations, and other MP settings will be copied. The template itself is never modified."));
+    QPushButton* browseTemplate = new QPushButton(tr("Browse..."), &dialog);
+    QWidget* templateRow = new QWidget(&dialog);
+    QHBoxLayout* templateLayout = new QHBoxLayout(templateRow);
+    templateLayout->setContentsMargins(0, 0, 0, 0);
+    templateLayout->addWidget(templatePath, 1);
+    templateLayout->addWidget(browseTemplate);
+    form->addRow(tr("Terrain template MPR"), templateRow);
+
+    QLineEdit* nameSpace = new QLineEdit(&dialog);
+    nameSpace->setToolTip(tr(
+        "Internal MP/SEC resource-name stem for the new archive. Keep the template namespace unless matching atlas textures already exist under a different namespace."));
+    form->addRow(tr("MPR namespace"), nameSpace);
+    QSpinBox* sectorsX = new QSpinBox(&dialog);
+    QSpinBox* sectorsY = new QSpinBox(&dialog);
+    sectorsX->setRange(1, 32);
+    sectorsY->setRange(1, 32);
+    sectorsX->setValue(4);
+    sectorsY->setValue(4);
+    sectorsX->setToolTip(tr(
+        "Horizontal map size. One sector contains 16 x 16 terrain tiles (33 x 33 shared vertices). Maximum: 32 sectors."));
+    sectorsY->setToolTip(tr(
+        "Vertical map size. One sector contains 16 x 16 terrain tiles (33 x 33 shared vertices). Maximum: 32 sectors."));
+    form->addRow(tr("Width (16-tile sectors)"), sectorsX);
+    form->addRow(tr("Height (16-tile sectors)"), sectorsY);
+    QDoubleSpinBox* maxZ = new QDoubleSpinBox(&dialog);
+    maxZ->setRange(0.001, 1000000.0);
+    maxZ->setDecimals(3);
+    maxZ->setValue(100.0);
+    maxZ->setToolTip(tr(
+        "World-space height represented by raw height 65535. Raw 0 is world height 0; raw 32768 is approximately half of maxZ. Increase maxZ for taller elevation differences without changing the 0-65535 raw precision."));
+    form->addRow(tr("Vertical scale (maxZ)"), maxZ);
+    QSpinBox* flatRaw = new QSpinBox(&dialog);
+    flatRaw->setRange(0, 65535);
+    flatRaw->setValue(32768);
+    flatRaw->setToolTip(tr(
+        "Initial terrain height when no heightmap is selected. World height = raw height / 65535 x maxZ. A selected heightmap replaces this value across the terrain."));
+    form->addRow(tr("Flat raw height"), flatRaw);
+    QSpinBox* atlasSlot = new QSpinBox(&dialog);
+    atlasSlot->setRange(0, 16383);
+    atlasSlot->setToolTip(tr(
+        "Existing terrain tile in the template atlas namespace. Endurance stores this packed atlas slot on every initial land tile; it does not create atlas imagery."));
+    form->addRow(tr("Initial atlas slot"), atlasSlot);
+    QComboBox* rotation = new QComboBox(&dialog);
+    rotation->addItems({tr("0 degrees"), tr("90 degrees"),
+                        tr("180 degrees"), tr("270 degrees")});
+    rotation->setToolTip(tr(
+        "Rotation applied to the selected initial land atlas tile."));
+    form->addRow(tr("Initial tile rotation"), rotation);
+    QCheckBox* closeEdges = new QCheckBox(tr("Taper the outside edge down to raw height 0"), &dialog);
+    closeEdges->setChecked(true);
+    closeEdges->setToolTip(tr(
+        "Gradually lowers the outer terrain band to raw 0 after heightmap import, creating a closed map edge. This deliberately replaces heightmap values inside that band."));
+    form->addRow(QString(), closeEdges);
+    QSpinBox* taperTiles = new QSpinBox(&dialog);
+    taperTiles->setRange(1, 16);
+    taperTiles->setValue(2);
+    taperTiles->setToolTip(tr(
+        "Width of the terrain edge band affected by the smooth taper."));
+    form->addRow(tr("Edge taper width (tiles)"), taperTiles);
+
+    QLineEdit* heightmapPath = new QLineEdit(&dialog);
+    heightmapPath->setObjectName(QStringLiteral("newMprHeightmapPath"));
+    heightmapPath->setPlaceholderText(tr("Optional; leave blank for a flat map"));
+    heightmapPath->setToolTip(tr(
+        "Optional grayscale image stretched across the complete map. Black pixels map to the black raw endpoint and white pixels to the white raw endpoint; either endpoint may be higher."));
+    QPushButton* browseHeightmap = new QPushButton(tr("Browse..."), &dialog);
+    QPushButton* clearHeightmap = new QPushButton(tr("Clear"), &dialog);
+    clearHeightmap->setObjectName(QStringLiteral("newMprHeightmapClear"));
+    QWidget* heightmapRow = new QWidget(&dialog);
+    QHBoxLayout* heightmapLayout = new QHBoxLayout(heightmapRow);
+    heightmapLayout->setContentsMargins(0, 0, 0, 0);
+    heightmapLayout->addWidget(heightmapPath, 1);
+    heightmapLayout->addWidget(browseHeightmap);
+    heightmapLayout->addWidget(clearHeightmap);
+    form->addRow(tr("Heightmap"), heightmapRow);
+    QSpinBox* heightmapMinimum = new QSpinBox(&dialog);
+    QSpinBox* heightmapMaximum = new QSpinBox(&dialog);
+    heightmapMinimum->setRange(0, 65535);
+    heightmapMaximum->setRange(0, 65535);
+    heightmapMaximum->setValue(65535);
+    heightmapMinimum->setToolTip(tr(
+        "Raw terrain height assigned to black pixels. It may be higher than the white endpoint to invert the heightmap."));
+    heightmapMaximum->setToolTip(tr(
+        "Raw terrain height assigned to white pixels. It may be lower than the black endpoint to invert the heightmap."));
+    form->addRow(tr("Heightmap black raw height"), heightmapMinimum);
+    form->addRow(tr("Heightmap white raw height"), heightmapMaximum);
+    QCheckBox* flipHeightmap = new QCheckBox(tr("Flip heightmap vertically"), &dialog);
+    flipHeightmap->setToolTip(tr(
+        "Mirrors the source image north-to-south before it is stretched onto the map."));
+    form->addRow(QString(), flipHeightmap);
+
+    QGroupBox* overlayGroup = new QGroupBox(tr("Initial overlay plane"), &dialog);
+    QFormLayout* overlayForm = new QFormLayout(overlayGroup);
+    QCheckBox* createOverlay = new QCheckBox(
+        tr("Create a full overlay plane (for water, lava, or other surfaces)"),
+        overlayGroup);
+    createOverlay->setObjectName(QStringLiteral("newMprCreateOverlay"));
+    createOverlay->setToolTip(tr(
+        "Creates an active overlay tile over the entire new map. Leave disabled for terrain-only maps."));
+    overlayForm->addRow(QString(), createOverlay);
+    QSpinBox* overlayRawHeight = new QSpinBox(overlayGroup);
+    overlayRawHeight->setRange(0, 65535);
+    overlayRawHeight->setValue(32768);
+    overlayRawHeight->setToolTip(tr(
+        "Constant raw height of the overlay plane. World height = raw height / 65535 x maxZ. This plane does not use the terrain heightmap."));
+    overlayForm->addRow(tr("Plane raw height"), overlayRawHeight);
+    QSpinBox* overlayAtlasSlot = new QSpinBox(overlayGroup);
+    overlayAtlasSlot->setRange(0, 16383);
+    overlayAtlasSlot->setToolTip(tr(
+        "Existing atlas tile used by every initial overlay cell, such as a water or lava tile."));
+    overlayForm->addRow(tr("Overlay atlas slot"), overlayAtlasSlot);
+    QComboBox* overlayRotation = new QComboBox(overlayGroup);
+    overlayRotation->addItems({tr("0 degrees"), tr("90 degrees"),
+                               tr("180 degrees"), tr("270 degrees")});
+    overlayRotation->setToolTip(tr(
+        "Rotation applied to the selected initial overlay atlas tile."));
+    overlayForm->addRow(tr("Overlay tile rotation"), overlayRotation);
+    QSpinBox* overlayMaterial = new QSpinBox(overlayGroup);
+    overlayMaterial->setRange(0, 0);
+    overlayMaterial->setToolTip(tr(
+        "Existing liquid/overlay material from the template MP. This controls material properties; the atlas slot controls the visible tile texture."));
+    overlayForm->addRow(tr("Liquid material index"), overlayMaterial);
+    QCheckBox* taperOverlay = new QCheckBox(
+        tr("Taper overlay edges down to raw height 0"), overlayGroup);
+    taperOverlay->setToolTip(tr(
+        "Gradually lowers only the overlay plane around the outside edge. The land taper remains independent."));
+    overlayForm->addRow(QString(), taperOverlay);
+    QSpinBox* overlayTaperTiles = new QSpinBox(overlayGroup);
+    overlayTaperTiles->setRange(1, 16);
+    overlayTaperTiles->setValue(2);
+    overlayTaperTiles->setToolTip(tr(
+        "Width of the overlay edge band affected by the smooth taper."));
+    overlayForm->addRow(tr("Overlay taper width (tiles)"), overlayTaperTiles);
+    root->addWidget(overlayGroup);
+    for(QWidget* control : {static_cast<QWidget*>(overlayRawHeight),
+                            static_cast<QWidget*>(overlayAtlasSlot),
+                            static_cast<QWidget*>(overlayRotation),
+                            static_cast<QWidget*>(overlayMaterial),
+                            static_cast<QWidget*>(taperOverlay),
+                            static_cast<QWidget*>(overlayTaperTiles)})
+        control->setEnabled(false);
+
+    QLabel* previewStatus = new QLabel(&dialog);
+    previewStatus->setObjectName(QStringLiteral("newMprHeightmapStatus"));
+    previewStatus->setWordWrap(true);
+    CNewMprCanvasPreview* canvasPreview = new CNewMprCanvasPreview(&dialog);
+    canvasPreview->setObjectName(QStringLiteral("newMprCanvasPreview"));
+    root->addWidget(previewStatus);
+    root->addWidget(canvasPreview, 1);
+
+    const QFileInfo currentTemplate = CLandscape::getInstance()->isMprLoad()
+        ? CLandscape::getInstance()->filePath() : QFileInfo();
+    if(currentTemplate.exists())
+    {
+        templatePath->setText(currentTemplate.absoluteFilePath());
+        CMprDocument current;
+        CValidationReport report;
+        if(current.load(currentTemplate, &report))
+        {
+            nameSpace->setText(current.mapInfo().innerNamespace);
+            maxZ->setValue(current.mapInfo().maxZ);
+            const quint32 atlasCount = qMin<quint32>(256, current.mapInfo().textureCount);
+            atlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+            overlayAtlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+            overlayMaterial->setMaximum(qMax(0, int(current.mapInfo().materialCount) - 1));
+        }
+    }
+    connect(browseTemplate, &QPushButton::clicked, &dialog, [&]() {
+        const QString path = QFileDialog::getOpenFileName(&dialog,
+            tr("Choose Terrain Template MPR"), templatePath->text(), tr("MPR (*.mpr)"));
+        if(path.isEmpty())
+            return;
+        templatePath->setText(path);
+        CMprDocument candidateTemplate;
+        CValidationReport report;
+        if(candidateTemplate.load(QFileInfo(path), &report))
+        {
+            nameSpace->setText(candidateTemplate.mapInfo().innerNamespace);
+            maxZ->setValue(candidateTemplate.mapInfo().maxZ);
+            const quint32 atlasCount = qMin<quint32>(
+                256, candidateTemplate.mapInfo().textureCount);
+            atlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+            overlayAtlasSlot->setMaximum(qMax(0, int(atlasCount * 64) - 1));
+            overlayMaterial->setMaximum(qMax(0,
+                int(candidateTemplate.mapInfo().materialCount) - 1));
+        }
+    });
+    connect(browseHeightmap, &QPushButton::clicked, &dialog, [&]() {
+        const QString path = QFileDialog::getOpenFileName(&dialog,
+            tr("Choose Grayscale Heightmap"), heightmapPath->text(),
+            tr("Heightmaps (*.png *.bmp *.tif *.tiff);;Images (*)"));
+        if(!path.isEmpty())
+            heightmapPath->setText(path);
+    });
+    connect(clearHeightmap, &QPushButton::clicked, heightmapPath, &QLineEdit::clear);
+    connect(closeEdges, &QCheckBox::toggled, taperTiles, &QSpinBox::setEnabled);
+    connect(createOverlay, &QCheckBox::toggled, &dialog, [&](bool enabled) {
+        overlayRawHeight->setEnabled(enabled);
+        overlayAtlasSlot->setEnabled(enabled);
+        overlayRotation->setEnabled(enabled);
+        overlayMaterial->setEnabled(enabled);
+        taperOverlay->setEnabled(enabled);
+        overlayTaperTiles->setEnabled(enabled && taperOverlay->isChecked());
+    });
+    connect(taperOverlay, &QCheckBox::toggled, &dialog, [&](bool enabled) {
+        overlayTaperTiles->setEnabled(createOverlay->isChecked() && enabled);
+    });
+
+    QImage previewHeightmap;
+    const auto refreshPreview = [&]() {
+        const QString path = heightmapPath->text().trimmed();
+        flatRaw->setEnabled(path.isEmpty());
+        if(path.isEmpty())
+        {
+            previewHeightmap = QImage();
+            previewStatus->setText(tr(
+                "Flat terrain preview: raw %1 = %2 world units. Choose a heightmap to preview its stretch and orientation.")
+                .arg(flatRaw->value())
+                .arg(double(flatRaw->value()) * maxZ->value() / 65535.0,
+                     0, 'f', 3));
+            previewStatus->setStyleSheet(QString());
+        }
+        else
+        {
+            const SNewMprHeightmap loaded = loadNewMprHeightmap(path);
+            previewHeightmap = loaded.image;
+            if(previewHeightmap.isNull())
+            {
+                previewStatus->setText(loaded.error);
+                previewStatus->setStyleSheet(QStringLiteral("color: #ff8080;"));
+            }
+            else
+            {
+                previewStatus->setText(tr(
+                    "%1 x %2 image stretched to the full terrain canvas. Black: raw %3 = %4 world units. White: raw %5 = %6 world units.%7")
+                    .arg(previewHeightmap.width()).arg(previewHeightmap.height())
+                    .arg(heightmapMinimum->value())
+                    .arg(double(heightmapMinimum->value()) * maxZ->value()
+                         / 65535.0, 0, 'f', 3)
+                    .arg(heightmapMaximum->value())
+                    .arg(double(heightmapMaximum->value()) * maxZ->value()
+                         / 65535.0, 0, 'f', 3)
+                    .arg(heightmapMinimum->value() > heightmapMaximum->value()
+                         ? tr(" Elevation is inverted (black is higher).")
+                         : QString()));
+                previewStatus->setStyleSheet(QString());
+            }
+        }
+        canvasPreview->setCanvas(sectorsX->value(), sectorsY->value(),
+            previewHeightmap, flipHeightmap->isChecked(), createOverlay->isChecked(),
+            closeEdges->isChecked(), taperOverlay->isChecked());
+    };
+    connect(heightmapPath, &QLineEdit::textChanged, &dialog,
+            [&](const QString&) { refreshPreview(); });
+    connect(sectorsX, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
+    connect(sectorsY, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
+    connect(flipHeightmap, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshPreview(); });
+    connect(maxZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dialog,
+            [&](double) { refreshPreview(); });
+    connect(flatRaw, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
+    connect(heightmapMinimum, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
+    connect(heightmapMaximum, QOverload<int>::of(&QSpinBox::valueChanged), &dialog,
+            [&](int) { refreshPreview(); });
+    connect(closeEdges, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshPreview(); });
+    connect(createOverlay, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshPreview(); });
+    connect(taperOverlay, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshPreview(); });
+    refreshPreview();
+
+    QDialogButtonBox* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Create and Open..."));
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    root->addWidget(buttons);
+    connect(buttons->button(QDialogButtonBox::Ok), &QPushButton::clicked,
+            &dialog, [&]() {
+        CMprDocument terrainTemplate;
+        CValidationReport report;
+        const QFileInfo templateFile(templatePath->text());
+        if(!terrainTemplate.load(templateFile, &report) || report.hasErrors())
+        {
+            QMessageBox::warning(&dialog, tr("Create New MPR"),
+                tr("The terrain template could not be validated.\n\n%1")
+                    .arg(report.toText()));
+            return;
+        }
+        SMprCreationRequest request;
+        request.innerNamespace = nameSpace->text().trimmed();
+        request.sectorCountX = quint32(sectorsX->value());
+        request.sectorCountY = quint32(sectorsY->value());
+        request.maxZ = float(maxZ->value());
+        request.flatRawHeight = quint16(flatRaw->value());
+        SMprPackedTile tile;
+        tile.atlasIndex = quint8(atlasSlot->value() / 64);
+        tile.tileIndex = quint8(atlasSlot->value() % 64);
+        tile.rotation = quint8(rotation->currentIndex());
+        request.initialPackedTile = tile.encode();
+        request.closeEdges = closeEdges->isChecked();
+        request.edgeTaperTiles = taperTiles->value();
+
+        const QString selectedHeightmap = heightmapPath->text().trimmed();
+        if(!selectedHeightmap.isEmpty())
+        {
+            const SNewMprHeightmap loaded = loadNewMprHeightmap(selectedHeightmap);
+            if(loaded.image.isNull())
+            {
+                ei::log(eLogWarning, QString("New MPR heightmap decode refused path:%1 error:%2")
+                    .arg(selectedHeightmap, loaded.error));
+                QMessageBox::warning(&dialog, tr("Create New MPR"), loaded.error);
+                heightmapPath->setFocus();
+                return;
+            }
+            request.heightmapWidth = loaded.image.width();
+            request.heightmapHeight = loaded.image.height();
+            request.heightmapMinimumRaw = float(heightmapMinimum->value());
+            request.heightmapMaximumRaw = float(heightmapMaximum->value());
+            request.heightmapSamples.reserve(loaded.image.width() * loaded.image.height());
+            for(int outputY = 0; outputY < loaded.image.height(); ++outputY)
+            {
+                const int imageY = flipHeightmap->isChecked()
+                    ? loaded.image.height() - 1 - outputY : outputY;
+                for(int x = 0; x < loaded.image.width(); ++x)
+                    request.heightmapSamples.append(
+                        float(qGray(loaded.image.pixel(x, imageY))) / 255.0f);
+            }
+        }
+        request.createOverlayPlane = createOverlay->isChecked();
+        request.overlayRawHeight = quint16(overlayRawHeight->value());
+        SMprPackedTile overlayTile;
+        overlayTile.atlasIndex = quint8(overlayAtlasSlot->value() / 64);
+        overlayTile.tileIndex = quint8(overlayAtlasSlot->value() % 64);
+        overlayTile.rotation = quint8(overlayRotation->currentIndex());
+        request.overlayPackedTile = overlayTile.encode();
+        request.overlayMaterialIndex = qint16(overlayMaterial->value());
+        request.taperOverlayEdges = taperOverlay->isChecked();
+        request.overlayEdgeTaperTiles = overlayTaperTiles->value();
+
+        QByteArray candidate;
+        report = CValidationReport();
+        if(!terrainTemplate.buildNewCanvas(request, &candidate, &report))
+        {
+            ei::log(eLogWarning, "New MPR generation refused: " + report.toText());
+            QMessageBox::warning(&dialog, tr("Create New MPR"),
+                tr("The new landscape could not be generated.\n\n%1")
+                    .arg(report.toText()));
+            return;
+        }
+        COptString* opt = dynamic_cast<COptString*>(
+            m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
+        const QString startFolder = opt ? opt->value() : templateFile.absolutePath();
+        QString destinationPath = QFileDialog::getSaveFileName(&dialog,
+            tr("Save New MPR"),
+            QDir(startFolder).filePath(request.innerNamespace + QStringLiteral(".mpr")),
+            tr("MPR (*.mpr)"));
+        if(destinationPath.isEmpty())
+            return;
+        if(!destinationPath.endsWith(".mpr", Qt::CaseInsensitive))
+            destinationPath += QStringLiteral(".mpr");
+        const QFileInfo destination(destinationPath);
+        if(destination.exists()
+           && QMessageBox::question(&dialog, tr("Replace MPR"),
+                tr("%1 already exists. Back it up and replace it?")
+                    .arg(destination.fileName())) != QMessageBox::Yes)
+            return;
+        SMprSaveCommitRequest commit;
+        commit.destination = destination;
+        const SMprSaveCommitResult result = commitGeneratedMpr(candidate, commit);
+        if(!result.success)
+        {
+            QMessageBox::critical(&dialog, tr("Create New MPR"),
+                tr("The generated MPR was not committed.\n\n%1").arg(result.error));
+            return;
+        }
+        if(opt)
+            opt->setValue(destination.absolutePath());
+        rememberRecentFile(destination);
+        if(!replaceLoadedLandscape(destination))
+        {
+            QMessageBox::information(&dialog, tr("New MPR Created"),
+                tr("The validated MPR was created at:\n%1\n\nIt was not opened because the current document transition was cancelled.")
+                    .arg(destination.absoluteFilePath()));
+            dialog.accept();
+            return;
+        }
+        statusBar()->showMessage(tr("Created and opened %1")
+            .arg(destination.fileName()), 5000);
+        dialog.accept();
+    });
+    dialog.exec();
+}
+
+void MainWindow::on_actionNew_MOB_triggered()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Create New MOB"));
+    dialog.setWindowFlag(Qt::WindowContextHelpButtonHint, false);
+    dialog.resize(650, 560);
+    QVBoxLayout* root = new QVBoxLayout(&dialog);
+    QLabel* introduction = new QLabel(tr(
+        "Create an empty, runtime-valid MOB. Objects, embedded AI graph, VSS, and "
+        "editor-only directory data are never copied. The normal script and "
+        "selected map metadata can be copied explicitly."), &dialog);
+    introduction->setWordWrap(true);
+    root->addWidget(introduction);
+
+    QFormLayout* form = new QFormLayout;
+    QComboBox* role = new QComboBox(&dialog);
+    role->addItem(tr("Primary map MOB (SC_OBJECT_DB_FILE)"));
+    role->addItem(tr("Supplemental / AutoZone MOB (PR_OBJECT_DB_FILE)"));
+    role->setCurrentIndex(1);
+    role->setToolTip(tr(
+        "Primary MOBs own world settings and normally anchor a map. Supplemental "
+        "MOBs are the usual choice for AutoZones and optional map states."));
+    form->addRow(tr("MOB role"), role);
+
+    QComboBox* templateMob = new QComboBox(&dialog);
+    templateMob->addItem(tr("Do not copy from a loaded MOB"), qulonglong(0));
+    if(m_pView)
+    {
+        for(CMob* mob : m_pView->mobs())
+        {
+            if(mob)
+                templateMob->addItem(mob->filePath().fileName(),
+                                     qulonglong(reinterpret_cast<quintptr>(mob)));
+        }
+    }
+    templateMob->setToolTip(tr(
+        "Only explicitly selected fields are copied. Objects, graphs, VSS, and "
+        "editor metadata are always omitted."));
+    form->addRow(tr("Copy settings from"), templateMob);
+
+    QCheckBox* copyRanges = new QCheckBox(tr("Copy the source MOB's active ID ranges"), &dialog);
+    QCheckBox* copyScript = new QCheckBox(tr("Copy normal script (SS_TEXT)"), &dialog);
+    QCheckBox* copyDiplomacy = new QCheckBox(tr("Copy diplomacy table and player names"), &dialog);
+    QCheckBox* copyWorld = new QCheckBox(tr("Copy primary world settings"), &dialog);
+    for(QCheckBox* box : {copyRanges, copyScript, copyDiplomacy, copyWorld})
+        box->setEnabled(false);
+    form->addRow(QString(), copyRanges);
+    form->addRow(QString(), copyScript);
+    form->addRow(QString(), copyDiplomacy);
+    form->addRow(QString(), copyWorld);
+
+    QRegularExpressionValidator* unsignedValidator = new QRegularExpressionValidator(
+        QRegularExpression(QStringLiteral("[0-9]{1,10}")), &dialog);
+    QLineEdit* rangeMinimum = new QLineEdit(QStringLiteral("1"), &dialog);
+    QLineEdit* rangeMaximum = new QLineEdit(QStringLiteral("999999"), &dialog);
+    rangeMinimum->setValidator(unsignedValidator);
+    rangeMaximum->setValidator(unsignedValidator);
+    rangeMinimum->setToolTip(tr(
+        "First object ID reserved for this MOB. Verify that it does not overlap "
+        "another MOB used by the same map state."));
+    rangeMaximum->setToolTip(tr(
+        "Last object ID reserved for this MOB. The range is required even for an "
+        "initially empty MOB so future object creation is deterministic."));
+    form->addRow(tr("ID range minimum"), rangeMinimum);
+    form->addRow(tr("ID range maximum"), rangeMaximum);
+
+    QCheckBox* createDiplomacy = new QCheckBox(
+        tr("Create a default 32-player diplomacy table"), &dialog);
+    createDiplomacy->setToolTip(tr(
+        "Creates the standard 32 by 32 zero-valued table with Player-0 through "
+        "Player-31 names. It contains no hostile relations. Leave disabled to "
+        "omit diplomacy metadata."));
+    form->addRow(QString(), createDiplomacy);
+    root->addLayout(form);
+
+    QGroupBox* worldGroup = new QGroupBox(tr("Initial primary world settings"), &dialog);
+    QFormLayout* worldForm = new QFormLayout(worldGroup);
+    QDoubleSpinBox* windX = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* windY = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* windZ = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* windStrength = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* time = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* ambient = new QDoubleSpinBox(worldGroup);
+    QDoubleSpinBox* sunlight = new QDoubleSpinBox(worldGroup);
+    for(QDoubleSpinBox* value : {windX, windY, windZ, windStrength,
+                                 time, ambient, sunlight})
+    {
+        value->setRange(-1000000.0, 1000000.0);
+        value->setDecimals(4);
+    }
+    time->setValue(12.0);
+    time->setToolTip(tr("Initial game time stored in WORLD_SET."));
+    ambient->setToolTip(tr("Initial ambient-light scalar stored in WORLD_SET."));
+    sunlight->setToolTip(tr("Initial sun-light scalar stored in WORLD_SET."));
+    worldForm->addRow(tr("Wind direction X"), windX);
+    worldForm->addRow(tr("Wind direction Y"), windY);
+    worldForm->addRow(tr("Wind direction Z"), windZ);
+    worldForm->addRow(tr("Wind strength"), windStrength);
+    worldForm->addRow(tr("Time"), time);
+    worldForm->addRow(tr("Ambient"), ambient);
+    worldForm->addRow(tr("Sun light"), sunlight);
+    root->addWidget(worldGroup);
+
+    QCheckBox* openParameters = new QCheckBox(
+        tr("Open MOB Parameters after creation"), &dialog);
+    openParameters->setChecked(true);
+    root->addWidget(openParameters);
+
+    const auto selectedTemplate = [&]() -> CMob* {
+        return reinterpret_cast<CMob*>(quintptr(templateMob->currentData().toULongLong()));
+    };
+    const auto refreshControls = [&]() {
+        const bool hasTemplate = selectedTemplate() != nullptr;
+        const bool primary = role->currentIndex() == 0;
+        copyRanges->setEnabled(hasTemplate);
+        copyScript->setEnabled(hasTemplate);
+        copyDiplomacy->setEnabled(hasTemplate);
+        copyWorld->setEnabled(hasTemplate && primary
+                              && !selectedTemplate()->isQuestMob());
+        if(!copyWorld->isEnabled())
+            copyWorld->setChecked(false);
+        worldGroup->setEnabled(primary && !copyWorld->isChecked());
+        rangeMinimum->setEnabled(!copyRanges->isChecked());
+        rangeMaximum->setEnabled(!copyRanges->isChecked());
+        createDiplomacy->setEnabled(!copyDiplomacy->isChecked());
+    };
+    connect(templateMob, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            &dialog, [&](int) { refreshControls(); });
+    connect(role, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            &dialog, [&](int) { refreshControls(); });
+    connect(copyRanges, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshControls(); });
+    connect(copyDiplomacy, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshControls(); });
+    connect(copyWorld, &QCheckBox::toggled, &dialog,
+            [&](bool) { refreshControls(); });
+    refreshControls();
+
+    QDialogButtonBox* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Create and Open..."));
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    root->addWidget(buttons);
+    connect(buttons->button(QDialogButtonBox::Ok), &QPushButton::clicked,
+            &dialog, [&]() {
+        const bool supplemental = role->currentIndex() == 1;
+        CMob* source = selectedTemplate();
+        const SMobParameterState sourceState = source
+            ? source->parameterState() : SMobParameterState();
+        QVector<SRange> ranges;
+        if(copyRanges->isChecked() && source)
+            ranges = sourceState.questMob ? sourceState.secondaryRanges
+                                          : sourceState.mainRanges;
+        else
+        {
+            bool minimumOk = false;
+            bool maximumOk = false;
+            const qulonglong minimum = rangeMinimum->text().toULongLong(&minimumOk);
+            const qulonglong maximum = rangeMaximum->text().toULongLong(&maximumOk);
+            if(!minimumOk || !maximumOk || minimum == 0 || minimum > 0xFFFFFFFFull
+               || maximum > 0xFFFFFFFFull || minimum > maximum)
+            {
+                QMessageBox::warning(&dialog, tr("Create New MOB"), tr(
+                    "Enter an ID range between 1 and 4294967295, with the minimum "
+                    "not greater than the maximum."));
+                rangeMinimum->setFocus();
+                return;
+            }
+            ranges.append(SRange(uint(minimum), uint(maximum)));
+        }
+        if(ranges.isEmpty())
+        {
+            QMessageBox::warning(&dialog, tr("Create New MOB"), tr(
+                "The selected source has no active ID range to copy. Enter a new "
+                "range instead."));
+            copyRanges->setChecked(false);
+            return;
+        }
+
+        CMob generated;
+        generated.setQuestMob(supplemental);
+        generated.ensureObjectSection();
+        generated.setRanges(!supplemental, ranges);
+        if(copyScript->isChecked() && source)
+            generated.setScript(sourceState.script);
+        if(copyDiplomacy->isChecked() && source)
+        {
+            generated.setDiplomacyField(sourceState.diplomacy);
+            generated.setDiplomacyNames(sourceState.diplomacyNames);
+        }
+        else if(createDiplomacy->isChecked())
+            generated.generateDiplomacyTable();
+        if(!supplemental)
+        {
+            CWorldSet world;
+            if(copyWorld->isChecked() && source)
+                world = sourceState.worldSet;
+            else
+            {
+                world.setData(eWsTypeWindDir, QStringLiteral("(%1,%2,%3)")
+                    .arg(windX->value(), 0, 'g', 9)
+                    .arg(windY->value(), 0, 'g', 9)
+                    .arg(windZ->value(), 0, 'g', 9));
+                world.setData(eWsTypeWindStr, QString::number(windStrength->value(), 'g', 9));
+                world.setData(eWsTypeTime, QString::number(time->value(), 'g', 9));
+                world.setData(eWsTypeAmbient, QString::number(ambient->value(), 'g', 9));
+                world.setData(eWsTypeSunLight, QString::number(sunlight->value(), 'g', 9));
+            }
+            generated.setWorldSet(world);
+        }
+
+        QByteArray candidate;
+        generated.serializeMob(candidate, false);
+        CMobDocument candidateDocument;
+        CValidationReport candidateReport;
+        if(!candidateDocument.loadBytes(candidate, QStringLiteral("new.mob"),
+                                         &candidateReport)
+           || candidateReport.hasErrors()
+           || candidateDocument.isQuestMob() != supplemental
+           || !candidateDocument.objects().isEmpty()
+           || !candidateDocument.hasSection(0xB000)
+           || candidateDocument.hasEmbeddedAiGraph()
+           || candidateDocument.hasSection(0x1E00))
+        {
+            QMessageBox::critical(&dialog, tr("Create New MOB"), tr(
+                "The generated MOB failed its fresh validation and was not written.\n\n%1")
+                .arg(candidateReport.toText()));
+            return;
+        }
+
+        COptString* opt = dynamic_cast<COptString*>(
+            m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
+        const QString startFolder = opt ? opt->value() : QDir::currentPath();
+        QString suggestedName = supplemental
+            ? QStringLiteral("autozone-new.mob") : QStringLiteral("zone-new.mob");
+        QString destinationPath = QFileDialog::getSaveFileName(&dialog,
+            tr("Save New MOB"), QDir(startFolder).filePath(suggestedName),
+            tr("MOB (*.mob)"));
+        if(destinationPath.isEmpty())
+            return;
+        if(!destinationPath.endsWith(QStringLiteral(".mob"), Qt::CaseInsensitive))
+            destinationPath += QStringLiteral(".mob");
+        const QFileInfo destination(destinationPath);
+        if(m_pView)
+        {
+            for(CMob* loaded : m_pView->mobs())
+            {
+                if(loaded && loaded->filePath().absoluteFilePath().compare(
+                       destination.absoluteFilePath(), Qt::CaseInsensitive) == 0)
+                {
+                    QMessageBox::warning(&dialog, tr("Create New MOB"), tr(
+                        "%1 is currently loaded. Unload it before replacing it with "
+                        "a newly generated MOB.").arg(destination.fileName()));
+                    return;
+                }
+            }
+        }
+        if(destination.exists()
+           && QMessageBox::question(&dialog, tr("Replace MOB"),
+                tr("%1 already exists. Back it up and replace it?")
+                    .arg(destination.fileName())) != QMessageBox::Yes)
+            return;
+
+        SMobSaveCommitRequest commit;
+        commit.destination = destination;
+        const SMobSaveCommitResult result = commitGeneratedMob(candidate, commit);
+        if(!result.success)
+        {
+            QMessageBox::critical(&dialog, tr("Create New MOB"), tr(
+                "The generated MOB was not committed.\n\n%1").arg(result.error));
+            return;
+        }
+        if(opt)
+            opt->setValue(destination.absolutePath());
+        if(!loadMobWithProgress(destination))
+        {
+            QMessageBox::information(&dialog, tr("New MOB Created"), tr(
+                "The validated MOB was created at:\n%1\n\nIt could not be opened automatically.")
+                .arg(destination.absoluteFilePath()));
+            dialog.accept();
+            return;
+        }
+        rememberRecentFile(destination);
+        if(openParameters->isChecked())
+            m_pView->openActiveMobEditParams();
+        statusBar()->showMessage(tr("Created and opened %1")
+            .arg(destination.fileName()), 5000);
+        dialog.accept();
+    });
+    dialog.exec();
 }
 
 void MainWindow::on_actionOpen_MOB_triggered()
@@ -5512,6 +7171,9 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
     }
     rebuildWindowTitle();
     updateDocumentActionAvailability();
+    if(type == eTitleTypeData::eTitleTypeDataMpr
+       || type == eTitleTypeData::eTitleTypeDataMprDirtyFlag)
+        updateLoadedMapPanel();
     updateMapTestAction();
     if(type == eTitleTypeData::eTitleTypeDataMpr)
         refreshMapTestContext();
@@ -5595,6 +7257,7 @@ void MainWindow::resizeEvent(QResizeEvent* e)
     QMainWindow::resizeEvent(e);
     positionMapTestResultNotification();
     positionAutosaveNotification();
+    positionViewportMinimap();
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)
@@ -5625,11 +7288,49 @@ void MainWindow::closeEvent(QCloseEvent *e)
     // docks. Landscape Tools is intentionally normalized to closed by
     // saveUiState(); editing mode never resumes implicitly next session.
     saveUiState();
+    // Autosave owns callbacks which query the live document/view state. Stop
+    // both its long-period timer and any active countdown before the viewport
+    // is destroyed; a queued timeout after view teardown used to crash during
+    // otherwise clean shutdown.
+    m_shutdownInProgress = true;
+    if(m_autosaveTimer)
+        m_autosaveTimer->stop();
+    if(m_autosaveCountdownTimer)
+        m_autosaveCountdownTimer->stop();
+    if(m_validationTimer)
+        m_validationTimer->stop();
+    if(m_mapTestResultTimer)
+        m_mapTestResultTimer->stop();
+    if(m_cameraSpeedPersistTimer)
+        m_cameraSpeedPersistTimer->stop();
+    if(m_autosaveNotification)
+        m_autosaveNotification->hide();
+    // The process-wide button connector outlives MainWindow and otherwise
+    // retains a dangling viewport pointer while tool buttons are destroyed.
+    CButtonConnector::getInstance()->attach(nullptr);
     ei::closeSecondaryWindows(this);
     // Remove the editor from the desktop before synchronous scene teardown.
     // Windows otherwise presents a still-visible window as unresponsive.
     hide();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    // The minimap is parented to the viewport while its cadence timers belong
+    // to MainWindow. Stop and disconnect them before deleting the viewport so
+    // no queued timeout can observe the already-destroyed child overlay during
+    // the remainder of shutdown. QPointer clears the child reference itself.
+    if(m_minimapRefreshTimer)
+        m_minimapRefreshTimer->stop();
+    if(m_minimapCameraTimer)
+        m_minimapCameraTimer->stop();
+    if(m_viewportMinimap)
+        m_viewportMinimap->disconnect(this);
+    if(m_pView)
+    {
+        // A long GL teardown gives already-posted viewport/UI callbacks ample
+        // time to become stale. Drain them and sever view-to-window delivery
+        // before the pointer is cleared.
+        QObject::disconnect(m_pView, nullptr, this, nullptr);
+        QCoreApplication::removePostedEvents(m_pView);
+    }
     // Destroy the QGLWidget while the main window and its native child surface
     // are still alive. Waiting for MainWindow::~MainWindow() is too late on
     // Windows: Qt has already released the surface even though CView::isValid()
@@ -5639,8 +7340,10 @@ void MainWindow::closeEvent(QCloseEvent *e)
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();
     ei::log(eLogInfo, "Shutdown live view deletion started");
+    m_pView->prepareForApplicationShutdown();
     delete m_pView;
     m_pView = nullptr;
+    m_viewportMinimap = nullptr;
     ei::log(eLogInfo, QString("Shutdown live view deletion complete elapsedMs:%1")
             .arg(shutdownTimer.elapsed()));
     ei::setCrashContext("shutdown/view-deleted");
@@ -5653,6 +7356,9 @@ void MainWindow::closeEvent(QCloseEvent *e)
         else
             ei::log(eLogInfo, "Editor backup session marked clean");
     }
+    // No deferred MainWindow callback may run after closeEvent returns with a
+    // null viewport. Child destruction is synchronous from this point.
+    QCoreApplication::removePostedEvents(this);
     e->accept();
 }
 

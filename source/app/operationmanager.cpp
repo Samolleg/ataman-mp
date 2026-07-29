@@ -1093,7 +1093,7 @@ CSelect::CSelect(CView *pView):
     if(CScene::getInstance()->getMode()==eEditModeLogic)
         CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, P-Add Patrol(trap zone), L-Add look(cast point), CTLR+Tab-change mode");
     else
-        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, B-Landscape tile painting, L-Landscape Tools, CTRL+Tab-change mode");
+        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, L-Landscape Tools, CTRL+Tab-change mode");
     CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
 }
 
@@ -1101,7 +1101,7 @@ CTileBrush::CTileBrush(CView* pView)
     :CState(pView)
 {
     qDebug()<< "CTileBrush init ";
-    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint, RMB-pick tile, Alt+Wheel-size, Shift+Wheel-material/rotate, Wheel-camera. Choose Land/Overlay in Landscape Tools; M/J toggle visibility.");
+    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint, RMB-pick tile, Alt+Wheel-size, Shift+Wheel-material/rotate, Wheel-camera. M/O toggle main terrain/overlays.");
     CButtonConnector::getInstance()->pressButton(EButtonOpTilebrush);
     m_pView->showOutliner(false);
 }
@@ -1118,22 +1118,13 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         m_pView->closeLandscapeTools();
         break;
     }
-    case eKey_J:
-    {
-        m_pView->setDrawWater(!m_pView->drawWater());
-        break;
-    }
-    case eKey_M:
-    {
-        m_pView->setDrawLand(!m_pView->drawLand());
-        break;
-    }
     case eKey_1 ... eKey_8:
     {
         m_pView->pickQuickAccessTile(key-eKey_1);
         bool bLand = CScene::getInstance()->isLandTileEditMode();
 
-        m_pView->updatePreviewTile(m_pView->getTerrainPos(bLand), bLand);
+        m_pView->updatePreviewTile(
+            m_pView->getTerrainBrushPos(), bLand);
         break;
     }
     default:
@@ -1160,19 +1151,25 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
     Q_UNUSED(pOp);
     m_lastPos = pEvent->pos();
     bool bLand = CScene::getInstance()->isLandTileEditMode();
-    m_lastLandPos = m_pView->getTerrainPos(pEvent->x(), pEvent->y(), bLand);
+    bool hit = false;
+    m_lastLandPos = m_pView->getTerrainBrushPos(
+        pEvent->x(), pEvent->y(), &hit, true);
+    m_lastLandPosValid = hit;
     //m_lastLandPos = QVector3D(0.0f, 0.0f, 0.0f);// make sure that next mouse move apply tile brushing
 
     switch (pEvent->buttons()) {
     case Qt::LeftButton:
     {
+        if(!hit)
+            break;
         m_pView->beginTileBrushGroup();
-        m_pView->setTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
+        m_pView->setTile(m_lastLandPos, bLand);
         break;
     }
     case Qt::RightButton:
     {
-        m_pView->pickTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
+        if(hit)
+            m_pView->pickTile(m_lastLandPos, bLand);
         break;
     }
     }
@@ -1185,16 +1182,28 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
         const bool bLand = CScene::getInstance()->isLandTileEditMode();
         // Always resolve the release position. The view de-duplicates an
         // unchanged center, while a short/fast gesture cannot lose its tail.
-        m_pView->setTile(m_pView->getTerrainPos(
-            pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
+        bool hit = false;
+        const QVector3D position = m_pView->getTerrainBrushPos(
+            pEvent->pos().x(), pEvent->pos().y(), &hit, true);
+        if(hit)
+        {
+            // The initial press may have missed a disconnected overlay. The
+            // first valid release sample still owns a complete undo stroke.
+            m_pView->beginTileBrushGroup();
+            m_pView->setTile(position, bLand);
+        }
         m_pView->endTileBrushGroup();
     }
     if(!m_pView->isPreviewTile()) // if we finished brushing, we will come here
     {
         bool bLand = CScene::getInstance()->isLandTileEditMode();
-        QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y()));
-        m_pView->updatePreviewTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
+        bool hit = false;
+        const QVector3D landPos = m_pView->getTerrainBrushPos(
+            pEvent->pos().x(), pEvent->pos().y(), &hit);
+        if(hit)
+            m_pView->updatePreviewTile(landPos, bLand);
         m_lastLandPos = landPos;
+        m_lastLandPosValid = hit;
     }
 }
 
@@ -1224,22 +1233,53 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
             m_pView->setPreviewTile(false);
 
         bool bLand = CScene::getInstance()->isLandTileEditMode();
-        const QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y(), bLand));
-        const float distance = landPos.distanceToPoint(m_lastLandPos);
+        bool hit = false;
+        const QVector3D landPos(m_pView->getTerrainBrushPos(
+            pEvent->x(), pEvent->y(), &hit));
+        if(!hit)
+        {
+            // A disconnected or thin overlay can legitimately have no pick
+            // beneath the cursor. Never interpolate from the renderer's far
+            // unprojection fallback: that creates a stroke across the map.
+            m_lastLandPosValid = false;
+            m_pView->endTerrainPreviewBatch();
+            m_lastPos = pEvent->pos();
+            return;
+        }
+        m_pView->beginTerrainPreviewBatch();
+        // A drag can enter a valid projected surface after its press missed.
+        // Begin is idempotent and guarantees every following stamp belongs to
+        // the release-owned undo transaction.
+        m_pView->beginTileBrushGroup();
+        const float distance = m_lastLandPosValid
+            ? landPos.distanceToPoint(m_lastLandPos) : 0.0f;
         const float spacing = m_pView->terrainPaintStampSpacing();
-        if(distance >= spacing)
+        if(!m_lastLandPosValid)
+        {
+            m_pView->setTile(landPos, bLand);
+            m_lastLandPos = landPos;
+            m_lastLandPosValid = true;
+        }
+        else if(distance >= spacing)
         {
             // Interpolate fast pointer movement so a small brush cannot leave
             // unpainted tile gaps between mouse events. All stamps remain in
             // the press/release undo macro.
+            constexpr int maximumContinuousSteps = 32;
             const int steps = qMax(1, int(std::ceil(distance / spacing)));
-            for(int step = 1; step <= steps; ++step)
-            {
-                const float ratio = float(step) / float(steps);
-                m_pView->setTile(m_lastLandPos * (1.0f - ratio) + landPos * ratio, bLand);
-            }
+            if(steps <= maximumContinuousSteps)
+                for(int step = 1; step <= steps; ++step)
+                {
+                    const float ratio = float(step) / float(steps);
+                    m_pView->setTile(m_lastLandPos * (1.0f - ratio) + landPos * ratio, bLand);
+                }
+            else
+                // Treat a delayed/warped pointer event as a discontinuity.
+                // The endpoint remains responsive without filling the gap.
+                m_pView->setTile(landPos, bLand);
             m_lastLandPos = landPos;
         }
+        m_pView->endTerrainPreviewBatch();
         m_pView->updatePreviewTile(landPos, bLand);
 
     }
@@ -1249,12 +1289,18 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
 //            m_pView->setPreviewTile();
 
         bool bLand = CScene::getInstance()->isLandTileEditMode();
-        QVector3D landPos(m_pView->getTerrainPos(pEvent->x(), pEvent->y()));
-        if(landPos.distanceToPoint(m_lastLandPos) > 1.0f) // avoid re-brushing single tile of each movement.
+        bool hit = false;
+        const QVector3D landPos = m_pView->getTerrainBrushPos(
+            pEvent->x(), pEvent->y(), &hit);
+        if(hit && (!m_lastLandPosValid
+                   || landPos.distanceToPoint(m_lastLandPos) > 1.0f))
         {
-            m_pView->updatePreviewTile(m_pView->getTerrainPos(pEvent->pos().x(), pEvent->pos().y(), bLand), bLand);
+            m_pView->updatePreviewTile(landPos, bLand);
             m_lastLandPos = landPos;
+            m_lastLandPosValid = true;
         }
+        else if(!hit)
+            m_lastLandPosValid = false;
 
     }
     m_lastPos = pEvent->pos();
@@ -1272,7 +1318,8 @@ void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
         {
             m_pView->addTileRotation(step);
             const bool bLand = CScene::getInstance()->isLandTileEditMode();
-            m_pView->updatePreviewTile(m_pView->getTerrainPos(bLand), bLand);
+            m_pView->updatePreviewTile(
+                m_pView->getTerrainBrushPos(), bLand);
             CStatusConnector::getInstance()->updateStatus(
                 "brush.ico", "Manual atlas tile rotation changed. Shift+Wheel rotates; Alt+Wheel resizes; Wheel controls the camera.");
         }

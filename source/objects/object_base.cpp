@@ -18,6 +18,7 @@
 #include "persistent_visual_cache.h"
 
 #include <climits>
+#include <algorithm>
 #include <limits>
 
 namespace {
@@ -121,6 +122,57 @@ void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
     }
     ++s_visualAssemblyTelemetry.memoryHits;
     cloneAssembly(destination, cached->parts);
+}
+
+float navigationCross(const QVector2D& origin, const QVector2D& a, const QVector2D& b)
+{
+    return (a.x() - origin.x()) * (b.y() - origin.y())
+        - (a.y() - origin.y()) * (b.x() - origin.x());
+}
+
+QVector<QVector2D> navigationConvexHull(QVector<QVector2D> points)
+{
+    std::sort(points.begin(), points.end(), [](const QVector2D& left, const QVector2D& right) {
+        return left.x() < right.x()
+            || (qFuzzyCompare(left.x(), right.x()) && left.y() < right.y());
+    });
+    QVector<QVector2D> unique;
+    for(const QVector2D& point : points)
+        if(unique.isEmpty() || (point - unique.back()).lengthSquared() > 1.0e-8f)
+            unique.append(point);
+    if(unique.size() <= 2)
+        return unique;
+    QVector<QVector2D> hull;
+    for(const QVector2D& point : unique)
+    {
+        while(hull.size() >= 2
+              && navigationCross(hull.at(hull.size() - 2), hull.back(), point) <= 1.0e-6f)
+            hull.removeLast();
+        hull.append(point);
+    }
+    const int lowerSize = hull.size();
+    for(int index = unique.size() - 2; index >= 0; --index)
+    {
+        const QVector2D point = unique.at(index);
+        while(hull.size() > lowerSize
+              && navigationCross(hull.at(hull.size() - 2), hull.back(), point) <= 1.0e-6f)
+            hull.removeLast();
+        hull.append(point);
+    }
+    hull.removeLast();
+    return hull;
+}
+
+ENavigationVolumeKind navigationKindForPart(const QString& name)
+{
+    const QString upper = name.toUpper();
+    if(upper.startsWith(QStringLiteral("BASE")))
+        return ENavigationVolumeKind::Bridge;
+    if(upper.startsWith(QStringLiteral("CROWN")))
+        return ENavigationVolumeKind::Easy;
+    if(upper.startsWith(QStringLiteral("EMPTY")))
+        return ENavigationVolumeKind::Ignored;
+    return ENavigationVolumeKind::Blocking;
 }
 }
 
@@ -398,35 +450,62 @@ QVector<SNavigationCollisionProxy> CObjectBase::navigationCollisionProxies() con
     {
         if(!part || !part->isDrawable())
             continue;
-        const QString upperName = part->name().toUpper();
-        if(upperName.startsWith(QStringLiteral("CROWN"))
-           || upperName.startsWith(QStringLiteral("EMPTY"))
-           || upperName.startsWith(QStringLiteral("BASE")))
-            continue;
 
-        QVector3D minimum(std::numeric_limits<float>::max(),
-                          std::numeric_limits<float>::max(),
-                          std::numeric_limits<float>::max());
-        QVector3D maximum(-std::numeric_limits<float>::max(),
-                          -std::numeric_limits<float>::max(),
-                          -std::numeric_limits<float>::max());
-        for(const SVertexData& vertex : part->vertData())
+        QVector3D localMinimum;
+        QVector3D localMaximum;
+        bool authored = part->hasAuthoredNavigationBounds();
+        if(authored)
         {
-            const QVector3D local = part->poseMatrix().map(vertex.position * scale);
-            const QVector3D world = m_rotation.rotatedVector(local) + m_drawPosition;
-            minimum.setX(qMin(minimum.x(), world.x()));
-            minimum.setY(qMin(minimum.y(), world.y()));
-            minimum.setZ(qMin(minimum.z(), world.z()));
-            maximum.setX(qMax(maximum.x(), world.x()));
-            maximum.setY(qMax(maximum.y(), world.y()));
-            maximum.setZ(qMax(maximum.z(), world.z()));
+            localMinimum = part->authoredNavigationMinimum();
+            localMaximum = part->authoredNavigationMaximum();
         }
+        else
+        {
+            localMinimum = QVector3D(std::numeric_limits<float>::max(),
+                                     std::numeric_limits<float>::max(),
+                                     std::numeric_limits<float>::max());
+            localMaximum = -localMinimum;
+            for(const SVertexData& vertex : part->vertData())
+            {
+                localMinimum.setX(qMin(localMinimum.x(), vertex.position.x()));
+                localMinimum.setY(qMin(localMinimum.y(), vertex.position.y()));
+                localMinimum.setZ(qMin(localMinimum.z(), vertex.position.z()));
+                localMaximum.setX(qMax(localMaximum.x(), vertex.position.x()));
+                localMaximum.setY(qMax(localMaximum.y(), vertex.position.y()));
+                localMaximum.setZ(qMax(localMaximum.z(), vertex.position.z()));
+            }
+        }
+
+        QVector<QVector2D> projected;
+        QVector<QVector3D> boxCorners;
+        boxCorners.reserve(8);
+        float minimumZ = std::numeric_limits<float>::max();
+        float maximumZ = -std::numeric_limits<float>::max();
+        for(int z = 0; z < 2; ++z)
+            for(int y = 0; y < 2; ++y)
+                for(int x = 0; x < 2; ++x)
+                {
+                    QVector3D local(x ? localMaximum.x() : localMinimum.x(),
+                                    y ? localMaximum.y() : localMinimum.y(),
+                                    z ? localMaximum.z() : localMinimum.z());
+                    local = part->poseMatrix().map(local * scale);
+                    const QVector3D world = m_rotation.rotatedVector(local) + m_drawPosition;
+                    projected.append(world.toVector2D());
+                    boxCorners.append(world);
+                    minimumZ = qMin(minimumZ, world.z());
+                    maximumZ = qMax(maximumZ, world.z());
+                }
         SNavigationCollisionProxy proxy;
-        proxy.minimum = minimum;
-        proxy.maximum = maximum;
+        proxy.footprint = navigationConvexHull(projected);
+        proxy.boxCorners = boxCorners;
+        proxy.minimumZ = minimumZ;
+        proxy.maximumZ = maximumZ;
+        proxy.kind = navigationKindForPart(part->name());
+        proxy.authored = authored;
         proxy.objectId = m_mapID;
         proxy.partName = part->name();
-        result.append(proxy);
+        if(proxy.footprint.size() >= 3 && proxy.maximumZ > proxy.minimumZ)
+            result.append(proxy);
     }
     return result;
 }

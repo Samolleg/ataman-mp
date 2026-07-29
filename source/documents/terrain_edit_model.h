@@ -21,6 +21,7 @@ struct STerrainSectorSource
     int sectorX{-1};
     int sectorY{-1};
     quint8 type{0};
+    quint64 overlayVertexOffset{0};
     quint64 landTileOffset{0};
     quint64 overlayTileOffset{0};
     quint64 overlayMaterialOffset{0};
@@ -172,6 +173,70 @@ struct STerrainHeightCommand
     }
 };
 
+struct SOverlaySectorDelta
+{
+    int sectorX{-1};
+    int sectorY{-1};
+    QByteArray beforePayload;
+    QByteArray afterPayload;
+};
+
+struct SOverlaySurfaceCommand
+{
+    QString description;
+    QVector<SOverlaySectorDelta> sectors;
+    int heightClampedVertexCount{0};
+    bool isEmpty() const { return sectors.isEmpty(); }
+};
+
+struct SOverlaySectorSnapshot
+{
+    int sectorX{0};
+    int sectorY{0};
+    QByteArray payload;
+};
+
+struct SOverlaySurfaceSnapshot
+{
+    QVector<SOverlaySectorSnapshot> sectors;
+};
+
+// Compose sequential overlay surface stamps into one reversible sector
+// transaction. Repeated sectors retain their original payload and final
+// payload so a complete stroke always undoes byte-for-byte.
+void appendOverlaySurfaceCommand(SOverlaySurfaceCommand* stroke,
+                                 const SOverlaySurfaceCommand& stamp);
+
+struct STerrainHeightRange
+{
+    int vertexCount{0};
+    quint16 minimumRaw{0};
+    quint16 maximumRaw{0};
+    float minimumWorld{0.0f};
+    float maximumWorld{0.0f};
+    float worldUnitsPerRawStep{0.0f};
+};
+
+enum class ETerrainVerticalScalePolicy
+{
+    ScaleTerrain,
+    PreserveWorldHeights
+};
+
+struct STerrainVerticalScaleCommand
+{
+    bool valid{false};
+    QString description;
+    ETerrainVerticalScalePolicy policy{ETerrainVerticalScalePolicy::ScaleTerrain};
+    float beforeMaxZ{0.0f};
+    float afterMaxZ{0.0f};
+    STerrainHeightCommand heights;
+    int roundedVertexCount{0};
+    int clampedVertexCount{0};
+    float maximumWorldError{0.0f};
+    bool isEmpty() const { return valid && beforeMaxZ == afterMaxZ && heights.isEmpty(); }
+};
+
 // Compose sequential live-preview height commands into one reversible
 // before/after transaction. Repeated vertices retain their first value and
 // final value so a whole sculpt stroke rebuilds each affected sector once.
@@ -278,11 +343,14 @@ public:
                      const QVector<STerrainSectorSource>& sources,
                      CValidationReport* report = nullptr,
                      int textureCount = 0,
-                     const QVector<qint32>& tileTypes = QVector<qint32>());
+                     const QVector<qint32>& tileTypes = QVector<qint32>(),
+                     int materialCount = 0);
 
     int vertexCountX() const { return m_vertexCountX; }
     int vertexCountY() const { return m_vertexCountY; }
     quint16 height(int globalX, int globalY) const;
+    float maxZ() const { return m_maxZ; }
+    STerrainHeightRange heightRange() const;
     bool hasSeamConflicts() const;
     bool isDirty() const;
     int tileCountX() const { return m_sectorCountX * 16; }
@@ -290,9 +358,46 @@ public:
     quint16 packedTile(int globalX, int globalY, ETerrainTileLayer layer,
                        bool* available = nullptr) const;
     qint32 tileType(quint16 packed, bool* found = nullptr) const;
+    // Source-compatible half-metre navigation samples. Each 1 m terrain quad
+    // contributes four samples using the three adjacent SEC vertices; this is
+    // deliberately not ordinary bilinear filtering.
+    float navigationHeightSample(int aiTileX, int aiTileY,
+                                 ETerrainTileLayer layer,
+                                 bool* available = nullptr,
+                                 bool requireActiveOverlay = true) const;
+    // Samples the displaced main-terrain surface using the runtime cell
+    // selection and triangle rules. This is intentionally distinct from the
+    // navigation half-cell sampler and from viewport ray picking.
+    float terrainSurfaceHeight(float worldX, float worldY,
+                               bool* available = nullptr) const;
+    qint16 overlayMaterialIndex(int globalTileX, int globalTileY,
+                                bool* available = nullptr) const;
+    SOverlaySurfaceCommand makeOverlayActivation(
+        const STerrainTileBrush& brush, qint16 materialIndex,
+        quint8 atlasIndex, quint8 tileIndex, quint8 rotation,
+        CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlayDeactivation(
+        const STerrainTileBrush& brush,
+        CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlayRaiseLower(
+        const STerrainBrush& brush, float rawHeightDelta,
+        CValidationReport* report = nullptr,
+        bool allowSaturation = false) const;
+    SOverlaySurfaceCommand makeOverlayFlatten(
+        const STerrainBrush& brush, quint16 targetHeight, float strength,
+        CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlaySmooth(
+        const STerrainBrush& brush, float strength,
+        CValidationReport* report = nullptr) const;
+    SOverlaySurfaceSnapshot overlaySurfaceSnapshot() const;
+    SOverlaySurfaceCommand makeOverlaySurfaceCommand(
+        const SOverlaySurfaceSnapshot& before,
+        const QString& description,
+        CValidationReport* report = nullptr) const;
 
     STerrainHeightCommand makeRaiseLower(const STerrainBrush& brush,
-                                         float rawHeightDelta) const;
+                                         float rawHeightDelta,
+                                         bool allowSaturation = false) const;
     STerrainHeightCommand makeFlatten(const STerrainBrush& brush,
                                       quint16 targetHeight,
                                       float strength) const;
@@ -306,6 +411,20 @@ public:
         const STerrainHeightmapGrid& grid,
         const STerrainHeightmapImportSettings& settings,
         CValidationReport* report = nullptr) const;
+    STerrainHeightCommand makeGlobalOffset(
+        float rawHeightDelta,
+        CValidationReport* report = nullptr) const;
+    STerrainHeightCommand makeGlobalFlatten(quint16 targetHeight) const;
+    STerrainHeightCommand makeGlobalClamp(
+        quint16 minimumHeight, quint16 maximumHeight,
+        CValidationReport* report = nullptr) const;
+    STerrainHeightCommand makeGlobalNormalize(
+        quint16 outputMinimum, quint16 outputMaximum,
+        CValidationReport* report = nullptr) const;
+    STerrainVerticalScaleCommand makeVerticalScale(
+        float newMaxZ, ETerrainVerticalScalePolicy policy,
+        bool allowClamping = false,
+        CValidationReport* report = nullptr) const;
     STerrainEditDiagnostics diagnose(
         const STerrainHeightCommand& command,
         const QVector<STerrainObjectHeightProbe>& objects = QVector<STerrainObjectHeightProbe>(),
@@ -314,6 +433,8 @@ public:
     bool apply(const STerrainHeightCommand& command, bool forward,
                CValidationReport* report = nullptr,
                bool allowHeightClamping = false);
+    bool apply(const STerrainVerticalScaleCommand& command, bool forward,
+               CValidationReport* report = nullptr);
     STerrainTileCommand makeTilePaint(const STerrainTileBrush& brush,
                                      ETerrainTileLayer layer,
                                      quint8 atlasIndex, quint8 tileIndex,
@@ -324,6 +445,8 @@ public:
         quint32 distributionSeed,
         CValidationReport* report = nullptr) const;
     bool apply(const STerrainTileCommand& command, bool forward,
+               CValidationReport* report = nullptr);
+    bool apply(const SOverlaySurfaceCommand& command, bool forward,
                CValidationReport* report = nullptr);
     bool appendSectorEdits(CMprEditTransaction* transaction,
                            CValidationReport* report = nullptr) const;
@@ -354,6 +477,12 @@ private:
     bool tileLocation(int globalX, int globalY, int* sectorIndex,
                       int* localTile, CValidationReport* report = nullptr) const;
     bool overlayTileIsActive(const SSector& sector, int localTile) const;
+    bool refreshSectorLayout(SSector* sector,
+                             CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlayHeightEdit(
+        const QString& description, const STerrainBrush& brush,
+        int operation, float value, float strength,
+        CValidationReport* report, bool allowSaturation = false) const;
     STerrainTileCommand makeBoundedSemanticTilePaint(
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
@@ -364,7 +493,9 @@ private:
     int m_vertexCountX{0};
     int m_vertexCountY{0};
     float m_maxZ{0.0f};
+    float m_originalMaxZ{0.0f};
     int m_textureCount{0};
+    int m_materialCount{0};
     QVector<qint32> m_tileTypes;
     QVector<quint16> m_heights;
     QVector<quint16> m_originalHeights;
@@ -390,6 +521,22 @@ public:
 private:
     QVector<STerrainTileCommand> m_undo;
     QVector<STerrainTileCommand> m_redo;
+};
+
+class COverlaySurfaceEditHistory
+{
+public:
+    bool execute(CTerrainEditModel* model, const SOverlaySurfaceCommand& command,
+                 CValidationReport* report = nullptr);
+    bool undo(CTerrainEditModel* model, CValidationReport* report = nullptr);
+    bool redo(CTerrainEditModel* model, CValidationReport* report = nullptr);
+    int undoCount() const { return m_undo.size(); }
+    int redoCount() const { return m_redo.size(); }
+    void clear();
+
+private:
+    QVector<SOverlaySurfaceCommand> m_undo;
+    QVector<SOverlaySurfaceCommand> m_redo;
 };
 
 class CTerrainEditHistory

@@ -536,7 +536,17 @@ void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyB
         return;
     m_rowValues.insert(row, clonePropertyValue(value));
     if(QTableWidgetItem* label = m_pTable->item(row, 0))
+    {
         label->setData(Qt::UserRole, int(value->type()));
+        if(value->type() == eObjParam_TRAP_DIPLOMACY)
+        {
+            label->setToolTip(tr(
+                "Raw MT_DIPLOMACY value stored on the trap. The game derives "
+                "the effective hostile mask from the containing MOB's diplomacy "
+                "table when loading, so changing this value alone does not make "
+                "a trap hostile."));
+        }
+    }
     installClipboardFilter(m_pTable->cellWidget(row, 1), row);
 }
 
@@ -854,7 +864,7 @@ void CTableManager::initRowName()
     m_aRowName[eObjParam_LEVER_IS_CYCLED] = "Is cycled?";
     m_aRowName[eObjParam_LEVER_IS_DOOR] = "Is door?";
     m_aRowName[eObjParam_LEVER_RECALC_GRAPH] = "Is recalc graph?";
-    m_aRowName[eObjParam_TRAP_DIPLOMACY] = "Trap group";
+    m_aRowName[eObjParam_TRAP_DIPLOMACY] = "Stored trap diplomacy value";
     m_aRowName[eObjParam_TRAP_SPELL] = "Trap spell";
     //m_aRowName[eObjParam_TRAP_AREAS] = "Trap Areas";
     //m_aRowName[eObjParam_TRAP_TARGETS] = "Trap targets";

@@ -14,10 +14,13 @@
 #include <QStringList>
 #include <QVector3D>
 #include <QFutureWatcher>
+#include <QImage>
+#include <QPointer>
 #include "types.h"
 #include "map_catalog.h"
 #include "map_spawn_planner.h"
 #include "mob_family_validation.h"
+#include "minimap_bake.h"
 
 namespace Ui {
 class MainWindow;
@@ -30,6 +33,7 @@ class CView;
 class CMob;
 class CRandomizeForm;
 class CTileForm;
+struct SMapTableSaveReport;
 class QMenu;
 class QAction;
 class QDockWidget;
@@ -42,6 +46,7 @@ class QComboBox;
 class QCheckBox;
 class QToolButton;
 class QLabel;
+struct SMinimapSceneCaptureResult;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QTimer;
@@ -56,6 +61,8 @@ class QScrollArea;
 class QListWidget;
 class QSlider;
 class QDoubleSpinBox;
+class CViewportMinimapWidget;
+class CMinimapExportDialog;
 
 struct SWindowTitle
 {
@@ -99,6 +106,17 @@ private:
     bool isExitAllowed();
     void closeAll();
     void showGameAndModSetup();
+    void generateMinimap();
+    void persistAiGraph();
+    void scheduleViewportMinimapRefresh(int delayMs = 250, bool force = false);
+    void refreshViewportMinimap();
+    void refreshViewportMinimapSources();
+    bool applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
+                             const SMinimapGradeSettings& grade);
+    void setMinimapGenerationLocked(bool locked);
+    bool ensureGeneratedMinimap();
+    void registerExportedMinimap(const QString& textureName);
+    void positionViewportMinimap();
     void rememberRecentFile(const QFileInfo& fileName);
     void rebuildRecentFilesMenu();
     void loadLastSession();
@@ -108,6 +126,8 @@ private:
     void rebuildWindowTitle();
     void runUndoToIndex(int targetIndex);
     void refreshMapsBrowser();
+    void refreshActiveCatalog(bool preserveWorkspaceState);
+    void processMapTableSaveReports(const QVector<SMapTableSaveReport>& reports);
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
     void openCollection(const QString& path);
     void newCollection();
@@ -127,7 +147,8 @@ private:
     CMob* mapTestStagingMob() const;
     void launchCurrentMapTest();
     void createViewportToolbars();
-    void refreshMapTestContext();
+    void refreshMapTestContext(bool preserveWorkspaceState = false,
+                               bool reloadCatalog = false);
     void populateEntranceCombo();
     void chooseBorrowedMapIdentity();
     void setCustomSpawnPicking(bool enabled);
@@ -146,7 +167,6 @@ private:
     void showLandscapeTools();
     void hideLandscapeTools();
     void toggleLandscapeTools();
-    void restoreLayoutAfterLandscapeTools();
     void handleEscapeShortcut();
     void saveUiState();
     void closeHotReloadProgress();
@@ -185,6 +205,8 @@ private slots:
     void showOutliner(bool bShow);
     void on_actionExit_triggered();
     void on_actionOpen_triggered();
+    void on_actionNew_MPR_triggered();
+    void on_actionNew_MOB_triggered();
     void on_actionOpen_MPR_triggered();
     void on_actionOpen_MOB_triggered();
     void on_actionSettings_triggered();
@@ -245,12 +267,6 @@ private:
     QDockWidget* m_mapsDock;
     QDockWidget* m_landscapeToolsDock;
     CLandscapeTools* m_landscapeTools;
-    QByteArray m_layoutBeforeLandscapeTools;
-    Qt::DockWidgetArea m_landscapeDockArea{Qt::RightDockWidgetArea};
-    int m_landscapeDockHeight{420};
-    bool m_landscapeDockFloating{false};
-    bool m_restoringLandscapeDockLayout{false};
-    bool m_suppressLandscapeDockRestore{false};
     quint64 m_landscapeVisibilityGeneration{0};
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;
@@ -295,6 +311,7 @@ private:
     QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
     bool m_uiStateSaved{false};
     bool m_workspaceLoadInProgress{false};
+    bool m_shutdownInProgress{false};
     QString m_mapTestResultLogPath;
     ETransientNotificationAction m_transientNotificationAction{
         ETransientNotificationAction::None};
@@ -338,6 +355,23 @@ private:
     SMapSpawnPlan m_customSpawn;
     QVector3D m_customSpawnPosition;
     QString m_customSpawnContextKey;
+    QPointer<CViewportMinimapWidget> m_viewportMinimap;
+    QPointer<CMinimapExportDialog> m_minimapExportDialog;
+    QTimer* m_minimapRefreshTimer{nullptr};
+    QTimer* m_minimapCameraTimer{nullptr};
+    QByteArray m_generatedMinimapMmp;
+    QImage m_generatedMinimapImage;
+    QImage m_embeddedMinimapImage;
+    QString m_embeddedMinimapName;
+    QString m_embeddedMinimapSource;
+    SMinimapGradeSettings m_minimapGrade;
+    QString m_generatedMinimapContextKey;
+    int m_minimapTargetTextureSize{1024};
+    bool m_minimapTargetDxt1{true};
+    QString m_minimapExportProfileDescription;
+    QString m_minimapSourceContextKey;
+    bool m_minimapCaptureRunning{false};
+    bool m_minimapGenerationLocked{false};
 };
 
 #endif // MAIN_WINDOW_H

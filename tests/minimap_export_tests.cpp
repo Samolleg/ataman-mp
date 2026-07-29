@@ -1,0 +1,403 @@
+#include <QtTest>
+#include <QTemporaryDir>
+#include <QFile>
+#include <QDataStream>
+
+#include "minimap_bake.h"
+#include "minimap_catalog_registration.h"
+#include "mmp_codec.h"
+#include "mmp_inspector.h"
+#include "res_archive_document.h"
+#include "res_texture_export.h"
+#include "synthetic_map_table_archive.h"
+
+namespace {
+QImage solid(const QSize& size, const QColor& color)
+{ QImage image(size, QImage::Format_ARGB32); image.fill(color); return image; }
+
+QByteArray archiveWithMapTable(const QByteArray& mapTable)
+{
+    QByteArray empty(16, '\0');
+    QDataStream header(&empty, QIODevice::WriteOnly);
+    header.setByteOrder(QDataStream::LittleEndian);
+    header << quint32(0x019ce23c) << quint32(0) << quint32(16) << quint32(0);
+    CResArchiveDocument baseline;
+    baseline.loadBytes(empty, "empty.res");
+    QByteArray result;
+    baseline.buildWithAppendedMember("map.txt", mapTable, 0, &result);
+    return result;
+}
+
+}
+
+class MinimapExportTests : public QObject
+{
+    Q_OBJECT
+private slots:
+    void bakes128PixelsPerSectorAndExcludesDynamic();
+    void normalizesOrientationAndFramesWholeMpr();
+    void composesTerrainOverlayAndStaticInOrder();
+    void encodesInspectable256Mmp();
+    void encodesDeterministicJmvDxt1Profile();
+    void preservesHighResolutionAspectPadding();
+    void gradesShadingAndColorDeterministically();
+    void createsAddsReplacesAndRefusesCollision();
+    void appendValidationMatchesByNameAfterHashTableReorder();
+    void validationFailureDoesNotPublish();
+    void validationFailurePreservesExistingArchive();
+    void registersCatalogOnlyAfterExportAndPreservesObjectives();
+    void stagesReviewedTextureInRunOwnedArchive();
+    void stagesTemporaryCatalogReferenceWithoutObjectivesMutation();
+    void temporaryRuntimeNameAvoidsInstalledTextureShadowing();
+};
+
+void MinimapExportTests::normalizesOrientationAndFramesWholeMpr()
+{
+    QCOMPARE(minimapWorldToReviewPixel(QPointF(0, 0), 2, 1), QPointF(0, 0));
+    QCOMPARE(minimapWorldToReviewPixel(QPointF(64, 32), 2, 1), QPointF(256, 128));
+    QCOMPARE(minimapGameContentRect(11, 9), QRect(0, 0, 256, 209));
+    QCOMPARE(minimapGameContentRect(9, 11), QRect(0, 0, 209, 256));
+
+    QImage source(128, 128, QImage::Format_ARGB32);
+    source.fill(Qt::black);
+    source.setPixelColor(0, 0, Qt::red); // renderer top edge is world north
+    SMinimapBakeOptions options;
+    options.sourceOrientation = EMinimapCaptureOrientation::PositiveYUp;
+    const auto result = bakeMinimapLayers(1, 1,
+        {{EMinimapBakeLayerKind::Terrain, "terrain", source}}, options);
+    QVERIFY(result.success);
+    QCOMPARE(result.reviewImage.pixelColor(0, 127), QColor(Qt::red));
+    QVERIFY(result.incomplete);
+}
+
+void MinimapExportTests::composesTerrainOverlayAndStaticInOrder()
+{
+    const QSize size(128, 128);
+    QImage overlay = solid(size, Qt::transparent);
+    overlay.setPixelColor(5, 6, QColor(0, 0, 255, 255));
+    QImage geometry = solid(size, Qt::transparent);
+    geometry.setPixelColor(5, 6, QColor(255, 0, 0, 255));
+    SMinimapBakeOptions options;
+    options.sourceOrientation = EMinimapCaptureOrientation::PositiveYDown;
+    const auto result = bakeMinimapLayers(1, 1, {
+        {EMinimapBakeLayerKind::Terrain, "terrain", solid(size, Qt::green)},
+        {EMinimapBakeLayerKind::Overlay, "overlays", overlay},
+        {EMinimapBakeLayerKind::StaticGeometry, "collection mobs", geometry}}, options);
+    QVERIFY(result.success);
+    QCOMPARE(result.reviewImage.pixelColor(5, 6), QColor(Qt::red));
+    QVERIFY(!result.incomplete);
+}
+
+void MinimapExportTests::bakes128PixelsPerSectorAndExcludesDynamic()
+{
+    const QSize size(256, 128);
+    QVector<SMinimapBakeLayer> layers{
+        {EMinimapBakeLayerKind::Terrain, "terrain", solid(size, Qt::green)},
+        {EMinimapBakeLayerKind::StaticGeometry, "primary.mob", solid(size, QColor(255, 0, 0, 128))},
+        {EMinimapBakeLayerKind::DynamicObject, "unit", solid(size, Qt::blue)}};
+    const auto first = bakeMinimapLayers(2, 1, layers);
+    const auto second = bakeMinimapLayers(2, 1, layers);
+    QVERIFY2(first.success, qPrintable(first.error));
+    QCOMPARE(first.reviewImage.size(), size);
+    QCOMPARE(first.gameImage.size(), QSize(256, 256));
+    QCOMPARE(first.gameContentRect, QRect(0, 0, 256, 128));
+    QCOMPARE(first.gameImage.pixelColor(0, 200), QColor(Qt::black));
+    QCOMPARE(first.gameImage.pixelColor(0, 0),
+             first.reviewImage.pixelColor(0, 0));
+    QCOMPARE(first.gameImage.pixelColor(255, 127),
+             first.reviewImage.pixelColor(255, 127));
+    QCOMPARE(first.reviewImage, second.reviewImage);
+    QVERIFY(first.reviewImage.pixelColor(0, 0).blue() == 0);
+    QVERIFY(!first.incomplete);
+
+    layers.removeAt(1);
+    const auto mprOnly = bakeMinimapLayers(2, 1, layers);
+    QVERIFY(mprOnly.success);
+    QVERIFY(mprOnly.incomplete);
+}
+
+void MinimapExportTests::encodesInspectable256Mmp()
+{
+    QImage image = solid(QSize(256, 256), QColor(12, 34, 56, 255));
+    QString diagnostic;
+    const QByteArray bytes = ei::encodeMmp8888(image, &diagnostic);
+    const auto inspection = ei::inspectMmp(bytes);
+    QVERIFY2(inspection.valid, qPrintable(inspection.diagnostic));
+    QCOMPARE(inspection.formatName, QString("8888"));
+    QCOMPARE(inspection.baseImage, image);
+    QCOMPARE(bytes, ei::encodeMmp8888(image));
+}
+
+void MinimapExportTests::createsAddsReplacesAndRefusesCollision()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString archivePath = directory.filePath("textures.res");
+    SResTextureExportRequest request;
+    request.destination = QFileInfo(archivePath);
+    request.memberName = "zone_new_map";
+    request.mmpPayload = ei::encodeMmp8888(solid(QSize(256, 256), Qt::red));
+    request.backupRootOverride = directory.filePath("backups");
+    auto created = exportMmpToRes(request);
+    QVERIFY2(created.success, qPrintable(created.phase + ": " + created.error));
+    QVERIFY(created.createdArchive);
+
+    request.memberName = "second_map.mmp";
+    request.mmpPayload = ei::encodeMmp8888(solid(QSize(256, 256), Qt::green));
+    auto added = exportMmpToRes(request);
+    QVERIFY2(added.success, qPrintable(added.phase + ": " + added.error));
+    QVERIFY(!added.backupPath.isEmpty());
+
+    request.memberName = "zone_new_map";
+    request.mmpPayload = ei::encodeMmp8888(solid(QSize(256, 256), Qt::blue));
+    const QByteArray beforeRefusal = [] (const QString& path) {
+        QFile f(path); f.open(QIODevice::ReadOnly); return f.readAll();
+    }(archivePath);
+    auto refused = exportMmpToRes(request);
+    QVERIFY(!refused.success);
+    QFile unchanged(archivePath); QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), beforeRefusal);
+    unchanged.close();
+
+    request.conflictPolicy = EResTextureConflictPolicy::Replace;
+    auto replaced = exportMmpToRes(request);
+    QVERIFY2(replaced.success, qPrintable(replaced.phase + ": " + replaced.error));
+    QVERIFY(replaced.replacedMember);
+    QFile finalFile(archivePath); QVERIFY(finalFile.open(QIODevice::ReadOnly));
+    CResArchiveDocument finalArchive;
+    QVERIFY(finalArchive.loadBytes(finalFile.readAll(), archivePath));
+    QCOMPARE(finalArchive.memberPayload("second_map.mmp"),
+             ei::encodeMmp8888(solid(QSize(256, 256), Qt::green)));
+    QCOMPARE(finalArchive.memberPayload("zone_new_map.mmp"), request.mmpPayload);
+}
+
+void MinimapExportTests::validationFailureDoesNotPublish()
+{
+    QTemporaryDir directory;
+    const QString path = directory.filePath("new.res");
+    SResTextureExportRequest request;
+    request.destination = QFileInfo(path);
+    request.memberName = "test";
+    request.mmpPayload = ei::encodeMmp8888(solid(QSize(256, 256), Qt::black));
+    request.simulateValidationFailure = true;
+    const auto result = exportMmpToRes(request);
+    QVERIFY(!result.success);
+    QVERIFY(!QFileInfo::exists(path));
+}
+
+void MinimapExportTests::encodesDeterministicJmvDxt1Profile()
+{
+    QImage image(1024, 1024, QImage::Format_ARGB32);
+    for(int y = 0; y < image.height(); ++y)
+        for(int x = 0; x < image.width(); ++x)
+            image.setPixelColor(x, y, QColor(x / 4, y / 4, (x + y) / 8));
+    QString diagnostic;
+    const QByteArray first = ei::encodeMmpDxt1(image, &diagnostic);
+    const QByteArray second = ei::encodeMmpDxt1(image, &diagnostic);
+    QCOMPARE(first, second);
+    const auto inspection = ei::inspectMmp(first);
+    QVERIFY2(inspection.valid, qPrintable(inspection.diagnostic));
+    QCOMPARE(inspection.formatName, QString("DXT1"));
+    QCOMPARE(inspection.baseImage.size(), QSize(1024, 1024));
+    QVERIFY(first.size() < image.sizeInBytes());
+    QCOMPARE(first.left(76).toHex(), QByteArray(
+        "4d4d50000004000000040000010000004458543104000000008000000f000000"
+        "01000000007c00000a00000005000000e003000005000000050000001f000000"
+        "000000000500000000000000"));
+}
+
+void MinimapExportTests::preservesHighResolutionAspectPadding()
+{
+    SMinimapBakeOptions options;
+    options.sourceOrientation = EMinimapCaptureOrientation::PositiveYDown;
+    options.textureSize = 1024;
+    const auto result = bakeMinimapLayers(11, 9,
+        {{EMinimapBakeLayerKind::Terrain, "terrain",
+          solid(QSize(1408, 1152), QColor(40, 80, 120))}}, options);
+    QVERIFY2(result.success, qPrintable(result.error));
+    QCOMPARE(result.gameImage.size(), QSize(1024, 1024));
+    QCOMPARE(result.gameContentRect, QRect(0, 0, 1024, 838));
+    QCOMPARE(result.gameImage.pixelColor(500, 900), QColor(Qt::black));
+}
+
+void MinimapExportTests::gradesShadingAndColorDeterministically()
+{
+    const QImage unlit = solid(QSize(4, 4), QColor(160, 100, 40));
+    const QImage shaded = solid(QSize(4, 4), QColor(80, 50, 20));
+    SMinimapGradeSettings settings{0, 100, 100, 100};
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
+             QColor(160, 100, 40));
+    settings.shadingPercent = 100;
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
+             QColor(80, 50, 20));
+    settings.shadingPercent = 150;
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
+             QColor(40, 25, 10));
+    settings = {0, 100, 100, 100, 120};
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
+             QColor(40, 160, 100));
+    settings = {50, 0, 100, 100};
+    const QColor desaturated = gradeMinimapImage(unlit, shaded, settings)
+        .pixelColor(0, 0);
+    QCOMPARE(desaturated.red(), desaturated.green());
+    QCOMPARE(desaturated.green(), desaturated.blue());
+    QCOMPARE(gradeMinimapImage(unlit, shaded, settings),
+             gradeMinimapImage(unlit, shaded, settings));
+}
+
+void MinimapExportTests::appendValidationMatchesByNameAfterHashTableReorder()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath("reordered.res");
+    SResTextureExportRequest request;
+    request.destination = QFileInfo(path);
+    request.backupRootOverride = directory.filePath("backups");
+    request.mmpPayload = ei::encodeMmp8888(
+        solid(QSize(256, 256), QColor(70, 80, 90)));
+    request.memberName = "seed_member";
+    QVERIFY(exportMmpToRes(request).success);
+
+    bool observedReorder = false;
+    for(int attempt = 0; attempt < 24 && !observedReorder; ++attempt)
+    {
+        QFile beforeFile(path);
+        QVERIFY(beforeFile.open(QIODevice::ReadOnly));
+        CResArchiveDocument before;
+        QVERIFY(before.loadBytes(beforeFile.readAll(), path));
+        beforeFile.close();
+        QStringList beforeOrder;
+        for(const SResArchiveMember& member : before.members())
+            beforeOrder.append(member.name);
+
+        request.memberName = QString("hash_shift_%1").arg(attempt);
+        const SResTextureExportResult added = exportMmpToRes(request);
+        QVERIFY2(added.success, qPrintable(added.phase + ": " + added.error));
+        QFile afterFile(path);
+        QVERIFY(afterFile.open(QIODevice::ReadOnly));
+        CResArchiveDocument after;
+        QVERIFY(after.loadBytes(afterFile.readAll(), path));
+        QStringList afterPrefix;
+        for(int index = 0; index < beforeOrder.size(); ++index)
+            afterPrefix.append(after.members().at(index).name);
+        observedReorder = beforeOrder != afterPrefix;
+    }
+    QVERIFY2(observedReorder,
+             "Synthetic append sequence did not exercise a RES hash-table reorder.");
+}
+
+void MinimapExportTests::validationFailurePreservesExistingArchive()
+{
+    QTemporaryDir directory;
+    const QString path = directory.filePath("existing.res");
+    SResTextureExportRequest request;
+    request.destination = QFileInfo(path);
+    request.memberName = "first";
+    request.mmpPayload = ei::encodeMmp8888(solid(QSize(256, 256), Qt::red));
+    QVERIFY(exportMmpToRes(request).success);
+    QFile beforeFile(path);
+    QVERIFY(beforeFile.open(QIODevice::ReadOnly));
+    const QByteArray before = beforeFile.readAll();
+    beforeFile.close();
+
+    request.memberName = "second";
+    request.mmpPayload = ei::encodeMmp8888(solid(QSize(256, 256), Qt::blue));
+    request.simulateValidationFailure = true;
+    QVERIFY(!exportMmpToRes(request).success);
+    QFile afterFile(path);
+    QVERIFY(afterFile.open(QIODevice::ReadOnly));
+    QCOMPARE(afterFile.readAll(), before);
+}
+
+void MinimapExportTests::stagesReviewedTextureInRunOwnedArchive()
+{
+    const QByteArray mmp = ei::encodeMmp8888(
+        solid(QSize(256, 256), QColor(17, 33, 65)));
+    QByteArray archiveBytes;
+    QStringList errors;
+    QVERIFY2(buildSyntheticMapTextureArchive(
+        "reviewed_zone_map", mmp, &archiveBytes, &errors),
+        qPrintable(errors.join('\n')));
+    CResArchiveDocument archive;
+    QVERIFY2(archive.loadBytes(archiveBytes, "temporary-minimap.res", &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(archive.members().size(), 1);
+    QCOMPARE(archive.members().first().name, QString("reviewed_zone_map.mmp"));
+    QCOMPARE(archive.memberPayload("REVIEWED_ZONE_MAP.MMP"), mmp);
+
+    QByteArray repeated;
+    QVERIFY(buildSyntheticMapTextureArchive(
+        "reviewed_zone_map", mmp, &repeated, &errors));
+    QCOMPARE(repeated, archiveBytes);
+}
+
+void MinimapExportTests::stagesTemporaryCatalogReferenceWithoutObjectivesMutation()
+{
+    const QByteArray mapTable =
+        "#zone gz1g gipat game\r\n"
+        "#res\r\nzone1 zone1\r\n"
+        "#maps\r\n2 1\r\noldmap authoredquest\r\n";
+    const QByteArray source = archiveWithMapTable(mapTable);
+    QByteArray staged;
+    QStringList errors;
+    QVERIFY2(stageTemporaryMinimapReference(
+        source, "private-texts.res", "gz1g", "reviewedmap", &staged, &errors),
+        qPrintable(errors.join('\n')));
+    QVERIFY(staged != source);
+    CResArchiveDocument reopened;
+    QVERIFY(reopened.loadBytes(staged, "private-texts-reopen.res", &errors));
+    const QByteArray updated = reopened.memberPayload("map.txt");
+    QVERIFY(updated.contains("reviewedmap authoredquest\r\n"));
+    QVERIFY(!updated.contains("oldmap authoredquest"));
+
+    // This helper consumes only an in-memory run-owned candidate.
+    QCOMPARE(archiveWithMapTable(mapTable), source);
+}
+
+void MinimapExportTests::temporaryRuntimeNameAvoidsInstalledTextureShadowing()
+{
+    const QByteArray mmp = ei::encodeMmp8888(
+        solid(QSize(256, 256), QColor(31, 63, 127)));
+    const QString first = temporaryMinimapRuntimeTextureName(mmp, "run-a");
+    const QString repeated = temporaryMinimapRuntimeTextureName(mmp, "run-a");
+    const QString nextRun = temporaryMinimapRuntimeTextureName(mmp, "run-b");
+    QVERIFY(first.startsWith("eimmap_"));
+    QCOMPARE(first, repeated);
+    QVERIFY(first != nextRun);
+    QVERIFY(!first.contains("zone1map", Qt::CaseInsensitive));
+}
+
+void MinimapExportTests::registersCatalogOnlyAfterExportAndPreservesObjectives()
+{
+    const QByteArray mapTable =
+        "#zone gz1g gipat game\r\n"
+        "#res\r\nzone1 zone1\r\n"
+        "#maps\r\n11 9\r\noldmap zone1quest\r\n"
+        "#unknown\r\nauthored bytes\r\n";
+    SMinimapCatalogRegistrationRequest request;
+    request.mapTableBytes = mapTable;
+    request.zoneId = "gz1g";
+    request.textureName = "newmap";
+    request.registrationConfirmed = true;
+
+    auto beforeExport = prepareMinimapCatalogRegistration(request);
+    QVERIFY(!beforeExport.success);
+    QCOMPARE(beforeExport.updatedMapTableBytes, mapTable);
+
+    request.textureExportSucceeded = true;
+    request.registrationConfirmed = false;
+    auto unconfirmed = prepareMinimapCatalogRegistration(request);
+    QVERIFY(!unconfirmed.success);
+    QCOMPARE(unconfirmed.updatedMapTableBytes, mapTable);
+
+    request.registrationConfirmed = true;
+    auto registered = prepareMinimapCatalogRegistration(request);
+    QVERIFY2(registered.success, qPrintable(registered.error));
+    QCOMPARE(registered.preservedObjectivesTexture, QString("zone1quest"));
+    QVERIFY(registered.updatedMapTableBytes.contains("newmap zone1quest\r\n"));
+    QVERIFY(registered.updatedMapTableBytes.contains("#unknown\r\nauthored bytes\r\n"));
+    QVERIFY(!registered.updatedMapTableBytes.contains("oldmap zone1quest"));
+}
+
+QTEST_APPLESS_MAIN(MinimapExportTests)
+#include "minimap_export_tests.moc"

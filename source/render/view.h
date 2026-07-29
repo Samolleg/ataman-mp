@@ -16,20 +16,25 @@
 #include <QOpenGLBuffer>
 #include <QElapsedTimer>
 #include <QRectF>
+#include <QPolygonF>
 #include <QSet>
 #include <QStringList>
 #include <QFutureWatcher>
+#include <functional>
 
 #include "types.h"
 #include "select_window.h"
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_profile.h"
 #include "spatial_grid.h"
 #include "particle_animation.h"
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
 #include "unit_visual_preparation.h"
+#include "minimap_bake.h"
+#include "tile_brush_stroke_policy.h"
 
 class QLineEdit;
 class QFrame;
@@ -37,6 +42,7 @@ class QLabel;
 class QComboBox;
 class QSlider;
 class QToolButton;
+class QDockWidget;
 class QResizeEvent;
 class CKeyManager;
 class CMob;
@@ -81,6 +87,23 @@ class CLandscape;
 class CExternalScriptWorkspaceManager;
 class CMobScriptWindow;
 struct SMobParameterState;
+
+struct SMinimapSceneCaptureResult
+{
+    SMinimapBakeResult bake;
+    QImage unlitGameImage;
+    int sectorWidth{0};
+    int sectorHeight{0};
+    int staticObjectCount{0};
+    int hiddenStaticObjectCount{0};
+    int excludedDynamicUnitCount{0};
+    bool staticGeometrySourcePresent{false};
+    QString framingDescription;
+    QString orientationDescription;
+    int targetTextureSize{256};
+    bool targetDxt1{false};
+    QString exportProfileDescription;
+};
 namespace ei { struct SRenderEnvironment; struct SScenePointLight; }
 
 ///
@@ -113,11 +136,14 @@ public:
     bool buildValidatedLandscapeCandidate(QByteArray* data,
                                           CValidationReport* report = nullptr);
     bool buildGeneratedAiGraphCandidate(QByteArray* data,
-                                        QString* error = nullptr);
+                                        QString* error = nullptr,
+                                        QString* sourceDescription = nullptr);
+    void refreshAiGraphOwnership();
     bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();
     void saveAllMob();
+    bool saveMobDocument(CMob* mob, const QFileInfo& destination);
     void unloadActiveMob();
     void openActiveMobEditParams();
     void openActiveMobScript();
@@ -155,7 +181,16 @@ public:
     QVector3D getTerrainPos(bool bLand = true);
     QVector3D getTerrainPos(const int cursorPosX, const int cursorPosY,
                             bool bLand = true, bool* hit = nullptr);
-    bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position);
+    QVector3D getTerrainBrushPos(bool* hit = nullptr);
+    QVector3D getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
+                                 bool* hit = nullptr, bool forcePick = false);
+    bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
+                           bool land = true);
+    bool projectToRegeneratedNavigation(const QPointF& requested,
+                                        QVector3D* position,
+                                        float maximumDistance = 8.0f) const;
+    QPolygonF minimapCameraFootprint() const;
+    void moveCameraToMinimapPoint(const QPointF& worldPosition);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
@@ -200,6 +235,8 @@ public:
     void setCameraSpeedMultiplier(double multiplier);
     bool overridesWorldTime() const;
     double effectiveWorldTimeHours() const;
+    SMinimapSceneCaptureResult captureMinimapScene(
+        bool includeLoadedStaticGeometry, int targetTextureSize = 256);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
@@ -229,6 +266,7 @@ public:
     bool applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error = nullptr);
     quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
     void openMapParameters();
+    void openAtlasTiles();
     void pickTile(QVector3D posOnLand, bool bLand = true);
     void setTile(QVector3D posOnLand, bool bLand = true);
     void updatePreviewTile(QVector3D posOnLand, bool bLand = true);
@@ -237,6 +275,7 @@ public:
     void adjustTerrainPaintMaterial(int steps);
     bool manualTilePaintingEnabled() const;
     float terrainPaintStampSpacing() const;
+    bool terrainBrushProjectsToLand() const;
     void setDrawWater(bool bDraw = true);
     void setDrawLand(bool bDraw = true);
     bool drawWater() const { return m_bDrawWater; }
@@ -247,8 +286,14 @@ public:
     void pickQuickAccessTile(int index);
     void beginTileBrushGroup();
     void endTileBrushGroup();
+    void beginTerrainPreviewBatch();
+    void endTerrainPreviewBatch();
     bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
+    bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
+                                          bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
+    bool applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command, bool forward);
+    void onLandscapeToolsShown();
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
                                      const QString& displayName, const QString& mapZoneId);
@@ -265,6 +310,7 @@ protected:
     void resizeGL(int width, int height) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
@@ -273,7 +319,8 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
-    bool saveMobDocument(CMob* mob, const QFileInfo& destination);
+    void closeMprSettingsDock();
+    void refreshMprSettingsDock();
     bool saveLandscapeDocument(const QFileInfo& destination);
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
                                       bool adoptAsOpenBaseline);
@@ -306,13 +353,20 @@ private:
     bool closeAllMobScriptWindows();
     bool confirmScriptReferencedObjectIds(const QVector<uint>& objectIds,
                                           const QString& operation);
-    void sculptTerrainAt(const QVector3D& position);
+    void sculptTerrainAt(const QVector3D& position, float stampFraction);
     void sculptTerrainTowardLatestPoint();
+    void updateOverlaySculptPointer();
+    void updateLandscapeSculptCoordinates(const QVector3D& position, bool valid);
+    quint16 rawTerrainHeight(float worldHeight) const;
     void finishSculptStroke();
     void syncLandscapeToolState();
+    bool handleLandscapeShortcut(QKeyEvent* event, bool pressed);
     void clearLandscapeBrushSelection();
     void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();
+    QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
+    void reviewTerrainAtlasProfile();
+    void updateTerrainAtlasViewerAnnotations(const QString& status);
     void rebuildSpatialIndices();
     QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
                                           SSpatialQueryStats* stats);
@@ -330,6 +384,7 @@ private:
     void syncAiGraphPreviewWidget();
     void rebuildAiGraphOverlayGeometry();
     void startAiGraphPreviewRegeneration();
+    void beginAiGraphPreviewRegeneration(bool selectRegenerated);
     void scheduleAiGraphPreviewRegeneration();
     bool captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                                          QString* error);
@@ -391,6 +446,7 @@ signals:
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
     void cameraSpeedMultiplierChanged(double multiplier);
     void unitVisualPreparationComplete();
+    void aiGraphPersistenceRequested();
 
 private:
     int m_height; //for redraw window
@@ -478,6 +534,11 @@ private:
     QVector3D m_visualWarmupCameraPivot;
     QVector3D m_visualWarmupCameraRotation;
     bool m_visualWarmupCameraValid{false};
+    bool m_minimapCaptureActive{false};
+    bool m_minimapCaptureUnlitPass{false};
+    bool m_minimapCaptureIncludeStaticGeometry{false};
+    QMatrix4x4 m_minimapCaptureView;
+    QVector3D m_minimapCaptureCameraPosition;
     QVector<CMob*> m_aMob;
     // World lighting belongs to the loaded map, not to whichever MOB happens
     // to be selected for editing. Keep the first loaded document as the
@@ -518,6 +579,8 @@ private:
     bool m_landscapeVisible{true};
     bool m_bPreviewTile;
     CTileForm* m_pTileForm;
+    QPointer<QDockWidget> m_mprSettingsDock;
+    std::function<void()> m_refreshMprSettingsDock;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
     int m_tileBrushCommandId;
@@ -525,16 +588,23 @@ private:
     CMprDocument m_mprDocument;
     CTerrainEditModel m_terrainEdit;
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
+    STerrainAtlasProfile m_terrainAtlasProfile;
+    QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;
+    SOverlaySurfaceCommand m_overlaySurfaceStrokeCommand;
+    SOverlaySurfaceSnapshot m_overlaySurfaceStrokeBaseline;
     QVector<STerrainPaintAuditAction> m_terrainPaintActions;
     int m_terrainPaintActionId{0};
     quint32 m_terrainSemanticSeed{0};
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
-    bool m_tilePaintStrokeActive{false};
+    CTileBrushStrokePolicy m_tileBrushStrokePolicy;
     bool m_terrainPaintOutlineValid{false};
+    bool m_terrainPaintOutlineGeometryDirty{true};
+    QVector<QVector3D> m_terrainPaintOutlineVertices;
+    bool m_terrainPaintProjectionLand{true};
     int m_terrainPaintOutlineX{0};
     int m_terrainPaintOutlineY{0};
     QPoint m_lastTerrainPaintCenter;
@@ -546,9 +616,33 @@ private:
     int m_tileStrokeRefused{0};
     int m_tileStrokeChangedTiles{0};
     int m_tileStrokeSolverNodes{0};
+    int m_tileStrokeMinimumX{0};
+    int m_tileStrokeMinimumY{0};
+    int m_tileStrokeMaximumX{0};
+    int m_tileStrokeMaximumY{0};
+    int m_tileStrokeMaximumCenterJump{0};
+    bool m_tileStrokeBoundsValid{false};
+    qint64 m_overlayCommandNsecs{0};
+    qint64 m_overlayModelNsecs{0};
+    qint64 m_overlayRenderNsecs{0};
+    qint64 m_overlayPickNsecs{0};
+    int m_overlayPickCount{0};
+    int m_overlayPreviewSectorCount{0};
+    QElapsedTimer m_overlayBrushPickTimer;
+    QPoint m_overlayBrushPickCursor;
+    QVector3D m_overlayBrushPickPosition;
+    bool m_overlayBrushPickValid{false};
+    bool m_overlayBrushPickProjectionLand{true};
+    bool m_terrainPreviewBatchActive{false};
+    QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
+    QSet<QPair<int, int>> m_pendingOverlayPreviewSectors;
+    QSet<QPair<int, int>> m_pendingTilePreviewSectors;
     bool m_sculptOutlineValid{false};
+    bool m_sculptOutlineGeometryDirty{true};
+    QVector<QVector3D> m_sculptOutlineVertices;
     QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;
+    bool m_sculptPointerValid{false};
     STerrainHeightCommand m_sculptStrokeCommand;
     QVector3D m_lastSculptPoint;
     QVector3D m_lastSculptStampPoint;
@@ -556,6 +650,7 @@ private:
     int m_sculptStrokeStamps{0};
     int m_sculptStrokeVertices{0};
     QTimer* m_sculptRepeatTimer;
+    QTimer* m_overlayPointerTimer;
     bool m_tileGridVisible;
     int m_lastLandscapeEditMode;
     QPoint m_lastViewportMousePos;
@@ -588,13 +683,18 @@ private:
     QToolButton* m_aiGraphPreviewCollapse{nullptr};
     QToolButton* m_aiGraphRegenerateButton{nullptr};
     QToolButton* m_aiGraphUseLoadedButton{nullptr};
+    QToolButton* m_aiGraphPersistButton{nullptr};
     QSlider* m_aiGraphLayerSlider{nullptr};
     QLabel* m_aiGraphLayerLabel{nullptr};
     QLabel* m_aiGraphSourceLabel{nullptr};
     CAiGraphDocument m_aiGraphDocument;
     CAiGraphDocument m_aiGraphLoadedDocument;
+    QByteArray m_aiGraphLoadedBytes;
+    CAiGraphDocument m_aiGraphRegeneratedDocument;
+    SAiGraphPreviewBuildResult m_aiGraphRegeneratedResult;
     QString m_aiGraphSource;
     QString m_aiGraphLoadedSource;
+    QString m_aiGraphRegeneratedSource;
     QFutureWatcher<SAiGraphPreviewBuildResult>* m_aiGraphBuildWatcher{nullptr};
     QFutureWatcher<QVector<SUnitAppearancePreparationResult>>* m_unitAppearanceWatcher{nullptr};
     QTimer* m_unitVisualPreparationTimer{nullptr};
@@ -610,6 +710,8 @@ private:
     quint64 m_aiGraphBuildRequest{0};
     bool m_aiGraphAutoRegenerationEnabled{false};
     bool m_aiGraphRegenerationPending{false};
+    bool m_aiGraphRegeneratedFresh{false};
+    bool m_aiGraphLoadedOverride{false};
     bool m_aiGraphPreviewVisible{false};
     bool m_aiGraphOverlayDirty{true};
     QVector<QVector3D> m_aiGraphOpenLinks;

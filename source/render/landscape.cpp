@@ -5,6 +5,9 @@
 #include <QMessageBox>
 
 #include "landscape.h"
+#include "map_object_placement_policy.h"
+
+#include <cmath>
 #include "render_performance.h"
 #include "view_frustum.h"
 #include "res_file.h"
@@ -16,6 +19,7 @@
 #include "staged_save_validator.h"
 #include "log.h"
 #include "mpr_document.h"
+#include "terrain_edit_model.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -28,6 +32,7 @@ CLandscape* CLandscape::getInstance()
 
 void CLandscape::unloadMpr()
 {
+    m_canonicalTerrain = nullptr;
     for (auto& xSec: m_aSector)
     {
         for(auto& ySec: xSec)
@@ -41,7 +46,8 @@ void CLandscape::unloadMpr()
 }
 
 CLandscape::CLandscape():
-  m_bDirty(false)
+  m_bDirty(false),
+  m_canonicalTerrain(nullptr)
 {
     m_aSector.clear();
     m_aAnimTile.clear();
@@ -436,9 +442,29 @@ void CLandscape::projectPosition(CNode* pNode)
         return;
     }
     QVector3D landPos(pNode->position());
-    if(pNode->nodeType() == eUnit)
-        landPos -= pNode->minPosition();
-    projectPt(landPos);
+    if(ei::usesTerrainRelativeMapObjectHeight(pNode->nodeType()))
+    {
+        bool sampled = false;
+        if(m_canonicalTerrain)
+        {
+            landPos.setZ(m_canonicalTerrain->terrainSurfaceHeight(
+                landPos.x(), landPos.y(), &sampled));
+        }
+        if(!sampled)
+        {
+            // Compatibility fallback for legacy/non-canonical loads only.
+            landPos.setZ(0.0f);
+            projectPt(landPos);
+        }
+        landPos = ei::resolveTerrainRelativeMapObjectPosition(
+            pNode->nodeType(), pNode->position(), landPos);
+    }
+    else
+    {
+        if(pNode->nodeType() == eUnit)
+            landPos -= pNode->minPosition();
+        projectPt(landPos);
+    }
     pNode->setDrawPosition(landPos);
 }
 
@@ -515,6 +541,38 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
         || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
         return false;
     return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
+}
+
+bool CLandscape::previewCanonicalOverlaySector(
+    int xSec, int ySec, const QByteArray& payload)
+{
+    if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
+        || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
+        return false;
+    return m_aSector[ySec][xSec]->previewCanonicalOverlayPayload(payload);
+}
+
+bool CLandscape::previewCanonicalOverlaySectorDelta(
+    int xSec, int ySec, const QByteArray& beforePayload,
+    const QByteArray& afterPayload)
+{
+    if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
+        || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
+        return false;
+    return m_aSector[ySec][xSec]->previewCanonicalOverlayDelta(
+        beforePayload, afterPayload);
+}
+
+bool CLandscape::previewCanonicalMaxZ(float maxZ)
+{
+    if(!std::isfinite(maxZ) || maxZ <= 0.0f || m_aSector.isEmpty())
+        return false;
+    m_header.maxZ = maxZ;
+    for(QVector<CSector*>& row : m_aSector)
+        for(CSector* sector : row)
+            if(sector)
+                sector->setPreviewMaxZ(maxZ);
+    return true;
 }
 
 bool CLandscape::previewCanonicalTile(int globalX, int globalY, bool land,

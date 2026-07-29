@@ -1,4 +1,7 @@
 #include <QtGlobal>
+#include <QtEndian>
+#include <algorithm>
+#include <cstring>
 
 #include "sector.h"
 #include "gl_dispatch.h"
@@ -177,35 +180,276 @@ bool CSector::previewCanonicalPayload(const QByteArray& payload)
     if(signature != secSignature || (type != 0 && type != 3))
         return false;
 
-    QVector<QVector<SSecVertex>> landVertex(nVertex);
-    for(int row = 0; row < nVertex; ++row)
-    {
-        landVertex[row].resize(nVertex);
-        for(int col = 0; col < nVertex; ++col)
-            stream >> landVertex[row][col];
-    }
+    const auto readVertexGrid = [&stream]() {
+        QVector<QVector<SSecVertex>> vertices(nVertex);
+        for(int row = 0; row < nVertex; ++row)
+        {
+            vertices[row].resize(nVertex);
+            for(int col = 0; col < nVertex; ++col)
+                stream >> vertices[row][col];
+        }
+        return vertices;
+    };
+    const QVector<QVector<SSecVertex>> landVertex = readVertexGrid();
+    const QVector<QVector<SSecVertex>> waterVertex = type == 3
+        ? readVertexGrid() : QVector<QVector<SSecVertex>>();
     if(stream.status() != QDataStream::Ok)
         return false;
 
-    QVector<SSecVertex> tileVertices(9);
-    for(int row = 0; row < nTile; ++row)
+    if(m_arrLand.size() != nTile)
     {
+        m_arrLand.resize(nTile);
+        for(QVector<CTile>& row : m_arrLand)
+            row.resize(nTile);
+    }
+    if(type == 3 && m_arrWater.size() != nTile)
+        m_arrWater = m_arrLand;
+    else if(type == 0)
+        m_arrWater.clear();
+
+    QVector<SSecVertex> tileVertices(9);
+    const auto resetTileVertices = [&tileVertices](
+        CTile& tile, const QVector<QVector<SSecVertex>>& vertices,
+        int row, int col) {
+        tileVertices[0] = vertices[row * 2][col * 2];
+        tileVertices[1] = vertices[row * 2][col * 2 + 1];
+        tileVertices[2] = vertices[row * 2][col * 2 + 2];
+        tileVertices[3] = vertices[row * 2 + 1][col * 2];
+        tileVertices[4] = vertices[row * 2 + 1][col * 2 + 1];
+        tileVertices[5] = vertices[row * 2 + 1][col * 2 + 2];
+        tileVertices[6] = vertices[row * 2 + 2][col * 2];
+        tileVertices[7] = vertices[row * 2 + 2][col * 2 + 1];
+        tileVertices[8] = vertices[row * 2 + 2][col * 2 + 2];
+        tile.resetVertices(tileVertices);
+    };
+    for(int row = 0; row < nTile; ++row)
         for(int col = 0; col < nTile; ++col)
         {
-            tileVertices[0] = landVertex[row * 2][col * 2];
-            tileVertices[1] = landVertex[row * 2][col * 2 + 1];
-            tileVertices[2] = landVertex[row * 2][col * 2 + 2];
-            tileVertices[3] = landVertex[row * 2 + 1][col * 2];
-            tileVertices[4] = landVertex[row * 2 + 1][col * 2 + 1];
-            tileVertices[5] = landVertex[row * 2 + 1][col * 2 + 2];
-            tileVertices[6] = landVertex[row * 2 + 2][col * 2];
-            tileVertices[7] = landVertex[row * 2 + 2][col * 2 + 1];
-            tileVertices[8] = landVertex[row * 2 + 2][col * 2 + 2];
-            m_arrLand[row][col].resetVertices(tileVertices);
+            resetTileVertices(m_arrLand[row][col], landVertex, row, col);
+            if(type == 3)
+                resetTileVertices(m_arrWater[row][col], waterVertex, row, col);
         }
+
+    quint16 packed = 0;
+    for(int row = 0; row < nTile; ++row)
+        for(int col = 0; col < nTile; ++col)
+        {
+            stream >> packed;
+            const STile decoded(packed);
+            m_arrLand[row][col].setTile(
+                decoded.m_index + decoded.m_texture * 64, decoded.m_rotation);
+        }
+    if(type == 3)
+    {
+        for(int row = 0; row < nTile; ++row)
+            for(int col = 0; col < nTile; ++col)
+            {
+                stream >> packed;
+                const STile decoded(packed);
+                m_arrWater[row][col].setTile(
+                    decoded.m_index + decoded.m_texture * 64, decoded.m_rotation);
+            }
+        qint16 material = -1;
+        for(int row = 0; row < nTile; ++row)
+            for(int col = 0; col < nTile; ++col)
+            {
+                stream >> material;
+                m_arrWater[row][col].setMaterialIndex(material);
+            }
     }
+    if(stream.status() != QDataStream::Ok)
+        return false;
     updateDrawData();
     return true;
+}
+
+bool CSector::previewCanonicalOverlayPayload(const QByteArray& payload)
+{
+    QByteArray copy = payload;
+    QDataStream stream(&copy, QIODevice::ReadOnly);
+    util::formatStream(stream);
+    quint32 signature = 0;
+    quint8 type = 0;
+    stream >> signature >> type;
+    if(signature != secSignature || (type != 0 && type != 3))
+        return false;
+
+    QVector<QVector<SSecVertex>> waterVertex;
+    // Overlay-only previews never consume land vertices. Skipping their fixed
+    // native byte block avoids decoding 1,089 packed normals on every live
+    // overlay stamp.
+    if(stream.skipRawData(nVertex * nVertex * 8) != nVertex * nVertex * 8)
+        return false;
+    if(type == 3)
+    {
+        waterVertex.resize(nVertex);
+        for(int row = 0; row < nVertex; ++row)
+        {
+            waterVertex[row].resize(nVertex);
+            for(int col = 0; col < nVertex; ++col)
+                stream >> waterVertex[row][col];
+        }
+    }
+    quint16 packed = 0;
+    for(int tile = 0; tile < nTile * nTile; ++tile)
+        stream >> packed; // land tiles are unchanged by overlay commands
+    if(stream.status() != QDataStream::Ok)
+        return false;
+
+    if(type == 0)
+    {
+        m_arrWater.clear();
+        updateWaterDrawData();
+        return true;
+    }
+    if(m_arrWater.size() != nTile)
+    {
+        m_arrWater = m_arrLand;
+        if(m_arrWater.size() != nTile)
+            return false;
+    }
+    QVector<SSecVertex> tileVertices(9);
+    for(int row = 0; row < nTile; ++row)
+        for(int col = 0; col < nTile; ++col)
+        {
+            tileVertices[0] = waterVertex[row * 2][col * 2];
+            tileVertices[1] = waterVertex[row * 2][col * 2 + 1];
+            tileVertices[2] = waterVertex[row * 2][col * 2 + 2];
+            tileVertices[3] = waterVertex[row * 2 + 1][col * 2];
+            tileVertices[4] = waterVertex[row * 2 + 1][col * 2 + 1];
+            tileVertices[5] = waterVertex[row * 2 + 1][col * 2 + 2];
+            tileVertices[6] = waterVertex[row * 2 + 2][col * 2];
+            tileVertices[7] = waterVertex[row * 2 + 2][col * 2 + 1];
+            tileVertices[8] = waterVertex[row * 2 + 2][col * 2 + 2];
+            m_arrWater[row][col].resetVertices(tileVertices);
+            stream >> packed;
+            const STile decoded(packed);
+            m_arrWater[row][col].setTile(
+                decoded.m_index + decoded.m_texture * 64, decoded.m_rotation);
+        }
+    qint16 material = -1;
+    for(int row = 0; row < nTile; ++row)
+        for(int col = 0; col < nTile; ++col)
+        {
+            stream >> material;
+            m_arrWater[row][col].setMaterialIndex(material);
+        }
+    if(stream.status() != QDataStream::Ok)
+        return false;
+    updateWaterDrawData();
+    return true;
+}
+
+bool CSector::previewCanonicalOverlayDelta(const QByteArray& beforePayload,
+                                           const QByteArray& afterPayload)
+{
+    static const int vertexSize = 8;
+    static const int vertexBlockSize = nVertex * nVertex * vertexSize;
+    static const int tileBlockSize = nTile * nTile * int(sizeof(quint16));
+    static const int landVertexOffset = 5;
+    static const int overlayVertexOffset = landVertexOffset + vertexBlockSize;
+    static const int overlayTileOffset = landVertexOffset
+        + 2 * vertexBlockSize + tileBlockSize;
+    static const int overlayMaterialOffset = overlayTileOffset + tileBlockSize;
+    static const int overlaySectorSize = overlayMaterialOffset + tileBlockSize;
+
+    if(beforePayload.size() < 5 || afterPayload.size() < 5
+       || qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+              beforePayload.constData())) != secSignature
+       || qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+              afterPayload.constData())) != secSignature
+       || quint8(beforePayload.at(4)) != 3 || quint8(afterPayload.at(4)) != 3
+       || beforePayload.size() < overlaySectorSize
+       || afterPayload.size() < overlaySectorSize
+       || m_arrWater.size() != nTile)
+        return previewCanonicalOverlayPayload(afterPayload);
+
+    QSet<int> changedTiles;
+    bool rebuildIndices = false;
+    const auto addVertexTiles = [&changedTiles](int vertexX, int vertexY)
+    {
+        const int maximumTileX = qMin(nTile - 1, vertexX / 2);
+        const int maximumTileY = qMin(nTile - 1, vertexY / 2);
+        const int minimumTileX = vertexX > 0 && vertexX % 2 == 0
+            ? maximumTileX - 1 : maximumTileX;
+        const int minimumTileY = vertexY > 0 && vertexY % 2 == 0
+            ? maximumTileY - 1 : maximumTileY;
+        for(int tileY = qMax(0, minimumTileY); tileY <= maximumTileY; ++tileY)
+            for(int tileX = qMax(0, minimumTileX); tileX <= maximumTileX; ++tileX)
+                changedTiles.insert(tileY * nTile + tileX);
+    };
+    for(int vertex = 0; vertex < nVertex * nVertex; ++vertex)
+    {
+        const int offset = overlayVertexOffset + vertex * vertexSize;
+        if(std::memcmp(beforePayload.constData() + offset,
+                       afterPayload.constData() + offset, vertexSize) != 0)
+            addVertexTiles(vertex % nVertex, vertex / nVertex);
+    }
+    for(int tile = 0; tile < nTile * nTile; ++tile)
+    {
+        const int packedOffset = overlayTileOffset + tile * 2;
+        const int materialOffset = overlayMaterialOffset + tile * 2;
+        if(std::memcmp(beforePayload.constData() + packedOffset,
+                       afterPayload.constData() + packedOffset, 2) != 0)
+            changedTiles.insert(tile);
+        if(std::memcmp(beforePayload.constData() + materialOffset,
+                       afterPayload.constData() + materialOffset, 2) != 0)
+        {
+            changedTiles.insert(tile);
+            rebuildIndices = true;
+        }
+    }
+    if(changedTiles.isEmpty())
+        return true;
+
+    const auto readVertex = [&afterPayload](int x, int y)
+    {
+        const int offset = overlayVertexOffset + (y * nVertex + x) * vertexSize;
+        const uchar* bytes = reinterpret_cast<const uchar*>(
+            afterPayload.constData() + offset);
+        SSecVertex vertex;
+        vertex.xOffset = qint8(bytes[0]);
+        vertex.yOffset = qint8(bytes[1]);
+        vertex.z = qFromLittleEndian<quint16>(bytes + 2);
+        vertex.packedNormal = qFromLittleEndian<quint32>(bytes + 4);
+        vertex.normal.setX((int((vertex.packedNormal >> 11) & 0x7ff) - 1000) / 1000.0f);
+        vertex.normal.setY((int(vertex.packedNormal & 0x7ff) - 1000) / 1000.0f);
+        vertex.normal.setZ(int(vertex.packedNormal >> 22) / 1000.0f);
+        return vertex;
+    };
+    for(int tile : changedTiles)
+    {
+        const int row = tile / nTile;
+        const int col = tile % nTile;
+        QVector<SSecVertex> vertices;
+        vertices.reserve(9);
+        for(int y = row * 2; y <= row * 2 + 2; ++y)
+            for(int x = col * 2; x <= col * 2 + 2; ++x)
+                vertices.append(readVertex(x, y));
+        m_arrWater[row][col].resetVertices(vertices);
+        const uchar* packedBytes = reinterpret_cast<const uchar*>(
+            afterPayload.constData() + overlayTileOffset + tile * 2);
+        const STile packed(qFromLittleEndian<quint16>(packedBytes));
+        m_arrWater[row][col].setTile(
+            packed.m_index + packed.m_texture * 64, packed.m_rotation);
+        const uchar* materialBytes = reinterpret_cast<const uchar*>(
+            afterPayload.constData() + overlayMaterialOffset + tile * 2);
+        m_arrWater[row][col].setMaterialIndex(
+            qFromLittleEndian<qint16>(materialBytes));
+    }
+    updateWaterTiles(changedTiles, rebuildIndices);
+    return true;
+}
+
+void CSector::setPreviewMaxZ(float maxZ)
+{
+    for(QVector<CTile>& row : m_arrLand)
+        for(CTile& tile : row)
+            tile.setMaxZ(maxZ);
+    for(QVector<CTile>& row : m_arrWater)
+        for(CTile& tile : row)
+            tile.setMaxZ(maxZ);
+    updateDrawData();
 }
 
 QByteArray CSector::serializeSector()
@@ -484,33 +728,54 @@ void CSector::generateVertexDataFromTile()
     // correctly rejects it with GL_INVALID_OPERATION.
     const int vertSize = m_arrLand.size() * m_arrLand.front().size() * 9;
     //m_aVertexData.clear(); // to recalc textures ?
-    bool bWater = !m_arrWater.isEmpty();
     m_arrLandVrtData.resize(vertSize); // todo: check size. vrt size == tile count * 9 (verts per tile)
-    if(bWater)
-        m_arrWaterVrtData.resize(vertSize);
-    int curIndex(0), waterIndex(0);
+    int curIndex(0);
     for(int row(0); row<m_arrLand.size(); ++row)
         for(int col(0); col<m_arrLand[row].size(); ++col)
-        {
             m_arrLand[row][col].generateDrawVertexData(m_arrLandVrtData, curIndex);
-            if(bWater)
-                m_arrWater[row][col].generateDrawVertexData(m_arrWaterVrtData, waterIndex);
-        }
 
     Q_ASSERT(curIndex == m_arrLandVrtData.size());
-    Q_ASSERT(!bWater || waterIndex == m_arrWaterVrtData.size());
+    generateWaterVertexData();
+}
 
-    m_arrAnimatedWaterVrtData.resize(m_arrWaterVrtData.size());
-    m_arrLitLandVrtData.resize(m_arrLandVrtData.size());
+void CSector::generateWaterVertexData()
+{
+    const bool hasWater = !m_arrWater.isEmpty();
+    if(!hasWater)
+    {
+        m_arrWaterVrtData.clear();
+        m_arrAnimatedWaterVrtData.clear();
+    }
+    else
+    {
+        const int vertSize = m_arrWater.size() * m_arrWater.front().size() * 9;
+        m_arrWaterVrtData.fill(SVertexData(), vertSize);
+        int waterIndex = 0;
+        for(int row = 0; row < m_arrWater.size(); ++row)
+            for(int col = 0; col < m_arrWater.at(row).size(); ++col)
+            {
+                if(m_arrWater.at(row).at(col).materialIndex() >= 0)
+                    m_arrWater[row][col].generateDrawVertexData(
+                        m_arrWaterVrtData, waterIndex);
+                else
+                    waterIndex += 9;
+            }
+        Q_ASSERT(waterIndex == m_arrWaterVrtData.size());
+        m_arrAnimatedWaterVrtData.fill(SWaterVertexData(),
+                                       m_arrWaterVrtData.size());
+    }
+
     QVector<qint16> overlayMaterials;
     overlayMaterials.reserve(nTile * nTile);
-    for(int row = 0; bWater && row < m_arrWater.size(); ++row)
+    for(int row = 0; hasWater && row < m_arrWater.size(); ++row)
         for(int col = 0; col < m_arrWater.at(row).size(); ++col)
             overlayMaterials.append(qint16(m_arrWater.at(row).at(col).materialIndex()));
-    for(int row = 0; bWater && row < m_arrWater.size(); ++row)
+    for(int row = 0; hasWater && row < m_arrWater.size(); ++row)
         for(int col = 0; col < m_arrWater.at(row).size(); ++col)
         {
             const int materialIndex = m_arrWater.at(row).at(col).materialIndex();
+            if(materialIndex < 0)
+                continue;
             const SMaterial* material = m_materials && materialIndex >= 0
                     && materialIndex < m_materials->size()
                 ? &m_materials->at(materialIndex) : nullptr;
@@ -539,6 +804,8 @@ void CSector::generateVertexDataFromTile()
                 target.emission = ei::terrainMaterialEmission(sharedMaterial);
             }
         }
+
+    m_arrLitLandVrtData.resize(m_arrLandVrtData.size());
     for(int row = 0; row < m_arrLand.size(); ++row)
         for(int col = 0; col < m_arrLand.at(row).size(); ++col)
             for(int vertex = 0; vertex < 9; ++vertex)
@@ -558,7 +825,7 @@ void CSector::generateVertexDataFromTile()
                         && sharedMaterialIndex < m_materials->size()
                     ? &m_materials->at(sharedMaterialIndex) : nullptr;
                 target.emission = QVector3D();
-                if(sharedMaterial && bWater)
+                if(sharedMaterial && hasWater)
                 {
                     const QVector3D overlayEmission =
                         ei::terrainMaterialEmission(sharedMaterial);
@@ -569,14 +836,13 @@ void CSector::generateVertexDataFromTile()
             }
 }
 
-void CSector::updatePosition()
+void CSector::updateBounds()
 {
-    m_modelMatrix.translate(QVector3D(m_index.x*32.0f, m_index.y*32.0f, .0f));
     QVector3D minimum;
     QVector3D maximum;
     bool initialized = false;
-    const auto includeVertices = [&minimum, &maximum, &initialized](const QVector<SVertexData>& vertices)
-    {
+    const auto includeVertices = [&minimum, &maximum, &initialized](
+        const QVector<SVertexData>& vertices) {
         for(const SVertexData& vertex : vertices)
         {
             if(!initialized)
@@ -597,7 +863,8 @@ void CSector::updatePosition()
     };
     includeVertices(m_arrLandVrtData);
     includeVertices(m_arrWaterVrtData);
-    const QVector3D sectorOffset(float(m_index.x) * 32.0f, float(m_index.y) * 32.0f, 0.0f);
+    const QVector3D sectorOffset(float(m_index.x) * 32.0f,
+                                 float(m_index.y) * 32.0f, 0.0f);
     if(initialized)
     {
         m_boundsCenter = (minimum + maximum) * 0.5f + sectorOffset;
@@ -610,6 +877,170 @@ void CSector::updatePosition()
         m_boundsCenter = sectorOffset + QVector3D(16.0f, 16.0f, 0.0f);
         m_boundsRadius = 23.0f;
     }
+}
+
+void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
+{
+    const int expectedVertices = nTile * nTile * 9;
+    if(m_arrWaterVrtData.size() != expectedVertices
+       || m_arrAnimatedWaterVrtData.size() != expectedVertices)
+    {
+        updateWaterDrawData(true);
+        return;
+    }
+    for(int tile : localTiles)
+    {
+        if(tile < 0 || tile >= nTile * nTile)
+            continue;
+        const int row = tile / nTile;
+        const int col = tile % nTile;
+        int vertexIndex = tile * 9;
+        if(m_arrWater.at(row).at(col).materialIndex() >= 0)
+            m_arrWater[row][col].generateDrawVertexData(
+                m_arrWaterVrtData, vertexIndex);
+        else
+            for(int vertex = 0; vertex < 9; ++vertex)
+                m_arrWaterVrtData[tile * 9 + vertex] = SVertexData();
+
+        const int materialIndex = m_arrWater.at(row).at(col).materialIndex();
+        const SMaterial* material = m_materials && materialIndex >= 0
+                && materialIndex < m_materials->size()
+            ? &m_materials->at(materialIndex) : nullptr;
+        const ei::SOverlayMaterialAnimation animation =
+            ei::overlayMaterialAnimation(material);
+        for(int vertex = 0; vertex < 9; ++vertex)
+        {
+            const int index = tile * 9 + vertex;
+            const SVertexData& source = m_arrWaterVrtData.at(index);
+            SWaterVertexData& target = m_arrAnimatedWaterVrtData[index];
+            target.position = source.position;
+            target.normal = source.normal;
+            target.texCoord = source.texCoord;
+            const int gridX = col * 2 + vertex % 3;
+            const int gridY = row * 2 + vertex / 3;
+            target.animation = QVector4D(animation.waveMultiplier,
+                animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
+                animation.animated ? 1.0f : 0.0f);
+            target.grid = QVector2D(float(gridX), float(gridY));
+        }
+    }
+
+    // Material edits can change the shared vertex chosen at a tile boundary.
+    // Refresh the inexpensive emissive payload for the sector while retaining
+    // the branch's incremental geometry rebuild and single orphaning upload.
+    QVector<qint16> overlayMaterials;
+    overlayMaterials.reserve(nTile * nTile);
+    for(int row = 0; row < m_arrWater.size(); ++row)
+        for(int col = 0; col < m_arrWater.at(row).size(); ++col)
+            overlayMaterials.append(qint16(
+                m_arrWater.at(row).at(col).materialIndex()));
+    for(int row = 0; row < m_arrWater.size(); ++row)
+        for(int col = 0; col < m_arrWater.at(row).size(); ++col)
+            for(int vertex = 0; vertex < 9; ++vertex)
+            {
+                const int index = (row * nTile + col) * 9 + vertex;
+                const int gridX = col * 2 + vertex % 3;
+                const int gridY = row * 2 + vertex / 3;
+                const int sharedMaterialIndex = ei::sharedOverlayMaterialIndex(
+                    overlayMaterials, nTile, nTile, gridX, gridY);
+                const SMaterial* sharedMaterial = m_materials
+                        && sharedMaterialIndex >= 0
+                        && sharedMaterialIndex < m_materials->size()
+                    ? &m_materials->at(sharedMaterialIndex) : nullptr;
+                m_arrAnimatedWaterVrtData[index].emission =
+                    ei::terrainMaterialEmission(sharedMaterial);
+                if(index < m_arrLitLandVrtData.size())
+                {
+                    const SVertexData& land = m_arrLandVrtData.at(index);
+                    const SVertexData& overlay = m_arrWaterVrtData.at(index);
+                    m_arrLitLandVrtData[index].emission =
+                        ei::terrainUnderlayEmission(
+                            ei::terrainMaterialEmission(sharedMaterial),
+                            land.position.z(), overlay.position.z());
+                }
+            }
+    updateBounds();
+    m_waterVertexBuf.bind();
+    // Match the fast terrain-sculpt ownership contract: glBufferData replaces
+    // (orphans) the live allocation so the GPU can finish drawing the previous
+    // frame without serializing against CPU writes. QOpenGLBuffer::write uses
+    // glBufferSubData on the buffer currently consumed by drawWater(), which
+    // caused a driver fence on every overlay stamp despite the small upload.
+    m_waterVertexBuf.allocate(m_arrAnimatedWaterVrtData.constData(),
+        m_arrAnimatedWaterVrtData.size() * int(sizeof(SWaterVertexData)));
+    m_waterVertexBuf.release();
+    m_vertexBuf.bind();
+    m_vertexBuf.allocate(m_arrLitLandVrtData.constData(),
+        m_arrLitLandVrtData.size() * int(sizeof(STerrainVertexData)));
+    m_vertexBuf.release();
+    if(!rebuildIndices)
+        return;
+
+    const QVector<ushort> tileIndices{
+        0,1,4, 0,4,3, 1,2,5, 1,5,4,
+        3,4,7, 3,7,6, 4,5,8, 4,8,7
+    };
+    QVector<ushort> waterIndices;
+    waterIndices.reserve(nTile * nTile * tileIndices.size());
+    for(int row = 0; row < nTile; ++row)
+        for(int col = 0; col < nTile; ++col)
+        {
+            if(m_arrWater.at(row).at(col).materialIndex() < 0)
+                continue;
+            const ushort tileOffset = ushort((row * nTile + col) * 9);
+            for(ushort index : tileIndices)
+                waterIndices.append(index + tileOffset);
+        }
+    m_waterIndexCount = waterIndices.size();
+    m_waterIndexBuf.bind();
+    m_waterIndexBuf.allocate(waterIndices.constData(),
+        waterIndices.size() * int(sizeof(ushort)));
+    m_waterIndexBuf.release();
+}
+
+void CSector::updateWaterDrawData(bool rebuildIndices)
+{
+    generateWaterVertexData();
+    updateBounds();
+    if(m_arrWaterVrtData.isEmpty())
+    {
+        m_waterIndexCount = 0;
+        return;
+    }
+    m_waterVertexBuf.bind();
+    m_waterVertexBuf.allocate(m_arrAnimatedWaterVrtData.data(),
+        m_arrAnimatedWaterVrtData.count() * int(sizeof(SWaterVertexData)));
+    m_waterVertexBuf.release();
+    if(!rebuildIndices)
+        return;
+    const QVector<ushort> tileIndices{
+        0,1,4, 0,4,3,
+        1,2,5, 1,5,4,
+        3,4,7, 3,7,6,
+        4,5,8, 4,8,7
+    };
+    QVector<ushort> waterIndices;
+    waterIndices.reserve(nTile * nTile * tileIndices.size());
+    for(int row = 0; row < nTile; ++row)
+        for(int col = 0; col < nTile; ++col)
+        {
+            if(m_arrWater.at(row).at(col).materialIndex() < 0)
+                continue;
+            const ushort tileOffset = ushort((row * nTile + col) * 9);
+            for(ushort index : tileIndices)
+                waterIndices.append(index + tileOffset);
+        }
+    m_waterIndexCount = waterIndices.size();
+    m_waterIndexBuf.bind();
+    m_waterIndexBuf.allocate(waterIndices.data(),
+                             waterIndices.count() * int(sizeof(ushort)));
+    m_waterIndexBuf.release();
+}
+
+void CSector::updatePosition()
+{
+    m_modelMatrix.translate(QVector3D(m_index.x*32.0f, m_index.y*32.0f, .0f));
+    updateBounds();
     m_vertexBuf.bind();
     m_vertexBuf.allocate(m_arrLitLandVrtData.data(),
                          m_arrLitLandVrtData.count()*int(sizeof(STerrainVertexData)));
@@ -662,10 +1093,25 @@ void CSector::updatePosition()
             m_arrAnimatedWaterVrtData.count() * int(sizeof(SWaterVertexData)));
         m_waterVertexBuf.release();
 
+        QVector<ushort> waterIndices;
+        waterIndices.reserve(aInd.size());
+        for(int row = 0; row < nTile; ++row)
+            for(int col = 0; col < nTile; ++col)
+            {
+                if(m_arrWater.at(row).at(col).materialIndex() < 0)
+                    continue;
+                const ushort tileOffset = ushort((row * nTile + col) * 9);
+                for(ushort index : arrTileInd)
+                    waterIndices.append(index + tileOffset);
+            }
+        m_waterIndexCount = waterIndices.size();
         m_waterIndexBuf.bind();
-        m_waterIndexBuf.allocate(aInd.data(), aInd.count() * int(sizeof(ushort)));
+        m_waterIndexBuf.allocate(waterIndices.data(),
+                                 waterIndices.count() * int(sizeof(ushort)));
         m_waterIndexBuf.release();
     }
+    else
+        m_waterIndexCount = 0;
 }
 
 bool CSector::pickTile(int& outRow, int& outCol, QVector3D& point, bool bLand)
@@ -695,7 +1141,8 @@ bool CSector::pickTile(int& outRow, int& outCol, QVector3D& point, bool bLand)
         for(int row(0); row<m_arrWater.size(); ++row)
             for(int col(0); col<m_arrWater[row].size(); ++col)
             {
-                if(m_arrWater[row][col].isProjectPoint(point))
+                if(m_arrWater[row][col].materialIndex() >= 0
+                   && m_arrWater[row][col].isProjectPoint(point))
                 {
                     outRow = row;
                     outCol = col;
@@ -766,7 +1213,7 @@ void CSector::draw(QOpenGLShaderProgram* program)
 
 void CSector::drawWater(QOpenGLShaderProgram *program)
 {
-    if (m_arrWaterVrtData.count() == 0)
+    if (m_arrWaterVrtData.count() == 0 || m_waterIndexCount == 0)
         return;
 
     program->setUniformValue("u_modelMmatrix", m_modelMatrix);
@@ -813,14 +1260,13 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
     }
 
     m_waterIndexBuf.bind();
-    const int indexCount = (m_arrWaterVrtData.count() / 9) * 24;
-    ei::gl::DrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
+    ei::gl::DrawElements(GL_TRIANGLES, m_waterIndexCount, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())
     {
         ++performance.counters().drawCalls;
         ++performance.counters().terrainDrawCalls;
-        performance.counters().triangles += quint64(indexCount / 3);
+        performance.counters().triangles += quint64(m_waterIndexCount / 3);
     }
 }
 
@@ -870,7 +1316,8 @@ bool CSector::projectPt(QVector3D& point, bool land)
     for(int row(yMin); row<yMax; ++row)
         for(int col(xMin); col<xMax; ++col)
         {
-            if(tiles[row][col].isProjectPoint(origin))
+            if((land || tiles[row][col].materialIndex() >= 0)
+               && tiles[row][col].isProjectPoint(origin))
             {
                 point.setZ(point.z() + origin.z());
                 return true;

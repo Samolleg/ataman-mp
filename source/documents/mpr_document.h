@@ -118,6 +118,43 @@ struct SMprDocumentDiffEntry
     QString details;
 };
 
+// Structural canvas changes are intentionally separate from ordinary member
+// edits. oldTileOffset places the old canvas inside the new canvas in the same
+// two-world-unit tiles used by the terrain grid. Positive values add space on
+// the west/north sides; negative values crop it there.
+struct SMprCanvasResizeRequest
+{
+    quint32 sectorCountX{0};
+    quint32 sectorCountY{0};
+    int oldTileOffsetX{0};
+    int oldTileOffsetY{0};
+    bool closeEdges{false};
+    int edgeTaperTiles{2};
+};
+
+struct SMprCreationRequest
+{
+    QString innerNamespace;
+    quint32 sectorCountX{1};
+    quint32 sectorCountY{1};
+    float maxZ{100.0f};
+    quint16 flatRawHeight{0};
+    quint16 initialPackedTile{0};
+    bool closeEdges{false};
+    int edgeTaperTiles{2};
+    int heightmapWidth{0};
+    int heightmapHeight{0};
+    QVector<float> heightmapSamples;
+    float heightmapMinimumRaw{0.0f};
+    float heightmapMaximumRaw{65535.0f};
+    bool createOverlayPlane{false};
+    quint16 overlayRawHeight{32768};
+    quint16 overlayPackedTile{0};
+    qint16 overlayMaterialIndex{0};
+    bool taperOverlayEdges{false};
+    int overlayEdgeTaperTiles{2};
+};
+
 class CMprSemanticDiff
 {
 public:
@@ -146,6 +183,16 @@ public:
     bool applyTransaction(const CMprEditTransaction& transaction,
                           QByteArray* output,
                           CValidationReport* report = nullptr) const;
+    bool appendMaxZEdit(float newMaxZ, CMprEditTransaction* transaction,
+                        CValidationReport* report = nullptr) const;
+    bool buildResizedCanvas(const SMprCanvasResizeRequest& request,
+                            QByteArray* output,
+                            CValidationReport* report = nullptr) const;
+    // Uses this document only as a validated atlas/material template. The new
+    // archive contains a freshly named MP and deterministic flat SEC members.
+    bool buildNewCanvas(const SMprCreationRequest& request,
+                        QByteArray* output,
+                        CValidationReport* report = nullptr) const;
     bool isDirty() const { return false; }
 
 private:

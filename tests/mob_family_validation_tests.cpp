@@ -65,6 +65,17 @@ QByteArray mobWithScript(const QByteArray& script)
     return section(0xA000, encryptedScript(script));
 }
 
+QByteArray mobWithMagicTrap(bool includeDiplomacy)
+{
+    const QByteArray trap = section(0xBBAB0000,
+        section(0xB002, u32(150)) + section(0xB004, QByteArray("test trap")));
+    QByteArray payload = section(0xC000) + section(0xB000, trap);
+    if(includeDiplomacy)
+        payload += section(0xDDDDDDD1,
+            section(0xDDDDDDD2, QByteArray(32 * 32 * int(sizeof(quint32)), '\0')));
+    return section(0xA000, payload);
+}
+
 QString writeMob(const QString& directory, const QString& name, const QByteArray& bytes)
 {
     const QString path = QDir(directory).filePath(name);
@@ -86,6 +97,7 @@ private slots:
     void separatelyLoadedMapSetsAreNotReportedAsOneFamily();
     void multipleLoadedPrimaryMobsAreReported();
     void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
+    void magicTrapRequiresContainingMobDiplomacy();
 };
 
 void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()
@@ -253,6 +265,46 @@ void MobFamilyValidationTests::duplicateIdsWithinOneMobAreAuthoritativeWarnings(
     QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
     QVERIFY(finding->message.contains("NID 568 is used by 2 objects in duplicate.mob"));
     QCOMPARE(finding->locations.size(), 2);
+}
+
+void MobFamilyValidationTests::magicTrapRequiresContainingMobDiplomacy()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString missing = writeMob(directory.path(), "autozone2newtest.mob",
+                                     mobWithMagicTrap(false));
+    const QString present = writeMob(directory.path(), "autozone2withdip.mob",
+                                     mobWithMagicTrap(true));
+    QVERIFY(!missing.isEmpty() && !present.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "trap-diplomacy";
+    request.profileId = "test";
+    request.seedMobPaths << missing;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "diplomacy.magic_trap_table_missing"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
+    QVERIFY(finding->message.contains("autozone2newtest.mob"));
+    QVERIFY(finding->message.contains("magic trap NID 150"));
+    QVERIFY(finding->message.contains("MOB diplomacy table"));
+    QVERIFY(finding->hasNid);
+    QCOMPARE(finding->nid, quint32(150));
+    QVERIFY(std::any_of(finding->locations.cbegin(), finding->locations.cend(),
+        [&missing](const QString& location)
+        { return location.startsWith(missing + ":") && location.contains("MAGIC_TRAP"); }));
+
+    request.seedMobPaths = QStringList() << present;
+    report = CMobFamilyValidator::validate(request);
+    finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "diplomacy.magic_trap_table_missing"; });
+    QVERIFY(finding == report.findings.cend());
 }
 
 void MobFamilyValidationTests::multipleLoadedPrimaryMobsAreReported()

@@ -1,6 +1,8 @@
 #include "mmp_codec.h"
 
 #include <QtEndian>
+#include <QtMath>
+#include <QDataStream>
 #include <cstring>
 #include <limits>
 
@@ -322,6 +324,182 @@ bool compositeTextureLayers(const QVector<QImage>& layers, QImage* composite,
     }
     *composite = result;
     return true;
+}
+
+QByteArray encodeMmp8888(const QImage& image, QString* diagnostic)
+{
+    if(image.isNull() || image.width() <= 0 || image.height() <= 0)
+    {
+        if(diagnostic) *diagnostic = "A non-empty image is required for 8888 MMP encoding.";
+        return {};
+    }
+    const QImage source = image.convertToFormat(QImage::Format_ARGB32);
+    QByteArray result;
+    QDataStream stream(&result, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0x00504d4d) << quint32(source.width()) << quint32(source.height())
+           << quint32(1) << quint32(0x00008888) << quint32(32)
+           << quint32(0xff000000) << quint32(24) << quint32(8)
+           << quint32(0x00ff0000) << quint32(16) << quint32(8)
+           << quint32(0x0000ff00) << quint32(8) << quint32(8)
+           << quint32(0x000000ff) << quint32(0) << quint32(8) << quint32(0);
+    for(int y = 0; y < source.height(); ++y)
+        for(int x = 0; x < source.width(); ++x)
+            stream << quint32(source.pixel(x, y));
+    return result;
+}
+
+namespace {
+quint16 rgb565(int r, int g, int b)
+{
+    return quint16(((r * 31 + 127) / 255) << 11
+        | ((g * 63 + 127) / 255) << 5 | ((b * 31 + 127) / 255));
+}
+
+QRgb expand565(quint16 value)
+{
+    const int r = (value >> 11) & 31;
+    const int g = (value >> 5) & 63;
+    const int b = value & 31;
+    return qRgb((r << 3) | (r >> 2), (g << 2) | (g >> 4),
+                (b << 3) | (b >> 2));
+}
+
+int colorError(QRgb a, QRgb b)
+{
+    const int dr = qRed(a) - qRed(b);
+    const int dg = qGreen(a) - qGreen(b);
+    const int db = qBlue(a) - qBlue(b);
+    return dr * dr + dg * dg + db * db;
+}
+}
+
+QByteArray encodeMmpDxt1(const QImage& image, QString* diagnostic)
+{
+    if(image.isNull() || image.width() <= 0 || image.height() <= 0
+       || (image.width() & 3) != 0 || (image.height() & 3) != 0)
+    {
+        if(diagnostic) *diagnostic = "DXT1 encoding requires non-empty dimensions divisible by four.";
+        return {};
+    }
+    const QImage source = image.convertToFormat(QImage::Format_ARGB32);
+    QByteArray result;
+    QDataStream stream(&result, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0x00504d4d) << quint32(source.width())
+           << quint32(source.height()) << quint32(1) << quint32(0x31545844);
+    // EI's DXT reader still consumes the legacy DirectDraw RGB565 descriptor.
+    // A zero-filled tail decodes in our structural inspector but is rejected
+    // by the game texture path and produces an invisible minimap.
+    stream << quint32(4) << quint32(0x00008000) << quint32(15)
+           << quint32(1) << quint32(0x00007c00) << quint32(10)
+           << quint32(5) << quint32(0x000003e0) << quint32(5)
+           << quint32(5) << quint32(0x0000001f) << quint32(0)
+           << quint32(5) << quint32(0);
+
+    for(int by = 0; by < source.height(); by += 4)
+        for(int bx = 0; bx < source.width(); bx += 4)
+        {
+            QRgb pixels[16];
+            bool transparent = false;
+            int opaqueCount = 0, sumR = 0, sumG = 0, sumB = 0;
+            QRgb low = qRgb(0, 0, 0), high = qRgb(0, 0, 0);
+            for(int py = 0; py < 4; ++py)
+            {
+                const QRgb* row = reinterpret_cast<const QRgb*>(source.constScanLine(by + py));
+                for(int px = 0; px < 4; ++px)
+                {
+                    const QRgb pixel = row[bx + px];
+                    pixels[py * 4 + px] = pixel;
+                    if(qAlpha(pixel) < 128) { transparent = true; continue; }
+                    ++opaqueCount;
+                    sumR += qRed(pixel); sumG += qGreen(pixel); sumB += qBlue(pixel);
+                }
+            }
+            if(opaqueCount > 0)
+            {
+                const double mean[3] = {double(sumR) / opaqueCount,
+                    double(sumG) / opaqueCount, double(sumB) / opaqueCount};
+                double covariance[3][3] = {};
+                for(int i = 0; i < 16; ++i)
+                {
+                    if(qAlpha(pixels[i]) < 128) continue;
+                    const double delta[3] = {qRed(pixels[i]) - mean[0],
+                        qGreen(pixels[i]) - mean[1], qBlue(pixels[i]) - mean[2]};
+                    for(int row = 0; row < 3; ++row)
+                        for(int column = 0; column < 3; ++column)
+                            covariance[row][column] += delta[row] * delta[column];
+                }
+                double axis[3] = {1.0, 1.0, 1.0};
+                for(int iteration = 0; iteration < 4; ++iteration)
+                {
+                    double next[3] = {};
+                    for(int row = 0; row < 3; ++row)
+                        for(int column = 0; column < 3; ++column)
+                            next[row] += covariance[row][column] * axis[column];
+                    const double length = qSqrt(next[0]*next[0] + next[1]*next[1]
+                                                + next[2]*next[2]);
+                    if(length < 0.0001) break;
+                    for(int channel = 0; channel < 3; ++channel)
+                        axis[channel] = next[channel] / length;
+                }
+                double minimum = 1.0e30, maximum = -1.0e30;
+                for(int i = 0; i < 16; ++i)
+                {
+                    if(qAlpha(pixels[i]) < 128) continue;
+                    const double projection = (qRed(pixels[i]) - mean[0]) * axis[0]
+                        + (qGreen(pixels[i]) - mean[1]) * axis[1]
+                        + (qBlue(pixels[i]) - mean[2]) * axis[2];
+                    if(projection < minimum) { minimum = projection; low = pixels[i]; }
+                    if(projection > maximum) { maximum = projection; high = pixels[i]; }
+                }
+            }
+            quint16 c0 = rgb565(qRed(high), qGreen(high), qBlue(high));
+            quint16 c1 = rgb565(qRed(low), qGreen(low), qBlue(low));
+            if(opaqueCount == 0) c0 = c1 = 0;
+            if(transparent)
+            {
+                if(c0 > c1) qSwap(c0, c1);
+            }
+            else
+            {
+                if(c0 <= c1) qSwap(c0, c1);
+                if(c0 == c1) c0 = c0 == 0xffff ? quint16(c0 - 1) : quint16(c0 + 1);
+                if(c0 <= c1) qSwap(c0, c1);
+            }
+            QRgb palette[4] = {expand565(c0), expand565(c1), 0, 0};
+            if(c0 > c1)
+            {
+                palette[2] = qRgb((2*qRed(palette[0])+qRed(palette[1]))/3,
+                    (2*qGreen(palette[0])+qGreen(palette[1]))/3,
+                    (2*qBlue(palette[0])+qBlue(palette[1]))/3);
+                palette[3] = qRgb((qRed(palette[0])+2*qRed(palette[1]))/3,
+                    (qGreen(palette[0])+2*qGreen(palette[1]))/3,
+                    (qBlue(palette[0])+2*qBlue(palette[1]))/3);
+            }
+            else
+            {
+                palette[2] = qRgb((qRed(palette[0])+qRed(palette[1]))/2,
+                    (qGreen(palette[0])+qGreen(palette[1]))/2,
+                    (qBlue(palette[0])+qBlue(palette[1]))/2);
+                palette[3] = qRgba(0, 0, 0, 0);
+            }
+            quint32 indices = 0;
+            for(int i = 0; i < 16; ++i)
+            {
+                int best = transparent && qAlpha(pixels[i]) < 128 ? 3 : 0;
+                int bestError = best == 3 ? 0 : std::numeric_limits<int>::max();
+                const int paletteCount = c0 > c1 ? 4 : 3;
+                for(int candidate = 0; candidate < paletteCount && bestError; ++candidate)
+                {
+                    const int error = colorError(pixels[i], palette[candidate]);
+                    if(error < bestError) { bestError = error; best = candidate; }
+                }
+                indices |= quint32(best) << (2 * i);
+            }
+            stream << c0 << c1 << indices;
+        }
+    return result;
 }
 
 }

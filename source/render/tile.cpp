@@ -89,23 +89,24 @@ quat ind: {0,1,4,3}, {1,2,5,4}, {3,4,7, 6},  {4, 5, 8, 7}
 */
 void CTile::generateDrawVertexData(QVector<SVertexData>& outData, int& curIndex)
 {
-    QVector<QVector2D> tCoord; // store x,y min and x,y max
-    tCoord.resize(2);
     int texCount = m_texAtlasNumber;
-    tCoord[0].setX((m_index%8/8.0f+m_atlasTexIndex)/texCount); // A landscape texture is expected to be a set of textures attached along the X axis, so for the X coordinate we need to take this offset into account.
-    tCoord[0].setY((7-int(m_index/8))/8.0f);
+    QVector2D texMinimum(
+        (m_index % 8 / 8.0f + m_atlasTexIndex) / texCount,
+        (7 - int(m_index / 8)) / 8.0f);
+    QVector2D texMaximum(texMinimum.x() + 1.0f / 8.0f / texCount,
+                         texMinimum.y() + 1.0f / 8.0f);
+    texMinimum += QVector2D(4.0f / 512.0f / texCount,
+                            4.0f / 512.0f / texCount);
+    texMaximum -= QVector2D(4.0f / 512.0f / texCount,
+                            4.0f / 512.0f / texCount);
 
-    tCoord[1].setX(tCoord[0].x() + 1.0f/8.0f/texCount);
-    tCoord[1].setY(tCoord[0].y() + 1.0f/8.0f);
-    tCoord[0] += QVector2D(4.0f/512.0f/texCount, 4.0f/512.0f/texCount); // cut a little piece from tile texture (dxt provide some "trash' on border)
-    tCoord[1] -= QVector2D(4.0f/512.0f/texCount, 4.0f/512.0f/texCount); // cut a little piece from tile texture (dxt provide some "trash' on border)
-
-    auto calcTexCoord = [&tCoord](QVector2D& texCoord, int row, int col)
+    const auto calcTexCoord = [&texMinimum, &texMaximum](
+        QVector2D& texCoord, int row, int col)
     {
-        float xStep = (tCoord[0].x() + tCoord[1].x())/2.0f - tCoord[0].x();
-        float yStep = (tCoord[0].y() + tCoord[1].y())/2.0f - tCoord[0].y();
-        texCoord.setX(tCoord[0].x() + xStep * col);
-        texCoord.setY(tCoord[1].y() - yStep * row);
+        const float xStep = (texMaximum.x() - texMinimum.x()) * 0.5f;
+        const float yStep = (texMaximum.y() - texMinimum.y()) * 0.5f;
+        texCoord.setX(texMinimum.x() + xStep * col);
+        texCoord.setY(texMaximum.y() - yStep * row);
     };
 
     for(int row(0); row<3; ++row)
@@ -117,11 +118,7 @@ void CTile::generateDrawVertexData(QVector<SVertexData>& outData, int& curIndex)
             outData[curIndex].position.setY(m_y + row + vrt.yOffset/254.0f);
             outData[curIndex].position.setZ(vrt.z * m_maxZ/65535.0f);
             outData[curIndex].normal = vrt.normal;
-            QVector2D test1;
-            calcTexCoord(test1, row, col);
-            auto indN = getNewIndex(row, col, m_rotNum);
-            QVector2D test2;
-            calcTexCoord(test2, indN.first, indN.second);
+            const QPair<int, int> indN = getNewIndex(row, col, m_rotNum);
             calcTexCoord(outData[curIndex].texCoord, indN.first, indN.second);
             ++curIndex;
         }
@@ -132,16 +129,19 @@ bool CTile::isProjectPoint(QVector3D& outPoint)
 {
     float u,v,t;
     QVector3D dir(0.0f, 0.0f, 1.0f);
-    QVector<int> arrTriangleId = {0, 1, 3, 3, 1, 4, 1, 2, 4, 4, 2, 5, 3, 4, 6, 6, 4, 7, 4, 5, 7, 7, 5, 8};
-    QVector3D pt1;
-    QVector3D pt2;
-    QVector3D pt3;
-    for(int i(0); i<arrTriangleId.size(); i+=3)
+    static const int triangleIds[] = {
+        0, 1, 3, 3, 1, 4, 1, 2, 4, 4, 2, 5,
+        3, 4, 6, 6, 4, 7, 4, 5, 7, 7, 5, 8
+    };
+    QVector3D points[9];
+    for(int point = 0; point < 9; ++point)
+        points[point] = pos(point / 3, point % 3);
+    for(int i = 0; i < 24; i += 3)
     {
-        pt1 = pos(arrTriangleId[(i+0)]/3, arrTriangleId[(i+0)]%3);
-        pt2 = pos(arrTriangleId[(i+1)]/3, arrTriangleId[(i+1)]%3);
-        pt3 = pos(arrTriangleId[(i+2)]/3, arrTriangleId[(i+2)]%3);
-        if (util::ptToTriangle(t, u, v, outPoint, dir, pt1, pt2, pt3))
+        if(util::ptToTriangle(t, u, v, outPoint, dir,
+                              points[triangleIds[i]],
+                              points[triangleIds[i + 1]],
+                              points[triangleIds[i + 2]]))
         {
             outPoint.setZ(outPoint.z() + t);
             return true;

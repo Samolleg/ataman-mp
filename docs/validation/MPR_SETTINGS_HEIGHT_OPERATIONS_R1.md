@@ -1,0 +1,100 @@
+# MPR Settings height operations R1
+
+## Scope
+
+This increment provides the consolidated **MPR Settings** workflow for
+non-structural height editing and explicit `maxZ` migration.
+
+Included:
+
+- map source, embedded namespace, sector/tile/vertex dimensions, atlas/material
+  counts, `maxZ`, and raw/world height-range summary;
+- explicit documentation of fixed vertex counts, clamp versus `maxZ`, vertical
+  scaling versus requantization, and structural resize;
+- undoable whole-map raw-height offset, flatten, clamp, and normalize/remap;
+- preview of changed canonical vertices, affected sectors, and before/after
+  changed-value ranges;
+- fail-closed invalid ranges, flat normalization, non-finite offsets, and raw
+  saturation;
+- undoable `maxZ` migration with separate **scale terrain** and **preserve world
+  heights** policies, explicit clamp acceptance, rounding/error preview, and
+  derived-normal rebuilds;
+- the existing atlas tile window retained through **Open Atlas Tiles...** and
+  through Landscape Tools manual-tile selection.
+
+Not enabled:
+
+- crop/expand or any sector/member addition/removal;
+- liquid-material mutation;
+- atlas tile-type mutation.
+
+## Automated evidence
+
+- `endurance_document_tests`: 63 passed, 0 failed, 3 expected private-fixture
+  skips;
+- global operation tests preserve a two-sector `65 x 33` canonical lattice,
+  emit one seam delta, update both owning SEC payloads, and pass undo/redo;
+- invalid clamp/normalize ranges, flat normalization, non-finite offset, and
+  saturation refusal are covered synthetically;
+- Qt 5.12.12 / MinGW 7.3 release build: passed;
+- non-interactive `--ui-widget-check`: passed.
+
+## Manual test cases
+
+Use a copied MPR or disposable test map only.
+
+1. Open **MPR Settings...** and confirm source, namespace, sector/tile/vertex
+   dimensions, `maxZ`, and raw/world ranges match the loaded MPR.
+2. Open **Open Atlas Tiles...** and confirm the existing manual tile workflow
+   remains available. Confirm Landscape Tools' manual-tile button still opens
+   the atlas window directly.
+3. Apply a small whole-map Offset. Confirm the preview reports the complete
+   vertex and sector scope, the terrain updates, and one Undo/Redo reverses and
+   restores it.
+4. Clamp to limits inside the current range. Confirm only out-of-range terrain
+   changes and repeating the same clamp becomes a no-op.
+5. Normalize to a visibly narrower range. Confirm dimensions and vertex count
+   do not change. Undo before continuing.
+6. Flatten the whole map only on a disposable copy, confirm it is one undoable
+   action, then undo it.
+7. Request an offset that would exceed 0-65535. Confirm Apply remains disabled
+   and explains that an explicit clamp or `maxZ` policy is required.
+8. Save a deliberate edit through normal MPR Save As or direct Save. Confirm
+   staged validation and backup behavior remain unchanged.
+9. Leave **MPR Settings** open, apply an operation, and use the editor's normal
+   Undo and Redo actions without closing the panel. Undock and redock it, close
+   it with the title-bar button, then reopen it through **MPR Settings...**.
+   Confirm there is no context-help button and the panel remains usable.
+10. Open **Atlas Tiles...** and select **Materials**. Confirm liquid material
+    records and animated-tile records can be inspected. Mutation controls must
+    remain disabled in this increment. Confirm the explanation identifies these
+    as overlay/liquid parameter slots referenced by overlay tiles, rather than
+    four selectable ground textures.
+11. In **Loaded Map**, right-click the MPR. Confirm **MPR Settings**, **Save
+    MPR**, and **Save MPR As** use the normal application actions. **Save MPR**
+    must be disabled while clean, become enabled after a terrain edit, and return
+    to disabled after a successful save or undo back to the clean state.
+12. Leave **MPR Settings** open and unload the MPR. Confirm the dock remains in
+    place and reads **No MPR loaded.** Load a different MPR and confirm the same
+    dock updates its source, namespace, dimensions, and ranges without reopening.
+13. Arrange **MPR Settings** above or below **Landscape Tools**, then close and
+    reopen Landscape Tools with **L**. Confirm it behaves exactly like **Maps and
+    Collections**: only visibility changes, its native dock slot/size is retained,
+    and no unrelated dock layout is restored or rearranged.
+14. On a disposable map, choose **Vertical scale**, double `maxZ`, and keep
+    **Scale terrain with vertical range**. Confirm the preview says raw samples
+    stay unchanged, Apply is one undo step, and the landscape becomes twice as
+    tall in world space. Undo and confirm the original shape/range returns.
+15. Set a moderately different `maxZ` with **Preserve world heights by
+    requantizing**. Confirm the preview reports changed/rounded vertices and a
+    maximum world error. Apply and confirm the visible world heights remain
+    effectively fixed; Undo/Redo must restore each state in one action.
+16. Request a preserve-world migration whose smaller range would clamp terrain.
+    Confirm Apply is refused until **Allow vertices above the new range to
+    clamp** is checked. Do not accept this on a valuable map.
+17. Save As after either maxZ policy, reopen the copy, and confirm the new maxZ
+    and terrain persist. Unknown/archive members remain governed by the normal
+    staged semantic-diff and backup contract. Undo back to the original state
+    before Save must return MPR to clean.
+
+No test requires or authorizes mutation of the live game installation.

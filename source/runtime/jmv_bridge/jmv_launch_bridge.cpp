@@ -226,11 +226,14 @@ struct HotReloadControl
     wchar_t mprPath[MAX_PATH * 4] = {};
     wchar_t mobPath[MAX_PATH * 4] = {};
     wchar_t bootstrapMobPath[MAX_PATH * 4] = {};
+    wchar_t minimapResourcePath[MAX_PATH * 4] = {};
     wchar_t savePath[MAX_PATH * 4] = {};
     unsigned char mprSha256[32] = {};
     unsigned char mobSha256[32] = {};
     unsigned char bootstrapMobSha256[32] = {};
+    unsigned char minimapResourceSha256[32] = {};
     bool hasBootstrap = false;
+    bool hasMinimapResource = false;
     bool graphless = false;
     bool syntheticMapIdentity = false;
     int mapSizeX = 0;
@@ -242,6 +245,7 @@ struct HotReloadControl
     char bootstrapMob[128] = {};
     char zone[128] = {};
     char bootstrapMode[32] = {};
+    char minimapTexture[128] = {};
 };
 
 constexpr size_t kZoneNameOffset = 0;
@@ -473,10 +477,11 @@ bool ConfigureSyntheticZone()
     return true;
 }
 
-bool RegisterTemporaryTextureResource()
+bool RegisterTextureResourcePath(const wchar_t* path, bool initialResource)
 {
-    if(!g_temporaryTextureResource[0]
-       || InterlockedCompareExchange(&g_temporaryTextureResourceRegistered, 0, 0))
+    if(!path || !path[0]
+       || (initialResource
+           && InterlockedCompareExchange(&g_temporaryTextureResourceRegistered, 0, 0)))
         return true;
     auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
     if(!game
@@ -493,7 +498,7 @@ bool RegisterTemporaryTextureResource()
     char resourcePath[MAX_PATH * 4]{};
     BOOL substituted = FALSE;
     if(!WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS,
-                            g_temporaryTextureResource, -1,
+                            path, -1,
                             resourcePath, int(sizeof(resourcePath)),
                             nullptr, &substituted) || substituted)
     {
@@ -528,12 +533,45 @@ bool RegisterTemporaryTextureResource()
         Log(L"TEMP_TEXTURE_RES refused: game texture manager rejected the run-owned archive");
         return false;
     }
-    InterlockedExchange(&g_temporaryTextureResourceRegistered, 1);
+    if(initialResource)
+        InterlockedExchange(&g_temporaryTextureResourceRegistered, 1);
     wchar_t message[1800]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
                  L"TEMP_TEXTURE_RES registered path=\"%s\" profile=%s installed_archives_modified=false",
-                 g_temporaryTextureResource,
+                 path,
                  g_runtimeBuild == RuntimeBuild::BaseEi ? L"base" : L"jmv");
+    Log(message);
+    return true;
+}
+
+bool RegisterTemporaryTextureResource()
+{
+    return !g_temporaryTextureResource[0]
+        || RegisterTextureResourcePath(g_temporaryTextureResource, true);
+}
+
+bool ConfigureHotReloadMinimap(const HotReloadControl& request)
+{
+    if(!request.minimapTexture[0])
+        return true;
+    if(request.hasMinimapResource
+       && !RegisterTextureResourcePath(request.minimapResourcePath, false))
+        return false;
+    unsigned char* zone = request.syntheticMapIdentity
+        ? FindZoneCandidate(request.zone, request.zone, request.zone)
+        : FindZoneCandidate(request.zone, request.bootstrapMpr, request.bootstrapMob);
+    if(!zone)
+        return false;
+    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+    const auto assign = reinterpret_cast<GameStringAssignFn>(game + kGameStringAssignRva);
+    assign(zone + kZoneMinimapTextureOffset, request.minimapTexture);
+    wchar_t name[256] = L"<unrepresentable>";
+    MultiByteToWideChar(CP_ACP, 0, request.minimapTexture, -1,
+                        name, int(sizeof(name) / sizeof(name[0])));
+    wchar_t message[768]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"HOT_RELOAD minimap selected texture=\"%s\" resource=%s",
+                 name, request.hasMinimapResource ? L"generation-owned" : L"active-profile");
     Log(message);
     return true;
 }
@@ -689,6 +727,7 @@ bool ReadHotReloadControl(HotReloadControl* output)
     HotReloadControl parsed;
     bool haveMprHash = false;
     bool haveMobHash = false;
+    bool haveMinimapHash = false;
     bool haveProfile = false;
     bool haveRunId = false;
     char* context = nullptr;
@@ -752,6 +791,18 @@ bool ReadHotReloadControl(HotReloadControl* output)
                 int(sizeof(parsed.bootstrapMobPath) / sizeof(parsed.bootstrapMobPath[0])));
             if(!parsed.hasBootstrap) return false;
         }
+        else if(std::strcmp(line, "minimapTexture") == 0)
+        {
+            if(strcpy_s(parsed.minimapTexture, value) != 0) return false;
+        }
+        else if(std::strcmp(line, "minimapResource") == 0 && value[0])
+        {
+            parsed.hasMinimapResource = Utf8ToWide(
+                value, parsed.minimapResourcePath,
+                int(sizeof(parsed.minimapResourcePath)
+                    / sizeof(parsed.minimapResourcePath[0])));
+            if(!parsed.hasMinimapResource) return false;
+        }
         else if(std::strcmp(line, "mprSha256") == 0)
             haveMprHash = ParseSha256(value, parsed.mprSha256);
         else if(std::strcmp(line, "mobSha256") == 0)
@@ -760,6 +811,8 @@ bool ReadHotReloadControl(HotReloadControl* output)
         {
             if(!ParseSha256(value, parsed.bootstrapMobSha256)) return false;
         }
+        else if(std::strcmp(line, "minimapResourceSha256") == 0 && value[0])
+            haveMinimapHash = ParseSha256(value, parsed.minimapResourceSha256);
         else if(std::strcmp(line, "graphless") == 0)
             parsed.graphless = std::strcmp(value, "1") == 0;
         else if(std::strcmp(line, "syntheticMapIdentity") == 0)
@@ -781,16 +834,21 @@ bool ReadHotReloadControl(HotReloadControl* output)
         if(!std::isalnum(static_cast<unsigned char>(*cursor))
            && *cursor != '_' && *cursor != '-')
             return false;
+    for(const char* cursor = parsed.minimapTexture; *cursor; ++cursor)
+        if(!std::isalnum(static_cast<unsigned char>(*cursor))
+           && *cursor != '_' && *cursor != '-' && *cursor != '.')
+            return false;
     if(parsed.bootstrapMode[0]
        && _stricmp(parsed.bootstrapMode, "automatic") != 0
        && _stricmp(parsed.bootstrapMode, "transition") != 0
        && _stricmp(parsed.bootstrapMode, "new-game") != 0)
         return false;
-    if(parsed.protocol != 3 || parsed.sequence == 0 || parsed.generation == 0
+    if(parsed.protocol != 4 || parsed.sequence == 0 || parsed.generation == 0
        || !haveProfile || !haveRunId
        || parsed.sequence <= g_hotReloadSequence || parsed.entranceId <= 0
        || parsed.entranceId > 1024
        || !parsed.zone[0] || !parsed.mprPath[0] || !parsed.mobPath[0]
+       || !parsed.bootstrapMpr[0] || !parsed.bootstrapMob[0]
        || !parsed.savePath[0]
        || !haveMprHash || !haveMobHash
        || !IsPathInsideHotReloadRoot(parsed.mprPath)
@@ -798,6 +856,12 @@ bool ReadHotReloadControl(HotReloadControl* output)
        || !IsPathInsideHotReloadRoot(parsed.savePath)
        || !HashMatches(parsed.mprPath, parsed.mprSha256)
        || !HashMatches(parsed.mobPath, parsed.mobSha256))
+        return false;
+    if(parsed.hasMinimapResource
+       && (!parsed.minimapTexture[0] || !haveMinimapHash
+           || !IsPathInsideHotReloadRoot(parsed.minimapResourcePath)
+           || !HashMatches(parsed.minimapResourcePath,
+                           parsed.minimapResourceSha256)))
         return false;
     if(parsed.syntheticMapIdentity
        && (parsed.mapSizeX <= 0 || parsed.mapSizeX > 1024
@@ -2522,9 +2586,8 @@ bool ProcessHotReloadOnGameThread()
         return false;
     }
     if(strcpy_s(g_bootstrapZone, request.sourceZone) != 0
-       || (request.syntheticMapIdentity
-           && (strcpy_s(g_bootstrapMpr, request.bootstrapMpr) != 0
-               || strcpy_s(g_bootstrapMob, request.bootstrapMob) != 0)))
+       || strcpy_s(g_bootstrapMpr, request.bootstrapMpr) != 0
+       || strcpy_s(g_bootstrapMob, request.bootstrapMob) != 0)
     {
         Log(L"HOT_RELOAD refused: bootstrap map identity is too long");
         return false;
@@ -2616,6 +2679,12 @@ bool ProcessHotReloadOnGameThread()
     if(!ConfigureSyntheticZone())
     {
         Log(L"HOT_RELOAD refused: synthetic map identity could not be prepared safely");
+        InterlockedExchange(&g_directLaunchState, -1);
+        return false;
+    }
+    if(!ConfigureHotReloadMinimap(request))
+    {
+        Log(L"HOT_RELOAD refused: selected minimap resource or zone identity could not be prepared safely");
         InterlockedExchange(&g_directLaunchState, -1);
         return false;
     }

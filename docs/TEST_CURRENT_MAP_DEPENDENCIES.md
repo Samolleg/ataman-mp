@@ -114,19 +114,15 @@ Temporary runtime aliases are journalled and removed only when their recorded
 hash still matches. Live campaign saves and source editor documents are not
 used as the test session's writable save namespace.
 
-When the primary MOB contains an embedded `AI_GRAPH`, Endurance preserves and
-uses it as part of the MOB and records any same-name loose `.grp` as shadowed.
-When the MOB has no embedded graph, Endurance resolves the matching `.grp`
-from the open MPR's directory before profile Maps fallbacks, validates its
-dimensions and exact byte length, then stages an unchanged sibling copy beside
-the temporary MPR. Every hot-reload generation receives its own immutable
-`map.grp`. Source graph files are never modified, and graph regeneration is
-not part of this staging feature. If no graph source exists, Endurance warns
-that the runtime exception supplies no navigation data and requires **Start
-Anyway** confirmation. The exact-hash bridge temporarily bypasses the graph
-requirement only for the staged loader invocation and restores it before normal
-runtime operation continues. The graphless decision and restoration outcome
-are recorded in the manifest and workflow/runtime log.
+Test Current Map generates an AI graph from the current terrain and object
+state, validates its map dimensions, eight profile planes, reciprocal links,
+local positions, and connected components, then serializes and freshly reopens
+it. Endurance removes any embedded `AI_GRAPH` only from the run-local primary
+MOB copy and stages the generated graph under the temporary MPR basename, so a
+stale embedded or loose graph cannot shadow the preview being tested. Hot reload
+does the same for each immutable generation. Source MOB and `.grp` files are
+never modified. This is temporary staging, not persistent graph export or MOB
+embedding; those remain separate explicit save operations.
 
 An unmapped loose JMV pair must have a current Play from Here point. Endurance
 does not guess the landscape center because it may be obstructed, outside the

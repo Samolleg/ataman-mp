@@ -42,6 +42,13 @@ struct SMobParameterState
 class CMob
 {
 public:
+    struct SCanvasCropResult
+    {
+        int translatedObjects{0};
+        int removedObjects{0};
+        int removedTaperObjects{0};
+        bool removedEmbeddedAiGraph{false};
+    };
     using SaveProgress = std::function<void(const QString&, int, int)>;
     CMob();
     ~CMob();
@@ -50,9 +57,17 @@ public:
     QVector<uint> checkUniqueId(QSet<uint>& aId);
     bool saveAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     bool save(const SaveProgress& progress = SaveProgress());
+    const QString& lastSaveError() const { return m_lastSaveError; }
     bool buildValidatedCandidate(QByteArray* data,
                                  CValidationReport* report = nullptr,
                                  QString* saveClass = nullptr);
+    bool buildCanvasCropCandidate(float offsetX, float offsetY,
+                                  float resultWidth, float resultHeight,
+                                  bool removeOutside, float closedEdgeWidth,
+                                  QByteArray* data, SCanvasCropResult* result,
+                                  CValidationReport* report = nullptr);
+    bool persistAiGraph(const QByteArray* graph, QString* error = nullptr,
+                        const SaveProgress& progress = SaveProgress());
     void serializeJson(const QFileInfo& file);
     void serializeMob(QByteArray& data, bool writeLog = true);
     void addNode(QList<CNode*>& aNode) {m_aNode.append(aNode); }
@@ -89,6 +104,7 @@ public:
     const QString& script() {return m_script;}
     void setScript(const QString& script) {m_script = script;}
     void setQuestMob(bool bQuest = true) {m_mobType = bQuest ? eEMobTypeQuest : eEMobTypeBase;}
+    void ensureObjectSection() { m_hasObjectSection = true; }
     bool isQuestMob() {return m_mobType == EMobType::eEMobTypeQuest;}
     void setDirty(bool bDurty = true) {m_bDirty = bDurty;}
     bool isDirty() const {return m_bDirty;}
@@ -158,12 +174,14 @@ private:
     CWorldSet m_worldSet;
     QByteArray m_vss_section;
     bool m_hasVssSection;
+    bool m_hasObjectSection;
     QByteArray m_directory;
     QByteArray m_directoryElements;
     QByteArray m_aiGraph;
     QByteArray m_originalData;
     QByteArray m_cleanProjection;
     QVector<uint> m_duplicateIds;
+    QString m_lastSaveError;
 
     //todo: include ALL nodes into these lists, for node assemly use children\parents
     QList<CNode*> m_aNode;

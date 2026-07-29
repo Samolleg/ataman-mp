@@ -9,6 +9,7 @@ class HotReloadProtocolTests : public QObject
     Q_OBJECT
 private slots:
     void acceptsOwnedVersionedPayload();
+    void acceptsOwnedGeneratedMinimapResource();
     void rejectsLiveOrEscapingPaths();
     void roundTripsBridgeControlFile();
 };
@@ -27,6 +28,9 @@ void HotReloadProtocolTests::acceptsOwnedVersionedPayload()
     request.generation = 1;
     request.runId = "run";
     request.profileId = "jamais-vu";
+    request.sourceZoneId = "gz1g";
+    request.bootstrapMprName = "zone1";
+    request.bootstrapMobName = "zone1";
     request.zoneId = "gz1g";
     request.entranceId = 1;
     request.mprPath = mpr;
@@ -39,6 +43,48 @@ void HotReloadProtocolTests::acceptsOwnedVersionedPayload()
     SMapHotReloadRequest parsed;
     QVERIFY(mapHotReloadRequestFromJson(mapHotReloadRequestToJson(request), &parsed, &errors));
     QCOMPARE(parsed.sequence, request.sequence);
+}
+
+void HotReloadProtocolTests::acceptsOwnedGeneratedMinimapResource()
+{
+    QTemporaryDir run;
+    const QString root = run.filePath("generations/000002");
+    const QString mpr = QDir(root).filePath("map.mpr");
+    const QString mob = QDir(root).filePath("map.mob");
+    const QString minimap = QDir(root).filePath("minimap.res");
+    const QString saves = QDir(root).filePath("saves");
+    QVERIFY(QDir().mkpath(root));
+    QVERIFY(QDir().mkpath(saves));
+    for(const QString& path : {mpr, mob, minimap})
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QVERIFY(file.write("fixture") == 7);
+    }
+    SMapHotReloadRequest request;
+    request.sequence = 2;
+    request.generation = 2;
+    request.runId = "run";
+    request.profileId = "jamais-vu";
+    request.sourceZoneId = "gz1g";
+    request.bootstrapMprName = "zone1";
+    request.bootstrapMobName = "zone1";
+    request.zoneId = "gz1g";
+    request.entranceId = 1;
+    request.mprPath = mpr;
+    request.mobPath = mob;
+    request.savePath = saves;
+    request.mprSha256 = QString(64, 'a');
+    request.mobSha256 = QString(64, 'b');
+    request.minimapTextureName = "eimmap_0123456789ab";
+    request.minimapResourcePath = minimap;
+    request.minimapResourceSha256 = QString(64, 'c');
+    QStringList errors;
+    QVERIFY2(validateMapHotReloadRequest(request, run.path(), &errors),
+             qPrintable(errors.join('\n')));
+    request.minimapTextureName = "unsafe/name";
+    errors.clear();
+    QVERIFY(!validateMapHotReloadRequest(request, run.path(), &errors));
 }
 
 void HotReloadProtocolTests::rejectsLiveOrEscapingPaths()
@@ -80,6 +126,9 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     request.mobSha256 = QString(64, 'b');
     request.bootstrapMobPath = "C:/test runs/run-19/reloads/19/AutoRunSpellAddon123.mob";
     request.bootstrapMobSha256 = QString(64, 'c');
+    request.minimapTextureName = "eimmap_0123456789ab";
+    request.minimapResourcePath = "C:/test runs/run-19/reloads/19/minimap.res";
+    request.minimapResourceSha256 = QString(64, 'd');
     request.savePath = "C:/test runs/run-19/generations/000007/saves";
     request.preservePosition = true;
     request.graphless = true;
@@ -104,6 +153,9 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     QCOMPARE(parsed.mprPath, request.mprPath);
     QCOMPARE(parsed.mobPath, request.mobPath);
     QCOMPARE(parsed.bootstrapMobPath, request.bootstrapMobPath);
+    QCOMPARE(parsed.minimapTextureName, request.minimapTextureName);
+    QCOMPARE(parsed.minimapResourcePath, request.minimapResourcePath);
+    QCOMPARE(parsed.minimapResourceSha256, request.minimapResourceSha256);
     QCOMPARE(parsed.savePath, request.savePath);
     QCOMPARE(parsed.preservePosition, request.preservePosition);
     QCOMPARE(parsed.graphless, request.graphless);

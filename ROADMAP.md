@@ -307,27 +307,38 @@ landscape-save gate unless later controlled evidence demonstrates a
 graph-dependent case. MPR/SEC and AI-graph persistence remain separate
 lossless transactions because the graph is not owned by the MPR.
 
+The user-run R6 matrix passed on 2026-07-26. The regenerated preview now applies
+the eight confirmed movement profiles, half-metre terrain samples, profile
+footprints, terrain traversal costs, slope limits, water depth/clearance,
+diagonal-corner rejection, reciprocal links, and deterministic component
+colouring. This closes terrain/liquid/profile preview policy. Object placement
+still uses conservative rendered bounds and is the active source-accuracy gap;
+generated graph persistence remains disabled.
+
 ## Confirmed format foundation
 
-- [ ] Add `AiGraphDocument` with exact raw-byte retention for embedded
+- [x] Add `AiGraphDocument` with exact raw-byte retention for embedded
   `AI_GRAPH` records and external `.grp` files.
-- [ ] Parse and validate the confirmed envelope: width, height, and
+- [x] Parse and validate the confirmed envelope: width, height, and
   `width * height * 152` bytes of graph data.
-- [ ] Model the article-derived `8 * 19` subdivision conservatively:
+- [x] Model the confirmed `8 * 19` subdivision without truncation:
   - eight neutral slots/layers per graph coordinate;
   - eight little-endian 16-bit directional values in each slot;
   - `0xFFFF` as an unavailable connection;
-  - the remaining one-byte and two-byte planes retained as opaque until their
-    engine or builder meaning is proven.
-- [ ] Confirm graph-to-world orientation and the observed eight graph
+  - the packed one-byte local X/Y position and two-byte connected-component
+    identifier retained as separate planes.
+- [x] Confirm graph-to-world orientation and the observed eight graph
   coordinates per terrain SEC across Base and JMV maps.
-- [ ] Treat the published BMP converters as research evidence only. Their
+- [x] Treat the published BMP converters as research evidence only. Their
   reverse conversion drops high bytes from finite 16-bit values, ignores the
   auxiliary planes, and is not a safe serializer or graph builder.
   ([Habr research article](https://habr.com/ru/articles/769050/))
 
 ## Visualization and validation
 
+- [x] Preview the exact same-basename sibling `.grp` when the primary MOB does
+  not contain an embedded `AI_GRAPH`; keep primary embedded ownership explicit
+  and authoritative when it is present instead of silently mixing sources.
 - [ ] Add a Navigation viewport mode with per-slot and combined overlays,
   directional edges, full 16-bit cost colouring, blocked connections, and a
   hover inspector exposing coordinates, source offsets, raw values, and hashes.
@@ -345,14 +356,11 @@ lossless transactions because the graph is not owned by the MPR.
   records whether the edited terrain actually causes a navigation defect.
 - [ ] Track terrain/object edits as navigation-dirty regions and retain the
   oversized-door runtime-regeneration convention as an explicit diagnostic.
-- [ ] Replace Play from Here's deliberately conservative terrain clearance
-  probe with the active regenerated AI graph as the authoritative walkability
-  and nearest-valid-position source. Automatic graph regeneration should make
-  that graph available for every loaded MPR; terrain projection remains useful
-  only for marker rendering and final Z display, not for deciding whether the
-  player can stand there. The current probe may reject legitimate standable mesh
-  objects and platforms; do not loosen it with unverified heuristics before the
-  graph-backed route is available.
+- [x] Use the active, non-stale regenerated AI graph as Play from Here's
+  authoritative walkability and nearest-valid-position source. Terrain
+  projection remains responsible for marker rendering and final Z display;
+  graph-unavailable workspaces retain the conservative terrain fallback.
+  (`c369086`)
 
 ## Zone 6 source and state research
 
@@ -375,11 +383,34 @@ lossless transactions because the graph is not owned by the MPR.
 
 - [ ] Characterize the separate map editor's `AiGraphBaker` on disposable
   copies as a behavioral oracle, recording exact executable and output hashes.
-- [ ] Derive terrain slope, height, liquid/ice, collision object, bridge,
-  multi-level, door, and profile-specific graph-building rules through
-  one-variable controlled fixtures.
-- [ ] Implement full-map regeneration first. Partial dirty-region rebuilding is
-  deferred until it is proven byte/semantic-equivalent to a full rebuild.
+- [x] Derive and implement terrain height/slope, liquid depth, profile footprint,
+  terrain-cost, node-placement, link-cost, and component-colouring rules through
+  one-variable controlled fixtures for all eight movement profiles.
+- [x] Implement deterministic full-map regeneration as non-persistent preview
+  data. Partial dirty-region rebuilding remains deferred until it is proven
+  byte/semantic-equivalent to a full rebuild.
+- [ ] Retain each active FIG part's authored navigation bounds and semantic
+  class, including current complexion, assembly/bone offsets, body-part
+  selection, object transform, ignored parts, obstacle severity, danger, and
+  bridge classification. Rendered mesh AABBs remain a visibly labelled fallback
+  only when authored metadata cannot be resolved.
+- [ ] Rasterize oriented object volumes into half-metre cells as vertical
+  occupancy intervals, compose overlapping volumes deterministically, and apply
+  profile height/footprint rules without converting a rotated object into one
+  oversized world-axis-aligned blocker.
+- [ ] Implement bridge cells as the engine's single-floor 2.5D special case:
+  select the highest active bridge surface, replace navigation ground with the
+  deck, clear water/depth for traversal, retain overhead obstacles, and restore
+  underlying terrain/liquid state when the bridge is removed. Report that an
+  underpass and deck cannot coexist at one graph XY coordinate.
+- [ ] Resolve current door/moving-object pose and graph-recalculation policy;
+  moving, rotating, scaling, opening, closing, creating, or deleting relevant
+  objects must invalidate the correct preview region while full rebuild remains
+  the correctness reference.
+- [ ] Add synthetic object-navigation fixtures for rotated fences, ignored/easy
+  parts, danger volumes, deep-water bridges, overlapping/sloped bridges,
+  overhead clearance, bridge removal, and open/closed doors across all layers;
+  compare copied Base/JMV loaded graphs and runtime traversal separately.
 - [ ] Make regeneration explicit, previewed, staged, freshly reparsed,
   undoable, backed up, and atomic. Never invoke it as an ordinary Save side
   effect and never fall back to the legacy MOB rebuilding serializer.
@@ -412,48 +443,97 @@ source-race refusal, pre-save backup, atomic replacement, post-commit byte and
 reopen verification, and canonical document rebinding. The legacy rebuilding
 serializer remains forbidden for every changed MPR.
 
-- [ ] Preserve untouched archive members, internal names, member order,
+The user-run baseline closure matrix passed on 2026-07-26. This closes the
+lossless sculpt/paint/save baseline, not every follow-up in this section. The
+semantic material definition bundled with Endurance is currently production-
+reviewed only for the Zone 1 atlas. Other zone or custom atlases remain usable
+through manual tile painting, but automatic material painting must stay gated
+until the built-in atlas conversion/review workflow has produced and validated
+their material tables.
+
+The post-closure usability pass keeps the proven terrain transaction model and
+adds persistent sculpt settings, raw-height sampling, layout-independent
+physical sculpt shortcuts, tool-specific wheel controls, and normal document
+semantics for MPR Save As: after staged validation, commit, fresh reopen, and
+hash verification, the selected destination becomes the active MPR. A future
+copy-only export must be a separately named command rather than overloading
+Save As.
+
+The user-run R5 matrix passed on 2026-07-26, closing whole-map offset, flatten,
+clamp, normalize/remap, and both explicit `maxZ` migration policies. R6 changed
+only diagnostic navigation preview and does not broaden the MPR save contract.
+
+Three post-baseline workstreams are intentionally isolated:
+
+- `feature/semantic-atlas-coverage` owns automatic atlas conversion, review,
+  approval, and profile/namespace-scoped semantic definitions beyond Zone 1.
+- `feature/minimap-catalog-integration` owns deterministic collection minimap
+  baking, MMP/RES export transactions, and live catalog refresh/rebinding.
+- `feature/mpr-settings` owns source-accurate object navigation diagnostics,
+  overlay-surface data mutation, new-MPR creation, and structural crop/expand.
+
+The overlay-material-animation renderer work owns existing liquid wave/warp
+visual semantics. Landscape work may expose and serialize material values but
+must not independently change its shaders or animation policy.
+
+- [x] Preserve untouched archive members, internal names, member order,
   timestamps/metadata, alignment, unknown entries, and original MP/SEC
   namespaces.
-- [ ] Make unchanged Save As byte-identical even when the outer filename differs
+- [x] Make unchanged Save As byte-identical even when the outer filename differs
   from the embedded map name.
-- [ ] Patch only edited sector/overlay payloads and derive affected lengths and
+- [x] Patch only edited sector/overlay payloads and derive affected lengths and
   metadata from emitted content.
+- [x] Prove append-only relocation for a length-changing MP/SEC replacement:
+  preserve the complete original data area, append aligned replacement bytes,
+  copy the original table/name/trailer bytes, patch only the edited member's
+  size/offset and the header table offset, then freshly reopen and validate
+  untouched payloads and immutable metadata.
 - [x] Stage, freshly reopen, validate, back up, and atomically replace every
   changed MPR.
-- [ ] Add deterministic MPR/SEC semantic diff and untouched-member equality
+- [x] Add deterministic MPR/SEC semantic diff and untouched-member equality
   checks.
-- [ ] Validate changed MPRs on copied Base/JMV maps before enabling live-map
+- [x] Validate changed MPRs on copied Base/JMV maps before enabling live-map
   replacement.
+- [x] Make changed and unchanged MPR Save As adopt the freshly reopened,
+  hash-verified destination as the active document without weakening backup,
+  atomic replacement, or untouched-member guarantees.
 
 ## New MPR creation
 
-- [ ] Add a user-facing **Create New MPR...** workflow that is independent from
+- [x] Add a user-facing **Create New MPR...** workflow that is independent from
   `map.txt` registration. Creating terrain must not silently invent zone IDs,
   entrances, minimap, music, quest, objectives, or other catalog metadata.
-- [ ] Let the author choose the map dimensions/sector layout, initial flat
+- [x] Let the author choose the map dimensions/sector layout, initial flat
   height, initial land material, active Base/JMV profile, and a supplied terrain
   atlas namespace. Endurance reads compatible atlases but does not author or
   bundle atlas imagery.
-- [ ] Generate deterministic MP/SEC members with canonical 33x33 sector vertex
+- [x] Keep optional heightmap validation inside the creation dialog, preserve
+  every entered setting after a rejected image/range, provide an explicit Clear
+  action, and preview the stretched/flipped image against the non-square tile
+  and SEC grid before committing the new landscape.
+- [x] Optionally initialize a full overlay plane (disabled by default) with an
+  explicit raw height, existing atlas slot/rotation and liquid material, plus an
+  independent edge taper. Generate canonical type-3 SEC members with shared
+  overlay seams instead of synthesizing the surface through post-create strokes.
+- [x] Generate deterministic MP/SEC members with canonical 33x33 sector vertex
   ownership, synchronized shared seams, explicit land/overlay initialization,
   and names derived from the chosen internal MPR namespace.
-- [ ] Construct a game-compatible MPR/RES member table. Lowercase each member
+- [x] Construct a game-compatible MPR/RES member table. Lowercase each member
   name, encode it as CP1251, place it in its native hash slot, and preserve
   deterministic `NextIndex` collision chains; a linear member inventory alone
   is not runtime validation.
-- [ ] Before packaging or Test Current Map, resolve every generated MP/SEC member
+- [x] Before packaging or Test Current Map, resolve every generated MP/SEC member
   through the runtime-style hash slot and chain. Reject case-insensitive
   duplicate names, cycles, out-of-range links, unreachable members, invalid
   dimensions/namespaces, and missing required sectors.
-- [ ] Apply the changed-MPR save contract to the initial archive: stage outside
+- [x] Apply the changed-MPR save contract to the initial archive: stage outside
   the destination, freshly reopen, validate archive reachability and terrain
   semantics, create a backup when replacing an existing path, and publish with
   atomic replacement only after every check passes.
 - [ ] Offer explicit follow-up registration through the `map.txt` editor after
   the MPR validates. Cancelling registration must leave the standalone MPR
   usable and must not create partial catalog or texture-resource changes.
-- [ ] Add minimized synthetic tests for 1x1 and multi-sector maps, deterministic
+- [x] Add minimized synthetic tests for 1x1 and multi-sector maps, deterministic
   repeat generation, seam equality, initial height/material selection, supplied
   atlas namespaces, deliberate hash collisions, uppercase runtime lookup,
   unreachable/cyclic chain rejection, failed destination replacement, and
@@ -462,61 +542,119 @@ serializer remains forbidden for every changed MPR.
 
 ## Heightmap editing
 
-- [ ] Refactor terrain ownership around each sector's canonical 33x33 vertex
+- [x] Replace the residual atlas-oriented parameters dialog with a consolidated
+  **MPR Settings** workflow following
+  [`docs/MPR_SETTINGS_AND_HEIGHT_RANGE.md`](docs/MPR_SETTINGS_AND_HEIGHT_RANGE.md):
+  map/profile/namespace summary, sector/tile/vertex dimensions, raw and world
+  height ranges, `maxZ`, materials, overlays, diagnostics, and separately gated
+  height-scale and resize transactions.
+- [x] Add undoable whole-map offset, flatten, clamp, and normalize/remap
+  operations. These retain the existing sector dimensions and canonical vertex
+  count; no-ops must not dirty the MPR.
+- [x] Treat `maxZ` as the global raw-to-world vertical range. Offer explicit
+  **Scale terrain** and **Preserve heights by requantizing** policies, preview
+  rounding and clamp effects, and never disguise a scale migration as an
+  ordinary maximum-height field.
+- [x] Add the first existing-map crop/expand transaction as structural and
+  Save-As-only. MPR Settings previews the old generated map inside the new
+  sector canvas, reports retained/added/removed SEC members, extends nearest
+  land boundaries, preserves retained/unknown payloads, rebuilds runtime RES
+  hash chains, freshly reopens, backs up, and atomically commits. The initial
+  ceiling is 32x32 sectors for a 256x256 runtime graph; copied private runtime
+  testing may lower it.
+- [x] Add the explicit companion for origin-moving resize: translate all proven
+  spatial MOB records into a separately named MOB and optionally delete
+  user-confirmed objects outside the new bounds. Stale embedded AI graph data is
+  omitted, the source MOB is restored without mutation, and an existing MOB is
+  never overwritten. Map registration and minimap metadata remain separate and
+  are never invented.
+- [x] Refactor terrain ownership around each sector's canonical 33x33 vertex
   lattice rather than independently duplicated tile vertices.
-- [ ] Synchronize shared seams between adjacent sectors.
-- [ ] Add undoable raise/lower, flatten, smooth, and ramp tools.
-- [ ] Provide radius, strength, falloff, and numeric-height controls.
-- [ ] Recalculate only affected normals and preserve untouched packed vertex
+- [x] Synchronize shared seams between adjacent sectors.
+- [x] Add undoable raise/lower, flatten, smooth, and ramp tools.
+- [x] Provide radius, strength, falloff, and numeric-height controls.
+- [x] Keep Raise/Lower/Smooth/Flatten shortcuts active while focus is inside
+  Landscape Tools and bind them to physical Z/X/C/V positions across Latin and
+  Cyrillic keyboard layouts. Flatten uses the selected falloff and has a direct
+  raw-target wheel adjustment.
+- [x] Recalculate only affected normals and preserve untouched packed vertex
   bits.
-- [ ] Warn before a height change requires lossy `maxZ` rescaling.
+- [x] Warn before a height change requires lossy `maxZ` rescaling.
 
 ## Terrain texture painting
 
-- [ ] Productionize the existing hidden tile brush with explicit atlas, layer,
+- [x] Productionize the existing hidden tile brush with explicit atlas, layer,
   category, rotation, brush shape, preview, and validation controls.
-- [ ] Implement visual blending through transition-tile painting and optional
+- [x] Implement visual blending through transition-tile painting and optional
   autotiling. SEC stores packed tile selection/rotation rather than arbitrary
   per-vertex blend weights.
-- [ ] Keep the terrain/tile atlas bound to the MPR's actual embedded namespace
+- [x] Keep the terrain/tile atlas bound to the MPR's actual embedded namespace
   and resource provenance.
 
 ## Overlay surfaces and materials
 
-- [ ] Add creation, removal, sculpting, visibility, texture, and material tools
-  for water, swamp, ice, lava, and other separate overlay surfaces.
+- [x] Add undoable creation, removal, sculpting, visibility, atlas-texture, and
+  existing-material assignment tools for separate overlay surfaces.
 - [ ] Provide validated Base and JMV material presets while retaining manual
   controls for mod-specific materials.
+- [ ] Add typed editing for liquid/surface material values; keep renderer-owned
+  animation semantics and shader policy outside the landscape transaction.
 - [ ] Preserve unknown overlay records and extra archive members.
+
+Implement this as separate undoable transactions: activate/deactivate cells,
+initialize or retain overlay vertices, sculpt overlay height without changing
+land vertices, choose existing atlas tiles, and edit typed MPR material values.
+No operation may normalize inactive sentinels, unknown records, or untouched
+sector bytes. Creation/removal must pass the same staged reopen, locality,
+semantic-diff, backup, and atomic-save contract as land edits.
+
+The activation/deactivation transaction and viewport brush are now implemented.
+Landscape Tools exposes **Paint active surfaces**, **Add surface**, and
+**Remove surface** as explicit operations. Adding requires a user-selected
+existing liquid-material record and an existing atlas family; it never creates
+or guesses either resource. Empty overlay regions are picked against land only
+for the initial placement, then rendered and edited as the overlay layer. One
+drag is one undo command. A land-only
+SEC upgrades deterministically to the native overlay layout only when the first
+cell is activated: land vertices and tiles remain byte-identical, overlay
+vertices start as an exact land-height copy, inactive material entries use the
+verified `-1` sentinel, and SEC trailing bytes are retained. Deactivation
+changes only that material sentinel and retains inactive tile/vertex bytes.
+Both directions are provenance-checked and undo back to the exact original SEC.
+Overlay-only Raise, Lower, Flatten, and Smooth now operate only on vertices
+belonging to active overlay cells, synchronize duplicated SEC seam vertices,
+rebuild the independent overlay normals, refuse conflicting seams/range clamps,
+and retain land vertices plus overlay tile/material blocks byte-for-byte. Typed
+material-value editing remains open.
 
 ## Landscape safety and game validation
 
-- [ ] Add a complete `map.txt` metadata editor for registered and new maps,
+- [x] Add a complete `map.txt` metadata editor for registered and new maps,
   including zone identity/type, entrances, destinations, minimap, music, and
   profile-specific metadata validation.
 
 ## Minimap generation and texture-resource export
 
-- [ ] Extend the lossless `map.txt` model to preserve and edit the complete
+- [x] Extend the lossless `map.txt` model to preserve and edit the complete
   `#maps` block: sector width/height, minimap texture identity, and the separate
   objectives-screen texture identity. Never invent or overwrite objectives
   metadata as a minimap side effect.
-- [ ] Add an existing-minimap viewer that resolves the referenced `.mmp`
+- [x] Add an existing-minimap viewer that resolves the referenced `.mmp`
   through the active Base/JMV resource profile and reports its archive
   provenance, format, dimensions, mip layout, and hash.
-- [ ] Implement a deterministic orthographic minimap bake following the
+- [x] Implement a deterministic orthographic minimap bake following the
   observed ZoneView contract: source BMP dimensions are sector width/height
   multiplied by 128 pixels per sector.
-- [ ] Make an active collection the production bake input: its MPR, primary
+- [x] Make an active collection the production bake input: its MPR, primary
   MOB, and ordered supplemental MOBs provide the complete authored static
   scene. Include terrain, overlays/liquids, lighting, and static geometry while
   excluding dynamic units. Permit an MPR-only terrain bake, but label it as
   incomplete when collection static geometry is absent.
-- [ ] Retain the full-resolution bake for review and regeneration, then convert
+- [x] Retain the full-resolution bake for review and regeneration, then convert
   it to the game-facing 256x256 minimap MMP only after orientation, framing,
   filtering, and resampling are proven against matching stock and JMV
   ZoneView/MMP pairs.
-- [ ] Provide one **Export Texture to RES...** workflow. The selected
+- [x] Provide one **Export Texture to RES...** workflow. The selected
   destination determines the operation:
   - a missing path creates a new RES archive;
   - an existing archive receives a new member after backup and staged rebuild;
@@ -524,17 +662,17 @@ serializer remains forbidden for every changed MPR.
   Allow any compatible user-selected archive, including the mod's
   `textures.res`, while warning about time and temporary-disk cost for large
   archives.
-- [ ] Treat archive "append" as a semantic member addition, never an in-place
+- [x] Treat archive "append" as a semantic member addition, never an in-place
   byte append. Stage and freshly reopen the candidate, prove untouched member
   names/order/metadata/raw bytes are unchanged, verify the new/replaced MMP,
   then back up and atomically replace the destination.
-- [ ] Coordinate the `map.txt` reference update only after the texture archive
+- [x] Coordinate the `map.txt` reference update only after the texture archive
   validates. A failed archive or metadata step must leave both destinations
   recoverable and must never publish a dangling minimap name.
-- [ ] Prove profile-specific discovery and duplicate-name precedence for a
+- [x] Prove profile-specific discovery and duplicate-name precedence for a
   newly created RES before recommending a dedicated archive. Prefer unique
   texture names so users do not accidentally replace another zone's minimap.
-- [ ] Add synthetic tests for pixels-per-sector dimensions, orientation,
+- [x] Add synthetic tests for pixels-per-sector dimensions, orientation,
   deterministic repeat generation, static-geometry inclusion, dynamic-unit
   exclusion, new-archive creation, existing-archive addition/replacement,
   collision cancellation, untouched-member equality, failed validation, and
@@ -555,6 +693,43 @@ serializer remains forbidden for every changed MPR.
 - [ ] Provide placement/navigation findings before save and test launch.
 - [ ] Require in-game traversal, water/overlay interaction, unload/reload, and
   graceful-exit tests before `0.4.0` release.
+
+## Remaining landscape closure work
+
+The following items are deliberately not hidden inside the completed baseline:
+
+- [ ] Finish production semantic-atlas conversion/approval coverage beyond the
+  reviewed Zone 1 definition. This remains isolated in the semantic-atlas
+  workstream; manual tile painting remains the safe fallback meanwhile.
+- [x] Implement the MPR-only existing-map crop/expand baseline as a previewed,
+  structural, Save-As-only transaction with a 32x32 experimental ceiling.
+  The companion workflow now translates/deletes MOB objects, removes objects
+  left on a lossy closed-edge taper, and opens the separately saved MPR/MOB
+  pair after commit. Copied-map runtime testing at the experimental ceiling
+  remains before this is the complete derivative-map workflow.
+- [x] Implement deterministic new-MPR creation using the runtime-compatible RES
+  hash table and collision-chain contract described above.
+- [x] Add persistent export/ownership for loaded or regenerated AI graphs. The
+  viewport and Tools menu now share one Bake / Export flow that writes the exact
+  active-MPR sibling `.grp`, embeds into the primary MOB, or atomically switches
+  a primary MOB from embedded to external ownership. Every changed artifact is
+  staged, freshly reopened, runtime-validated, backed up, race-checked, and
+  atomically replaced; shared-MOB registrations and embedded-graph shadowing are
+  called out before mutation. Zone 6 / Zone 6 frozen remain the controlled
+  copied-fixture game-side test for distinct `zone6.grp` and `zone6_2.grp` states.
+- [x] Replace Play from Here's terrain-only clearance probe with nearest valid
+  placement from the active, non-stale regenerated graph. (`c369086`)
+- [x] Add recovery autosave for dirty canonical MPR transactions without using
+  the forbidden legacy serializer.
+- [x] Add explicit new-MOB creation for primary map MOBs and supplemental /
+  AutoZone MOBs. Generated files require an active ID range, expose primary
+  world settings, optionally create/copy diplomacy metadata, and may copy only
+  the normal script and user-selected settings from a loaded MOB. Objects,
+  embedded AI graphs, VSS, and editor directory metadata are never copied.
+  Creation uses fresh reopen validation, backup, race checks, and atomic
+  replacement rather than weakening the changed-MOB preservation path.
+- [ ] Complete typed overlay-material editing/presets and the final Base/JMV
+  overlay runtime matrix.
 
 </details>
 

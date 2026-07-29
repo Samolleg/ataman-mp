@@ -72,6 +72,8 @@ private:
 private slots:
     void updateWindow();
     void on_diplomacyButton_clicked();
+    void createNeutralDiplomacyTable();
+    void copyDiplomacyFromLoadedMob();
     void tableItemClicked(int r, int c);
     void on_pushCancel_clicked();
     void on_pushApply_clicked();

@@ -205,8 +205,17 @@ public:
     const QByteArray& originalBytes() const { return m_originalBytes; }
     const QVector<SMobSection>& sections() const { return m_sections; }
     bool hasEmbeddedAiGraph() const;
+    bool embeddedAiGraph(QByteArray* graph,
+                         CValidationReport* report = nullptr) const;
+    bool replaceEmbeddedAiGraph(const QByteArray& graph, QByteArray* output,
+                                CValidationReport* report = nullptr) const;
+    bool removeEmbeddedAiGraph(QByteArray* output,
+                               CValidationReport* report = nullptr) const;
     const QVector<SMobObjectSnapshot>& objects() const { return m_objects; }
     const QVector<SMobIdRangeSnapshot>& idRanges() const { return m_idRanges; }
+    bool hasSection(quint32 type) const;
+    bool ensureEmptyObjectSection(QByteArray* output,
+                                  CValidationReport* report = nullptr) const;
     bool isQuestMob() const { return m_questMob; }
     const QVector<quint32>& duplicateIds() const { return m_duplicateIds; }
     bool applyTransaction(const CMobEditTransaction& transaction,
@@ -253,6 +262,12 @@ public:
         const QByteArray& editedProjectionBytes,
         CMobEditTransaction* transaction, QByteArray* candidate,
         CValidationReport* report = nullptr);
+    static bool buildOwnedRootProjectionCandidate(
+        const QByteArray& sourceBytes, const QString& sourceName,
+        const QByteArray& cleanProjectionBytes,
+        const QByteArray& editedProjectionBytes,
+        CMobEditTransaction* transaction, QByteArray* candidate,
+        QString* saveClass, CValidationReport* report = nullptr);
     static bool encodeCp1251Strict(const QString& value, QByteArray* output,
                                    QString* error = nullptr);
     bool isDirty() const { return false; }

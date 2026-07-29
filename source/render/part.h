@@ -58,6 +58,17 @@ public:
     quintptr meshIdentity() const { return quintptr(m_mesh.data()); }
     const QVector3D& localBoundsCenter() const { return m_localBoundsCenter; }
     float localBoundsRadius() const { return m_localBoundsRadius; }
+    void setAuthoredNavigationBounds(const QVector3D& minimum, const QVector3D& maximum)
+    {
+        m_authoredNavigationMinimum = minimum;
+        m_authoredNavigationMaximum = maximum;
+        m_hasAuthoredNavigationBounds = true;
+    }
+    bool hasAuthoredNavigationBounds() const { return m_hasAuthoredNavigationBounds; }
+    const QVector3D& authoredNavigationMinimum() const
+    { return m_authoredNavigationMinimum; }
+    const QVector3D& authoredNavigationMaximum() const
+    { return m_authoredNavigationMaximum; }
     static void setCacheScope(const QString& scope);
     // Final application shutdown can let the OpenGL context release all GPU
     // objects in one operation. This avoids thousands of serialized driver
@@ -85,6 +96,9 @@ private:
     QVector<int> m_sourceVertexIndices;
     QVector3D m_localBoundsCenter;
     float m_localBoundsRadius{0.0f};
+    QVector3D m_authoredNavigationMinimum;
+    QVector3D m_authoredNavigationMaximum;
+    bool m_hasAuthoredNavigationBounds{false};
     bool m_morphApplied{false};
     bool m_bShow;
 };

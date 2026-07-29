@@ -33,11 +33,14 @@
 #include "backup_manager.h"
 #include "staged_save_validator.h"
 #include "endurance_document.h"
+#include "ai_graph_document.h"
 
 CMob::CMob():
     m_view(nullptr)
   ,m_pProgress(nullptr)
+  ,m_scriptKey(0)
   ,m_hasVssSection(false)
+  ,m_hasObjectSection(false)
   ,m_bDirty(false)
   ,m_activeRangeId(0)
 {
@@ -269,6 +272,7 @@ bool CMob::deserialize(QByteArray data)
         //object section
         else if(parser.isNextTag("OBJECT_SECTION"))
         {
+            m_hasObjectSection = true;
             step = step/3;
             m_pProgress->update(step);
             uint objSecLen = parser.nodeLen();
@@ -1544,7 +1548,7 @@ void CMob::serializeMob(QByteArray& data, bool writeLog)
         parser.endSection(); //"DIRICTORY_ELEMENTS"
     }
 
-    if(!m_aNode.empty())
+    if(m_hasObjectSection || !m_aNode.empty())
     {
         bool bSaveSelect = false; //todo: save selected objects with file->save selected objects only
 
@@ -1741,6 +1745,23 @@ bool CMob::buildRawObjectSequenceCandidate(
        !editedDocument.loadBytes(currentProjection, "edited-ui-projection.mob", report))
         return false;
 
+    QByteArray structuralBaselineSource = m_originalData;
+    QByteArray structuralBaselineClean = m_cleanProjection;
+    bool insertedEmptyObjectSection = false;
+    if(!sourceDocument.hasSection(0xB000) || !cleanDocument.hasSection(0xB000))
+    {
+        if(!sourceDocument.objects().isEmpty() || !cleanDocument.objects().isEmpty())
+            return false;
+        if(!sourceDocument.ensureEmptyObjectSection(&structuralBaselineSource, report)
+           || !cleanDocument.ensureEmptyObjectSection(&structuralBaselineClean, report)
+           || !sourceDocument.loadBytes(structuralBaselineSource,
+                                        m_filePath.filePath(), report)
+           || !cleanDocument.loadBytes(structuralBaselineClean,
+                                       "clean-ui-projection.mob", report))
+            return false;
+        insertedEmptyObjectSection = true;
+    }
+
     QMap<QString, const SMobObjectSnapshot*> cleanBySourcePath;
     const CMobSemanticDiff alignment = CMobSemanticDiff::compare(sourceDocument, cleanDocument);
     for(const SMobDiffEntry& entry : alignment.entries())
@@ -1757,7 +1778,7 @@ bool CMob::buildRawObjectSequenceCandidate(
         return false;
 
     const QByteArray sourceDocumentSha256 = QCryptographicHash::hash(
-        m_originalData, QCryptographicHash::Sha256);
+        structuralBaselineSource, QCryptographicHash::Sha256);
     QVector<QByteArray> sourceSubtrees;
     QVector<QByteArray> sourceHashes;
     QVector<QByteArray> cleanSubtrees;
@@ -1862,23 +1883,27 @@ bool CMob::buildRawObjectSequenceCandidate(
         return false;
     structuralSource = reconciledSource;
     structuralClean = reconciledClean;
-    if(structuralSource == m_originalData && structuralClean == m_cleanProjection)
+    if(structuralSource == structuralBaselineSource
+       && structuralClean == structuralBaselineClean)
         return false;
 
     if(currentProjection == structuralClean ||
        (m_aNode.isEmpty() && editedDocument.objects().isEmpty()))
     {
         *candidate = structuralSource;
-        *saveClass = "RAW_OBJECT_SEQUENCE";
+        *saveClass = insertedEmptyObjectSection
+            ? "INSERT_EMPTY_OBJECT_SECTION+RAW_OBJECT_SEQUENCE"
+            : "RAW_OBJECT_SEQUENCE";
     }
     else
     {
-        if(!CMobDocument::buildProjectionTransactionCandidate(
+        if(!CMobDocument::buildOwnedRootProjectionCandidate(
                structuralSource, m_filePath.filePath(), structuralClean,
-               currentProjection, transaction, candidate, report) ||
-           !transaction->validatedChangedSaveClass(saveClass))
+               currentProjection, transaction, candidate, saveClass, report))
             return false;
-        *saveClass = "RAW_OBJECT_SEQUENCE+" + *saveClass;
+        *saveClass = (insertedEmptyObjectSection
+            ? "INSERT_EMPTY_OBJECT_SECTION+RAW_OBJECT_SEQUENCE+"
+            : "RAW_OBJECT_SEQUENCE+") + *saveClass;
     }
 
     CMobDocument candidateDocument;
@@ -1917,12 +1942,11 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
         CValidationReport transactionReport;
         CMobEditTransaction transaction;
         QByteArray transactionCandidate;
-        bool candidateReady = CMobDocument::buildProjectionTransactionCandidate(
-            m_originalData, m_filePath.filePath(), m_cleanProjection,
-            currentProjection, &transaction, &transactionCandidate, &transactionReport);
         QString validatedClassName;
-        if(candidateReady)
-            candidateReady = transaction.validatedChangedSaveClass(&validatedClassName);
+        bool candidateReady = CMobDocument::buildOwnedRootProjectionCandidate(
+            m_originalData, m_filePath.filePath(), m_cleanProjection,
+            currentProjection, &transaction, &transactionCandidate,
+            &validatedClassName, &transactionReport);
         if(!candidateReady)
         {
             CValidationReport structuralReport;
@@ -1942,7 +1966,28 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
                 candidateReady = true;
             }
             else
-                transactionReport = structuralReport;
+            {
+                CValidationReport actionableReport;
+                auto appendActionable = [&actionableReport](const CValidationReport& source) {
+                    for(const SValidationFinding& finding : source.findings())
+                    {
+                        if(finding.severity != EValidationSeverity::Error
+                           && finding.severity != EValidationSeverity::Critical)
+                            continue;
+                        actionableReport.add(finding.code, finding.severity,
+                                             finding.message, finding.location);
+                    }
+                };
+                appendActionable(transactionReport);
+                appendActionable(structuralReport);
+                if(!actionableReport.hasErrors())
+                    actionableReport.add(
+                        "mob.candidate.unsupported_edit",
+                        EValidationSeverity::Error,
+                        "The current MOB changes could not be mapped to a provenance-checked save transaction. No file was staged; review the preceding workflow log for the rejected edit class.",
+                        m_filePath.filePath());
+                transactionReport = actionableReport;
+            }
         }
         if(candidateReady)
         {
@@ -2001,9 +2046,118 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
     return true;
 }
 
+bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
+                                    float resultWidth, float resultHeight,
+                                    bool removeOutside, float closedEdgeWidth,
+                                    QByteArray* data,
+                                    SCanvasCropResult* result,
+                                    CValidationReport* report)
+{
+    if(!data || !result || resultWidth <= 0.0f || resultHeight <= 0.0f
+       || closedEdgeWidth < 0.0f)
+        return false;
+    data->clear();
+    *result = SCanvasCropResult();
+    if(CScene::getInstance()->getMode() != eEditModeObjects)
+    {
+        if(report)
+            report->add("mob.canvas_crop.mode", EValidationSeverity::Error,
+                        "Switch from logic editing to object editing before creating a cropped companion MOB.",
+                        m_filePath.filePath());
+        return false;
+    }
+
+    struct Snapshot
+    {
+        CNode* node{nullptr};
+        int index{-1};
+        QVector3D position;
+        bool removed{false};
+    };
+    QVector<Snapshot> snapshots;
+    snapshots.reserve(m_aNode.size());
+    for(int index = 0; index < m_aNode.size(); ++index)
+    {
+        Snapshot snapshot;
+        snapshot.node = m_aNode.at(index);
+        snapshot.index = index;
+        snapshot.position = snapshot.node->position();
+        snapshots.append(snapshot);
+    }
+    const bool wasDirty = m_bDirty;
+    const auto restore = [this, &snapshots, wasDirty]() {
+        for(int index = snapshots.size() - 1; index >= 0; --index)
+            if(snapshots[index].removed)
+                restoreDeletedNode(snapshots[index].node, snapshots[index].index);
+        for(Snapshot& snapshot : snapshots)
+        {
+            QVector3D original = snapshot.position;
+            snapshot.node->updatePos(original);
+            snapshot.node->setPos(original);
+        }
+        m_bDirty = wasDirty;
+        logicNodesUpdate();
+    };
+
+    for(Snapshot& snapshot : snapshots)
+    {
+        QVector3D translated = snapshot.position;
+        translated.setX(translated.x() + offsetX);
+        translated.setY(translated.y() + offsetY);
+        snapshot.node->updatePos(translated);
+        translated.setZ(snapshot.position.z());
+        snapshot.node->setPos(translated);
+        ++result->translatedObjects;
+        const bool outside = translated.x() < 0.0f || translated.y() < 0.0f
+            || translated.x() > resultWidth || translated.y() > resultHeight;
+        const bool onClosedEdge = !outside && closedEdgeWidth > 0.0f
+            && (translated.x() < closedEdgeWidth || translated.y() < closedEdgeWidth
+                || translated.x() > resultWidth - closedEdgeWidth
+                || translated.y() > resultHeight - closedEdgeWidth);
+        if((removeOutside && outside) || onClosedEdge)
+        {
+            deleteNode(snapshot.node);
+            snapshot.removed = true;
+            ++result->removedObjects;
+            if(onClosedEdge)
+                ++result->removedTaperObjects;
+        }
+    }
+
+    QByteArray candidate;
+    QString saveClass;
+    const bool candidateReady = buildValidatedCandidate(&candidate, report, &saveClass);
+    if(!candidateReady)
+    {
+        restore();
+        return false;
+    }
+    CMobDocument document;
+    CValidationReport documentReport;
+    if(!document.loadBytes(candidate, QStringLiteral("canvas-crop-candidate.mob"),
+                           &documentReport))
+    {
+        if(report)
+            *report = documentReport;
+        restore();
+        return false;
+    }
+    result->removedEmbeddedAiGraph = document.hasEmbeddedAiGraph();
+    const bool stripped = document.removeEmbeddedAiGraph(data, report);
+    restore();
+    if(!stripped)
+        return false;
+    ei::log(eLogInfo, QString("Prepared companion MOB crop candidate path:%1 translated:%2 removed:%3 taperRemoved:%4 embeddedGraphRemoved:%5")
+        .arg(m_filePath.filePath()).arg(result->translatedObjects)
+        .arg(result->removedObjects).arg(result->removedTaperObjects)
+        .arg(result->removedEmbeddedAiGraph ? "true" : "false"));
+    return true;
+}
+
 bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
 {
     const QString filePath = path.filePath();
+    m_lastSaveError.clear();
     try
     {
         QByteArray data;
@@ -2014,13 +2168,13 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
         {
             ei::log(eLogFatal, QString("Refusing dirty MOB save because the edit could not be mapped safely to the original raw tree path:%1")
                 .arg(filePath));
-            QMessageBox::critical(nullptr, "Lossless MOB save not available for this edit",
+            m_lastSaveError = QStringLiteral(
                 "Endurance could not map this complete edit set onto verified raw MOB records. "
                 "Properties, transforms, same-MOB copy/paste, deletion, and known patrol/look-point "
                 "changes save automatically. A newly created object requires a selected same-type raw "
                 "template, and unrecognized structural records remain protected.\n\n"
                 "No destination or backup file was changed. Endurance will not fall back to the legacy "
-                "rebuilding serializer.\n\n" + candidateReport.toText().trimmed());
+                "rebuilding serializer.\n\n") + candidateReport.toText().trimmed();
             return false;
         }
 
@@ -2030,9 +2184,9 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
         {
             ei::log(eLogFatal, QString("Refusing MOB save because staged validation failed path:%1 error:%2")
                 .arg(filePath, validation.error));
-            QMessageBox::critical(nullptr, "Endurance safe save",
-                QString("The staged MOB failed fresh validation, so the destination was not replaced.\n\n%1")
-                    .arg(validation.error));
+            m_lastSaveError = QString(
+                "The staged MOB failed fresh validation, so the destination was not replaced.\n\n%1")
+                    .arg(validation.error);
             return false;
         }
         ei::log(eLogInfo, QString("Staged MOB validation passed path:%1 size:%2 sha256:%3")
@@ -2046,9 +2200,9 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
             {
                 ei::log(eLogFatal, QString("Refusing MOB save because pre-save backup failed:%1 error:%2")
                     .arg(filePath, saveBackup.error));
-                QMessageBox::critical(nullptr, "Endurance safe save",
-                    QString("The pre-save backup failed, so the source file was not replaced.\n\n%1")
-                        .arg(saveBackup.error));
+                m_lastSaveError = QString(
+                    "The pre-save backup failed, so the source file was not replaced.\n\n%1")
+                        .arg(saveBackup.error);
                 return false;
             }
         }
@@ -2058,10 +2212,15 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
         if(!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
         {
             ei::log(eLogFatal, QString("Atomic MOB save failed:%1 error:%2").arg(filePath, file.errorString()));
-            QMessageBox::critical(nullptr, "Endurance safe save", "Atomic save failed. The source file was not replaced.");
+            m_lastSaveError = QStringLiteral(
+                "Atomic save failed. The source file was not replaced.");
             return false;
         }
         m_originalData = data;
+        CMobDocument savedDocument;
+        CValidationReport savedReport;
+        if(savedDocument.loadBytes(data, filePath, &savedReport))
+            m_hasObjectSection = savedDocument.hasSection(0xB000);
         captureCleanProjection();
         if(progress) progress("Rebinding saved MOB provenance...", 4, 5);
         if(!rebindRawObjectProvenance())
@@ -2073,8 +2232,8 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
     catch (const std::exception& ex)
     {
         ei::log(eLogFatal, ex.what());
-        QMessageBox::critical(nullptr, "Endurance safe save",
-            QString("The MOB save failed before replacement.\n\n%1").arg(ex.what()));
+        m_lastSaveError = QString("The MOB save failed before replacement.\n\n%1")
+            .arg(ex.what());
         return false;
     }
 }
@@ -2083,6 +2242,114 @@ bool CMob::save(const SaveProgress& progress)
 {
     return saveAs(m_filePath, progress);
 }
+
+bool CMob::persistAiGraph(const QByteArray* graph, QString* error,
+                          const SaveProgress& progress)
+{
+    if(graph)
+    {
+        CAiGraphDocument graphDocument;
+        QString graphError;
+        if(!graphDocument.parse(*graph, &graphError)
+           || !graphDocument.validateRuntimeCompatibility(
+               graphDocument.width(), graphDocument.height(), &graphError))
+        {
+            if(error) *error = QString("The selected AI graph is not runtime-compatible: %1")
+                .arg(graphError);
+            return false;
+        }
+    }
+    QByteArray currentCandidate;
+    CValidationReport report;
+    QString saveClass;
+    if(progress) progress("Serializing current verified MOB edits...", 0, 6);
+    if(!buildValidatedCandidate(&currentCandidate, &report, &saveClass))
+    {
+        if(error) *error = report.toText().trimmed();
+        return false;
+    }
+
+    CMobDocument document;
+    if(!document.loadBytes(currentCandidate, m_filePath.filePath(), &report))
+    {
+        if(error) *error = report.toText().trimmed();
+        return false;
+    }
+    QByteArray finalCandidate;
+    if(progress) progress(graph ? "Embedding the selected AI graph..."
+                                : "Removing the embedded AI graph...", 1, 6);
+    const bool transformed = graph
+        ? document.replaceEmbeddedAiGraph(*graph, &finalCandidate, &report)
+        : document.removeEmbeddedAiGraph(&finalCandidate, &report);
+    if(!transformed)
+    {
+        if(error) *error = report.toText().trimmed();
+        return false;
+    }
+
+    if(progress) progress("Freshly validating the staged MOB...", 2, 6);
+    const SStagedSaveValidation validation = validateStagedSave(
+        finalCandidate, m_filePath);
+    if(!validation.success)
+    {
+        if(error) *error = validation.error;
+        return false;
+    }
+    CMobDocument reopened;
+    CValidationReport reopenReport;
+    QByteArray reopenedGraph;
+    if(!reopened.loadBytes(finalCandidate, "ai-graph-save-candidate.mob",
+                           &reopenReport)
+       || (graph && (!reopened.embeddedAiGraph(&reopenedGraph, &reopenReport)
+                     || reopenedGraph != *graph))
+       || (!graph && reopened.hasEmbeddedAiGraph()))
+    {
+        if(error) *error = reopenReport.toText().trimmed();
+        return false;
+    }
+
+    if(progress) progress("Checking the source and creating a backup...", 3, 6);
+    QFile source(m_filePath.absoluteFilePath());
+    if(!source.open(QIODevice::ReadOnly))
+    {
+        if(error) *error = source.errorString();
+        return false;
+    }
+    const QByteArray diskBytes = source.readAll();
+    source.close();
+    if(diskBytes != m_originalData)
+    {
+        if(error) *error = "The primary MOB changed on disk. Reopen it before saving the AI graph.";
+        return false;
+    }
+    const SBackupResult backup = CBackupManager().snapshotBeforeSave(m_filePath);
+    if(!backup.success)
+    {
+        if(error) *error = backup.error;
+        return false;
+    }
+    if(progress) progress("Atomically replacing the primary MOB...", 4, 6);
+    QString replacementError;
+    if(!atomicallyReplaceVerifiedFile(m_filePath, diskBytes, finalCandidate,
+                                      &replacementError))
+    {
+        if(error)
+            *error = replacementError.isEmpty()
+                ? QStringLiteral("The primary MOB could not be atomically replaced.")
+                : replacementError;
+        return false;
+    }
+    m_aiGraph = graph ? *graph : QByteArray();
+    m_originalData = finalCandidate;
+    captureCleanProjection();
+    if(progress) progress("Rebinding saved MOB provenance...", 5, 6);
+    if(!rebindRawObjectProvenance())
+        ei::log(eLogWarning, QString("AI graph MOB save could not rebind raw object provenance path:%1")
+                .arg(m_filePath.absoluteFilePath()));
+    if(progress) progress("AI graph MOB save complete.", 6, 6);
+    return true;
+}
+
 bool SMobParameterState::operator==(const SMobParameterState& other) const
 {
     if(questMob != other.questMob || mainRanges != other.mainRanges
