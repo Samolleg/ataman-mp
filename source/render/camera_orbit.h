@@ -7,6 +7,26 @@
 
 namespace ei {
 
+struct SCameraFixedStepAdvance
+{
+    int steps{0};
+    float interpolation{0.0f};
+};
+
+inline SCameraFixedStepAdvance advanceCameraFixedStep(double elapsedSeconds,
+                                                      double* accumulator,
+                                                      double fixedStepSeconds = 1.0 / 120.0)
+{
+    SCameraFixedStepAdvance result;
+    if(!accumulator || fixedStepSeconds <= 0.0)
+        return result;
+    *accumulator += qBound(0.0, elapsedSeconds, 0.1);
+    result.steps = int(*accumulator / fixedStepSeconds);
+    *accumulator -= double(result.steps) * fixedStepSeconds;
+    result.interpolation = float(qBound(0.0, *accumulator / fixedStepSeconds, 1.0));
+    return result;
+}
+
 inline float cameraFrameMovementScale(double elapsedSeconds)
 {
     // Preserve the legacy 60 FPS feel while integrating keyboard movement by

@@ -53,6 +53,8 @@ public:
 private:
     void move(QVector3D& orDir, bool bShift = false);
     void shift(QVector3D& orDir, bool bShift = false);
+    void syncMotionInterpolation();
+    QMatrix4x4 matrixFor(const QVector3D& position, const QVector3D& pivot) const;
 
 private:
     QVector3D m_pos;
@@ -62,6 +64,13 @@ private:
     float m_step;
     float m_speedMultiplier;
     float m_frameMovementScale;
+    QVector3D m_previousMotionPos;
+    QVector3D m_previousMotionPivot;
+    QVector3D m_renderPos;
+    QVector3D m_renderPivot;
+    double m_motionAccumulator{0.0};
+    bool m_motionStateInitialized{false};
+    bool m_integratingKeyboardMotion{false};
     QElapsedTimer m_updateTimer;
     CKeyManager* m_keyManager;
     CSettings* m_pSettings;

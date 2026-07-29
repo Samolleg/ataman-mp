@@ -12,6 +12,7 @@ private slots:
     void frustumSliceUsesTheRenderedCameraEye();
     void mapsShadowQualityToCapabilityBoundResolution();
     void integratesMovementIndependentlyOfFrameRate();
+    void interpolatesUnevenCameraFramesWithoutLateralJitter();
 };
 
 void CameraTests::changesOrbitPivotWithoutMovingTheCurrentView()
@@ -96,6 +97,35 @@ void CameraTests::integratesMovementIndependentlyOfFrameRate()
     QVERIFY(qAbs(at30 - at60) < 0.0001f);
     QVERIFY(qAbs(at240 - at60) < 0.0001f);
     QCOMPARE(ei::cameraFrameMovementScale(1.0), 6.0f);
+}
+
+void CameraTests::interpolatesUnevenCameraFramesWithoutLateralJitter()
+{
+    const QVector<double> frameTimes = {
+        0.004, 0.018, 0.006, 0.013, 0.009, 0.021, 0.005, 0.017,
+        0.008, 0.012, 0.019, 0.007, 0.011, 0.016, 0.006, 0.014
+    };
+    constexpr double fixedStep = 1.0 / 120.0;
+    double accumulator = 0.0;
+    double elapsed = 0.0;
+    double previousSimulation = 0.0;
+    double simulation = 0.0;
+    for(double frameTime : frameTimes)
+    {
+        elapsed += frameTime;
+        const ei::SCameraFixedStepAdvance advance = ei::advanceCameraFixedStep(
+            frameTime, &accumulator, fixedStep);
+        for(int step = 0; step < advance.steps; ++step)
+        {
+            previousSimulation = simulation;
+            simulation += fixedStep;
+        }
+        const double rendered = previousSimulation * (1.0 - advance.interpolation)
+            + simulation * advance.interpolation;
+        const double expected = qMax(0.0, elapsed - fixedStep);
+        QVERIFY2(qAbs(rendered - expected) < 0.000001,
+                 "Uneven render intervals produced a discontinuous camera trajectory");
+    }
 }
 
 QTEST_APPLESS_MAIN(CameraTests)

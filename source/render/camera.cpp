@@ -17,6 +17,7 @@ CCamera::CCamera()
     m_xRot = -90.0f;
     m_zRot = 0.0f;
     m_step = 0.5f;
+    syncMotionInterpolation();
 }
 
 CCamera::CCamera(QVector3D pos, QVector3D pivot, float xRot, float zRot)
@@ -30,7 +31,7 @@ CCamera::CCamera(QVector3D pos, QVector3D pivot, float xRot, float zRot)
     ,m_keyManager(nullptr)
     ,m_pSettings(nullptr)
 {
-
+    syncMotionInterpolation();
 }
 
 void CCamera::reset()
@@ -54,12 +55,13 @@ void CCamera::reset()
         m_zRot = 45.0f;
         m_step = 1.0f;
     }
+    syncMotionInterpolation();
 }
 
 void CCamera::getLocation(QVector3D& pos, QVector3D& pivot, QVector3D& rot)
 {
-    pos = m_pos;
-    pivot = m_pivot;
+    pos = m_motionStateInitialized ? m_renderPos : m_pos;
+    pivot = m_motionStateInitialized ? m_renderPivot : m_pivot;
     rot = QVector3D(m_xRot, 0, m_zRot);
 }
 
@@ -69,6 +71,7 @@ void CCamera::setLocation(const QVector3D& pos, const QVector3D& pivot, const QV
     m_pivot = pivot;
     m_xRot = rot.x();
     m_zRot = rot.z();
+    syncMotionInterpolation();
 }
 
 void CCamera::setOrbitPivotPreservingView(const QVector3D& pivot)
@@ -80,6 +83,7 @@ void CCamera::setOrbitPivotPreservingView(const QVector3D& pivot)
     m_pos = ei::reanchoredCameraPosition(
         m_pos, m_pivot, pivot, m_xRot, m_zRot);
     m_pivot = pivot;
+    syncMotionInterpolation();
 }
 
 void CCamera::xRotate(float& angle)
@@ -109,29 +113,54 @@ QMatrix4x4 CCamera::update()
     }
     else
         m_updateTimer.start();
-    m_frameMovementScale = ei::cameraFrameMovementScale(elapsedSeconds);
-    move();
+    if(!m_motionStateInitialized)
+        syncMotionInterpolation();
+    const ei::SCameraFixedStepAdvance advance = ei::advanceCameraFixedStep(
+        elapsedSeconds, &m_motionAccumulator);
+    constexpr double fixedStepSeconds = 1.0 / 120.0;
+    m_integratingKeyboardMotion = true;
+    for(int stepIndex = 0; stepIndex < advance.steps; ++stepIndex)
+    {
+        m_previousMotionPos = m_pos;
+        m_previousMotionPivot = m_pivot;
+        m_frameMovementScale = ei::cameraFrameMovementScale(fixedStepSeconds);
+        move();
+    }
+    m_integratingKeyboardMotion = false;
     m_frameMovementScale = 1.0f;
-    QMatrix4x4 matrix;
-    matrix.setToIdentity();
-    matrix.translate(m_pivot.x(), m_pivot.y(), m_pivot.z());
-    matrix.translate(-m_pos.x(), -m_pos.y(), -m_pos.z());
-    matrix.rotate(m_xRot, 1.0, 0.0, 0.0);
-    matrix.rotate(m_zRot, 0.0, 0.0, 1.0);
-    matrix.translate(-m_pivot.x(), -m_pivot.y(), -m_pivot.z());
-    return matrix;
+    m_renderPos = m_previousMotionPos * (1.0f - advance.interpolation)
+        + m_pos * advance.interpolation;
+    m_renderPivot = m_previousMotionPivot * (1.0f - advance.interpolation)
+        + m_pivot * advance.interpolation;
+    return matrixFor(m_renderPos, m_renderPivot);
 }
 
 QMatrix4x4 CCamera::viewMatrix()
 {
+    return matrixFor(m_motionStateInitialized ? m_renderPos : m_pos,
+                     m_motionStateInitialized ? m_renderPivot : m_pivot);
+}
+
+QMatrix4x4 CCamera::matrixFor(const QVector3D& position, const QVector3D& pivot) const
+{
     QMatrix4x4 matrix;
     matrix.setToIdentity();
-    matrix.translate(m_pivot.x(), m_pivot.y(), m_pivot.z());
-    matrix.translate(-m_pos.x(), -m_pos.y(), -m_pos.z());
+    matrix.translate(pivot.x(), pivot.y(), pivot.z());
+    matrix.translate(-position.x(), -position.y(), -position.z());
     matrix.rotate(m_xRot, 1.0, 0.0, 0.0);
     matrix.rotate(m_zRot, 0.0, 0.0, 1.0);
-    matrix.translate(-m_pivot.x(), -m_pivot.y(), -m_pivot.z());
+    matrix.translate(-pivot.x(), -pivot.y(), -pivot.z());
     return matrix;
+}
+
+void CCamera::syncMotionInterpolation()
+{
+    m_previousMotionPos = m_pos;
+    m_previousMotionPivot = m_pivot;
+    m_renderPos = m_pos;
+    m_renderPivot = m_pivot;
+    m_motionAccumulator = 0.0;
+    m_motionStateInitialized = true;
 }
 
 void CCamera::strafeRight(bool bShift)
@@ -182,6 +211,8 @@ void CCamera::strafeUpward(bool bShift)
     const float amount = step();
     m_pos += dir*(bShift ? amount*2.0f : amount);
     m_pivot += dir*(bShift ? amount*2.0f : amount);
+    if(!m_integratingKeyboardMotion)
+        syncMotionInterpolation();
 }
 
 void CCamera::strafeDown(bool bShift)
@@ -196,6 +227,8 @@ void CCamera::strafeDownward(bool bShift)
     const float amount = step();
     m_pos += dir*(bShift ? amount*2.0f : amount);
     m_pivot += dir*(bShift ? amount*2.0f : amount);
+    if(!m_integratingKeyboardMotion)
+        syncMotionInterpolation();
 }
 
 void CCamera::move(QVector3D& orDir, bool bShift)
@@ -210,6 +243,8 @@ void CCamera::move(QVector3D& orDir, bool bShift)
     const float amount = step();
     m_pos += orDir*(bShift ? amount*2.0f : amount);
     m_pivot += orDir*(bShift ? amount*2.0f : amount);
+    if(!m_integratingKeyboardMotion)
+        syncMotionInterpolation();
 }
 
 void CCamera::shift(QVector3D& orDir, bool bShift)
@@ -226,6 +261,8 @@ void CCamera::shift(QVector3D& orDir, bool bShift)
     const QVector3D movement = orDir*(bShift ? amount*2.0f : amount);
     m_pos += movement;
     m_pivot += movement;
+    if(!m_integratingKeyboardMotion)
+        syncMotionInterpolation();
 }
 
 void CCamera::enlarge(const bool bZoom)
@@ -286,6 +323,7 @@ void CCamera::moveTo(QVector3D posTarget)
     QVector3D dif = m_pos - m_pivot;
     m_pivot = posTarget;
     m_pos = m_pivot + dif;
+    syncMotionInterpolation();
 }
 
 //move camera away on 'distance' point from pivot
@@ -299,6 +337,7 @@ void CCamera::moveAwayOn(float distance)
     QVector3D dir(m_pos-m_pivot);
     dir.normalize();
     m_pos = m_pivot + dir*distance;
+    syncMotionInterpolation();
 }
 
 void CCamera::attachSettings(CSettings *pSetting)
@@ -319,4 +358,5 @@ void CCamera::attachSettings(CSettings *pSetting)
                m_pSettings->opt("cameraSpeedMultiplier")))
             setSpeedMultiplier(float(speed->value()));
     }
+    syncMotionInterpolation();
 }
