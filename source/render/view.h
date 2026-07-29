@@ -183,7 +183,8 @@ public:
                                  int selectedIndex);
     void moveCameraToPoint(const QVector3D& position);
     void anchorCameraRotationToViewportCenter();
-    void changeOperation(EButtonOp type);
+    void changeOperation(EButtonOp type,
+                         bool preserveLandscapeEditing = false);
     void operationSetBackup(EOperationAxisType operationType);
     void operationRevert(EOperationAxisType operationType);
     void operationApply(EOperationAxisType operationType);

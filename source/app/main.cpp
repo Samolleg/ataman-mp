@@ -51,6 +51,7 @@
 #include "settings.h"
 #include "jmv_map_test_launcher.h"
 #include "render_scheduling.h"
+#include "landscape_operation_policy.h"
 #include "utils.h"
 
 #ifdef Q_OS_WIN
@@ -1175,6 +1176,7 @@ int runHeadlessCommand(QApplication& app)
         const bool paintIssueMarkerAvailable = paintIssueCategory
             && paintIssueCategory->count() == 3
             && paintIssueCategory->itemData(0).toString() == "no-blend"
+            && paintIssueCategory->itemText(0) == "No / wrong blend"
             && paintIssueCategory->itemData(1).toString() == "tile-mismatch"
             && paintIssueCategory->itemData(2).toString() == "wrong-rotation"
             && markPaintIssueButton && markPaintIssueButton->isCheckable();
@@ -1185,13 +1187,33 @@ int runHeadlessCommand(QApplication& app)
             && landscapeTools.paintIssueCategory() == "no-blend"
             && landscapeTools.paintTerrainType(&materialSelectedWhileMarking) == 0
             && !materialSelectedWhileMarking
+            && landscapeTools.editingEnabled()
             && markPaintIssueButton->text().contains("MARKING");
         bool materialSelectedAfterMarker = false;
+        int markerExitStateSignals = 0;
+        int markerExitMaterialSignals = 0;
+        QObject::connect(&landscapeTools, &CLandscapeTools::editingStateChanged,
+                         [&markerExitStateSignals]() { ++markerExitStateSignals; });
+        QObject::connect(&landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
+                         [&markerExitMaterialSignals](qint32 material) {
+            if(material == 9)
+                ++markerExitMaterialSignals;
+        });
         const bool paintIssueMarkerMutuallyExclusive =
             landscapeTools.selectPaintTerrainType(9)
             && !landscapeTools.paintIssueMarkingEnabled()
             && landscapeTools.paintTerrainType(&materialSelectedAfterMarker) == 9
-            && materialSelectedAfterMarker;
+            && materialSelectedAfterMarker
+            && landscapeTools.editingEnabled()
+            && markerExitStateSignals > 0
+            && markerExitMaterialSignals == 1;
+        const bool paintIssueTemporarySelectPreservesEditing =
+            !landscapeOperationDisablesEditing(
+                EButtonOpSelect, true, true)
+            && landscapeOperationDisablesEditing(
+                EButtonOpSelect, true, false)
+             && !landscapeOperationDisablesEditing(
+                 EButtonOpTilebrush, true, false);
 
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
@@ -1401,6 +1423,7 @@ int runHeadlessCommand(QApplication& app)
                 && materialAtlasActionWorks
                 && paintIssueMarkerActivates
                 && paintIssueMarkerMutuallyExclusive
+                && paintIssueTemporarySelectPreservesEditing
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
@@ -1502,6 +1525,8 @@ int runHeadlessCommand(QApplication& app)
                << " paintIssueMarkerActivates=" << paintIssueMarkerActivates
                << " paintIssueMarkerMutuallyExclusive="
                << paintIssueMarkerMutuallyExclusive
+               << " paintIssueTemporarySelectPreservesEditing="
+               << paintIssueTemporarySelectPreservesEditing
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
                << (passed ? "PASS" : "FAIL")

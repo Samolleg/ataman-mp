@@ -30,6 +30,7 @@
 #include <limits>
 
 #include "view.h"
+#include "landscape_operation_policy.h"
 #include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
@@ -948,7 +949,7 @@ void CView::syncLandscapeToolState()
     {
         endTileBrushGroup();
         if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
-            changeOperation(EButtonOpSelect);
+            changeOperation(EButtonOpSelect, true);
         setPreviewTile(false);
         unsetCursor();
         emit updateMsg(tr("Paint issue marking mode: %1. Drag across every bad tile; normal painting is disabled until you choose a material brush.")
@@ -11946,13 +11947,15 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     return point.unproject(view, m_projection, viewPortRect); //return Vector3D here
 }
 
-void CView::changeOperation(EButtonOp type)
+void CView::changeOperation(EButtonOp type, bool preserveLandscapeEditing)
 {
     cancelPendingOperation();
-    if(type != EButtonOpTilebrush && m_landscapeTools
+    const bool landscapePaintMode = m_landscapeTools
         && (m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
             || m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
-            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint))
+            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint);
+    if(m_landscapeTools && landscapeOperationDisablesEditing(
+           type, landscapePaintMode, preserveLandscapeEditing))
         m_landscapeTools->setEditingEnabled(false, false);
     switch (type) {
     case EButtonOpSelect:

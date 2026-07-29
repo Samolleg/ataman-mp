@@ -329,6 +329,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
                 bool selected = false;
                 const qint32 material = paintTerrainType(&selected);
                 emit paintTerrainTypeChanged(selected ? material : -1);
+                // QButtonGroup is still processing the click when the marker
+                // is disabled. Notify once more after the material is fully
+                // selected so the view restores its tile-brush operation.
+                emit editingStateChanged();
             });
     connect(m_overlayMaterialButtons, QOverload<int>::of(&QButtonGroup::buttonClicked),
             this, [this](int) {
@@ -336,6 +340,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
                 bool selected = false;
                 const qint32 material = paintTerrainType(&selected);
                 emit paintTerrainTypeChanged(selected ? material : -1);
+                emit editingStateChanged();
             });
     connect(m_materialTabs, &QTabWidget::currentChanged, this, [this](int index) {
         if(!m_editingActive)
@@ -925,6 +930,8 @@ bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
         {
             setPaintIssueMarkingEnabled(false);
             button->setChecked(true);
+            emit paintTerrainTypeChanged(terrainType);
+            emit editingStateChanged();
             return true;
         }
     return false;
