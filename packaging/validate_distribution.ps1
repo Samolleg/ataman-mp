@@ -42,14 +42,27 @@ foreach ($profile in Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.
     try {
         $document = Get-Content -LiteralPath $profile.FullName -Raw | ConvertFrom-Json
         $portableClone = $document.provenance -eq 'portable-exact-stock-atlas-clone-v1'
-        $portablePath = $relative.StartsWith(
+        $portableModern = $document.provenance -eq 'portable-finalized-modern-atlas-v1'
+        $portableRootPath = $relative.StartsWith(
             'terrain-atlas-profiles\', [System.StringComparison]::OrdinalIgnoreCase)
+        $portableCollectionPath = $relative.StartsWith(
+            'collections\', [System.StringComparison]::OrdinalIgnoreCase) -and
+            $relative.Contains('\terrain-atlas-profiles\')
         $slotCount = [int]$document.atlasSlotCount
         $complete = $slotCount -gt 0 -and $document.approved -eq $true -and
             $document.atlasPixelSha256 -match '^[0-9a-fA-F]{64}$' -and
-            @($document.slots).Count -eq $slotCount -and
-            @($document.slots | Where-Object { -not $_.assigned }).Count -eq 0
-        if (-not ($portableClone -and $portablePath -and $complete)) {
+            @($document.slots).Count -eq $slotCount
+        $allAssigned = @($document.slots | Where-Object { -not $_.assigned }).Count -eq 0
+        $hasAssigned = @($document.slots | Where-Object { $_.assigned }).Count -gt 0
+        $allowedStockClone = $portableClone -and $portableRootPath -and
+            $complete -and $allAssigned
+        # Modern finalized pages are physical 8x8 sheets. Their last page may
+        # contain deliberately unassigned padding, so requiring every physical
+        # slot to be assigned would reject the exact sidecar needed to reopen a
+        # packaged visual-test MPR. Keep this exception collection-local.
+        $allowedModernCollection = $portableModern -and
+            $portableCollectionPath -and $complete -and $hasAssigned
+        if (-not ($allowedStockClone -or $allowedModernCollection)) {
             $failures.Add("pre-shipped local Material atlas override included: $relative")
         }
     }
