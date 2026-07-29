@@ -6863,6 +6863,18 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
 
     m_unitAppearanceProgressCompleted = ei::completedUnitVisualCount(
         m_unitAppearanceProgressTotal, unresolved.size());
+    if(m_unitAppearanceProgressCompleted == m_unitAppearanceProgressTotal
+            || m_unitAppearanceLastLoggedCompleted < 0
+            || m_unitAppearanceProgressCompleted - m_unitAppearanceLastLoggedCompleted >= 32)
+    {
+        ei::log(eLogInfo, QString("Full character visual progress completed:%1 total:%2 "
+                                 "batchPending:%3 watcherRunning:%4 cacheHits:%5")
+                .arg(m_unitAppearanceProgressCompleted).arg(m_unitAppearanceProgressTotal)
+                .arg(m_unitAppearanceBatchPending)
+                .arg(m_unitAppearanceWatcher && m_unitAppearanceWatcher->isRunning())
+                .arg(m_unitAppearanceCacheHits));
+        m_unitAppearanceLastLoggedCompleted = m_unitAppearanceProgressCompleted;
+    }
     if(m_pProgress && m_pProgress->isVisible())
         m_pProgress->setValue(m_unitAppearanceProgressCompleted);
 
@@ -6882,6 +6894,7 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
             m_unitAppearanceProgressTotal = 0;
             m_unitAppearanceProgressCompleted = 0;
             m_unitAppearanceCacheHits = 0;
+            m_unitAppearanceLastLoggedCompleted = -1;
             m_unitAppearanceProgressPending = false;
             if(m_unitVisualPreparationTimer)
                 m_unitVisualPreparationTimer->stop();
@@ -6897,10 +6910,10 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
     QElapsedTimer finalizationTimer;
     finalizationTimer.start();
     // A single figure/texture upload is not time-sliceable. Do not deliberately
-    // add one of those stalls to every camera frame; units that actually enter
-    // view still take the established forced first-use path. While stationary,
-    // finalize one prepared unit per pump tick for predictable frame pacing.
-    const int finalizationLimit = cameraMoving ? 0 : 1;
+    // add those stalls to camera frames; units that actually enter view still
+    // take the established forced first-use path. The idle pump can finalize a
+    // bounded batch so zone18 does not require 402 separate timer intervals.
+    const int finalizationLimit = cameraMoving ? 0 : 8;
     int finalized = 0;
     for(const Candidate& candidate : unresolved)
     {
@@ -6917,7 +6930,8 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
         return;
     }
 
-    if(m_unitAppearanceWatcher && m_unitAppearanceWatcher->isRunning())
+    if(!ei::canStartUnitAppearanceBatch(m_unitAppearanceBatchPending,
+            m_unitAppearanceWatcher && m_unitAppearanceWatcher->isRunning()))
         return;
 
     QVector<SUnitAppearancePreparationTask> tasks;
@@ -6943,18 +6957,26 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
         {
             const QVector<SUnitAppearancePreparationResult> results
                 = m_unitAppearanceWatcher->result();
+            int batchCacheHits = 0;
             for(const SUnitAppearancePreparationResult& result : results)
             {
                 if(result.cacheHit)
+                {
                     ++m_unitAppearanceCacheHits;
+                    ++batchCacheHits;
+                }
                 const QPointer<CUnit> unit = m_unitAppearanceTargets.value(result.unitKey);
                 if(unit)
                     unit->acceptAppearancePreparation(result);
                 m_unitAppearanceTargets.remove(result.unitKey);
             }
+            m_unitAppearanceBatchPending = false;
+            ei::log(eLogInfo, QString("Character appearance batch accepted results:%1 cacheHits:%2")
+                    .arg(results.size()).arg(batchCacheHits));
             update();
         });
     }
+    m_unitAppearanceBatchPending = true;
     m_unitAppearanceWatcher->setFuture(QtConcurrent::run([tasks]()
     {
         return resolveUnitAppearanceTasks(tasks);

@@ -597,9 +597,11 @@ private:
     QFutureWatcher<QVector<SUnitAppearancePreparationResult>>* m_unitAppearanceWatcher{nullptr};
     QTimer* m_unitVisualPreparationTimer{nullptr};
     QHash<quintptr, QPointer<CUnit>> m_unitAppearanceTargets;
+    bool m_unitAppearanceBatchPending{false};
     int m_unitAppearanceProgressTotal{0};
     int m_unitAppearanceProgressCompleted{0};
     int m_unitAppearanceCacheHits{0};
+    int m_unitAppearanceLastLoggedCompleted{-1};
     bool m_unitAppearanceProgressPending{false};
     QTimer* m_aiGraphRegenerationTimer{nullptr};
     quint64 m_aiGraphBuildRequest{0};

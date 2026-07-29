@@ -25,6 +25,13 @@ inline bool shouldPumpUnitVisualPreparation(bool pending, int total, int complet
     return pending && total > 0 && completed < total;
 }
 
+inline bool canStartUnitAppearanceBatch(bool batchPending, bool watcherRunning)
+{
+    // QFutureWatcher::isRunning() can turn false before its queued finished
+    // handler consumes the result. Batch ownership must survive that window.
+    return !batchPending && !watcherRunning;
+}
+
 }
 
 struct SUnitAppearancePreparationTask

@@ -12,12 +12,59 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QSaveFile>
+#include <QSet>
 
 namespace {
 
 constexpr int kAppearanceCacheSchema = 1;
 QMutex s_appearanceCacheMutex;
 QHash<QString, QJsonObject> s_appearanceMemoryCache;
+QSet<QString> s_cleanedLegacyCacheRoots;
+const QString kAppearanceCacheManifest = QStringLiteral("cache-manifest.json");
+
+bool writeCacheManifest(const QString& directory)
+{
+    QJsonObject root;
+    root.insert(QStringLiteral("schema"), kAppearanceCacheSchema);
+    QSaveFile file(QDir(directory).filePath(kAppearanceCacheManifest));
+    if(!file.open(QIODevice::WriteOnly))
+        return false;
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    return file.commit();
+}
+
+bool prepareCacheDirectory(const QString& directory)
+{
+    if(directory.isEmpty())
+        return false;
+    QMutexLocker locker(&s_appearanceCacheMutex);
+    QDir cache(directory);
+    bool compatible = false;
+    if(cache.exists())
+    {
+        QFile manifest(cache.filePath(kAppearanceCacheManifest));
+        if(manifest.open(QIODevice::ReadOnly) && manifest.size() > 0
+                && manifest.size() <= 4096)
+        {
+            QJsonParseError error;
+            const QJsonDocument document = QJsonDocument::fromJson(manifest.readAll(), &error);
+            compatible = error.error == QJsonParseError::NoError
+                && document.isObject()
+                && document.object().value(QStringLiteral("schema")).toInt(-1)
+                    == kAppearanceCacheSchema;
+        }
+        if(!compatible)
+        {
+            manifest.close();
+            if(!cache.removeRecursively())
+                return false;
+            s_appearanceMemoryCache.clear();
+        }
+    }
+    if(!QDir().mkpath(directory))
+        return false;
+    return compatible || writeCacheManifest(directory);
+}
 
 QJsonObject requestJson(const SUnitAppearancePreparationTask& task)
 {
@@ -64,20 +111,34 @@ bool readCacheEntry(const QString& directory, const QString& key,
     }
     if(root.isEmpty())
     {
-        QFile file(cachePath(directory, key));
+        const QString path = cachePath(directory, key);
+        QFile file(path);
         if(!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > 1024 * 1024)
+        {
+            file.close();
+            QFile::remove(path);
             return false;
+        }
         QJsonParseError error;
         const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
         if(error.error != QJsonParseError::NoError)
+        {
+            file.close();
+            QFile::remove(path);
             return false;
+        }
         root = document.object();
         QMutexLocker locker(&s_appearanceCacheMutex);
         s_appearanceMemoryCache.insert(memoryKey, root);
     }
     if(root.value(QStringLiteral("schema")).toInt() != kAppearanceCacheSchema
             || root.value(QStringLiteral("key")).toString() != key)
+    {
+        QFile::remove(cachePath(directory, key));
+        QMutexLocker locker(&s_appearanceCacheMutex);
+        s_appearanceMemoryCache.remove(memoryKey);
         return false;
+    }
     const QJsonObject provider = root.value(QStringLiteral("providerResult")).toObject();
     if(!provider.value(QStringLiteral("success")).toBool())
         return false;
@@ -135,8 +196,24 @@ QString unitAppearancePreparationCacheKey(const SUnitAppearancePreparationTask& 
 
 QString unitAppearancePreparationCacheDirectory()
 {
-    return unitAppearancePreparationCacheDirectoryForApplication(
-        QCoreApplication::applicationDirPath());
+    const QString applicationDirectory = QCoreApplication::applicationDirPath();
+    const QString directory = unitAppearancePreparationCacheDirectoryForApplication(
+        applicationDirectory);
+    const QString cacheRoot = QDir(applicationDirectory).filePath(QStringLiteral("cache"));
+    {
+        QMutexLocker locker(&s_appearanceCacheMutex);
+        const QString normalizedRoot = QDir::cleanPath(cacheRoot).toCaseFolded();
+        if(!s_cleanedLegacyCacheRoots.contains(normalizedRoot))
+        {
+            QDir root(cacheRoot);
+            for(const QString& legacy : root.entryList(
+                    QStringList() << QStringLiteral("unit-appearances-v*"),
+                    QDir::Dirs | QDir::NoDotAndDotDot))
+                QDir(root.filePath(legacy)).removeRecursively();
+            s_cleanedLegacyCacheRoots.insert(normalizedRoot);
+        }
+    }
+    return directory;
 }
 
 QString unitAppearancePreparationCacheDirectoryForApplication(
@@ -145,7 +222,7 @@ QString unitAppearancePreparationCacheDirectoryForApplication(
     if(applicationDirectory.trimmed().isEmpty())
         return QString();
     return QDir(applicationDirectory).filePath(
-        QStringLiteral("cache/unit-appearances-v1"));
+        QStringLiteral("cache/unit-appearances"));
 }
 
 QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
@@ -156,6 +233,7 @@ QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
     ProfileVisualProviderService providers;
     const QString effectiveCacheDirectory = cacheDirectory.isNull()
         ? unitAppearancePreparationCacheDirectory() : cacheDirectory;
+    const bool cacheReady = prepareCacheDirectory(effectiveCacheDirectory);
     for(const SUnitAppearancePreparationTask& task : tasks)
     {
         SUnitAppearancePreparationResult result;
@@ -164,7 +242,8 @@ QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
         result.visualRevision = task.visualRevision;
         const QString cacheKey = unitAppearancePreparationCacheKey(task);
         const bool cacheable = canCacheTask(task);
-        if(cacheable && readCacheEntry(effectiveCacheDirectory, cacheKey, &result))
+        if(cacheable && cacheReady
+                && readCacheEntry(effectiveCacheDirectory, cacheKey, &result))
         {
             results.append(result);
             continue;
@@ -178,7 +257,7 @@ QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
         }
         else
             result.providerResult = resolver->resolve(task.request, &result.appearance);
-        if(cacheable)
+        if(cacheable && cacheReady)
             writeCacheEntry(effectiveCacheDirectory, cacheKey, result);
         results.append(result);
     }

@@ -107,7 +107,9 @@ private slots:
     void cachesPreparedAppearanceByContentIdentity();
     void keepsAppearanceProgressVisibleBetweenWorkerBatches();
     void pumpsIncompleteIdleVisualPreparation();
+    void retainsAppearanceBatchOwnershipUntilResultsAreConsumed();
     void keepsAppearanceCacheBesideEditor();
+    void rebuildsIncompatibleAppearanceCacheAutomatically();
     void malformedAndUnknownInputsFailStatic();
 };
 
@@ -120,12 +122,53 @@ void UnitAnimationTests::pumpsIncompleteIdleVisualPreparation()
     QVERIFY(!ei::shouldPumpUnitVisualPreparation(false, 402, 387));
 }
 
+void UnitAnimationTests::retainsAppearanceBatchOwnershipUntilResultsAreConsumed()
+{
+    QVERIFY(ei::canStartUnitAppearanceBatch(false, false));
+    QVERIFY(!ei::canStartUnitAppearanceBatch(false, true));
+    // Exact race: the future finished, but the queued result consumer has not
+    // run. isRunning() alone previously allowed the future to be replaced.
+    QVERIFY(!ei::canStartUnitAppearanceBatch(true, false));
+}
+
 void UnitAnimationTests::keepsAppearanceCacheBesideEditor()
 {
     const QString root = QDir::cleanPath(QStringLiteral("C:/portable/EI Mapper Endurance"));
     QCOMPARE(QDir::cleanPath(unitAppearancePreparationCacheDirectoryForApplication(root)),
-             QDir(root).filePath(QStringLiteral("cache/unit-appearances-v1")));
+             QDir(root).filePath(QStringLiteral("cache/unit-appearances")));
     QVERIFY(unitAppearancePreparationCacheDirectoryForApplication(QString()).isEmpty());
+}
+
+void UnitAnimationTests::rebuildsIncompatibleAppearanceCacheAutomatically()
+{
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    QFile staleManifest(QDir(cache.path()).filePath(QStringLiteral("cache-manifest.json")));
+    QVERIFY(staleManifest.open(QIODevice::WriteOnly));
+    staleManifest.write("{\"schema\":999}");
+    staleManifest.close();
+    QFile stalePayload(QDir(cache.path()).filePath(QStringLiteral("stale-entry.bin")));
+    QVERIFY(stalePayload.open(QIODevice::WriteOnly));
+    stalePayload.write("stale");
+    stalePayload.close();
+
+    SUnitAppearancePreparationTask task;
+    task.unitKey = 7;
+    task.providerId = QStringLiteral("jmv.v1");
+    task.request.model = QStringLiteral("unhuma");
+    task.request.primaryTexture = QStringLiteral("unhumaskin_01_x4");
+    task.request.bodyParts = QStringList() << QStringLiteral("hd") << QStringLiteral("bd");
+    task.request.dataSource = EUnitVisualDataSource::EmbeddedMob;
+    const QVector<SUnitAppearancePreparationResult> result
+        = resolveUnitAppearanceTasks({task}, cache.path());
+
+    QCOMPARE(result.size(), 1);
+    QVERIFY(result.first().providerResult.success);
+    QVERIFY(!QFileInfo::exists(stalePayload.fileName()));
+    QFile rebuiltManifest(QDir(cache.path()).filePath(QStringLiteral("cache-manifest.json")));
+    QVERIFY(rebuiltManifest.open(QIODevice::ReadOnly));
+    QCOMPARE(QJsonDocument::fromJson(rebuiltManifest.readAll()).object()
+                 .value(QStringLiteral("schema")).toInt(), 1);
 }
 
 void UnitAnimationTests::parsesAndSelectsDeterministically()
