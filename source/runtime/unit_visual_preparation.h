@@ -15,6 +15,11 @@ inline bool shouldShowUnitAppearanceProgress(bool pending, int total, int comple
     return pending && total > 0 && completed < total;
 }
 
+inline int completedUnitVisualCount(int total, int unresolved)
+{
+    return qBound(0, total - qMax(0, unresolved), qMax(0, total));
+}
+
 }
 
 struct SUnitAppearancePreparationTask

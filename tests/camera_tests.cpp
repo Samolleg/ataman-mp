@@ -12,7 +12,7 @@ private slots:
     void frustumSliceUsesTheRenderedCameraEye();
     void mapsShadowQualityToCapabilityBoundResolution();
     void integratesMovementIndependentlyOfFrameRate();
-    void interpolatesUnevenCameraFramesWithoutLateralJitter();
+    void advancesVsyncFramesWithoutFixedStepLag();
     void keepsMovementActiveBetweenInterpolatedSteps();
 };
 
@@ -100,32 +100,20 @@ void CameraTests::integratesMovementIndependentlyOfFrameRate()
     QCOMPARE(ei::cameraFrameMovementScale(1.0), 6.0f);
 }
 
-void CameraTests::interpolatesUnevenCameraFramesWithoutLateralJitter()
+void CameraTests::advancesVsyncFramesWithoutFixedStepLag()
 {
     const QVector<double> frameTimes = {
-        0.004, 0.018, 0.006, 0.013, 0.009, 0.021, 0.005, 0.017,
-        0.008, 0.012, 0.019, 0.007, 0.011, 0.016, 0.006, 0.014
+        1.0 / 59.0, 1.0 / 61.0, 1.0 / 60.0, 1.0 / 59.5,
+        1.0 / 60.5, 1.0 / 60.0
     };
-    constexpr double fixedStep = 1.0 / 120.0;
-    double accumulator = 0.0;
-    double elapsed = 0.0;
-    double previousSimulation = 0.0;
-    double simulation = 0.0;
+    double expected = 0.0;
+    double integrated = 0.0;
     for(double frameTime : frameTimes)
     {
-        elapsed += frameTime;
-        const ei::SCameraFixedStepAdvance advance = ei::advanceCameraFixedStep(
-            frameTime, &accumulator, fixedStep);
-        for(int step = 0; step < advance.steps; ++step)
-        {
-            previousSimulation = simulation;
-            simulation += fixedStep;
-        }
-        const double rendered = previousSimulation * (1.0 - advance.interpolation)
-            + simulation * advance.interpolation;
-        const double expected = qMax(0.0, elapsed - fixedStep);
-        QVERIFY2(qAbs(rendered - expected) < 0.000001,
-                 "Uneven render intervals produced a discontinuous camera trajectory");
+        expected += frameTime * 60.0;
+        integrated += ei::cameraFrameMovementScale(frameTime);
+        QVERIFY2(qAbs(integrated - expected) < 0.000001,
+                 "VSync-sized frame deltas were quantized or delayed");
     }
 }
 

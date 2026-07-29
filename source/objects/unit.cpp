@@ -139,9 +139,24 @@ void CUnit::drawSelect(QOpenGLShaderProgram* program)
 void CUnit::preloadVisualResources()
 {
     // Called with the viewport GL context current immediately after MOB
-    // projection. This resolves figure and texture resources before the unit
-    // first enters the camera frustum; it does not alter serialized MOB data.
-    refreshTransientVisual(true);
+    // projection. Resolve the complete figure/texture/equipment plan and its
+    // initial idle pose before the unit first enters the camera frustum; this
+    // does not alter serialized MOB data.
+    if(refreshTransientVisual(true))
+        refreshAnimationPose();
+}
+
+bool CUnit::needsVisualResolution() const
+{
+    return m_resolvedDatabaseGeneration != ei::ProfileDatabaseContext::instance().generation()
+        || m_resolvedVisualRevision != m_visualRevision;
+}
+
+bool CUnit::hasPreparedAppearance() const
+{
+    return m_preparedAppearanceValid
+        && m_preparedAppearanceGeneration == ei::ProfileDatabaseContext::instance().generation()
+        && m_preparedAppearanceRevision == m_visualRevision;
 }
 
 bool CUnit::needsAppearancePreparation() const

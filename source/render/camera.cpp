@@ -131,23 +131,19 @@ QMatrix4x4 CCamera::update()
         m_updateTimer.start();
     if(!m_motionStateInitialized)
         syncMotionInterpolation();
-    const ei::SCameraFixedStepAdvance advance = ei::advanceCameraFixedStep(
-        elapsedSeconds, &m_motionAccumulator);
-    constexpr double fixedStepSeconds = 1.0 / 120.0;
+    // The camera has no collision or physics state that benefits from a fixed
+    // simulation quantum. Quantizing it to 120 Hz made VSync-limited 60 Hz
+    // strafing alternate between interpolation phases. Integrate the actual
+    // bounded frame delta so every presented frame advances continuously.
     m_integratingKeyboardMotion = true;
-    for(int stepIndex = 0; stepIndex < advance.steps; ++stepIndex)
-    {
-        m_previousMotionPos = m_pos;
-        m_previousMotionPivot = m_pivot;
-        m_frameMovementScale = ei::cameraFrameMovementScale(fixedStepSeconds);
-        move();
-    }
+    m_previousMotionPos = m_pos;
+    m_previousMotionPivot = m_pivot;
+    m_frameMovementScale = ei::cameraFrameMovementScale(elapsedSeconds);
+    move();
     m_integratingKeyboardMotion = false;
     m_frameMovementScale = 1.0f;
-    m_renderPos = m_previousMotionPos * (1.0f - advance.interpolation)
-        + m_pos * advance.interpolation;
-    m_renderPivot = m_previousMotionPivot * (1.0f - advance.interpolation)
-        + m_pivot * advance.interpolation;
+    m_renderPos = m_pos;
+    m_renderPivot = m_pivot;
     return matrixFor(m_renderPos, m_renderPivot);
 }
 

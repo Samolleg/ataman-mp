@@ -4643,7 +4643,7 @@ void CView::draw()
     m_visualWarmupCameraPivot = cameraPivot;
     m_visualWarmupCameraRotation = cameraRotation;
     m_visualWarmupCameraValid = true;
-    scheduleUnitAppearancePreparation(cameraPosition);
+    scheduleUnitAppearancePreparation(cameraPosition, cameraMoving);
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
     const bool animationEnabled = !animationOption || animationOption->value();
@@ -6780,10 +6780,9 @@ bool CView::loadMob(QFileInfo &filePath)
     return true;
 }
 
-void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
+void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
+                                              bool cameraMoving)
 {
-    if(m_unitAppearanceWatcher && m_unitAppearanceWatcher->isRunning())
-        return;
     if(m_pProgress && m_pProgress->isVisible() && m_unitAppearanceProgressTotal == 0)
         return;
 
@@ -6792,34 +6791,70 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
         CUnit* unit{nullptr};
         float distanceSquared{0.0f};
     };
-    QVector<Candidate> candidates;
+    QVector<Candidate> unresolved;
     for(CMob* mob : m_aMob)
     {
         if(!mob || !isMobVisible(mob))
             continue;
         for(CNode* node : mob->nodes())
             if(CUnit* unit = dynamic_cast<CUnit*>(node))
-                if(unit->nodeState() != ENodeState::eHidden && unit->needsAppearancePreparation())
+                if(unit->nodeState() != ENodeState::eHidden && unit->needsVisualResolution())
                 {
                     const QVector3D position = unit->drawPosition().isNull()
                         ? unit->position() : unit->drawPosition();
                     Candidate candidate;
                     candidate.unit = unit;
                     candidate.distanceSquared = (position - cameraPosition).lengthSquared();
-                    candidates.append(candidate);
+                    unresolved.append(candidate);
                 }
     }
-    if(candidates.isEmpty())
+    std::sort(unresolved.begin(), unresolved.end(), [](const Candidate& left, const Candidate& right)
+    {
+        return left.distanceSquared < right.distanceSquared;
+    });
+
+    if(m_unitAppearanceProgressTotal == 0 && !unresolved.isEmpty())
+    {
+        m_unitAppearanceProgressTotal = unresolved.size();
+        m_unitAppearanceProgressCompleted = 0;
+        m_unitAppearanceCacheHits = 0;
+        m_unitAppearanceProgressPending = true;
+        QTimer::singleShot(150, this, [this]()
+        {
+            if(!ei::shouldShowUnitAppearanceProgress(m_unitAppearanceProgressPending,
+                    m_unitAppearanceProgressTotal, m_unitAppearanceProgressCompleted)
+                    || !m_pProgress)
+                return;
+            m_pProgress->setRange(0, qMax(1, m_unitAppearanceProgressTotal));
+            m_pProgress->setValue(m_unitAppearanceProgressCompleted);
+            m_pProgress->setFormat(tr("Resolving full character visuals... %v/%m"));
+            m_pProgress->setVisible(true);
+            ei::log(eLogInfo, QString("Full character visual progress shown completed:%1 total:%2")
+                    .arg(m_unitAppearanceProgressCompleted)
+                    .arg(m_unitAppearanceProgressTotal));
+        });
+    }
+    else if(!unresolved.isEmpty())
+    {
+        const int expectedRemaining = qMax(0, m_unitAppearanceProgressTotal
+                                             - m_unitAppearanceProgressCompleted);
+        if(unresolved.size() > expectedRemaining)
+            m_unitAppearanceProgressTotal += unresolved.size() - expectedRemaining;
+    }
+
+    m_unitAppearanceProgressCompleted = ei::completedUnitVisualCount(
+        m_unitAppearanceProgressTotal, unresolved.size());
+    if(m_pProgress && m_pProgress->isVisible())
+        m_pProgress->setValue(m_unitAppearanceProgressCompleted);
+
+    if(unresolved.isEmpty())
     {
         if(m_unitAppearanceProgressTotal > 0)
         {
-            // Units visible between worker batches can consume their prepared
-            // result through the foreground path. No remaining candidate and
-            // no active worker still means the original workload completed.
             m_unitAppearanceProgressCompleted = m_unitAppearanceProgressTotal;
-            ei::log(eLogInfo, QString("Character data preparation complete total:%1 cached:%2 resolved:%3")
+            ei::log(eLogInfo, QString("Full character visual preparation complete total:%1 appearanceCacheHits:%2")
                     .arg(m_unitAppearanceProgressTotal).arg(m_unitAppearanceCacheHits)
-                    .arg(m_unitAppearanceProgressCompleted - m_unitAppearanceCacheHits));
+                    );
             if(m_pProgress && (m_unitAppearanceProgressPending || m_pProgress->isVisible()))
             {
                 m_pProgress->setFormat(QStringLiteral("%p%"));
@@ -6832,53 +6867,47 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
         }
         return;
     }
-    std::sort(candidates.begin(), candidates.end(), [](const Candidate& left, const Candidate& right)
+
+    // Provider/database work is safe on the worker. Figure assembly, layered
+    // texture creation and OpenGL upload are not; finish prepared units on the
+    // current GL thread in a small camera-prioritized budget. This runs even
+    // while moving, but limits moving frames to one unit so traversal cannot
+    // discover an unbounded synchronous workload.
+    QElapsedTimer finalizationTimer;
+    finalizationTimer.start();
+    const int finalizationLimit = cameraMoving ? 1 : 8;
+    int finalized = 0;
+    for(const Candidate& candidate : unresolved)
     {
-        return left.distanceSquared < right.distanceSquared;
-    });
+        if(finalized >= finalizationLimit || (finalized > 0 && finalizationTimer.elapsed() >= 3))
+            break;
+        if(!candidate.unit->hasPreparedAppearance())
+            continue;
+        candidate.unit->preloadVisualResources();
+        ++finalized;
+    }
+    if(finalized > 0)
+    {
+        update();
+        return;
+    }
+
+    if(m_unitAppearanceWatcher && m_unitAppearanceWatcher->isRunning())
+        return;
 
     QVector<SUnitAppearancePreparationTask> tasks;
-    const int batchSize = qMin(16, candidates.size());
+    const int batchSize = qMin(16, unresolved.size());
     tasks.reserve(batchSize);
     for(int index = 0; index < batchSize; ++index)
     {
         SUnitAppearancePreparationTask task;
-        if(!candidates.at(index).unit->takeAppearancePreparationTask(&task))
+        if(!unresolved.at(index).unit->takeAppearancePreparationTask(&task))
             continue;
-        m_unitAppearanceTargets.insert(task.unitKey, QPointer<CUnit>(candidates.at(index).unit));
+        m_unitAppearanceTargets.insert(task.unitKey, QPointer<CUnit>(unresolved.at(index).unit));
         tasks.append(task);
     }
     if(tasks.isEmpty())
         return;
-
-    if(m_unitAppearanceProgressTotal == 0)
-    {
-        m_unitAppearanceProgressTotal = candidates.size();
-        m_unitAppearanceProgressCompleted = 0;
-        m_unitAppearanceCacheHits = 0;
-        m_unitAppearanceProgressPending = true;
-        QTimer::singleShot(150, this, [this]()
-        {
-            if(!ei::shouldShowUnitAppearanceProgress(m_unitAppearanceProgressPending,
-                    m_unitAppearanceProgressTotal, m_unitAppearanceProgressCompleted)
-                    || !m_pProgress)
-                return;
-            m_pProgress->setRange(0, qMax(1, m_unitAppearanceProgressTotal));
-            m_pProgress->setValue(m_unitAppearanceProgressCompleted);
-            m_pProgress->setFormat(tr("Resolving character data... %v/%m"));
-            m_pProgress->setVisible(true);
-            ei::log(eLogInfo, QString("Character data progress shown completed:%1 total:%2")
-                    .arg(m_unitAppearanceProgressCompleted)
-                    .arg(m_unitAppearanceProgressTotal));
-        });
-    }
-    else
-    {
-        const int expectedRemaining = qMax(0, m_unitAppearanceProgressTotal
-                                             - m_unitAppearanceProgressCompleted);
-        if(candidates.size() > expectedRemaining)
-            m_unitAppearanceProgressTotal += candidates.size() - expectedRemaining;
-    }
 
     if(!m_unitAppearanceWatcher)
     {
@@ -6889,7 +6918,6 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
         {
             const QVector<SUnitAppearancePreparationResult> results
                 = m_unitAppearanceWatcher->result();
-            m_unitAppearanceProgressCompleted += results.size();
             for(const SUnitAppearancePreparationResult& result : results)
             {
                 if(result.cacheHit)
@@ -6899,9 +6927,6 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
                     unit->acceptAppearancePreparation(result);
                 m_unitAppearanceTargets.remove(result.unitKey);
             }
-            if(m_pProgress && m_pProgress->isVisible())
-                m_pProgress->setValue(qMin(m_unitAppearanceProgressCompleted,
-                                           m_unitAppearanceProgressTotal));
             update();
         });
     }

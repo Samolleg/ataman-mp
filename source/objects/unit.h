@@ -203,6 +203,8 @@ public:
     const QStringList& renderedBodyTextureLayers() const { return m_renderedBodyTextureLayers; }
     const QStringList& visualDiagnostics() const { return m_visualDiagnostics; }
     void preloadVisualResources();
+    bool needsVisualResolution() const;
+    bool hasPreparedAppearance() const;
     bool needsAppearancePreparation() const;
     bool takeAppearancePreparationTask(SUnitAppearancePreparationTask* task);
     void acceptAppearancePreparation(const SUnitAppearancePreparationResult& result);

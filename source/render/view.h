@@ -281,7 +281,8 @@ private:
     void refreshMobDirtyStates();
     void initShaders();
     void draw();
-    void scheduleUnitAppearancePreparation(const QVector3D& cameraPosition);
+    void scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
+                                           bool cameraMoving);
     void drawTestOverlaysOpenGl();
     CNode* pickObject(QList<CNode*>& aNode, int x, int y);
     void applyParam(SParam& param);

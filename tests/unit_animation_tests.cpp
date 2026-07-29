@@ -380,6 +380,9 @@ void UnitAnimationTests::keepsAppearanceProgressVisibleBetweenWorkerBatches()
     QVERIFY(ei::shouldShowUnitAppearanceProgress(true, 402, 173));
     QVERIFY(!ei::shouldShowUnitAppearanceProgress(false, 402, 173));
     QVERIFY(!ei::shouldShowUnitAppearanceProgress(true, 402, 402));
+    QCOMPARE(ei::completedUnitVisualCount(402, 402), 0);
+    QCOMPARE(ei::completedUnitVisualCount(402, 401), 1);
+    QCOMPARE(ei::completedUnitVisualCount(402, 0), 402);
 }
 
 void UnitAnimationTests::malformedAndUnknownInputsFailStatic()
