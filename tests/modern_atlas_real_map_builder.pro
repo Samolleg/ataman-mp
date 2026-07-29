@@ -9,6 +9,7 @@ RESOURCES += ../assets/resources/semantic_atlas_presets.qrc
 INCLUDEPATH += ../source/documents ../source/core ../source/render ../source/resources
 SOURCES += \
     modern_atlas_real_map_builder.cpp \
+    ../source/documents/collection_document.cpp \
     ../source/documents/endurance_document.cpp \
     ../source/documents/mpr_document.cpp \
     ../source/documents/mpr_namespace.cpp \

@@ -14,6 +14,7 @@
 #include <QtEndian>
 
 #include "endurance_document.h"
+#include "collection_document.h"
 #include "mmp_codec.h"
 #include "mmp_inspector.h"
 #include "mpr_document.h"
@@ -719,6 +720,8 @@ int main(int argc, char** argv)
             return 4;
         }
         QJsonArray probes;
+        const QString collectionsDirectory = QDir(outputRoot).filePath(
+            QStringLiteral("collections"));
         for(int pages : {16, 32, 64, 128, 256})
         {
             const QString directory = QDir(outputRoot).filePath(
@@ -732,7 +735,36 @@ int main(int argc, char** argv)
                 err << "runtime-probe-" << pages << ": " << probe.error << '\n';
                 return 8;
             }
-            probes.append(probe.manifest);
+            const QString collectionName = QStringLiteral(
+                "zone18-expanded-%1-slots.collection").arg(pages * 64);
+            const QString collectionPath = QDir(collectionsDirectory).filePath(
+                collectionName);
+            SEnduranceCollection collection;
+            collection.name = QStringLiteral("Zone18 expanded atlas - %1 slots")
+                .arg(pages * 64);
+            collection.profileId = QStringLiteral("jamais-vu");
+            // Leave mapZoneId empty deliberately. The generated MPR has an
+            // isolated namespace, while the collection explicitly supplies
+            // the stock Zone18 environment MOB from the active JMV map root.
+            const QString generatedMprPath = QFileInfo(
+                QDir(directory).filePath(
+                    probe.manifest.value("mpr_file").toString()))
+                .absoluteFilePath();
+            collection.mprReference = QDir(
+                QFileInfo(collectionPath).absolutePath())
+                .relativeFilePath(generatedMprPath);
+            collection.mobReferences.append(QStringLiteral("zone18.mob"));
+            if(!CCollectionDocument::save(collectionPath, collection, &error))
+            {
+                err << "runtime-probe-" << pages
+                    << " collection: " << error << '\n';
+                return 9;
+            }
+            QJsonObject probeManifest = probe.manifest;
+            probeManifest.insert("collection_file",
+                QStringLiteral("collections/") + collectionName);
+            probeManifest.insert("collection_mob", "zone18.mob");
+            probes.append(probeManifest);
             out << "runtime-probe-" << pages << ": slots="
                 << probe.manifest.value("active_slots").toInt() << '\n';
             out.flush();
@@ -748,7 +780,7 @@ int main(int argc, char** argv)
                        QJsonDocument(root).toJson(QJsonDocument::Indented), &error))
         {
             err << error << '\n';
-            return 9;
+            return 10;
         }
         return 0;
     }

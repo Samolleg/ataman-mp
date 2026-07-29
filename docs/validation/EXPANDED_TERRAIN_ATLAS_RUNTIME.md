@@ -74,6 +74,11 @@ modern_atlas_real_map_builder.exe `
   --runtime-only
 ```
 
+The fixture root also contains one portable `.collection` per expanded MPR.
+Each collection references its generated MPR relatively and resolves
+`zone18.mob` through the active Jamais Vu Maps root, so the stock environment
+MOB is used without copying it into the package.
+
 Build `tests/jmv_map_test_launcher_tests.pro`, the x86 runtime host, and the x86
 bridge; put the latter two below the test executable's `runtime` directory. Close
 unrelated game/test processes and run:
