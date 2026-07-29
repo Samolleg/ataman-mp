@@ -418,6 +418,7 @@ private slots:
     void aiGraphFileCommitIsValidatedBackedUpAndAtomic();
     void aiGraphOwnershipSwitchValidationNeverRewritesExternalFile();
     void existingGraphComponentReuseIsWarningNotBlocker();
+    void generatedGraphComponentReuseIsRecoloredAutomatically();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
     void unknownLeafIsPreservedAsOpaque();
@@ -842,6 +843,31 @@ void EnduranceDocumentTests::existingGraphComponentReuseIsWarningNotBlocker()
         QStringLiteral("long-distance"), Qt::CaseInsensitive));
     QVERIFY(file.open(QIODevice::ReadOnly));
     QCOMPARE(file.readAll(), bytes);
+}
+
+void EnduranceDocumentTests::generatedGraphComponentReuseIsRecoloredAutomatically()
+{
+    QVector<SAiGraphLayer> layers(CAiGraphDocument::LayerCount);
+    for(SAiGraphLayer& layer : layers)
+    {
+        layer.weights.fill(qint16(-1), 2 * CAiGraphDocument::DirectionCount);
+        layer.packedPositions = QByteArray(2, char(0x11));
+        layer.components.fill(1, 2);
+    }
+    CAiGraphDocument graph;
+    QString error;
+    QVERIFY2(graph.initializePreview(2, 1, layers, &error), qPrintable(error));
+    QVERIFY(!graph.validateRuntimeCompatibility(2, 1, &error));
+
+    QVERIFY2(graph.recolorConnectedComponents(&error), qPrintable(error));
+    QVERIFY2(graph.validateRuntimeCompatibility(2, 1, &error), qPrintable(error));
+    QVERIFY(graph.component(0, 0, 0) != graph.component(0, 1, 0));
+
+    const QByteArray bytes = graph.serialize(&error);
+    QVERIFY2(!bytes.isEmpty(), qPrintable(error));
+    CAiGraphDocument reopened;
+    QVERIFY2(reopened.parse(bytes, &error), qPrintable(error));
+    QVERIFY2(reopened.validateRuntimeCompatibility(2, 1, &error), qPrintable(error));
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

@@ -1799,7 +1799,10 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error,
     const int expectedHeight = (m_terrainEdit.vertexCountY() - 1) / 4;
     CAiGraphDocument generated;
     QByteArray candidate;
-    if(m_aiGraphLoadedOverride && m_aiGraphLoadedDocument.isValid()
+    const bool preserveLoadedGraph = m_aiGraphLoadedOverride
+        && m_aiGraphLoadedDocument.isValid()
+        && !m_aiGraphLoadedBytes.isEmpty();
+    if(preserveLoadedGraph
        && !m_aiGraphLoadedBytes.isEmpty())
     {
         generated = m_aiGraphLoadedDocument;
@@ -1829,15 +1832,34 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error,
         if(sourceDescription)
             *sourceDescription = tr("Freshly regenerated graph");
     }
+    if(!preserveLoadedGraph)
+    {
+        QString recolorError;
+        if(!generated.recolorConnectedComponents(&recolorError))
+        {
+            if(error)
+                *error = tr("Endurance could not finalize the regenerated navigation graph. Nothing was changed. Keep using the loaded graph for testing and report this diagnostic: %1")
+                    .arg(recolorError);
+            return false;
+        }
+    }
     QString compatibilityError;
+    QStringList compatibilityWarnings;
     if(!generated.validateRuntimeCompatibility(expectedWidth, expectedHeight,
-                                                &compatibilityError))
+                                                &compatibilityError,
+                                                &compatibilityWarnings,
+                                                preserveLoadedGraph))
     {
         if(error)
-            *error = tr("Generated AI graph is not runtime-compatible: %1")
-                .arg(compatibilityError);
+            *error = preserveLoadedGraph
+                ? tr("The selected loaded AI graph is structurally incompatible with this map. Regenerate the preview or choose another graph: %1")
+                    .arg(compatibilityError)
+                : tr("Endurance could not finalize the regenerated navigation graph. Nothing was changed. Keep using the loaded graph for testing and report this diagnostic: %1")
+                    .arg(compatibilityError);
         return false;
     }
+    for(const QString& warning : compatibilityWarnings)
+        ei::log(eLogWarning, QStringLiteral("Preserved loaded AI graph warning: ") + warning);
     if(candidate.isEmpty())
         candidate = generated.serialize(error);
     if(candidate.isEmpty())
@@ -1851,12 +1873,17 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error,
                 .arg(reopenError);
         return false;
     }
+    QStringList reopenWarnings;
     if(!reopened.validateRuntimeCompatibility(expectedWidth, expectedHeight,
-                                               &reopenError))
+                                               &reopenError, &reopenWarnings,
+                                               preserveLoadedGraph))
     {
         if(error)
-            *error = tr("Generated AI graph failed runtime validation after reopen: %1")
-                .arg(reopenError);
+            *error = preserveLoadedGraph
+                ? tr("The selected loaded AI graph failed validation after reopening: %1")
+                    .arg(reopenError)
+                : tr("Endurance could not verify the finalized regenerated navigation graph after reopening it. Nothing was changed. Keep using the loaded graph for testing and report this diagnostic: %1")
+                    .arg(reopenError);
         return false;
     }
     *data = candidate;

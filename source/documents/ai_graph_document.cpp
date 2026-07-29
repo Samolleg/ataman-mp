@@ -204,6 +204,72 @@ QByteArray CAiGraphDocument::serialize(QString* error) const
     return bytes;
 }
 
+bool CAiGraphDocument::recolorConnectedComponents(QString* error)
+{
+    if(error)
+        error->clear();
+    const auto fail = [error](const QString& message) {
+        if(error)
+            *error = message;
+        return false;
+    };
+    if(!m_valid || m_width <= 0 || m_height <= 0
+       || m_layers.size() != LayerCount)
+        return fail(QStringLiteral("The AI graph is not initialized."));
+
+    const int cells = m_width * m_height;
+    for(int layerIndex = 0; layerIndex < LayerCount; ++layerIndex)
+    {
+        SAiGraphLayer& layer = m_layers[layerIndex];
+        if(layer.weights.size() != cells * DirectionCount
+           || layer.packedPositions.size() != cells
+           || layer.components.size() != cells)
+            return fail(QStringLiteral("AI graph layer %1 has inconsistent plane sizes.")
+                        .arg(layerIndex));
+
+        QVector<quint16> recolored(cells, 0);
+        quint32 nextComponent = 1;
+        QQueue<int> pending;
+        for(int start = 0; start < cells; ++start)
+        {
+            if(recolored.at(start) != 0)
+                continue;
+            if(nextComponent > 0xffffu)
+                return fail(QStringLiteral(
+                    "AI graph layer %1 has more disconnected regions than the runtime format can label.")
+                    .arg(layerIndex));
+            const quint16 component = quint16(nextComponent++);
+            recolored[start] = component;
+            pending.enqueue(start);
+            while(!pending.isEmpty())
+            {
+                const int cell = pending.dequeue();
+                const int x = cell % m_width;
+                const int y = cell / m_width;
+                for(int direction = 0; direction < DirectionCount; ++direction)
+                {
+                    if(layer.weights.at(cell * DirectionCount + direction) < 0)
+                        continue;
+                    const QPoint delta = directionDelta(direction);
+                    const int nx = x + delta.x();
+                    const int ny = y + delta.y();
+                    if(nx < 0 || ny < 0 || nx >= m_width || ny >= m_height)
+                        continue;
+                    const int neighbor = ny * m_width + nx;
+                    if(recolored.at(neighbor) == 0)
+                    {
+                        recolored[neighbor] = component;
+                        pending.enqueue(neighbor);
+                    }
+                }
+            }
+        }
+        layer.components = recolored;
+    }
+    m_rawBytes.clear();
+    return true;
+}
+
 bool CAiGraphDocument::validateRuntimeCompatibility(
     int expectedWidth, int expectedHeight, QString* error,
     QStringList* warnings, bool allowLegacyComponentReuse) const

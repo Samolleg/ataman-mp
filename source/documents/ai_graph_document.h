@@ -34,6 +34,7 @@ public:
     const QByteArray& rawBytes() const { return m_rawBytes; }
     QByteArray serializeNoOp() const { return m_rawBytes; }
     QByteArray serialize(QString* error = nullptr) const;
+    bool recolorConnectedComponents(QString* error = nullptr);
     bool validateRuntimeCompatibility(int expectedWidth, int expectedHeight,
                                       QString* error = nullptr,
                                       QStringList* warnings = nullptr,
