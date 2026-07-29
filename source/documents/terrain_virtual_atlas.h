@@ -62,6 +62,22 @@ struct STerrainFinalizedTile
     QByteArray pixelSha256;
     bool authored{false};
     int sourceSlot{-1};
+    // Empty for original map slots. Imported exact tiles and generated tiles
+    // record the stock JMV source used to review/reconstruct their artwork.
+    QString blendProvenance;
+    bool stockDerivedBlend{false};
+};
+
+struct STerrainBlendMaskTemplate
+{
+    STerrainTransitionSignature signature;
+    QImage ownershipMask;
+    qint32 ownerMaterial{0};
+    qint32 otherMaterial{0};
+    ETerrainBlendStyle ownerStyle{ETerrainBlendStyle::Organic};
+    ETerrainBlendStyle otherStyle{ETerrainBlendStyle::Organic};
+    QString sourceLabel;
+    QByteArray maskSha256;
 };
 
 struct STerrainAtlasFinalization
@@ -142,6 +158,11 @@ public:
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
         CValidationReport* report = nullptr);
+    bool addStockBlendMaskTemplate(
+        const STerrainTransitionSignature& signature, const QImage& pixels,
+        const QString& sourceLabel = QString(),
+        CValidationReport* report = nullptr)
+    { return registerBlendMaskTemplate(signature, pixels, sourceLabel, report); }
     const QVector<STerrainFinalizedTile>& generatedTiles() const
         { return m_generatedTiles; }
 
@@ -168,7 +189,15 @@ private:
         const STerrainTransitionSignature& signature, quint8* rotation) const;
     QImage generateTile(const STerrainTransitionSignature& gridSignature,
                         ETerrainBlendStyle style, int variation,
+                        QString* provenance,
                         CValidationReport* report) const;
+    bool registerBlendMaskTemplate(
+        const STerrainTransitionSignature& signature, const QImage& pixels,
+        const QString& sourceLabel, CValidationReport* report);
+    QImage alignedStockMask(
+        const STerrainTransitionSignature& requestedPreview,
+        qint32 ownerMaterial, qint32 otherMaterial, int variation,
+        QString* provenance) const;
     ETerrainBlendStyle blendStyleForSignature(
         const STerrainTransitionSignature& signature) const;
     int blendVariation(int cellX, int cellY,
@@ -182,6 +211,7 @@ private:
     QMap<QByteArray, int> m_generatedBySignature;
     QMap<QByteArray, int> m_generatedByPixels;
     QVector<STerrainFinalizedTile> m_generatedTiles;
+    QVector<STerrainBlendMaskTemplate> m_blendMaskTemplates;
     CTerrainTransitionCatalog m_authoredLibraryCatalog;
     QVector<int> m_authoredLibraryGeneratedIndices;
     quint32 m_distributionSeed{0};
@@ -213,6 +243,10 @@ public:
     int activeTextureCount() const;
     QSet<int> takeChangedSlots();
     bool addAuthoredLibraryTransition(
+        const STerrainTransitionSignature& signature, const QImage& pixels,
+        const QString& sourceLabel = QString(),
+        CValidationReport* report = nullptr);
+    bool addStockBlendMaskTemplate(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
         CValidationReport* report = nullptr);

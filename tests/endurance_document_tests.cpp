@@ -5508,11 +5508,11 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
                 return family.name == name;
             });
     };
-    const auto limestone = zone2Family(QStringLiteral("Stone / Limestone"));
+    const auto lime = zone2Family(QStringLiteral("Stone / Lime"));
     const auto pink = zone2Family(QStringLiteral("Stone / Pink"));
     const auto mossy = zone2Family(QStringLiteral("Stone / Mossy"));
     const auto irregular = zone2Family(QStringLiteral("Grass / Irregular"));
-    QVERIFY(limestone != zone2.families.cend());
+    QVERIFY(lime != zone2.families.cend());
     QVERIFY(pink != zone2.families.cend());
     QVERIFY(mossy != zone2.families.cend());
     QVERIFY(irregular != zone2.families.cend());
@@ -5528,7 +5528,7 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
         QVERIFY2(zone2Family(removed) == zone2.families.cend(), qPrintable(removed));
     QCOMPARE(irregular->thumbnailSlot, 117);
     QCOMPARE(zone2.slotDefinitions.at(117).signature.southWest, irregular->id);
-    QCOMPARE(zone2.slotDefinitions.at(393).signature.northWest, limestone->id);
+    QCOMPARE(zone2.slotDefinitions.at(393).signature.northWest, lime->id);
     QCOMPARE(zone2.slotDefinitions.at(416).signature.southWest, pink->id);
     QCOMPARE(zone2.slotDefinitions.at(285).signature.northWest, mossy->id);
 }
@@ -5782,7 +5782,7 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    QCOMPARE(landFamilyCount, 69);
+    QCOMPARE(landFamilyCount, 68);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
@@ -5813,6 +5813,19 @@ void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots(
         sources.insert(material, source);
     }
     CTerrainWorkingAtlas working(authored, tiles, 77u, 1024, sources);
+    QImage reviewedMaskPixels(16, 16, QImage::Format_RGBA8888);
+    for(int y = 0; y < reviewedMaskPixels.height(); ++y)
+        for(int x = 0; x < reviewedMaskPixels.width(); ++x)
+            reviewedMaskPixels.setPixelColor(x, y,
+                x + y < reviewedMaskPixels.width() - 1
+                    ? sources.value(1).pixelColor(x, y)
+                    : sources.value(2).pixelColor(x, y));
+    STerrainTransitionSignature reviewedOneCorner;
+    reviewedOneCorner.northWest = 1;
+    reviewedOneCorner.northEast = reviewedOneCorner.southEast =
+        reviewedOneCorner.southWest = 2;
+    QVERIFY(working.addStockBlendMaskTemplate(reviewedOneCorner,
+        reviewedMaskPixels, QStringLiteral("reviewed-stock-endurance-fixture")));
     QVERIFY(working.isValid());
     QCOMPARE(working.capacityLimit(), 1024);
     QCOMPARE(working.activeTextureCount(), 8);

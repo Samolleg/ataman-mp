@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QPainter>
 #include <QTransform>
+#include <cmath>
 
 #include "endurance_document.h"
 #include "mmp_codec.h"
@@ -50,6 +51,83 @@ struct Fixture
         }
     }
 };
+
+template<typename TAtlas>
+void seedReviewedStockMasks(TAtlas& atlas, const Fixture& fixture)
+{
+    const QVector<STerrainTransitionSignature> patterns = {
+        signature(3, 4, 4, 4), signature(3, 3, 4, 4),
+        signature(3, 4, 3, 4)
+    };
+    for(int patternIndex = 0; patternIndex < patterns.size(); ++patternIndex)
+    {
+        const STerrainTransitionSignature preview =
+            CTerrainTransitionCatalog::mirroredGridY(patterns.at(patternIndex));
+        const QVector<qint32> ids = {preview.northWest, preview.northEast,
+            preview.southEast, preview.southWest};
+        const int size = fixture.images.front().width();
+        QImage transition(size, size, QImage::Format_RGBA8888);
+        for(int y = 0; y < size; ++y) for(int x = 0; x < size; ++x)
+        {
+            const double u = size == 1 ? 0.0 : double(x) / double(size - 1);
+            const double v = size == 1 ? 0.0 : double(y) / double(size - 1);
+            const double weights[4] = {(1-u)*(1-v), u*(1-v), u*v, (1-u)*v};
+            double owner = 0.0;
+            for(int corner = 0; corner < 4; ++corner)
+                if(ids.at(corner) == 3) owner += weights[corner];
+            const double authoredContour = 0.5
+                + 0.10 * std::sin((u * 3.0 + v * 1.5) * 6.28318530718)
+                + 0.05 * std::sin((v * 7.0 - u * 2.0) * 6.28318530718);
+            transition.setPixelColor(x, y, owner >= authoredContour
+                ? fixture.images.at(2).pixelColor(x, y)
+                : fixture.images.at(3).pixelColor(x, y));
+        }
+        QVERIFY(atlas.addStockBlendMaskTemplate(patterns.at(patternIndex),
+            transition, QStringLiteral("reviewed-stock-fixture:%1")
+                .arg(patternIndex)));
+    }
+}
+
+template<typename TAtlas>
+void seedReviewedPairMasks(TAtlas& atlas, qint32 owner, qint32 other,
+                           const QImage& ownerPixels,
+                           const QImage& otherPixels)
+{
+    const QVector<STerrainTransitionSignature> patterns = {
+        signature(owner, other, other, other),
+        signature(owner, owner, other, other),
+        signature(owner, other, owner, other)
+    };
+    for(int patternIndex = 0; patternIndex < patterns.size(); ++patternIndex)
+    {
+        const STerrainTransitionSignature preview =
+            CTerrainTransitionCatalog::mirroredGridY(patterns.at(patternIndex));
+        const QVector<qint32> ids = {preview.northWest, preview.northEast,
+            preview.southEast, preview.southWest};
+        QImage transition(ownerPixels.size(), QImage::Format_RGBA8888);
+        for(int y = 0; y < transition.height(); ++y)
+            for(int x = 0; x < transition.width(); ++x)
+            {
+                const double u = transition.width() == 1 ? 0.0
+                    : double(x) / double(transition.width() - 1);
+                const double v = transition.height() == 1 ? 0.0
+                    : double(y) / double(transition.height() - 1);
+                const double weights[4] = {(1-u)*(1-v), u*(1-v),
+                                            u*v, (1-u)*v};
+                double amount = 0.0;
+                for(int corner = 0; corner < 4; ++corner)
+                    if(ids.at(corner) == owner) amount += weights[corner];
+                const double contour = 0.5
+                    + 0.12 * std::sin((u * 4.0 + v * 1.25) * 6.28318530718);
+                transition.setPixelColor(x, y, amount >= contour
+                    ? ownerPixels.pixelColor(x, y)
+                    : otherPixels.pixelColor(x, y));
+            }
+        QVERIFY(atlas.addStockBlendMaskTemplate(patterns.at(patternIndex),
+            transition, QStringLiteral("reviewed-stock-pair:%1")
+                .arg(patternIndex)));
+    }
+}
 
 QByteArray portableMpr(bool withInactiveOverlay = false)
 {
@@ -181,6 +259,7 @@ private slots:
     void virtualFieldPaintIsUnboundedByAtlas();
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
+    void missingStockMaskNeverFallsBackToProceduralArtwork();
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
     void generatesFourFamilyTupleWithOrientation();
@@ -235,6 +314,7 @@ void TerrainVirtualAtlasTests::exactAuthoredTileIsReused()
 {
     Fixture fixture;
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images,7);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainVirtualTile tile=atlas.resolve(signature(2,2,2,2),4,9);
     QVERIFY(tile.authored);
     QCOMPARE(SMprPackedTile::decode(tile.authoredPacked).atlasSlot(),1);
@@ -251,6 +331,7 @@ void TerrainVirtualAtlasTests::authoredGlobalBlendIsImportedBeforeGeneration()
             authoredBlend.setPixelColor(x, y, (x + y) & 1
                 ? QColor(17, 83, 149) : QColor(221, 137, 29));
     CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u);
+    seedReviewedStockMasks(atlas, fixture);
     CValidationReport report;
     QVERIFY2(atlas.addAuthoredLibraryTransition(
         requested, authoredBlend, QStringLiteral("stock-jmv-test"), &report),
@@ -278,10 +359,24 @@ void TerrainVirtualAtlasTests::authoredGlobalBlendIsImportedBeforeGeneration()
     QVERIFY(keptImportedPixels);
 }
 
+void TerrainVirtualAtlasTests::missingStockMaskNeverFallsBackToProceduralArtwork()
+{
+    Fixture fixture;
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u);
+    CValidationReport report;
+    const STerrainVirtualTile unresolved = atlas.resolve(
+        signature(1, 2, 2, 2), 0, 0, &report);
+    QCOMPARE(unresolved.generatedIndex, -1);
+    QVERIFY(report.hasErrors());
+    QVERIFY(report.toText().contains("No reviewed stock JMV mask"));
+    QVERIFY(atlas.generatedTiles().isEmpty());
+}
+
 void TerrainVirtualAtlasTests::generatesOneThreeTuple()
 {
     Fixture fixture;
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainVirtualTile tile=atlas.resolve(signature(1,2,2,2),0,0);
     QVERIFY(!tile.authored);
     QVERIFY(tile.generatedIndex>=0);
@@ -292,6 +387,7 @@ void TerrainVirtualAtlasTests::generatesTwoTwoTuple()
 {
     Fixture fixture;
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     QVERIFY(atlas.resolve(signature(1,1,2,2),0,0).generatedIndex>=0);
 }
 
@@ -299,6 +395,7 @@ void TerrainVirtualAtlasTests::generatesFourFamilyTupleWithOrientation()
 {
     Fixture fixture;
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainVirtualTile tile=atlas.resolve(signature(1,2,3,4),0,0);
     const QImage image=atlas.generatedTiles().at(tile.generatedIndex).pixels;
     // Grid Y is mirrored once at the image boundary: SW,NW,NE,SE become
@@ -313,6 +410,7 @@ void TerrainVirtualAtlasTests::generatedEdgesUseOnlyTheirTwoCornerMaterials()
 {
     Fixture fixture;
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainVirtualTile tile=atlas.resolve(signature(1,2,3,4),0,0);
     const QImage image=atlas.generatedTiles().at(tile.generatedIndex).pixels;
     const QColor top=image.pixelColor(3,0);
@@ -333,6 +431,7 @@ void TerrainVirtualAtlasTests::generatedTransitionRetainsSourceTextureIdentity()
                 : QColor(20, light ? 235 : 95, 30, 255));
         }
     CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainVirtualTile tile = atlas.resolve(signature(1,1,2,2), 0, 0);
     QVERIFY(tile.generatedIndex >= 0);
     const QImage generated = atlas.generatedTiles().at(tile.generatedIndex).pixels;
@@ -354,8 +453,8 @@ void TerrainVirtualAtlasTests::generatedTransitionRetainsSourceTextureIdentity()
     // Ordinary bilinear cross-fading makes most of the tile a blurry average.
     // A generated transition must instead retain a source texture on at least
     // three quarters of its pixels, with only a narrow visible join.
-    QVERIFY(sourceLike >= 48);
-    QVERIFY(genuinelyMixed > 0);
+    QVERIFY(sourceLike >= 56);
+    QVERIFY(genuinelyMixed <= 8);
 }
 
 void TerrainVirtualAtlasTests::generatedTransitionBoundaryIsOrganicRatherThanQuadrants()
@@ -365,6 +464,7 @@ void TerrainVirtualAtlasTests::generatedTransitionBoundaryIsOrganicRatherThanQua
         image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
                              Qt::FastTransformation);
     CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 73);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainVirtualTile tile = atlas.resolve(signature(1, 1, 2, 2), 0, 0);
     QVERIFY(tile.generatedIndex >= 0);
     const QImage generated = atlas.generatedTiles().at(tile.generatedIndex).pixels;
@@ -428,45 +528,6 @@ void TerrainVirtualAtlasTests::materialNamesSelectExplicitBlendStyles()
 
 void TerrainVirtualAtlasTests::materialBlendStylesProvideBoundedDistinctVariants()
 {
-    const QVector<ETerrainBlendStyle> styles = {
-        ETerrainBlendStyle::Grass, ETerrainBlendStyle::Soil,
-        ETerrainBlendStyle::Ice, ETerrainBlendStyle::Lava,
-        ETerrainBlendStyle::Paving, ETerrainBlendStyle::Stone,
-        ETerrainBlendStyle::Gravel, ETerrainBlendStyle::Sand,
-        ETerrainBlendStyle::Snow, ETerrainBlendStyle::Swamp,
-        ETerrainBlendStyle::Water, ETerrainBlendStyle::Organic
-    };
-    QSet<QByteArray> styleFingerprints;
-    for(ETerrainBlendStyle style : styles)
-    {
-        Fixture fixture;
-        for(QImage& image : fixture.images)
-            image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
-                                 Qt::FastTransformation);
-        QMap<qint32, ETerrainBlendStyle> descriptors;
-        descriptors.insert(1, style);
-        descriptors.insert(2, ETerrainBlendStyle::Soil);
-        CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x51a7u,
-                                   {}, descriptors);
-        const int expected = CTerrainVirtualAtlas::blendVariationLimit(
-            signature(1,2,2,2));
-        for(int y = 0; y < 20
-             && atlas.generatedTiles().size() < expected; ++y)
-            for(int x = 0; x < 20
-                 && atlas.generatedTiles().size() < expected; ++x)
-                QVERIFY(atlas.resolve(signature(1,2,2,2), x, y).generatedIndex >= 0);
-        QCOMPARE(atlas.generatedTiles().size(), expected);
-        QList<QByteArray> hashes;
-        for(const STerrainFinalizedTile& tile : atlas.generatedTiles())
-            hashes.append(tile.pixelSha256);
-        std::sort(hashes.begin(), hashes.end());
-        QByteArray fingerprint;
-        for(const QByteArray& hash : hashes) fingerprint += hash + '\n';
-        QVERIFY(!styleFingerprints.contains(fingerprint));
-        styleFingerprints.insert(fingerprint);
-    }
-    QCOMPARE(styleFingerprints.size(), styles.size());
-
     QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,1,1,1)), 1);
     QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,1,1,2)), 2);
     QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,1,2,2)), 2);
@@ -474,9 +535,26 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideBoundedDistinctVariants
     QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,2,2,3)), 1);
     QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,2,3,4)), 1);
 
+    Fixture boundedFixture;
+    CTerrainVirtualAtlas bounded(boundedFixture.catalog,
+                                 boundedFixture.images, 0x51a7u);
+    seedReviewedStockMasks(bounded, boundedFixture);
+    for(int y = 0; y < 20; ++y) for(int x = 0; x < 20; ++x)
+        QVERIFY(bounded.resolve(signature(1,2,2,2), x, y).generatedIndex >= 0);
+    QVERIFY(bounded.generatedTiles().size() >= 1);
+    QVERIFY(bounded.generatedTiles().size()
+            <= CTerrainVirtualAtlas::blendVariationLimit(signature(1,2,2,2)));
+    for(const STerrainFinalizedTile& tile : bounded.generatedTiles())
+    {
+        QVERIFY(tile.stockDerivedBlend);
+        QVERIFY(tile.blendProvenance.startsWith("reviewed-stock-fixture:"));
+    }
+
     Fixture fixture;
     CTerrainVirtualAtlas threeWay(fixture.catalog, fixture.images, 0x31u);
     CTerrainVirtualAtlas fourWay(fixture.catalog, fixture.images, 0x41u);
+    seedReviewedStockMasks(threeWay, fixture);
+    seedReviewedStockMasks(fourWay, fixture);
     for(int y = 0; y < 16; ++y)
         for(int x = 0; x < 16; ++x)
         {
@@ -501,6 +579,7 @@ void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
     QVERIFY(field.setMaterial(1, 1, 3));
     QVERIFY(field.setMaterial(2, 1, 4));
     CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const auto finalized = atlas.finalize(field, "PixelSeam", 512, {1,2,3,4});
     QVERIFY2(finalized.success, qPrintable(finalized.error));
     const QImage preview = renderFinalizedPreview(finalized, 2, 1);
@@ -515,6 +594,7 @@ void TerrainVirtualAtlasTests::rotationsAndIdenticalPixelsAreDeduplicated()
 {
     Fixture fixture;
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainTransitionSignature base=signature(1,2,3,4);
     const STerrainVirtualTile first=atlas.resolve(base,0,0);
     const STerrainVirtualTile rotated=atlas.resolve(
@@ -524,6 +604,7 @@ void TerrainVirtualAtlasTests::rotationsAndIdenticalPixelsAreDeduplicated()
 
     Fixture duplicate(true);
     CTerrainVirtualAtlas duplicateAtlas(duplicate.catalog,duplicate.images);
+    seedReviewedStockMasks(duplicateAtlas, duplicate);
     const int a=duplicateAtlas.resolve(signature(1,2,3,3),0,0).generatedIndex;
     const int b=duplicateAtlas.resolve(signature(1,2,4,4),0,0).generatedIndex;
     QCOMPARE(a,b);
@@ -537,6 +618,8 @@ void TerrainVirtualAtlasTests::stableHashesAndNamespaceAreDeterministic()
     field.setMaterial(1,0,2); field.setMaterial(1,1,3); field.setMaterial(0,1,4);
     CTerrainVirtualAtlas first(fixture.catalog,fixture.images,42);
     CTerrainVirtualAtlas second(fixture.catalog,fixture.images,42);
+    seedReviewedStockMasks(first, fixture);
+    seedReviewedStockMasks(second, fixture);
     const STerrainAtlasFinalization a=first.finalize(field,"Zone2",512);
     const STerrainAtlasFinalization b=second.finalize(field,"Zone2",512);
     QVERIFY2(a.success,qPrintable(a.error));
@@ -552,6 +635,7 @@ void TerrainVirtualAtlasTests::mapWideUsageAndUnusedCompaction()
     QVERIFY(field.resize(2,2,1));
     field.setMaterial(1,1,2);
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainAtlasFinalization result=atlas.finalize(field,"Zone2",512,{10,20,30,40});
     QVERIFY2(result.success,qPrintable(result.error));
     QCOMPARE(result.usage.cellCount,quint64(4));
@@ -611,6 +695,7 @@ void TerrainVirtualAtlasTests::capacityRefusalNeverSubstitutes()
     field.setMaterial(1,0,2);
     field.setMaterial(2,0,3);
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainAtlasFinalization result=atlas.finalize(field,"Zone15",1);
     QVERIFY(!result.success);
     QVERIFY(result.error.contains("exceeding"));
@@ -660,6 +745,7 @@ void TerrainVirtualAtlasTests::pageOrientationMipmapsAlphaAndReopen()
     CTerrainVirtualMaterialField field;
     QVERIFY(field.resize(1,1,1));
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const STerrainAtlasFinalization result=atlas.finalize(field,"Zone1",512);
     QVERIFY2(result.success,qPrintable(result.error));
     QCOMPARE(result.pages.size(),1);
@@ -881,6 +967,7 @@ void TerrainVirtualAtlasTests::exactOnlyNoOpPreservesPixels()
     CTerrainVirtualMaterialField field;
     QVERIFY(field.resize(2,2,1));
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const auto result=atlas.finalize(field,"Zone1",512,{77,88,99,111});
     QVERIFY2(result.success,qPrintable(result.error));
     QCOMPARE(result.requiredSlots,1);
@@ -898,6 +985,7 @@ void TerrainVirtualAtlasTests::portablePackageRemapsNamespaceAndReopens()
     QVERIFY(field.resize(16,16,1));
     field.setMaterial(8,8,2);
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const auto finalization=atlas.finalize(field,"CaveSet",512,{1,2,3,4},&report);
     QVERIFY2(finalization.success,qPrintable(finalization.error));
     const auto package=CTerrainVirtualAtlas::buildPortablePackage(
@@ -953,6 +1041,7 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     QVector<QImage> workingImages = fixture.images;
     while(workingImages.size() < 64) workingImages.append(fixture.images.front());
     CTerrainWorkingAtlas working(fixture.catalog, workingImages, 99, 128);
+    seedReviewedStockMasks(working, fixture);
     model.enableWorkingAtlasSlots(128);
     QMap<int,quint64> usage;
     for(int slot = 0; slot < 128; ++slot) usage.insert(slot, 0);
@@ -1001,6 +1090,7 @@ void TerrainVirtualAtlasTests::externalUniformFamilyPaintsAndBlendsWithoutAuthor
     QMap<qint32, QImage> external;
     external.insert(externalId, solid(qRgba(170, 170, 165, 255)));
     CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 17, external);
+    seedReviewedStockMasks(atlas, fixture);
     CValidationReport report;
     const STerrainVirtualTile pure = atlas.resolve(
         signature(externalId, externalId, externalId, externalId), 3, 4, &report);
@@ -1043,6 +1133,7 @@ void TerrainVirtualAtlasTests::preservedLayerSlotsArePinnedAndRemapped()
     Fixture fixture;CTerrainVirtualMaterialField field;QVERIFY(field.resize(1,1,1));
     SMprPackedTile pinned;pinned.tileIndex=3;pinned.rotation=2;
     CTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const auto result=atlas.finalize(field,"Zone2",512,{10,20,30,40},nullptr,{pinned.encode()});
     QVERIFY2(result.success,qPrintable(result.error));
     QCOMPARE(result.requiredSlots,2);
@@ -1062,6 +1153,7 @@ void TerrainVirtualAtlasTests::inactiveOverlaySentinelSurvivesLandFinalization()
     QVERIFY(field.resize(16, 16, 1));
     QVERIFY(field.setMaterial(8, 8, 2));
     CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    seedReviewedStockMasks(atlas, fixture);
     const auto finalized = atlas.finalize(field, "InactiveOverlay", 512,
                                            {1,2,3,4}, &report);
     QVERIFY2(finalized.success, qPrintable(finalized.error + "\n" + report.toText()));
@@ -1185,6 +1277,7 @@ void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()
 {
     Fixture fixture;
     CTerrainWorkingAtlas working(fixture.catalog,fixture.images,17,8);
+    seedReviewedStockMasks(working, fixture);
     QVERIFY2(working.isValid(),qPrintable(working.error()));
     QMap<int,quint64> usage;
     usage[0]=4;usage[1]=4;usage[2]=4;usage[3]=0;
@@ -1220,6 +1313,7 @@ void TerrainVirtualAtlasTests::expanded4096AtlasRetainsWorkingExtensionCapacity(
     external.insert(2, solid(qRgba(150, 70, 30, 255)));
     CTerrainWorkingAtlas working(catalog, authored, 91u,
         kMprPackedTerrainAtlasSlotLimit, external);
+    seedReviewedPairMasks(working, 1, 2, authored.front(), external.value(2));
     QCOMPARE(working.capacityLimit(), kMprPackedTerrainAtlasSlotLimit);
     QMap<int, quint64> usage;
     QSet<int> protectedSlots;
@@ -1241,6 +1335,7 @@ void TerrainVirtualAtlasTests::workingAtlasNeverReplacesAuthoredPixels()
     Fixture fixture;
     const QVector<QImage> original = fixture.images;
     CTerrainWorkingAtlas working(fixture.catalog, fixture.images, 17, 8);
+    seedReviewedStockMasks(working, fixture);
     QMap<int, quint64> usage;
     for(int slot = 0; slot < 8; ++slot) usage[slot] = 0;
     CValidationReport report;
@@ -1275,6 +1370,7 @@ void TerrainVirtualAtlasTests::repeatedGeneratedStampsNeverMutateAuthoredAtlas()
         external.insert(material, image);
     }
     CTerrainWorkingAtlas working(fixture.catalog, authored, 97, 1024, external);
+    seedReviewedStockMasks(working, fixture);
     QMap<int, quint64> usage;
     for(int slot = 0; slot < 1024; ++slot) usage[slot] = 0;
     CValidationReport report;
@@ -1305,6 +1401,7 @@ void TerrainVirtualAtlasTests::workingAtlasProtectsUndoSlotsAndRefusesCapacity()
 {
     Fixture fixture;
     CTerrainWorkingAtlas working(fixture.catalog,fixture.images,3,4);
+    seedReviewedStockMasks(working, fixture);
     QMap<int,quint64> usage;
     usage[0]=usage[1]=usage[2]=usage[3]=0;
     const QSet<int> allProtected({0,1,2,3});
@@ -1399,6 +1496,7 @@ void TerrainVirtualAtlasTests::parallelStripesAndBaseCrossResolveExactly()
     }
 
     CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x314159u);
+    seedReviewedStockMasks(atlas, fixture);
     CValidationReport report;
     const auto finalized = atlas.finalize(field, "StripeCross", 512,
                                            {1,2,3,4}, &report);
@@ -1463,6 +1561,7 @@ void TerrainVirtualAtlasTests::nestedCircleMaterialPairingsResolveExactly()
             QVERIFY(field.paint(innerBrush, inner) > 0);
 
             CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x271828u);
+            seedReviewedStockMasks(atlas, fixture);
             CValidationReport report;
             const auto finalized = atlas.finalize(field,
                 QString("Nested-%1-%2").arg(outer).arg(inner), 512,
@@ -1505,6 +1604,7 @@ void TerrainVirtualAtlasTests::nestedCircleMaterialPairingsResolveExactly()
                     QString("Radius-3 material %1 circle with radius-1 material %2 center.")
                         .arg(outer).arg(inner)));
             CTerrainVirtualAtlas repeated(fixture.catalog, fixture.images, 0x271828u);
+            seedReviewedStockMasks(repeated, fixture);
             const auto again = repeated.finalize(field,
                 QString("Nested-%1-%2").arg(outer).arg(inner), 512, {1,2,3,4});
             QCOMPARE(again.stableSha256, finalized.stableSha256);
@@ -1585,6 +1685,7 @@ void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexO
 
         CValidationReport report;
         CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x13579u);
+        seedReviewedStockMasks(atlas, fixture);
         const auto finalized = atlas.finalize(field, "MatrixMap", 512,
                                                {1,2,3,4}, &report);
         QVERIFY2(finalized.success, qPrintable(finalized.error + "\n" + report.toText()));
@@ -1640,6 +1741,7 @@ void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexO
         }
 
         CTerrainVirtualAtlas repeatAtlas(fixture.catalog, fixture.images, 0x13579u);
+        seedReviewedStockMasks(repeatAtlas, fixture);
         const auto repeat = repeatAtlas.finalize(field, "MatrixMap", 512, {1,2,3,4});
         QCOMPARE(repeat.stableSha256, finalized.stableSha256);
         QCOMPARE(repeat.packedCells, finalized.packedCells);

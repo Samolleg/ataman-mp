@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QRegularExpression>
+#include <QTransform>
 #include <QtEndian>
 
 #include <algorithm>
@@ -51,45 +52,6 @@ quint32 terrainNoiseHash(quint32 value)
     return value ^ (value >> 16);
 }
 
-double terrainNoiseLattice(int x, int y, quint32 seed)
-{
-    const quint32 mixed = terrainNoiseHash(seed
-        ^ quint32(x) * 0x9e3779b9u ^ quint32(y) * 0x85ebca6bu);
-    return double(mixed & 0xffffu) / 65535.0;
-}
-
-double terrainValueNoise(double x, double y, quint32 seed)
-{
-    const int x0 = int(std::floor(x));
-    const int y0 = int(std::floor(y));
-    const double fx0 = x - x0;
-    const double fy0 = y - y0;
-    const double fx = fx0 * fx0 * (3.0 - 2.0 * fx0);
-    const double fy = fy0 * fy0 * (3.0 - 2.0 * fy0);
-    const double nw = terrainNoiseLattice(x0, y0, seed);
-    const double ne = terrainNoiseLattice(x0 + 1, y0, seed);
-    const double sw = terrainNoiseLattice(x0, y0 + 1, seed);
-    const double se = terrainNoiseLattice(x0 + 1, y0 + 1, seed);
-    return (nw + (ne - nw) * fx) * (1.0 - fy)
-         + (sw + (se - sw) * fx) * fy;
-}
-
-quint32 transitionNoiseSeed(const QVector<qint32>& ids,
-                            const QMap<qint32, QImage>& sources,
-                            quint32 seed)
-{
-    quint32 result = seed ^ 0xa511e9b3u;
-    for(qint32 id : ids)
-    {
-        const QByteArray hash = imageHash(sources.value(id));
-        quint32 pixels = 0;
-        for(int index = 0; index < 8 && index < hash.size(); ++index)
-            pixels = pixels * 33u + quint8(hash.at(index));
-        result = terrainNoiseHash(result ^ pixels);
-    }
-    return result;
-}
-
 int terrainBlendStylePriority(ETerrainBlendStyle style)
 {
     switch(style)
@@ -108,210 +70,6 @@ int terrainBlendStylePriority(ETerrainBlendStyle style)
     case ETerrainBlendStyle::Organic: return 0;
     }
     return 0;
-}
-
-double terrainTriangleWave(double value)
-{
-    const double fraction = value - std::floor(value);
-    return 1.0 - 4.0 * std::fabs(fraction - 0.5);
-}
-
-void terrainBlendDisplacement(ETerrainBlendStyle style, double u, double v,
-                              quint32 seed, int variation,
-                              double* dx, double* dy, double* sharpness)
-{
-    const double tau = 6.28318530717958647692;
-    const double phase = (double(seed & 0xffffu) / 65535.0
-                         + double(variation) * 0.193) * tau;
-    const double coarseX = terrainValueNoise(u * 2.25, v * 2.25, seed) - 0.5;
-    const double coarseY = terrainValueNoise(u * 2.25, v * 2.25,
-                                              seed ^ 0x68bc21ebu) - 0.5;
-    const double detailX = terrainValueNoise(u * 6.5, v * 6.5,
-                                              seed ^ 0x02e5be93u) - 0.5;
-    const double detailY = terrainValueNoise(u * 6.5, v * 6.5,
-                                              seed ^ 0x967a889bu) - 0.5;
-    *sharpness = 9.0;
-    switch(style)
-    {
-    case ETerrainBlendStyle::Grass:
-    {
-        const double strandsX = std::sin((v * (10.0 + variation) + u * 1.5) * tau + phase);
-        const double strandsY = std::sin((u * (9.0 + variation) - v * 1.2) * tau + phase * 1.37);
-        const double patches = terrainValueNoise(u * 4.0, v * 4.0,
-                                                  seed ^ 0x4f1bbcdcu) - 0.5;
-        *dx = coarseX * 0.30 + strandsX * 0.24 + patches * 0.38;
-        *dy = coarseY * 0.30 + strandsY * 0.24 + patches * 0.32;
-        *sharpness = 13.0 + std::fabs(patches) * 7.0;
-        break;
-    }
-    case ETerrainBlendStyle::Sand:
-    {
-        const double grainX = terrainValueNoise(u * (18.0 + variation * 2.0),
-            v * (18.0 + variation * 2.0), seed ^ 0xa0761d65u) - 0.5;
-        const double grainY = terrainValueNoise(u * (20.0 + variation * 2.0),
-            v * (20.0 + variation * 2.0), seed ^ 0xe7037ed1u) - 0.5;
-        *dx = coarseX * 0.12 + grainX * 0.20;
-        *dy = coarseY * 0.12 + grainY * 0.20;
-        *sharpness = 7.5;
-        break;
-    }
-    case ETerrainBlendStyle::Gravel:
-    {
-        const double chunksX = terrainValueNoise(u * (7.0 + variation),
-            v * (6.0 + variation), seed ^ 0x8ebc6af1u) - 0.5;
-        const double chunksY = terrainValueNoise(u * (6.0 + variation),
-            v * (8.0 + variation), seed ^ 0x589965cdu) - 0.5;
-        *dx = coarseX * 0.22 + chunksX * 0.64 + detailX * 0.24;
-        *dy = coarseY * 0.22 + chunksY * 0.64 + detailY * 0.24;
-        *sharpness = 14.0 + std::fabs(chunksX + chunksY) * 5.0;
-        break;
-    }
-    case ETerrainBlendStyle::Snow:
-    {
-        const double clumpX = std::sin((u * (3.0 + variation * 0.5)
-                                       + v * 2.0) * tau + phase);
-        const double clumpY = std::sin((v * (3.5 + variation * 0.5)
-                                       - u * 1.75) * tau + phase * 1.21);
-        const double powder = terrainValueNoise(u * 5.0, v * 5.0,
-                                                 seed ^ 0xd1b54a35u) - 0.5;
-        *dx = coarseX * 0.28 + clumpX * 0.25 + powder * 0.25;
-        *dy = coarseY * 0.28 + clumpY * 0.25 + powder * 0.25;
-        *sharpness = 10.5 + (clumpX + 1.0) * 1.5;
-        break;
-    }
-    case ETerrainBlendStyle::Stone:
-    {
-        const double crackX = terrainTriangleWave(u * (5.0 + variation)
-                                                   + v * 1.7 + phase / tau);
-        const double crackY = terrainTriangleWave(v * (5.0 + variation)
-                                                   - u * 1.3 + phase / tau);
-        *dx = coarseX * 0.22 + crackX * 0.38 + detailX * 0.20;
-        *dy = coarseY * 0.22 + crackY * 0.38 + detailY * 0.20;
-        *sharpness = 15.0 + std::fabs(crackX * crackY) * 6.0;
-        break;
-    }
-    case ETerrainBlendStyle::Water:
-    {
-        const double ripple = std::sin((v * (4.0 + variation * 0.75)
-                                       + u * 0.65) * tau + phase);
-        const double crossRipple = std::sin((u * 2.25 - v * 3.0) * tau
-                                            + phase * 1.43);
-        *dx = coarseX * 0.12 + ripple * 0.18;
-        *dy = coarseY * 0.12 + ripple * 0.42 + crossRipple * 0.12;
-        *sharpness = 8.5;
-        break;
-    }
-    case ETerrainBlendStyle::Ice:
-    {
-        const double fractureX = terrainTriangleWave(u * (7.0 + variation)
-                                                      + v * 3.0 + phase / tau);
-        const double fractureY = terrainTriangleWave(v * (8.0 + variation)
-                                                      - u * 2.0 + phase / tau);
-        *dx = coarseX * 0.16 + fractureX * 0.36 + detailX * 0.16;
-        *dy = coarseY * 0.16 + fractureY * 0.36 + detailY * 0.16;
-        *sharpness = 12.5;
-        break;
-    }
-    case ETerrainBlendStyle::Paving:
-    {
-        const double courses = terrainTriangleWave(v * (5.0 + variation)
-                                                    + phase / tau);
-        const double joints = terrainTriangleWave(u * (6.0 + variation)
-                                                   + (int(v * 6.0) & 1) * 0.5);
-        *dx = coarseX * 0.10 + joints * 0.25;
-        *dy = coarseY * 0.10 + courses * 0.25;
-        *sharpness = 16.0;
-        break;
-    }
-    case ETerrainBlendStyle::Lava:
-    {
-        const double flow = std::sin((u * 1.4 + v * (4.0 + variation))
-                                     * tau + phase);
-        const double branch = terrainValueNoise(u * 5.5, v * 5.5,
-                                                 seed ^ 0x94d049bbu) - 0.5;
-        *dx = coarseX * 0.32 + flow * 0.22 + branch * 0.35;
-        *dy = coarseY * 0.32 + flow * 0.45 + branch * 0.25;
-        *sharpness = 12.0 + std::fabs(flow) * 4.0;
-        break;
-    }
-    case ETerrainBlendStyle::Swamp:
-    {
-        const double pools = terrainValueNoise(u * (3.0 + variation * 0.4),
-            v * (3.0 + variation * 0.4), seed ^ 0x369dea0fu) - 0.5;
-        const double reeds = std::sin((u * 8.0 + v * 1.25) * tau + phase);
-        *dx = coarseX * 0.30 + pools * 0.42 + reeds * 0.12;
-        *dy = coarseY * 0.30 + pools * 0.42 + reeds * 0.18;
-        *sharpness = 9.5 + std::fabs(pools) * 5.0;
-        break;
-    }
-    case ETerrainBlendStyle::Soil:
-        *dx = coarseX * 0.52 + detailX * 0.24;
-        *dy = coarseY * 0.52 + detailY * 0.24;
-        *sharpness = 10.0;
-        break;
-    case ETerrainBlendStyle::Organic:
-    default:
-    {
-        const double sweepX = std::sin(v * tau + phase)
-                            + 0.45 * std::sin(v * 2.5 * tau + phase * 1.71);
-        const double sweepY = std::sin(u * tau + phase * 1.31)
-                            + 0.45 * std::sin(u * 2.5 * tau + phase * 0.73);
-        *dx = coarseX * 0.60 + detailX * 0.20 + sweepX * 0.20;
-        *dy = coarseY * 0.60 + detailY * 0.20 + sweepY * 0.20;
-        break;
-    }
-    }
-}
-
-double terrainEdgeDisplacement(ETerrainBlendStyle style, qint32 first,
-                               qint32 second, double position, quint32 seed)
-{
-    if(first == second)
-        return 0.0;
-    const bool reversed = first > second;
-    if(reversed)
-    {
-        std::swap(first, second);
-        position = 1.0 - position;
-    }
-    const quint32 pairSeed = terrainNoiseHash(seed);
-    const double coarse = terrainValueNoise(position * 3.25, 0.375,
-                                             pairSeed) - 0.5;
-    const double detail = terrainValueNoise(position * 9.5, 1.875,
-                                             pairSeed ^ 0x27d4eb2fu) - 0.5;
-    const double tau = 6.28318530717958647692;
-    double displacement = coarse * 0.20 + detail * 0.07;
-    switch(style)
-    {
-    case ETerrainBlendStyle::Grass:
-        displacement += std::sin(position * 11.0 * tau
-            + double(pairSeed & 255u)) * 0.045;
-        break;
-    case ETerrainBlendStyle::Sand:
-        displacement = coarse * 0.09 + detail * 0.025;
-        break;
-    case ETerrainBlendStyle::Gravel:
-        displacement = coarse * 0.24 + detail * 0.11;
-        break;
-    case ETerrainBlendStyle::Snow:
-        displacement = coarse * 0.18
-            + std::sin(position * 4.0 * tau + double(pairSeed & 127u)) * 0.06;
-        break;
-    case ETerrainBlendStyle::Stone:
-    case ETerrainBlendStyle::Paving:
-    case ETerrainBlendStyle::Ice:
-        displacement = coarse * 0.14
-            + terrainTriangleWave(position * 6.0
-                + double(pairSeed & 63u) / 63.0) * 0.045;
-        break;
-    case ETerrainBlendStyle::Water:
-        displacement = coarse * 0.08
-            + std::sin(position * 5.0 * tau + double(pairSeed & 255u)) * 0.055;
-        break;
-    default:
-        break;
-    }
-    return reversed ? -displacement : displacement;
 }
 
 QRgb premultipliedBlend(const QRgb samples[4], const double weights[4])
@@ -334,6 +92,46 @@ QRgb premultipliedBlend(const QRgb samples[4], const double weights[4])
                  qBound(0, qRound(green / alpha), 255),
                  qBound(0, qRound(blue / alpha), 255),
                  qBound(0, qRound(alpha * 255.0), 255));
+}
+
+int transitionTopology(const STerrainTransitionSignature& signature)
+{
+    QMap<qint32, int> counts;
+    for(qint32 id : corners(signature)) ++counts[id];
+    if(counts.size() != 2) return counts.size();
+    const QList<int> values = counts.values();
+    if(values.contains(1)) return 21; // one/three
+    return signature.northWest == signature.southEast
+        && signature.northEast == signature.southWest ? 22 : 23;
+}
+
+STerrainTransitionSignature rotatePreviewClockwise(
+    const STerrainTransitionSignature& value)
+{
+    STerrainTransitionSignature result;
+    result.northWest = value.southWest;
+    result.northEast = value.northWest;
+    result.southEast = value.northEast;
+    result.southWest = value.southEast;
+    return result;
+}
+
+QImage rotateImageClockwise(const QImage& image)
+{
+    return image.transformed(QTransform().rotate(90.0), Qt::FastTransformation);
+}
+
+bool sameOwnerPattern(const STerrainTransitionSignature& first,
+                      qint32 firstOwner,
+                      const STerrainTransitionSignature& second,
+                      qint32 secondOwner)
+{
+    const QVector<qint32> a = corners(first);
+    const QVector<qint32> b = corners(second);
+    for(int index = 0; index < 4; ++index)
+        if((a.at(index) == firstOwner) != (b.at(index) == secondOwner))
+            return false;
+    return true;
 }
 }
 
@@ -674,10 +472,169 @@ int CTerrainVirtualAtlas::blendVariation(int cellX, int cellY,
                % quint32(boundedLimit));
 }
 
+bool CTerrainVirtualAtlas::registerBlendMaskTemplate(
+    const STerrainTransitionSignature& signature, const QImage& pixels,
+    const QString& sourceLabel, CValidationReport* report)
+{
+    QSet<qint32> materials;
+    for(qint32 id : corners(signature)) materials.insert(id);
+    if(materials.size() != 2)
+        return true;
+    QList<qint32> ordered = materials.values();
+    std::sort(ordered.begin(), ordered.end());
+    const qint32 owner = ordered.at(0);
+    const qint32 other = ordered.at(1);
+    if(!m_materialSources.contains(owner) || !m_materialSources.contains(other))
+        return true;
+    const QImage ownerPixels = m_materialSources.value(owner)
+        .convertToFormat(QImage::Format_RGBA8888);
+    const QImage otherPixels = m_materialSources.value(other)
+        .convertToFormat(QImage::Format_RGBA8888);
+    if(ownerPixels.size() != pixels.size() || otherPixels.size() != pixels.size())
+        return true;
+
+    const QImage transition = pixels.convertToFormat(QImage::Format_RGBA8888);
+    QImage mask(pixels.size(), QImage::Format_Grayscale8);
+    quint64 separability = 0;
+    for(int y = 0; y < mask.height(); ++y)
+        for(int x = 0; x < mask.width(); ++x)
+        {
+            const QColor actual = transition.pixelColor(x, y);
+            const QColor a = ownerPixels.pixelColor(x, y);
+            const QColor b = otherPixels.pixelColor(x, y);
+            const auto distance = [&actual](const QColor& sample) {
+                const qint64 dr = actual.red() - sample.red();
+                const qint64 dg = actual.green() - sample.green();
+                const qint64 db = actual.blue() - sample.blue();
+                const qint64 da = actual.alpha() - sample.alpha();
+                return quint64(dr * dr + dg * dg + db * db + da * da);
+            };
+            const quint64 da = distance(a);
+            const quint64 db = distance(b);
+            separability += quint64(qAbs(a.red() - b.red())
+                + qAbs(a.green() - b.green()) + qAbs(a.blue() - b.blue()));
+            double ownership = da + db == 0 ? 0.5
+                : double(db) / double(da + db);
+            // Stock transition art often contains pixels authored specifically
+            // for the join. Preserve its silhouette while avoiding a broad,
+            // blurry cross-fade when that ownership field is transferred.
+            ownership = qBound(0.0, (ownership - 0.5) * 2.4 + 0.5, 1.0);
+            ownership = ownership * ownership * (3.0 - 2.0 * ownership);
+            mask.setPixelColor(x, y, QColor::fromRgbF(
+                ownership, ownership, ownership));
+        }
+    if(separability < quint64(mask.width()) * quint64(mask.height()) * 6u)
+        return true;
+
+    const STerrainTransitionSignature preview =
+        CTerrainTransitionCatalog::mirroredGridY(signature);
+    const QVector<qint32> previewCorners = corners(preview);
+    const QPoint points[4] = {{0, 0}, {mask.width() - 1, 0},
+        {mask.width() - 1, mask.height() - 1}, {0, mask.height() - 1}};
+    for(int corner = 0; corner < 4; ++corner)
+        mask.setPixelColor(points[corner], previewCorners.at(corner) == owner
+            ? Qt::white : Qt::black);
+
+    STerrainBlendMaskTemplate candidate;
+    candidate.signature = signature;
+    candidate.ownershipMask = mask;
+    candidate.ownerMaterial = owner;
+    candidate.otherMaterial = other;
+    candidate.ownerStyle = m_materialBlendStyles.value(
+        owner, ETerrainBlendStyle::Organic);
+    candidate.otherStyle = m_materialBlendStyles.value(
+        other, ETerrainBlendStyle::Organic);
+    candidate.sourceLabel = sourceLabel;
+    candidate.maskSha256 = imageHash(mask);
+    for(const STerrainBlendMaskTemplate& existing : m_blendMaskTemplates)
+        if(existing.maskSha256 == candidate.maskSha256
+           && transitionTopology(existing.signature)
+                == transitionTopology(candidate.signature))
+            return true;
+    m_blendMaskTemplates.append(candidate);
+    if(report) report->add("terrain.stock_blend_mask",
+        EValidationSeverity::Info,
+        "Indexed a full-resolution stock JMV transition mask", sourceLabel);
+    return true;
+}
+
+QImage CTerrainVirtualAtlas::alignedStockMask(
+    const STerrainTransitionSignature& requestedPreview,
+    qint32 ownerMaterial, qint32 otherMaterial, int variation,
+    QString* provenance) const
+{
+    struct Candidate { int score{0}; QImage mask; QString source; QByteArray hash; };
+    QVector<Candidate> matches;
+    const ETerrainBlendStyle ownerStyle = m_materialBlendStyles.value(
+        ownerMaterial, ETerrainBlendStyle::Organic);
+    const ETerrainBlendStyle otherStyle = m_materialBlendStyles.value(
+        otherMaterial, ETerrainBlendStyle::Organic);
+    const int topology = transitionTopology(requestedPreview);
+    for(const STerrainBlendMaskTemplate& item : m_blendMaskTemplates)
+    {
+        STerrainTransitionSignature itemPreview =
+            CTerrainTransitionCatalog::mirroredGridY(item.signature);
+        if(transitionTopology(itemPreview) != topology)
+            continue;
+        QImage rotated = item.ownershipMask;
+        for(int turn = 0; turn < 4; ++turn)
+        {
+            bool inverted = false;
+            bool aligned = sameOwnerPattern(itemPreview, item.ownerMaterial,
+                                            requestedPreview, ownerMaterial);
+            if(!aligned)
+            {
+                aligned = sameOwnerPattern(itemPreview, item.otherMaterial,
+                                           requestedPreview, ownerMaterial);
+                inverted = aligned;
+            }
+            if(aligned)
+            {
+                Candidate candidate;
+                candidate.mask = rotated;
+                if(inverted) candidate.mask.invertPixels();
+                candidate.source = item.sourceLabel;
+                candidate.hash = item.maskSha256;
+                const bool exactPair = (item.ownerMaterial == ownerMaterial
+                    && item.otherMaterial == otherMaterial)
+                    || (item.ownerMaterial == otherMaterial
+                        && item.otherMaterial == ownerMaterial);
+                const bool exactStyles = (item.ownerStyle == ownerStyle
+                    && item.otherStyle == otherStyle)
+                    || (item.ownerStyle == otherStyle
+                        && item.otherStyle == ownerStyle);
+                candidate.score = exactPair ? 10000 : exactStyles ? 1000 : 0;
+                if(item.ownerStyle == ownerStyle || item.otherStyle == ownerStyle)
+                    candidate.score += 200;
+                if(item.ownerStyle == otherStyle || item.otherStyle == otherStyle)
+                    candidate.score += 100;
+                matches.append(candidate);
+                break;
+            }
+            itemPreview = rotatePreviewClockwise(itemPreview);
+            rotated = rotateImageClockwise(rotated);
+        }
+    }
+    if(matches.isEmpty()) return {};
+    std::sort(matches.begin(), matches.end(), [](const Candidate& a,
+                                                  const Candidate& b) {
+        if(a.score != b.score) return a.score > b.score;
+        if(a.source != b.source) return a.source < b.source;
+        return a.hash < b.hash;
+    });
+    const int bestScore = matches.front().score;
+    int pool = 0;
+    while(pool < matches.size() && matches.at(pool).score == bestScore
+          && pool < blendVariationCount()) ++pool;
+    const Candidate& selected = matches.at(variation % qMax(1, pool));
+    if(provenance) *provenance = selected.source;
+    return selected.mask;
+}
+
 QImage CTerrainVirtualAtlas::generateTile(
     const STerrainTransitionSignature& gridSignature,
     ETerrainBlendStyle style, int variation,
-    CValidationReport* report) const
+    QString* provenance, CValidationReport* report) const
 {
     // Atlas thumbnails are vertically opposite the canonical terrain grid.
     const STerrainTransitionSignature preview =
@@ -694,87 +651,91 @@ QImage CTerrainVirtualAtlas::generateTile(
             return {};
         }
     }
-    const int size = m_authoredTiles.front().width();
-    const quint32 noiseSeed = transitionNoiseSeed(
-        ids, m_materialSources, m_distributionSeed);
-    const quint32 variantSeed = terrainNoiseHash(noiseSeed
-        ^ quint32(variation + 1) * 0x9e3779b9u);
-    struct EdgeDescriptor
+    QSet<qint32> uniqueSet;
+    for(qint32 id : ids) uniqueSet.insert(id);
+    QList<qint32> unique = uniqueSet.values();
+    std::sort(unique.begin(), unique.end());
+    QVector<QImage> ownership;
+    ownership.reserve(unique.size());
+    QStringList sources;
+    if(unique.size() == 1)
     {
-        qint32 first{0};
-        qint32 second{0};
-        ETerrainBlendStyle style{ETerrainBlendStyle::Organic};
-        quint32 seed{0};
-    };
-    const auto makeEdge = [this](qint32 first, qint32 second) {
-        EdgeDescriptor edge;
-        edge.first = first;
-        edge.second = second;
-        const ETerrainBlendStyle firstStyle = m_materialBlendStyles.value(
-            first, ETerrainBlendStyle::Organic);
-        const ETerrainBlendStyle secondStyle = m_materialBlendStyles.value(
-            second, ETerrainBlendStyle::Organic);
-        edge.style = terrainBlendStylePriority(firstStyle)
-            >= terrainBlendStylePriority(secondStyle) ? firstStyle : secondStyle;
-        QVector<qint32> pair;
-        if(first <= second) pair << first << second;
-        else pair << second << first;
-        edge.seed = transitionNoiseSeed(
-            pair, m_materialSources, m_distributionSeed);
-        return edge;
-    };
-    const EdgeDescriptor topEdge = makeEdge(ids[0], ids[1]);
-    const EdgeDescriptor bottomEdge = makeEdge(ids[3], ids[2]);
-    const EdgeDescriptor leftEdge = makeEdge(ids[0], ids[3]);
-    const EdgeDescriptor rightEdge = makeEdge(ids[1], ids[2]);
-    const auto edgeWarp = [](const EdgeDescriptor& edge, double position) {
-        return terrainEdgeDisplacement(edge.style, edge.first, edge.second,
-                                       position, edge.seed);
-    };
+        if(provenance) *provenance = QStringLiteral("uniform-material-source");
+        return m_materialSources.value(unique.front())
+            .convertToFormat(QImage::Format_RGBA8888);
+    }
+    if(unique.size() == 2)
+    {
+        QString source;
+        QImage owner = alignedStockMask(preview, unique.at(0), unique.at(1),
+                                        variation, &source);
+        if(owner.isNull())
+        {
+            if(report) report->add("terrain.stock_blend_mask_missing",
+                EValidationSeverity::Error,
+                "No reviewed stock JMV mask matches this transition topology",
+                QString("%1/%2 (%3)").arg(unique.at(0)).arg(unique.at(1))
+                    .arg(blendStyleName(style)));
+            return {};
+        }
+        ownership << owner;
+        QImage inverse = owner;
+        inverse.invertPixels();
+        ownership << inverse;
+        sources << source;
+    }
+    else
+    {
+        // Multi-school junctions are composed from reviewed stock one-corner
+        // transitions. Each corner retains a stock-authored silhouette; equal
+        // identities are aggregated before normalization.
+        for(qint32 material : unique)
+        {
+            QImage combined(m_authoredTiles.front().size(),
+                            QImage::Format_Grayscale8);
+            combined.fill(Qt::black);
+            for(int corner = 0; corner < 4; ++corner)
+            {
+                if(ids.at(corner) != material) continue;
+                qint32 support = unique.front() == material && unique.size() > 1
+                    ? unique.at(1) : unique.front();
+                STerrainTransitionSignature oneCorner;
+                oneCorner.northWest = oneCorner.northEast =
+                    oneCorner.southEast = oneCorner.southWest = support;
+                if(corner == 0) oneCorner.northWest = material;
+                if(corner == 1) oneCorner.northEast = material;
+                if(corner == 2) oneCorner.southEast = material;
+                if(corner == 3) oneCorner.southWest = material;
+                QString source;
+                const QImage cornerMask = alignedStockMask(
+                    oneCorner, material, support, variation, &source);
+                if(cornerMask.isNull())
+                {
+                    if(report) report->add("terrain.stock_blend_mask_missing",
+                        EValidationSeverity::Error,
+                        "No reviewed stock JMV one-corner mask can compose a multi-school junction",
+                        QString::number(material));
+                    return {};
+                }
+                sources << source;
+                for(int y = 0; y < combined.height(); ++y)
+                    for(int x = 0; x < combined.width(); ++x)
+                    {
+                        const int value = qMax(combined.pixelColor(x, y).red(),
+                            cornerMask.pixelColor(x, y).red());
+                        combined.setPixelColor(x, y, QColor(value, value, value));
+                    }
+            }
+            ownership << combined;
+        }
+    }
+    sources.removeDuplicates();
+    if(provenance) *provenance = sources.join(QStringLiteral("; "));
+    const int size = m_authoredTiles.front().width();
     QImage result(size, size, QImage::Format_RGBA8888);
     for(int y = 0; y < size; ++y)
-    {
-        const double v = size == 1 ? 0.0 : double(y) / double(size - 1);
         for(int x = 0; x < size; ++x)
         {
-            const double u = size == 1 ? 0.0 : double(x) / double(size - 1);
-            // Warp the interior corner field with deterministic multi-scale
-            // value noise. The envelope is zero on every tile edge, so two
-            // neighbouring exact tuples still produce byte-identical seams,
-            // while the visible meeting line meanders like authored terrain
-            // instead of dividing the tile into four geometric quadrants.
-            const double sinU = std::sin(u * 3.14159265358979323846);
-            const double sinV = std::sin(v * 3.14159265358979323846);
-            const double envelope = sinU * sinV;
-            double displacementX = 0.0;
-            double displacementY = 0.0;
-            double sharpness = 9.0;
-            terrainBlendDisplacement(style, u, v, variantSeed, variation,
-                                     &displacementX, &displacementY,
-                                     &sharpness);
-            // Tangential edge warps are keyed only by the two endpoint
-            // materials. Adjacent tiles therefore share the same irregular
-            // silhouette instead of meeting at a repeated 90-degree quarter
-            // cut. Interior variation remains cell-specific.
-            const double horizontalEdgeWarp =
-                (1.0 - v) * edgeWarp(topEdge, u)
-                + v * edgeWarp(bottomEdge, u);
-            const double verticalEdgeWarp =
-                (1.0 - u) * edgeWarp(leftEdge, v)
-                + u * edgeWarp(rightEdge, v);
-            const double warpedU = qBound(0.0,
-                u + envelope * displacementX + sinU * horizontalEdgeWarp, 1.0);
-            const double warpedV = qBound(0.0,
-                v + envelope * displacementY + sinV * verticalEdgeWarp, 1.0);
-            const double bilinear[4] = {
-                (1.0 - warpedU) * (1.0 - warpedV),
-                warpedU * (1.0 - warpedV),
-                warpedU * warpedV, (1.0 - warpedU) * warpedV
-            };
-            // A transition is a masked meeting of material textures, not a
-            // low-frequency colour interpolation across the complete tile.
-            // Aggregate duplicate corners first, then sharpen the material
-            // masks so source detail is retained outside the true boundary.
             double weights[4] = {0.0, 0.0, 0.0, 0.0};
             double total = 0.0;
             QRgb samples[4];
@@ -783,30 +744,46 @@ QImage CTerrainVirtualAtlas::generateTile(
                 samples[corner] = m_materialSources.value(ids.at(corner))
                     .pixelColor(x, y).rgba();
                 bool first = true;
-                double materialWeight = 0.0;
                 for(int candidate = 0; candidate < 4; ++candidate)
-                    if(ids.at(candidate) == ids.at(corner))
-                    {
-                        materialWeight += bilinear[candidate];
-                        if(candidate < corner) first = false;
-                    }
+                    if(ids.at(candidate) == ids.at(corner) && candidate < corner)
+                        first = false;
                 if(first)
                 {
-                    // Style-specific sharpness is also faded out at edges so
-                    // independently selected variants remain byte-seamless.
-                    const double edgeSafeSharpness = 9.0
-                        + envelope * (sharpness - 9.0);
-                    weights[corner] = std::pow(materialWeight,
-                                                edgeSafeSharpness);
+                    const int materialIndex = unique.indexOf(ids.at(corner));
+                    weights[corner] = ownership.at(materialIndex)
+                        .pixelColor(x, y).redF();
                     total += weights[corner];
                 }
             }
             if(total > 0.0)
                 for(double& weight : weights) weight /= total;
+            const auto forceSharedEdge = [&](qint32 firstMaterial,
+                                             qint32 secondMaterial,
+                                             double position) {
+                for(double& weight : weights) weight = 0.0;
+                const qint32 selected = firstMaterial == secondMaterial
+                    || position < 0.5 ? firstMaterial : secondMaterial;
+                for(int corner = 0; corner < 4; ++corner)
+                    if(ids.at(corner) == selected)
+                    {
+                        weights[corner] = 1.0;
+                        break;
+                    }
+            };
+            // Interior artwork comes from the reviewed stock mask. The outer
+            // texel ring is resolved solely from its two edge endpoints so
+            // independently selected interior variants cannot open a seam.
+            if(y == 0) forceSharedEdge(ids.at(0), ids.at(1),
+                size == 1 ? 0.0 : double(x) / double(size - 1));
+            if(y == size - 1) forceSharedEdge(ids.at(3), ids.at(2),
+                size == 1 ? 0.0 : double(x) / double(size - 1));
+            if(x == 0) forceSharedEdge(ids.at(0), ids.at(3),
+                size == 1 ? 0.0 : double(y) / double(size - 1));
+            if(x == size - 1) forceSharedEdge(ids.at(1), ids.at(2),
+                size == 1 ? 0.0 : double(y) / double(size - 1));
             result.setPixelColor(x, y,
                 QColor::fromRgba(premultipliedBlend(samples, weights)));
         }
-    }
     return result;
 }
 
@@ -822,6 +799,7 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
             sourceLabel);
         return false;
     }
+    registerBlendMaskTemplate(signature, pixels, sourceLabel, report);
     bool alreadyPresent = false;
     m_authoredLibraryCatalog.selectForPaint(
         signature, 0, 0, m_distributionSeed, &alreadyPresent);
@@ -836,6 +814,8 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     imported.pixelSha256 = imageHash(imported.pixels);
     imported.authored = true;
     imported.sourceSlot = -1;
+    imported.blendProvenance = sourceLabel;
+    imported.stockDerivedBlend = true;
     const int generatedIndex = m_generatedTiles.size();
     m_generatedTiles.append(imported);
     m_generatedByPixels.insert(imported.pixelSha256, generatedIndex);
@@ -908,7 +888,9 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     int index = m_generatedBySignature.value(key, -1);
     if(index < 0)
     {
-        const QImage pixels = generateTile(canonical, style, variation, report);
+        QString provenance;
+        const QImage pixels = generateTile(canonical, style, variation,
+                                           &provenance, report);
         if(pixels.isNull())
             return result;
         const QByteArray pixelsHash = imageHash(pixels);
@@ -920,6 +902,10 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
             generated.pixels = pixels;
             generated.pixelSha256 = pixelsHash;
             generated.authored = false;
+            generated.blendProvenance = provenance;
+            QSet<qint32> generatedMaterials;
+            for(qint32 id : corners(canonical)) generatedMaterials.insert(id);
+            generated.stockDerivedBlend = generatedMaterials.size() > 1;
             index = m_generatedTiles.size();
             m_generatedTiles.append(generated);
             m_generatedByPixels.insert(pixelsHash, index);
@@ -982,7 +968,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             if(!tile.authored && tile.generatedIndex < 0)
             {
                 result.error = QStringLiteral(
-                    "An exact tile could not be authored because a material lacks a uniform source.");
+                    "An exact tile could not be authored. See validation findings for a missing "
+                    "uniform material source or reviewed stock JMV blend mask.");
                 return result;
             }
             cells.append({tile, x, y});
@@ -1475,6 +1462,14 @@ bool CTerrainWorkingAtlas::addAuthoredLibraryTransition(
     const QString& sourceLabel, CValidationReport* report)
 {
     return m_resolver && m_resolver->addAuthoredLibraryTransition(
+        signature, pixels, sourceLabel, report);
+}
+
+bool CTerrainWorkingAtlas::addStockBlendMaskTemplate(
+    const STerrainTransitionSignature& signature, const QImage& pixels,
+    const QString& sourceLabel, CValidationReport* report)
+{
+    return m_resolver && m_resolver->addStockBlendMaskTemplate(
         signature, pixels, sourceLabel, report);
 }
 

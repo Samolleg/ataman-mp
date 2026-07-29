@@ -7672,12 +7672,14 @@ void CView::finalizeVirtualTerrainAtlas()
         item->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         item->setText(tr("Slot %1 - %2").arg(slot)
             .arg(tile.authored?tr("stock JMV"):tr("generated")));
-        item->setToolTip(tr("Corners: %1, %2, %3, %4\nPixel SHA-256: %5")
+        item->setToolTip(tr("Corners: %1, %2, %3, %4\nPixel SHA-256: %5\nBlend source: %6")
             .arg(tile.canonicalSignature.northWest)
             .arg(tile.canonicalSignature.northEast)
             .arg(tile.canonicalSignature.southEast)
             .arg(tile.canonicalSignature.southWest)
-            .arg(QString::fromLatin1(tile.pixelSha256)));
+            .arg(QString::fromLatin1(tile.pixelSha256))
+            .arg(tile.blendProvenance.isEmpty()
+                ?tr("original map atlas"):tile.blendProvenance));
         addedGrid->addWidget(item,addedIndex/6,addedIndex%6);
         ++addedIndex;
     }
@@ -7747,6 +7749,8 @@ void CView::finalizeVirtualTerrainAtlas()
         item.insert(QStringLiteral("authored"),tile.authored);
         item.insert(QStringLiteral("sourceSlot"),tile.sourceSlot);
         item.insert(QStringLiteral("pixelSha256"),QString::fromLatin1(tile.pixelSha256));
+        item.insert(QStringLiteral("stockDerivedBlend"),tile.stockDerivedBlend);
+        item.insert(QStringLiteral("blendProvenance"),tile.blendProvenance);
         QJsonArray corners;corners.append(tile.canonicalSignature.northWest);
         corners.append(tile.canonicalSignature.northEast);
         corners.append(tile.canonicalSignature.southEast);

@@ -19,9 +19,16 @@ paint tools.
 ## Exact generation and packing
 
 Stroke release and finalization both reuse exact authored packed tiles first.
-Missing 1/3, 2/2, three-family, and four-family signatures are generated
-deterministically from uniform material sources. Finalization repacks the live
-cache from the authoritative field. Grid/preview Y
+Missing 1/3 and 2/2 signatures are generated deterministically by transferring
+a full-resolution ownership mask reconstructed from a reviewed stock JMV
+transition onto the requested uniform material sources. Ranking is exact
+material pair first, then the sibling-reviewed material-school pair and exact
+topology. Three- and four-family junctions compose reviewed stock one-corner
+silhouettes. There is no procedural-noise fallback: an absent reviewed mask is
+reported instead of silently inventing artwork. Every generated tile records
+the stock namespace/slot provenance used for visual review.
+
+Finalization repacks the live cache from the authoritative field. Grid/preview Y
 orientation is explicit. Quarter-turn-equivalent signatures and identical
 pixels are deduplicated, and page mipmaps use premultiplied downsampling.
 DXT1 binary alpha is preserved; graded alpha is refused rather than flattened.
@@ -53,9 +60,11 @@ cell's exact four semantic corners with the authoritative intended vertex
 field, checks shared-edge continuity and mandatory touched vertices, repeats
 finalization for stable hashes, and loads every generated MPR again.
 
-When `EI_MAPPER_ATLAS_TEST_OUTPUT` is set, the test also writes every generated
-MPR, its matching external atlas RES, and the raw scenario report. These files
-are shipped with the tester build so the same inputs can be opened manually.
+The distributable visual workload is a real-JMV Zone2 stripe collection. It
+stamps every reviewed uniform family, forces missing multi-family junctions,
+writes the exact generated MPR/RES pair, and emits a native-resolution contact
+sheet plus per-tile stock provenance. Synthetic unit fixtures remain structural
+tests only and are not presented as human visual evidence.
 
 ## Reference evidence
 

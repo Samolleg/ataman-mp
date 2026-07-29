@@ -14,6 +14,7 @@
 #include <QtEndian>
 
 #include <cmath>
+#include <cstring>
 
 #include "endurance_document.h"
 #include "collection_document.h"
@@ -496,12 +497,54 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                      package.resourceArchiveBytes, &result.error))
         return result;
 
+    QVector<int> generatedSlots;
+    for(int slot = 0; slot < finalized.tiles.size(); ++slot)
+        if(!finalized.tiles.at(slot).authored) generatedSlots.append(slot);
+    if(!generatedSlots.isEmpty())
+    {
+        const int tileSize = finalized.tiles.front().pixels.width();
+        const int columns = 8;
+        const int rows = (generatedSlots.size() + columns - 1) / columns;
+        QImage review(columns * tileSize, rows * tileSize,
+                      QImage::Format_RGBA8888);
+        review.fill(QColor(32, 32, 32));
+        for(int index = 0; index < generatedSlots.size(); ++index)
+        {
+            const QImage tile = finalized.tiles.at(generatedSlots.at(index))
+                .pixels.convertToFormat(QImage::Format_RGBA8888);
+            const int destinationX = (index % columns) * tileSize;
+            const int destinationY = (index / columns) * tileSize;
+            for(int y = 0; y < tileSize; ++y)
+                memcpy(review.scanLine(destinationY + y) + destinationX * 4,
+                       tile.constScanLine(y), size_t(tileSize) * 4u);
+        }
+        if(!review.save(QDir(outputDirectory).filePath(
+                QStringLiteral("generated-blends-review.png")), "PNG"))
+        {
+            result.error = QStringLiteral(
+                "Could not write the native-resolution generated blend review sheet.");
+            return result;
+        }
+    }
+
     int authored = 0;
     int importedStock = 0;
+    QJsonArray generatedBlendSources;
     for(const STerrainFinalizedTile& tile : finalized.tiles)
     {
         authored += tile.authored;
         importedStock += tile.authored && tile.sourceSlot < 0;
+        if(!tile.authored)
+        {
+            QJsonObject source;
+            source.insert(QStringLiteral("pixel_sha256"),
+                          QString::fromLatin1(tile.pixelSha256));
+            source.insert(QStringLiteral("stock_derived"),
+                          tile.stockDerivedBlend);
+            source.insert(QStringLiteral("provenance"),
+                          tile.blendProvenance);
+            generatedBlendSources.append(source);
+        }
     }
     QJsonObject manifest;
     manifest.insert(QStringLiteral("schema"),
@@ -523,6 +566,12 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                     indexedStockTransitions);
     manifest.insert(QStringLiteral("generated_exact_tiles"),
                     finalized.tiles.size() - authored);
+    manifest.insert(QStringLiteral("generated_blend_sources"),
+                    generatedBlendSources);
+    manifest.insert(QStringLiteral("generated_blend_review"),
+                    generatedSlots.isEmpty() ? QString()
+                    : QStringLiteral("generated-blends-review.png"));
+    manifest.insert(QStringLiteral("generated_blend_review_columns"), 8);
     manifest.insert(QStringLiteral("total_active_slots"), finalized.requiredSlots);
     manifest.insert(QStringLiteral("texture_pages"), finalized.textureCount);
     manifest.insert(QStringLiteral("capacity_limit"), finalized.capacityLimit);
