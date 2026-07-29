@@ -469,19 +469,18 @@ limit; live painting remains independent of that ceiling.
   report renderer, canonical document, tile-table, and material-catalog phase
   durations independently.
 - [ ] Replace the shipped runtime's monolithic terrain-atlas allocation before
-  claiming 8192 slots. Both the normal Zone18 stress run and an independent
-  no-`drawall` control crash after gameplay-ready while allocating the
-  12288x11264 combined atlas: private memory rises from about 0.6 GiB to
-  2.6 GiB and the largest free 32-bit region falls below the required RGBA
-  surface size. A controlled test-only probe that downsamples each stock
-  Zone18 tile independently to 64px (128 512x512 pages; 6144x5632 if packed as
-  a grid) still crashes at 8192 slots: private memory rises from 513,822,720 to
-  2,317,262,848 bytes and committed 32-bit address space reaches 3,110,043,648
-  bytes before CRT abnormal termination. This rules out texture dimensions as
-  the sole cause and confirms a page-count/load-copy amplification problem.
-  The campaign therefore stops at 8192 and does not attempt 16384. Neither
-  size may be reported as passing until the renderer/resource-memory
-  architecture changes; production authoring must never silently downsample.
+  claiming 8192 slots. The corrected HD Zone18 campaign authoritatively passes
+  1024, 2048, and 4096 slots, then detects CRT abnormal termination during the
+  8192-slot load without accepting a stale readiness line. At that endpoint,
+  private memory reaches 2,559,827,968 bytes, committed 32-bit address space
+  reaches 3,399,507,968 bytes, and the largest free region falls to 335,355,904
+  bytes while the nominal RGBA atlas is 553,648,128 bytes. A controlled
+  test-only 512px-page probe also fails at 8192, ruling out texture dimensions
+  as the sole cause and confirming page/load-copy amplification. The ordered
+  campaign therefore stops at 8192 and does not attempt 16384. Neither size may
+  be reported as passing until renderer/resource-memory architecture changes;
+  production authoring must never silently downsample. Current evidence:
+  `artifacts/modern-atlas-runtime-evidence-r23`.
 - [ ] Extend one finalization transaction to simultaneous virtual land and
   overlay edits and define inactive-overlay virtual baselines.
 

@@ -97,7 +97,7 @@ Qt reports are first written to an owned ASCII `%TEMP%` path because Qt 5.12 is
 unreliable below a non-ASCII worktree. They are then copied into the campaign.
 On hard timeout the wrapper invokes owned-run recovery before classifying it.
 
-## Current proof state (prior capacity claims retracted)
+## Current proof state
 
 The 2026-07-28/29 capacity results are not valid runtime passes. The shared
 launcher accepted a stale `GameplayReady` record after `game.exe` displayed a
@@ -126,3 +126,21 @@ the owned run, and rejects the result even if historical bridge output contains
 `GameplayReady`. This applies to both the standalone campaign and Editor
 **Test Current Map**. A nonuniform frame remains supporting evidence only and
 must never override a native failure or substitute for confirmed staged play.
+
+The corrected 2026-07-29 HD campaign regenerated every fixture from the exact
+installed Zone18 MPR/MOB and produced the following authoritative boundary:
+
+| Pages / slots | Corrected result | Peak private bytes | Peak committed VA | Minimum largest free region |
+|---:|---|---:|---:|---:|
+| 16 / 1,024 | **Pass:** player on staged map, rendered terrain, dwell and cleanup | 931,086,336 | 1,815,441,408 | 2,144,096,256 |
+| 32 / 2,048 | **Pass:** player on staged map, rendered terrain, dwell and cleanup | 1,223,593,984 | 2,026,336,256 | 1,945,108,480 |
+| 64 / 4,096 | **Pass:** player on staged map, rendered terrain, dwell and cleanup | 1,238,818,816 | 2,041,536,512 | 1,920,008,192 |
+| 128 / 8,192 | **Fail:** CRT abnormal termination during load; no authoritative player-on-map result | 2,559,827,968 | 3,399,507,968 | 335,355,904 |
+
+The 8,192-slot probe's nominal combined RGBA surface is 553,648,128 bytes, but
+the observed private-memory growth above the last passing run is approximately
+1.32 GiB and committed 32-bit address space reaches approximately 3.17 GiB.
+The corrected classifier therefore identifies page/load-copy amplification and
+address-space pressure rather than accepting the stale readiness line. The
+ordered campaign stops at this confirmed endpoint and does not attempt 16,384.
+Evidence is preserved in `artifacts/modern-atlas-runtime-evidence-r23`.
