@@ -129,7 +129,8 @@ void seedReviewedPairMasks(TAtlas& atlas, qint32 owner, qint32 other,
     }
 }
 
-QByteArray portableMpr(bool withInactiveOverlay = false)
+QByteArray portableMpr(bool withInactiveOverlay = false,
+                       bool withAnimatedRange = false)
 {
     QByteArray mp;
     QDataStream stream(&mp,QIODevice::WriteOnly);
@@ -137,8 +138,10 @@ QByteArray portableMpr(bool withInactiveOverlay = false)
     stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
     stream<<quint32(0xCE4AF672)<<float(100.0f)<<quint32(1)<<quint32(1)
           <<quint32(4)<<quint32(64)<<quint32(4)<<quint32(8)
-          <<quint16(0)<<quint32(0);
+          <<quint16(0)<<quint32(withAnimatedRange ? 1 : 0);
     stream<<qint32(1)<<qint32(2)<<qint32(3)<<qint32(4);
+    if(withAnimatedRange)
+        stream<<quint16(0)<<quint16(4);
     QByteArray sector;
     QDataStream sec(&sector,QIODevice::WriteOnly);
     sec.setByteOrder(QDataStream::LittleEndian);
@@ -271,6 +274,7 @@ private slots:
     void generatedMultiFamilyBlendHasNoZeroWeightHoles();
     void generatedOverlayBlendPreservesAuthoredAlpha();
     void stockMaskTransferRemovesPixelSizedIslandsAndPinholes();
+    void stockMaskTransferRemovesLargeDetachedInsideCornerBlocks();
     void materialNamesSelectExplicitBlendStyles();
     void materialBlendStylesProvideBoundedDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
@@ -302,6 +306,8 @@ private slots:
     void selfPaintPreservesExactPackedTileAndRotation();
     void parallelStripesAndBaseCrossResolveExactly();
     void nestedCircleMaterialPairingsResolveExactly();
+    void circularPaintsKeepEveryBrushIdentityInsideAndAtOuterEdge();
+    void generatedSlotsNeverInheritCompactedAnimationRanges();
     void generatedPaintMatrixSavesReopensAndMatchesVertexOracle();
 };
 
@@ -651,6 +657,38 @@ void TerrainVirtualAtlasTests::stockMaskTransferRemovesPixelSizedIslandsAndPinho
             > generated.pixelColor(8, 31).green());
     QVERIFY(generated.pixelColor(54, 30).green()
             > generated.pixelColor(54, 30).red());
+}
+
+void TerrainVirtualAtlasTests::stockMaskTransferRemovesLargeDetachedInsideCornerBlocks()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    fixture.images[0].fill(QColor(230, 20, 20, 255));
+    fixture.images[1].fill(QColor(20, 220, 20, 255));
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    QImage malformed(64, 64, QImage::Format_RGBA8888);
+    malformed.fill(fixture.images[1].pixelColor(0, 0));
+    for(int y = 0; y < 30; ++y)
+        for(int x = 0; x < 30; ++x)
+            malformed.setPixelColor(x, y, fixture.images[0].pixelColor(x, y));
+    // This sizeable detached owner block models the square/cross artifact in
+    // a concave circle boundary. It is too large for an area-only filter but
+    // is invalid because no requested owner corner reaches it.
+    for(int y = 34; y < 48; ++y)
+        for(int x = 34; x < 48; ++x)
+            malformed.setPixelColor(x, y, fixture.images[0].pixelColor(x, y));
+    QVERIFY(atlas.addStockBlendMaskTemplate(signature(1, 2, 2, 2),
+        malformed, QStringLiteral("detached-inside-corner-regression")));
+    const STerrainVirtualTile tile = atlas.resolve(
+        signature(1, 2, 2, 2), 0, 0);
+    QVERIFY(tile.generatedIndex >= 0);
+    const QImage generated = atlas.generatedTiles().at(
+        tile.generatedIndex).pixels;
+    QVERIFY2(generated.pixelColor(40, 40).green()
+             > generated.pixelColor(40, 40).red(),
+             "Detached inside-corner owner block survived mask transfer");
 }
 
 void TerrainVirtualAtlasTests::materialNamesSelectExplicitBlendStyles()
@@ -1775,6 +1813,80 @@ void TerrainVirtualAtlasTests::nestedCircleMaterialPairingsResolveExactly()
             ++scenarios;
         }
     QCOMPARE(scenarios, 12);
+}
+
+void TerrainVirtualAtlasTests::circularPaintsKeepEveryBrushIdentityInsideAndAtOuterEdge()
+{
+    Fixture fixture;
+    for(qint32 background = 1; background <= 4; ++background)
+        for(qint32 brushMaterial = 1; brushMaterial <= 4; ++brushMaterial)
+            for(float radius : {3.0f, 4.0f})
+            {
+                CTerrainVirtualMaterialField field;
+                QVERIFY(field.resize(16, 16, background));
+                STerrainTileBrush brush;
+                brush.centerX = brush.centerY = 8.0f;
+                brush.radius = radius;
+                brush.shape = ETerrainTileBrushShape::Circle;
+                field.paint(brush, brushMaterial);
+                CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images,
+                                            0xc1cc1e00u);
+                seedReviewedStockMasks(atlas, fixture);
+                CValidationReport report;
+                const STerrainAtlasFinalization finalized = atlas.finalize(
+                    field, QStringLiteral("CircleBrushOracle"), 512,
+                    {1,2,3,4}, &report);
+                QVERIFY2(finalized.success,
+                    qPrintable(finalized.error + "\n" + report.toText()));
+                for(int y = 0; y < 16; ++y)
+                    for(int x = 0; x < 16; ++x)
+                    {
+                        bool found = false;
+                        const STerrainTransitionSignature actual =
+                            finalizedSignature(finalized,
+                                finalized.packedCells.at(y * 16 + x), &found);
+                        QVERIFY(found);
+                        QCOMPARE(actual, field.cellSignature(x, y));
+                    }
+                for(int y = 0; y <= 16; ++y)
+                    for(int x = 0; x <= 16; ++x)
+                    {
+                        const int dx = x - 8, dy = y - 8;
+                        const bool touched = dx * dx + dy * dy
+                            <= int(radius * radius + 0.0001f);
+                        QCOMPARE(field.material(x, y),
+                            touched ? brushMaterial : background);
+                    }
+            }
+}
+
+void TerrainVirtualAtlasTests::generatedSlotsNeverInheritCompactedAnimationRanges()
+{
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(16, 16, 1));
+    QVERIFY(field.setMaterial(1, 0, 2));
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0xadda11u);
+    seedReviewedStockMasks(atlas, fixture);
+    CValidationReport report;
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("AnimatedSource"), 512, {1,2,3,4}, &report);
+    QVERIFY2(finalized.success, qPrintable(finalized.error));
+    CMprDocument source;
+    QVERIFY2(source.loadBytes(portableMpr(false, true),
+        QStringLiteral("animated-source.mpr"), &report),
+        qPrintable(report.toText()));
+    QCOMPARE(source.mapInfo().animatedTileCount, quint32(1));
+    const STerrainPortableAtlasPackage package =
+        CTerrainVirtualAtlas::buildPortablePackage(
+            source, finalized, ETerrainTileLayer::Land, &report);
+    QVERIFY2(package.success,
+        qPrintable(package.error + "\n" + report.toText()));
+    CMprDocument reopened;
+    QVERIFY2(reopened.loadBytes(package.mprBytes,
+        QStringLiteral("animated-finalized.mpr"), &report),
+        qPrintable(report.toText()));
+    QCOMPARE(reopened.mapInfo().animatedTileCount, quint32(0));
 }
 
 void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexOracle()

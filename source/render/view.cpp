@@ -6664,7 +6664,13 @@ void CView::rebuildTerrainAutoCatalog()
     STerrainAtlasProfile stored;
     QString storedPath;
     CValidationReport storedReport;
-    if(CTerrainAtlasProfileStore::loadExplicitOverride(
+    const QString portableProfileRoot = m_pLand
+        ? m_pLand->filePath().absolutePath() : QString();
+    const bool adjacentPortableProfile = !portableProfileRoot.isEmpty()
+        && CTerrainAtlasProfileStore::loadExplicitOverride(
+            mprNamespace, atlasHash, slotCount, &stored,
+            portableProfileRoot, &storedPath, &storedReport);
+    if(adjacentPortableProfile || CTerrainAtlasProfileStore::loadExplicitOverride(
            mprNamespace, atlasHash, slotCount, &stored, QString(),
            &storedPath, &storedReport))
     {
@@ -7940,6 +7946,107 @@ void CView::finalizeVirtualTerrainAtlas()
         item.insert(QStringLiteral("canonicalGridCorners"),corners);tiles.append(item);
     }
     manifest.insert(QStringLiteral("tiles"),tiles);
+    // The isolated atlas has a new namespace, pixel hash, slot order, and
+    // generated signatures. Persist its exact semantic contract beside the
+    // MPR; otherwise reopening correctly finds the 704 (etc.) texture slots
+    // but has zero assignments because only the original namespace profile is
+    // known to the editor.
+    STerrainAtlasProfile portableProfile;
+    portableProfile.mprNamespace=finalized.isolatedNamespace;
+    QVector<QImage> finalizedImages;
+    for(const STerrainFinalizedTile& tile:finalized.tiles)
+        finalizedImages.append(tile.pixels);
+    portableProfile.atlasPixelSha256=
+        CTerrainAtlasProfileInference::pixelSha256(finalizedImages);
+    portableProfile.atlasSlotCount=finalized.tiles.size();
+    portableProfile.provenance=QStringLiteral(
+        "portable-finalized-modern-atlas-v1");
+    portableProfile.approved=true;
+    QMap<int,STerrainAtlasProfileSlot> sourceDefinitions;
+    for(const STerrainAtlasProfileSlot& definition:
+            m_terrainAtlasProfile.slotDefinitions)
+        sourceDefinitions.insert(definition.slot,definition);
+    QSet<qint32> portableMaterialIds;
+    for(int slot=0;slot<finalized.tiles.size();++slot)
+    {
+        const STerrainFinalizedTile& tile=finalized.tiles.at(slot);
+        STerrainAtlasProfileSlot definition;
+        definition.slot=slot;
+        if(tile.sourceSlot>=0&&sourceDefinitions.contains(tile.sourceSlot))
+            definition.signature=sourceDefinitions.value(tile.sourceSlot).signature;
+        else
+            definition.signature=CTerrainTransitionCatalog::mirroredGridY(
+                tile.canonicalSignature);
+        definition.assigned=definition.signature.northWest>0
+            &&definition.signature.northEast>0
+            &&definition.signature.southEast>0
+            &&definition.signature.southWest>0;
+        definition.ambiguous=false;
+        if(definition.assigned)
+            for(qint32 id:{definition.signature.northWest,
+                           definition.signature.northEast,
+                           definition.signature.southEast,
+                           definition.signature.southWest})
+                portableMaterialIds.insert(id);
+        portableProfile.slotDefinitions.append(definition);
+    }
+    for(qint32 id:portableMaterialIds)
+    {
+        STerrainAtlasProfileFamily family;
+        family.id=id;
+        family.name=materialNames.value(id,
+            QStringLiteral("Material %1").arg(id));
+        family.layer=layer==ETerrainTileLayer::Land
+            ?ETerrainAtlasLayer::Land:ETerrainAtlasLayer::Overlay;
+        family.landAllowed=layer==ETerrainTileLayer::Land;
+        family.overlayAllowed=layer==ETerrainTileLayer::Overlay;
+        for(const STerrainAtlasProfileFamily& sourceFamily:
+                m_terrainAtlasProfile.families)
+            if(sourceFamily.id==id)
+            {
+                family.name=sourceFamily.name;
+                family.layer=sourceFamily.layer;
+                family.landAllowed=sourceFamily.landAllowed;
+                family.overlayAllowed=sourceFamily.overlayAllowed;
+                family.underwater=sourceFamily.underwater;
+                family.underwaterRole=sourceFamily.underwaterRole;
+                family.tileType=sourceFamily.tileType;
+                break;
+            }
+        for(const STerrainGlobalMaterialFamily& global:m_terrainGlobalFamilies)
+            if(global.id==id)
+            {
+                family.name=global.name;
+                family.layer=global.layer;
+                family.landAllowed=global.layer==ETerrainAtlasLayer::Land;
+                family.overlayAllowed=global.layer==ETerrainAtlasLayer::Overlay;
+                break;
+            }
+        for(const STerrainAtlasProfileSlot& definition:
+                portableProfile.slotDefinitions)
+            if(definition.assigned
+               &&definition.signature.northWest==id
+               &&definition.signature.northEast==id
+               &&definition.signature.southEast==id
+               &&definition.signature.southWest==id)
+            { family.thumbnailSlot=definition.slot;break; }
+        portableProfile.families.append(family);
+    }
+    CValidationReport portableProfileReport;
+    if(!portableProfile.normalizeMembership(&portableProfileReport))
+    {
+        QMessageBox::critical(this,tr("Atlas package not written"),
+            tr("The isolated material profile could not be constructed.\n\n%1")
+                .arg(portableProfileReport.toText()));
+        parent.rmdir(folderName);
+        return;
+    }
+    const QByteArray profileBytes=QJsonDocument(
+        portableProfile.toJson()).toJson(QJsonDocument::Indented);
+    const QString profilePath=CTerrainAtlasProfileStore::profilePath(
+        finalized.isolatedNamespace,folderPath);
+    manifest.insert(QStringLiteral("semanticProfile"),
+        QDir(folderPath).relativeFilePath(profilePath));
     const QByteArray manifestBytes=QJsonDocument(manifest).toJson(QJsonDocument::Indented);
     const auto writeFile=[](const QString& path,const QByteArray& bytes,QString* error)
     {
@@ -7949,11 +8056,15 @@ void CView::finalizeVirtualTerrainAtlas()
         return true;
     };
     QString error;
-    if(!writeFile(mprPath,package.mprBytes,&error)
+    if(!QDir().mkpath(QFileInfo(profilePath).absolutePath())
+       ||!writeFile(mprPath,package.mprBytes,&error)
        ||!writeFile(resPath,package.resourceArchiveBytes,&error)
+       ||!writeFile(profilePath,profileBytes,&error)
        ||!writeFile(manifestPath,manifestBytes,&error))
     {
-        QFile::remove(mprPath);QFile::remove(resPath);QFile::remove(manifestPath);
+        QFile::remove(mprPath);QFile::remove(resPath);QFile::remove(profilePath);
+        QFile::remove(manifestPath);
+        QDir(folderPath).rmdir(QStringLiteral("terrain-atlas-profiles"));
         parent.rmdir(folderName);
         QMessageBox::critical(this,tr("Atlas package not written"),error);
         return;
@@ -7969,6 +8080,19 @@ void CView::finalizeVirtualTerrainAtlas()
         QMessageBox::critical(this,tr("Atlas package reopen failed"),
             tr("The package was written but failed the final disk reopen. Do not install it.\n%1")
                 .arg(reopenReport.toText()+errors.join(QStringLiteral("\n"))));
+        return;
+    }
+    STerrainAtlasProfile reopenedProfile;
+    QString reopenedProfilePath;
+    if(!CTerrainAtlasProfileStore::loadExplicitOverride(
+           finalized.isolatedNamespace,portableProfile.atlasPixelSha256,
+           finalized.tiles.size(),&reopenedProfile,folderPath,
+           &reopenedProfilePath,&reopenReport)
+       ||reopenedProfile.assignedSlotCount()!=portableProfile.assignedSlotCount())
+    {
+        QMessageBox::critical(this,tr("Atlas package reopen failed"),
+            tr("The package textures reopened, but its material assignments did not. Do not install it.\n%1")
+                .arg(reopenReport.toText()));
         return;
     }
     emit updateMsg(tr("Validated map-specific atlas package written: %1")

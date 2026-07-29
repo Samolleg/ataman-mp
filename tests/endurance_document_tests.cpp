@@ -5984,7 +5984,19 @@ void EnduranceDocumentTests::materialAtlasStoreLoadsOnlyExplicitLocalOverrides()
     QCOMPARE(loaded.provenance,
              QStringLiteral("portable-exact-stock-atlas-clone-v1"));
 
+    profile.provenance = QStringLiteral("portable-finalized-modern-atlas-v1");
+    profile.mprNamespace = QStringLiteral("zone1_eime_finalized");
+    QVERIFY2(CTerrainAtlasProfileStore::save(
+                 profile, root.path(), &portableSaveReport),
+             qPrintable(portableSaveReport.toText()));
+    QVERIFY2(CTerrainAtlasProfileStore::loadExplicitOverride(
+                 profile.mprNamespace, hash, 512, &loaded, root.path(),
+                 &sourcePath, &portableLoadReport),
+             qPrintable(portableLoadReport.toText()));
+    QCOMPARE(loaded.assignedSlotCount(), profile.assignedSlotCount());
+
     profile.provenance = QStringLiteral("user-authored-custom-profile");
+    profile.mprNamespace = QStringLiteral("zone1");
     profile.families.front().name = QStringLiteral("User ground name");
     CValidationReport saveReport;
     QVERIFY2(CTerrainAtlasProfileStore::save(profile, root.path(), &saveReport),

@@ -904,7 +904,9 @@ bool CTerrainAtlasProfileStore::loadExplicitOverride(
         == QStringLiteral("user-authored-custom-profile");
     const bool portableExactClone = loaded.provenance
         == QStringLiteral("portable-exact-stock-atlas-clone-v1");
-    if(!explicitUserProfile && !portableExactClone)
+    const bool portableFinalizedAtlas = loaded.provenance
+        == QStringLiteral("portable-finalized-modern-atlas-v1");
+    if(!explicitUserProfile && !portableExactClone && !portableFinalizedAtlas)
     {
         if(report) report->add("terrain.atlas_profile_not_explicit_override",
             EValidationSeverity::Warning,

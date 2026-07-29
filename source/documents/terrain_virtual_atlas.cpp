@@ -101,7 +101,8 @@ QRgb materialBlend(const QRgb samples[4], const double weights[4],
                              : qBound(0, qRound(alpha * 255.0), 255));
 }
 
-QImage removeSmallMaskFeatures(const QImage& source)
+QImage cleanAnchoredMask(const QImage& source,
+                         const QVector<bool>& ownerCorners)
 {
     if(source.isNull()) return {};
     const int width = source.width();
@@ -111,6 +112,53 @@ QImage removeSmallMaskFeatures(const QImage& source)
     for(int y = 0; y < height; ++y)
         for(int x = 0; x < width; ++x)
             binary[y * width + x] = source.pixelColor(x, y).red() >= 128;
+
+    const int cornerIndices[4] = {0, width - 1, count - 1,
+                                  qMax(0, count - width)};
+    for(int corner = 0; corner < 4 && corner < ownerCorners.size(); ++corner)
+        binary[cornerIndices[corner]] = ownerCorners.at(corner) ? 1 : 0;
+
+    // A valid two-material transition owns only regions connected to one of
+    // that material's requested corners. Size alone is insufficient: a large
+    // detached block creates the square notches/crosses visible around a
+    // circular stroke. Apply the same rule to support regions so large holes
+    // cannot survive either.
+    for(int value = 0; value <= 1; ++value)
+    {
+        QVector<quint8> anchored(count, 0);
+        QVector<int> queue;
+        for(int corner = 0; corner < 4 && corner < ownerCorners.size(); ++corner)
+            if(binary[cornerIndices[corner]] == value)
+            {
+                anchored[cornerIndices[corner]] = 1;
+                queue.append(cornerIndices[corner]);
+            }
+        for(int cursor = 0; cursor < queue.size(); ++cursor)
+        {
+            const int index = queue.at(cursor);
+            const int x = index % width;
+            const int y = index / width;
+            const int neighbours[4] = {index - 1, index + 1,
+                                        index - width, index + width};
+            for(int direction = 0; direction < 4; ++direction)
+            {
+                if((direction == 0 && x == 0)
+                   || (direction == 1 && x + 1 == width)
+                   || (direction == 2 && y == 0)
+                   || (direction == 3 && y + 1 == height))
+                    continue;
+                const int next = neighbours[direction];
+                if(!anchored[next] && binary[next] == value)
+                {
+                    anchored[next] = 1;
+                    queue.append(next);
+                }
+            }
+        }
+        for(int index = 0; index < count; ++index)
+            if(binary[index] == value && !anchored[index])
+                binary[index] = quint8(1 - value);
+    }
 
     // Remove both tiny owner islands and tiny support pinholes. The threshold
     // scales with authored resolution: 8x8 fixtures retain their shape while
@@ -709,10 +757,13 @@ bool CTerrainVirtualAtlas::registerBlendMaskTemplate(
     if(separability < quint64(mask.width()) * quint64(mask.height()) * 6u)
         return true;
 
-    mask = removeSmallMaskFeatures(mask);
     const STerrainTransitionSignature preview =
         CTerrainTransitionCatalog::mirroredGridY(signature);
     const QVector<qint32> previewCorners = corners(preview);
+    QVector<bool> ownerCorners;
+    for(qint32 material : previewCorners)
+        ownerCorners.append(material == owner);
+    mask = cleanAnchoredMask(mask, ownerCorners);
     const QPoint points[4] = {{0, 0}, {mask.width() - 1, 0},
         {mask.width() - 1, mask.height() - 1}, {0, mask.height() - 1}};
     for(int corner = 0; corner < 4; ++corner)
@@ -779,19 +830,21 @@ QImage CTerrainVirtualAtlas::alignedStockMask(
                 if(inverted) candidate.mask.invertPixels();
                 candidate.source = item.sourceLabel;
                 candidate.hash = item.maskSha256;
-                const bool exactPair = (item.ownerMaterial == ownerMaterial
-                    && item.otherMaterial == otherMaterial)
-                    || (item.ownerMaterial == otherMaterial
-                        && item.otherMaterial == ownerMaterial);
-                const bool exactStyles = (item.ownerStyle == ownerStyle
-                    && item.otherStyle == otherStyle)
-                    || (item.ownerStyle == otherStyle
-                        && item.otherStyle == ownerStyle);
-                candidate.score = exactPair ? 10000 : exactStyles ? 1000 : 0;
-                if(item.ownerStyle == ownerStyle || item.otherStyle == ownerStyle)
-                    candidate.score += 200;
-                if(item.ownerStyle == otherStyle || item.otherStyle == otherStyle)
-                    candidate.score += 100;
+                const qint32 mappedOwner = inverted
+                    ? item.otherMaterial : item.ownerMaterial;
+                const qint32 mappedOther = inverted
+                    ? item.ownerMaterial : item.otherMaterial;
+                const ETerrainBlendStyle mappedOwnerStyle = inverted
+                    ? item.otherStyle : item.ownerStyle;
+                const ETerrainBlendStyle mappedOtherStyle = inverted
+                    ? item.ownerStyle : item.otherStyle;
+                const bool exactPair = mappedOwner == ownerMaterial
+                    && mappedOther == otherMaterial;
+                const bool exactStyles = mappedOwnerStyle == ownerStyle
+                    && mappedOtherStyle == otherStyle;
+                candidate.score = exactPair ? 10000 : exactStyles ? 1500 : 0;
+                if(mappedOwnerStyle == ownerStyle) candidate.score += 700;
+                if(mappedOtherStyle == otherStyle) candidate.score += 350;
                 matches.append(candidate);
                 break;
             }
@@ -965,18 +1018,43 @@ QImage CTerrainVirtualAtlas::generateTile(
             }
             if(total > 0.0)
                 for(double& weight : weights) weight /= total;
+
+            // Independently transferred corner silhouettes may overlap at a
+            // three-/four-family junction. Never average all of them into a
+            // low-detail soup: retain only the strongest two, and cross-fade
+            // those only inside a narrow ownership band.
+            QVector<int> ranked;
+            for(int corner = 0; corner < 4; ++corner)
+                if(weights[corner] > 0.0) ranked.append(corner);
+            std::sort(ranked.begin(), ranked.end(), [&weights](int a, int b) {
+                return weights[a] > weights[b];
+            });
+            if(ranked.size() > 1)
+            {
+                const int first = ranked.at(0);
+                const int second = ranked.at(1);
+                const double pairTotal = weights[first] + weights[second];
+                double share = pairTotal > 0.0 ? weights[first] / pairTotal : 1.0;
+                share = qBound(0.0, (share - 0.38) / 0.24, 1.0);
+                share = share * share * (3.0 - 2.0 * share);
+                for(double& weight : weights) weight = 0.0;
+                weights[first] = share;
+                weights[second] = 1.0 - share;
+            }
             const auto forceSharedEdge = [&](qint32 firstMaterial,
                                              qint32 secondMaterial,
                                              double position) {
                 for(double& weight : weights) weight = 0.0;
-                const qint32 selected = firstMaterial == secondMaterial
-                    || position < 0.5 ? firstMaterial : secondMaterial;
+                double secondWeight = firstMaterial == secondMaterial ? 0.0
+                    : qBound(0.0, (position - 0.44) / 0.12, 1.0);
+                secondWeight = secondWeight * secondWeight
+                    * (3.0 - 2.0 * secondWeight);
                 for(int corner = 0; corner < 4; ++corner)
-                    if(ids.at(corner) == selected)
-                    {
-                        weights[corner] = 1.0;
-                        break;
-                    }
+                    if(ids.at(corner) == firstMaterial)
+                    { weights[corner] = 1.0 - secondWeight; break; }
+                for(int corner = 0; corner < 4; ++corner)
+                    if(ids.at(corner) == secondMaterial)
+                    { weights[corner] += secondWeight; break; }
             };
             // Interior artwork comes from the reviewed stock mask. The outer
             // texel ring is resolved solely from its two edge endpoints so
@@ -1342,7 +1420,9 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
     const QByteArray originalMp=source.memberPayload(map.memberName);
     const int tileTypeOffset=38+int(map.materialCount)*44;
     const int oldTailOffset=tileTypeOffset+int(map.tileCount)*4;
-    if(tileTypeOffset<38||oldTailOffset>originalMp.size()){
+    const int oldAnimationEnd=oldTailOffset+int(map.animatedTileCount)*4;
+    if(tileTypeOffset<38||oldTailOffset>originalMp.size()
+       ||oldAnimationEnd>originalMp.size()){
         result.error=QStringLiteral("The MP tile-type array is truncated.");return result;
     }
     QByteArray replacementMp=originalMp.left(tileTypeOffset);
@@ -1350,7 +1430,43 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
         char bytes[4];qToLittleEndian<qint32>(type,reinterpret_cast<uchar*>(bytes));
         replacementMp.append(bytes,4);
     }
-    replacementMp.append(originalMp.mid(oldTailOffset));
+    // Animated-terrain records address physical atlas slots. Copying them
+    // byte-for-byte after compaction makes an old animation start point at a
+    // newly generated material, which then cycles through unrelated tiles in
+    // game. Preserve only ranges whose complete authored frame sequence was
+    // retained and remains contiguous after remapping. Generated/imported
+    // exact tiles are deliberately static.
+    QByteArray remappedAnimations;
+    quint32 remappedAnimationCount=0;
+    for(quint32 index=0;index<map.animatedTileCount;++index)
+    {
+        const int offset=oldTailOffset+int(index)*4;
+        const quint16 oldStart=qFromLittleEndian<quint16>(
+            reinterpret_cast<const uchar*>(originalMp.constData()+offset));
+        const quint16 phaseCount=qFromLittleEndian<quint16>(
+            reinterpret_cast<const uchar*>(originalMp.constData()+offset+2));
+        bool retain=phaseCount>0;
+        int newStart=-1;
+        for(int phase=0;retain&&phase<int(phaseCount);++phase)
+        {
+            const int oldSlot=int(oldStart)+phase;
+            if(!finalization.authoredSlotRemap.contains(oldSlot))
+            { retain=false; break; }
+            const int mapped=finalization.authoredSlotRemap.value(oldSlot);
+            if(phase==0)newStart=mapped;
+            else if(mapped!=newStart+phase)retain=false;
+        }
+        if(!retain)continue;
+        char bytes[4];
+        qToLittleEndian<quint16>(quint16(newStart),
+            reinterpret_cast<uchar*>(bytes));
+        qToLittleEndian<quint16>(phaseCount,
+            reinterpret_cast<uchar*>(bytes+2));
+        remappedAnimations.append(bytes,4);
+        ++remappedAnimationCount;
+    }
+    replacementMp.append(remappedAnimations);
+    replacementMp.append(originalMp.mid(oldAnimationEnd));
     qToLittleEndian<quint32>(quint32(finalization.textureCount),
         reinterpret_cast<uchar*>(replacementMp.data()+16));
     qToLittleEndian<quint32>(quint32(finalization.pages.front().width()),
@@ -1359,6 +1475,8 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
         reinterpret_cast<uchar*>(replacementMp.data()+24));
     qToLittleEndian<quint32>(quint32(finalization.tiles.front().pixels.width()),
         reinterpret_cast<uchar*>(replacementMp.data()+28));
+    qToLittleEndian<quint32>(remappedAnimationCount,
+        reinterpret_cast<uchar*>(replacementMp.data()+34));
     CMprEditTransaction transaction(QStringLiteral("Finalize isolated terrain atlas"));
     for(const SMprArchiveMember& member:source.members())
         if(member.name.compare(map.memberName,Qt::CaseInsensitive)==0)

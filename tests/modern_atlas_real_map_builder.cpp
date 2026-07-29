@@ -268,6 +268,8 @@ QMap<qint32, QImage> globalSources(
         bool loaded = false;
         QImage fallback;
         STerrainGlobalMaterialSource chosen;
+        QSize chosenSourceSize;
+        QJsonArray candidateSizes;
         for(const STerrainGlobalMaterialSource& source : family.sources)
         {
             Atlas atlas = assets->atlas(source.mprNamespace,
@@ -275,14 +277,22 @@ QMap<qint32, QImage> globalSources(
             if(!atlas.valid || source.uniformSlot < 0
                || source.uniformSlot >= atlas.tiles.size()) continue;
             const QImage image = atlas.tiles.at(source.uniformSlot);
+            QJsonObject candidateSize;
+            candidateSize.insert(QStringLiteral("namespace"),
+                                 source.mprNamespace);
+            candidateSize.insert(QStringLiteral("width"), image.width());
+            candidateSize.insert(QStringLiteral("height"), image.height());
+            candidateSizes.append(candidateSize);
             if(fallback.isNull())
             {
                 fallback = image;
                 chosen = source;
+                chosenSourceSize = image.size();
             }
             if(image.size() != tileSize) continue;
             fallback = image;
             chosen = source;
+            chosenSourceSize = image.size();
             loaded = true;
             break;
         }
@@ -305,6 +315,45 @@ QMap<qint32, QImage> globalSources(
                 item.insert(QStringLiteral("reviewed_pure_anchor_slot"),
                             chosen.uniformSlot);
                 item.insert(QStringLiteral("target_tile_width"), tileSize.width());
+                item.insert(QStringLiteral("source_tile_width"),
+                            chosenSourceSize.width());
+                item.insert(QStringLiteral("resampled"),
+                            chosenSourceSize != tileSize);
+                item.insert(QStringLiteral("candidate_sizes"), candidateSizes);
+                qint64 transparentPixels = 0;
+                quint64 neighbourDelta = 0;
+                quint64 neighbourSamples = 0;
+                for(int y = 0; y < fallback.height(); ++y)
+                    for(int x = 0; x < fallback.width(); ++x)
+                    {
+                        const QColor pixel = fallback.pixelColor(x, y);
+                        transparentPixels += pixel.alpha() == 0;
+                        if(x + 1 < fallback.width())
+                        {
+                            const QColor next = fallback.pixelColor(x + 1, y);
+                            neighbourDelta += quint64(qAbs(pixel.red() - next.red())
+                                + qAbs(pixel.green() - next.green())
+                                + qAbs(pixel.blue() - next.blue()));
+                            ++neighbourSamples;
+                        }
+                        if(y + 1 < fallback.height())
+                        {
+                            const QColor next = fallback.pixelColor(x, y + 1);
+                            neighbourDelta += quint64(qAbs(pixel.red() - next.red())
+                                + qAbs(pixel.green() - next.green())
+                                + qAbs(pixel.blue() - next.blue()));
+                            ++neighbourSamples;
+                        }
+                    }
+                item.insert(QStringLiteral("transparent_pixels"),
+                            double(transparentPixels));
+                item.insert(QStringLiteral("transparent_fraction"),
+                            fallback.isNull() ? 0.0
+                            : double(transparentPixels)
+                                / double(fallback.width() * fallback.height()));
+                item.insert(QStringLiteral("mean_neighbour_rgb_delta"),
+                            neighbourSamples == 0 ? 0.0
+                            : double(neighbourDelta) / double(neighbourSamples));
                 item.insert(QStringLiteral("pixel_sha256"), QString::fromLatin1(
                     QCryptographicHash::hash(
                         QByteArray(reinterpret_cast<const char*>(fallback.constBits()),
@@ -336,7 +385,8 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                   const QMap<qint32, QString>& names,
                   const QMap<qint32, QImage>& externalSources,
                   const Atlas& sourceAtlas, StockAssets* stockAssets,
-                  const QString& outputDirectory, bool stripeLayout = false)
+                  const QString& outputDirectory, bool stripeLayout = false,
+                  bool circleLayout = false)
 {
     BuiltMap result;
     QFile sourceFile(sourcePath);
@@ -370,7 +420,7 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         result.error = QStringLiteral("The virtual field dimensions are invalid.");
         return result;
     }
-    const int spacing = stripeLayout ? 5 : 5;
+    const int spacing = circleLayout ? 8 : 5;
     const int margin = 2;
     const int columns = qMax(1, (field.vertexWidth() - margin * 2) / spacing);
     const int stripeHeight = 12;
@@ -389,10 +439,42 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     {
         const int x0 = margin + (index % columns) * spacing;
         const int y0 = margin + (index / columns) * rowSpacing;
-        const int height = stripeLayout ? stripeHeight : 3;
-        for(int y = y0; y < y0 + height; ++y)
-            for(int x = x0; x < x0 + 3; ++x)
-                field.setMaterial(x, y, stampIds.at(index));
+        const int height = stripeLayout ? stripeHeight
+            : (circleLayout ? 7 : 3);
+        const int width = circleLayout ? 7 : 3;
+        if(circleLayout)
+        {
+            // Every brush, including the map's base material, receives a real
+            // outer edge. The base brush gets a local patch of the second
+            // material first so it is not accidentally tested as a no-op.
+            if(stampIds.at(index) == base && stampIds.size() > 1)
+                for(int y = y0; y < y0 + 7; ++y)
+                    for(int x = x0; x < x0 + 7; ++x)
+                        field.setMaterial(x, y, stampIds.at(1));
+            STerrainTileBrush brush;
+            brush.centerX = float(x0 + 3);
+            brush.centerY = float(y0 + 3);
+            brush.radius = 3.0f;
+            brush.shape = ETerrainTileBrushShape::Circle;
+            field.paint(brush, stampIds.at(index));
+            for(int y = y0; y < y0 + 7; ++y)
+                for(int x = x0; x < x0 + 7; ++x)
+                {
+                    const int dx=x-(x0+3),dy=y-(y0+3);
+                    if(dx*dx+dy*dy<=9
+                       &&field.material(x,y)!=stampIds.at(index))
+                    {
+                        result.error=QStringLiteral(
+                            "Circular brush %1 dropped a mandatory interior vertex.")
+                            .arg(names.value(stampIds.at(index)));
+                        return result;
+                    }
+                }
+        }
+        else
+            for(int y = y0; y < y0 + height; ++y)
+                for(int x = x0; x < x0 + width; ++x)
+                    field.setMaterial(x, y, stampIds.at(index));
         QJsonObject stamp;
         stamp.insert(QStringLiteral("material_id"), stampIds.at(index));
         stamp.insert(QStringLiteral("material"), names.value(stampIds.at(index)));
@@ -402,8 +484,12 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                     names.value(stampIds.at(index)))));
         stamp.insert(QStringLiteral("x0"), x0);
         stamp.insert(QStringLiteral("y0"), y0);
-        stamp.insert(QStringLiteral("width_vertices"), 3);
+        stamp.insert(QStringLiteral("width_vertices"), width);
         stamp.insert(QStringLiteral("height_vertices"), height);
+        stamp.insert(QStringLiteral("shape"),circleLayout
+            ?QStringLiteral("circle-radius-3")
+            :(stripeLayout?QStringLiteral("vertical-stripe")
+                         :QStringLiteral("square")));
         stamps.append(stamp);
     }
     // Force genuine four-family junctions in otherwise unused lower rows.
@@ -553,9 +639,10 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     manifest.insert(QStringLiteral("source_mpr"), QFileInfo(sourcePath).fileName());
     manifest.insert(QStringLiteral("isolated_namespace"), baseName);
     manifest.insert(QStringLiteral("family_stamps"), stamps);
-    manifest.insert(QStringLiteral("layout"), stripeLayout
-        ? QStringLiteral("final-material-stripes")
-        : QStringLiteral("non-overlapping-3x3-stamps"));
+    manifest.insert(QStringLiteral("layout"), circleLayout
+        ?QStringLiteral("all-material-radius-3-circles")
+        :(stripeLayout?QStringLiteral("final-material-stripes")
+                     :QStringLiteral("non-overlapping-3x3-stamps")));
     manifest.insert(QStringLiteral("four_family_junctions"), fourFamilyJunctions);
     manifest.insert(QStringLiteral("paintable_materials"), stampIds.size());
     manifest.insert(QStringLiteral("authored_tiles_reused"), authored);
@@ -1334,8 +1421,10 @@ int main(int argc, char** argv)
         std::sort(ids.begin(), ids.end(), [&names](qint32 left, qint32 right) {
             return names.value(left).localeAwareCompare(names.value(right)) < 0;
         });
+        QJsonArray sourceManifest;
         const QMap<qint32, QImage> external = globalSources(
-            materials, &assets, zone2.tiles.front().size(), nullptr, &error);
+            materials, &assets, zone2.tiles.front().size(), &sourceManifest,
+            &error);
         BuiltMap stripes = buildMap(
             sourceMpr, QStringLiteral("Zone2"), ids, names, external,
             zone2, &assets, outputRoot, true);
@@ -1352,6 +1441,49 @@ int main(int argc, char** argv)
         {
             err << "final-material-stripes collection: " << error << '\n';
             return 9;
+        }
+        const QString circleDirectory=QDir(outputRoot).filePath(
+            QStringLiteral("all-material-circles"));
+        BuiltMap circles=buildMap(
+            sourceMpr,QStringLiteral("Zone2"),ids,names,external,
+            zone2,&assets,circleDirectory,false,true);
+        if(!circles.success)
+        {
+            err << "all-material-circles: " << circles.error << '\n';
+            return 11;
+        }
+        const QString circleCollectionPath=QDir(outputRoot).filePath(
+            QStringLiteral("all-material-circles.collection"));
+        if(!writeMapCollection(circleCollectionPath,circleDirectory,&circles,
+               QStringLiteral("Every material radius-3 circles - Zone2 environment"),
+               QStringLiteral("zone2.mob"),&error))
+        {
+            err << "all-material-circles collection: " << error << '\n';
+            return 12;
+        }
+        circles.manifest.insert(QStringLiteral("reviewed_pure_sources"),
+                                sourceManifest);
+        if(!writeBytes(QDir(circleDirectory).filePath(QStringLiteral("manifest.json")),
+               QJsonDocument(circles.manifest).toJson(QJsonDocument::Indented),
+               &error))
+        {
+            err << error << '\n';
+            return 13;
+        }
+        stripes.manifest.insert(QStringLiteral("reviewed_pure_sources"),
+                                sourceManifest);
+        stripes.manifest.insert(QStringLiteral("circle_test_map"),
+            QDir(outputRoot).relativeFilePath(circleDirectory));
+        stripes.manifest.insert(QStringLiteral("circle_test_collection"),
+            QFileInfo(circleCollectionPath).fileName());
+        stripes.manifest.insert(QStringLiteral("circle_test_unresolved_cells"),
+            circles.manifest.value(QStringLiteral("unresolved_cells")));
+        if(!writeBytes(QDir(outputRoot).filePath(QStringLiteral("manifest.json")),
+                       QJsonDocument(stripes.manifest).toJson(
+                           QJsonDocument::Indented), &error))
+        {
+            err << error << '\n';
+            return 10;
         }
         out << QJsonDocument(stripes.manifest).toJson(QJsonDocument::Indented);
         return 0;
