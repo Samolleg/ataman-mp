@@ -6,7 +6,8 @@ param(
     [string]$QtBin = "",
     [ValidateNotNullOrEmpty()][int[]]$ProbePages = @(16, 32, 64, 128, 256),
     [int]$DwellMilliseconds = 20000,
-    [int]$ProbeTimeoutSeconds = 120
+    [int]$ProbeTimeoutSeconds = 120,
+    [bool]$ForceDrawall = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -129,8 +130,8 @@ function Invoke-AtlasProbe([int]$Pages) {
     if ([int]$manifest.texture_pages -ne $Pages -or $slots -ne $Pages * 64 -or
         [int]$manifest.highest_referenced_page -ne $Pages - 1 -or
         $manifest.workload -ne 'installed-zone18-mpr-mob-with-drawall' -or
-        -not [bool]$manifest.drawall_required) {
-        throw "Fixture $Pages does not satisfy the Zone18/drawall stress contract."
+        ($ForceDrawall -and -not [bool]$manifest.drawall_required)) {
+        throw "Fixture $Pages does not satisfy the Zone18 expanded-atlas stress contract."
     }
     if ((Get-Sha256 $zone18Mpr) -ne $manifest.source_mpr_sha256 -or
         (Get-Sha256 $zone18Mob) -ne $manifest.source_mob_sha256) {
@@ -168,7 +169,7 @@ function Invoke-AtlasProbe([int]$Pages) {
     $env:EI_ENDURANCE_RUNTIME_SMOKE_SIZE_X = [string]$manifest.map_size_x
     $env:EI_ENDURANCE_RUNTIME_SMOKE_SIZE_Y = [string]$manifest.map_size_y
     $env:EI_ENDURANCE_RUNTIME_SMOKE_ALLOW_GRAPHLESS = '0'
-    $env:EI_ENDURANCE_RUNTIME_SMOKE_DRAWALL = '1'
+    $env:EI_ENDURANCE_RUNTIME_SMOKE_DRAWALL = if ($ForceDrawall) { '1' } else { '0' }
     $env:EI_ENDURANCE_RUNTIME_SMOKE_EXIT = '1'
     $env:EI_ENDURANCE_RUNTIME_SMOKE_X = '0'
     $env:EI_ENDURANCE_RUNTIME_SMOKE_Y = '0'
@@ -221,10 +222,15 @@ function Invoke-AtlasProbe([int]$Pages) {
     $vaExhausted = $memoryObject -and
         [double]$memoryObject.minimumLargestFreeRegionBytes -gt 0 -and
         [double]$memoryObject.minimumLargestFreeRegionBytes -lt 64MB
+    $allocationPressure = $memoryObject -and (Test-ExpandedAtlasMemoryPressure `
+        -CombinedRgbaBytes ([int64]$manifest.combined_rgba_bytes) `
+        -GameplayReadyPrivateBytes ([int64]$memoryObject.gameplayReadyPrivateBytes) `
+        -PeakPrivateBytes ([int64]$memoryObject.peakPrivateBytes) `
+        -MinimumLargestFreeRegionBytes ([int64]$memoryObject.minimumLargestFreeRegionBytes))
     $classification = Get-ExpandedAtlasProbeClassification `
         -PassShape ([bool]$passShape) -TimedOut ([bool]$timedOut) `
         -NativeRuntimeFailure ([bool]$nativeRuntimeFailure) `
-        -MemoryFailure ([bool]($memorySignature -or $vaExhausted)) `
+        -MemoryFailure ([bool]($memorySignature -or $vaExhausted -or $allocationPressure)) `
         -AuthoritativeEvidence ([bool]$authoritativeEvidence)
     $passed = Test-ExpandedAtlasProbePassed -Classification $classification
     return [pscustomobject]@{
@@ -236,6 +242,8 @@ function Invoke-AtlasProbe([int]$Pages) {
         new_native_dumps=$newNativeDumps
         dump_evidence=if ($newNativeDumps.Count -gt 0) { $dumpEvidence } else { '' }
         memory_parse_error=$memoryParseError
+        allocation_pressure=[bool]$allocationPressure
+        combined_rgba_bytes=[int64]$manifest.combined_rgba_bytes
     }
 }
 
@@ -267,6 +275,8 @@ function Write-CampaignSummary($Rows) {
             new_native_dump_count=$row.new_native_dump_count
             dump_evidence=$row.dump_evidence
             memory_parse_error=$row.memory_parse_error
+            allocation_pressure=$row.allocation_pressure
+            combined_rgba_bytes=$row.combined_rgba_bytes
         }
         if ($row.memory_data) {
             foreach ($name in @('gameplayReadyWorkingSetBytes','gameplayReadyPrivateBytes',
@@ -312,7 +322,11 @@ function Write-CampaignSummary($Rows) {
     $summary = [ordered]@{
         schema='ei-zone18-expanded-atlas-stress-v2'
         captured_utc=[DateTime]::UtcNow.ToString('o')
-        workload='run-owned Zone18 MPR+MOB; drawall 1; installed JMV atlas imagery'
+        workload=if ($ForceDrawall) {
+            'run-owned Zone18 MPR+MOB; drawall 1; installed JMV atlas imagery'
+        } else {
+            'run-owned Zone18 MPR+MOB; drawall disabled control; installed JMV atlas imagery'
+        }
         source_mpr=$zone18Mpr; source_mpr_sha256=Get-Sha256 $zone18Mpr
         source_mob=$zone18Mob; source_mob_sha256=Get-Sha256 $zone18Mob
         cost_note='Observed deltas include page/resource/runtime overhead; regression is an estimate, not a constant allocation law.'

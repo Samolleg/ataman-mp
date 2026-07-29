@@ -13,6 +13,8 @@
 #include <QTextStream>
 #include <QtEndian>
 
+#include <cmath>
+
 #include "endurance_document.h"
 #include "collection_document.h"
 #include "mmp_codec.h"
@@ -765,6 +767,18 @@ BuiltMap buildExpandedRuntimeProbe(
         CTerrainAtlasProfileStore::profilePath(baseName, portableProfileRoot)));
     manifest.insert("texture_pages", best.textureCount);
     manifest.insert("active_slots", best.requiredSlots);
+    const int atlasColumns = targetPages <= 8 ? targetPages
+        : qMax(1, int(std::ceil(std::sqrt(double(targetPages)))));
+    const int atlasRows = (targetPages + atlasColumns - 1) / atlasColumns;
+    const int pageSize = tileSize * 8;
+    manifest.insert("page_width", pageSize);
+    manifest.insert("page_height", pageSize);
+    manifest.insert("atlas_columns", atlasColumns);
+    manifest.insert("atlas_rows", atlasRows);
+    manifest.insert("combined_width", pageSize * atlasColumns);
+    manifest.insert("combined_height", pageSize * atlasRows);
+    manifest.insert("combined_rgba_bytes", double(qint64(pageSize)
+        * atlasColumns * qint64(pageSize) * atlasRows * 4));
     manifest.insert("pixel_policy", "exact-stock-zone18-repeat");
     manifest.insert("page_payload_policy", "byte-identical-stock-mmp-repeat");
     manifest.insert("source_cycle_slots", sourceAtlas.tiles.size());
@@ -784,6 +798,212 @@ BuiltMap buildExpandedRuntimeProbe(
     result.success = true;
     return result;
 }
+
+BuiltMap buildPaintedExtensionRuntimeProbe(
+    const QString& sourcePath, const QString& sourceMobPath,
+    const Atlas& sourceAtlas, const QString& outputDirectory,
+    const QString& portableProfileRoot)
+{
+    BuiltMap result;
+    const QString controlDirectory = QDir(outputDirectory).filePath(
+        QStringLiteral("base-2048-control"));
+    const BuiltMap control = buildExpandedRuntimeProbe(
+        sourcePath, sourceMobPath, QStringLiteral("Zone18"), 32,
+        {}, {}, sourceAtlas, controlDirectory, portableProfileRoot);
+    if(!control.success)
+    {
+        result.error = QStringLiteral("Could not build the 2048-slot paint control: ")
+            + control.error;
+        return result;
+    }
+
+    const QString controlMprPath = QDir(controlDirectory).filePath(
+        control.manifest.value("mpr_file").toString());
+    QFile controlMprFile(controlMprPath);
+    if(!controlMprFile.open(QIODevice::ReadOnly))
+    {
+        result.error = QStringLiteral("Could not read the 2048-slot paint control.");
+        return result;
+    }
+    CMprDocument controlDocument;
+    CValidationReport report;
+    if(!controlDocument.loadBytes(controlMprFile.readAll(), controlMprPath, &report))
+    {
+        result.error = report.toText();
+        return result;
+    }
+
+    QVector<STerrainAtlasMaterial> paintable;
+    for(const STerrainAtlasMaterial& material : sourceAtlas.analysis.materials)
+        if(material.layer == ETerrainAtlasLayer::Land && !material.cornerOnly
+           && material.representativeSlot >= 0
+           && material.representativeSlot < sourceAtlas.tiles.size())
+            paintable.append(material);
+    if(paintable.size() < 2)
+    {
+        result.error = QStringLiteral(
+            "Zone18 does not expose two uniform land materials for the painted extension probe.");
+        return result;
+    }
+
+    CTerrainTransitionCatalog uniformCatalog;
+    QVector<QImage> uniformImages;
+    for(int index = 0; index < 2; ++index)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = variant.signature.northEast =
+            variant.signature.southEast = variant.signature.southWest =
+                paintable.at(index).id;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(index);
+        variant.packedTile = packed.encode();
+        uniformCatalog.addVariant(variant);
+        uniformImages.append(sourceAtlas.tiles.at(
+            paintable.at(index).representativeSlot));
+    }
+    CTerrainVirtualAtlas generator(uniformCatalog, uniformImages, 0x2048u);
+    STerrainTransitionSignature requested;
+    requested.northWest = paintable.at(0).id;
+    requested.northEast = requested.southEast = requested.southWest =
+        paintable.at(1).id;
+    const STerrainVirtualTile generated = generator.resolve(
+        requested, 0, 0, &report);
+    if(generated.authored || generated.generatedIndex < 0
+       || generator.generatedTiles().at(generated.generatedIndex).pixels.isNull())
+    {
+        result.error = QStringLiteral(
+            "The painted extension probe did not create an exact missing blend.");
+        return result;
+    }
+
+    constexpr int baseSlots = 2048;
+    constexpr int activeSlots = baseSlots + 64;
+    constexpr int generatedSlot = baseSlots;
+    CTerrainEditModel terrain;
+    if(!terrain.load(controlDocument, &report))
+    {
+        result.error = report.toText();
+        return result;
+    }
+    terrain.enableWorkingAtlasSlots(activeSlots);
+    bool available = false;
+    const quint16 before = terrain.packedTile(
+        0, 0, ETerrainTileLayer::Land, &available);
+    SMprPackedTile extensionPacked;
+    extensionPacked.atlasIndex = quint8(generatedSlot / 64);
+    extensionPacked.tileIndex = quint8(generatedSlot % 64);
+    STerrainTileCommand command;
+    STerrainTileDelta delta;
+    delta.globalX = 0;
+    delta.globalY = 0;
+    delta.layer = ETerrainTileLayer::Land;
+    delta.before = before;
+    delta.after = extensionPacked.encode();
+    command.deltas.append(delta);
+    if(!available || !terrain.apply(command, true, &report))
+    {
+        result.error = QStringLiteral(
+            "The generated extension slot could not be referenced by terrain.\n")
+            + report.toText();
+        return result;
+    }
+    CMprEditTransaction transaction(QStringLiteral(
+        "Create painted 2048-slot extension runtime probe"));
+    if(!terrain.appendSectorEdits(&transaction, &report))
+    {
+        result.error = report.toText();
+        return result;
+    }
+    QByteArray paintedMprBytes;
+    if(!controlDocument.applyTransaction(transaction, &paintedMprBytes, &report))
+    {
+        result.error = report.toText();
+        return result;
+    }
+    CMprDocument paintedDocument;
+    if(!paintedDocument.loadBytes(paintedMprBytes,
+                                  QStringLiteral("painted-2048.mpr"), &report))
+    {
+        result.error = report.toText();
+        return result;
+    }
+
+    QVector<QImage> activeTiles;
+    activeTiles.reserve(activeSlots);
+    for(int slot = 0; slot < baseSlots; ++slot)
+        activeTiles.append(sourceAtlas.tiles.at(slot % sourceAtlas.tiles.size()));
+    QImage transparent(sourceAtlas.tiles.front().size(), QImage::Format_RGBA8888);
+    transparent.fill(Qt::transparent);
+    for(int slot = baseSlots; slot < activeSlots; ++slot)
+        activeTiles.append(transparent);
+    activeTiles[generatedSlot] =
+        generator.generatedTiles().at(generated.generatedIndex).pixels;
+    QVector<QByteArray> authoredPages;
+    authoredPages.reserve(32);
+    for(int page = 0; page < 32; ++page)
+        authoredPages.append(sourceAtlas.pageMmpPayloads.at(
+            page % sourceAtlas.pageMmpPayloads.size()));
+    const STerrainPortableAtlasPackage package =
+        CTerrainVirtualAtlas::buildWorkingPreviewPackage(
+            paintedDocument, activeTiles, authoredPages, &report);
+    if(!package.success)
+    {
+        result.error = package.error + QLatin1Char('\n') + report.toText();
+        return result;
+    }
+
+    if(!QDir().mkpath(outputDirectory))
+    {
+        result.error = QStringLiteral("Could not create %1").arg(outputDirectory);
+        return result;
+    }
+    const QString baseName = control.manifest.value("isolated_namespace").toString();
+    const QString mprName = baseName + QStringLiteral("-painted-extension.mpr");
+    const QString atlasName = baseName + QStringLiteral("-painted-extension-atlas.res");
+    if(!writeBytes(QDir(outputDirectory).filePath(mprName), package.mprBytes,
+                   &result.error)
+       || !writeBytes(QDir(outputDirectory).filePath(atlasName),
+                      package.resourceArchiveBytes, &result.error))
+        return result;
+
+    QJsonObject manifest;
+    manifest.insert("schema", "ei-painted-working-atlas-runtime-probe-v1");
+    manifest.insert("source_mpr", QFileInfo(sourcePath).fileName());
+    manifest.insert("source_mpr_sha256", QString::fromLatin1(fileSha256(sourcePath)));
+    manifest.insert("source_mob", QFileInfo(sourceMobPath).fileName());
+    manifest.insert("source_mob_sha256", QString::fromLatin1(fileSha256(sourceMobPath)));
+    manifest.insert("workload", "installed-zone18-mpr-mob-painted-extension");
+    manifest.insert("drawall_required", false);
+    manifest.insert("isolated_namespace", baseName);
+    manifest.insert("mpr_file", mprName);
+    manifest.insert("atlas_file", atlasName);
+    manifest.insert("texture_pages", 33);
+    manifest.insert("active_slots", activeSlots);
+    const int pageSize = sourceAtlas.tiles.front().width() * 8;
+    manifest.insert("page_width", pageSize);
+    manifest.insert("page_height", pageSize);
+    manifest.insert("atlas_columns", 6);
+    manifest.insert("atlas_rows", 6);
+    manifest.insert("combined_width", pageSize * 6);
+    manifest.insert("combined_height", pageSize * 6);
+    manifest.insert("combined_rgba_bytes", double(qint64(pageSize)
+        * 6 * qint64(pageSize) * 6 * 4));
+    manifest.insert("base_authored_slots", baseSlots);
+    manifest.insert("generated_exact_tiles", 1);
+    manifest.insert("generated_referenced_slot", generatedSlot);
+    manifest.insert("highest_referenced_page", 32);
+    manifest.insert("mmp_member_count", package.resourceMembers.size());
+    manifest.insert("map_size_x", int(controlDocument.mapInfo().sectorCountX));
+    manifest.insert("map_size_y", int(controlDocument.mapInfo().sectorCountY));
+    manifest.insert("installed_resources_modified", false);
+    if(!writeBytes(QDir(outputDirectory).filePath(QStringLiteral("manifest.json")),
+                   QJsonDocument(manifest).toJson(QJsonDocument::Indented),
+                   &result.error))
+        return result;
+    result.manifest = manifest;
+    result.success = true;
+    return result;
+}
 }
 
 int main(int argc, char** argv)
@@ -793,7 +1013,7 @@ int main(int argc, char** argv)
     QTextStream err(stderr);
     if(application.arguments().size() < 3 || application.arguments().size() > 4)
     {
-        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only]\n";
+        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only|--painted-only]\n";
         return 2;
     }
     const QString outputRoot = QDir::cleanPath(application.arguments().at(1));
@@ -807,6 +1027,29 @@ int main(int argc, char** argv)
     }
     const bool runtimeOnly = application.arguments().contains(
         QStringLiteral("--runtime-only"));
+    const bool paintedOnly = application.arguments().contains(
+        QStringLiteral("--painted-only"));
+    if(paintedOnly)
+    {
+        const QString sourceMpr = QDir(jmvRoot).filePath("Maps/zone18.mpr");
+        const QString sourceMob = QDir(jmvRoot).filePath("Maps/zone18.mob");
+        Atlas zone18 = assets.atlas(QStringLiteral("Zone18"), 512, &error);
+        if(!zone18.valid || !QFileInfo::exists(sourceMpr)
+           || !QFileInfo::exists(sourceMob))
+        {
+            err << "Zone18 painted runtime source unavailable: " << error << '\n';
+            return 4;
+        }
+        const BuiltMap painted = buildPaintedExtensionRuntimeProbe(
+            sourceMpr, sourceMob, zone18, outputRoot, outputRoot);
+        if(!painted.success)
+        {
+            err << "painted-extension-2048: " << painted.error << '\n';
+            return 11;
+        }
+        out << QJsonDocument(painted.manifest).toJson(QJsonDocument::Indented);
+        return 0;
+    }
     if(runtimeOnly)
     {
         const QString sourceMpr = QDir(jmvRoot).filePath("Maps/zone18.mpr");
@@ -868,10 +1111,43 @@ int main(int argc, char** argv)
                 << probe.manifest.value("active_slots").toInt() << '\n';
             out.flush();
         }
+        const QString paintedDirectory = QDir(outputRoot).filePath(
+            QStringLiteral("painted-extension-probes/2048-plus-one-blend"));
+        const BuiltMap painted = buildPaintedExtensionRuntimeProbe(
+            sourceMpr, sourceMob, zone18, paintedDirectory, outputRoot);
+        if(!painted.success)
+        {
+            err << "painted-extension-2048: " << painted.error << '\n';
+            return 11;
+        }
+        const QString paintedCollectionName = QStringLiteral(
+            "zone18-expanded-2048-painted-extension.collection");
+        const QString paintedCollectionPath = QDir(collectionsDirectory).filePath(
+            paintedCollectionName);
+        SEnduranceCollection paintedCollection;
+        paintedCollection.name = QStringLiteral(
+            "Zone18 expanded atlas - 2048 slots + painted exact blend");
+        paintedCollection.profileId = QStringLiteral("jamais-vu");
+        paintedCollection.mprReference = QDir(
+            QFileInfo(paintedCollectionPath).absolutePath()).relativeFilePath(
+                QFileInfo(QDir(paintedDirectory).filePath(
+                    painted.manifest.value("mpr_file").toString())).absoluteFilePath());
+        paintedCollection.mobReferences.append(QStringLiteral("zone18.mob"));
+        if(!CCollectionDocument::save(
+               paintedCollectionPath, paintedCollection, &error))
+        {
+            err << "painted-extension-2048 collection: " << error << '\n';
+            return 12;
+        }
+        QJsonObject paintedManifest = painted.manifest;
+        paintedManifest.insert("collection_file",
+            QStringLiteral("collections/") + paintedCollectionName);
+        paintedManifest.insert("collection_mob", "zone18.mob");
         QJsonObject root;
         root.insert("schema", "ei-zone18-expanded-atlas-fixtures-v1");
         root.insert("asset_policy", "Installed JMV assets used directly; live files unmodified.");
         root.insert("runtime_atlas_probes", probes);
+        root.insert("painted_extension_probe", paintedManifest);
         root.insert("source_mpr_sha256", QString::fromLatin1(fileSha256(sourceMpr)));
         root.insert("source_mob_sha256", QString::fromLatin1(fileSha256(sourceMob)));
         QDir().mkpath(outputRoot);

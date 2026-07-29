@@ -445,8 +445,9 @@ The hybrid modern-editor MVP is specified in
 [`docs/MODERN_TERRAIN_EDITOR_MVP.md`](docs/MODERN_TERRAIN_EDITOR_MVP.md). It
 adds a virtual vertex-material field, release-time exact resolution,
 deterministic generation of absent exact corner tuples, map-wide usage
-compaction, and isolated portable atlas packaging. Its initial 512-slot ceiling
-is a validation gate rather than a claimed packed-format limit.
+compaction, and isolated portable atlas packaging. Its current 1024-slot
+finalization ceiling is a validation gate rather than a claimed packed-format
+limit; live painting remains independent of that ceiling.
 
 - [x] Make one palette card equal one unique paintable vertex-material identity;
   remove support/context brush variants.
@@ -458,9 +459,17 @@ is a validation gate rather than a claimed packed-format limit.
 - [x] Count map-wide use, remove only unused slots, remap both changed and
   preserved layer references, rebuild MMP pages/mips, and freshly reopen the
   isolated MPR/RES package.
-- [ ] Validate more than eight MMP pages in controlled shipped 9/16-page tests
-  and update the Endurance renderer where required before raising the 512-slot
-  release ceiling.
+- [x] Validate expanded Zone18 atlases at 1024, 2048, and 4096 slots with a
+  controlled player, exact page/slot evidence, and process memory telemetry.
+  A 2048-slot map plus one generated/referenced extension page (2112 physical
+  slots) also reaches gameplay authoritatively.
+- [ ] Replace the shipped runtime's monolithic terrain-atlas allocation before
+  claiming 8192 slots. Both the normal Zone18 stress run and an independent
+  no-`drawall` control crash after gameplay-ready while allocating the
+  12288x11264 combined atlas: private memory rises from about 0.6 GiB to
+  2.6 GiB and the largest free 32-bit region falls below the required RGBA
+  surface size. 16384 must not be reported or attempted as a passing size
+  until that renderer/resource-memory architecture changes.
 - [ ] Extend one finalization transaction to simultaneous virtual land and
   overlay edits and define inactive-overlay virtual baselines.
 

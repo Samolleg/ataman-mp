@@ -1340,6 +1340,23 @@ bool CTextureList::terrainMmpPayload(const QString& textureName,
                                sourcePath);
 }
 
+bool CTextureList::terrainMmpTile(const QString& textureName, int logicalSlot,
+                                  QImage* tile, QString* sourcePath) const
+{
+    QByteArray payload;
+    if(!tile || !terrainMmpPayload(textureName, &payload, sourcePath))
+        return false;
+    QString diagnostic;
+    if(!ei::decodeMmpDxt1AtlasTile(payload, logicalSlot, tile, &diagnostic))
+    {
+        ei::log(eLogWarning, QString(
+            "Cannot decode terrain atlas tile directly: %1 slot:%2 diagnostic:%3")
+            .arg(textureName).arg(logicalSlot).arg(diagnostic));
+        return false;
+    }
+    return true;
+}
+
 void CTextureList::setMapLocalTerrainArchive(const QString& path)
 {
     QString resolved;

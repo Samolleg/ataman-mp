@@ -477,6 +477,59 @@ QByteArray encodeMmp8888(const QImage& image, QString* diagnostic)
     return result;
 }
 
+bool decodeMmpDxt1AtlasTile(const QByteArray& mmp, int logicalSlot,
+                            QImage* image, QString* diagnostic)
+{
+    constexpr int headerSize = 76;
+    constexpr quint32 signature = 0x00504d4d;
+    constexpr quint32 dxt1 = 0x31545844;
+    if(!image || logicalSlot < 0 || logicalSlot >= 64
+       || mmp.size() < headerSize || readDword(mmp, 0) != signature
+       || readDword(mmp, 16) != dxt1)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page or logical tile index is invalid.");
+        return false;
+    }
+    const quint32 widthValue = readDword(mmp, 4);
+    const quint32 heightValue = readDword(mmp, 8);
+    if(widthValue == 0 || widthValue != heightValue || widthValue % 32 != 0
+       || widthValue > quint32(std::numeric_limits<int>::max()))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page dimensions cannot be divided into 8x8 tiles.");
+        return false;
+    }
+    const int width = int(widthValue);
+    const int tileSize = width / 8;
+    const int pageBlocks = width / 4;
+    const int tileBlocks = tileSize / 4;
+    const qint64 baseBytes = qint64(pageBlocks) * pageBlocks * 8;
+    if(baseBytes > std::numeric_limits<int>::max()
+       || qint64(headerSize) + baseBytes > mmp.size())
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page base mip is truncated.");
+        return false;
+    }
+    const int tileColumn = logicalSlot % 8;
+    // MPR slot rows advance opposite to the raw MMP scanline order. The old
+    // full-page path mirrored the page, cropped, then mirrored the tile back;
+    // selecting 7-row directly is exactly equivalent.
+    const int rawTileRow = 7 - logicalSlot / 8;
+    QByteArray compressed;
+    compressed.reserve(tileBlocks * tileBlocks * 8);
+    for(int blockRow = 0; blockRow < tileBlocks; ++blockRow)
+    {
+        const qint64 sourceBlock = qint64(rawTileRow * tileBlocks + blockRow)
+            * pageBlocks + tileColumn * tileBlocks;
+        compressed.append(mmp.constData() + headerSize + sourceBlock * 8,
+                          tileBlocks * 8);
+    }
+    return decodeDxtImage(compressed, tileSize, tileSize,
+                          DxtFormat::Dxt1, image, diagnostic);
+}
+
 QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps,
                          QString* diagnostic)
 {

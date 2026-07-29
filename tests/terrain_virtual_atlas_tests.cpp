@@ -206,6 +206,7 @@ private slots:
     void inactiveOverlaySentinelSurvivesLandFinalization();
     void gradedAlphaIsRefusedWithoutFlattening();
     void dxt1TerrainPagesMatchShippedMipContract();
+    void dxt1AtlasTileDirectDecodeMatchesFullPageOrientation();
     void workingAtlasGeneratesImmediatelyAndReusesTuple();
     void expanded4096AtlasRetainsWorkingExtensionCapacity();
     void workingAtlasNeverReplacesAuthoredPixels();
@@ -646,6 +647,36 @@ void TerrainVirtualAtlasTests::workingPreviewPackagePreservesAuthoredPagesAndApp
     CValidationReport report;
     QVERIFY2(source.loadBytes(portableMpr(), "working-source.mpr", &report),
              qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(source, &report), qPrintable(report.toText()));
+    terrain.enableWorkingAtlasSlots(5 * 64);
+    bool available = false;
+    const quint16 before = terrain.packedTile(
+        0, 0, ETerrainTileLayer::Land, &available);
+    QVERIFY(available);
+    SMprPackedTile extension;
+    extension.atlasIndex = 4;
+    extension.tileIndex = 0;
+    STerrainTileCommand command;
+    STerrainTileDelta delta;
+    delta.globalX = 0;
+    delta.globalY = 0;
+    delta.layer = ETerrainTileLayer::Land;
+    delta.before = before;
+    delta.after = extension.encode();
+    command.deltas.append(delta);
+    QVERIFY2(terrain.apply(command, true, &report), qPrintable(report.toText()));
+    CMprEditTransaction transaction(QStringLiteral(
+        "Reference generated working-atlas extension"));
+    QVERIFY2(terrain.appendSectorEdits(&transaction, &report),
+             qPrintable(report.toText()));
+    QByteArray paintedBytes;
+    QVERIFY2(source.applyTransaction(transaction, &paintedBytes, &report),
+             qPrintable(report.toText()));
+    CMprDocument paintedSource;
+    QVERIFY2(paintedSource.loadBytes(
+                 paintedBytes, "working-painted-source.mpr", &report),
+             qPrintable(report.toText()));
     QVector<QImage> tiles(5 * 64, solid(qRgba(40, 80, 120, 255)));
     QVector<QByteArray> authoredPages;
     for(int page = 0; page < 4; ++page)
@@ -661,7 +692,7 @@ void TerrainVirtualAtlasTests::workingPreviewPackagePreservesAuthoredPagesAndApp
     tiles[4 * 64].fill(QColor(220, 30, 170, 255));
     const STerrainPortableAtlasPackage package =
         CTerrainVirtualAtlas::buildWorkingPreviewPackage(
-            source, tiles, authoredPages, &report);
+            paintedSource, tiles, authoredPages, &report);
     QVERIFY2(package.success,
              qPrintable(package.error + "\n" + report.toText()));
     CMprDocument reopened;
@@ -669,6 +700,12 @@ void TerrainVirtualAtlasTests::workingPreviewPackagePreservesAuthoredPagesAndApp
              qPrintable(report.toText()));
     QCOMPARE(reopened.mapInfo().textureCount, quint32(5));
     QCOMPARE(reopened.mapInfo().tileCount, quint32(320));
+    CTerrainEditModel reopenedTerrain;
+    QVERIFY2(reopenedTerrain.load(reopened, &report), qPrintable(report.toText()));
+    const quint16 reopenedPacked = reopenedTerrain.packedTile(
+        0, 0, ETerrainTileLayer::Land, &available);
+    QVERIFY(available);
+    QCOMPARE(SMprPackedTile::decode(reopenedPacked).atlasSlot(), 256);
     CResArchiveDocument resources;
     QStringList errors;
     QVERIFY2(resources.loadBytes(package.resourceArchiveBytes,
@@ -926,6 +963,40 @@ void TerrainVirtualAtlasTests::dxt1TerrainPagesMatchShippedMipContract()
     QCOMPARE(inspected.authoredMipSizes.back(), QSize(1, 1));
     QCOMPARE(inspected.authoredMipSizes.size(), 12);
     QCOMPARE(encoded.size(), 2796292);
+}
+
+void TerrainVirtualAtlasTests::dxt1AtlasTileDirectDecodeMatchesFullPageOrientation()
+{
+    QVector<QImage> tiles;
+    tiles.reserve(64);
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        QImage tile(16, 16, QImage::Format_RGBA8888);
+        for(int y = 0; y < tile.height(); ++y)
+            for(int x = 0; x < tile.width(); ++x)
+                tile.setPixelColor(x, y, QColor(
+                    (slot * 19 + x * 11) & 255,
+                    (slot * 31 + y * 7) & 255,
+                    (slot * 47 + x * 3 + y * 5) & 255));
+        tiles.append(tile);
+    }
+    QString diagnostic;
+    const QByteArray payload = ei::encodeMmpDxt1(
+        CTerrainVirtualAtlas::composePage(tiles, 0, 16), true, &diagnostic);
+    QVERIFY2(!payload.isEmpty(), qPrintable(diagnostic));
+    const ei::SMmpInspection full = ei::inspectMmp(payload);
+    QVERIFY2(full.valid, qPrintable(full.diagnostic));
+    const QImage editorPage = full.baseImage.mirrored(false, true);
+    for(int slot : {0, 7, 8, 27, 56, 63})
+    {
+        QImage direct;
+        QVERIFY2(ei::decodeMmpDxt1AtlasTile(
+                     payload, slot, &direct, &diagnostic),
+                 qPrintable(diagnostic));
+        const QImage legacy = editorPage.copy(
+            (slot % 8) * 16, (slot / 8) * 16, 16, 16).mirrored(false, true);
+        QCOMPARE(direct, legacy);
+    }
 }
 
 void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()

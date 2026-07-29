@@ -43,4 +43,20 @@ if ($changed.Count -ne 2 -or $changed.path -notcontains 'grown.dmp' `
 }
 Write-Output 'PASS: native dump delta includes new and changed dumps only'
 ++ $passed
+$pressure = Test-ExpandedAtlasMemoryPressure `
+    -CombinedRgbaBytes 553648128 -GameplayReadyPrivateBytes 613986304 `
+    -PeakPrivateBytes 2579759104 -MinimumLargestFreeRegionBytes 298991616
+if (-not $pressure) {
+    throw 'FAIL: observed 8192-slot allocation pressure was not recognized'
+}
+Write-Output 'PASS: observed 8192-slot allocation pressure is recognized'
+++ $passed
+$healthy = Test-ExpandedAtlasMemoryPressure `
+    -CombinedRgbaBytes 268435456 -GameplayReadyPrivateBytes 500000000 `
+    -PeakPrivateBytes 1232080896 -MinimumLargestFreeRegionBytes 1927675904
+if ($healthy) {
+    throw 'FAIL: healthy 4096-slot address space was classified as exhausted'
+}
+Write-Output 'PASS: healthy 4096-slot address space is not classified as exhausted'
+++ $passed
 Write-Output "Totals: $passed passed, 0 failed"

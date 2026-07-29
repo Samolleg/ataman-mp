@@ -99,7 +99,6 @@ CTerrainTransitionCatalog globalMaterialCatalog(
 QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
                                const QString& preferredNamespace,
                                const QSize& requiredSize,
-                               QMap<QString, QImage>* decodedPageCache,
                                QMap<QString, QImage>* decodedTileCache)
 {
     QVector<STerrainGlobalMaterialSource> sources = family.sources;
@@ -126,23 +125,15 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
             .arg(requiredSize.width()).arg(requiredSize.height());
         if(decodedTileCache && decodedTileCache->contains(tileCacheKey))
             return decodedTileCache->value(tileCacheKey);
-        QImage page;
-        if(decodedPageCache && decodedPageCache->contains(pageName))
-            page = decodedPageCache->value(pageName);
-        else
-        {
-            CTextureList::getInstance()->extractMmpToDxt1(page, pageName);
-            if(decodedPageCache) decodedPageCache->insert(pageName, page);
-        }
-        if(page.isNull() || page.width() != page.height()
-           || page.width() % 8 != 0)
-            continue;
-        const int tileSize = page.width() / 8;
         const int localSlot = source.uniformSlot % 64;
-        QImage tile = page.copy((localSlot % 8) * tileSize,
-                                (localSlot / 8) * tileSize,
-                                tileSize, tileSize).mirrored(false, true)
-                      .convertToFormat(QImage::Format_RGBA8888);
+        QImage tile;
+        // The palette needs one reviewed uniform tile, not the other 63
+        // tiles on its MMP page. Direct block extraction cuts first-load work
+        // from dozens of 2048x2048 RGBA decodes to small 128/256px tiles.
+        if(!CTextureList::getInstance()->terrainMmpTile(
+               pageName, localSlot, &tile))
+            continue;
+        tile = tile.convertToFormat(QImage::Format_RGBA8888);
         if(requiredSize.isEmpty() || tile.size() == requiredSize)
         {
             if(decodedTileCache)
@@ -6778,11 +6769,10 @@ void CView::rebuildTerrainAutoCatalog()
         // families. Decode each physical MMP only once per catalog rebuild;
         // the previous per-family decode made map opening spend tens of
         // seconds repeatedly expanding the same 2048x2048 DXT page.
-        QMap<QString, QImage> decodedGlobalPages;
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             const QImage source = loadGlobalUniformSource(
-                family, mprNamespace, requiredSize, &decodedGlobalPages,
+                family, mprNamespace, requiredSize,
                 &m_terrainGlobalUniformTileCache);
             if(source.isNull())
             {

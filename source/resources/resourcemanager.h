@@ -147,6 +147,8 @@ public:
     // appending generated working-atlas pages to a run-local RES archive.
     bool terrainMmpPayload(const QString& textureName, QByteArray* payload,
                            QString* sourcePath = nullptr) const;
+    bool terrainMmpTile(const QString& textureName, int logicalSlot,
+                        QImage* tile, QString* sourcePath = nullptr) const;
     // A finalized isolated MPR may carry a sibling <mpr>-atlas.res. This
     // session-only source is searched before configured shared terrain data.
     void setMapLocalTerrainArchive(const QString& path);

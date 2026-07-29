@@ -22,6 +22,12 @@ bool decodeDxtImage(const QByteArray& compressed, int width, int height,
                     DxtFormat format, QImage* image,
                     QString* diagnostic = nullptr);
 
+// Decode one logical 8x8 terrain-atlas tile directly from the base DXT1 mip.
+// This avoids expanding a 1024/2048-pixel page merely to build one material
+// palette thumbnail. logicalSlot uses the MPR 0..63 tile ordering.
+bool decodeMmpDxt1AtlasTile(const QByteArray& mmp, int logicalSlot,
+                            QImage* image, QString* diagnostic = nullptr);
+
 // PNT3 stores four-pixel (16-byte) literal blocks separated by byte-counted
 // transparent runs. Only the first dword of each block is a control candidate:
 // non-zero with alpha zero is a run; otherwise the whole block is literal.

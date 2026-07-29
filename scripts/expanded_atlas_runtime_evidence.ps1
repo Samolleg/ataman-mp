@@ -26,6 +26,22 @@ function Test-ExpandedAtlasProbePassed {
     return $Classification -eq 'pass'
 }
 
+function Test-ExpandedAtlasMemoryPressure {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][int64]$CombinedRgbaBytes,
+        [Parameter(Mandatory = $true)][int64]$GameplayReadyPrivateBytes,
+        [Parameter(Mandatory = $true)][int64]$PeakPrivateBytes,
+        [Parameter(Mandatory = $true)][int64]$MinimumLargestFreeRegionBytes
+    )
+    if ($CombinedRgbaBytes -le 0 -or $MinimumLargestFreeRegionBytes -le 0) {
+        return $false
+    }
+    $growth = $PeakPrivateBytes - $GameplayReadyPrivateBytes
+    return $growth -ge $CombinedRgbaBytes `
+        -and $MinimumLargestFreeRegionBytes -lt $CombinedRgbaBytes
+}
+
 function Get-ChangedNativeDumpRows {
     [CmdletBinding()]
     param(
