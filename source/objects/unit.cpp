@@ -509,7 +509,7 @@ void CUnit::refreshAnimationPose()
             { result.code = "animation.provider.unavailable"; result.message = diagnostic; }
             if(result.success)
             {
-                m_idleClip = parseNestedAnimationClip(
+                m_idleClip = loadOrParseCachedAnimationClip(
                     CObjectList::getInstance()->modelAnimation(m_resolvedAnimationModel),
                     resolved.value("actionName").toString(), resolved.value("length").toInt());
                 int morphChannels = 0;

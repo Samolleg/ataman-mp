@@ -13,6 +13,7 @@
 #include "render_queue.h"
 #include "settings.h"
 #include "property.h"
+#include "persistent_visual_cache.h"
 
 #include <climits>
 #include <limits>
@@ -47,23 +48,8 @@ QString meshCacheScope(const QString& modelName)
     CSettings* settings = CObjectList::getInstance()->settings();
     const COptString* profile = settings
         ? dynamic_cast<const COptString*>(settings->opt("resourceProfile")) : nullptr;
-    const COptStringList* roots = settings
-        ? dynamic_cast<const COptStringList*>(settings->opt(eOptSetResource, "resourceRoots")) : nullptr;
-    QString scope = (profile ? profile->value() : QString()) + '|';
-    QVector<QString> sourcePaths = roots ? roots->value() : QVector<QString>();
-    if(sourcePaths.isEmpty() && settings)
-    {
-        for(const char* optionName : {"figPaths", "texPaths"})
-        {
-            const COptStringList* paths = dynamic_cast<const COptStringList*>(
-                settings->opt(eOptSetResource, optionName));
-            if(paths)
-                sourcePaths += paths->value();
-        }
-    }
-    for(const QString& root : sourcePaths)
-            scope += QFileInfo(root).absoluteFilePath().toLower() + ';';
-    return scope + '|' + modelName.toLower();
+    return (profile ? profile->value() : QString()) + '|'
+        + configuredResourceFingerprint(settings) + '|' + modelName.toLower();
 }
 
 void cloneAssembly(QVector<CPart*>& destination, const QVector<CPart*>& source)
@@ -87,9 +73,45 @@ void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
     if(!cached)
     {
         cached = new CachedFigureAssembly;
-        QStringList parts = visibleParts;
-        QVector3D renderComplexion = complexion;
-        figure->getVertexData(cached->parts, renderComplexion, parts);
+        const QString diskDirectory = ei::visualCacheDirectory(
+            QStringLiteral("character-assemblies"));
+        const QString diskKey = ei::visualCacheKey(key.toUtf8());
+        QVector<ei::SCachedVisualPart> diskParts;
+        if(ei::readCachedFigureAssembly(diskDirectory, diskKey, &diskParts))
+        {
+            cached->parts.reserve(diskParts.size());
+            for(const ei::SCachedVisualPart& source : diskParts)
+            {
+                CPart* part = new CPart;
+                part->name() = source.name;
+                part->setParentName(source.parentName);
+                part->setRestOffset(source.restOffset);
+                part->setTextureNumber(source.textureNumber);
+                part->vertData() = source.vertices;
+                part->setSourceVertexIndices(source.sourceVertexIndices);
+                part->update();
+                cached->parts.append(part);
+            }
+        }
+        else
+        {
+            QStringList parts = visibleParts;
+            QVector3D renderComplexion = complexion;
+            figure->getVertexData(cached->parts, renderComplexion, parts);
+            diskParts.reserve(cached->parts.size());
+            for(const CPart* part : cached->parts)
+            {
+                ei::SCachedVisualPart output;
+                output.name = part->name();
+                output.parentName = part->parentName();
+                output.restOffset = part->restOffset();
+                output.textureNumber = part->textureNumber();
+                output.vertices = part->vertData();
+                output.sourceVertexIndices = part->sourceVertexIndices();
+                diskParts.append(output);
+            }
+            ei::writeCachedFigureAssembly(diskDirectory, diskKey, diskParts);
+        }
         quint64 retainedBytes = 0;
         for(CPart* part : cached->parts)
             retainedBytes += quint64(part->vertData().size()) * sizeof(SVertexData);

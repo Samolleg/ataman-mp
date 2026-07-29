@@ -2,12 +2,132 @@
 
 #include <QDataStream>
 #include <QRegularExpression>
+#include <QCryptographicHash>
 #include <QtMath>
 #include <algorithm>
 #include <cmath>
 #include <functional>
 
+#include "persistent_visual_cache.h"
+
 namespace {
+
+const quint32 kAnimationCacheSchema = 1;
+const quint32 kMaximumAnimationChannels = 4096;
+const quint32 kMaximumAnimationSamples = 1000000;
+
+void writeVector3(QDataStream& out, const QVector3D& value)
+{
+    out << value.x() << value.y() << value.z();
+}
+
+bool readVector3(QDataStream& in, QVector3D* value)
+{
+    float x = 0, y = 0, z = 0;
+    in >> x >> y >> z;
+    if(in.status() != QDataStream::Ok)
+        return false;
+    *value = QVector3D(x, y, z);
+    return true;
+}
+
+QByteArray serializeAnimationClip(const SAnimationClip& clip)
+{
+    QByteArray payload;
+    QDataStream out(&payload, QIODevice::WriteOnly);
+    out.setByteOrder(QDataStream::LittleEndian);
+    out << clip.actionName << qint32(clip.logicalLength) << clip.diagnostics
+        << quint32(clip.channels.size());
+    for(auto it = clip.channels.constBegin(); it != clip.channels.constEnd(); ++it)
+    {
+        const SAnimationChannel& channel = it.value();
+        out << it.key() << channel.component << quint32(channel.rotations.size());
+        for(const QQuaternion& rotation : channel.rotations)
+            out << rotation.scalar() << rotation.x() << rotation.y() << rotation.z();
+        out << quint32(channel.translations.size());
+        for(const QVector3D& translation : channel.translations)
+            writeVector3(out, translation);
+        out << quint32(channel.morphations.size());
+        for(const QVector<QVector3D>& frame : channel.morphations)
+        {
+            out << quint32(frame.size());
+            for(const QVector3D& delta : frame)
+                writeVector3(out, delta);
+        }
+    }
+    return out.status() == QDataStream::Ok ? payload : QByteArray();
+}
+
+bool deserializeAnimationClip(const QByteArray& payload, SAnimationClip* clip)
+{
+    if(!clip)
+        return false;
+    QDataStream in(payload);
+    in.setByteOrder(QDataStream::LittleEndian);
+    SAnimationClip decoded;
+    qint32 logicalLength = 0;
+    quint32 channelCount = 0;
+    in >> decoded.actionName >> logicalLength >> decoded.diagnostics >> channelCount;
+    if(in.status() != QDataStream::Ok || logicalLength <= 0
+            || channelCount > kMaximumAnimationChannels)
+        return false;
+    decoded.logicalLength = logicalLength;
+    for(quint32 channelIndex = 0; channelIndex < channelCount; ++channelIndex)
+    {
+        QString key;
+        SAnimationChannel channel;
+        quint32 rotationCount = 0, translationCount = 0, morphFrameCount = 0;
+        in >> key >> channel.component >> rotationCount;
+        if(rotationCount > kMaximumAnimationSamples)
+            return false;
+        channel.rotations.reserve(int(rotationCount));
+        for(quint32 i = 0; i < rotationCount; ++i)
+        {
+            float scalar = 0, x = 0, y = 0, z = 0;
+            in >> scalar >> x >> y >> z;
+            channel.rotations.append(QQuaternion(scalar, x, y, z));
+        }
+        in >> translationCount;
+        if(translationCount > kMaximumAnimationSamples)
+            return false;
+        channel.translations.reserve(int(translationCount));
+        for(quint32 i = 0; i < translationCount; ++i)
+        {
+            QVector3D value;
+            if(!readVector3(in, &value))
+                return false;
+            channel.translations.append(value);
+        }
+        in >> morphFrameCount;
+        if(morphFrameCount > kMaximumAnimationSamples)
+            return false;
+        channel.morphations.reserve(int(morphFrameCount));
+        for(quint32 frameIndex = 0; frameIndex < morphFrameCount; ++frameIndex)
+        {
+            quint32 deltaCount = 0;
+            in >> deltaCount;
+            if(deltaCount > kMaximumAnimationSamples)
+                return false;
+            QVector<QVector3D> frame;
+            frame.reserve(int(deltaCount));
+            for(quint32 deltaIndex = 0; deltaIndex < deltaCount; ++deltaIndex)
+            {
+                QVector3D delta;
+                if(!readVector3(in, &delta))
+                    return false;
+                frame.append(delta);
+            }
+            channel.morphations.append(frame);
+        }
+        if(in.status() != QDataStream::Ok || key.isEmpty())
+            return false;
+        decoded.channels.insert(key, channel);
+    }
+    if(in.status() != QDataStream::Ok || !in.atEnd() || !decoded.valid())
+        return false;
+    *clip = decoded;
+    return true;
+}
 
 QString fixedString(const QByteArray& bytes)
 {
@@ -377,6 +497,42 @@ SAnimationClip parseNestedAnimationClip(const QByteArray& modelAnimationArchive,
             result.channels.insert(it.key().toLower(), channel);
     }
     return result;
+}
+
+SAnimationClip loadOrParseCachedAnimationClip(const QByteArray& modelAnimationArchive,
+                                              const QString& actionName, int logicalLength,
+                                              const QString& requestedCacheDirectory,
+                                              bool* cacheHit)
+{
+    if(cacheHit)
+        *cacheHit = false;
+    const QString directory = requestedCacheDirectory.isEmpty()
+        ? ei::visualCacheDirectory(QStringLiteral("character-animations"))
+        : requestedCacheDirectory;
+    QByteArray identity = QCryptographicHash::hash(modelAnimationArchive,
+        QCryptographicHash::Sha256);
+    identity += '|';
+    identity += actionName.toLower().toUtf8();
+    identity += '|';
+    identity += QByteArray::number(logicalLength);
+    const QString key = ei::visualCacheKey(identity);
+    QByteArray payload;
+    SAnimationClip clip;
+    if(ei::readVisualCachePayload(directory, key, kAnimationCacheSchema, &payload)
+            && deserializeAnimationClip(payload, &clip))
+    {
+        if(cacheHit)
+            *cacheHit = true;
+        return clip;
+    }
+    clip = parseNestedAnimationClip(modelAnimationArchive, actionName, logicalLength);
+    if(clip.valid())
+    {
+        payload = serializeAnimationClip(clip);
+        if(!payload.isEmpty())
+            ei::writeVisualCachePayload(directory, key, kAnimationCacheSchema, payload);
+    }
+    return clip;
 }
 
 SAnimationLocalPose interpolateAnimationPose(const SAnimationClip& clip, double logicalFrame,

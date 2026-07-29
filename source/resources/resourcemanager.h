@@ -14,6 +14,11 @@
 //forward declarations
 class CSettings;
 
+// Stable identity for all configured resource sources. It includes normalized
+// source paths, sizes, and modification times, so persistent derived caches are
+// invalidated when the active profile or any contributing archive changes.
+QString configuredResourceFingerprint(CSettings* settings);
+
 ///
 /// \brief The CObjectList class stores information about the currently read 3D figures from the game resources.
 ///

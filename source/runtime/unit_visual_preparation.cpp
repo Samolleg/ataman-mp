@@ -196,6 +196,8 @@ QString unitAppearancePreparationCacheKey(const SUnitAppearancePreparationTask& 
 
 QString unitAppearancePreparationCacheDirectory()
 {
+    if(!QCoreApplication::instance())
+        return QString();
     const QString applicationDirectory = QCoreApplication::applicationDirPath();
     const QString directory = unitAppearancePreparationCacheDirectoryForApplication(
         applicationDirectory);

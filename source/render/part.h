@@ -51,6 +51,7 @@ public:
     void setPoseMatrix(const QMatrix4x4& matrix) { m_poseMatrix = matrix; }
     const QMatrix4x4& poseMatrix() const { return m_poseMatrix; }
     void setSourceVertexIndices(const QVector<int>& indices) { m_sourceVertexIndices = indices; }
+    const QVector<int>& sourceVertexIndices() const { return m_sourceVertexIndices; }
     void setMorphDeltas(const QVector<QVector3D>& deltas);
     bool isDrawable() const { return m_bShow && !m_aVertData.isEmpty(); }
     bool canInstance() const { return !m_morphApplied; }

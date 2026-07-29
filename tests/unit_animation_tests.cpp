@@ -4,6 +4,7 @@
 #include "unit_animation.h"
 #include "profile_visual_provider.h"
 #include "unit_visual_preparation.h"
+#include "persistent_visual_cache.h"
 
 namespace {
 
@@ -110,8 +111,85 @@ private slots:
     void retainsAppearanceBatchOwnershipUntilResultsAreConsumed();
     void keepsAppearanceCacheBesideEditor();
     void rebuildsIncompatibleAppearanceCacheAutomatically();
+    void cachesParsedAnimationAndRecoversFromCorruption();
+    void roundTripsComposedAtlasPixelsLosslessly();
+    void roundTripsFigureAssemblyAndUnknownPartNames();
     void malformedAndUnknownInputsFailStatic();
 };
+
+void UnitAnimationTests::cachesParsedAnimationAndRecoversFromCorruption()
+{
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    const QByteArray archive = res({{"idle", res({{"body", channel()}})}});
+    bool hit = true;
+    const SAnimationClip cold = loadOrParseCachedAnimationClip(
+        archive, QStringLiteral("idle"), 3, cache.path(), &hit);
+    QVERIFY(cold.valid());
+    QVERIFY(!hit);
+    const SAnimationClip warm = loadOrParseCachedAnimationClip(
+        archive, QStringLiteral("idle"), 3, cache.path(), &hit);
+    QVERIFY(hit);
+    QCOMPARE(warm.channels.size(), cold.channels.size());
+    QCOMPARE(warm.channels.value(QStringLiteral("body")).translations.size(), 3);
+
+    const QStringList entries = QDir(cache.path()).entryList(
+        QStringList() << QStringLiteral("*.cache"), QDir::Files);
+    QCOMPARE(entries.size(), 1);
+    QFile corrupt(QDir(cache.path()).filePath(entries.first()));
+    QVERIFY(corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    corrupt.write("broken");
+    corrupt.close();
+    const SAnimationClip recovered = loadOrParseCachedAnimationClip(
+        archive, QStringLiteral("idle"), 3, cache.path(), &hit);
+    QVERIFY(recovered.valid());
+    QVERIFY(!hit);
+}
+
+void UnitAnimationTests::roundTripsComposedAtlasPixelsLosslessly()
+{
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    QImage source(2, 2, QImage::Format_RGBA64);
+    source.setPixelColor(0, 0, QColor::fromRgba64(1, 2, 3, 4));
+    source.setPixelColor(1, 0, QColor::fromRgba64(65535, 32768, 12, 50000));
+    source.setPixelColor(0, 1, QColor::fromRgba64(100, 200, 300, 400));
+    source.setPixelColor(1, 1, QColor::fromRgba64(65534, 65533, 65532, 65531));
+    QVERIFY(ei::writeCachedVisualImage(cache.path(), QStringLiteral("atlas"), source));
+    QImage restored;
+    QVERIFY(ei::readCachedVisualImage(cache.path(), QStringLiteral("atlas"), &restored));
+    QCOMPARE(restored.format(), QImage::Format_RGBA64);
+    QCOMPARE(restored.size(), source.size());
+    for(int y = 0; y < source.height(); ++y)
+        for(int x = 0; x < source.width(); ++x)
+            QCOMPARE(restored.pixelColor(x, y).rgba64(), source.pixelColor(x, y).rgba64());
+}
+
+void UnitAnimationTests::roundTripsFigureAssemblyAndUnknownPartNames()
+{
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    ei::SCachedVisualPart source;
+    source.name = QStringLiteral("future_unknown_part");
+    source.parentName = QStringLiteral("bd");
+    source.restOffset = QVector3D(1.25f, -2.5f, 3.75f);
+    source.textureNumber = 2;
+    QVector3D position(1, 2, 3), normal(0, 0, 1);
+    QVector2D uv(0.25f, 0.75f);
+    source.vertices.append(SVertexData(position, normal, uv));
+    source.sourceVertexIndices.append(42);
+    QVERIFY(ei::writeCachedFigureAssembly(cache.path(), QStringLiteral("assembly"), {source}));
+    QVector<ei::SCachedVisualPart> restored;
+    QVERIFY(ei::readCachedFigureAssembly(cache.path(), QStringLiteral("assembly"), &restored));
+    QCOMPARE(restored.size(), 1);
+    QCOMPARE(restored.first().name, source.name);
+    QCOMPARE(restored.first().parentName, source.parentName);
+    QCOMPARE(restored.first().textureNumber, 2);
+    QCOMPARE(restored.first().vertices.size(), 1);
+    QCOMPARE(restored.first().vertices.first().position, position);
+    QCOMPARE(restored.first().vertices.first().texCoord, uv);
+    QCOMPARE(restored.first().sourceVertexIndices, QVector<int>() << 42);
+}
 
 void UnitAnimationTests::pumpsIncompleteIdleVisualPreparation()
 {

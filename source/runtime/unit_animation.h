@@ -74,6 +74,10 @@ bool selectJmvDefaultIdleAction(const QVector<SAdbAction>& actions, const QStrin
                                 QString* diagnostic = nullptr);
 SAnimationClip parseNestedAnimationClip(const QByteArray& modelAnimationArchive,
                                         const QString& actionName, int logicalLength);
+SAnimationClip loadOrParseCachedAnimationClip(const QByteArray& modelAnimationArchive,
+                                              const QString& actionName, int logicalLength,
+                                              const QString& cacheDirectory = QString(),
+                                              bool* cacheHit = nullptr);
 SAnimationLocalPose interpolateAnimationPose(const SAnimationClip& clip, double logicalFrame,
                                              const SAnimationSkeleton* skeleton = nullptr);
 QMap<QString, QMatrix4x4> propagateAnimationHierarchy(

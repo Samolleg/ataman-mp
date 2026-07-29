@@ -22,6 +22,7 @@
 #include "log.h"
 #include "resource_name.h"
 #include "unit_appearance.h"
+#include "persistent_visual_cache.h"
 
 CObjectList* CObjectList::m_pObjectContainer = nullptr;
 CTextureList* CTextureList::m_pTextureContainer = nullptr;
@@ -339,6 +340,11 @@ int dxtLevelSize(int width, int height, int blockBytes)
 {
     return qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4) * blockBytes;
 }
+}
+
+QString configuredResourceFingerprint(CSettings* settings)
+{
+    return resourceSourceFingerprint(configuredResourceSources(settings));
 }
 
 CObjectList *CObjectList::getInstance()
@@ -1074,6 +1080,17 @@ QImage CTextureList::layeredTextureImage(const QStringList& layerNames,
                                          const QString& modelName,
                                          QString* diagnostic)
 {
+    const QByteArray identity = (configuredResourceFingerprint(m_pSettings) + '|'
+        + modelName.toLower() + '|' + layerNames.join(';').toLower()).toUtf8();
+    const QString cacheDirectory = ei::visualCacheDirectory(QStringLiteral("character-atlases"));
+    const QString cacheKey = ei::visualCacheKey(identity);
+    QImage cached;
+    if(ei::readCachedVisualImage(cacheDirectory, cacheKey, &cached))
+    {
+        if(diagnostic)
+            diagnostic->clear();
+        return cached;
+    }
     QVector<QImage> layers;
     for(const QString& name : layerNames)
     {
@@ -1101,6 +1118,7 @@ QImage CTextureList::layeredTextureImage(const QStringList& layerNames,
     }
     if(diagnostic)
         diagnostic->clear();
+    ei::writeCachedVisualImage(cacheDirectory, cacheKey, composite);
     return composite;
 }
 
