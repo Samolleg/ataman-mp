@@ -370,6 +370,32 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
         m_materialSourceSlots.remove(source.key());
     }
     m_valid = true;
+    // The opened map is itself reviewed stock JMV evidence. Index all of its
+    // authored two-family transitions immediately so the first semantic
+    // stroke can generate an absent tuple without waiting for an unrelated
+    // exact global transition to be imported earlier in the session.
+    for(int slot = 0; slot < authoredTiles.size(); ++slot)
+    {
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot % 64);
+        packed.atlasIndex = quint8(slot / 64);
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            catalog.gridSignatureForPacked(packed.encode(), &found);
+        if(found)
+            registerBlendMaskTemplate(signature, authoredTiles.at(slot),
+                QStringLiteral("current-map stock slot %1").arg(slot), nullptr);
+    }
+}
+
+int CTerrainVirtualAtlas::stockBlendMaskCountFor(
+    const STerrainTransitionSignature& signature) const
+{
+    const int topology = transitionTopology(signature);
+    int count = 0;
+    for(const STerrainBlendMaskTemplate& item : m_blendMaskTemplates)
+        count += transitionTopology(item.signature) == topology;
+    return count;
 }
 
 QByteArray CTerrainVirtualAtlas::signatureKey(
@@ -1471,6 +1497,12 @@ bool CTerrainWorkingAtlas::addStockBlendMaskTemplate(
 {
     return m_resolver && m_resolver->addStockBlendMaskTemplate(
         signature, pixels, sourceLabel, report);
+}
+
+int CTerrainWorkingAtlas::stockBlendMaskCountFor(
+    const STerrainTransitionSignature& signature) const
+{
+    return m_resolver ? m_resolver->stockBlendMaskCountFor(signature) : 0;
 }
 
 int CTerrainWorkingAtlas::activeTextureCount() const

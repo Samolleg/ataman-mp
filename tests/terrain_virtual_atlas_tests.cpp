@@ -260,6 +260,7 @@ private slots:
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void missingStockMaskNeverFallsBackToProceduralArtwork();
+    void authoredMapMasksAreAvailableBeforeFirstStroke();
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
     void generatesFourFamilyTupleWithOrientation();
@@ -370,6 +371,58 @@ void TerrainVirtualAtlasTests::missingStockMaskNeverFallsBackToProceduralArtwork
     QVERIFY(report.hasErrors());
     QVERIFY(report.toText().contains("No reviewed stock JMV mask"));
     QVERIFY(atlas.generatedTiles().isEmpty());
+}
+
+void TerrainVirtualAtlasTests::authoredMapMasksAreAvailableBeforeFirstStroke()
+{
+    Fixture fixture;
+    const QVector<STerrainTransitionSignature> stockPatterns = {
+        signature(3, 4, 4, 4), signature(3, 3, 4, 4),
+        signature(3, 4, 3, 4)
+    };
+    for(const STerrainTransitionSignature& pattern : stockPatterns)
+    {
+        const STerrainTransitionSignature preview =
+            CTerrainTransitionCatalog::mirroredGridY(pattern);
+        const QVector<qint32> ids = {preview.northWest, preview.northEast,
+            preview.southEast, preview.southWest};
+        QImage pixels(8, 8, QImage::Format_RGBA8888);
+        for(int y = 0; y < pixels.height(); ++y)
+            for(int x = 0; x < pixels.width(); ++x)
+            {
+                const double u = double(x) / double(pixels.width() - 1);
+                const double v = double(y) / double(pixels.height() - 1);
+                const double weights[4] = {(1-u)*(1-v), u*(1-v),
+                                            u*v, (1-u)*v};
+                double owner = 0.0;
+                for(int corner = 0; corner < 4; ++corner)
+                    if(ids.at(corner) == 3) owner += weights[corner];
+                pixels.setPixelColor(x, y, owner >= 0.5
+                    ? fixture.images.at(2).pixelColor(x, y)
+                    : fixture.images.at(3).pixelColor(x, y));
+            }
+        const int slot = fixture.images.size();
+        fixture.images.append(pixels);
+        STerrainTransitionVariant variant;
+        variant.signature = pattern;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot);
+        variant.packedTile = packed.encode();
+        QVERIFY(fixture.catalog.addVariant(variant));
+    }
+
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u);
+    for(const STerrainTransitionSignature& requested : {
+            signature(1, 2, 2, 2), signature(1, 1, 2, 2),
+            signature(1, 2, 1, 2)})
+    {
+        QVERIFY(atlas.stockBlendMaskCountFor(requested) > 0);
+        CValidationReport report;
+        const STerrainVirtualTile resolved = atlas.resolve(
+            requested, 0, 0, &report);
+        QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+        QVERIFY(resolved.generatedIndex >= 0);
+    }
 }
 
 void TerrainVirtualAtlasTests::generatesOneThreeTuple()

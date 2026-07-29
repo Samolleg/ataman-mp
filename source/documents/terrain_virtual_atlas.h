@@ -163,6 +163,8 @@ public:
         const QString& sourceLabel = QString(),
         CValidationReport* report = nullptr)
     { return registerBlendMaskTemplate(signature, pixels, sourceLabel, report); }
+    int stockBlendMaskCountFor(
+        const STerrainTransitionSignature& signature) const;
     const QVector<STerrainFinalizedTile>& generatedTiles() const
         { return m_generatedTiles; }
 
@@ -250,6 +252,8 @@ public:
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
         CValidationReport* report = nullptr);
+    int stockBlendMaskCountFor(
+        const STerrainTransitionSignature& signature) const;
 
     quint16 resolve(const STerrainTransitionSignature& signature,
                     int cellX, int cellY,

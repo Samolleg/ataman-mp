@@ -179,6 +179,20 @@ QByteArray globalTransitionKey(const STerrainTransitionSignature& signature)
     return key;
 }
 
+int terrainTransitionTopology(const STerrainTransitionSignature& signature)
+{
+    QMap<qint32, int> counts;
+    for(qint32 material : {signature.northWest, signature.northEast,
+                           signature.southEast, signature.southWest})
+        ++counts[material];
+    if(counts.size() != 2)
+        return counts.size();
+    if(counts.values().contains(1))
+        return 21;
+    return signature.northWest == signature.southEast
+        && signature.northEast == signature.southWest ? 22 : 23;
+}
+
 QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
                                 const QSize& requiredSize,
                                 QMap<QString, QImage>* decodedPageCache)
@@ -7381,11 +7395,12 @@ bool CView::realizeWorkingTerrainSignature(
     }
     // Resolution order is user-visible policy: current map exact tuple first,
     // then an exact authored tuple from any configured stock JMV atlas, and
-    // only then procedural generation. Global pages are decoded on demand so
+    // only then stock-mask-derived generation. Global pages are decoded on demand so
     // building the palette does not expand every atlas in the installation.
     bool alreadyExact = false;
     m_workingTerrainAtlas->catalog().selectForPaint(
         signature, cellX, cellY, m_terrainSemanticSeed, &alreadyExact);
+    bool exactLibraryReady = false;
     if(!alreadyExact)
     {
         const QList<STerrainGlobalTransitionSource> candidates =
@@ -7404,6 +7419,7 @@ bool CView::realizeWorkingTerrainSignature(
             if(m_workingTerrainAtlas->addAuthoredLibraryTransition(
                    source.signature, pixels, label, &importReport))
             {
+                exactLibraryReady = true;
                 m_importedTerrainTransitions.insert(
                     globalTransitionKey(source.signature),
                     qMakePair(source.signature, pixels));
@@ -7412,6 +7428,101 @@ bool CView::realizeWorkingTerrainSignature(
                     .arg(label));
                 break;
             }
+        }
+    }
+    if(!alreadyExact && !exactLibraryReady
+       && m_workingTerrainAtlas->stockBlendMaskCountFor(signature) < 3)
+    {
+        // Exact stock reuse was unavailable. Lazily index a few real JMV
+        // silhouettes of the required topology, preferring the requested
+        // material schools. This keeps map opening cheap while guaranteeing
+        // that the first paint on a default atlas is not refused merely
+        // because no unrelated earlier stroke happened to import a mask.
+        struct RankedMaskSource
+        {
+            STerrainGlobalTransitionSource source;
+            int score{0};
+            QString stableKey;
+        };
+        const QMap<qint32, ETerrainBlendStyle> styles =
+            globalMaterialBlendStyles(m_terrainGlobalFamilies);
+        const ETerrainBlendStyle requestedA = styles.value(
+            signature.northWest, ETerrainBlendStyle::Organic);
+        ETerrainBlendStyle requestedB = requestedA;
+        for(qint32 material : {signature.northEast, signature.southEast,
+                               signature.southWest})
+            if(material != signature.northWest)
+            {
+                requestedB = styles.value(material,
+                    ETerrainBlendStyle::Organic);
+                break;
+            }
+        QVector<RankedMaskSource> ranked;
+        QSet<QString> seen;
+        const int requestedTopology = terrainTransitionTopology(signature);
+        for(auto it = m_terrainGlobalTransitionSources.cbegin();
+            it != m_terrainGlobalTransitionSources.cend(); ++it)
+        {
+            const STerrainGlobalTransitionSource& source = it.value();
+            if(terrainTransitionTopology(source.signature) != requestedTopology)
+                continue;
+            const QString stableKey = QStringLiteral("%1:%2")
+                .arg(source.mprNamespace.toCaseFolded()).arg(source.slot);
+            if(seen.contains(stableKey))
+                continue;
+            seen.insert(stableKey);
+            const ETerrainBlendStyle sourceA = styles.value(
+                source.signature.northWest, ETerrainBlendStyle::Organic);
+            ETerrainBlendStyle sourceB = sourceA;
+            for(qint32 material : {source.signature.northEast,
+                                   source.signature.southEast,
+                                   source.signature.southWest})
+                if(material != source.signature.northWest)
+                {
+                    sourceB = styles.value(material,
+                        ETerrainBlendStyle::Organic);
+                    break;
+                }
+            const bool exactStyles = (sourceA == requestedA
+                && sourceB == requestedB) || (sourceA == requestedB
+                && sourceB == requestedA);
+            const bool oneStyle = sourceA == requestedA || sourceA == requestedB
+                || sourceB == requestedA || sourceB == requestedB;
+            RankedMaskSource candidate;
+            candidate.source = source;
+            candidate.score = exactStyles ? 1000 : oneStyle ? 100 : 0;
+            candidate.stableKey = stableKey;
+            ranked.append(candidate);
+        }
+        std::sort(ranked.begin(), ranked.end(),
+            [](const RankedMaskSource& left, const RankedMaskSource& right) {
+                if(left.score != right.score) return left.score > right.score;
+                return left.stableKey < right.stableKey;
+            });
+        const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
+            ? QSize() : m_authoredTerrainTileImages.front().size();
+        for(const RankedMaskSource& candidate : ranked)
+        {
+            const QImage pixels = loadGlobalTransitionTile(
+                candidate.source, requiredSize,
+                &m_terrainGlobalTransitionPageCache);
+            if(pixels.isNull())
+                continue;
+            const int before =
+                m_workingTerrainAtlas->stockBlendMaskCountFor(signature);
+            const QString label = QStringLiteral("%1 slot %2")
+                .arg(candidate.source.mprNamespace)
+                .arg(candidate.source.slot);
+            m_workingTerrainAtlas->addStockBlendMaskTemplate(
+                candidate.source.signature, pixels, label, nullptr);
+            const int after =
+                m_workingTerrainAtlas->stockBlendMaskCountFor(signature);
+            if(after > before)
+                ei::log(eLogInfo, QString(
+                    "Terrain stock mask source indexed:%1 topology:%2 score:%3")
+                    .arg(label).arg(requestedTopology).arg(candidate.score));
+            if(after >= 3)
+                break;
         }
     }
     const auto appendFindings = [report](const CValidationReport& source) {
