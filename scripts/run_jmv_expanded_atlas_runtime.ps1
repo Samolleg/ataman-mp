@@ -181,10 +181,14 @@ function Invoke-AtlasProbe([int]$Pages) {
     $combinedFailure = $reportText + "`n" + (Get-Content -LiteralPath $proxy -Raw)
     $memorySignature = $combinedFailure -match `
         '(?i)out of memory|E_OUTOFMEMORY|bad_alloc|0xC0000017|not enough (storage|memory)|allocation fail'
+    $nativeRuntimeFailure = $combinedFailure -match `
+        '(?i)native runtime failure|Microsoft Visual C\+\+ Runtime|abnormal program termination'
     $vaExhausted = $memoryObject -and
         [double]$memoryObject.minimumLargestFreeRegionBytes -gt 0 -and
         [double]$memoryObject.minimumLargestFreeRegionBytes -lt 64MB
-    $classification = if ($passed) { 'pass' } elseif ($memorySignature -or $vaExhausted) {
+    $classification = if ($passed) { 'pass' } elseif ($nativeRuntimeFailure) {
+        'native-runtime-crash'
+    } elseif ($memorySignature -or $vaExhausted) {
         'memory-or-address-space-exhaustion'
     } elseif ($timedOut) { 'timeout-unclassified' } else { 'unrelated-runtime-or-staging-failure' }
     return [pscustomobject]@{
@@ -283,7 +287,8 @@ foreach ($pages in $ProbePages) {
         $script:CurrentProbeAttempt = $attempt
         $row = Invoke-AtlasProbe $pages
         $script:AllProbeAttempts += $row
-        if ($row.passed -or $row.classification -eq 'memory-or-address-space-exhaustion') { break }
+        if ($row.passed -or $row.classification -eq 'memory-or-address-space-exhaustion' `
+            -or $row.classification -eq 'native-runtime-crash') { break }
         if ($attempt -lt 2) {
             Write-Warning "Probe $($row.slots) had unrelated attempt-$attempt failure; evidence preserved, retrying once."
         }

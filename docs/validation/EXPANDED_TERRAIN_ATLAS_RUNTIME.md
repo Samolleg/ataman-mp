@@ -97,29 +97,32 @@ Qt reports are first written to an owned ASCII `%TEMP%` path because Qt 5.12 is
 unreliable below a non-ASCII worktree. They are then copied into the campaign.
 On hard timeout the wrapper invokes owned-run recovery before classifying it.
 
-## Current proof state
+## Current proof state (prior capacity claims retracted)
 
-The earlier 512/576/1,024 gate remains the historical lower-bound control. On
-2026-07-29 campaign `expanded-atlas-zone18-stress-20260728-213659` reached the
-packed maximum with installed Zone18 imagery and MOB content:
+The 2026-07-28/29 capacity results are not valid runtime passes. The shared
+launcher accepted a stale `GameplayReady` record after `game.exe` displayed a
+Microsoft Visual C++ Runtime Error / abnormal-termination dialog. Its frame
+predicate measured only color variation, so title artwork and the crash dialog
+were misclassified as rendered terrain. Cleanup then requested Stop and masked
+the failure status in the authoritative result.
 
-| Run | Pages / slots | Page resolutions | Frame buckets / dominant | Peak WS / private MiB | Peak committed VA / largest-free MiB | Result |
-|---|---:|---:|---:|---:|---:|---|
-| `20260728-213659-b0ff4af9` | 16 / 1,024 | 16 / 16 | 1,651 / 0.1032 | 619.0 / 886.3 | 1,682.3 / 2,044.8 | Pass |
-| `20260728-213754-9862ebcc` | 32 / 2,048 | 32 / 32 | 1,745 / 0.1028 | 629.3 / 896.1 | 1,692.1 / 2,044.7 | Pass |
-| `20260728-213849-09016bff` | 64 / 4,096 | 64 / 64 | 1,624 / 0.1053 | 645.7 / 913.2 | 1,708.8 / 2,044.7 | Pass |
-| `20260728-213927-63c3418c` | 128 / 8,192 | 128 / 128 | 5,972 / 0.0513 | 2,081.3 / 2,457.3 | 3,212.4 / 303.5 | Pass |
-| `20260728-214008-2273689a` | 256 / 16,384 | 256 / 256 | 5,972 / 0.0513 | 673.3 / 1,046.5 | 1,804.3 / 1,862.9 | Pass |
+The user-observed 2026-07-29 rerun established the actual result for the two
+largest probes:
 
-The `GameplayReady` private-byte regression is about 11,085 bytes (10.8 KiB)
-per slot. Pre-pressure adjacent peak deltas are roughly 9–11.5 KiB per slot.
-Peak residency is not linear: 8,192 slots approached the configured pressure
-threshold, while 16,384 slots completed after cache eviction with much lower
-residency. Per-slot estimates are therefore planning figures, not a promise that
-every decoded page stays resident.
+| Pages / slots | Corrected classification |
+|---:|---|
+| 128 / 8,192 | **Fail:** native runtime crash during load; no player-on-map confirmation |
+| 256 / 16,384 | **Fail:** native runtime crash during load; no player-on-map confirmation |
 
-All five final runs proved staging, drawall, complete page resolution, rendered
-terrain, dwell survival, source preservation, no new dump, and cleanup. This
-validates the shipped JMV packed terrain-page field through 256 pages / 16,384
-slots for this controlled Zone18 workload. It does not remove the need for
-Endurance editor-renderer paging work or broader save/reopen/map coverage.
+The earlier 512, 576, 1,024, 2,048, and 4,096 observations used the same
+defective pass predicate and must be rerun under the corrected harness before
+they are cited as automated capacity proof. Their retained memory samples are
+diagnostic data only; they cannot estimate bytes per valid atlas tile until the
+corresponding run passes.
+
+The corrected shared launcher monitors the owned game process for native fatal
+dialogs, records the evidence in the run manifest/result, automatically stops
+the owned run, and rejects the result even if historical bridge output contains
+`GameplayReady`. This applies to both the standalone campaign and Editor
+**Test Current Map**. A nonuniform frame remains supporting evidence only and
+must never override a native failure or substitute for confirmed staged play.

@@ -85,6 +85,9 @@ public:
     QString runId() const { return m_runId; }
     QString temporaryMapName() const { return m_temporaryMapName; }
     qint64 activeGameProcessId() const { return runtimeGameProcessId(); }
+    bool runtimeFailureObserved() const { return m_runtimeFailureObserved; }
+    QString runtimeFailureEvidence() const
+    { return m_manifest.value("runtimeFailureEvidence").toString(); }
     void stop();
 
     static QString testRunsRootPath();
@@ -106,6 +109,9 @@ public:
     static qint64 runtimeGameProcessId(bool usesRuntimeHost,
                                        const QString& gamePidPath,
                                        qint64 transportProcessId);
+    static bool isRuntimeFailureDialog(const QString& title,
+                                       const QString& windowClass,
+                                       const QString& bodyText);
     static QJsonObject buildAuthoritativeResult(const QJsonObject& manifest,
                                                 const QString& bridgeResult,
                                                 int exitCode,
@@ -181,6 +187,7 @@ private:
     QProcess* m_process;
     QTimer* m_hotReloadReadyTimer;
     QTimer* m_hotReloadResultTimer;
+    QTimer* m_runtimeHealthTimer;
     QTimer* m_recoveryTimer;
     QString m_runId;
     QString m_temporaryMapName;
@@ -225,6 +232,7 @@ private:
     bool m_cleanupComplete;
     bool m_stopRequested{false};
     bool m_processCrashObserved{false};
+    bool m_runtimeFailureObserved{false};
     bool m_baseProbe;
     bool m_usesRuntimeHost{false};
     bool m_recoveryPending{false};

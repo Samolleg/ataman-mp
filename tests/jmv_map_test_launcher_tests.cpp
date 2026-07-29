@@ -63,6 +63,8 @@ private slots:
     void currentSessionRestoreRejectsTamperedBackupWithoutTouchingLiveTree();
     void currentSessionSnapshotRejectsUnsafePath();
     void authoritativeResultAcceptsVerifiedRun();
+    void recognizesNativeRuntimeFailureDialogs();
+    void authoritativeResultRejectsObservedFailureAfterStop();
     void authoritativeResultRequiresExpandedAtlasRegistration();
     void authoritativeResultRequiresDrawallStagingEvidence();
     void authoritativeResultAcceptsLatestHotReloadGeneration();
@@ -847,6 +849,9 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
     const bool survivedDwell = launcher.isRunning()
         && launcher.runtimeState() == "GameplayReady"
         && responsiveDuringDwell;
+    QVERIFY2(!launcher.runtimeFailureObserved(),
+             qPrintable(QStringLiteral("A native runtime failure was observed: %1")
+                        .arg(launcher.runtimeFailureEvidence())));
     bool renderedTerrain = true;
     double dominantColorRatio = 0.0;
     int renderedColorBuckets = 0;
@@ -1274,6 +1279,41 @@ void JmvMapTestLauncherTests::authoritativeResultAcceptsVerifiedRun()
     QStringList findings;
     QVERIFY2(CJmvMapTestLauncher::validateAutomatedResult(report, &findings),
              qPrintable(findings.join('\n')));
+}
+
+void JmvMapTestLauncherTests::recognizesNativeRuntimeFailureDialogs()
+{
+    QVERIFY(CJmvMapTestLauncher::isRuntimeFailureDialog(
+        "Microsoft Visual C++ Runtime Library", "#32770",
+        "Runtime Error! Program: D:\\Evil Islands\\Starter\\Engine\\game.exe "
+        "abnormal program termination"));
+    QVERIFY(CJmvMapTestLauncher::isRuntimeFailureDialog(
+        "game.exe - Application Error", "#32770", "The application was unable to start"));
+    QVERIFY(!CJmvMapTestLauncher::isRuntimeFailureDialog(
+        "Microsoft Visual C++ Runtime Library", "JMV Main Window", "Runtime Error!"));
+    QVERIFY(!CJmvMapTestLauncher::isRuntimeFailureDialog(
+        "Evil Islands", "#32770", "Choose a rendering mode"));
+}
+
+void JmvMapTestLauncherTests::authoritativeResultRejectsObservedFailureAfterStop()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    QJsonObject manifest = resultManifest(temp.path(), source);
+    manifest.insert("runtimeFailureObserved", true);
+    manifest.insert("runtimeFailureEvidence",
+                    "Microsoft Visual C++ Runtime Library: abnormal program termination");
+    const QJsonObject report = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, successfulBridgeEvidence(temp.path()), 62097,
+        int(QProcess::CrashExit), true, "Removed all owned runtime artifacts");
+    QVERIFY(!report.value("passed").toBool());
+    QVERIFY(report.value("runtimeFailureObserved").toBool());
+    QVERIFY(QJsonDocument(report.value("errors").toArray()).toJson()
+            .contains("native runtime failure"));
+    QStringList findings;
+    QVERIFY(!CJmvMapTestLauncher::validateAutomatedResult(report, &findings));
 }
 
 void JmvMapTestLauncherTests::authoritativeResultRequiresExpandedAtlasRegistration()

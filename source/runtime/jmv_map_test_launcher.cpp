@@ -428,6 +428,51 @@ BOOL CALLBACK findWindowForProcess(HWND window, LPARAM parameter)
     }
     return TRUE;
 }
+
+QString nativeWindowText(HWND window)
+{
+    wchar_t text[2048]{};
+    GetWindowTextW(window, text, int(sizeof(text) / sizeof(text[0])));
+    return QString::fromWCharArray(text);
+}
+
+struct RuntimeFailureWindowContext
+{
+    DWORD pid{0};
+    QString summary;
+};
+
+BOOL CALLBACK collectChildWindowText(HWND window, LPARAM parameter)
+{
+    QString* text = reinterpret_cast<QString*>(parameter);
+    const QString child = nativeWindowText(window).trimmed();
+    if(!child.isEmpty())
+        *text += (text->isEmpty() ? QString() : QStringLiteral(" | ")) + child;
+    return TRUE;
+}
+
+BOOL CALLBACK findRuntimeFailureWindow(HWND window, LPARAM parameter)
+{
+    RuntimeFailureWindowContext* context =
+        reinterpret_cast<RuntimeFailureWindowContext*>(parameter);
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    if(pid != context->pid || !IsWindowVisible(window))
+        return TRUE;
+    wchar_t className[128]{};
+    GetClassNameW(window, className, int(sizeof(className) / sizeof(className[0])));
+    const QString title = nativeWindowText(window).trimmed();
+    QString body;
+    EnumChildWindows(window, collectChildWindowText, LPARAM(&body));
+    if(CJmvMapTestLauncher::isRuntimeFailureDialog(
+           title, QString::fromWCharArray(className), body))
+    {
+        context->summary = QStringLiteral("title=\"%1\" class=\"%2\" text=\"%3\"")
+            .arg(title, QString::fromWCharArray(className), body.left(512));
+        return FALSE;
+    }
+    return TRUE;
+}
 #endif
 }
 
@@ -435,9 +480,37 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     : QObject(parent), m_process(new QProcess(this)),
       m_hotReloadReadyTimer(new QTimer(this)),
       m_hotReloadResultTimer(new QTimer(this)),
+      m_runtimeHealthTimer(new QTimer(this)),
       m_recoveryTimer(new QTimer(this)),
       m_cleanupComplete(true), m_baseProbe(false)
 {
+    m_runtimeHealthTimer->setInterval(500);
+    connect(m_runtimeHealthTimer, &QTimer::timeout, this, [this]()
+    {
+#ifdef Q_OS_WIN
+        if(m_runtimeFailureObserved || !isRunning())
+            return;
+        const qint64 pid = runtimeGameProcessId();
+        if(pid <= 0)
+            return;
+        RuntimeFailureWindowContext context;
+        context.pid = DWORD(pid);
+        EnumWindows(findRuntimeFailureWindow, LPARAM(&context));
+        if(context.summary.isEmpty())
+            return;
+        m_runtimeFailureObserved = true;
+        m_processCrashObserved = true;
+        m_manifest.insert("runtimeFailureObserved", true);
+        m_manifest.insert("runtimeFailureEvidence", context.summary);
+        appendRunLog("Runtime failure dialog observed: " + context.summary);
+        writeManifest("runtime-failure-observed");
+        stop();
+        emit testError(QStringLiteral(
+            "The staged JMV runtime reported a fatal error. This run is failed; "
+            "GameplayReady and an unchanged process ID cannot override a native "
+            "runtime failure.\n\n%1").arg(context.summary));
+#endif
+    });
     m_recoveryTimer->setInterval(2000);
     connect(m_recoveryTimer, &QTimer::timeout,
             this, &CJmvMapTestLauncher::refreshInterruptedRecovery);
@@ -521,6 +594,7 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     });
     connect(m_process, &QProcess::started, this, [this]()
     {
+        m_runtimeHealthTimer->start();
         appendRunLog(QString("%1 started pid=%2")
                      .arg(m_usesRuntimeHost ? "Endurance runtime host" : "game.exe")
                      .arg(m_process->processId()));
@@ -539,6 +613,7 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     {
         m_hotReloadReadyTimer->stop();
         m_hotReloadResultTimer->stop();
+        m_runtimeHealthTimer->stop();
         m_pendingHotReloadSequence = 0;
         m_pendingSaveGeneration = 0;
         appendRunLog(QString("game.exe finished exitCode=%1 status=%2")
@@ -928,6 +1003,10 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
                                                 : (exitStatus == int(QProcess::CrashExit)
                                                    ? "crash" : "process-exit"));
     report.insert("cleanupMessage", cleanupMessage);
+    const bool runtimeFailureObserved = manifest.value(
+        "runtimeFailureObserved").toBool();
+    const QString runtimeFailureEvidence = manifest.value(
+        "runtimeFailureEvidence").toString();
 
     QString requestedZone = manifest.value("sessionSettings").toObject()
         .value("sourceZone").toString();
@@ -1179,6 +1258,11 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         addUnique(&errors, "One or more source map files changed during the test.");
     if(!cleanupComplete)
         addUnique(&errors, "One or more owned runtime artifacts could not be cleaned up safely.");
+    if(runtimeFailureObserved)
+        addUnique(&errors, runtimeFailureEvidence.isEmpty()
+            ? QStringLiteral("A native runtime failure was observed during the staged run.")
+            : QStringLiteral("A native runtime failure was observed during the staged run: ")
+                + runtimeFailureEvidence);
     if(exitStatus == int(QProcess::CrashExit) && !stopRequested)
         addUnique(&errors, "The owned game process ended with a crash status.");
     else if(exitCode != 0 && !stopRequested)
@@ -1241,6 +1325,8 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("sourceFilesUnchanged", sourceFilesUnchanged);
     report.insert("changedSources", changedSources);
     report.insert("cleanupComplete", cleanupComplete);
+    report.insert("runtimeFailureObserved", runtimeFailureObserved);
+    report.insert("runtimeFailureEvidence", runtimeFailureEvidence);
     report.insert("retainedArtifacts", retainedArtifacts);
     report.insert("errors", errors);
     report.insert("warnings", warnings);
@@ -1280,6 +1366,8 @@ bool CJmvMapTestLauncher::validateAutomatedResult(const QJsonObject& report,
         local.append("Source-file preservation failed.");
     if(!report.value("cleanupComplete").toBool())
         local.append("Runtime cleanup is incomplete.");
+    if(report.value("runtimeFailureObserved").toBool())
+        local.append("A native runtime failure was observed during the staged run.");
     for(const QJsonValue& error : report.value("errors").toArray())
         local.append(error.toString());
     local.removeDuplicates();
@@ -1509,6 +1597,22 @@ bool CJmvMapTestLauncher::prepareTemporaryAutoexec(const QString& engineDirector
         return false;
     }
     return true;
+}
+
+bool CJmvMapTestLauncher::isRuntimeFailureDialog(const QString& title,
+                                                 const QString& windowClass,
+                                                 const QString& bodyText)
+{
+    if(windowClass.compare(QStringLiteral("#32770"),
+                           Qt::CaseInsensitive) != 0)
+        return false;
+    const QString combined = (title + QLatin1Char('\n') + bodyText).toLower();
+    return title.contains(QStringLiteral("Microsoft Visual C++ Runtime Library"),
+                          Qt::CaseInsensitive)
+        || combined.contains(QStringLiteral("runtime error"))
+        || combined.contains(QStringLiteral("abnormal program termination"))
+        || (combined.contains(QStringLiteral("game.exe"))
+            && combined.contains(QStringLiteral("application error")));
 }
 
 bool CJmvMapTestLauncher::prepareRunOwnedDrawallAutoexec(
@@ -1742,6 +1846,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_cleanupComplete = false;
     m_stopRequested = false;
     m_processCrashObserved = false;
+    m_runtimeFailureObserved = false;
     if(!stage(input, error))
     {
         if(error && !error->isEmpty())
@@ -2981,7 +3086,9 @@ void CJmvMapTestLauncher::stop()
     if(!isRunning())
         return;
     m_stopRequested = true;
-    appendRunLog("Stop Test requested by user");
+    appendRunLog(m_runtimeFailureObserved
+        ? "Stop Test initiated after detected native runtime failure"
+        : "Stop Test requested by user");
     m_process->terminate();
     QTimer::singleShot(5000, this, [this]()
     {
