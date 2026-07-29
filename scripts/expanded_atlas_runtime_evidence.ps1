@@ -38,8 +38,17 @@ function Test-ExpandedAtlasMemoryPressure {
         return $false
     }
     $growth = $PeakPrivateBytes - $GameplayReadyPrivateBytes
-    return $growth -ge $CombinedRgbaBytes `
+    $fragmentedNominalCopy = $growth -ge $CombinedRgbaBytes `
         -and $MinimumLargestFreeRegionBytes -lt $CombinedRgbaBytes
+    # Some DirectDraw backends retain several decoded/staging copies before
+    # the next allocation fails.  In that shape the largest remaining region
+    # can still exceed one nominal RGBA atlas even though the 32-bit process
+    # has already crossed 2 GiB and amplified the atlas by an order of
+    # magnitude.  Treat that measured surge as capacity pressure rather than
+    # an unrelated native crash.
+    $amplified32BitLoad = $PeakPrivateBytes -ge 2GB `
+        -and $growth -ge (8 * $CombinedRgbaBytes)
+    return $fragmentedNominalCopy -or $amplified32BitLoad
 }
 
 function Get-ChangedNativeDumpRows {

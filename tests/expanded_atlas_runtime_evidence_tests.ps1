@@ -51,6 +51,14 @@ if (-not $pressure) {
 }
 Write-Output 'PASS: observed 8192-slot allocation pressure is recognized'
 ++ $passed
+$controlledLowresPressure = Test-ExpandedAtlasMemoryPressure `
+    -CombinedRgbaBytes 138412032 -GameplayReadyPrivateBytes 513822720 `
+    -PeakPrivateBytes 2317262848 -MinimumLargestFreeRegionBytes 450052096
+if (-not $controlledLowresPressure) {
+    throw 'FAIL: controlled 512px 8192-slot amplification pressure was not recognized'
+}
+Write-Output 'PASS: controlled 512px 8192-slot amplification pressure is recognized'
+++ $passed
 $healthy = Test-ExpandedAtlasMemoryPressure `
     -CombinedRgbaBytes 268435456 -GameplayReadyPrivateBytes 500000000 `
     -PeakPrivateBytes 1232080896 -MinimumLargestFreeRegionBytes 1927675904
