@@ -417,6 +417,7 @@ private slots:
     void aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt();
     void aiGraphFileCommitIsValidatedBackedUpAndAtomic();
     void aiGraphOwnershipSwitchValidationNeverRewritesExternalFile();
+    void existingGraphComponentReuseIsWarningNotBlocker();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
     void unknownLeafIsPreservedAsOpaque();
@@ -794,17 +795,53 @@ void EnduranceDocumentTests::aiGraphOwnershipSwitchValidationNeverRewritesExtern
     graph.close();
 
     QString error;
-    QVERIFY2(validateExistingAiGraphFile(QFileInfo(graphPath), &error),
+    QVERIFY2(validateExistingAiGraphFile(QFileInfo(graphPath), 1, 1,
+                                         nullptr, &error),
              qPrintable(error));
     QVERIFY(graph.open(QIODevice::ReadOnly));
     QCOMPARE(graph.readAll(), graphBytes);
     graph.close();
 
     const QString missingPath = directory.filePath("missing.grp");
-    QVERIFY(!validateExistingAiGraphFile(QFileInfo(missingPath), &error));
+    QVERIFY(!validateExistingAiGraphFile(QFileInfo(missingPath), 1, 1,
+                                          nullptr, &error));
     QVERIFY(!QFileInfo::exists(missingPath));
     QVERIFY(graph.open(QIODevice::ReadOnly));
     QCOMPARE(graph.readAll(), graphBytes);
+}
+
+void EnduranceDocumentTests::existingGraphComponentReuseIsWarningNotBlocker()
+{
+    QVector<SAiGraphLayer> layers(CAiGraphDocument::LayerCount);
+    for(SAiGraphLayer& layer : layers)
+    {
+        layer.weights.fill(qint16(-1), 2 * CAiGraphDocument::DirectionCount);
+        layer.packedPositions = QByteArray(2, char(0x11));
+        layer.components.fill(1, 2);
+    }
+    CAiGraphDocument graph;
+    QString error;
+    QVERIFY2(graph.initializePreview(2, 1, layers, &error), qPrintable(error));
+    QVERIFY(!graph.validateRuntimeCompatibility(2, 1, &error));
+    QVERIFY(error.contains(QStringLiteral("disconnected"), Qt::CaseInsensitive));
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("legacy.grp"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray bytes = graph.serialize(&error);
+    QCOMPARE(file.write(bytes), qint64(bytes.size()));
+    file.close();
+
+    QStringList warnings;
+    QVERIFY2(validateExistingAiGraphFile(QFileInfo(path), 2, 1,
+                                         &warnings, &error), qPrintable(error));
+    QVERIFY(!warnings.isEmpty());
+    QVERIFY(warnings.join(QStringLiteral("\n")).contains(
+        QStringLiteral("long-distance"), Qt::CaseInsensitive));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), bytes);
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

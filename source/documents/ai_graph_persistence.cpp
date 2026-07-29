@@ -208,7 +208,11 @@ SAiGraphFileCommitResult commitValidatedAiGraphFile(
     return result;
 }
 
-bool validateExistingAiGraphFile(const QFileInfo& source, QString* error)
+bool validateExistingAiGraphFile(const QFileInfo& source,
+                                 int expectedWidth,
+                                 int expectedHeight,
+                                 QStringList* warnings,
+                                 QString* error)
 {
     if(!source.isFile())
     {
@@ -220,5 +224,13 @@ bool validateExistingAiGraphFile(const QFileInfo& source, QString* error)
     QByteArray bytes;
     if(!readFile(source, &bytes, error))
         return false;
-    return validateGraph(bytes, error);
+
+    CAiGraphDocument graph;
+    QStringList parseWarnings;
+    if(!graph.parse(bytes, error, &parseWarnings))
+        return false;
+    if(warnings)
+        warnings->append(parseWarnings);
+    return graph.validateRuntimeCompatibility(expectedWidth, expectedHeight,
+                                              error, warnings, true);
 }

@@ -93,6 +93,7 @@
 #include "jmv_map_test_launcher.h"
 #include "resource_profile.h"
 #include "endurance_document.h"
+#include "ai_graph_document.h"
 #include "ai_graph_persistence.h"
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
@@ -3814,15 +3815,35 @@ void MainWindow::persistAiGraph()
     {
         updateProgress(tr("Validating existing %1 without changing it...")
                            .arg(QFileInfo(externalPath).fileName()), 1, 6);
-        if(!validateExistingAiGraphFile(QFileInfo(externalPath), &graphError))
+        CAiGraphDocument selectedGraph;
+        QString selectedGraphError;
+        QStringList ownershipWarnings;
+        const bool selectedGraphParsed = selectedGraph.parse(
+            graphBytes, &selectedGraphError);
+        if(!selectedGraphParsed)
+            failureText = tr("The selected graph dimensions could not be established. Nothing was changed.\n\n%1")
+                .arg(selectedGraphError);
+        else if(!validateExistingAiGraphFile(
+                    QFileInfo(externalPath), selectedGraph.width(),
+                    selectedGraph.height(), &ownershipWarnings, &graphError))
             failureText = tr("The embedded graph was left untouched because no valid existing runtime .grp is available. Export a graph first, then retry the ownership switch.\n\n%1")
                 .arg(graphError);
         else if(!primaryMob->persistAiGraph(nullptr, &graphError, updateProgress))
             failureText = tr("The existing runtime .grp was not changed, but the embedded graph could not be removed. The MOB still shadows the external file, so runtime ownership has not changed.\n\n%1")
                 .arg(graphError);
         else
+        {
             successText = tr("Preserved the existing runtime graph %1 unchanged and removed the embedded graph from %2. The active MPR now resolves that sibling .grp at runtime.")
                 .arg(externalPath, primaryMob->filePath().fileName());
+            if(!ownershipWarnings.isEmpty())
+            {
+                successText += tr("\n\nExisting graph warning: %1")
+                    .arg(ownershipWarnings.join(QStringLiteral("\n")));
+                for(const QString& warning : ownershipWarnings)
+                    ei::log(eLogWarning, QStringLiteral(
+                        "Preserved external AI graph warning: ") + warning);
+            }
+        }
     }
     progress.setValue(progress.maximum());
     progress.close();

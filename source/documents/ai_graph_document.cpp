@@ -205,7 +205,8 @@ QByteArray CAiGraphDocument::serialize(QString* error) const
 }
 
 bool CAiGraphDocument::validateRuntimeCompatibility(
-    int expectedWidth, int expectedHeight, QString* error) const
+    int expectedWidth, int expectedHeight, QString* error,
+    QStringList* warnings, bool allowLegacyComponentReuse) const
 {
     if(error)
         error->clear();
@@ -276,9 +277,17 @@ bool CAiGraphDocument::validateRuntimeCompatibility(
                 continue;
             const quint16 component = layer.components.at(start);
             if(componentRegion.contains(component))
-                return fail(QStringLiteral("AI graph layer %1 reuses component %2 for disconnected regions.")
-                            .arg(layerIndex).arg(component));
-            componentRegion.insert(component, region++);
+            {
+                const QString message = QStringLiteral(
+                    "AI graph layer %1 reuses component %2 for disconnected regions; preserved legacy navigation may make inaccurate long-distance reachability decisions.")
+                    .arg(layerIndex).arg(component);
+                if(!allowLegacyComponentReuse)
+                    return fail(message);
+                if(warnings && !warnings->contains(message))
+                    warnings->append(message);
+            }
+            else
+                componentRegion.insert(component, region++);
             QQueue<int> pending;
             pending.enqueue(start);
             visited[start] = true;
