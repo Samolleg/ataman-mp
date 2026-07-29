@@ -58,6 +58,8 @@ class CLandscapeTools : public QWidget
 public:
     explicit CLandscapeTools(QWidget* parent = nullptr);
 
+    QSize minimumSizeHint() const override;
+
     bool sculptEnabled() const;
     bool overlaySculptEnabled() const;
     bool editingEnabled() const;

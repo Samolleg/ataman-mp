@@ -357,6 +357,16 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     updateModeVisibility();
 }
 
+QSize CLandscapeTools::minimumSizeHint() const
+{
+    QSize hint = QWidget::minimumSizeHint();
+    // Wrapped help/status text and long action captions must not force the
+    // dock to occupy half of a wide display. They reflow correctly at compact
+    // widths, while the material palette retains the remaining height.
+    hint.setWidth(qMin(hint.width(), 320));
+    return hint;
+}
+
 bool CLandscapeTools::editingEnabled() const { return m_editingActive; }
 ELandscapeEditMode CLandscapeTools::editMode() const
 {
