@@ -192,6 +192,19 @@ rather than another editor architecture pass.
 
 ## Object authoring conveniences
 
+- [ ] Perform a property-view labeling and terminology pass against the English
+  and Russian object-description references and the verified MOB schema.
+  - Replace misleading, ambiguous, mistranslated, or inconsistent user-facing
+    labels with the clearest canonical editing terms.
+  - Preserve serialized tag names and internal field identifiers; this is a UI
+    vocabulary correction, not a format migration.
+  - Show useful documented aliases and the underlying MOB field/tag in tooltips
+    where established modding terminology differs between tools or languages.
+  - Audit labels consistently across Object Properties, Create Object, compound
+    editors, validation findings, copy/paste descriptions, and documentation.
+  - Record genuine documentation-versus-runtime discrepancies explicitly rather
+    than silently choosing one interpretation.
+
 - [ ] **Post-baseline traps and patrols authoring/support pass.** Replace the
   current loosely exposed child records with explicit, lossless compound-object
   workflows; do not normalize or auto-repair existing maps merely by opening
