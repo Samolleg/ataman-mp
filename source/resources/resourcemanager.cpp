@@ -37,6 +37,11 @@ QHash<QString, QImage> s_preparedCompositeImages;
 QList<QString> s_preparedCompositeOrder;
 qint64 s_preparedCompositeBytes = 0;
 const qint64 kPreparedCompositeBudget = 256ll * 1024ll * 1024ll;
+// Keep several heavy-map appearance sets resident. The 512 MiB ceiling was
+// empirically too small for gz18h -> gz11 -> gz19 -> gz18h and forced the
+// return visit to re-upload older layered atlases from disk.
+const qint64 kLayeredTextureSessionBudget = 768ll * 1024ll * 1024ll;
+const qint64 kTextureImageSessionBudget = 128ll * 1024ll * 1024ll;
 ERenderMaterialClass classifyDxt1Alpha(const QByteArray& data, int offset, int width, int height)
 {
     const int blocks = qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4);
@@ -1131,13 +1136,17 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
     const QString key = ei::cachedResourceSourceFingerprint(sources) + '|'
         + ei::textureCacheKey(name, modelName);
     if(m_aTextureImages.contains(key))
+    {
+        m_textureImageLru.touch(key, qint64(m_aTextureImages.value(key).sizeInBytes()));
         return m_aTextureImages.value(key);
+    }
     const QString cacheDirectory = ei::visualCacheDirectory(QStringLiteral("character-atlases"));
     const QString cacheKey = ei::visualCacheKey(key.toUtf8());
     QImage cached;
     if(ei::readCachedVisualImage(cacheDirectory, cacheKey, &cached))
     {
         m_aTextureImages.insert(key, cached);
+        m_textureImageLru.touch(key, qint64(cached.sizeInBytes()));
         return cached;
     }
     for(const QString& candidate : ei::textureResourceCandidates(name, modelName))
@@ -1153,6 +1162,7 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
         {
             ei::log(eLogWarning, "Shared body-atlas composition currently requires PNT3: " + candidate);
             m_aTextureImages.insert(key, QImage());
+            m_textureImageLru.touch(key, 0);
             return QImage();
         }
         QImage image(header.m_width, header.m_height, QImage::Format_RGBA64);
@@ -1161,9 +1171,11 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
         {
             ei::log(eLogWarning, "Invalid body-atlas layer " + candidate + ": " + diagnostic);
             m_aTextureImages.insert(key, QImage());
+            m_textureImageLru.touch(key, 0);
             return QImage();
         }
         m_aTextureImages.insert(key, image);
+        m_textureImageLru.touch(key, qint64(image.sizeInBytes()));
         // Persist the decoded source layer once. Final body atlases are still
         // composed and shared in memory by their complete ordered layer list;
         // caching those composites duplicated the same base pixels across
@@ -1173,6 +1185,7 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
     }
     ei::log(eLogWarning, QString("Missing body-atlas layer: %1 model:%2").arg(name, modelName));
     m_aTextureImages.insert(key, QImage());
+    m_textureImageLru.touch(key, 0);
     return QImage();
 }
 
@@ -1223,7 +1236,10 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
         + modelName.toLower() + '|'
         + layerNames.join(';').toLower();
     if(m_aTexture.contains(cacheKey))
+    {
+        m_layeredTextureLru.touchExisting(cacheKey);
         return m_aTexture.value(cacheKey);
+    }
     const QString compositeDirectory = ei::visualCacheDirectory(
         QStringLiteral("character-composites"));
     const QString compositeKey = ei::visualCacheKey(cacheKey.toUtf8());
@@ -1253,6 +1269,7 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
     texture->setWrapMode(QOpenGLTexture::Repeat);
     texture->setData(composite);
     m_aTexture.insert(cacheKey, texture);
+    m_layeredTextureLru.touch(cacheKey, qint64(composite.sizeInBytes()));
     m_textureMaterialClasses.insert(texture, classifyTextureAlpha(composite));
     // A completed composite is the durable checkpoint for interrupted
     // preparation, including one-off equipment combinations.
@@ -1650,23 +1667,40 @@ void CTextureList::setTerrainMipmappingEnabled(bool enabled)
 
 void CTextureList::refreshConfiguredSources()
 {
+    clearTransientVisualCache();
     ei::invalidateResourceSourceFingerprintCache();
     m_missingTextureNames.clear();
-    m_aTextureImages.clear();
-    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
-    {
-        if(it.key().startsWith("layers|"))
-            it = m_aTexture.erase(it);
-        else
-            ++it;
-    }
     QSet<QString> empty;
     loadTexture(empty);
+}
+
+void CTextureList::trimTransientVisualCache()
+{
+    const QStringList textureEvictions = m_layeredTextureLru.trim(kLayeredTextureSessionBudget);
+    for(const QString& key : textureEvictions)
+    {
+        QOpenGLTexture* texture = m_aTexture.take(key);
+        if(!texture)
+            continue;
+        m_textureMaterialClasses.remove(texture);
+        if(texture->isCreated())
+            texture->destroy();
+        delete texture;
+    }
+    const QStringList imageEvictions = m_textureImageLru.trim(kTextureImageSessionBudget);
+    for(const QString& key : imageEvictions)
+        m_aTextureImages.remove(key);
+    ei::log(eLogInfo, QString("Retained character visuals after map unload "
+                             "gpuMiB:%1 sourceMiB:%2 evictedGpu:%3 evictedSource:%4")
+            .arg(double(m_layeredTextureLru.totalBytes()) / (1024.0 * 1024.0), 0, 'f', 1)
+            .arg(double(m_textureImageLru.totalBytes()) / (1024.0 * 1024.0), 0, 'f', 1)
+            .arg(textureEvictions.size()).arg(imageEvictions.size()));
 }
 
 void CTextureList::clearTransientVisualCache()
 {
     m_aTextureImages.clear();
+    m_textureImageLru.clear();
     for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
     {
         if(!it.key().startsWith("layers|"))
@@ -1684,6 +1718,7 @@ void CTextureList::clearTransientVisualCache()
             delete texture;
         }
     }
+    m_layeredTextureLru.clear();
 }
 
 

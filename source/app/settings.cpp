@@ -17,6 +17,7 @@
 #include "log.h"
 #include "resource_profile.h"
 #include "profile_database.h"
+#include "persistent_visual_cache.h"
 
 CSettings::CSettings(QWidget *parent) :
     QWidget(parent, Qt::Window)
@@ -111,6 +112,18 @@ CSettings::CSettings(QWidget *parent) :
     autosaveActions->addWidget(openBackupFolder);
     autosaveActions->addStretch(1);
     ui->gridLayout->addLayout(autosaveActions, 12, 0, 1, 2);
+    QLabel* visualCacheLimitLabel = new QLabel(tr("Character cache limit (MiB)"),
+                                                ui->tabGeneral);
+    visualCacheLimitLabel->setToolTip(tr(
+        "Maximum combined size of persistent character plans, decoded atlases, composites, "
+        "assemblies, and animations beside the editor. Oldest entries are removed first. "
+        "Enter 0 for no limit."));
+    QLineEdit* visualCacheLimit = new QLineEdit(ui->tabGeneral);
+    visualCacheLimit->setObjectName("visualCacheLimitMiB");
+    visualCacheLimit->setValidator(new QIntValidator(0, 1048576, visualCacheLimit));
+    visualCacheLimit->setToolTip(visualCacheLimitLabel->toolTip());
+    ui->gridLayout->addWidget(visualCacheLimitLabel, 13, 0);
+    ui->gridLayout->addWidget(visualCacheLimit, 13, 1);
     connect(autosaveNow, &QPushButton::clicked, this, &CSettings::autosaveRequested);
     connect(openBackupFolder, &QPushButton::clicked, this, &CSettings::backupFolderRequested);
     connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
@@ -129,6 +142,10 @@ CSettings::CSettings(QWidget *parent) :
     ui->renderShadowDistance->setValidator(new QIntValidator(1, 1024, this));
     initOptions();
     readOptions();
+    const COptInt* initialVisualCacheLimit = dynamic_cast<const COptInt*>(
+        opt(eOptSetGeneral, "visualCacheLimitMiB"));
+    ei::setVisualCacheLimitMiB(qMax(0, initialVisualCacheLimit
+        ? initialVisualCacheLimit->value() : 1024));
     const COptString* savedProfile = dynamic_cast<const COptString*>(opt(eOptSetResource, "resourceProfile"));
     const QString savedRoot = configuredGameRoot();
     if(savedProfile && !savedProfile->value().isEmpty() && !savedRoot.isEmpty())
@@ -495,6 +512,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("uiScalePercent", 100)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("visualCacheLimitMiB", 1024)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowQuality", 2)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowDistance", 320)));
@@ -750,6 +768,10 @@ void CSettings::applyUiOptions()
         opt(eOptSetGeneral, "autosaveIntervalMinutes"));
     const COptInt* uiScale = dynamic_cast<const COptInt*>(
         opt(eOptSetGeneral, "uiScalePercent"));
+    const COptInt* visualCacheLimit = dynamic_cast<const COptInt*>(
+        opt(eOptSetGeneral, "visualCacheLimitMiB"));
+    ei::setVisualCacheLimitMiB(qMax(0, visualCacheLimit
+        ? visualCacheLimit->value() : 1024));
     emit autosaveSettingsApplied(autosaveEnabled && autosaveEnabled->value(),
                                  qBound(1, autosaveInterval ? autosaveInterval->value() : 5, 120));
     emit uiScaleApplied(qBound(75, uiScale ? uiScale->value() : 100, 200));

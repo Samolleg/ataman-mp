@@ -4,6 +4,7 @@
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -14,6 +15,7 @@
 #include <QMutexLocker>
 #include <QSaveFile>
 #include <QSet>
+#include <algorithm>
 
 namespace {
 
@@ -29,44 +31,63 @@ const int kMaximumPayloadBytes = 512 * 1024 * 1024;
 const int kMaximumParts = 4096;
 const int kMaximumVertices = 16 * 1024 * 1024;
 QMutex s_cacheMutex;
+QMutex s_pruneMutex;
 QSet<QString> s_preparedDirectories;
-QHash<QString, qint64> s_directoryBytes;
+QSet<QString> s_cacheRoots;
+QHash<QString, qint64> s_cacheRootBytes;
+int s_visualCacheLimitMiB = 1024;
 
-qint64 directoryBudget(const QString& path)
+qint64 configuredCacheBudget()
 {
-    const QString category = QFileInfo(path).fileName().toLower();
-    if(category == QStringLiteral("character-atlases"))
-        return 96ll * 1024ll * 1024ll;
-    if(category == QStringLiteral("character-composites"))
-        // Completed layered humanoid atlases are the expensive restart unit.
-        // Keep a full heavy-map working set so a sequential reload cannot
-        // evict entries before it reaches them again.
-        return 256ll * 1024ll * 1024ll;
-    if(category == QStringLiteral("character-assemblies"))
-        return 96ll * 1024ll * 1024ll;
-    if(category == QStringLiteral("character-animations"))
-        return 16ll * 1024ll * 1024ll;
-    return 64ll * 1024ll * 1024ll;
+    QMutexLocker locker(&s_cacheMutex);
+    return s_visualCacheLimitMiB <= 0 ? 0
+        : qint64(s_visualCacheLimitMiB) * 1024ll * 1024ll;
 }
 
-qint64 cacheEntryBytes(const QDir& directory)
+bool isBudgetedCacheFile(const QFileInfo& entry)
+{
+    if(entry.fileName().compare(QStringLiteral("cache-manifest.json"),
+                                Qt::CaseInsensitive) == 0)
+        return false;
+    const QString suffix = entry.suffix().toLower();
+    return suffix == QStringLiteral("cache") || suffix == QStringLiteral("json");
+}
+
+qint64 cacheRootBytes(const QString& rootPath)
 {
     qint64 total = 0;
-    for(const QFileInfo& entry : directory.entryInfoList(
-            QStringList() << QStringLiteral("*.cache"), QDir::Files))
-        total += entry.size();
+    QDirIterator iterator(rootPath, QDir::Files, QDirIterator::Subdirectories);
+    while(iterator.hasNext())
+    {
+        const QFileInfo entry(iterator.next());
+        if(isBudgetedCacheFile(entry))
+            total += entry.size();
+    }
     return total;
 }
 
-void pruneDirectory(const QString& path)
+void pruneCacheRoot(const QString& categoryPath)
 {
-    QDir directory(path);
-    QFileInfoList entries = directory.entryInfoList(
-        QStringList() << QStringLiteral("*.cache"), QDir::Files, QDir::Time | QDir::Reversed);
+    const qint64 budget = configuredCacheBudget();
+    if(budget <= 0)
+        return;
+    QMutexLocker pruneLocker(&s_pruneMutex);
+    const QString rootPath = QFileInfo(categoryPath).dir().absolutePath();
+    QFileInfoList entries;
+    QDirIterator iterator(rootPath, QDir::Files, QDirIterator::Subdirectories);
+    while(iterator.hasNext())
+    {
+        const QFileInfo entry(iterator.next());
+        if(isBudgetedCacheFile(entry))
+            entries.append(entry);
+    }
+    std::sort(entries.begin(), entries.end(), [](const QFileInfo& left, const QFileInfo& right)
+    {
+        return left.lastModified() < right.lastModified();
+    });
     qint64 total = 0;
     for(const QFileInfo& entry : entries)
         total += entry.size();
-    const qint64 budget = directoryBudget(path);
     for(const QFileInfo& entry : entries)
     {
         if(total <= budget)
@@ -76,7 +97,7 @@ void pruneDirectory(const QString& path)
             total -= size;
     }
     QMutexLocker locker(&s_cacheMutex);
-    s_directoryBytes.insert(QDir::cleanPath(path).toCaseFolded(), total);
+    s_cacheRootBytes.insert(QDir::cleanPath(rootPath).toCaseFolded(), total);
 }
 
 bool prepareDirectory(const QString& path)
@@ -114,12 +135,30 @@ bool prepareDirectory(const QString& path)
         if(!output.commit())
             return false;
     }
+    const QString rootPath = QFileInfo(path).dir().absolutePath();
+    const QString normalizedRoot = QDir::cleanPath(rootPath).toCaseFolded();
+    bool initializeRootSize = false;
     {
         QMutexLocker locker(&s_cacheMutex);
         s_preparedDirectories.insert(normalized);
-        s_directoryBytes.insert(normalized, cacheEntryBytes(QDir(path)));
+        s_cacheRoots.insert(rootPath);
+        initializeRootSize = !s_cacheRootBytes.contains(normalizedRoot);
     }
-    pruneDirectory(path);
+    if(initializeRootSize)
+    {
+        const qint64 total = cacheRootBytes(rootPath);
+        QMutexLocker locker(&s_cacheMutex);
+        s_cacheRootBytes.insert(normalizedRoot, total);
+    }
+    bool overBudget = false;
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        const qint64 budget = s_visualCacheLimitMiB <= 0 ? 0
+            : qint64(s_visualCacheLimitMiB) * 1024ll * 1024ll;
+        overBudget = budget > 0 && s_cacheRootBytes.value(normalizedRoot) > budget;
+    }
+    if(overBudget)
+        pruneCacheRoot(path);
     return true;
 }
 
@@ -146,6 +185,106 @@ bool readVector3(QDataStream& in, QVector3D* value)
 }
 
 namespace ei {
+
+void setVisualCacheLimitMiB(int limitMiB)
+{
+    QStringList roots;
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        s_visualCacheLimitMiB = qMax(0, limitMiB);
+        roots = s_cacheRoots.values();
+    }
+    for(const QString& root : roots)
+        pruneCacheRoot(QDir(root).filePath(QStringLiteral("character-plans")));
+}
+
+int visualCacheLimitMiB()
+{
+    QMutexLocker locker(&s_cacheMutex);
+    return s_visualCacheLimitMiB;
+}
+
+void recordVisualCacheFileWrite(const QString& directory, qint64 previousBytes,
+                                qint64 currentBytes)
+{
+    if(directory.isEmpty())
+        return;
+    const QString rootPath = QFileInfo(directory).dir().absolutePath();
+    const QString normalizedRoot = QDir::cleanPath(rootPath).toCaseFolded();
+    bool initializeRootSize = false;
+    bool overBudget = false;
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        s_cacheRoots.insert(rootPath);
+        initializeRootSize = !s_cacheRootBytes.contains(normalizedRoot);
+        if(!initializeRootSize)
+        {
+            const qint64 updated = qMax<qint64>(0, s_cacheRootBytes.value(normalizedRoot)
+                - qMax<qint64>(0, previousBytes) + qMax<qint64>(0, currentBytes));
+            s_cacheRootBytes.insert(normalizedRoot, updated);
+            const qint64 budget = s_visualCacheLimitMiB <= 0 ? 0
+                : qint64(s_visualCacheLimitMiB) * 1024ll * 1024ll;
+            overBudget = budget > 0 && updated > budget;
+        }
+    }
+    if(initializeRootSize)
+    {
+        const qint64 total = cacheRootBytes(rootPath);
+        QMutexLocker locker(&s_cacheMutex);
+        s_cacheRootBytes.insert(normalizedRoot, total);
+        const qint64 budget = s_visualCacheLimitMiB <= 0 ? 0
+            : qint64(s_visualCacheLimitMiB) * 1024ll * 1024ll;
+        overBudget = budget > 0 && total > budget;
+    }
+    if(overBudget)
+        pruneCacheRoot(directory);
+}
+
+void CVisualCacheLru::touch(const QString& key, qint64 costBytes)
+{
+    if(key.isEmpty())
+        return;
+    const qint64 boundedCost = qMax<qint64>(0, costBytes);
+    m_totalBytes -= m_costs.value(key, 0);
+    m_oldestFirst.removeAll(key);
+    m_costs.insert(key, boundedCost);
+    m_oldestFirst.append(key);
+    m_totalBytes += boundedCost;
+}
+
+void CVisualCacheLru::touchExisting(const QString& key)
+{
+    if(!m_costs.contains(key))
+        return;
+    m_oldestFirst.removeAll(key);
+    m_oldestFirst.append(key);
+}
+
+QStringList CVisualCacheLru::trim(qint64 maximumBytes)
+{
+    QStringList removed;
+    const qint64 budget = qMax<qint64>(0, maximumBytes);
+    while(m_totalBytes > budget && !m_oldestFirst.isEmpty())
+    {
+        const QString key = m_oldestFirst.takeFirst();
+        m_totalBytes -= m_costs.take(key);
+        removed.append(key);
+    }
+    return removed;
+}
+
+void CVisualCacheLru::remove(const QString& key)
+{
+    m_totalBytes -= m_costs.take(key);
+    m_oldestFirst.removeAll(key);
+}
+
+void CVisualCacheLru::clear()
+{
+    m_costs.clear();
+    m_oldestFirst.clear();
+    m_totalBytes = 0;
+}
 
 QString visualCacheDirectoryForApplication(const QString& applicationDirectory,
                                            const QString& category)
@@ -222,17 +361,7 @@ bool writeVisualCachePayload(const QString& directory, const QString& key,
            << qCompress(payload, 1);
     if(stream.status() != QDataStream::Ok || !output.commit())
         return false;
-    const QString normalized = QDir::cleanPath(directory).toCaseFolded();
-    bool overBudget = false;
-    {
-        QMutexLocker locker(&s_cacheMutex);
-        const qint64 total = qMax<qint64>(0, s_directoryBytes.value(normalized)
-            - previousSize + QFileInfo(path).size());
-        s_directoryBytes.insert(normalized, total);
-        overBudget = total > directoryBudget(directory);
-    }
-    if(overBudget)
-        pruneDirectory(directory);
+    recordVisualCacheFileWrite(directory, previousSize, QFileInfo(path).size());
     return true;
 }
 

@@ -1641,6 +1641,8 @@ void CView::applyRenderScheduling()
 
 void CView::refreshAfterResourceSetup()
 {
+    // Texture source refresh destroys profile-scoped OpenGL resources.
+    makeCurrent();
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources();
     m_spatialIndexDirty = true;
@@ -6856,6 +6858,7 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
 
     if(m_unitAppearanceProgressTotal == 0 && !unresolved.isEmpty())
     {
+        ei::resetVisualAssemblyCacheTelemetry();
         m_unitAppearanceProgressTotal = unresolved.size();
         m_unitAppearanceProgressCompleted = 0;
         m_unitAppearanceCacheHits = 0;
@@ -6910,6 +6913,12 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
             ei::log(eLogInfo, QString("Full character visual preparation complete total:%1 appearanceCacheHits:%2")
                     .arg(m_unitAppearanceProgressTotal).arg(m_unitAppearanceCacheHits)
                     );
+            const ei::SVisualAssemblyCacheTelemetry assembly
+                = ei::visualAssemblyCacheTelemetry();
+            ei::log(eLogInfo, QString("Character assembly cache totals memoryHits:%1 diskHits:%2 "
+                                     "builds:%3 diskReadMs:%4 buildMs:%5 cloneMs:%6")
+                    .arg(assembly.memoryHits).arg(assembly.diskHits).arg(assembly.builds)
+                    .arg(assembly.diskReadMs).arg(assembly.buildMs).arg(assembly.cloneMs));
             if(m_pProgress && (m_unitAppearanceProgressPending || m_pProgress->isVisible()))
             {
                 m_pProgress->setFormat(QStringLiteral("%p%"));
@@ -6925,7 +6934,9 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
             if(qApp->property("workspaceVisualSmoke").toBool())
             {
                 ei::log(eLogInfo, "Workspace visual smoke complete");
-                QTimer::singleShot(500, qApp, &QCoreApplication::quit);
+                emit unitVisualPreparationComplete();
+                if(!qApp->property("workspaceVisualSequence").isValid())
+                    QTimer::singleShot(500, qApp, &QCoreApplication::quit);
             }
         }
         return;
@@ -7204,7 +7215,7 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
         m_staticShadowFingerprint.clear();
         m_farStaticShadowFingerprint.clear();
         makeCurrent();
-        CTextureList::getInstance()->clearTransientVisualCache();
+        CTextureList::getInstance()->trimTransientVisualCache();
     }
     ei::log(eLogInfo, "Mob unloaded");
     refreshAiGraphPreviewSource();
@@ -7463,7 +7474,7 @@ void CView::unloadMob(QString mobName)
         m_staticShadowFingerprint.clear();
         m_farStaticShadowFingerprint.clear();
         makeCurrent();
-        CTextureList::getInstance()->clearTransientVisualCache();
+        CTextureList::getInstance()->trimTransientVisualCache();
         // Keep the view context current for the next map's terrain/resource
         // uploads; this matches the renderer's existing context lifetime.
     }

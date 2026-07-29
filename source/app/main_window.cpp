@@ -1315,7 +1315,8 @@ MainWindow::MainWindow(QWidget* parent) :
     QString backupSessionError;
     CBackupManager backupManager;
     const bool workspaceSmoke = qApp->property("workspaceLoadSmoke").toBool()
-        || qApp->property("workspaceVisualSmoke").toBool();
+        || qApp->property("workspaceVisualSmoke").toBool()
+        || qApp->property("workspaceVisualSequence").isValid();
     m_backupSessionStarted = workspaceSmoke ? false : backupManager.beginEditorSession(
         &recoveries, &backupSessionError);
     if(workspaceSmoke)

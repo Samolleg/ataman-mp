@@ -6,6 +6,7 @@
 #include <QMap>
 #include <QImage>
 #include <QOpenGLTexture>
+#include "persistent_visual_cache.h"
 #include <QJsonObject>
 #include "figure.h"
 #include "types.h"
@@ -140,8 +141,11 @@ public:
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     void initResource();
     void refreshConfiguredSources();
-    // Drop map-local composed humanoid atlases while an OpenGL context is
-    // current. Ordinary resource textures remain shared across maps.
+    // Retain recently used composed atlases across ordinary map replacement.
+    // Trimming is safe only after the last MOB has unloaded because scene
+    // objects retain raw QOpenGLTexture pointers while alive.
+    void trimTransientVisualCache();
+    // Invalidate all composed/source images after a profile/resource change.
     void clearTransientVisualCache();
     const QList<QString>& textureList() const {return m_arrCellComboBox;}
     int extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringList& inArrTextureName);
@@ -159,6 +163,8 @@ private:
     static CTextureList* m_pTextureContainer;
     QMap<QString, QOpenGLTexture*> m_aTexture;
     QMap<QString, QImage> m_aTextureImages;
+    ei::CVisualCacheLru m_layeredTextureLru;
+    ei::CVisualCacheLru m_textureImageLru;
     QMap<QOpenGLTexture*, ERenderMaterialClass> m_textureMaterialClasses;
     QSet<QOpenGLTexture*> m_terrainTextures;
     bool m_terrainMipmappingEnabled{true};

@@ -17,6 +17,7 @@ mapTestWarningVersion
 openLastSessionOnStartup
 autosaveEnabled
 autosaveIntervalMinutes
+visualCacheLimitMiB
 Option set name:Resource
 resourceProfile
 resourceRoots

@@ -14,6 +14,21 @@
 
 class CMob;
 
+namespace ei {
+struct SVisualAssemblyCacheTelemetry
+{
+    int memoryHits{0};
+    int diskHits{0};
+    int builds{0};
+    qint64 diskReadMs{0};
+    qint64 buildMs{0};
+    qint64 cloneMs{0};
+};
+
+void resetVisualAssemblyCacheTelemetry();
+SVisualAssemblyCacheTelemetry visualAssemblyCacheTelemetry();
+}
+
 struct SNavigationCollisionProxy
 {
     QVector3D minimum;

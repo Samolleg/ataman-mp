@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QSet>
 #include <QString>
+#include <QElapsedTimer>
 #include "mob\mob.h"
 #include "landscape.h"
 #include "view.h"
@@ -20,6 +21,8 @@
 #include <limits>
 
 namespace {
+ei::SVisualAssemblyCacheTelemetry s_visualAssemblyTelemetry;
+
 struct CachedFigureAssembly
 {
     ~CachedFigureAssembly()
@@ -38,7 +41,15 @@ QCache<QString, CachedFigureAssembly>& transientAssemblyCache()
         // Costs are KiB of retained CPU vertex data. This keeps the cache
         // useful for dense humanoid maps without allowing old profiles/maps
         // to retain an unbounded amount of assembly geometry.
-        cache.setMaxCost(128 * 1024);
+        // Keep the completed geometry working set for several heavy maps in
+        // one editing session. Every scene object receives its own clone, so
+        // cached assemblies can be evicted safely, but a 128 MiB ceiling made
+        // gz18h thrash after visiting only a few other zones.
+        // The measured gz18h -> gz11 -> gz19 -> gz18h sequence exceeded the
+        // former 384 MiB ceiling and converted a warm return into hundreds of
+        // compressed disk assembly reads. Keep the multi-map working set;
+        // QCache still evicts least-recently-used immutable assemblies.
+        cache.setMaxCost(768 * 1024);
         initialized = true;
     }
     return cache;
@@ -65,6 +76,18 @@ QSet<QString>& persistedAssemblies()
     return keys;
 }
 
+QHash<QString, float>& transientPartUvScaleCache()
+{
+    static QHash<QString, float> cache;
+    return cache;
+}
+
+QHash<QString, float>& transientProjectionMinZCache()
+{
+    static QHash<QString, float> cache;
+    return cache;
+}
+
 QVector<ei::SCachedVisualPart> serializableAssembly(const QVector<CPart*>& parts)
 {
     QVector<ei::SCachedVisualPart> result;
@@ -85,9 +108,12 @@ QVector<ei::SCachedVisualPart> serializableAssembly(const QVector<CPart*>& parts
 
 void cloneAssembly(QVector<CPart*>& destination, const QVector<CPart*>& source)
 {
+    QElapsedTimer timer;
+    timer.start();
     destination.reserve(source.size());
     for(CPart* part : source)
         destination.append(new CPart(*part));
+    s_visualAssemblyTelemetry.cloneMs += timer.elapsed();
 }
 
 void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
@@ -116,8 +142,13 @@ void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
     {
         cached = new CachedFigureAssembly;
         QVector<ei::SCachedVisualPart> diskParts;
-        if(ei::readCachedFigureAssembly(diskDirectory, diskKey, &diskParts))
+        QElapsedTimer diskTimer;
+        diskTimer.start();
+        const bool diskHit = ei::readCachedFigureAssembly(diskDirectory, diskKey, &diskParts);
+        s_visualAssemblyTelemetry.diskReadMs += diskTimer.elapsed();
+        if(diskHit)
         {
+            ++s_visualAssemblyTelemetry.diskHits;
             persistedAssemblies().insert(diskKey);
             cached->parts.reserve(diskParts.size());
             for(const ei::SCachedVisualPart& source : diskParts)
@@ -135,9 +166,13 @@ void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
         }
         else
         {
+            ++s_visualAssemblyTelemetry.builds;
+            QElapsedTimer buildTimer;
+            buildTimer.start();
             QStringList parts = visibleParts;
             QVector3D renderComplexion = complexion;
             figure->getVertexData(cached->parts, renderComplexion, parts);
+            s_visualAssemblyTelemetry.buildMs += buildTimer.elapsed();
             if(ei::shouldPersistReusableVisualArtifact(usageCount)
                     && ei::writeCachedFigureAssembly(
                     diskDirectory, diskKey, serializableAssembly(cached->parts)))
@@ -152,8 +187,23 @@ void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
         cache.insert(key, cached, costKiB);
         return;
     }
+    ++s_visualAssemblyTelemetry.memoryHits;
     cloneAssembly(destination, cached->parts);
 }
+}
+
+namespace ei {
+
+void resetVisualAssemblyCacheTelemetry()
+{
+    s_visualAssemblyTelemetry = SVisualAssemblyCacheTelemetry();
+}
+
+SVisualAssemblyCacheTelemetry visualAssemblyCacheTelemetry()
+{
+    return s_visualAssemblyTelemetry;
+}
+
 }
 
 CObjectBase::CObjectBase(): 
@@ -854,8 +904,13 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
                 && !bodyTextureLayers.isEmpty() ? textureName : partTextureNames.value(part->name(),
             part->textureNumber() == 2 && !secondaryTextureName.trimmed().isEmpty()
                 ? secondaryTextureName : textureName);
-        float uvScale = ei::textureUvScale(partTexture);
-        if(!part->vertData().isEmpty())
+        const QString uvCacheKey = QString::number(part->meshIdentity()) + '|'
+            + partTexture.toLower();
+        auto cachedUvScale = transientPartUvScaleCache().constFind(uvCacheKey);
+        float uvScale = cachedUvScale == transientPartUvScaleCache().constEnd()
+            ? ei::textureUvScale(partTexture) : cachedUvScale.value();
+        if(cachedUvScale == transientPartUvScaleCache().constEnd()
+                && !part->vertData().isEmpty())
         {
             float minU = part->vertData().first().texCoord.x();
             float maxU = minU;
@@ -870,10 +925,28 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
             }
             uvScale = ei::textureUvScaleForBounds(partTexture, minU, maxU, minV, maxV);
         }
+        if(cachedUvScale == transientPartUvScaleCache().constEnd())
+            transientPartUvScaleCache().insert(uvCacheKey, uvScale);
         part->setTextureUvScale(uvScale);
     }
     rebuildTransientAnimationSkeleton();
-    recalcMinPos();
+    const QString projectionKey = cacheScope + '|' + fingerprint + '|'
+        + QString::number(m_rotation.scalar(), 'g', 8) + ','
+        + QString::number(m_rotation.x(), 'g', 8) + ','
+        + QString::number(m_rotation.y(), 'g', 8) + ','
+        + QString::number(m_rotation.z(), 'g', 8) + '|'
+        + QString::number(editorVisualScale(), 'g', 8);
+    const auto cachedMinZ = transientProjectionMinZCache().constFind(projectionKey);
+    if(cachedMinZ != transientProjectionMinZCache().constEnd())
+    {
+        m_minPoint = QVector3D(0.0f, 0.0f, cachedMinZ.value());
+        CLandscape::getInstance()->projectPosition(this);
+    }
+    else
+    {
+        recalcMinPos();
+        transientProjectionMinZCache().insert(projectionKey, m_minPoint.z());
+    }
 }
 
 void CObjectBase::recalcMinPos()

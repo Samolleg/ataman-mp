@@ -390,6 +390,7 @@ signals:
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
     void cameraSpeedMultiplierChanged(double multiplier);
+    void unitVisualPreparationComplete();
 
 private:
     int m_height; //for redraw window

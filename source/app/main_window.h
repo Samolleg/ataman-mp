@@ -81,6 +81,7 @@ public:
     void performAutosave();
     void beginAutosaveCountdown();
     void showRecoverableAutosaves();
+    CView* view() const { return m_pView; }
 
     void testFunc1();
 

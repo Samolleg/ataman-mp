@@ -36,6 +36,8 @@
 #include <QWidget>
 #include <QVariant>
 #include <QSettings>
+#include <QSharedPointer>
+#include <functional>
 #include <cstdio>
 #include <cstring>
 
@@ -52,6 +54,7 @@
 #include "settings.h"
 #include "endurance_ui_scale.h"
 #include "jmv_map_test_launcher.h"
+#include "view.h"
 #include "render_scheduling.h"
 #include "utils.h"
 
@@ -392,6 +395,9 @@ int runHeadlessCommand(QApplication& app)
         "Open positional MPR/MOB documents, log foreground load timings, then exit.");
     QCommandLineOption workspaceVisualSmokeOption("workspace-visual-smoke",
         "Open positional documents and exit after all background unit visuals resolve.");
+    QCommandLineOption workspaceVisualSequenceOption("workspace-visual-sequence",
+        "Open semicolon-separated MPR|MOB stages in one process and exit after each stage resolves.",
+        "stages");
     parser.addOption(validateOption);
     parser.addOption(roundtripOption);
     parser.addOption(jsonOption);
@@ -405,6 +411,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(renderBenchmarkOption);
     parser.addOption(workspaceLoadSmokeOption);
     parser.addOption(workspaceVisualSmokeOption);
+    parser.addOption(workspaceVisualSequenceOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
 
@@ -415,6 +422,11 @@ int runHeadlessCommand(QApplication& app)
         app.setProperty("workspaceLoadSmoke", true);
     if(parser.isSet(workspaceVisualSmokeOption))
         app.setProperty("workspaceVisualSmoke", true);
+    if(parser.isSet(workspaceVisualSequenceOption))
+    {
+        app.setProperty("workspaceVisualSmoke", true);
+        app.setProperty("workspaceVisualSequence", parser.value(workspaceVisualSequenceOption));
+    }
 
     if(parser.isSet(versionOption))
     {
@@ -1704,6 +1716,54 @@ int main(int argc, char *argv[])
     qApp->setProperty("enduranceStartupScreenGeometry", QVariant());
     window.raise();
     window.activateWindow();
+    const QString visualSequence = qApp->property("workspaceVisualSequence").toString();
+    if(!visualSequence.isEmpty())
+    {
+        QVector<QPair<QString, QString>> stages;
+        for(const QString& stageText : visualSequence.split(';', QString::SkipEmptyParts))
+        {
+            const int separator = stageText.indexOf('|');
+            if(separator <= 0 || separator >= stageText.size() - 1)
+                continue;
+            stages.append(qMakePair(stageText.left(separator), stageText.mid(separator + 1)));
+        }
+        QSharedPointer<int> stageIndex(new int(0));
+        QSharedPointer<std::function<void()>> advance(new std::function<void()>);
+        *advance = [&window, stages, stageIndex, advance]()
+        {
+            if(*stageIndex >= stages.size())
+            {
+                ei::log(eLogInfo, QString("Workspace visual sequence complete stages:%1")
+                        .arg(stages.size()));
+                QTimer::singleShot(500, qApp, &QCoreApplication::quit);
+                return;
+            }
+            const int current = (*stageIndex)++;
+            const QPair<QString, QString>& stage = stages.at(current);
+            // This diagnostic models replacing the current map, not layering
+            // every prior MOB into one workspace. Keeping old MOBs made the
+            // cache regression itself invalid and also flooded family
+            // validation with unrelated cross-zone collisions.
+            if(current > 0)
+            {
+                window.view()->unloadMob(QString());
+                window.view()->unloadLand(false);
+            }
+            ei::log(eLogInfo, QString("Workspace visual sequence stage:%1/%2 mpr:%3 mob:%4")
+                    .arg(current + 1).arg(stages.size()).arg(stage.first, stage.second));
+            if(!window.replaceLoadedLandscape(QFileInfo(stage.first))
+                    || !window.loadMobWithProgress(QFileInfo(stage.second)))
+            {
+                ei::log(eLogWarning, QString("Workspace visual sequence stage failed:%1")
+                        .arg(current + 1));
+                QCoreApplication::exit(3);
+            }
+        };
+        QObject::connect(window.view(), &CView::unitVisualPreparationComplete,
+                         &window, [advance]() { QTimer::singleShot(100, *advance); });
+        QTimer::singleShot(0, *advance);
+        return app.exec();
+    }
     QStringList startupDocuments;
     for(int i = 1; i < app.arguments().size(); ++i)
     {

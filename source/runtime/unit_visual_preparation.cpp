@@ -1,5 +1,6 @@
 #include "unit_visual_preparation.h"
 #include "profile_visual_provider.h"
+#include "persistent_visual_cache.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -171,12 +172,15 @@ void writeCacheEntry(const QString& directory, const QString& key,
     root.insert(QStringLiteral("providerResult"), provider);
     root.insert(QStringLiteral("appearance"), result.appearance);
     root.insert(QStringLiteral("diagnostic"), result.diagnostic);
+    const qint64 previousSize = target.size();
     QSaveFile file(target.absoluteFilePath());
     if(file.open(QIODevice::WriteOnly))
     {
         file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
         if(file.commit())
         {
+            ei::recordVisualCacheFileWrite(directory, previousSize,
+                                           QFileInfo(target.absoluteFilePath()).size());
             const QString memoryKey = QDir::cleanPath(directory).toCaseFolded()
                 + QLatin1Char('|') + key;
             QMutexLocker locker(&s_appearanceCacheMutex);

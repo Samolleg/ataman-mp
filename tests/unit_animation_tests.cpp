@@ -1,6 +1,8 @@
 #include <QtTest>
 #include <QDataStream>
 #include <QTemporaryDir>
+#include <QRandomGenerator>
+#include <QThread>
 #include "unit_animation.h"
 #include "profile_visual_provider.h"
 #include "unit_visual_preparation.h"
@@ -115,8 +117,69 @@ private slots:
     void cachesParsedAnimationAndRecoversFromCorruption();
     void roundTripsComposedAtlasAsGpuReadyRgba8();
     void roundTripsFigureAssemblyAndUnknownPartNames();
+    void retainsRecentlyUsedVisualsAcrossMapReplacement();
+    void enforcesCombinedPersistentVisualCacheLimit();
     void malformedAndUnknownInputsFailStatic();
 };
+
+void UnitAnimationTests::retainsRecentlyUsedVisualsAcrossMapReplacement()
+{
+    ei::CVisualCacheLru cache;
+    cache.touch(QStringLiteral("gz18h-a"), 40);
+    cache.touch(QStringLiteral("gz18h-b"), 40);
+    cache.touch(QStringLiteral("gz11"), 30);
+    QCOMPARE(cache.trim(120), QStringList());
+
+    cache.touch(QStringLiteral("gz18h-a"), 40);
+    cache.touch(QStringLiteral("gz19"), 30);
+    QCOMPARE(cache.trim(120), QStringList() << QStringLiteral("gz18h-b"));
+    QCOMPARE(cache.oldestFirst(), QStringList()
+             << QStringLiteral("gz11") << QStringLiteral("gz18h-a")
+             << QStringLiteral("gz19"));
+    QCOMPARE(cache.totalBytes(), qint64(100));
+
+    cache.clear();
+    QCOMPARE(cache.totalBytes(), qint64(0));
+    QVERIFY(cache.oldestFirst().isEmpty());
+}
+
+void UnitAnimationTests::enforcesCombinedPersistentVisualCacheLimit()
+{
+    QTemporaryDir application;
+    QVERIFY(application.isValid());
+    QByteArray noisy(700 * 1024, Qt::Uninitialized);
+    QRandomGenerator random(0x45494d50u);
+    for(int index = 0; index < noisy.size(); ++index)
+        noisy[index] = char(random.generate() & 0xffu);
+    const QString atlases = ei::visualCacheDirectoryForApplication(
+        application.path(), QStringLiteral("character-atlases"));
+    const QString assemblies = ei::visualCacheDirectoryForApplication(
+        application.path(), QStringLiteral("character-assemblies"));
+    ei::setVisualCacheLimitMiB(1);
+    QVERIFY(ei::writeVisualCachePayload(atlases, QStringLiteral("old"), 77, noisy));
+    QThread::msleep(20);
+    const QString plans = ei::visualCacheDirectoryForApplication(
+        application.path(), QStringLiteral("unit-appearances"));
+    QVERIFY(QDir().mkpath(plans));
+    const QString planPath = QDir(plans).filePath(QStringLiteral("plan.json"));
+    QFile plan(planPath);
+    QVERIFY(plan.open(QIODevice::WriteOnly));
+    QCOMPARE(plan.write(noisy), qint64(noisy.size()));
+    plan.close();
+    ei::recordVisualCacheFileWrite(plans, 0, QFileInfo(planPath).size());
+    QVERIFY(!QFileInfo(QDir(atlases).filePath(QStringLiteral("old.cache"))).exists());
+    QVERIFY(QFileInfo(planPath).exists());
+    QThread::msleep(20);
+    QVERIFY(ei::writeVisualCachePayload(assemblies, QStringLiteral("new"), 77, noisy));
+    QVERIFY(!QFileInfo(planPath).exists());
+    QVERIFY(QFileInfo(QDir(assemblies).filePath(QStringLiteral("new.cache"))).exists());
+
+    ei::setVisualCacheLimitMiB(0);
+    QVERIFY(ei::writeVisualCachePayload(atlases, QStringLiteral("unlimited"), 77,
+                                        noisy + noisy));
+    QVERIFY(QFileInfo(QDir(atlases).filePath(QStringLiteral("unlimited.cache"))).exists());
+    ei::setVisualCacheLimitMiB(1024);
+}
 
 void UnitAnimationTests::cachesParsedAnimationAndRecoversFromCorruption()
 {
