@@ -34,6 +34,7 @@
 #include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
+#include "camera_orbit.h"
 #include "unit_animation.h"
 #include <QDateTime>
 #include "mob\mob.h"
