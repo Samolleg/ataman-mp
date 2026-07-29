@@ -38,7 +38,24 @@ foreach ($dump in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object
 }
 
 foreach ($profile in Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.semantic-atlas.json') {
-    $failures.Add("pre-shipped local Material atlas override included: $($profile.FullName.Substring($root.Length + 1))")
+    $relative = $profile.FullName.Substring($root.Length + 1)
+    try {
+        $document = Get-Content -LiteralPath $profile.FullName -Raw | ConvertFrom-Json
+        $portableClone = $document.provenance -eq 'portable-exact-stock-atlas-clone-v1'
+        $portablePath = $relative.StartsWith(
+            'terrain-atlas-profiles\', [System.StringComparison]::OrdinalIgnoreCase)
+        $slotCount = [int]$document.atlasSlotCount
+        $complete = $slotCount -gt 0 -and $document.approved -eq $true -and
+            $document.atlasPixelSha256 -match '^[0-9a-fA-F]{64}$' -and
+            @($document.slots).Count -eq $slotCount -and
+            @($document.slots | Where-Object { -not $_.assigned }).Count -eq 0
+        if (-not ($portableClone -and $portablePath -and $complete)) {
+            $failures.Add("pre-shipped local Material atlas override included: $relative")
+        }
+    }
+    catch {
+        $failures.Add("invalid packaged Material atlas profile: $relative ($($_.Exception.Message))")
+    }
 }
 
 $versionPath = Join-Path $root 'VERSION'

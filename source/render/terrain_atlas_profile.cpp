@@ -900,11 +900,15 @@ bool CTerrainAtlasProfileStore::loadExplicitOverride(
     STerrainAtlasProfile loaded;
     if(!STerrainAtlasProfile::load(path, &loaded, report))
         return false;
-    if(loaded.provenance != QStringLiteral("user-authored-custom-profile"))
+    const bool explicitUserProfile = loaded.provenance
+        == QStringLiteral("user-authored-custom-profile");
+    const bool portableExactClone = loaded.provenance
+        == QStringLiteral("portable-exact-stock-atlas-clone-v1");
+    if(!explicitUserProfile && !portableExactClone)
     {
         if(report) report->add("terrain.atlas_profile_not_explicit_override",
             EValidationSeverity::Warning,
-            "A stored generated/default profile was ignored; only an explicitly edited local profile may override the built-in Material atlas",
+            "A stored generated/default profile was ignored; only an explicitly edited local profile or an exact-bound portable stock clone may override the built-in Material atlas",
             path);
         return false;
     }

@@ -4,6 +4,7 @@
 #include <QScrollBar>
 #include <QShortcut>
 #include <QLabel>
+#include <QHash>
 
 #include "tile_form.h"
 #include "ui_tile_form.h"
@@ -320,19 +321,40 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
     ui->tableTile->setColumnCount(m_nTilePerRow); // Одна колонка для иконок
 
     m_icoList.clear();
+    QHash<qint64, QVector<QImage>> pageTiles;
+    QHash<qint64, QVector<QIcon>> pageIcons;
     for(int i(0); i<textureAtlasNumber; ++i)
     {
+        const qint64 pageKey = arrImage.at(i).cacheKey();
+        const auto cachedTiles = pageTiles.constFind(pageKey);
+        if(cachedTiles != pageTiles.constEnd())
+        {
+            for(const QImage& tile : cachedTiles.value())
+                m_tileImages.append(tile);
+            for(const QIcon& icon : pageIcons.value(pageKey))
+                m_icoList.append(icon);
+            continue;
+        }
+        QVector<QImage> physicalPageTiles;
+        QVector<QIcon> physicalPageIcons;
+        physicalPageTiles.reserve(64);
+        physicalPageIcons.reserve(64);
         for(int col(0); col<m_nTilePerRow; ++col)
         {
             for(int row(0); row<m_nTilePerRow; ++row)
             {
                 QImage croppedImage = arrImage[i].copy(row*m_originalTilesize, col*m_originalTilesize, m_originalTilesize, m_originalTilesize);
                 croppedImage = croppedImage.mirrored(false, true);
-                m_tileImages.append(croppedImage.convertToFormat(QImage::Format_RGBA8888));
+                croppedImage = croppedImage.convertToFormat(QImage::Format_RGBA8888);
                 QPixmap croppedPixmap = QPixmap::fromImage(croppedImage);
-                m_icoList.append(QIcon(croppedPixmap));
+                physicalPageTiles.append(croppedImage);
+                physicalPageIcons.append(QIcon(croppedPixmap));
             }
         }
+        pageTiles.insert(pageKey, physicalPageTiles);
+        pageIcons.insert(pageKey, physicalPageIcons);
+        for(const QImage& tile : physicalPageTiles) m_tileImages.append(tile);
+        for(const QIcon& icon : physicalPageIcons) m_icoList.append(icon);
     }
 
     int iIco(0);

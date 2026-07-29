@@ -261,6 +261,7 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
       m_binding(new QLabel(this)), m_storage(new QLabel(this)),
       m_diagnostics(new QLabel(this)), m_familyReason(new QLabel(this)),
       m_familyClass(new QComboBox(this)),
+      m_atlasPage(new QComboBox(this)),
       m_confirmFamily(new QPushButton(tr("Confirm material"), this)),
       m_thumbnail(new QPushButton(tr("Use selected tile as thumbnail"), this)),
       m_apply(new QPushButton(tr("Apply + Close"), this))
@@ -335,11 +336,20 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     body->addLayout(inspector, 3);
 
     QVBoxLayout* poolSide = new QVBoxLayout;
-    poolSide->addWidget(new QLabel(tr("Unassigned / unusual tiles"), this));
+    poolSide->addWidget(new QLabel(tr("All physical atlas slots"), this));
     QLabel* poolHelp = new QLabel(tr(
-        "These tiles are excluded from automatic painting. Drag one to a material for a uniform assignment, then edit individual corners if it is a transition."), this);
+        "Choose an atlas page to inspect every physical slot, including repeated slots in expanded atlases. Select a slot for its full preview and exact corner identities. Drag an unassigned slot to a material to classify it."), this);
     poolHelp->setWordWrap(true);
     poolSide->addWidget(poolHelp);
+    m_atlasPage->setObjectName(QStringLiteral("physicalAtlasPage"));
+    const int physicalSlots = qMax(m_profile.atlasSlotCount, m_tileImages.size());
+    const int physicalPages = (physicalSlots + 63) / 64;
+    for(int page = 0; page < physicalPages; ++page)
+        m_atlasPage->addItem(tr("Page %1 — slots %2–%3")
+            .arg(page).arg(page * 64)
+            .arg(qMin(physicalSlots - 1, page * 64 + 63)), page);
+    poolSide->addWidget(m_atlasPage);
+    m_unassigned->setObjectName(QStringLiteral("physicalAtlasSlots"));
     poolSide->addWidget(m_unassigned, 1);
     body->addLayout(poolSide, 3);
     layout->addLayout(body, 1);
@@ -373,6 +383,10 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
             this, &CTerrainAtlasReviewDialog::selectTreeItem);
     connect(m_unassigned, &QListWidget::itemSelectionChanged,
             this, &CTerrainAtlasReviewDialog::selectPoolItem);
+    connect(m_atlasPage, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) {
+                if(!m_rebuilding) rebuildPhysicalPage();
+            });
     CValidationReport defaultReport;
     const STerrainAtlasProfile builtIn = CTerrainAtlasPresetCatalog::exactProfile(
         m_profile.mprNamespace, m_profile.atlasPixelSha256,
@@ -526,7 +540,6 @@ void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSl
     m_rebuilding = true;
     m_selectedSlot = selectSlot;
     m_materials->clear();
-    m_unassigned->clear();
     QTreeWidgetItem* groups[3];
     const QString names[] = {tr("Ground"), tr("Underwater"), tr("Overlay")};
     for(int group = 0; group < 3; ++group)
@@ -587,20 +600,7 @@ void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSl
         }
         if(entry.id == selectFamily && selectSlot < 0) selectItem = familyItem;
     }
-    for(const STerrainAtlasProfileSlot& definition : m_profile.slotDefinitions)
-        if(!definition.assigned || definition.ambiguous)
-        {
-            QListWidgetItem* item = new QListWidgetItem(
-                tileIcon(m_tileImages, definition.slot), tr("Tile %1").arg(definition.slot),
-                m_unassigned);
-            item->setData(IdRole, definition.slot);
-            item->setToolTip(tr("Parser proposal: NW %1 / NE %2 / SE %3 / SW %4")
-                .arg(familyName(definition.signature.northWest))
-                .arg(familyName(definition.signature.northEast))
-                .arg(familyName(definition.signature.southEast))
-                .arg(familyName(definition.signature.southWest)));
-            if(definition.slot == selectSlot) m_unassigned->setCurrentItem(item);
-        }
+    rebuildPhysicalPage(selectSlot);
     if(selectItem)
     {
         m_materials->setCurrentItem(selectItem);
@@ -611,6 +611,45 @@ void CTerrainAtlasReviewDialog::rebuildVisuals(qint32 selectFamily, int selectSl
     m_rebuilding = false;
     updateInspector();
     updateDiagnostics();
+}
+
+void CTerrainAtlasReviewDialog::rebuildPhysicalPage(int selectSlot)
+{
+    const bool wasRebuilding = m_rebuilding;
+    m_rebuilding = true;
+    if(selectSlot >= 0 && m_atlasPage->count() > 0)
+        m_atlasPage->setCurrentIndex(qBound(0, selectSlot / 64,
+                                           m_atlasPage->count() - 1));
+    const int page = qMax(0, m_atlasPage->currentData().toInt());
+    const int firstSlot = page * 64;
+    const int lastSlot = qMin(qMax(m_profile.atlasSlotCount,
+                                  m_tileImages.size()), firstSlot + 64);
+    m_unassigned->clear();
+    for(int physicalSlot = firstSlot; physicalSlot < lastSlot; ++physicalSlot)
+    {
+        const STerrainAtlasProfileSlot* definition = slot(physicalSlot);
+        const QString state = !definition || !definition->assigned
+            ? tr("unassigned") : (definition->ambiguous ? tr("ambiguous")
+                                                         : tr("assigned"));
+        QListWidgetItem* item = new QListWidgetItem(
+            tileIcon(m_tileImages, physicalSlot),
+            tr("Slot %1  (local %2) — %3")
+                .arg(physicalSlot).arg(physicalSlot % 64).arg(state),
+            m_unassigned);
+        item->setData(IdRole, physicalSlot);
+        if(definition)
+            item->setToolTip(tr("Page %1, local slot %2. NW %3 / NE %4 / SE %5 / SW %6")
+                .arg(page).arg(physicalSlot % 64)
+                .arg(familyName(definition->signature.northWest))
+                .arg(familyName(definition->signature.northEast))
+                .arg(familyName(definition->signature.southEast))
+                .arg(familyName(definition->signature.southWest)));
+        else
+            item->setToolTip(tr("Page %1, local slot %2. No semantic definition is available.")
+                .arg(page).arg(physicalSlot % 64));
+        if(physicalSlot == selectSlot) m_unassigned->setCurrentItem(item);
+    }
+    m_rebuilding = wasRebuilding;
 }
 
 qint32 CTerrainAtlasReviewDialog::selectedFamilyId() const

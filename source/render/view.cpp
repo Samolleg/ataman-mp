@@ -98,7 +98,8 @@ CTerrainTransitionCatalog globalMaterialCatalog(
 
 QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
                                const QString& preferredNamespace,
-                               const QSize& requiredSize)
+                               const QSize& requiredSize,
+                               QMap<QString, QImage>* decodedPageCache)
 {
     QVector<STerrainGlobalMaterialSource> sources = family.sources;
     std::stable_sort(sources.begin(), sources.end(),
@@ -118,9 +119,16 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
         const int pageIndex = source.uniformSlot / 64;
         if(pageIndex < 0 || pageIndex >= names.size())
             continue;
+        const QString pageName = names.at(pageIndex).toCaseFolded();
         QImage page;
-        if(!CTextureList::getInstance()->extractMmpToDxt1(page, names.at(pageIndex))
-           || page.isNull() || page.width() != page.height()
+        if(decodedPageCache && decodedPageCache->contains(pageName))
+            page = decodedPageCache->value(pageName);
+        else
+        {
+            CTextureList::getInstance()->extractMmpToDxt1(page, pageName);
+            if(decodedPageCache) decodedPageCache->insert(pageName, page);
+        }
+        if(page.isNull() || page.width() != page.height()
            || page.width() % 8 != 0)
             continue;
         const int tileSize = page.width() / 8;
@@ -6635,10 +6643,15 @@ void CView::rebuildTerrainAutoCatalog()
             CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
         const QSize requiredSize = m_pTileForm->tileImages().isEmpty()
             ? QSize() : m_pTileForm->tileImages().front().size();
+        // A reviewed atlas page commonly supplies anchors for many material
+        // families. Decode each physical MMP only once per catalog rebuild;
+        // the previous per-family decode made map opening spend tens of
+        // seconds repeatedly expanding the same 2048x2048 DXT page.
+        QMap<QString, QImage> decodedGlobalPages;
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             const QImage source = loadGlobalUniformSource(
-                family, mprNamespace, requiredSize);
+                family, mprNamespace, requiredSize, &decodedGlobalPages);
             if(source.isNull())
             {
                 report.add("terrain.global_family_source",

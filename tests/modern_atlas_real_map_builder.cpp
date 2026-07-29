@@ -506,7 +506,8 @@ BuiltMap buildExpandedRuntimeProbe(
     const QString& nameSpace, int targetPages,
     const QVector<qint32>& materialIds,
     const QMap<qint32, QImage>& externalSources,
-    const Atlas& sourceAtlas, const QString& outputDirectory)
+    const Atlas& sourceAtlas, const QString& outputDirectory,
+    const QString& portableProfileRoot)
 {
     Q_UNUSED(materialIds);
     Q_UNUSED(externalSources);
@@ -550,6 +551,9 @@ BuiltMap buildExpandedRuntimeProbe(
         return result;
     }
     QCryptographicHash stable(QCryptographicHash::Sha256);
+    QCryptographicHash semanticPixels(QCryptographicHash::Sha256);
+    semanticPixels.addData(QByteArray::number(requiredSlots));
+    semanticPixels.addData("\n", 1);
     stable.addData(nameSpace.toLower().toUtf8());
     stable.addData(QByteArray::number(targetPages));
     best.tileTypes.reserve(requiredSlots);
@@ -568,6 +572,14 @@ BuiltMap buildExpandedRuntimeProbe(
             const int slot = page * 64 + local;
             QImage pixels = sourceAtlas.tiles.at(slot % sourceAtlas.tiles.size())
                 .convertToFormat(QImage::Format_RGBA8888);
+            semanticPixels.addData(QByteArray::number(pixels.width()));
+            semanticPixels.addData("x", 1);
+            semanticPixels.addData(QByteArray::number(pixels.height()));
+            semanticPixels.addData("\n", 1);
+            for(int y = 0; y < pixels.height(); ++y)
+                semanticPixels.addData(
+                    reinterpret_cast<const char*>(pixels.constScanLine(y)),
+                    pixels.width() * 4);
             // Repeat exact stock Zone18 imagery. Physical slot/page identity
             // comes from the MPR reference; changing pixels here prevents the
             // semantic catalog from recovering a complete paintable field.
@@ -638,6 +650,36 @@ BuiltMap buildExpandedRuntimeProbe(
                          baseName + QStringLiteral("-atlas.res")),
                      package.resourceArchiveBytes, &result.error))
         return result;
+    STerrainAtlasProfile portableProfile = sourceAtlas.profile;
+    portableProfile.mprNamespace = baseName;
+    portableProfile.atlasPixelSha256 = semanticPixels.result().toHex();
+    portableProfile.atlasSlotCount = requiredSlots;
+    portableProfile.provenance =
+        QStringLiteral("portable-exact-stock-atlas-clone-v1");
+    portableProfile.approved = true;
+    portableProfile.slotDefinitions.clear();
+    portableProfile.slotDefinitions.reserve(requiredSlots);
+    for(int slot = 0; slot < requiredSlots; ++slot)
+    {
+        STerrainAtlasProfileSlot definition =
+            sourceAtlas.profile.slotDefinitions.at(
+                slot % sourceAtlas.profile.slotDefinitions.size());
+        definition.slot = slot;
+        portableProfile.slotDefinitions.append(definition);
+    }
+    CValidationReport portableProfileReport;
+    if(!portableProfile.normalizeMembership(&portableProfileReport)
+       || !portableProfile.validateBinding(
+           baseName, portableProfile.atlasPixelSha256, requiredSlots,
+           &portableProfileReport)
+       || !CTerrainAtlasProfileStore::save(
+           portableProfile, portableProfileRoot, &portableProfileReport))
+    {
+        result.error = QStringLiteral(
+            "Could not create the exact semantic profile for the expanded atlas.\n%1")
+            .arg(portableProfileReport.toText());
+        return result;
+    }
     int highestReferencedSlot = -1;
     QSet<int> referencedPages;
     for(quint16 encoded : best.packedCells)
@@ -663,6 +705,8 @@ BuiltMap buildExpandedRuntimeProbe(
     manifest.insert("isolated_namespace", baseName);
     manifest.insert("mpr_file", baseName + QStringLiteral(".mpr"));
     manifest.insert("atlas_file", baseName + QStringLiteral("-atlas.res"));
+    manifest.insert("semantic_profile_file", QDir(outputDirectory).relativeFilePath(
+        CTerrainAtlasProfileStore::profilePath(baseName, portableProfileRoot)));
     manifest.insert("texture_pages", best.textureCount);
     manifest.insert("active_slots", best.requiredSlots);
     manifest.insert("pixel_policy", "exact-stock-zone18-repeat");
@@ -728,7 +772,7 @@ int main(int argc, char** argv)
                     .arg(pages, 2, 10, QLatin1Char('0')));
             const BuiltMap probe = buildExpandedRuntimeProbe(
                 sourceMpr, sourceMob, QStringLiteral("Zone18"), pages,
-                {}, {}, zone18, directory);
+                {}, {}, zone18, directory, outputRoot);
             if(!probe.success)
             {
                 err << "runtime-probe-" << pages << ": " << probe.error << '\n';
@@ -887,7 +931,8 @@ int main(int argc, char** argv)
                 .arg(pages, 2, 10, QLatin1Char('0')));
         const BuiltMap probe = buildExpandedRuntimeProbe(
             zone18Source, zone18Mob, QStringLiteral("Zone18"), pages,
-            globalLandIds, QMap<qint32, QImage>(), zone18, probeDirectory);
+            globalLandIds, QMap<qint32, QImage>(), zone18, probeDirectory,
+            outputRoot);
         if(!probe.success)
         {
             err << "runtime-probe-" << pages << ": " << probe.error << '\n';

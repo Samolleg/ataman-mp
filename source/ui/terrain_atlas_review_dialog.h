@@ -43,6 +43,7 @@ private slots:
 
 private:
     void rebuildVisuals(qint32 selectFamilyId = -1, int selectSlot = -1);
+    void rebuildPhysicalPage(int selectSlot = -1);
     void updateInspector();
     void updateDiagnostics();
     void assignTile(int slot, qint32 sourceFamily, qint32 targetFamily);
@@ -75,6 +76,7 @@ private:
     QLabel* m_diagnostics;
     QLabel* m_familyReason;
     QComboBox* m_familyClass;
+    QComboBox* m_atlasPage;
     QPushButton* m_confirmFamily;
     QPushButton* m_thumbnail;
     QPushButton* m_apply;

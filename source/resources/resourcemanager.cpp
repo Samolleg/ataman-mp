@@ -13,6 +13,8 @@
 #include <QJsonArray>
 #include <QFile>
 #include <QTextCodec>
+#include <QCryptographicHash>
+#include <QHash>
 #include <limits>
 
 #include "res_file.h"
@@ -1239,6 +1241,11 @@ int CTextureList::extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringLi
         return false;
 
     int nCount(0);
+    // Expanded map-specific atlases may intentionally repeat authored MMP
+    // pages under distinct physical page names. Preserve those physical
+    // identities while sharing one immutable decoded QImage for byte-identical
+    // payloads instead of allocating the same RGBA page hundreds of times.
+    QHash<QByteArray, QImage> decodedPayloads;
     for(int index = 0; index < inArrTextureName.size(); ++index)
     {
         const QString texName = inArrTextureName.at(index).toLower();
@@ -1247,6 +1254,18 @@ int CTextureList::extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringLi
         if(!readIndexedResource(sources, texName, textureData, &sourcePath))
         {
             ei::log(eLogWarning, "Missing terrain texture: " + texName);
+            continue;
+        }
+
+        const QByteArray payloadSha256 = QCryptographicHash::hash(
+            textureData, QCryptographicHash::Sha256);
+        const auto cached = decodedPayloads.constFind(payloadSha256);
+        if(cached != decodedPayloads.constEnd())
+        {
+            outArrImage[index] = cached.value();
+            ++nCount;
+            ei::log(eLogInfo, QString("Resolved repeated terrain tile atlas %1 source:%2 sharedDecodedPixels:true")
+                    .arg(texName, sourcePath));
             continue;
         }
 
@@ -1268,6 +1287,7 @@ int CTextureList::extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringLi
         stream.device()->seek(header.size());
         QImage& img = outArrImage[index];
         img = convert_DXT(stream, header.m_width, header.m_height).mirrored(false, true);
+        decodedPayloads.insert(payloadSha256, img);
         ++nCount;
         ei::log(eLogInfo, QString("Resolved terrain tile atlas %1 source:%2 size:%3x%4")
                 .arg(texName, sourcePath).arg(header.m_width).arg(header.m_height));
