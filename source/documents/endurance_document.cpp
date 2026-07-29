@@ -16,6 +16,7 @@
 #include <cmath>
 #include <climits>
 #include <cstring>
+#include <functional>
 
 namespace {
 QString severityName(EValidationSeverity severity)
@@ -2272,6 +2273,235 @@ bool CMobDocument::ensureEmptyObjectSection(QByteArray* output,
     if(report)
         report->add("mob.object_section.inserted", EValidationSeverity::Info,
                     "Inserted an empty OBJECT_SECTION into an object-free MOB.");
+    return true;
+}
+
+bool CMobDocument::buildOwnedRootProjectionCandidate(
+    const QByteArray& sourceBytes, const QString& sourceName,
+    const QByteArray& cleanProjectionBytes, const QByteArray& editedProjectionBytes,
+    CMobEditTransaction* transaction, QByteArray* candidate,
+    QString* saveClass, CValidationReport* report)
+{
+    if(!transaction || !candidate || !saveClass)
+        return false;
+    *transaction = CMobEditTransaction("owned MOB root transaction save");
+    candidate->clear();
+    saveClass->clear();
+
+    CMobDocument source;
+    CMobDocument clean;
+    CMobDocument edited;
+    if(!source.loadBytes(sourceBytes, sourceName, report) ||
+       !clean.loadBytes(cleanProjectionBytes, "clean-ui-projection.mob", report) ||
+       !edited.loadBytes(editedProjectionBytes, "edited-ui-projection.mob", report))
+        return false;
+    if(source.sections().isEmpty() || clean.sections().isEmpty() || edited.sections().isEmpty())
+        return false;
+
+    // These are complete records emitted and owned by CMob::serializeMob.
+    // OBJECT_SECTION and the trailing AI_GRAPH have separate, stricter paths.
+    static const QSet<quint32> ownedTypes = {
+        0xACCEECCB, 0xACCEECCA, // SS_TEXT / SS_TEXT_OLD
+        0xFF01, 0xFF00,         // MAIN_RANGE / SEC_RANGE
+        0xDDDDDDD1,             // DIPLOMATION
+        0xABD0,                 // WORLD_SET
+        0x1E00,                 // VSS_SECTION
+        0xE000, 0xF000          // DIRICTORY / DIRICTORY_ELEMENTS
+    };
+
+    const SMobSection& sourceRoot = source.sections().front();
+    const SMobSection& cleanRoot = clean.sections().front();
+    const SMobSection& editedRoot = edited.sections().front();
+    auto countType = [](const QVector<SMobSection>& children, quint32 type) {
+        int count = 0;
+        for(const SMobSection& child : children)
+            if(child.type == type) ++count;
+        return count;
+    };
+    auto findType = [](const QVector<SMobSection>& children, quint32 type) -> const SMobSection* {
+        for(const SMobSection& child : children)
+            if(child.type == type) return &child;
+        return nullptr;
+    };
+    std::function<bool(const SMobSection&, const SMobSection&)> sameShape;
+    sameShape = [&sameShape](const SMobSection& left, const SMobSection& right) {
+        if(left.type != right.type || left.children.size() != right.children.size())
+            return false;
+        for(int index = 0; index < left.children.size(); ++index)
+            if(!sameShape(left.children.at(index), right.children.at(index)))
+                return false;
+        return true;
+    };
+
+    // A topology change outside the explicit ownership list remains forbidden.
+    QVector<quint32> cleanUnowned;
+    QVector<quint32> editedUnowned;
+    for(const SMobSection& child : cleanRoot.children)
+        if(!ownedTypes.contains(child.type)) cleanUnowned.append(child.type);
+    for(const SMobSection& child : editedRoot.children)
+        if(!ownedTypes.contains(child.type)) editedUnowned.append(child.type);
+    if(cleanUnowned != editedUnowned)
+    {
+        if(report)
+            report->add("mob.owned_root.unowned_structure", EValidationSeverity::Error,
+                        "The UI projection changed a top-level MOB record outside the editor-owned structural transaction");
+        return false;
+    }
+
+    struct SRootRecord { quint32 type; QByteArray raw; };
+    QVector<SRootRecord> sourceRecords;
+    QVector<SRootRecord> cleanRecords;
+    for(const SMobSection& child : sourceRoot.children)
+        sourceRecords.append({child.type, child.rawBytes});
+    for(const SMobSection& child : cleanRoot.children)
+        cleanRecords.append({child.type, child.rawBytes});
+
+    auto eraseType = [](QVector<SRootRecord>* records, quint32 type) {
+        for(int index = 0; index < records->size(); ++index)
+            if(records->at(index).type == type) { records->removeAt(index); return; }
+    };
+    auto replaceType = [](QVector<SRootRecord>* records, quint32 type, const QByteArray& raw) {
+        for(int index = 0; index < records->size(); ++index)
+            if(records->at(index).type == type) { (*records)[index].raw = raw; return; }
+    };
+    auto containsType = [](const QVector<SRootRecord>& records, quint32 type) {
+        for(const SRootRecord& record : records)
+            if(record.type == type) return true;
+        return false;
+    };
+    auto insertInEditedOrder = [&editedRoot, &containsType](QVector<SRootRecord>* records,
+                                                            quint32 type,
+                                                            const QByteArray& raw) {
+        int editedIndex = -1;
+        for(int index = 0; index < editedRoot.children.size(); ++index)
+            if(editedRoot.children.at(index).type == type) { editedIndex = index; break; }
+        for(int index = editedIndex + 1; index < editedRoot.children.size(); ++index)
+        {
+            const quint32 nextType = editedRoot.children.at(index).type;
+            if(!containsType(*records, nextType)) continue;
+            for(int recordIndex = 0; recordIndex < records->size(); ++recordIndex)
+                if(records->at(recordIndex).type == nextType)
+                { records->insert(recordIndex, {type, raw}); return; }
+        }
+        int insertion = records->size();
+        for(int index = editedIndex - 1; index >= 0; --index)
+        {
+            const quint32 previousType = editedRoot.children.at(index).type;
+            for(int recordIndex = records->size() - 1; recordIndex >= 0; --recordIndex)
+                if(records->at(recordIndex).type == previousType)
+                { insertion = recordIndex + 1; index = -1; break; }
+        }
+        records->insert(insertion, {type, raw});
+    };
+
+    bool structuralChanged = false;
+    for(quint32 type : ownedTypes)
+    {
+        if(countType(sourceRoot.children, type) > 1 ||
+           countType(cleanRoot.children, type) > 1 ||
+           countType(editedRoot.children, type) > 1)
+        {
+            if(report)
+                report->add("mob.owned_root.duplicate", EValidationSeverity::Error,
+                            QString("Editor-owned root record 0x%1 is duplicated")
+                                .arg(type, 8, 16, QLatin1Char('0')));
+            return false;
+        }
+        const SMobSection* sourceSection = findType(sourceRoot.children, type);
+        const SMobSection* cleanSection = findType(cleanRoot.children, type);
+        const SMobSection* editedSection = findType(editedRoot.children, type);
+        const bool topologyChanged = cleanSection && editedSection &&
+                                     !sameShape(*cleanSection, *editedSection);
+        if(bool(cleanSection) == bool(editedSection) && !topologyChanged)
+            continue;
+        structuralChanged = true;
+        if(cleanSection)
+        {
+            if(!sourceSection || sourceSection->rawBytes != cleanSection->rawBytes)
+            {
+                if(report)
+                    report->add("mob.owned_root.provenance", EValidationSeverity::Error,
+                                "An editor-owned structural edit does not byte-match its clean source record",
+                                cleanSection->path);
+                return false;
+            }
+        }
+        else if(sourceSection)
+        {
+            if(report)
+                report->add("mob.owned_root.provenance", EValidationSeverity::Error,
+                            "The source contains an editor-owned record absent from the clean projection",
+                            sourceSection->path);
+            return false;
+        }
+
+        if(!editedSection)
+        {
+            eraseType(&sourceRecords, type);
+            eraseType(&cleanRecords, type);
+        }
+        else if(cleanSection)
+        {
+            replaceType(&sourceRecords, type, editedSection->rawBytes);
+            replaceType(&cleanRecords, type, editedSection->rawBytes);
+        }
+        else
+        {
+            insertInEditedOrder(&sourceRecords, type, editedSection->rawBytes);
+            insertInEditedOrder(&cleanRecords, type, editedSection->rawBytes);
+        }
+    }
+
+    if(!structuralChanged)
+    {
+        if(!buildProjectionTransactionCandidate(sourceBytes, sourceName,
+                cleanProjectionBytes, editedProjectionBytes,
+                transaction, candidate, report))
+            return false;
+        if(!transaction->validatedChangedSaveClass(saveClass))
+            return false;
+        return true;
+    }
+
+    auto rebuild = [](const QVector<SMobSection>& topLevel,
+                      const QVector<SRootRecord>& rootRecords) {
+        QByteArray rootPayload;
+        for(const SRootRecord& record : rootRecords) rootPayload += record.raw;
+        QByteArray bytes;
+        appendU32(bytes, quint32(0xA000));
+        appendU32(bytes, quint32(rootPayload.size() + 8));
+        bytes += rootPayload;
+        for(int index = 1; index < topLevel.size(); ++index)
+            bytes += topLevel.at(index).rawBytes;
+        return bytes;
+    };
+    const QByteArray structuralSource = rebuild(source.sections(), sourceRecords);
+    const QByteArray structuralClean = rebuild(clean.sections(), cleanRecords);
+    if(structuralClean == editedProjectionBytes)
+    {
+        *candidate = structuralSource;
+        *saveClass = "OWNED_ROOT_STRUCTURE";
+    }
+    else
+    {
+        if(!buildProjectionTransactionCandidate(structuralSource, sourceName,
+                structuralClean, editedProjectionBytes,
+                transaction, candidate, report) ||
+           !transaction->validatedChangedSaveClass(saveClass))
+            return false;
+        *saveClass = "OWNED_ROOT_STRUCTURE+" + *saveClass;
+    }
+
+    CMobDocument reopened;
+    if(!reopened.loadBytes(*candidate, "owned-root-candidate.mob", report))
+    {
+        candidate->clear();
+        saveClass->clear();
+        return false;
+    }
+    if(report)
+        report->add("mob.owned_root.authorized", EValidationSeverity::Info,
+                    "Applied a provenance-checked editor-owned root structure transaction");
     return true;
 }
 

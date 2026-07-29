@@ -291,8 +291,10 @@ void MobFamilyValidationTests::magicTrapRequiresContainingMobDiplomacy()
     QVERIFY(finding != report.findings.cend());
     QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
     QVERIFY(finding->message.contains("autozone2newtest.mob"));
-    QVERIFY(finding->message.contains("1 magic trap"));
+    QVERIFY(finding->message.contains("magic trap NID 150"));
     QVERIFY(finding->message.contains("MOB diplomacy table"));
+    QVERIFY(finding->hasNid);
+    QCOMPARE(finding->nid, quint32(150));
     QVERIFY(std::any_of(finding->locations.cbegin(), finding->locations.cend(),
         [&missing](const QString& location)
         { return location.startsWith(missing + ":") && location.contains("MAGIC_TRAP"); }));

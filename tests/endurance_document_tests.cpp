@@ -442,6 +442,8 @@ private slots:
     void projectionSaveCandidateIsProvenanceChecked();
     void topologyPreservingLeafEditsAreAuthorizedTogether();
     void projectionSaveCandidateRejectsStructuralEdit();
+    void ownedRootProjectionAddsDiplomacyAndScriptLosslessly();
+    void ownedRootProjectionRejectsUnknownStructuralEdit();
     void transactionRejectsStaleProvenance();
     void cp1251EncodingIsStrict();
     void unchangedMprIsByteIdentical();
@@ -1591,6 +1593,56 @@ void EnduranceDocumentTests::unchangedMprIsByteIdentical()
     QVERIFY(document.load(QFileInfo(file.fileName()), &report));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!document.isDirty());
+}
+
+void EnduranceDocumentTests::ownedRootProjectionAddsDiplomacyAndScriptLosslessly()
+{
+    const QByteArray unknownBefore = section(0xDEADBEEF, "opaque-before");
+    const QByteArray unknownAfter = section(0xFEEDC0DE, "opaque-after");
+    const QByteArray objects = section(0xB000, object(42, "trap"));
+    const QByteArray trailingGraph = section(0x31415926,
+                                             syntheticValidAiGraph(0x31, 7));
+    const QByteArray sourceBytes = validMob(unknownBefore + objects + unknownAfter)
+        + trailingGraph;
+    const QByteArray cleanBytes = validMob(objects) + trailingGraph;
+    const QByteArray diplomacy = section(0xDDDDDDD1,
+        section(0xDDDDDDD2, QByteArray(32 * 32 * int(sizeof(quint32)), '\0')) +
+        stringArray(0xDDDDDDD3, QStringList() << "Neutral"));
+    const QByteArray script = encryptedScript("function main() end");
+    const QByteArray editedBytes = validMob(script + diplomacy + objects) + trailingGraph;
+
+    CMobEditTransaction transaction;
+    QByteArray candidate;
+    QString saveClass;
+    CValidationReport report;
+    QVERIFY2(CMobDocument::buildOwnedRootProjectionCandidate(
+        sourceBytes, "owned-root-source.mob", cleanBytes, editedBytes,
+        &transaction, &candidate, &saveClass, &report), qPrintable(report.toText()));
+    QCOMPARE(saveClass, QString("OWNED_ROOT_STRUCTURE"));
+    QCOMPARE(candidate, validMob(unknownBefore + script + diplomacy + objects + unknownAfter)
+                            + trailingGraph);
+
+    CMobDocument reopened;
+    QVERIFY2(reopened.loadBytes(candidate, "owned-root-candidate.mob", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(reopened.objects().size(), 1);
+    QCOMPARE(reopened.objects().front().nid, quint32(42));
+}
+
+void EnduranceDocumentTests::ownedRootProjectionRejectsUnknownStructuralEdit()
+{
+    const QByteArray sourceBytes = validMob(section(0xB000, object(42, "trap")));
+    const QByteArray editedBytes = validMob(section(0xCAFEBABE, "invented") +
+                                             section(0xB000, object(42, "trap")));
+    CMobEditTransaction transaction;
+    QByteArray candidate("must-clear");
+    QString saveClass;
+    CValidationReport report;
+    QVERIFY(!CMobDocument::buildOwnedRootProjectionCandidate(
+        sourceBytes, "owned-root-source.mob", sourceBytes, editedBytes,
+        &transaction, &candidate, &saveClass, &report));
+    QVERIFY(candidate.isEmpty());
+    QVERIFY(report.hasErrors());
 }
 
 void EnduranceDocumentTests::mprCanvasResizeCropsAndRenamesRetainedSectorLosslessly()

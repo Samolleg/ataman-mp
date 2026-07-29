@@ -38,6 +38,7 @@ struct SMobFamilyMember
     bool hasDiplomacyTable = false;
     int magicTrapCount = 0;
     QStringList magicTrapSectionPaths;
+    QVector<SMobObjectSnapshot> magicTraps;
 };
 
 struct SMobNidOwner

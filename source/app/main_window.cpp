@@ -4212,6 +4212,10 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     QElapsedTimer elapsed;
     elapsed.start();
     const QByteArray previousDigest = m_familyValidation.findingDigest();
+    bool previouslyMissingTrapDiplomacy = false;
+    for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+        previouslyMissingTrapDiplomacy = previouslyMissingTrapDiplomacy
+            || finding.code == "diplomacy.magic_trap_table_missing";
     m_familyValidation = report;
     // Visual providers resolve against live profile/database/resource state on
     // the GUI-owned unit projection. Surface their fail-closed diagnostics in
@@ -4301,6 +4305,15 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     }
     m_ui->treeWidget->setValidationNids(criticalNids, warningNids);
     updateMobFamilyValidationPanel();
+    bool newlyMissingTrapDiplomacy = false;
+    for(const SMobFamilyFinding& finding : m_familyValidation.findings)
+        newlyMissingTrapDiplomacy = newlyMissingTrapDiplomacy
+            || finding.code == "diplomacy.magic_trap_table_missing";
+    if(newlyMissingTrapDiplomacy && !previouslyMissingTrapDiplomacy && m_validationDock)
+    {
+        m_validationDock->show();
+        m_validationDock->raise();
+    }
     ei::log(eLogInfo, QString("MOB validation UI applied context:%1 elapsedMs:%2 members:%3 findings:%4")
             .arg(m_familyValidation.familyLabel).arg(elapsed.elapsed())
             .arg(m_familyValidation.members.size()).arg(m_familyValidation.findings.size()));
@@ -4381,6 +4394,32 @@ void MainWindow::updateMobFamilyValidationPanel()
                       QString("%1 %2\n%3\n%4")
                           .arg(severity, finding.category, finding.message,
                                finding.locations.join('\n')));
+        if(finding.hasNid)
+        {
+            const QVector<SMobNidOwner> owners = m_familyValidation.nidOwners.value(finding.nid);
+            const SMobNidOwner* matchingOwner = nullptr;
+            for(const SMobNidOwner& owner : owners)
+            {
+                for(const QString& location : finding.locations)
+                {
+                    if(location.startsWith(owner.mobPath + ":", Qt::CaseInsensitive)
+                       || location.compare(owner.mobPath, Qt::CaseInsensitive) == 0)
+                    {
+                        matchingOwner = &owner;
+                        break;
+                    }
+                }
+                if(matchingOwner)
+                    break;
+            }
+            if(matchingOwner)
+            {
+                item->setData(0, kValidationPathRole, matchingOwner->mobPath);
+                item->setData(0, kValidationNidRole, matchingOwner->nid);
+                item->setData(0, kValidationSectionRole, matchingOwner->sectionPath);
+                item->setToolTip(1, tr("Double-click to load its MOB if needed, then select this object."));
+            }
+        }
         for(const QString& location : finding.locations)
             new QTreeWidgetItem(item, QStringList() << QString() << tr("Location")
                                                     << location << QString());

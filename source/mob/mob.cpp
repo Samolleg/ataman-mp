@@ -1871,10 +1871,9 @@ bool CMob::buildRawObjectSequenceCandidate(
     }
     else
     {
-        if(!CMobDocument::buildProjectionTransactionCandidate(
+        if(!CMobDocument::buildOwnedRootProjectionCandidate(
                structuralSource, m_filePath.filePath(), structuralClean,
-               currentProjection, transaction, candidate, report) ||
-           !transaction->validatedChangedSaveClass(saveClass))
+               currentProjection, transaction, candidate, saveClass, report))
             return false;
         *saveClass = (insertedEmptyObjectSection
             ? "INSERT_EMPTY_OBJECT_SECTION+RAW_OBJECT_SEQUENCE+"
@@ -1917,12 +1916,11 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
         CValidationReport transactionReport;
         CMobEditTransaction transaction;
         QByteArray transactionCandidate;
-        bool candidateReady = CMobDocument::buildProjectionTransactionCandidate(
-            m_originalData, m_filePath.filePath(), m_cleanProjection,
-            currentProjection, &transaction, &transactionCandidate, &transactionReport);
         QString validatedClassName;
-        if(candidateReady)
-            candidateReady = transaction.validatedChangedSaveClass(&validatedClassName);
+        bool candidateReady = CMobDocument::buildOwnedRootProjectionCandidate(
+            m_originalData, m_filePath.filePath(), m_cleanProjection,
+            currentProjection, &transaction, &transactionCandidate,
+            &validatedClassName, &transactionReport);
         if(!candidateReady)
         {
             CValidationReport structuralReport;
@@ -1942,7 +1940,28 @@ bool CMob::buildValidatedCandidate(QByteArray* data,
                 candidateReady = true;
             }
             else
-                transactionReport = structuralReport;
+            {
+                CValidationReport actionableReport;
+                auto appendActionable = [&actionableReport](const CValidationReport& source) {
+                    for(const SValidationFinding& finding : source.findings())
+                    {
+                        if(finding.severity != EValidationSeverity::Error
+                           && finding.severity != EValidationSeverity::Critical)
+                            continue;
+                        actionableReport.add(finding.code, finding.severity,
+                                             finding.message, finding.location);
+                    }
+                };
+                appendActionable(transactionReport);
+                appendActionable(structuralReport);
+                if(!actionableReport.hasErrors())
+                    actionableReport.add(
+                        "mob.candidate.unsupported_edit",
+                        EValidationSeverity::Error,
+                        "The current MOB changes could not be mapped to a provenance-checked save transaction. No file was staged; review the preceding workflow log for the rejected edit class.",
+                        m_filePath.filePath());
+                transactionReport = actionableReport;
+            }
         }
         if(candidateReady)
         {

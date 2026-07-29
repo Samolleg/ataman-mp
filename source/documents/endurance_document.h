@@ -262,6 +262,12 @@ public:
         const QByteArray& editedProjectionBytes,
         CMobEditTransaction* transaction, QByteArray* candidate,
         CValidationReport* report = nullptr);
+    static bool buildOwnedRootProjectionCandidate(
+        const QByteArray& sourceBytes, const QString& sourceName,
+        const QByteArray& cleanProjectionBytes,
+        const QByteArray& editedProjectionBytes,
+        CMobEditTransaction* transaction, QByteArray* candidate,
+        QString* saveClass, CValidationReport* report = nullptr);
     static bool encodeCp1251Strict(const QString& value, QByteArray* output,
                                    QString* error = nullptr);
     bool isDirty() const { return false; }
