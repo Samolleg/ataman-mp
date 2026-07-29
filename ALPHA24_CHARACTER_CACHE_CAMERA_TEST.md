@@ -9,6 +9,9 @@
   existing non-blocking progress area. Fast cache hits do not flash the UI.
 - Keyboard camera movement now runs on a fixed 120 Hz motion step and is
   interpolated for rendering, reducing uneven lateral strafe jitter.
+- The progress indicator remains visible across gaps between worker batches,
+  and held camera input prevents foreground cold character resolution even on
+  an interpolated frame with no positional delta.
 
 ## Focused checks
 
