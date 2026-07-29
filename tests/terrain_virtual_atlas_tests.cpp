@@ -188,7 +188,7 @@ private slots:
     void generatedTransitionRetainsSourceTextureIdentity();
     void generatedTransitionBoundaryIsOrganicRatherThanQuadrants();
     void materialNamesSelectExplicitBlendStyles();
-    void materialBlendStylesProvideFourDistinctVariants();
+    void materialBlendStylesProvideBoundedDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
     void rotationsAndIdenticalPixelsAreDeduplicated();
     void stableHashesAndNamespaceAreDeterministic();
@@ -426,7 +426,7 @@ void TerrainVirtualAtlasTests::materialNamesSelectExplicitBlendStyles()
              ETerrainBlendStyle::Organic);
 }
 
-void TerrainVirtualAtlasTests::materialBlendStylesProvideFourDistinctVariants()
+void TerrainVirtualAtlasTests::materialBlendStylesProvideBoundedDistinctVariants()
 {
     const QVector<ETerrainBlendStyle> styles = {
         ETerrainBlendStyle::Grass, ETerrainBlendStyle::Soil,
@@ -448,15 +448,14 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideFourDistinctVariants()
         descriptors.insert(2, ETerrainBlendStyle::Soil);
         CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x51a7u,
                                    {}, descriptors);
+        const int expected = CTerrainVirtualAtlas::blendVariationLimit(
+            signature(1,2,2,2));
         for(int y = 0; y < 20
-             && atlas.generatedTiles().size()
-                < CTerrainVirtualAtlas::blendVariationCount(); ++y)
+             && atlas.generatedTiles().size() < expected; ++y)
             for(int x = 0; x < 20
-                 && atlas.generatedTiles().size()
-                    < CTerrainVirtualAtlas::blendVariationCount(); ++x)
+                 && atlas.generatedTiles().size() < expected; ++x)
                 QVERIFY(atlas.resolve(signature(1,2,2,2), x, y).generatedIndex >= 0);
-        QCOMPARE(atlas.generatedTiles().size(),
-                 CTerrainVirtualAtlas::blendVariationCount());
+        QCOMPARE(atlas.generatedTiles().size(), expected);
         QList<QByteArray> hashes;
         for(const STerrainFinalizedTile& tile : atlas.generatedTiles())
             hashes.append(tile.pixelSha256);
@@ -469,8 +468,10 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideFourDistinctVariants()
     QCOMPARE(styleFingerprints.size(), styles.size());
 
     QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,1,1,1)), 1);
-    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,1,2,2)), 5);
-    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,2,2,3)), 3);
+    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,1,1,2)), 2);
+    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,1,2,2)), 2);
+    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,2,1,2)), 1);
+    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,2,2,3)), 1);
     QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,2,3,4)), 1);
 
     Fixture fixture;
@@ -484,7 +485,7 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideFourDistinctVariants()
             QVERIFY(fourWay.resolve(signature(1,2,3,4), x, y)
                         .generatedIndex >= 0);
         }
-    QCOMPARE(threeWay.generatedTiles().size(), 3);
+    QCOMPARE(threeWay.generatedTiles().size(), 1);
     QCOMPARE(fourWay.generatedTiles().size(), 1);
 }
 
@@ -555,10 +556,10 @@ void TerrainVirtualAtlasTests::mapWideUsageAndUnusedCompaction()
     QVERIFY2(result.success,qPrintable(result.error));
     QCOMPARE(result.usage.cellCount,quint64(4));
     // No authored source slot is used by this field. The dense result may
-    // still contain four artistic variants of its one canonical 1/3 tuple,
+    // still contain two artistic variants of its one canonical 1/3 tuple,
     // but all four original authored slots must have been evicted.
     QVERIFY(result.authoredSlotRemap.isEmpty());
-    QVERIFY(result.requiredSlots <= 4);
+    QVERIFY(result.requiredSlots <= 2);
     QCOMPARE(result.packedCells.size(),4);
     QCOMPARE(result.tileTypes.size(),result.requiredSlots);
 }

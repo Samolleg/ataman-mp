@@ -635,15 +635,30 @@ ETerrainBlendStyle CTerrainVirtualAtlas::blendStyleForSignature(
 int CTerrainVirtualAtlas::blendVariationLimit(
     const STerrainTransitionSignature& signature)
 {
+    const QVector<qint32> values = corners(signature);
     QSet<qint32> materials;
-    for(qint32 material : corners(signature))
+    for(qint32 material : values)
         materials.insert(material);
     switch(materials.size())
     {
     case 0:
     case 1: return 1;
-    case 2: return 5;
-    case 3: return 3;
+    case 2:
+    {
+        int firstCount = 0;
+        const qint32 first = *materials.constBegin();
+        for(qint32 material : values) firstCount += material == first;
+        // Across one unordered material pair this permits two variants for
+        // its 1/3 tuple, two for its adjacent 2/2 tuple, and one for its
+        // diagonal 2/2 tuple: five exact tiles total, with rotations reused.
+        if(firstCount == 1 || firstCount == 3) return 2;
+        const bool diagonal = signature.northWest == signature.southEast
+            && signature.northEast == signature.southWest;
+        return diagonal ? 1 : 2;
+    }
+    // A three-material set has three possible doubled identities. One exact
+    // tile for each arrangement gives the requested three-tile total budget.
+    case 3: return 1;
     default: return 1;
     }
 }
