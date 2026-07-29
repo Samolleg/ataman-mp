@@ -334,7 +334,8 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                   const QVector<qint32>& stampIds,
                   const QMap<qint32, QString>& names,
                   const QMap<qint32, QImage>& externalSources,
-                  const Atlas& sourceAtlas, const QString& outputDirectory)
+                  const Atlas& sourceAtlas, StockAssets* stockAssets,
+                  const QString& outputDirectory, bool stripeLayout = false)
 {
     BuiltMap result;
     QFile sourceFile(sourcePath);
@@ -368,10 +369,13 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         result.error = QStringLiteral("The virtual field dimensions are invalid.");
         return result;
     }
-    const int spacing = 5;
+    const int spacing = stripeLayout ? 5 : 5;
     const int margin = 2;
     const int columns = qMax(1, (field.vertexWidth() - margin * 2) / spacing);
-    const int rows = qMax(1, (field.vertexHeight() - margin * 2) / spacing);
+    const int stripeHeight = 12;
+    const int rowSpacing = stripeLayout ? stripeHeight + 3 : spacing;
+    const int rows = qMax(1,
+        (field.vertexHeight() - margin * 2) / rowSpacing);
     if(columns * rows < stampIds.size())
     {
         result.error = QStringLiteral(
@@ -383,8 +387,9 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     for(int index = 0; index < stampIds.size(); ++index)
     {
         const int x0 = margin + (index % columns) * spacing;
-        const int y0 = margin + (index / columns) * spacing;
-        for(int y = y0; y < y0 + 3; ++y)
+        const int y0 = margin + (index / columns) * rowSpacing;
+        const int height = stripeLayout ? stripeHeight : 3;
+        for(int y = y0; y < y0 + height; ++y)
             for(int x = x0; x < x0 + 3; ++x)
                 field.setMaterial(x, y, stampIds.at(index));
         QJsonObject stamp;
@@ -397,12 +402,12 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         stamp.insert(QStringLiteral("x0"), x0);
         stamp.insert(QStringLiteral("y0"), y0);
         stamp.insert(QStringLiteral("width_vertices"), 3);
-        stamp.insert(QStringLiteral("height_vertices"), 3);
+        stamp.insert(QStringLiteral("height_vertices"), height);
         stamps.append(stamp);
     }
     // Force genuine four-family junctions in otherwise unused lower rows.
     QJsonArray fourFamilyJunctions;
-    const int junctionY = margin + rows * spacing;
+    const int junctionY = margin + rows * rowSpacing;
     if(junctionY + 1 < field.vertexHeight())
         for(int group = 0; group + 3 < stampIds.size(); group += 4)
         {
@@ -424,6 +429,27 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
             CTerrainVirtualAtlas::blendStyleForMaterialName(it.value()));
     CTerrainVirtualAtlas atlas(catalog, sourceAtlas.tiles, 0x4a4d5631u,
                                externalSources, blendStyles);
+    int indexedStockTransitions = 0;
+    if(stockAssets)
+        for(const STerrainGlobalTransitionSource& transition :
+                CTerrainAtlasPresetCatalog::globalAuthoredTransitions(&report))
+        {
+            if(transition.layer != ETerrainAtlasLayer::Land)
+                continue;
+            const Atlas stock = stockAssets->atlas(
+                transition.mprNamespace, transition.textureCount * 64,
+                nullptr);
+            if(!stock.valid || transition.slot < 0
+               || transition.slot >= stock.tiles.size()
+               || stock.tiles.at(transition.slot).size()
+                    != sourceAtlas.tiles.front().size())
+                continue;
+            if(atlas.addAuthoredLibraryTransition(
+                   transition.signature, stock.tiles.at(transition.slot),
+                   transition.mprNamespace + QStringLiteral(":")
+                       + QString::number(transition.slot), &report))
+                ++indexedStockTransitions;
+        }
     const QVector<quint16> pinned = pinnedOverlay(terrain);
     const STerrainAtlasFinalization finalized = atlas.finalize(
         field, nameSpace, 16384, document.mapInfo().tileTypes, &report, pinned);
@@ -471,8 +497,12 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         return result;
 
     int authored = 0;
+    int importedStock = 0;
     for(const STerrainFinalizedTile& tile : finalized.tiles)
+    {
         authored += tile.authored;
+        importedStock += tile.authored && tile.sourceSlot < 0;
+    }
     QJsonObject manifest;
     manifest.insert(QStringLiteral("schema"),
                     QStringLiteral("ei-modern-atlas-real-map-v1"));
@@ -480,9 +510,17 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     manifest.insert(QStringLiteral("source_mpr"), QFileInfo(sourcePath).fileName());
     manifest.insert(QStringLiteral("isolated_namespace"), baseName);
     manifest.insert(QStringLiteral("family_stamps"), stamps);
+    manifest.insert(QStringLiteral("layout"), stripeLayout
+        ? QStringLiteral("final-material-stripes")
+        : QStringLiteral("non-overlapping-3x3-stamps"));
     manifest.insert(QStringLiteral("four_family_junctions"), fourFamilyJunctions);
     manifest.insert(QStringLiteral("paintable_materials"), stampIds.size());
     manifest.insert(QStringLiteral("authored_tiles_reused"), authored);
+    manifest.insert(QStringLiteral("local_authored_tiles_reused"),
+                    authored - importedStock);
+    manifest.insert(QStringLiteral("global_stock_blends_reused"), importedStock);
+    manifest.insert(QStringLiteral("loaded_global_stock_transition_candidates"),
+                    indexedStockTransitions);
     manifest.insert(QStringLiteral("generated_exact_tiles"),
                     finalized.tiles.size() - authored);
     manifest.insert(QStringLiteral("total_active_slots"), finalized.requiredSlots);
@@ -501,6 +539,41 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     result.manifest = manifest;
     result.success = true;
     return result;
+}
+
+bool writeMapCollection(const QString& collectionPath,
+                        const QString& mapDirectory, BuiltMap* built,
+                        const QString& name, const QString& mobReference,
+                        QString* error)
+{
+    if(!built || !built->success)
+    {
+        if(error) *error = QStringLiteral("Cannot create a collection for an incomplete map.");
+        return false;
+    }
+    const QString mprName = built->manifest.value(
+        QStringLiteral("mpr_file")).toString();
+    const QString mprPath = QFileInfo(
+        QDir(mapDirectory).filePath(mprName)).absoluteFilePath();
+    if(mprName.isEmpty() || !QFileInfo::exists(mprPath))
+    {
+        if(error) *error = QStringLiteral("The generated collection MPR is missing: %1")
+            .arg(mprPath);
+        return false;
+    }
+    SEnduranceCollection collection;
+    collection.name = name;
+    collection.profileId = QStringLiteral("jamais-vu");
+    collection.mprReference = QDir(
+        QFileInfo(collectionPath).absolutePath()).relativeFilePath(mprPath);
+    collection.mobReferences.append(mobReference);
+    if(!CCollectionDocument::save(collectionPath, collection, error))
+        return false;
+    built->manifest.insert(QStringLiteral("collection_file"),
+        QFileInfo(collectionPath).fileName());
+    built->manifest.insert(QStringLiteral("collection_mob"), mobReference);
+    return writeBytes(QDir(mapDirectory).filePath(QStringLiteral("manifest.json")),
+        QJsonDocument(built->manifest).toJson(QJsonDocument::Indented), error);
 }
 
 BuiltMap buildExpandedRuntimeProbe(
@@ -876,6 +949,24 @@ BuiltMap buildPaintedExtensionRuntimeProbe(
         result.error = report.toText();
         return result;
     }
+    const QString paintedNamespace =
+        control.manifest.value("isolated_namespace").toString()
+        + QStringLiteral("_painted");
+    CMprEditTransaction isolateTransaction(QStringLiteral(
+        "Isolate painted extension regression namespace"));
+    QByteArray isolatedControlBytes;
+    if(!controlDocument.applyIsolatedNamespaceTransaction(
+           isolateTransaction, paintedNamespace, &isolatedControlBytes,
+           &report)
+       || !controlDocument.loadBytes(
+           isolatedControlBytes, paintedNamespace + QStringLiteral(".mpr"),
+           &report))
+    {
+        result.error = QStringLiteral(
+            "Could not isolate the painted 2048-slot control namespace.\n")
+            + report.toText();
+        return result;
+    }
 
     QVector<STerrainAtlasMaterial> paintable;
     for(const STerrainAtlasMaterial& material : sourceAtlas.analysis.materials)
@@ -976,12 +1067,10 @@ BuiltMap buildPaintedExtensionRuntimeProbe(
     activeTiles.reserve(activeSlots);
     for(int slot = 0; slot < baseSlots; ++slot)
         activeTiles.append(sourceAtlas.tiles.at(slot % sourceAtlas.tiles.size()));
-    QImage transparent(sourceAtlas.tiles.front().size(), QImage::Format_RGBA8888);
-    transparent.fill(Qt::transparent);
-    for(int slot = baseSlots; slot < activeSlots; ++slot)
-        activeTiles.append(transparent);
-    activeTiles[generatedSlot] =
+    const QImage generatedPixels =
         generator.generatedTiles().at(generated.generatedIndex).pixels;
+    for(int slot = baseSlots; slot < activeSlots; ++slot)
+        activeTiles.append(generatedPixels);
     QVector<QByteArray> authoredPages;
     authoredPages.reserve(32);
     for(int page = 0; page < 32; ++page)
@@ -996,12 +1085,102 @@ BuiltMap buildPaintedExtensionRuntimeProbe(
         return result;
     }
 
+    const QString controlProfilePath = QDir(controlDirectory).filePath(
+        control.manifest.value("semantic_profile_file").toString());
+    STerrainAtlasProfile paintedProfile;
+    CValidationReport profileReport;
+    if(!STerrainAtlasProfile::load(
+           QFileInfo(controlProfilePath).absoluteFilePath(), &paintedProfile,
+           &profileReport)
+       || paintedProfile.slotDefinitions.size() != baseSlots)
+    {
+        result.error = QStringLiteral(
+            "The 2112-slot control semantic profile could not be loaded.\n")
+            + profileReport.toText();
+        return result;
+    }
+    paintedProfile.mprNamespace = paintedNamespace;
+    paintedProfile.atlasPixelSha256 =
+        CTerrainAtlasProfileInference::pixelSha256(activeTiles);
+    paintedProfile.atlasSlotCount = activeSlots;
+    for(int slot = baseSlots; slot < activeSlots; ++slot)
+    {
+        STerrainAtlasProfileSlot definition;
+        definition.slot = slot;
+        definition.signature = requested;
+        paintedProfile.slotDefinitions.append(definition);
+    }
+    paintedProfile.provenance =
+        QStringLiteral("portable-exact-stock-atlas-clone-v1");
+    paintedProfile.approved = true;
+    if(!paintedProfile.normalizeMembership(&profileReport)
+       || !paintedProfile.validateBinding(
+           paintedProfile.mprNamespace, paintedProfile.atlasPixelSha256,
+           activeSlots, &profileReport)
+       || !CTerrainAtlasProfileStore::save(
+           paintedProfile, portableProfileRoot, &profileReport))
+    {
+        result.error = QStringLiteral(
+            "The painted 2112-slot semantic profile could not be bound.\n")
+            + profileReport.toText();
+        return result;
+    }
+    const STerrainAtlasAnalysis paintedAnalysis =
+        paintedProfile.approvedAnalysis(&profileReport);
+    CMprDocument semanticReopen;
+    CTerrainEditModel semanticTerrain;
+    if(!paintedAnalysis.usable
+       || paintedAnalysis.describedSlots != activeSlots
+       || !semanticReopen.loadBytes(
+           package.mprBytes, QStringLiteral("painted-2112.mpr"),
+           &profileReport)
+       || !semanticTerrain.load(semanticReopen, &profileReport))
+    {
+        result.error = QStringLiteral(
+            "The painted fixture failed its semantic reopen.\n")
+            + profileReport.toText();
+        return result;
+    }
+    STerrainTileBrush regressionBrush;
+    regressionBrush.centerX = qMin(110, semanticTerrain.tileCountX() - 1);
+    regressionBrush.centerY = qMin(62, semanticTerrain.tileCountY() - 1);
+    regressionBrush.radius = 0.0f;
+    bool brushAccepted = false;
+    for(const STerrainAtlasMaterial& material : paintedAnalysis.materials)
+    {
+        if(material.layer != ETerrainAtlasLayer::Land || material.cornerOnly)
+            continue;
+        CValidationReport brushReport;
+        const STerrainTileCommand brushCommand =
+            semanticTerrain.makeVirtualMaterialPaint(
+                int(regressionBrush.centerX), int(regressionBrush.centerY),
+                regressionBrush, ETerrainTileLayer::Land, material.id,
+                paintedAnalysis.landCatalog, 0x2112u, &brushReport);
+        if(brushReport.hasErrors())
+        {
+            profileReport = brushReport;
+            break;
+        }
+        if(!brushCommand.virtualVertices.isEmpty())
+        {
+            brushAccepted = true;
+            break;
+        }
+    }
+    if(!brushAccepted)
+    {
+        result.error = QStringLiteral(
+            "The painted 2112-slot fixture still refuses a semantic brush after reopen.\n")
+            + profileReport.toText();
+        return result;
+    }
+
     if(!QDir().mkpath(outputDirectory))
     {
         result.error = QStringLiteral("Could not create %1").arg(outputDirectory);
         return result;
     }
-    const QString baseName = control.manifest.value("isolated_namespace").toString();
+    const QString baseName = paintedNamespace;
     const QString mprName = baseName + QStringLiteral("-painted-extension.mpr");
     const QString atlasName = baseName + QStringLiteral("-painted-extension-atlas.res");
     if(!writeBytes(QDir(outputDirectory).filePath(mprName), package.mprBytes,
@@ -1037,6 +1216,13 @@ BuiltMap buildPaintedExtensionRuntimeProbe(
     manifest.insert("generated_referenced_slot", generatedSlot);
     manifest.insert("highest_referenced_page", 32);
     manifest.insert("mmp_member_count", package.resourceMembers.size());
+    manifest.insert("semantic_profile_file",
+        QDir(QFileInfo(outputDirectory).absoluteFilePath()).relativeFilePath(
+            QFileInfo(CTerrainAtlasProfileStore::profilePath(
+                paintedProfile.mprNamespace, portableProfileRoot))
+                .absoluteFilePath()));
+    manifest.insert("semantic_profile_slots", paintedAnalysis.describedSlots);
+    manifest.insert("semantic_reopen_paint_accepted", brushAccepted);
     manifest.insert("map_size_x", int(controlDocument.mapInfo().sectorCountX));
     manifest.insert("map_size_y", int(controlDocument.mapInfo().sectorCountY));
     manifest.insert("installed_resources_modified", false);
@@ -1057,7 +1243,7 @@ int main(int argc, char** argv)
     QTextStream err(stderr);
     if(application.arguments().size() < 3 || application.arguments().size() > 4)
     {
-        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only|--runtime-lowres-only|--painted-only]\n";
+        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only|--runtime-lowres-only|--painted-only|--stripe-only]\n";
         return 2;
     }
     const QString outputRoot = QDir::cleanPath(application.arguments().at(1));
@@ -1075,6 +1261,52 @@ int main(int argc, char** argv)
         QStringLiteral("--painted-only"));
     const bool runtimeLowresOnly = application.arguments().contains(
         QStringLiteral("--runtime-lowres-only"));
+    const bool stripeOnly = application.arguments().contains(
+        QStringLiteral("--stripe-only"));
+    if(stripeOnly)
+    {
+        Atlas zone2 = assets.atlas(QStringLiteral("Zone2"), 512, &error);
+        const QString sourceMpr = QDir(jmvRoot).filePath("Maps/zone2.mpr");
+        if(!zone2.valid || !QFileInfo::exists(sourceMpr))
+        {
+            err << "Zone2 stripe source unavailable: " << error << '\n';
+            return 4;
+        }
+        const QVector<STerrainGlobalMaterialFamily> materials =
+            CTerrainAtlasPresetCatalog::globalUniformFamilies(nullptr);
+        QMap<qint32, QString> names;
+        QVector<qint32> ids;
+        for(const STerrainGlobalMaterialFamily& material : materials)
+            if(material.layer == ETerrainAtlasLayer::Land)
+            {
+                ids.append(material.id);
+                names.insert(material.id, material.name);
+            }
+        std::sort(ids.begin(), ids.end(), [&names](qint32 left, qint32 right) {
+            return names.value(left).localeAwareCompare(names.value(right)) < 0;
+        });
+        const QMap<qint32, QImage> external = globalSources(
+            materials, &assets, zone2.tiles.front().size(), nullptr, &error);
+        BuiltMap stripes = buildMap(
+            sourceMpr, QStringLiteral("Zone2"), ids, names, external,
+            zone2, &assets, outputRoot, true);
+        if(!stripes.success)
+        {
+            err << "final-material-stripes: " << stripes.error << '\n';
+            return 7;
+        }
+        const QString collectionPath = QDir(outputRoot).filePath(
+            QStringLiteral("final-material-stripes.collection"));
+        if(!writeMapCollection(collectionPath, outputRoot, &stripes,
+               QStringLiteral("Final material stripes - Zone2 environment"),
+               QStringLiteral("zone2.mob"), &error))
+        {
+            err << "final-material-stripes collection: " << error << '\n';
+            return 9;
+        }
+        out << QJsonDocument(stripes.manifest).toJson(QJsonDocument::Indented);
+        return 0;
+    }
     if(paintedOnly)
     {
         const QString sourceMpr = QDir(jmvRoot).filePath("Maps/zone18.mpr");
@@ -1362,7 +1594,7 @@ int main(int argc, char** argv)
             QStringLiteral("zone-set/")
             + QString::fromLatin1(zone.nameSpace).toLower());
         const BuiltMap built = buildMap(sourcePath, zone.nameSpace,
-            localIds, globalNames, external, sourceAtlas, directory);
+            localIds, globalNames, external, sourceAtlas, &assets, directory);
         if(!built.success)
         {
             err << zone.nameSpace << ": " << built.error << '\n';
@@ -1378,13 +1610,34 @@ int main(int argc, char** argv)
     const QString fullDirectory = QDir(outputRoot).filePath(
         QStringLiteral("full-game-family-stamp"));
     const BuiltMap full = buildMap(fullSource, QStringLiteral("Zone2"),
-        globalLandIds, globalNames, zone2External, zone2, fullDirectory);
+        globalLandIds, globalNames, zone2External, zone2, &assets,
+        fullDirectory);
     if(!full.success)
     {
         err << "full-family: " << full.error << '\n';
         return 7;
     }
     outputs.append(full.manifest);
+    const QString stripeDirectory = QDir(outputRoot).filePath(
+        QStringLiteral("final-material-stripes"));
+    BuiltMap stripes = buildMap(fullSource, QStringLiteral("Zone2"),
+        globalLandIds, globalNames, zone2External, zone2, &assets,
+        stripeDirectory, true);
+    if(!stripes.success)
+    {
+        err << "final-material-stripes: " << stripes.error << '\n';
+        return 7;
+    }
+    const QString stripeCollectionPath = QDir(outputRoot).filePath(
+        QStringLiteral("final-material-stripes.collection"));
+    if(!writeMapCollection(stripeCollectionPath, stripeDirectory, &stripes,
+           QStringLiteral("Final material stripes - Zone2 environment"),
+           QStringLiteral("zone2.mob"), &error))
+    {
+        err << "final-material-stripes collection: " << error << '\n';
+        return 9;
+    }
+    outputs.append(stripes.manifest);
     const QString zone18Source = QDir(jmvRoot).filePath(
         QStringLiteral("Maps/zone18.mpr"));
     const QString zone18Mob = QDir(jmvRoot).filePath(
@@ -1429,6 +1682,12 @@ int main(int argc, char** argv)
                 full.manifest.value(QStringLiteral("total_active_slots")));
     root.insert(QStringLiteral("full_family_generated_exact_tiles"),
                 full.manifest.value(QStringLiteral("generated_exact_tiles")));
+    root.insert(QStringLiteral("stripe_test_required_slots"),
+                stripes.manifest.value(QStringLiteral("total_active_slots")));
+    root.insert(QStringLiteral("stripe_test_generated_exact_tiles"),
+                stripes.manifest.value(QStringLiteral("generated_exact_tiles")));
+    root.insert(QStringLiteral("stripe_test_global_stock_blends_reused"),
+                stripes.manifest.value(QStringLiteral("global_stock_blends_reused")));
     root.insert(QStringLiteral("unresolved_cells"), 0);
     QDir().mkpath(outputRoot);
     if(!writeBytes(QDir(outputRoot).filePath(QStringLiteral("manifest.json")),
@@ -1443,7 +1702,10 @@ int main(int argc, char** argv)
         "Each MPR has an adjacent isolated `-atlas.res`; keep the pair together.\n\n"
         "`full-game-family-stamp` contains one non-overlapping 3x3 vertex stamp for "
         "every unique reviewed Family / Subfamily brush. `zone-set` contains the same "
-        "Zone 1, 2, 5_1, 11, 16, and 17 source set used by semantic-atlas review.\n\n"
+        "Zone 1, 2, 5_1, 11, 16, and 17 source set used by semantic-atlas review. "
+        "`final-material-stripes` lays out the same final brush set as long isolated "
+        "stripes so stock transition reuse and generated exact blends can be compared "
+        "visually.\n\n"
         "Every visual manifest must report `unresolved_cells: 0`. The "
         "`runtime-atlas-probes` directory contains a deterministic 8-page control "
         "plus 9-page and 16-page MPR/RES pairs whose highest page is referenced "

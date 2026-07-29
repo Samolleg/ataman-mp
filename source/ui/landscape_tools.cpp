@@ -11,6 +11,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPainter>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
@@ -74,6 +75,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_tilesetStatus(new QLabel(tr("Terrain materials are loaded from the MPR namespace template."), this))
     , m_atlasCoverage(new QLabel(tr("0 / 0 assigned"), this))
     , m_generatedAtlasTiles(new QLabel(tr("Added exact tiles: 0"), this))
+    , m_atlasCapacity(new QProgressBar(this))
+    , m_atlasCapacityWarning(new QLabel(this))
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
 {
@@ -238,20 +241,29 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "This changes only the editor profile, not atlas images or MPR resources."));
     m_atlasCoverage->setWordWrap(true);
     m_generatedAtlasTiles->setWordWrap(true);
+    m_atlasCapacity->setObjectName(QStringLiteral("terrainAtlasCapacity"));
+    m_atlasCapacity->setRange(0, 16384);
+    m_atlasCapacity->setTextVisible(true);
+    m_atlasCapacityWarning->setObjectName(
+        QStringLiteral("terrainAtlasCapacityWarning"));
+    m_atlasCapacityWarning->setWordWrap(true);
     m_atlasCoverage->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_generatedAtlasTiles->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     QVBoxLayout* atlasRow = new QVBoxLayout;
     atlasRow->addWidget(reviewAtlas);
     atlasRow->addWidget(m_atlasCoverage);
     atlasRow->addWidget(m_generatedAtlasTiles);
+    atlasRow->addWidget(m_atlasCapacity);
+    atlasRow->addWidget(m_atlasCapacityWarning);
     paintLayout->addLayout(atlasRow);
     QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
     QPushButton* finalizeAtlas = new QPushButton(
         tr("Finalize map-specific atlas package..."), this);
     finalizeAtlas->setToolTip(tr(
         "Generate exact missing transitions, compact map-wide tile usage, and write "
-        "a portable isolated MPR + RES package. The shipped-runtime validated ceiling "
-        "is 1,024 slots (16 texture pages)."));
+        "a portable isolated MPR + RES package. Unused source slots are evicted. "
+        "The packed format allows 16,384 slots; sizes above 4,096 remain potentially "
+        "unstable and are clearly warned, but staging is not blocked."));
     paintLayout->addWidget(exportDiagnostic);
     paintLayout->addWidget(finalizeAtlas);
     // The material palette is the primary authoring surface. Give it all
@@ -270,6 +282,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(finalizeAtlas, &QPushButton::clicked, this, &CLandscapeTools::finalizeVirtualAtlasRequested);
     m_atlasCoverage->setObjectName(QStringLiteral("materialAtlasSourceStatus"));
     m_generatedAtlasTiles->setObjectName(QStringLiteral("generatedAtlasTileCount"));
+    refreshAtlasCapacity(0);
     connect(m_groundMaterialButtons, QOverload<int>::of(&QButtonGroup::buttonClicked),
             this, [this](int) {
                 bool selected = false;
@@ -437,6 +450,48 @@ void CLandscapeTools::setGeneratedAtlasTileCount(int count)
         .arg(m_authoredAtlasSlots).arg(added).arg(active));
     m_generatedAtlasTiles->setToolTip(tr(
         "Original slots remain byte-identical. Added exact tiles include reused stock JMV blends and newly generated combinations cached for this map session."));
+    refreshAtlasCapacity(active);
+}
+
+void CLandscapeTools::refreshAtlasCapacity(int activeSlots)
+{
+    const int boundedSlots = qBound(0, activeSlots, 16384);
+    QColor color;
+    QString tier;
+    if(activeSlots <= 512)
+    {
+        color = QColor(53, 168, 83);
+        tier = tr("shipped-size range");
+    }
+    else if(activeSlots <= 2048)
+    {
+        color = QColor(235, 190, 35);
+        tier = tr("expanded range");
+    }
+    else if(activeSlots <= 4096)
+    {
+        color = QColor(232, 126, 32);
+        tier = tr("high-memory range");
+    }
+    else
+    {
+        color = QColor(205, 55, 55);
+        tier = tr("unvalidated / potentially unstable range");
+    }
+    m_atlasCapacity->setValue(boundedSlots);
+    m_atlasCapacity->setFormat(tr("%1 / 16384 slots - %2")
+        .arg(activeSlots).arg(tier));
+    m_atlasCapacity->setStyleSheet(QStringLiteral(
+        "QProgressBar { text-align: center; } "
+        "QProgressBar::chunk { background-color: %1; }")
+        .arg(color.name()));
+    const bool unstable = activeSlots > 4096;
+    m_atlasCapacityWarning->setVisible(unstable);
+    m_atlasCapacityWarning->setText(unstable ? tr(
+        "Potential instability: this atlas is above 4096 slots. Staging remains available, but runtime memory limits depend on the rest of the map.")
+        : QString());
+    m_atlasCapacityWarning->setStyleSheet(
+        QStringLiteral("QLabel { color: #c73737; font-weight: bold; }"));
 }
 ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {

@@ -7590,7 +7590,7 @@ void CView::finalizeVirtualTerrainAtlas()
         }
     const STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,
-        kValidatedShippedTerrainAtlasSlotLimit,
+        kMprPackedTerrainAtlasSlotLimit,
         m_mprDocument.mapInfo().tileTypes,&report,pinned);
     if(!finalized.success)
     {
@@ -7600,6 +7600,99 @@ void CView::finalizeVirtualTerrainAtlas()
             finalized.error+findings);
         return;
     }
+    int generatedCount=0;
+    int importedStockCount=0;
+    for(const STerrainFinalizedTile& tile:finalized.tiles)
+    {
+        generatedCount+=!tile.authored;
+        importedStockCount+=tile.authored&&tile.sourceSlot<0;
+    }
+    const int retainedAuthored=finalized.authoredSlotRemap.size();
+    const int evictedAuthored=qMax(0,authoredImages.size()-retainedAuthored);
+    QDialog preview(this);
+    preview.setWindowTitle(tr("Review finalized map atlas"));
+    preview.resize(900,700);
+    QVBoxLayout* previewLayout=new QVBoxLayout(&preview);
+    QLabel* summary=new QLabel(tr(
+        "Final atlas: %1 slots (%2 pages)\n"
+        "Retained source tiles: %3  |  Evicted unused source tiles: %4\n"
+        "Added stock JMV blends: %5  |  Newly generated exact blends: %6")
+        .arg(finalized.requiredSlots).arg(finalized.textureCount)
+        .arg(retainedAuthored).arg(evictedAuthored)
+        .arg(importedStockCount).arg(generatedCount),&preview);
+    summary->setWordWrap(true);
+    previewLayout->addWidget(summary);
+    QProgressBar* capacity=new QProgressBar(&preview);
+    capacity->setRange(0,kMprPackedTerrainAtlasSlotLimit);
+    capacity->setValue(finalized.requiredSlots);
+    QString capacityColor;
+    QString capacityTier;
+    if(finalized.requiredSlots<=512)
+    {capacityColor=QStringLiteral("#35a853");capacityTier=tr("shipped-size range");}
+    else if(finalized.requiredSlots<=2048)
+    {capacityColor=QStringLiteral("#ebbe23");capacityTier=tr("expanded range");}
+    else if(finalized.requiredSlots<=4096)
+    {capacityColor=QStringLiteral("#e87e20");capacityTier=tr("high-memory range");}
+    else
+    {capacityColor=QStringLiteral("#cd3737");capacityTier=tr("potentially unstable");}
+    capacity->setFormat(tr("%1 / 16384 slots - %2")
+        .arg(finalized.requiredSlots).arg(capacityTier));
+    capacity->setStyleSheet(QStringLiteral(
+        "QProgressBar { text-align: center; } "
+        "QProgressBar::chunk { background-color: %1; }").arg(capacityColor));
+    previewLayout->addWidget(capacity);
+    if(finalized.requiredSlots>4096)
+    {
+        QLabel* warning=new QLabel(tr(
+            "Potential instability: this atlas exceeds 4,096 slots. Runtime memory "
+            "headroom depends on the rest of the map. The package may still be "
+            "created and staged for controlled testing."),&preview);
+        warning->setWordWrap(true);
+        warning->setStyleSheet(QStringLiteral(
+            "QLabel { color: #c73737; font-weight: bold; }"));
+        previewLayout->addWidget(warning);
+    }
+    QLabel* addedHeading=new QLabel(tr(
+        "Tiles added to this isolated atlas (stock reuse first, generated only when missing):"),
+        &preview);
+    addedHeading->setWordWrap(true);
+    previewLayout->addWidget(addedHeading);
+    QScrollArea* addedScroll=new QScrollArea(&preview);
+    addedScroll->setWidgetResizable(true);
+    QWidget* addedPage=new QWidget(addedScroll);
+    QGridLayout* addedGrid=new QGridLayout(addedPage);
+    int addedIndex=0;
+    for(int slot=0;slot<finalized.tiles.size();++slot)
+    {
+        const STerrainFinalizedTile& tile=finalized.tiles.at(slot);
+        if(tile.sourceSlot>=0)continue;
+        QToolButton* item=new QToolButton(addedPage);
+        item->setIcon(QPixmap::fromImage(tile.pixels));
+        item->setIconSize(QSize(96,96));
+        item->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        item->setText(tr("Slot %1 - %2").arg(slot)
+            .arg(tile.authored?tr("stock JMV"):tr("generated")));
+        item->setToolTip(tr("Corners: %1, %2, %3, %4\nPixel SHA-256: %5")
+            .arg(tile.canonicalSignature.northWest)
+            .arg(tile.canonicalSignature.northEast)
+            .arg(tile.canonicalSignature.southEast)
+            .arg(tile.canonicalSignature.southWest)
+            .arg(QString::fromLatin1(tile.pixelSha256)));
+        addedGrid->addWidget(item,addedIndex/6,addedIndex%6);
+        ++addedIndex;
+    }
+    if(addedIndex==0)
+        addedGrid->addWidget(new QLabel(tr("No tiles are added; this finalization only compacts existing usage."),addedPage),0,0);
+    addedGrid->setAlignment(Qt::AlignTop);
+    addedScroll->setWidget(addedPage);
+    previewLayout->addWidget(addedScroll,1);
+    QDialogButtonBox* buttons=new QDialogButtonBox(
+        QDialogButtonBox::Save|QDialogButtonBox::Cancel,&preview);
+    buttons->button(QDialogButtonBox::Save)->setText(tr("Choose output folder..."));
+    connect(buttons,&QDialogButtonBox::accepted,&preview,&QDialog::accept);
+    connect(buttons,&QDialogButtonBox::rejected,&preview,&QDialog::reject);
+    previewLayout->addWidget(buttons);
+    if(preview.exec()!=QDialog::Accepted)return;
     const STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
         m_mprDocument,finalized,layer,&report);
     if(!package.success)
@@ -7637,6 +7730,11 @@ void CView::finalizeVirtualTerrainAtlas()
     manifest.insert(QStringLiteral("capacityLimit"),finalized.capacityLimit);
     manifest.insert(QStringLiteral("usedSlots"),finalized.requiredSlots);
     manifest.insert(QStringLiteral("texturePages"),finalized.textureCount);
+    manifest.insert(QStringLiteral("retainedAuthoredTiles"),retainedAuthored);
+    manifest.insert(QStringLiteral("evictedUnusedAuthoredTiles"),evictedAuthored);
+    manifest.insert(QStringLiteral("addedStockJmvBlends"),importedStockCount);
+    manifest.insert(QStringLiteral("addedGeneratedExactBlends"),generatedCount);
+    manifest.insert(QStringLiteral("runtimeStabilityTier"),capacityTier);
     manifest.insert(QStringLiteral("layer"),layer==ETerrainTileLayer::Land
         ?QStringLiteral("land"):QStringLiteral("overlay"));
     QJsonArray members;for(const QString& member:package.resourceMembers)members.append(member);

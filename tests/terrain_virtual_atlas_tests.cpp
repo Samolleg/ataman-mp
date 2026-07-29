@@ -448,8 +448,12 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideFourDistinctVariants()
         descriptors.insert(2, ETerrainBlendStyle::Soil);
         CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x51a7u,
                                    {}, descriptors);
-        for(int y = 0; y < 16 && atlas.generatedTiles().size() < 4; ++y)
-            for(int x = 0; x < 16 && atlas.generatedTiles().size() < 4; ++x)
+        for(int y = 0; y < 20
+             && atlas.generatedTiles().size()
+                < CTerrainVirtualAtlas::blendVariationCount(); ++y)
+            for(int x = 0; x < 20
+                 && atlas.generatedTiles().size()
+                    < CTerrainVirtualAtlas::blendVariationCount(); ++x)
                 QVERIFY(atlas.resolve(signature(1,2,2,2), x, y).generatedIndex >= 0);
         QCOMPARE(atlas.generatedTiles().size(),
                  CTerrainVirtualAtlas::blendVariationCount());
@@ -463,6 +467,25 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideFourDistinctVariants()
         styleFingerprints.insert(fingerprint);
     }
     QCOMPARE(styleFingerprints.size(), styles.size());
+
+    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,1,1,1)), 1);
+    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,1,2,2)), 5);
+    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,2,2,3)), 3);
+    QCOMPARE(CTerrainVirtualAtlas::blendVariationLimit(signature(1,2,3,4)), 1);
+
+    Fixture fixture;
+    CTerrainVirtualAtlas threeWay(fixture.catalog, fixture.images, 0x31u);
+    CTerrainVirtualAtlas fourWay(fixture.catalog, fixture.images, 0x41u);
+    for(int y = 0; y < 16; ++y)
+        for(int x = 0; x < 16; ++x)
+        {
+            QVERIFY(threeWay.resolve(signature(1,2,2,3), x, y)
+                        .generatedIndex >= 0);
+            QVERIFY(fourWay.resolve(signature(1,2,3,4), x, y)
+                        .generatedIndex >= 0);
+        }
+    QCOMPARE(threeWay.generatedTiles().size(), 3);
+    QCOMPARE(fourWay.generatedTiles().size(), 1);
 }
 
 void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
@@ -531,7 +554,11 @@ void TerrainVirtualAtlasTests::mapWideUsageAndUnusedCompaction()
     const STerrainAtlasFinalization result=atlas.finalize(field,"Zone2",512,{10,20,30,40});
     QVERIFY2(result.success,qPrintable(result.error));
     QCOMPARE(result.usage.cellCount,quint64(4));
-    QVERIFY(result.requiredSlots<fixture.images.size());
+    // No authored source slot is used by this field. The dense result may
+    // still contain four artistic variants of its one canonical 1/3 tuple,
+    // but all four original authored slots must have been evicted.
+    QVERIFY(result.authoredSlotRemap.isEmpty());
+    QVERIFY(result.requiredSlots <= 4);
     QCOMPARE(result.packedCells.size(),4);
     QCOMPARE(result.tileTypes.size(),result.requiredSlots);
 }

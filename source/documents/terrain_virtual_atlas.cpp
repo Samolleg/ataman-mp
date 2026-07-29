@@ -632,13 +632,31 @@ ETerrainBlendStyle CTerrainVirtualAtlas::blendStyleForSignature(
     return selected;
 }
 
-int CTerrainVirtualAtlas::blendVariation(int cellX, int cellY,
-                                         ETerrainBlendStyle style) const
+int CTerrainVirtualAtlas::blendVariationLimit(
+    const STerrainTransitionSignature& signature)
 {
+    QSet<qint32> materials;
+    for(qint32 material : corners(signature))
+        materials.insert(material);
+    switch(materials.size())
+    {
+    case 0:
+    case 1: return 1;
+    case 2: return 5;
+    case 3: return 3;
+    default: return 1;
+    }
+}
+
+int CTerrainVirtualAtlas::blendVariation(int cellX, int cellY,
+                                         ETerrainBlendStyle style,
+                                         int limit) const
+{
+    const int boundedLimit = qBound(1, limit, blendVariationCount());
     const quint32 origin = terrainNoiseHash(m_distributionSeed
         ^ quint32(terrainBlendStylePriority(style) + 1) * 0xc2b2ae35u);
     return int((origin + quint32(cellX) + quint32(cellY) * 3u)
-               % quint32(blendVariationCount()));
+               % quint32(boundedLimit));
 }
 
 QImage CTerrainVirtualAtlas::generateTile(
@@ -867,7 +885,8 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     const STerrainTransitionSignature canonical =
         canonicalSignature(signature, &rotation);
     const ETerrainBlendStyle style = blendStyleForSignature(canonical);
-    const int variation = blendVariation(cellX, cellY, style);
+    const int variation = blendVariation(
+        cellX, cellY, style, blendVariationLimit(canonical));
     QByteArray key = signatureKey(canonical);
     key.append(char(terrainBlendStylePriority(style)));
     key.append(char(variation));

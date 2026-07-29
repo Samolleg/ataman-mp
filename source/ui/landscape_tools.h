@@ -15,6 +15,7 @@ class QDoubleSpinBox;
 class QLabel;
 class QButtonGroup;
 class QGridLayout;
+class QProgressBar;
 class QResizeEvent;
 class QScrollArea;
 class QSlider;
@@ -153,6 +154,8 @@ private:
     QLabel* m_tilesetStatus;
     QLabel* m_atlasCoverage;
     QLabel* m_generatedAtlasTiles;
+    QProgressBar* m_atlasCapacity;
+    QLabel* m_atlasCapacityWarning;
     QWidget* m_sculptControls;
     QWidget* m_paintControls;
     QVector<STerrainPaintMaterialChoice> m_landPaintTypes;
@@ -165,6 +168,7 @@ private:
     void updateModeVisibility();
     void refreshPaintTerrainTypes();
     void rebuildMaterialPalette();
+    void refreshAtlasCapacity(int activeSlots);
 };
 
 #endif

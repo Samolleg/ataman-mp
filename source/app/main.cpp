@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include <QApplication>
+#include <QProgressBar>
 #include <QStyleFactory>
 #include <QProxyStyle>
 #include <QIcon>
@@ -1138,6 +1139,23 @@ int runHeadlessCommand(QApplication& app)
         const bool generatedAtlasCountVisible = generatedAtlasStatus
             && generatedAtlasStatus->text() == QStringLiteral(
                 "512 original + 7 added exact = 519 active slots");
+        QProgressBar* atlasCapacity =
+            landscapeTools.findChild<QProgressBar*>("terrainAtlasCapacity");
+        QLabel* atlasCapacityWarning = landscapeTools.findChild<QLabel*>(
+            "terrainAtlasCapacityWarning");
+        const bool expandedAtlasCapacityIsYellow = atlasCapacity
+            && atlasCapacity->value() == 519
+            && atlasCapacity->styleSheet().contains(QStringLiteral("#ebbe23"))
+            && atlasCapacityWarning && atlasCapacityWarning->text().isEmpty();
+        landscapeTools.setPaintMaterials(
+            {irregularOnDark}, {}, {}, 4096, 4096);
+        landscapeTools.setGeneratedAtlasTileCount(1);
+        const bool unstableAtlasCapacityIsRedButInformational = atlasCapacity
+            && atlasCapacity->value() == 4097
+            && atlasCapacity->styleSheet().contains(QStringLiteral("#cd3737"))
+            && atlasCapacityWarning
+            && atlasCapacityWarning->text().contains(
+                QStringLiteral("Staging remains available"));
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
@@ -1354,6 +1372,8 @@ int runHeadlessCommand(QApplication& app)
             && defaultAtlasSourceVisible
             && localAtlasSourceVisible
             && generatedAtlasCountVisible
+            && expandedAtlasCapacityIsYellow
+            && unstableAtlasCapacityIsRedButInformational
                 && materialAtlasActionWorks
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
@@ -1441,6 +1461,10 @@ int runHeadlessCommand(QApplication& app)
                << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
                << " localAtlasSourceVisible=" << localAtlasSourceVisible
                << " generatedAtlasCountVisible=" << generatedAtlasCountVisible
+               << " expandedAtlasCapacityIsYellow="
+               << expandedAtlasCapacityIsYellow
+               << " unstableAtlasCapacityIsRedButInformational="
+               << unstableAtlasCapacityIsRedButInformational
                << " materialAtlasActionWorks=" << materialAtlasActionWorks
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"

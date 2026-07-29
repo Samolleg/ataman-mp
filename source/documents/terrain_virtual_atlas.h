@@ -129,7 +129,9 @@ public:
 
     static ETerrainBlendStyle blendStyleForMaterialName(const QString& name);
     static QString blendStyleName(ETerrainBlendStyle style);
-    static int blendVariationCount() { return 4; }
+    static int blendVariationCount() { return 5; }
+    static int blendVariationLimit(
+        const STerrainTransitionSignature& signature);
 
     bool isValid() const { return m_valid; }
     QString error() const { return m_error; }
@@ -170,7 +172,7 @@ private:
     ETerrainBlendStyle blendStyleForSignature(
         const STerrainTransitionSignature& signature) const;
     int blendVariation(int cellX, int cellY,
-                       ETerrainBlendStyle style) const;
+                       ETerrainBlendStyle style, int limit) const;
 
     const CTerrainTransitionCatalog& m_catalog;
     QVector<QImage> m_authoredTiles;

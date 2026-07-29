@@ -5698,7 +5698,10 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 58);
-    QCOMPARE(transitionSupportFamilies, 70);
+    // Keep this count pinned to the reviewed semantic-atlas catalog. A change
+    // means a family crossed the paint-brush/transition-support boundary and
+    // must be visually audited before the palette consumes it.
+    QCOMPARE(transitionSupportFamilies, 74);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -5776,7 +5779,10 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     QVERIFY(commonGrassId != freshGrassId);
     // This is the reviewed Family/Subfamily palette, after collapsing atlas
     // variants and excluding transition-only/mixed imagery.
-    QCOMPARE(landFamilyCount, 71);
+    // Two remaining reviewed names currently have no visually verified pure
+    // anchor. Keep them as transition support rather than leaking a mixed
+    // thumbnail into the brush palette.
+    QCOMPARE(landFamilyCount, 69);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
