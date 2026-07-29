@@ -188,6 +188,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_materialTabs->addTab(m_groundMaterialScroll, tr("Ground"));
     m_materialTabs->addTab(m_overlayMaterialScroll, tr("Overlay"));
     m_materialTabs->setObjectName(QStringLiteral("materialPaletteTabs"));
+    // The surrounding paint controls have large wrapped size hints at narrow
+    // dock widths.  Without an explicit expanding floor Qt satisfies those
+    // hints by collapsing the authoring palette to a short strip even when the
+    // dock has ample vertical room.
+    m_materialTabs->setSizePolicy(QSizePolicy::Expanding,
+                                  QSizePolicy::Expanding);
+    m_materialTabs->setMinimumHeight(300);
     paintLayout->addWidget(m_materialTabs, 1);
 
     m_paintRadius->setRange(1, 33);

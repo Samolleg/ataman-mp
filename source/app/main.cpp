@@ -1458,6 +1458,13 @@ int runHeadlessCommand(QApplication& app)
                << materialPaletteScrollsAndFillsWidth
                << " landscapeToolsAreCompactAndPaletteFillsHeight="
                << landscapeToolsAreCompactAndPaletteFillsHeight
+               << " landscapeToolsMinimumWidth="
+               << landscapeTools.minimumSizeHint().width()
+               << " landscapeToolsWidth=" << landscapeTools.width()
+               << " materialPaletteTabsHeight="
+               << (materialPaletteTabs ? materialPaletteTabs->height() : -1)
+               << " groundMaterialScrollHeight="
+               << (groundMaterialScroll ? groundMaterialScroll->height() : -1)
                << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
                << " localAtlasSourceVisible=" << localAtlasSourceVisible
                << " generatedAtlasCountVisible=" << generatedAtlasCountVisible

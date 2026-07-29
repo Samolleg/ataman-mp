@@ -17,6 +17,8 @@ silhouettes reconstructed from reviewed stock Jamais Vu atlas tiles.
 - The embedded semantic catalog incorporates the sibling review corrections,
   including the Zone2 Stone/Lime identity and removal of Zone4's false
   Ground/Trampled family.
+- At narrow dock widths, the material palette now keeps a 300px expanding
+  vertical floor instead of collapsing beneath wrapped paint controls.
 - The included Zone2 stripe collection contains all 68 current uniform land
   materials, 86 exact stock blend reuses, 268 stock-derived exact tiles, and
   zero unresolved cells. Its native-resolution review sheet shows the exact
