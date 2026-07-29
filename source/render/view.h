@@ -469,6 +469,10 @@ private:
     QOpenGLTimerQuery* m_gpuTimer;
     bool m_gpuTimerPending;
     QMatrix4x4 m_projection;
+    QVector3D m_visualWarmupCameraAnchor;
+    QVector3D m_visualWarmupCameraPivot;
+    QVector3D m_visualWarmupCameraRotation;
+    bool m_visualWarmupCameraValid{false};
     QVector<CMob*> m_aMob;
     // World lighting belongs to the loaded map, not to whichever MOB happens
     // to be selected for editing. Keep the first loaded document as the

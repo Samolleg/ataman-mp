@@ -100,6 +100,7 @@ private slots:
     void preservesChildBindOffsetAndIgnoresChildTranslation();
     void preMultipliesChildRotationInEiOrder();
     void appliesDistanceTiers();
+    void boundsColdVisualResolutionDuringCameraMovement();
     void malformedAndUnknownInputsFailStatic();
 };
 
@@ -282,6 +283,22 @@ void UnitAnimationTests::appliesDistanceTiers()
     QCOMPARE(quantizedAnimationFrame(EAnimationDistanceTier::HalfRate, 100, 10, 0), 0.0);
     QCOMPARE(quantizedAnimationFrame(EAnimationDistanceTier::LowRate, 100, 10, 0), 0.0);
     QCOMPARE(quantizedAnimationFrame(EAnimationDistanceTier::LowRate, 300, 10, 0), 4.0);
+}
+
+void UnitAnimationTests::boundsColdVisualResolutionDuringCameraMovement()
+{
+    AnimationFrameContext& frame = AnimationFrameContext::instance();
+    frame.beginFrame(QVector3D(), 0, true, true);
+    QVERIFY(frame.cameraMoving());
+    QVERIFY(!frame.claimColdVisualResolution());
+
+    frame.beginFrame(QVector3D(), 16, true, false);
+    QVERIFY(!frame.cameraMoving());
+    QVERIFY(frame.claimColdVisualResolution());
+    QVERIFY(!frame.claimColdVisualResolution());
+
+    frame.beginFrame(QVector3D(), 32, true, false);
+    QVERIFY(frame.claimColdVisualResolution());
 }
 
 void UnitAnimationTests::malformedAndUnknownInputsFailStatic()

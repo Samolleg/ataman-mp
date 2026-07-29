@@ -4631,6 +4631,14 @@ void CView::draw()
     bool cameraEyeOk = false;
     const QVector3D renderedCameraEye = ei::cameraEyeFromView(camMatrix, &cameraEyeOk);
     const QVector3D cameraPosition = cameraEyeOk ? renderedCameraEye : cameraAnchor;
+    const bool cameraMoving = m_visualWarmupCameraValid
+        && ((cameraAnchor - m_visualWarmupCameraAnchor).lengthSquared() > 0.000001f
+            || (cameraPivot - m_visualWarmupCameraPivot).lengthSquared() > 0.000001f
+            || (cameraRotation - m_visualWarmupCameraRotation).lengthSquared() > 0.000001f);
+    m_visualWarmupCameraAnchor = cameraAnchor;
+    m_visualWarmupCameraPivot = cameraPivot;
+    m_visualWarmupCameraRotation = cameraRotation;
+    m_visualWarmupCameraValid = true;
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
     const bool animationEnabled = !animationOption || animationOption->value();
@@ -4639,7 +4647,7 @@ void CView::draw()
     CTextureList::getInstance()->setTerrainMipmappingEnabled(
         !mipmappingOption || mipmappingOption->value());
     AnimationFrameContext::instance().beginFrame(cameraPosition,
-        QDateTime::currentMSecsSinceEpoch(), animationEnabled);
+        QDateTime::currentMSecsSinceEpoch(), animationEnabled, cameraMoving);
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
     const bool cullingEnabled = !cullingOption || cullingOption->value();

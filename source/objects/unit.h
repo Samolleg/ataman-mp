@@ -224,7 +224,7 @@ public:
     bool restoreMovementState(const QVector<QVector3D>& state);
 
 private:
-    void refreshTransientVisual();
+    bool refreshTransientVisual(bool force = false);
     void refreshAnimationPose();
     //"UNIT_R", eNull};
     QString m_prototypeName;//"UNIT_PROTOTYPE", eString};

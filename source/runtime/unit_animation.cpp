@@ -492,10 +492,26 @@ AnimationFrameContext& AnimationFrameContext::instance()
 }
 
 void AnimationFrameContext::beginFrame(const QVector3D& cameraPosition,
-                                       qint64 elapsedMilliseconds, bool enabled)
+                                       qint64 elapsedMilliseconds, bool enabled,
+                                       bool cameraMoving)
 {
     m_cameraPosition = cameraPosition;
     m_elapsedMilliseconds = elapsedMilliseconds;
     m_enabled = enabled;
+    m_cameraMoving = cameraMoving;
+    // Cold unit visuals can perform archive reads, layered texture composition,
+    // figure assembly and GL uploads. Never let camera traversal discover an
+    // arbitrary number in one frame, and do not resolve any while the camera is
+    // moving: those synchronous stalls are much more disruptive than temporary
+    // visual pop-in during the initial warm-up.
+    m_coldVisualResolutionsRemaining = cameraMoving ? 0 : 1;
     m_counters = SAnimationPerformanceCounters();
+}
+
+bool AnimationFrameContext::claimColdVisualResolution()
+{
+    if(m_coldVisualResolutionsRemaining <= 0)
+        return false;
+    --m_coldVisualResolutionsRemaining;
+    return true;
 }

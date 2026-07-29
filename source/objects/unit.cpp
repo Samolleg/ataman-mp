@@ -102,7 +102,8 @@ void CUnit::drawObjectVisual(bool isActive, QOpenGLShaderProgram* program)
         AnimationFrameContext::instance().counters().skippedOffscreen++;
         return;
     }
-    refreshTransientVisual();
+    if(!refreshTransientVisual())
+        return;
     refreshAnimationPose();
     CObjectBase::draw(isActive, program);
 }
@@ -119,7 +120,8 @@ void CUnit::drawSelect(QOpenGLShaderProgram* program)
 {
     if(m_state == ENodeState::eHidden)
         return;
-    refreshTransientVisual();
+    if(!refreshTransientVisual())
+        return;
     refreshAnimationPose();
     CObjectBase::drawSelect(program);
     for(auto& logic: m_aLogic)
@@ -133,7 +135,7 @@ void CUnit::preloadVisualResources()
     // Called with the viewport GL context current immediately after MOB
     // projection. This resolves figure and texture resources before the unit
     // first enters the camera frustum; it does not alter serialized MOB data.
-    refreshTransientVisual();
+    refreshTransientVisual(true);
 }
 
 namespace {
@@ -177,13 +179,15 @@ bool optionalEquipmentPart(const QString& part)
 
 }
 
-void CUnit::refreshTransientVisual()
+bool CUnit::refreshTransientVisual(bool force)
 {
     ei::ProfileDatabaseContext& context = ei::ProfileDatabaseContext::instance();
     const quint64 generation = context.generation();
     prepareUnitGenerationCaches(generation);
     if(m_resolvedDatabaseGeneration == generation && m_resolvedVisualRevision == m_visualRevision)
-        return;
+        return true;
+    if(!force && !AnimationFrameContext::instance().claimColdVisualResolution())
+        return false;
     m_resolvedDatabaseGeneration = generation;
     m_resolvedVisualRevision = m_visualRevision;
     m_visualDiagnostics.clear();
@@ -200,7 +204,7 @@ void CUnit::refreshTransientVisual()
         ei::log(eLogWarning, "Unit visual provider unavailable: " + diagnostic);
         applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
         m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
-        return;
+        return true;
     }
 
     SCharacterAppearanceRequest appearanceRequest;
@@ -223,7 +227,7 @@ void CUnit::refreshTransientVisual()
                 .arg(m_prototypeName, appearanceResult.code, appearanceResult.message));
         applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
         m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
-        return;
+        return true;
     }
 
     const QString model = appearance.value("model").toString();
@@ -362,6 +366,7 @@ void CUnit::refreshTransientVisual()
                          secondaryTexture, bodyTextureLayers, partEmissions);
     m_resolvedAnimationModel = model;
     m_resolvedAnimationWeapons = equipmentRequest.weapons;
+    return true;
 }
 
 void CUnit::refreshAnimationPose()
