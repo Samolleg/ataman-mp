@@ -477,9 +477,12 @@ void TerrainVirtualAtlasTests::generatedEdgesUseOnlyTheirTwoCornerMaterials()
     const STerrainVirtualTile tile=atlas.resolve(signature(1,2,3,4),0,0);
     const QImage image=atlas.generatedTiles().at(tile.generatedIndex).pixels;
     const QColor top=image.pixelColor(3,0);
-    QVERIFY(top.red()>190 && top.green()>180 && top.blue()<60);
+    // The top edge contains only its yellow/blue endpoint materials, but the
+    // transition is broad enough to be visible instead of a 90-degree cut.
+    QVERIFY(top.red()>100 && top.green()>100 && top.blue()>60);
     const QColor bottom=image.pixelColor(3,7);
-    QVERIFY(bottom.red()>190 && bottom.green()<70 && bottom.blue()<40);
+    // The opposite edge contains only red/green and therefore no blue leak.
+    QVERIFY(bottom.red()>100 && bottom.green()>60 && bottom.blue()<40);
 }
 
 void TerrainVirtualAtlasTests::generatedTransitionRetainsSourceTextureIdentity()
@@ -514,10 +517,11 @@ void TerrainVirtualAtlasTests::generatedTransitionRetainsSourceTextureIdentity()
         genuinelyMixed += nearest > 20;
     }
     // Ordinary bilinear cross-fading makes most of the tile a blurry average.
-    // A generated transition must instead retain a source texture on at least
-    // three quarters of its pixels, with only a narrow visible join.
-    QVERIFY(sourceLike >= 56);
-    QVERIFY(genuinelyMixed <= 8);
+    // Preserve the authored source texture over most of the tile, while
+    // retaining a substantial (not one- or two-pixel) transition band.
+    QVERIFY(sourceLike >= 48);
+    QVERIFY(genuinelyMixed >= 8);
+    QVERIFY(genuinelyMixed <= 16);
 }
 
 void TerrainVirtualAtlasTests::generatedTransitionBoundaryIsOrganicRatherThanQuadrants()

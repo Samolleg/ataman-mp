@@ -201,8 +201,22 @@ QImage cleanAnchoredMask(const QImage& source,
         }
     }
 
-    // Feather only the cleaned boundary. A short scale-relative box filter
-    // keeps stock-authored large shapes while avoiding a hard generated cut.
+    // Retain the stock mask's authored tonal ramp wherever topology cleanup
+    // did not change ownership. Earlier code rebuilt a binary mask and then
+    // feathered only a few pixels, turning broad stock blends into sharp cuts.
+    QVector<quint8> cleaned(count);
+    for(int y = 0; y < height; ++y)
+        for(int x = 0; x < width; ++x)
+        {
+            const int index = y * width + x;
+            const int authored = source.pixelColor(x, y).red();
+            const bool authoredOwner = authored >= 128;
+            cleaned[index] = authoredOwner == bool(binary[index])
+                ? quint8(authored) : quint8(binary[index] ? 255 : 0);
+        }
+
+    // Smooth the cleaned authored ramp enough to reject isolated DXT grain,
+    // while preserving substantial material shapes and the original gradient.
     const int radius = qMin(width, height) < 32
         ? 0 : qBound(1, qMin(width, height) / 64, 4);
     QVector<int> integral((width + 1) * (height + 1), 0);
@@ -211,7 +225,7 @@ QImage cleanAnchoredMask(const QImage& source,
         int row = 0;
         for(int x = 0; x < width; ++x)
         {
-            row += binary[y * width + x] ? 255 : 0;
+            row += cleaned[y * width + x];
             integral[(y + 1) * (width + 1) + x + 1] =
                 integral[y * (width + 1) + x + 1] + row;
         }
@@ -1046,7 +1060,7 @@ QImage CTerrainVirtualAtlas::generateTile(
                                              double position) {
                 for(double& weight : weights) weight = 0.0;
                 double secondWeight = firstMaterial == secondMaterial ? 0.0
-                    : qBound(0.0, (position - 0.44) / 0.12, 1.0);
+                    : qBound(0.0, position, 1.0);
                 secondWeight = secondWeight * secondWeight
                     * (3.0 - 2.0 * secondWeight);
                 for(int corner = 0; corner < 4; ++corner)
@@ -1224,6 +1238,43 @@ QImage CTerrainVirtualAtlas::composePage(const QVector<QImage>& tiles,
                    source.constScanLine(y), size_t(tileSize) * 4u);
     }
     return page;
+}
+
+bool CTerrainVirtualAtlas::decodePhysicalTileImages(
+    const STerrainAtlasFinalization& finalization, QVector<QImage>* images,
+    CValidationReport* report)
+{
+    if(!images) return false;
+    images->clear();
+    if(finalization.textureCount <= 0
+       || finalization.pageMmpPayloads.size() != finalization.textureCount)
+    {
+        if(report) report->add("terrain.finalized_physical_pages",
+            EValidationSeverity::Error,
+            "The finalized atlas does not contain one MMP payload per physical page");
+        return false;
+    }
+    images->reserve(finalization.textureCount * 64);
+    for(int page = 0; page < finalization.textureCount; ++page)
+        for(int localSlot = 0; localSlot < 64; ++localSlot)
+        {
+            QImage tile;
+            QString diagnostic;
+            if(!ei::decodeMmpDxt1AtlasTile(
+                    finalization.pageMmpPayloads.at(page), localSlot,
+                    &tile, &diagnostic))
+            {
+                if(report) report->add("terrain.finalized_physical_decode",
+                    EValidationSeverity::Error,
+                    "A finalized physical atlas slot could not be decoded",
+                    QStringLiteral("page %1 slot %2: %3")
+                        .arg(page).arg(localSlot).arg(diagnostic));
+                images->clear();
+                return false;
+            }
+            images->append(tile);
+        }
+    return true;
 }
 
 STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(

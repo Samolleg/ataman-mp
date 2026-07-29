@@ -1,5 +1,7 @@
 #include "terrain_atlas_profile.h"
 
+#include "terrain_virtual_atlas.h"
+
 #include <QCryptographicHash>
 #include <QCoreApplication>
 #include <QDir>
@@ -846,6 +848,105 @@ int STerrainAtlasProfile::assignedSlotCount() const
     for(const STerrainAtlasProfileSlot& slot : slotDefinitions)
         count += slot.assigned;
     return count;
+}
+
+STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
+    const STerrainAtlasFinalization& finalization,
+    const QVector<QImage>& decodedPhysicalTiles,
+    const STerrainAtlasProfile& sourceProfile, ETerrainAtlasLayer layer,
+    const QMap<qint32, QString>& materialNames, CValidationReport* report)
+{
+    STerrainAtlasProfile profile;
+    profile.mprNamespace = finalization.isolatedNamespace;
+    profile.atlasPixelSha256 =
+        CTerrainAtlasProfileInference::pixelSha256(decodedPhysicalTiles);
+    profile.atlasSlotCount = decodedPhysicalTiles.size();
+    profile.provenance = QStringLiteral("portable-finalized-modern-atlas-v1");
+    profile.approved = true;
+
+    QMap<int, STerrainAtlasProfileSlot> sourceDefinitions;
+    for(const STerrainAtlasProfileSlot& definition : sourceProfile.slotDefinitions)
+        sourceDefinitions.insert(definition.slot, definition);
+    QMap<qint32, STerrainAtlasProfileFamily> sourceFamilies;
+    for(const STerrainAtlasProfileFamily& family : sourceProfile.families)
+        sourceFamilies.insert(family.id, family);
+
+    QSet<qint32> materialIds;
+    for(int slot = 0; slot < decodedPhysicalTiles.size(); ++slot)
+    {
+        STerrainAtlasProfileSlot definition;
+        definition.slot = slot;
+        definition.assigned = slot < finalization.tiles.size();
+        definition.ambiguous = false;
+        if(definition.assigned)
+        {
+            const STerrainFinalizedTile& tile = finalization.tiles.at(slot);
+            if(tile.sourceSlot >= 0 && sourceDefinitions.contains(tile.sourceSlot))
+                definition.signature = sourceDefinitions.value(tile.sourceSlot).signature;
+            else
+                definition.signature = CTerrainTransitionCatalog::mirroredGridY(
+                    tile.canonicalSignature);
+            definition.assigned = definition.signature.northWest > 0
+                && definition.signature.northEast > 0
+                && definition.signature.southEast > 0
+                && definition.signature.southWest > 0;
+            if(definition.assigned)
+                for(qint32 id : {definition.signature.northWest,
+                                  definition.signature.northEast,
+                                  definition.signature.southEast,
+                                  definition.signature.southWest})
+                    materialIds.insert(id);
+        }
+        profile.slotDefinitions.append(definition);
+    }
+
+    // JSON profiles intentionally describe every physical slot. Unassigned
+    // page padding still needs a syntactically valid family signature so it
+    // can round-trip through the strict parser; assigned=false keeps it out of
+    // every paint catalog and usage count.
+    if(!materialIds.isEmpty())
+    {
+        const qint32 paddingFamily = *materialIds.constBegin();
+        for(STerrainAtlasProfileSlot& definition : profile.slotDefinitions)
+            if(!definition.assigned)
+            {
+                definition.signature.northWest = paddingFamily;
+                definition.signature.northEast = paddingFamily;
+                definition.signature.southEast = paddingFamily;
+                definition.signature.southWest = paddingFamily;
+            }
+    }
+
+    for(qint32 id : materialIds)
+    {
+        STerrainAtlasProfileFamily family;
+        if(sourceFamilies.contains(id)) family = sourceFamilies.value(id);
+        family.id = id;
+        family.name = materialNames.value(id, family.name);
+        if(family.name.trimmed().isEmpty())
+            family.name = QStringLiteral("Material %1").arg(id);
+        if(!sourceFamilies.contains(id))
+        {
+            family.layer = layer;
+            family.landAllowed = layer == ETerrainAtlasLayer::Land;
+            family.overlayAllowed = layer == ETerrainAtlasLayer::Overlay;
+        }
+        family.memberSlots.clear();
+        family.thumbnailSlot = -1;
+        for(const STerrainAtlasProfileSlot& definition : profile.slotDefinitions)
+            if(definition.assigned
+               && definition.signature.northWest == id
+               && definition.signature.northEast == id
+               && definition.signature.southEast == id
+               && definition.signature.southWest == id)
+            {
+                family.thumbnailSlot = definition.slot;
+                break;
+            }
+        profile.families.append(family);
+    }
+    profile.normalizeMembership(report);
+    return profile;
 }
 
 QString CTerrainAtlasProfileStore::profilePath(const QString& mprNamespace,

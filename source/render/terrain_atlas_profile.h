@@ -4,12 +4,14 @@
 #include <QByteArray>
 #include <QImage>
 #include <QJsonObject>
+#include <QMap>
 #include <QString>
 #include <QVector>
 
 #include "terrain_atlas_analyzer.h"
 
 class CValidationReport;
+struct STerrainAtlasFinalization;
 
 struct STerrainAtlasSlotUsage
 {
@@ -146,6 +148,13 @@ struct STerrainAtlasProfile
 class CTerrainAtlasProfileStore
 {
 public:
+    static STerrainAtlasProfile portableFinalizedProfile(
+        const STerrainAtlasFinalization& finalization,
+        const QVector<QImage>& decodedPhysicalTiles,
+        const STerrainAtlasProfile& sourceProfile,
+        ETerrainAtlasLayer layer,
+        const QMap<qint32, QString>& materialNames = {},
+        CValidationReport* report = nullptr);
     static QString profilePath(const QString& mprNamespace,
                                const QString& rootDirectory = QString());
     static bool save(const STerrainAtlasProfile& profile,

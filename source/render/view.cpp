@@ -7672,6 +7672,14 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
     const ETerrainTileLayer layer=landActive?ETerrainTileLayer::Land:ETerrainTileLayer::Overlay;
+    QProgressDialog finalizeProgress(
+        tr("Preparing map-specific terrain atlas..."),QString(),0,0,this);
+    finalizeProgress.setWindowTitle(tr("Finalizing terrain atlas"));
+    finalizeProgress.setCancelButton(nullptr);
+    finalizeProgress.setWindowModality(Qt::WindowModal);
+    finalizeProgress.setMinimumDuration(0);
+    finalizeProgress.show();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     CTerrainVirtualMaterialField field;
     if(!m_terrainEdit.copyVirtualMaterialField(layer,&field))
     {
@@ -7686,6 +7694,9 @@ void CView::finalizeVirtualTerrainAtlas()
         ?ETerrainTileLayer::Overlay:ETerrainTileLayer::Land;
     CTerrainEditModel originalTerrain;
     CValidationReport originalReport;
+    finalizeProgress.setLabelText(tr(
+        "Auditing preserved terrain references and unused slots..."));
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     if(!originalTerrain.load(m_mprDocument,&originalReport))
     {
         QMessageBox::critical(this,tr("Atlas finalization refused"),
@@ -7712,6 +7723,9 @@ void CView::finalizeVirtualTerrainAtlas()
                                m_terrainGlobalMaterialSources,
                                globalMaterialBlendStyles(m_terrainGlobalFamilies),
                                layer == ETerrainTileLayer::Land);
+    finalizeProgress.setLabelText(tr(
+        "Loading exact stock transitions used by this map..."));
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     for(auto imported = m_importedTerrainTransitions.cbegin();
         imported != m_importedTerrainTransitions.cend(); ++imported)
         if(!atlas.addAuthoredLibraryTransition(
@@ -7723,6 +7737,9 @@ void CView::finalizeVirtualTerrainAtlas()
                     .arg(report.toText()));
             return;
         }
+    finalizeProgress.setLabelText(tr(
+        "Resolving, evicting unused tiles, and rebuilding physical pages..."));
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     const STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,
         kMprPackedTerrainAtlasSlotLimit,
@@ -7865,6 +7882,7 @@ void CView::finalizeVirtualTerrainAtlas()
     connect(buttons,&QDialogButtonBox::accepted,&preview,&QDialog::accept);
     connect(buttons,&QDialogButtonBox::rejected,&preview,&QDialog::reject);
     previewLayout->addWidget(buttons);
+    finalizeProgress.hide();
     if(preview.exec()!=QDialog::Accepted)return;
     const STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
         m_mprDocument,finalized,layer,&report);
@@ -7951,89 +7969,24 @@ void CView::finalizeVirtualTerrainAtlas()
     // MPR; otherwise reopening correctly finds the 704 (etc.) texture slots
     // but has zero assignments because only the original namespace profile is
     // known to the editor.
-    STerrainAtlasProfile portableProfile;
-    portableProfile.mprNamespace=finalized.isolatedNamespace;
-    QVector<QImage> finalizedImages;
-    for(const STerrainFinalizedTile& tile:finalized.tiles)
-        finalizedImages.append(tile.pixels);
-    portableProfile.atlasPixelSha256=
-        CTerrainAtlasProfileInference::pixelSha256(finalizedImages);
-    portableProfile.atlasSlotCount=finalized.tiles.size();
-    portableProfile.provenance=QStringLiteral(
-        "portable-finalized-modern-atlas-v1");
-    portableProfile.approved=true;
-    QMap<int,STerrainAtlasProfileSlot> sourceDefinitions;
-    for(const STerrainAtlasProfileSlot& definition:
-            m_terrainAtlasProfile.slotDefinitions)
-        sourceDefinitions.insert(definition.slot,definition);
-    QSet<qint32> portableMaterialIds;
-    for(int slot=0;slot<finalized.tiles.size();++slot)
-    {
-        const STerrainFinalizedTile& tile=finalized.tiles.at(slot);
-        STerrainAtlasProfileSlot definition;
-        definition.slot=slot;
-        if(tile.sourceSlot>=0&&sourceDefinitions.contains(tile.sourceSlot))
-            definition.signature=sourceDefinitions.value(tile.sourceSlot).signature;
-        else
-            definition.signature=CTerrainTransitionCatalog::mirroredGridY(
-                tile.canonicalSignature);
-        definition.assigned=definition.signature.northWest>0
-            &&definition.signature.northEast>0
-            &&definition.signature.southEast>0
-            &&definition.signature.southWest>0;
-        definition.ambiguous=false;
-        if(definition.assigned)
-            for(qint32 id:{definition.signature.northWest,
-                           definition.signature.northEast,
-                           definition.signature.southEast,
-                           definition.signature.southWest})
-                portableMaterialIds.insert(id);
-        portableProfile.slotDefinitions.append(definition);
-    }
-    for(qint32 id:portableMaterialIds)
-    {
-        STerrainAtlasProfileFamily family;
-        family.id=id;
-        family.name=materialNames.value(id,
-            QStringLiteral("Material %1").arg(id));
-        family.layer=layer==ETerrainTileLayer::Land
-            ?ETerrainAtlasLayer::Land:ETerrainAtlasLayer::Overlay;
-        family.landAllowed=layer==ETerrainTileLayer::Land;
-        family.overlayAllowed=layer==ETerrainTileLayer::Overlay;
-        for(const STerrainAtlasProfileFamily& sourceFamily:
-                m_terrainAtlasProfile.families)
-            if(sourceFamily.id==id)
-            {
-                family.name=sourceFamily.name;
-                family.layer=sourceFamily.layer;
-                family.landAllowed=sourceFamily.landAllowed;
-                family.overlayAllowed=sourceFamily.overlayAllowed;
-                family.underwater=sourceFamily.underwater;
-                family.underwaterRole=sourceFamily.underwaterRole;
-                family.tileType=sourceFamily.tileType;
-                break;
-            }
-        for(const STerrainGlobalMaterialFamily& global:m_terrainGlobalFamilies)
-            if(global.id==id)
-            {
-                family.name=global.name;
-                family.layer=global.layer;
-                family.landAllowed=global.layer==ETerrainAtlasLayer::Land;
-                family.overlayAllowed=global.layer==ETerrainAtlasLayer::Overlay;
-                break;
-            }
-        for(const STerrainAtlasProfileSlot& definition:
-                portableProfile.slotDefinitions)
-            if(definition.assigned
-               &&definition.signature.northWest==id
-               &&definition.signature.northEast==id
-               &&definition.signature.southEast==id
-               &&definition.signature.southWest==id)
-            { family.thumbnailSlot=definition.slot;break; }
-        portableProfile.families.append(family);
-    }
     CValidationReport portableProfileReport;
-    if(!portableProfile.normalizeMembership(&portableProfileReport))
+    QVector<QImage> physicalTiles;
+    if(!CTerrainVirtualAtlas::decodePhysicalTileImages(
+           finalized,&physicalTiles,&portableProfileReport))
+    {
+        QMessageBox::critical(this,tr("Atlas package not written"),
+            tr("The isolated physical atlas could not be decoded.\n\n%1")
+                .arg(portableProfileReport.toText()));
+        parent.rmdir(folderName);
+        return;
+    }
+    STerrainAtlasProfile portableProfile=
+        CTerrainAtlasProfileStore::portableFinalizedProfile(
+            finalized,physicalTiles,m_terrainAtlasProfile,
+            layer==ETerrainTileLayer::Land?ETerrainAtlasLayer::Land
+                                          :ETerrainAtlasLayer::Overlay,
+            materialNames,&portableProfileReport);
+    if(portableProfile.assignedSlotCount()<=0)
     {
         QMessageBox::critical(this,tr("Atlas package not written"),
             tr("The isolated material profile could not be constructed.\n\n%1")
@@ -8086,7 +8039,7 @@ void CView::finalizeVirtualTerrainAtlas()
     QString reopenedProfilePath;
     if(!CTerrainAtlasProfileStore::loadExplicitOverride(
            finalized.isolatedNamespace,portableProfile.atlasPixelSha256,
-           finalized.tiles.size(),&reopenedProfile,folderPath,
+           physicalTiles.size(),&reopenedProfile,folderPath,
            &reopenedProfilePath,&reopenReport)
        ||reopenedProfile.assignedSlotCount()!=portableProfile.assignedSlotCount())
     {
@@ -10134,7 +10087,6 @@ void CView::endTileBrushGroup()
             const ETerrainTileLayer layer=m_tileStrokeCommand.virtualVertices.front().layer;
             CValidationReport releaseReport;
             CTerrainVirtualMaterialField field;
-            QMap<int,quint64> usage=workingTerrainAtlasUsage();
             QSet<int> affected;
             QElapsedTimer releaseTimer;
             releaseTimer.start();
@@ -10153,9 +10105,29 @@ void CView::endTileBrushGroup()
                                 affected.insert(y*field.tileWidth()+x);
                 QVector<int> cells=affected.values().toVector();
                 std::sort(cells.begin(),cells.end());
+                struct SMissingSignature
+                {
+                    STerrainTransitionSignature signature;
+                    int x{0};
+                    int y{0};
+                };
+                QMap<QByteArray,SMissingSignature> missing;
+                for(int cell:cells)
+                {
+                    const int x=cell%field.tileWidth(),y=cell/field.tileWidth();
+                    bool found=false,exactAvailable=false;
+                    const STerrainTransitionSignature signature=
+                        field.cellSignature(x,y,&found);
+                    if(!found)continue;
+                    m_workingTerrainAtlas->catalog().selectForPaint(
+                        signature,x,y,m_terrainSemanticSeed,&exactAvailable);
+                    if(!exactAvailable)
+                        missing.insert(globalTransitionKey(signature),
+                                       {signature,x,y});
+                }
                 QProgressDialog progress(
                     tr("Resolving exact terrain blends..."), QString(),
-                    0, cells.size() + 1, this);
+                    0, missing.size() + 1, this);
                 progress.setWindowTitle(tr("Finishing terrain stroke"));
                 progress.setCancelButton(nullptr);
                 progress.setWindowModality(Qt::WindowModal);
@@ -10163,26 +10135,31 @@ void CView::endTileBrushGroup()
                 QElapsedTimer resolveTimer;
                 resolveTimer.start();
                 int resolvedCells = 0;
-                for(int cell:cells)
+                QMap<int,quint64> usage;
+                qint64 usageScanMs=0;
+                if(!missing.isEmpty())
+                {
+                    QElapsedTimer usageTimer;usageTimer.start();
+                    usage=workingTerrainAtlasUsage();
+                    usageScanMs=usageTimer.elapsed();
+                }
+                for(const SMissingSignature& item:missing)
                 {
                     progress.setValue(resolvedCells);
                     progress.setLabelText(tr(
                         "Resolving exact terrain blends (%1 / %2)...")
-                        .arg(resolvedCells + 1).arg(cells.size()));
+                        .arg(resolvedCells + 1).arg(missing.size()));
                     QCoreApplication::processEvents(
                         QEventLoop::ExcludeUserInputEvents);
-                    const int x=cell%field.tileWidth(),y=cell/field.tileWidth();
-                    bool found=false;
-                    const STerrainTransitionSignature exact=field.cellSignature(x,y,&found);
-                    if(!found||!realizeWorkingTerrainSignature(
-                           exact,x,y,&usage,&releaseReport))
+                    if(!realizeWorkingTerrainSignature(
+                           item.signature,item.x,item.y,&usage,&releaseReport))
                         break;
                     ++resolvedCells;
                 }
                 resolveElapsed = resolveTimer.elapsed();
-                if(!releaseReport.hasErrors())
+                if(!releaseReport.hasErrors()&&!missing.isEmpty())
                 {
-                    progress.setValue(cells.size());
+                    progress.setValue(missing.size());
                     progress.setLabelText(tr(
                         "Uploading the resolved terrain atlas..."));
                     QCoreApplication::processEvents(
@@ -10194,8 +10171,11 @@ void CView::endTileBrushGroup()
                             EValidationSeverity::Error,
                             "The completed stroke could not install its generated exact transitions.");
                     uploadElapsed = uploadTimer.elapsed();
-                    progress.setValue(cells.size() + 1);
+                    progress.setValue(missing.size() + 1);
                 }
+                ei::log(eLogInfo,QString(
+                    "Terrain exact cache plan: affected:%1 uniqueMissing:%2 usageScanMs:%3")
+                    .arg(cells.size()).arg(missing.size()).arg(usageScanMs));
             }
             ei::log(eLogInfo, QString(
                 "Terrain stroke release timing: affectedCells:%1 resolveMs:%2 uploadMs:%3 totalMs:%4")

@@ -178,6 +178,13 @@ public:
 
     static QImage composePage(const QVector<QImage>& tiles, int firstTile,
                               int tileSize);
+    // Decode the exact physical slot vector that the editor/game will observe
+    // after MMP DXT1 encoding. This includes page padding slots and is the only
+    // valid pixel/count identity for a portable finalized profile.
+    static bool decodePhysicalTileImages(
+        const STerrainAtlasFinalization& finalization,
+        QVector<QImage>* images,
+        CValidationReport* report = nullptr);
     static STerrainPortableAtlasPackage buildPortablePackage(
         const CMprDocument& source, const STerrainAtlasFinalization& finalization,
         ETerrainTileLayer layer, CValidationReport* report = nullptr);

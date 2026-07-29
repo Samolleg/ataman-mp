@@ -8,6 +8,7 @@
 
 #include "endurance_document.h"
 #include "landscape_edit_policy.h"
+#include "mmp_codec.h"
 #include "operation_history_policy.h"
 #include "terrain_edit_model.h"
 #include "terrain_atlas_analyzer.h"
@@ -350,6 +351,7 @@ private slots:
     void zone2TransitionOnlyGrassMapsToGlobalUniformFamily();
     void authoredPresetSupportsZone18SharedLayers();
     void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
+    void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
     void semanticAtlasPartialCatalogRejectsCrossLayerCornersInline();
@@ -6025,6 +6027,86 @@ void EnduranceDocumentTests::materialAtlasStoreLoadsOnlyExplicitLocalOverrides()
         "zone1", root.path())));
     QVERIFY(CTerrainAtlasProfileStore::removeLocalOverride(
         "zone1", root.path(), &removeReport));
+}
+
+void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding()
+{
+    STerrainAtlasProfile source;
+    source.mprNamespace = QStringLiteral("source");
+    for(int slot = 0; slot < 3; ++slot)
+    {
+        STerrainAtlasProfileSlot definition;
+        definition.slot = slot;
+        definition.signature.northWest = slot + 1;
+        definition.signature.northEast = slot + 1;
+        definition.signature.southEast = slot + 1;
+        definition.signature.southWest = slot + 1;
+        source.slotDefinitions.append(definition);
+        STerrainAtlasProfileFamily family;
+        family.id = slot + 1;
+        family.name = QStringLiteral("Family %1").arg(slot + 1);
+        family.thumbnailSlot = slot;
+        source.families.append(family);
+    }
+    QVERIFY(source.normalizeMembership());
+
+    STerrainAtlasFinalization finalized;
+    finalized.success = true;
+    finalized.isolatedNamespace = QStringLiteral("physical_profile_regression");
+    finalized.textureCount = 1;
+    QVector<QImage> active;
+    for(int slot = 0; slot < 3; ++slot)
+    {
+        QImage pixels(8, 8, QImage::Format_RGBA8888);
+        pixels.fill(QColor(30 + slot * 70, 90 + slot * 20, 160 - slot * 30));
+        active.append(pixels);
+        STerrainFinalizedTile tile;
+        tile.sourceSlot = slot;
+        tile.authored = true;
+        tile.pixels = pixels;
+        tile.canonicalSignature = source.slotDefinitions.at(slot).signature;
+        finalized.tiles.append(tile);
+    }
+    QString diagnostic;
+    finalized.pageMmpPayloads.append(ei::encodeMmpDxt1(
+        CTerrainVirtualAtlas::composePage(active, 0, 8), true, &diagnostic));
+    QVERIFY2(!finalized.pageMmpPayloads.front().isEmpty(), qPrintable(diagnostic));
+
+    QVector<QImage> physical;
+    CValidationReport report;
+    QVERIFY2(CTerrainVirtualAtlas::decodePhysicalTileImages(
+                 finalized, &physical, &report), qPrintable(report.toText()));
+    QCOMPARE(physical.size(), 64);
+    const STerrainAtlasProfile portable =
+        CTerrainAtlasProfileStore::portableFinalizedProfile(
+            finalized, physical, source, ETerrainAtlasLayer::Land, {}, &report);
+    QCOMPARE(portable.atlasSlotCount, 64);
+    QCOMPARE(portable.slotDefinitions.size(), 64);
+    QCOMPARE(portable.assignedSlotCount(), 3);
+    QVERIFY(portable.validateBinding(
+        finalized.isolatedNamespace,
+        CTerrainAtlasProfileInference::pixelSha256(physical), 64, &report));
+
+    QVector<QImage> logical;
+    for(const STerrainFinalizedTile& tile : finalized.tiles)
+        logical.append(tile.pixels);
+    CValidationReport oldBindingReport;
+    QVERIFY(!portable.validateBinding(
+        finalized.isolatedNamespace,
+        CTerrainAtlasProfileInference::pixelSha256(logical), logical.size(),
+        &oldBindingReport));
+    QVERIFY(oldBindingReport.hasErrors());
+
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QVERIFY2(CTerrainAtlasProfileStore::save(portable, root.path(), &report),
+             qPrintable(report.toText()));
+    STerrainAtlasProfile reopened;
+    QVERIFY2(CTerrainAtlasProfileStore::loadExplicitOverride(
+                 finalized.isolatedNamespace, portable.atlasPixelSha256, 64,
+                 &reopened, root.path(), nullptr, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(reopened.assignedSlotCount(), 3);
 }
 
 void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()

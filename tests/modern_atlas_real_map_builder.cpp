@@ -583,6 +583,44 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                      package.resourceArchiveBytes, &result.error))
         return result;
 
+    // Ship the semantic identity beside every generated visual-test MPR. The
+    // profile binds to the post-DXT physical pages (including their padding),
+    // exactly as a normal reopen sees them; logical active-tile hashes cannot
+    // bind a page-backed MPR whose slot count is rounded to 64.
+    QVector<QImage> physicalTiles;
+    CValidationReport portableProfileReport;
+    if(!CTerrainVirtualAtlas::decodePhysicalTileImages(
+           finalized, &physicalTiles, &portableProfileReport))
+    {
+        result.error = portableProfileReport.toText();
+        return result;
+    }
+    const STerrainAtlasProfile portableProfile =
+        CTerrainAtlasProfileStore::portableFinalizedProfile(
+            finalized, physicalTiles, sourceAtlas.profile,
+            ETerrainAtlasLayer::Land, names, &portableProfileReport);
+    if(portableProfile.assignedSlotCount() <= 0
+       || !CTerrainAtlasProfileStore::save(
+           portableProfile, outputDirectory, &portableProfileReport))
+    {
+        result.error = QStringLiteral(
+            "Could not write the generated map's physical semantic profile.\n%1")
+            .arg(portableProfileReport.toText());
+        return result;
+    }
+    STerrainAtlasProfile reopenedProfile;
+    if(!CTerrainAtlasProfileStore::loadExplicitOverride(
+           baseName, portableProfile.atlasPixelSha256, physicalTiles.size(),
+           &reopenedProfile, outputDirectory, nullptr, &portableProfileReport)
+       || reopenedProfile.assignedSlotCount()
+            != portableProfile.assignedSlotCount())
+    {
+        result.error = QStringLiteral(
+            "The generated map's semantic profile failed exact reopen.\n%1")
+            .arg(portableProfileReport.toText());
+        return result;
+    }
+
     QVector<int> generatedSlots;
     for(int slot = 0; slot < finalized.tiles.size(); ++slot)
         if(!finalized.tiles.at(slot).authored) generatedSlots.append(slot);
@@ -668,6 +706,12 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     manifest.insert(QStringLiteral("mpr_file"), baseName + QStringLiteral(".mpr"));
     manifest.insert(QStringLiteral("atlas_file"),
                     baseName + QStringLiteral("-atlas.res"));
+    manifest.insert(QStringLiteral("semantic_profile"),
+        QDir(outputDirectory).relativeFilePath(
+            CTerrainAtlasProfileStore::profilePath(baseName, outputDirectory)));
+    manifest.insert(QStringLiteral("physical_slots"), physicalTiles.size());
+    manifest.insert(QStringLiteral("assigned_slots"),
+                    portableProfile.assignedSlotCount());
     const QByteArray manifestBytes = QJsonDocument(manifest).toJson(
         QJsonDocument::Indented);
     if(!writeBytes(QDir(outputDirectory).filePath(QStringLiteral("manifest.json")),
