@@ -103,6 +103,22 @@ void CCamera::setSpeedMultiplier(float multiplier)
     m_speedMultiplier = qBound(0.1f, multiplier, 10.0f);
 }
 
+bool CCamera::movementInputActive() const
+{
+    if(!m_keyManager)
+        return false;
+    return m_keyManager->isPressed(eKey_W)
+        || m_keyManager->isPressed(eKey_A)
+        || m_keyManager->isPressed(eKey_S)
+        || m_keyManager->isPressed(eKey_D)
+        || m_keyManager->isPressed(eKey_Q)
+        || m_keyManager->isPressed(eKey_E)
+        || m_keyManager->isPressed(eKey_UpArrow)
+        || m_keyManager->isPressed(eKey_DownArrow)
+        || m_keyManager->isPressed(eKey_LeftArrow)
+        || m_keyManager->isPressed(eKey_RightArrow);
+}
+
 QMatrix4x4 CCamera::update()
 {
     double elapsedSeconds = 1.0 / 60.0;

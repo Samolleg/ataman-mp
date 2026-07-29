@@ -37,6 +37,7 @@ public:
     float step() const {return m_step * m_speedMultiplier * m_frameMovementScale;}
     float speedMultiplier() const {return m_speedMultiplier;}
     void setSpeedMultiplier(float multiplier);
+    bool movementInputActive() const;
     // Legacy serialized orbit-controller state. `pos` is NOT guaranteed to be
     // the rendered world-space eye after pivot rotations. Use viewMatrix() and
     // ei::cameraEyeFromView() for culling, LOD, lighting, and shadow geometry.

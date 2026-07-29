@@ -13,6 +13,15 @@ struct SCameraFixedStepAdvance
     float interpolation{0.0f};
 };
 
+inline bool cameraMotionActive(bool renderedTransformChanged, bool movementInputActive)
+{
+    // Render interpolation can legitimately produce a frame with no visible
+    // translation while a movement key remains held. Resource preparation
+    // must still treat that frame as moving or it can introduce a GUI-thread
+    // hitch directly into a strafe.
+    return renderedTransformChanged || movementInputActive;
+}
+
 inline SCameraFixedStepAdvance advanceCameraFixedStep(double elapsedSeconds,
                                                       double* accumulator,
                                                       double fixedStepSeconds = 1.0 / 120.0)

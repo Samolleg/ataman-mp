@@ -13,6 +13,7 @@ private slots:
     void mapsShadowQualityToCapabilityBoundResolution();
     void integratesMovementIndependentlyOfFrameRate();
     void interpolatesUnevenCameraFramesWithoutLateralJitter();
+    void keepsMovementActiveBetweenInterpolatedSteps();
 };
 
 void CameraTests::changesOrbitPivotWithoutMovingTheCurrentView()
@@ -126,6 +127,13 @@ void CameraTests::interpolatesUnevenCameraFramesWithoutLateralJitter()
         QVERIFY2(qAbs(rendered - expected) < 0.000001,
                  "Uneven render intervals produced a discontinuous camera trajectory");
     }
+}
+
+void CameraTests::keepsMovementActiveBetweenInterpolatedSteps()
+{
+    QVERIFY(!ei::cameraMotionActive(false, false));
+    QVERIFY(ei::cameraMotionActive(true, false));
+    QVERIFY(ei::cameraMotionActive(false, true));
 }
 
 QTEST_APPLESS_MAIN(CameraTests)

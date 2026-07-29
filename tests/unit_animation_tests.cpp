@@ -105,6 +105,7 @@ private slots:
     void boundsColdVisualResolutionDuringCameraMovement();
     void resolvesAppearancePreparationWithoutSceneObjects();
     void cachesPreparedAppearanceByContentIdentity();
+    void keepsAppearanceProgressVisibleBetweenWorkerBatches();
     void malformedAndUnknownInputsFailStatic();
 };
 
@@ -371,6 +372,14 @@ void UnitAnimationTests::cachesPreparedAppearanceByContentIdentity()
         = resolveUnitAppearanceTasks({task}, cache.path());
     QCOMPARE(changedUnit.size(), 1);
     QVERIFY(!changedUnit.first().cacheHit);
+}
+
+void UnitAnimationTests::keepsAppearanceProgressVisibleBetweenWorkerBatches()
+{
+    QVERIFY(ei::shouldShowUnitAppearanceProgress(true, 402, 16));
+    QVERIFY(ei::shouldShowUnitAppearanceProgress(true, 402, 173));
+    QVERIFY(!ei::shouldShowUnitAppearanceProgress(false, 402, 173));
+    QVERIFY(!ei::shouldShowUnitAppearanceProgress(true, 402, 402));
 }
 
 void UnitAnimationTests::malformedAndUnknownInputsFailStatic()

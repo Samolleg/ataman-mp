@@ -4632,10 +4632,12 @@ void CView::draw()
     bool cameraEyeOk = false;
     const QVector3D renderedCameraEye = ei::cameraEyeFromView(camMatrix, &cameraEyeOk);
     const QVector3D cameraPosition = cameraEyeOk ? renderedCameraEye : cameraAnchor;
-    const bool cameraMoving = m_visualWarmupCameraValid
+    const bool renderedCameraChanged = m_visualWarmupCameraValid
         && ((cameraAnchor - m_visualWarmupCameraAnchor).lengthSquared() > 0.000001f
             || (cameraPivot - m_visualWarmupCameraPivot).lengthSquared() > 0.000001f
             || (cameraRotation - m_visualWarmupCameraRotation).lengthSquared() > 0.000001f);
+    const bool cameraMoving = ei::cameraMotionActive(
+        renderedCameraChanged, m_cam->movementInputActive());
     m_visualWarmupCameraAnchor = cameraAnchor;
     m_visualWarmupCameraPivot = cameraPivot;
     m_visualWarmupCameraRotation = cameraRotation;
@@ -6810,6 +6812,10 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
     {
         if(m_unitAppearanceProgressTotal > 0)
         {
+            // Units visible between worker batches can consume their prepared
+            // result through the foreground path. No remaining candidate and
+            // no active worker still means the original workload completed.
+            m_unitAppearanceProgressCompleted = m_unitAppearanceProgressTotal;
             ei::log(eLogInfo, QString("Character data preparation complete total:%1 cached:%2 resolved:%3")
                     .arg(m_unitAppearanceProgressTotal).arg(m_unitAppearanceCacheHits)
                     .arg(m_unitAppearanceProgressCompleted - m_unitAppearanceCacheHits));
@@ -6852,13 +6858,17 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
         m_unitAppearanceProgressPending = true;
         QTimer::singleShot(150, this, [this]()
         {
-            if(!m_unitAppearanceProgressPending || !m_unitAppearanceWatcher
-                    || !m_unitAppearanceWatcher->isRunning() || !m_pProgress)
+            if(!ei::shouldShowUnitAppearanceProgress(m_unitAppearanceProgressPending,
+                    m_unitAppearanceProgressTotal, m_unitAppearanceProgressCompleted)
+                    || !m_pProgress)
                 return;
             m_pProgress->setRange(0, qMax(1, m_unitAppearanceProgressTotal));
             m_pProgress->setValue(m_unitAppearanceProgressCompleted);
             m_pProgress->setFormat(tr("Resolving character data... %v/%m"));
             m_pProgress->setVisible(true);
+            ei::log(eLogInfo, QString("Character data progress shown completed:%1 total:%2")
+                    .arg(m_unitAppearanceProgressCompleted)
+                    .arg(m_unitAppearanceProgressTotal));
         });
     }
     else
@@ -6891,8 +6901,6 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
             if(m_pProgress && m_pProgress->isVisible())
                 m_pProgress->setValue(qMin(m_unitAppearanceProgressCompleted,
                                            m_unitAppearanceProgressTotal));
-            m_unitAppearanceProgressPending = m_unitAppearanceProgressCompleted
-                < m_unitAppearanceProgressTotal;
             update();
         });
     }

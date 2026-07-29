@@ -8,6 +8,15 @@
 #include <QSharedPointer>
 #include <QVector>
 
+namespace ei {
+
+inline bool shouldShowUnitAppearanceProgress(bool pending, int total, int completed)
+{
+    return pending && total > 0 && completed < total;
+}
+
+}
+
 struct SUnitAppearancePreparationTask
 {
     quintptr unitKey{0};
