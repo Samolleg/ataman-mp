@@ -16,7 +16,9 @@ through the packed-format maximum of 16,384 slots.
 
 1. Select the `jamais-vu` resource profile and refresh Maps and Collections.
 2. Open `Zone18 expanded atlas - 1024 slots` from Collections. Confirm the MPR
-   and default `zone18.mob` load and terrain is textured.
+   and default `zone18.mob` load and terrain is textured. The **Loose Map**
+   warning is expected because the generated MPR uses an isolated namespace;
+   continue with the synthetic test identity.
 3. Use **Test Current Map** and confirm Zone18 reaches gameplay without missing
    terrain. Stop the test normally.
 4. Repeat in order for 2,048, 4,096, 8,192, and 16,384 slots. Allow the largest
