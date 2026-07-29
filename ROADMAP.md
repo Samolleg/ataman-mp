@@ -192,6 +192,32 @@ rather than another editor architecture pass.
 
 ## Object authoring conveniences
 
+- [ ] **Post-baseline traps and patrols authoring/support pass.** Replace the
+  current loosely exposed child records with explicit, lossless compound-object
+  workflows; do not normalize or auto-repair existing maps merely by opening
+  them.
+  - Show every patrol and look-at point owned by a unit in a clear list, keep
+    list and viewport selection synchronized, and provide unambiguous ownership
+    visualization for overlapping or hidden points.
+  - Show every magic-trap attachment—including areas, targets/cast points, and
+    other confirmed linked records—with its structural source, parent, ordering,
+    and viewport representation.
+  - Validate missing, orphaned, multiply owned, and wrong-parent attachments.
+    Findings remain non-destructive and identify both the parent and child
+    provenance needed for an explicit repair.
+  - Define compound copy/paste and duplication semantics: preserve the complete
+    owned subtree when safe, allocate/remap identities and typed links
+    transactionally when crossing MOBs, and require an explicit user choice when
+    ownership or script/raw references are ambiguous.
+  - Add focused undo/redo, copy/paste, lossless-save, duplicate-ID, malformed
+    attachment, and cross-MOB remapping fixtures for patrols, look-at points, and
+    traps.
+  - Add concise tooltips/documentation for trap player/diplomacy behavior.
+    `MT_DIPLOMACY` alone is not runtime authority: the effective hostile mask is
+    derived from the containing MOB's diplomacy table. Keep this authoring pass
+    separate from landscape's existing-MOB diplomacy controls and
+    missing-diplomacy validation.
+
 - [x] Add an explicit **Convert World Object to Lever...** transaction.
   - Preserve the original NID, transform, model, textures, body parts, common
     object fields, directory membership, ordering position, and script-facing
