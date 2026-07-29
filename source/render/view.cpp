@@ -5663,10 +5663,11 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
         if(terrainAtlasSlots)
             *terrainAtlasSlots = m_workingTerrainAtlas->activeTileImages().size();
         ei::log(eLogInfo, QString(
-            "Test Current Map staged working terrain atlas pages:%1 slots:%2 authoredPagesPreserved:%3")
+            "Test Current Map staged working terrain atlas pages:%1 slots:%2 authoredPagesPreserved:%3 generatedExactTiles:%4")
             .arg(package.resourceMembers.size())
             .arg(m_workingTerrainAtlas->activeTileImages().size())
-            .arg(authoredPages.size()));
+            .arg(authoredPages.size())
+            .arg(m_workingTerrainAtlas->generatedTileCount()));
     }
     ei::log(eLogInfo, QString("Test Current Map staged unsaved MPR candidate members:%1 sha256:%2")
         .arg(validation.changedMembers.join(QStringLiteral(",")), validation.sha256));
@@ -6902,6 +6903,14 @@ void CView::rebuildTerrainAutoCatalog()
             if(currentUsage.at(slot).landCount > 0
                || currentUsage.at(slot).overlayCount > 0)
                 m_workingAtlasProtectedSlots.insert(slot);
+        ei::log(eLogInfo, QString(
+            "Modern terrain working atlas ready authoredSlots:%1 authoredPages:%2 capacitySlots:%3 extensionSlots:%4 protectedAuthoredSlots:%5")
+            .arg(m_authoredTerrainTileImages.size())
+            .arg(m_workingTerrainAtlas->activeTextureCount())
+            .arg(m_workingTerrainAtlas->capacityLimit())
+            .arg(m_workingTerrainAtlas->capacityLimit()
+                 - m_authoredTerrainTileImages.size())
+            .arg(m_workingAtlasProtectedSlots.size()));
         refreshTerrainFamilyUsage();
     }
 }

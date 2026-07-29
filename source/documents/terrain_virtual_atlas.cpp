@@ -1491,8 +1491,9 @@ int CTerrainWorkingAtlas::realize(
     {
         if(report) report->add("terrain.working_atlas_capacity",
             EValidationSeverity::Error,
-            QString("The stroke needs another exact transition, but all %1 validated working slots are used or protected by undo history. No identity was substituted.")
-                .arg(m_capacityLimit));
+            QString("The stroke needs another exact transition, but all %1 validated working slots are used or protected by undo history (authored:%2 extension:%3). No identity was substituted.")
+                .arg(m_capacityLimit).arg(m_authoredImages.size())
+                .arg(qMax(0, m_capacityLimit - m_authoredImages.size())));
         return -1;
     }
 

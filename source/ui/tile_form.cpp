@@ -115,11 +115,12 @@ void CTileForm::fitTable()
         tableWidth -= ui->tableTile->verticalScrollBar()->width();
     int cellWidth = tableWidth/8;
 
-    int nRow = m_nTilePerRow * m_nTextureAtlas;
     for(int col(0); col<m_nTilePerRow; ++col)
         ui->tableTile->setColumnWidth(col, cellWidth);
-    for(int row(0); row<nRow; ++row)
-        ui->tableTile->setRowHeight(row, (row+1)%8 == 0 ? (cellWidth + 6) : cellWidth);
+    // Expanded atlases can contain thousands of rows. QTableWidget applies its
+    // header default to every row without walking the complete model; the
+    // delegate already draws the page separator after every eighth row.
+    ui->tableTile->verticalHeader()->setDefaultSectionSize(cellWidth);
     ensureVisibleTileIcons();
 
     //quick panel
@@ -148,6 +149,25 @@ QIcon CTileForm::iconForSlot(int index)
     return m_icoList.at(index);
 }
 
+QTableWidgetItem* CTileForm::ensureTileItem(int row, int column)
+{
+    if(row < 0 || row >= ui->tableTile->rowCount()
+       || column < 0 || column >= m_nTilePerRow)
+        return nullptr;
+    QTableWidgetItem* item = ui->tableTile->item(row, column);
+    if(item)
+        return item;
+    item = new QTableWidgetItem;
+    item->setText(QString());
+    item->setTextAlignment(Qt::AlignTop);
+    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+    const int slot = row * m_nTilePerRow + column;
+    if(slot < m_semanticAnnotations.size())
+        item->setToolTip(m_semanticAnnotations.at(slot));
+    ui->tableTile->setItem(row, column, item);
+    return item;
+}
+
 void CTileForm::ensureVisibleTileIcons()
 {
     if(m_tileImages.isEmpty() || !ui->tableTile->viewport())
@@ -162,7 +182,7 @@ void CTileForm::ensureVisibleTileIcons()
         for(int column = 0; column < m_nTilePerRow; ++column)
         {
             const int slot = row * m_nTilePerRow + column;
-            QTableWidgetItem* item = ui->tableTile->item(row, column);
+            QTableWidgetItem* item = ensureTileItem(row, column);
             if(item && slot < m_tileImages.size() && item->icon().isNull())
                 item->setIcon(iconForSlot(slot));
         }
@@ -255,10 +275,8 @@ void CTileForm::onSelectFinish()
 void CTileForm::onAddAnimTileFromTable()
 {
     QVector<int> aInd;
-    for(auto& item: ui->tableTile->selectedItems())
-    {
-        aInd.append(item->row() * m_nTilePerRow + item->column());
-    }
+    for(const QModelIndex& index : ui->tableTile->selectionModel()->selectedIndexes())
+        aInd.append(index.row() * m_nTilePerRow + index.column());
     if(aInd.isEmpty())
         return;
     if(aInd.size() == 1)
@@ -383,21 +401,10 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
     for(int slot = 0; slot < m_tileImages.size(); ++slot)
         m_icoList.append(QIcon());
 
-    int iIco(0);
-    for(int row(0); row<nRow; ++row)
-    {
-        for(int col(0); col<m_nTilePerRow; ++col)
-        {
-            QTableWidgetItem *item = new QTableWidgetItem;
-            item->setText("");
-            item->setTextAlignment(Qt::AlignTop);
-            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
-            if(iIco < m_semanticAnnotations.size())
-                item->setToolTip(m_semanticAnnotations.at(iIco));
-            ui->tableTile->setItem(row, col, item);
-            ++iIco;
-        }
-    }
+    // The atlas inspector is normally hidden while an MPR opens. Creating one
+    // QTableWidgetItem per physical slot made 1024+ atlases pay UI costs even
+    // when the inspector was never opened. Visible rows are materialized by
+    // ensureVisibleTileIcons(), and arbitrary empty cells remain selectable.
 
     // set custom icon delegate
     for(int i(0); i<m_nTilePerRow; ++i)
@@ -692,9 +699,11 @@ void CTileForm::on_buttonOnAnimTileShow_clicked()
     {
         int cRow = (index+i)/m_nTilePerRow;
         int cCol = (index+i)%m_nTilePerRow;
-        ui->tableTile->item(cRow, cCol)->setSelected(true);
+        if(QTableWidgetItem* item = ensureTileItem(cRow, cCol))
+            item->setSelected(true);
     }
-    ui->tableTile->scrollToItem(ui->tableTile->item(row, col));
+    if(QTableWidgetItem* item = ensureTileItem(row, col))
+        ui->tableTile->scrollToItem(item);
 }
 
 

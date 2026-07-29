@@ -201,6 +201,7 @@ private slots:
     void exactOnlyNoOpPreservesPixels();
     void portablePackageRemapsNamespaceAndReopens();
     void workingPreviewPackagePreservesAuthoredPagesAndAppendsExtensions();
+    void workingPreviewPackageStagesSeveralGeneratedPages();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void preservedLayerSlotsArePinnedAndRemapped();
     void inactiveOverlaySentinelSurvivesLandFinalization();
@@ -721,6 +722,117 @@ void TerrainVirtualAtlasTests::workingPreviewPackagePreservesAuthoredPagesAndApp
     QVERIFY2(appended.valid, qPrintable(appended.diagnostic));
 }
 
+void TerrainVirtualAtlasTests::workingPreviewPackageStagesSeveralGeneratedPages()
+{
+    CMprDocument source;
+    CValidationReport report;
+    QVERIFY2(source.loadBytes(portableMpr(), "working-multipage-source.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(source, &report), qPrintable(report.toText()));
+
+    constexpr int authoredPages = 4;
+    constexpr int generatedPages = 4;
+    constexpr int totalPages = authoredPages + generatedPages;
+    terrain.enableWorkingAtlasSlots(totalPages * 64);
+    STerrainTileCommand command;
+    for(int cell = 0; cell < generatedPages * 64; ++cell)
+    {
+        const int x = cell % 16;
+        const int y = cell / 16;
+        bool available = false;
+        const quint16 before = terrain.packedTile(
+            x, y, ETerrainTileLayer::Land, &available);
+        QVERIFY(available);
+        SMprPackedTile extension;
+        const int slot = authoredPages * 64 + cell;
+        extension.atlasIndex = quint8(slot / 64);
+        extension.tileIndex = quint8(slot % 64);
+        STerrainTileDelta delta;
+        delta.globalX = x;
+        delta.globalY = y;
+        delta.layer = ETerrainTileLayer::Land;
+        delta.before = before;
+        delta.after = extension.encode();
+        command.deltas.append(delta);
+    }
+    QVERIFY2(terrain.apply(command, true, &report), qPrintable(report.toText()));
+    CMprEditTransaction transaction(QStringLiteral(
+        "Reference several generated working-atlas pages"));
+    QVERIFY2(terrain.appendSectorEdits(&transaction, &report),
+             qPrintable(report.toText()));
+    QByteArray paintedBytes;
+    QVERIFY2(source.applyTransaction(transaction, &paintedBytes, &report),
+             qPrintable(report.toText()));
+    CMprDocument paintedSource;
+    QVERIFY2(paintedSource.loadBytes(
+                 paintedBytes, "working-multipage-painted.mpr", &report),
+             qPrintable(report.toText()));
+
+    QVector<QImage> tiles(totalPages * 64);
+    for(int slot = 0; slot < tiles.size(); ++slot)
+    {
+        QImage tile(8, 8, QImage::Format_RGBA8888);
+        for(int y = 0; y < tile.height(); ++y)
+            for(int x = 0; x < tile.width(); ++x)
+                tile.setPixelColor(x, y, QColor(
+                    (slot * 13 + x * 29) & 255,
+                    (slot * 31 + y * 17) & 255,
+                    (slot * 47 + x * 7 + y * 11) & 255,
+                    255));
+        tiles[slot] = tile;
+    }
+    QVector<QByteArray> authoredPayloads;
+    for(int page = 0; page < authoredPages; ++page)
+    {
+        QString diagnostic;
+        const QByteArray payload = ei::encodeMmpDxt1(
+            CTerrainVirtualAtlas::composePage(tiles, page * 64, 8),
+            true, &diagnostic);
+        QVERIFY2(!payload.isEmpty(), qPrintable(diagnostic));
+        authoredPayloads.append(payload);
+    }
+    const STerrainPortableAtlasPackage package =
+        CTerrainVirtualAtlas::buildWorkingPreviewPackage(
+            paintedSource, tiles, authoredPayloads, &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + "\n" + report.toText()));
+    QCOMPARE(package.resourceMembers.size(), totalPages);
+
+    CMprDocument reopened;
+    QVERIFY2(reopened.loadBytes(package.mprBytes,
+                                "working-multipage-result.mpr", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(reopened.mapInfo().textureCount, quint32(totalPages));
+    QCOMPARE(reopened.mapInfo().tileCount, quint32(totalPages * 64));
+    CTerrainEditModel reopenedTerrain;
+    QVERIFY2(reopenedTerrain.load(reopened, &report), qPrintable(report.toText()));
+    for(int cell = 0; cell < generatedPages * 64; ++cell)
+    {
+        bool available = false;
+        const quint16 packed = reopenedTerrain.packedTile(
+            cell % 16, cell / 16, ETerrainTileLayer::Land, &available);
+        QVERIFY(available);
+        QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(),
+                 authoredPages * 64 + cell);
+    }
+
+    CResArchiveDocument resources;
+    QStringList errors;
+    QVERIFY2(resources.loadBytes(package.resourceArchiveBytes,
+                                 "working-multipage-result.res", &errors),
+             qPrintable(errors.join('\n')));
+    for(int page = 0; page < authoredPages; ++page)
+        QCOMPARE(resources.memberPayload(package.resourceMembers.at(page)),
+                 authoredPayloads.at(page));
+    for(int page = authoredPages; page < totalPages; ++page)
+    {
+        const ei::SMmpInspection appended = ei::inspectMmp(
+            resources.memberPayload(package.resourceMembers.at(page)));
+        QVERIFY2(appended.valid, qPrintable(appended.diagnostic));
+    }
+}
+
 void TerrainVirtualAtlasTests::namespacesAreIsolated()
 {
     Fixture fixture;
@@ -1082,11 +1194,15 @@ void TerrainVirtualAtlasTests::expanded4096AtlasRetainsWorkingExtensionCapacity(
         kMprPackedTerrainAtlasSlotLimit, external);
     QCOMPARE(working.capacityLimit(), kMprPackedTerrainAtlasSlotLimit);
     QMap<int, quint64> usage;
+    QSet<int> protectedSlots;
     for(int slot = 0; slot < authored.size(); ++slot)
+    {
         usage.insert(slot, 1);
+        protectedSlots.insert(slot);
+    }
     CValidationReport report;
     const quint16 packed = working.resolve(signature(1, 2, 2, 2),
-        0, 0, &usage, {}, nullptr, &report);
+        0, 0, &usage, protectedSlots, nullptr, &report);
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(), 4096);
     QCOMPARE(working.activeTextureCount(), 65);

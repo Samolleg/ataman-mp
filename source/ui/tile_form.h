@@ -69,6 +69,7 @@ public:
 private:
     void fitTable();
     QIcon iconForSlot(int index);
+    QTableWidgetItem* ensureTileItem(int row, int column);
     void ensureVisibleTileIcons();
     QPixmap tileWithRot(int index, int rot);
     void updateMaterialData();
