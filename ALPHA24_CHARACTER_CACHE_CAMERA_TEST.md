@@ -12,6 +12,8 @@
 - The progress indicator remains visible across gaps between worker batches,
   and held camera input prevents foreground cold character resolution even on
   an interpolated frame with no positional delta.
+- Every MOB Family Validation column can now be resized manually; the initial
+  widths remain readable when the panel first opens.
 
 ## Focused checks
 
@@ -23,6 +25,7 @@
    confirm that changed content is resolved again rather than remaining stale.
 4. Hold `A` or `D` while panning across a detailed area and check that lateral
    motion remains smooth at both high and temporarily reduced frame rates.
+5. Open MOB Family Validation and drag each column separator in its header.
 
 ## Known boundary
 

@@ -47,6 +47,7 @@
 #include "layout_components/viewport_widget.h"
 #include "ui/landscape_tools.h"
 #include "ui/bodypartedit_form.h"
+#include "ui/validation_panel_layout.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "endurance_ui_scale.h"
@@ -925,6 +926,14 @@ int runHeadlessCommand(QApplication& app)
                     && bodyPartTable->horizontalHeader()->sectionResizeMode(column)
                         == QHeaderView::Interactive;
         }
+        QTreeWidget validationTree;
+        validationTree.setColumnCount(4);
+        ei::configureValidationTreeHeader(validationTree.header());
+        bool validationColumnsResizable = true;
+        for(int column = 0; column < validationTree.columnCount(); ++column)
+            validationColumnsResizable = validationColumnsResizable
+                && validationTree.header()->sectionResizeMode(column)
+                    == QHeaderView::Interactive;
         const bool bodyPartSourceFiltering =
             filterShowsOnly("model option", {"optional_part"})
             && filterShowsOnly("unknown", {"future_part"});
@@ -1327,6 +1336,7 @@ int runHeadlessCommand(QApplication& app)
                 && bodyPartStateFilterAliases
                 && bodyPartStateTextHidden
                 && bodyPartColumnsResizable
+                && validationColumnsResizable
                 && bodyPartSourceFiltering
                 && bodyPartColumnSorting
                 && humanoidHairOptionAvailable
@@ -1406,6 +1416,7 @@ int runHeadlessCommand(QApplication& app)
                << " bodyPartStateFilterAliases=" << bodyPartStateFilterAliases
                << " bodyPartStateTextHidden=" << bodyPartStateTextHidden
                << " bodyPartColumnsResizable=" << bodyPartColumnsResizable
+               << " validationColumnsResizable=" << validationColumnsResizable
                << " bodyPartSourceFiltering=" << bodyPartSourceFiltering
                << " bodyPartColumnSorting=" << bodyPartColumnSorting
                << " humanoidHairOptionAvailable=" << humanoidHairOptionAvailable

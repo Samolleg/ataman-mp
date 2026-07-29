@@ -67,6 +67,7 @@
 #include "landscape.h"
 #include "node.h"
 #include "settings.h"
+#include "ui/validation_panel_layout.h"
 #include "endurance_ui_scale.h"
 #include "select_window.h"
 #include "createobjectform.h"
@@ -513,10 +514,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_validationTree->setColumnCount(4);
     m_validationTree->setHeaderLabels(QStringList() << tr("Severity") << tr("MOB / Type")
                                       << tr("Source path") << tr("Details"));
-    m_validationTree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_validationTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_validationTree->header()->setSectionResizeMode(2, QHeaderView::Stretch);
-    m_validationTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    ei::configureValidationTreeHeader(m_validationTree->header());
     m_validationTree->setUniformRowHeights(true);
     m_validationTree->setContextMenuPolicy(Qt::CustomContextMenu);
     validationLayout->addWidget(m_validationSummary);
