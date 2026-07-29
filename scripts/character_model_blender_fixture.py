@@ -198,6 +198,281 @@ def apply_edit_spec(path: Path) -> dict[str, object]:
                 "bounds_before": bounds_before,
                 "bounds_after": bounds_after,
             })
+        elif kind == "mesh_axis_taper_scale":
+            axis = int(operation.get("axis", 0))
+            direction = float(operation.get("direction", 1.0))
+            factors = operation.get("factors")
+            pivot = operation.get("pivot", [0.0, 0.0, 0.0])
+            preserve_fraction = float(operation.get("preserve_fraction", 0.2))
+            full_fraction = float(operation.get("full_fraction", 0.55))
+            if (axis not in {0, 1, 2} or direction not in {-1.0, 1.0} or
+                    not isinstance(factors, list) or len(factors) != 3 or
+                    not isinstance(pivot, list) or len(pivot) != 3):
+                raise RuntimeError(
+                    "mesh_axis_taper_scale requires axis 0..2, direction +/-1, "
+                    "three factors, and a three-value pivot"
+                )
+            factors = [float(value) for value in factors]
+            pivot = [float(value) for value in pivot]
+            if (not all(math.isfinite(value) and value > 0.0 for value in factors) or
+                    not all(math.isfinite(value) for value in pivot) or
+                    not (0.0 <= preserve_fraction < full_fraction <= 1.0)):
+                raise RuntimeError(
+                    "mesh_axis_taper_scale values must be finite/positive and "
+                    "satisfy 0 <= preserve_fraction < full_fraction <= 1"
+                )
+            directed = [direction * float(vertex.co[axis]) for vertex in obj.data.vertices]
+            low = min(directed)
+            high = max(directed)
+            span = high - low
+            if not math.isfinite(span) or span <= 0.0:
+                raise RuntimeError(f"Degenerate taper axis for {object_name}")
+            anchor = direction * low
+            unchanged_count = 0
+            full_count = 0
+            transition_count = 0
+            for vertex, longitudinal in zip(obj.data.vertices, directed):
+                fraction = (longitudinal - low) / span
+                if fraction <= preserve_fraction:
+                    weight = 0.0
+                    unchanged_count += 1
+                elif fraction >= full_fraction:
+                    weight = 1.0
+                    full_count += 1
+                else:
+                    linear = ((fraction - preserve_fraction) /
+                              (full_fraction - preserve_fraction))
+                    weight = linear * linear * (3.0 - 2.0 * linear)
+                    transition_count += 1
+                effective = [1.0 + (factor - 1.0) * weight for factor in factors]
+                for component in range(3):
+                    component_pivot = anchor if component == axis else pivot[component]
+                    vertex.co[component] = component_pivot + (
+                        vertex.co[component] - component_pivot
+                    ) * effective[component]
+            obj.data.update()
+            result.update({
+                "axis": axis,
+                "direction": direction,
+                "factors": factors,
+                "pivot": pivot,
+                "preserve_fraction": preserve_fraction,
+                "full_fraction": full_fraction,
+                "directed_min": low,
+                "directed_max": high,
+                "axis_anchor": anchor,
+                "vertex_count": len(obj.data.vertices),
+                "unchanged_vertex_count": unchanged_count,
+                "transition_vertex_count": transition_count,
+                "full_scale_vertex_count": full_count,
+            })
+        elif kind == "mesh_axis_profile_scale":
+            axis = int(operation.get("axis", 0))
+            direction = float(operation.get("direction", 1.0))
+            pivot = operation.get("pivot", [0.0, 0.0, 0.0])
+            profile = operation.get("profile")
+            if (axis not in {0, 1, 2} or direction not in {-1.0, 1.0} or
+                    not isinstance(pivot, list) or len(pivot) != 3 or
+                    not isinstance(profile, list) or len(profile) < 2):
+                raise RuntimeError(
+                    "mesh_axis_profile_scale requires axis 0..2, direction +/-1, "
+                    "a three-value pivot, and at least two profile knots"
+                )
+            pivot = [float(value) for value in pivot]
+            knots = []
+            for knot in profile:
+                if (not isinstance(knot, dict) or
+                        not isinstance(knot.get("factors"), list) or
+                        len(knot["factors"]) != 3):
+                    raise RuntimeError("Each profile knot requires fraction and three factors")
+                fraction = float(knot["fraction"])
+                factors = [float(value) for value in knot["factors"]]
+                if (not math.isfinite(fraction) or
+                        not all(math.isfinite(value) and value > 0.0 for value in factors)):
+                    raise RuntimeError("Profile fractions/factors must be finite and factors positive")
+                knots.append((fraction, factors))
+            if (knots[0][0] != 0.0 or knots[-1][0] != 1.0 or
+                    any(left[0] >= right[0] for left, right in zip(knots, knots[1:])) or
+                    not all(math.isfinite(value) for value in pivot)):
+                raise RuntimeError("Profile knots must increase strictly from fraction 0 to 1")
+            directed = [direction * float(vertex.co[axis]) for vertex in obj.data.vertices]
+            low = min(directed)
+            high = max(directed)
+            span = high - low
+            if not math.isfinite(span) or span <= 0.0:
+                raise RuntimeError(f"Degenerate profile axis for {object_name}")
+            knot_counts = [0 for _ in knots]
+            for vertex, longitudinal in zip(obj.data.vertices, directed):
+                fraction = min(1.0, max(0.0, (longitudinal - low) / span))
+                segment = next(
+                    index for index in range(len(knots) - 1)
+                    if fraction <= knots[index + 1][0]
+                )
+                left_fraction, left_factors = knots[segment]
+                right_fraction, right_factors = knots[segment + 1]
+                linear = (fraction - left_fraction) / (right_fraction - left_fraction)
+                weight = linear * linear * (3.0 - 2.0 * linear)
+                factors = [
+                    left + (right - left) * weight
+                    for left, right in zip(left_factors, right_factors)
+                ]
+                for component in range(3):
+                    vertex.co[component] = pivot[component] + (
+                        vertex.co[component] - pivot[component]
+                    ) * factors[component]
+                knot_counts[segment] += 1
+            obj.data.update()
+            result.update({
+                "axis": axis,
+                "direction": direction,
+                "pivot": pivot,
+                "profile": [
+                    {"fraction": fraction, "factors": factors}
+                    for fraction, factors in knots
+                ],
+                "directed_min": low,
+                "directed_max": high,
+                "vertex_count": len(obj.data.vertices),
+                "segment_vertex_counts": knot_counts[:-1],
+            })
+        elif kind == "mesh_bilateral_shoulder_smooth":
+            lateral_axis = int(operation.get("lateral_axis", 0))
+            vertical_axis = int(operation.get("vertical_axis", 2))
+            lateral_start = float(operation.get("lateral_start_fraction", 0.45))
+            vertical_start = float(operation.get("vertical_start_fraction", 0.58))
+            vertical_full = float(operation.get("vertical_full_fraction", 0.80))
+            max_drop_fraction = float(operation.get("max_drop_fraction", 0.04))
+            if (lateral_axis not in {0, 1, 2} or vertical_axis not in {0, 1, 2} or
+                    lateral_axis == vertical_axis or
+                    not (0.0 <= lateral_start < 1.0) or
+                    not (0.0 <= vertical_start < vertical_full <= 1.0) or
+                    not math.isfinite(max_drop_fraction) or max_drop_fraction <= 0.0):
+                raise RuntimeError(
+                    "mesh_bilateral_shoulder_smooth requires distinct valid axes, "
+                    "0 <= lateral_start < 1, 0 <= vertical_start < vertical_full <= 1, "
+                    "and a positive finite max_drop_fraction"
+                )
+            lateral_extent = max(abs(float(vertex.co[lateral_axis])) for vertex in obj.data.vertices)
+            vertical_min = min(float(vertex.co[vertical_axis]) for vertex in obj.data.vertices)
+            vertical_max = max(float(vertex.co[vertical_axis]) for vertex in obj.data.vertices)
+            vertical_span = vertical_max - vertical_min
+            if lateral_extent <= 0.0 or vertical_span <= 0.0:
+                raise RuntimeError(f"Degenerate shoulder bounds for {object_name}")
+            max_drop = vertical_span * max_drop_fraction
+            changed = 0
+            maximum_applied = 0.0
+            for vertex in obj.data.vertices:
+                lateral_fraction = abs(float(vertex.co[lateral_axis])) / lateral_extent
+                vertical_fraction = (
+                    (float(vertex.co[vertical_axis]) - vertical_min) / vertical_span
+                )
+                if lateral_fraction <= lateral_start or vertical_fraction <= vertical_start:
+                    continue
+                lateral_linear = (lateral_fraction - lateral_start) / (1.0 - lateral_start)
+                lateral_weight = lateral_linear * lateral_linear * (3.0 - 2.0 * lateral_linear)
+                if vertical_fraction >= vertical_full:
+                    vertical_weight = 1.0
+                else:
+                    vertical_linear = (
+                        (vertical_fraction - vertical_start) /
+                        (vertical_full - vertical_start)
+                    )
+                    vertical_weight = vertical_linear * vertical_linear * (3.0 - 2.0 * vertical_linear)
+                drop = max_drop * lateral_weight * vertical_weight
+                vertex.co[vertical_axis] -= drop
+                changed += 1
+                maximum_applied = max(maximum_applied, drop)
+            obj.data.update()
+            result.update({
+                "lateral_axis": lateral_axis,
+                "vertical_axis": vertical_axis,
+                "lateral_start_fraction": lateral_start,
+                "vertical_start_fraction": vertical_start,
+                "vertical_full_fraction": vertical_full,
+                "max_drop_fraction": max_drop_fraction,
+                "max_drop": max_drop,
+                "maximum_applied_drop": maximum_applied,
+                "vertex_count": len(obj.data.vertices),
+                "changed_vertex_count": changed,
+            })
+        elif kind == "mesh_proximal_cap_smooth":
+            axis = int(operation.get("axis", 0))
+            direction = float(operation.get("direction", 1.0))
+            vertical_axis = int(operation.get("vertical_axis", 2))
+            preserve = float(operation.get("preserve_fraction", 0.03))
+            full_start = float(operation.get("full_start_fraction", 0.12))
+            full_end = float(operation.get("full_end_fraction", 0.20))
+            end = float(operation.get("end_fraction", 0.42))
+            vertical_start = float(operation.get("vertical_start_fraction", 0.58))
+            vertical_full = float(operation.get("vertical_full_fraction", 0.85))
+            max_drop_fraction = float(operation.get("max_drop_fraction", 0.11))
+            if (axis not in {0, 1, 2} or vertical_axis not in {0, 1, 2} or
+                    axis == vertical_axis or direction not in {-1.0, 1.0} or
+                    not (0.0 <= preserve < full_start <= full_end < end <= 1.0) or
+                    not (0.0 <= vertical_start < vertical_full <= 1.0) or
+                    not math.isfinite(max_drop_fraction) or max_drop_fraction <= 0.0):
+                raise RuntimeError(
+                    "mesh_proximal_cap_smooth requires distinct valid axes, direction +/-1, "
+                    "0 <= preserve < full_start <= full_end < end <= 1, "
+                    "0 <= vertical_start < vertical_full <= 1, and a positive finite drop"
+                )
+            directed = [direction * float(vertex.co[axis]) for vertex in obj.data.vertices]
+            low, high = min(directed), max(directed)
+            span = high - low
+            vertical_min = min(float(vertex.co[vertical_axis]) for vertex in obj.data.vertices)
+            vertical_max = max(float(vertex.co[vertical_axis]) for vertex in obj.data.vertices)
+            vertical_span = vertical_max - vertical_min
+            if span <= 0.0 or vertical_span <= 0.0:
+                raise RuntimeError(f"Degenerate proximal-cap bounds for {object_name}")
+            max_drop = vertical_span * max_drop_fraction
+            changed = 0
+            maximum_applied = 0.0
+            for vertex, value in zip(obj.data.vertices, directed):
+                axial_fraction = (value - low) / span
+                if axial_fraction <= preserve or axial_fraction >= end:
+                    continue
+                if axial_fraction < full_start:
+                    linear = (axial_fraction - preserve) / (full_start - preserve)
+                    axial_weight = linear * linear * (3.0 - 2.0 * linear)
+                elif axial_fraction <= full_end:
+                    axial_weight = 1.0
+                else:
+                    linear = (end - axial_fraction) / (end - full_end)
+                    axial_weight = linear * linear * (3.0 - 2.0 * linear)
+                vertical_fraction = (
+                    (float(vertex.co[vertical_axis]) - vertical_min) / vertical_span
+                )
+                if vertical_fraction <= vertical_start:
+                    continue
+                if vertical_fraction >= vertical_full:
+                    vertical_weight = 1.0
+                else:
+                    linear = (
+                        (vertical_fraction - vertical_start) /
+                        (vertical_full - vertical_start)
+                    )
+                    vertical_weight = linear * linear * (3.0 - 2.0 * linear)
+                drop = max_drop * axial_weight * vertical_weight
+                vertex.co[vertical_axis] -= drop
+                changed += 1
+                maximum_applied = max(maximum_applied, drop)
+            obj.data.update()
+            result.update({
+                "axis": axis,
+                "direction": direction,
+                "vertical_axis": vertical_axis,
+                "preserve_fraction": preserve,
+                "full_start_fraction": full_start,
+                "full_end_fraction": full_end,
+                "end_fraction": end,
+                "vertical_start_fraction": vertical_start,
+                "vertical_full_fraction": vertical_full,
+                "max_drop_fraction": max_drop_fraction,
+                "max_drop": max_drop,
+                "maximum_applied_drop": maximum_applied,
+                "vertex_count": len(obj.data.vertices),
+                "changed_vertex_count": changed,
+            })
         else:
             raise RuntimeError(f"Unsupported edit operation: {kind}")
         applied.append(result)

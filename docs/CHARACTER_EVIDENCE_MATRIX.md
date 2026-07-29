@@ -24,6 +24,7 @@ may record hashes and structural summaries but not redistribute game data.
 | 15 Hz, closing sample, child*parent, root-relative translation | Base/JMV | unit animation tests + ei_figer behavior | synthetic nested ANM | Verified renderer/ei_figer triangulation |
 | Synchronized bone + vertex morph | Base/JMV | animation tests | JMV `unmodg` wing membrane | Verified renderer; runtime control retained |
 | Complexion uses placed geometry values | Base/JMV | unit/provider flow + visual comparison | same prototype, varied MOB constitution | Verified renderer rule; per-family engine comparison incomplete |
+| JMV saved appearance tuple is not direct primary-stat normalization | JMV | read-only decoded `unhufe` save record + renderer FIG8 interpolation + controlled Blender/game silhouette | tested heroine: displayed `25/25/25`, stored `0.20/0.30/0.85` | Verified for this hero record; general character-creation mapping unresolved |
 
 ## Tool and copied-fixture provenance (2026-07-22)
 
@@ -88,6 +89,11 @@ to preserve embedded creature data and diagnose missing/incompatible members.
 - Editing all eight complexion extremes propagates to every character or hand:
   rejected. FIG8 extremes cover interpolation within one FIG member only;
   family (`unhuma`/`unhufe`) and hand (`rh*`/`lh*`) remain separate assets.
+- Mapping displayed `25/25/25` stats directly to synthetic FIG8 coordinates:
+  rejected by the exact saved heroine appearance tuple and the resulting
+  short/thick-leg visual control. Primary stats and stored appearance must be
+  treated as separate inputs until their provider-owned creation mapping is
+  verified.
 
 ## Equipped dagger hand-resolution control (2026-07-22)
 
@@ -105,6 +111,36 @@ to preserve embedded creature data and diagnose missing/incompatible members.
   This confirms the hand-specific member selection. No female runtime claim was
   made; a staged `unhufe` experiment was stopped before installation because it
   was unnecessary to resolve this control.
+
+## `unhufe` hand-size and shoulder controls (2026-07-22)
+
+- The neutral test heroine shown as `25/25/25` stores the exact appearance
+  tuple `0.20, 0.30, 0.85`. Renderer corner order is base, Y, X, XY, followed
+  by the four scaled/Z counterparts; its ordered weights are
+  `[0.084, 0.036, 0.021, 0.009, 0.476, 0.204, 0.119, 0.051]`.
+  Earlier synthetic-stat modeler scenes are negative controls because they
+  made the legs too short and thick. The corrected v5 handoff uses the stored
+  tuple, a provider-resolved idle presentation, and the split unlayered-head /
+  composed-body atlas rule.
+
+- The accepted JMV visual control keeps the first 20% of each base-hand member
+  (`unhufe.mod/lh3` and `rh3`) at its authored wrist scale, blends smoothly,
+  and reaches 115% transverse palm/fist scale at 55% of hand length. The same
+  fixed-topology rule covers all eight FIG8 extremes and both hands.
+- Candidate SHA-256:
+  `2ED0D220404AC046CF722FF1C9A7B7300B2E1563DF72F09070FDA3BCE76C4D19`.
+  Among 10,506 recursive archive members, only the containing `unhufe.mod` and
+  base `lh2/rh2/lh3/rh3` differ from vanilla; the forearms use the separately
+  validated natural profile. Fresh reopen and semantic checks passed for 32
+  meshes. Manual JMV comparison judged the resulting palm/fist size suitable.
+- This is an accepted authoring target for the investigated `unhufe` asset, not
+  evidence that 115% is a general female, family, or complexion rule.
+- Rejected shoulder hypothesis: lowering the outer/top `bd` torso silhouette
+  made the unchanged proximal `lh1/rh1` upper-arm caps stand out more strongly
+  in game. V6 SHA-256
+  `F6ACD1F29D16D43B522CA30E654B4A2F49BEE56A2375B617C372B7BF4B24F27D`
+  is retained only as a negative control. Future shoulder work must begin from
+  the accepted hand build, restore `bd`, and isolate the proximal upper-arm cap.
 
 ## Round-trip plan
 

@@ -241,6 +241,52 @@ source `.blend`; the atlas tool rejects outputs in an input-layer directory.
     exit.
 11. Package only staged deltas, reports, attribution, and rollback instructions.
 
+### Current `unhufe` geometry control
+
+The tested JMV heroine's visible body proportions are not obtained by mapping
+the displayed `25/25/25` primary stats directly onto the FIG8 axes. A read-only
+decode of the exact saved `unhufe` appearance record stores the geometry tuple
+`0.20, 0.30, 0.85`. Use that tuple for the reproducible modeler control unless
+the provider's stat-to-appearance creation routine is separately established.
+Direct-stat handoffs built from synthetic `0.5/0.6/0.7` inputs are rejected:
+they produce the short, thick legs seen in the failed Blender/game comparison.
+
+Consume FIG8 corners in renderer order: base, Y, X, XY, then the four
+corresponding scaled/Z corners. For `X=0.20`, `Y=0.30`, `Z=0.85`, the ordered
+trilinear weights are
+`[0.084, 0.036, 0.021, 0.009, 0.476, 0.204, 0.119, 0.051]`.
+Do not treat add-on `str`/`dex` labels on corners 1 and 2 as authoritative.
+
+The current external-modeler handoff is staged at
+`work/character-blender-pipeline/handoffs/unhufe-neutral25-modeler-handoff-v5`.
+It contains a locked `03_IDLE_PRESENTATION__LOCKED` collection for inspection,
+a hidden `01_MODELER_EDIT__RUNTIME_CONTROL` T-pose collection for editing, and
+a locked source reference. The head uses the unlayered hero skin while the body
+uses the composed character atlas; applying either atlas globally gives a
+visibly wrong face or body. Hair and equipment are intentionally absent.
+
+For the investigated JMV `unhufe` base body, preserve the accepted 115% hand
+profile when testing unrelated arm or shoulder changes: keep the wrist-side 20%
+at authored scale and reach 115% transverse palm/fist scale at 55% of hand
+length on both `lh3` and `rh3`, across all eight extremes. This was accepted by
+manual in-game silhouette comparison and is asset-specific, not a global
+female-character rule.
+
+Do not reuse the rejected torso-shoulder v6 edit. Its `bd` lowering exposed the
+unchanged `lh1/rh1` cap and worsened the shoulder step. Start new shoulder
+fixtures from the accepted v5 archive and modify only a fingerprinted proximal
+upper-arm region while preserving its attachment boundary.
+
+The superseded first-generation modeler handoff at
+`work/character-blender-pipeline/handoffs/unhufe-proportion-modeler-v1` keeps
+all eight 15-part FIG8 source assemblies hidden and selection-locked, while a
+visible `EDIT__*` duplicate set carries the accepted v5 proportions. Its packed
+skin material requires no add-on for ordinary modeling. The return contract
+forbids topology, vertex-order, UV, name, and parent changes; seam vertex groups
+mark the first/last 3% of limb axes. `tools/extract_modeler_deltas.py` verifies
+the embedded source hashes and emits ordered vertex plus object-transform
+deltas for subsequent extreme and armor-transfer fixtures.
+
 ## Automated procedure and report contract
 
 The report script accepts files/directories, recursively hashes them, inventories
