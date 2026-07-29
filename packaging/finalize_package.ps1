@@ -28,6 +28,14 @@ foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object
     Remove-PackageFile $file
 }
 
+# Runtime-generated performance caches belong to the tester's own installation
+# and must never be carried forward from a package used during development.
+foreach ($cacheDirectory in Get-ChildItem -LiteralPath $root -Recurse -Directory -Filter 'cache') {
+    $relative = $cacheDirectory.FullName.Substring($root.Length + 1)
+    Remove-Item -LiteralPath $cacheDirectory.FullName -Recurse -Force
+    $removed.Add($relative + '\')
+}
+
 # A tester folder is a runtime package, never a qmake/Make shadow directory.
 # Remove common compiler intermediates defensively; the strict validator below
 # will still reject anything this list does not recognize.
