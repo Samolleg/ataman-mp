@@ -6949,11 +6949,11 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
     // discover an unbounded synchronous workload.
     QElapsedTimer finalizationTimer;
     finalizationTimer.start();
-    // A single figure/texture upload is not time-sliceable. Do not deliberately
-    // add those stalls to camera frames; units that actually enter view still
-    // take the established forced first-use path. The idle pump can finalize a
-    // bounded batch so zone18 does not require 402 separate timer intervals.
-    const int finalizationLimit = cameraMoving ? 0 : 8;
+    // Continue making visible progress while the user pans. One character per
+    // moving frame bounds the added hitch, while the progress bar makes that
+    // background cost explicit. Pausing entirely made large maps appear stuck
+    // until the camera stopped.
+    const int finalizationLimit = ei::unitVisualFinalizationLimit(cameraMoving);
     int finalized = 0;
     for(const Candidate& candidate : unresolved)
     {

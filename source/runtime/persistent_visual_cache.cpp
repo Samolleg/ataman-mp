@@ -15,6 +15,7 @@
 #include <QMutexLocker>
 #include <QSaveFile>
 #include <QSet>
+#include <QThread>
 #include <algorithm>
 
 namespace {
@@ -35,7 +36,8 @@ QMutex s_pruneMutex;
 QSet<QString> s_preparedDirectories;
 QSet<QString> s_cacheRoots;
 QHash<QString, qint64> s_cacheRootBytes;
-int s_visualCacheLimitMiB = 1024;
+int s_visualCacheLimitMiB = 4096;
+bool s_deprecatedAssemblyCacheChecked = false;
 
 qint64 configuredCacheBudget()
 {
@@ -298,7 +300,42 @@ QString visualCacheDirectory(const QString& category)
 {
     if(!QCoreApplication::instance())
         return QString();
-    return visualCacheDirectoryForApplication(QCoreApplication::applicationDirPath(), category);
+    const QString applicationDirectory = QCoreApplication::applicationDirPath();
+    bool checkDeprecated = false;
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        if(!s_deprecatedAssemblyCacheChecked)
+        {
+            s_deprecatedAssemblyCacheChecked = true;
+            checkDeprecated = true;
+        }
+    }
+    if(checkDeprecated)
+    {
+        // The retired assembly cache may contain thousands of large files.
+        // Deleting it synchronously on the first character finalization would
+        // make the viewport appear frozen. It is derived-only data and no
+        // current reader can open it, so reclaim it on a one-shot background
+        // thread and retry on the next launch if process exit interrupts it.
+        QThread* cleanup = QThread::create([applicationDirectory]() {
+            removeDeprecatedVisualAssemblyCacheForApplication(applicationDirectory);
+        });
+        QObject::connect(cleanup, &QThread::finished,
+                         QCoreApplication::instance(), [cleanup]() {
+            cleanup->deleteLater();
+        });
+        cleanup->start();
+    }
+    return visualCacheDirectoryForApplication(applicationDirectory, category);
+}
+
+bool removeDeprecatedVisualAssemblyCacheForApplication(const QString& applicationDirectory)
+{
+    if(applicationDirectory.isEmpty())
+        return false;
+    QDir obsolete(visualCacheDirectoryForApplication(
+        applicationDirectory, QStringLiteral("character-assemblies")));
+    return !obsolete.exists() || obsolete.removeRecursively();
 }
 
 QString visualCacheKey(const QByteArray& identity)

@@ -3248,6 +3248,15 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
 
 void MainWindow::scheduleMobFamilyValidation(int delayMs)
 {
+    // Workspace visual smoke/sequence modes measure load and visual-cache
+    // behavior. A full runtime-family audit can emit thousands of legacy
+    // findings for large JMV families and dominate the very timings these
+    // non-interactive diagnostics are meant to measure. Interactive loads and
+    // every normal validation trigger remain unchanged.
+    if(qApp && (qApp->property("workspaceLoadSmoke").toBool()
+            || qApp->property("workspaceVisualSmoke").toBool()
+            || qApp->property("workspaceVisualSequence").isValid()))
+        return;
     if(m_validationTimer)
         m_validationTimer->start(qMax(0, delayMs));
 }

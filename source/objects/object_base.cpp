@@ -32,27 +32,29 @@ struct CachedFigureAssembly
     QVector<CPart*> parts;
 };
 
-QCache<QString, CachedFigureAssembly>& transientAssemblyCache()
+enum class EAssemblyCacheClass
 {
-    static QCache<QString, CachedFigureAssembly> cache;
+    GeneralObject,
+    CharacterVisual
+};
+
+QCache<QString, CachedFigureAssembly>& transientAssemblyCache(EAssemblyCacheClass cacheClass)
+{
+    static QCache<QString, CachedFigureAssembly> generalObjects;
+    static QCache<QString, CachedFigureAssembly> characterVisuals;
     static bool initialized = false;
     if(!initialized)
     {
-        // Costs are KiB of retained CPU vertex data. This keeps the cache
-        // useful for dense humanoid maps without allowing old profiles/maps
-        // to retain an unbounded amount of assembly geometry.
-        // Keep the completed geometry working set for several heavy maps in
-        // one editing session. Every scene object receives its own clone, so
-        // cached assemblies can be evicted safely, but a 128 MiB ceiling made
-        // gz18h thrash after visiting only a few other zones.
-        // The measured gz18h -> gz11 -> gz19 -> gz18h sequence exceeded the
-        // former 384 MiB ceiling and converted a warm return into hundreds of
-        // compressed disk assembly reads. Keep the multi-map working set;
-        // QCache still evicts least-recently-used immutable assemblies.
-        cache.setMaxCost(768 * 1024);
+        // Static map geometry is loaded during the foreground MOB pass. Keep
+        // it independent from completed humanoid geometry so thousands of
+        // scenery objects cannot evict a recently resolved character set just
+        // before the user returns to that map.
+        generalObjects.setMaxCost(384 * 1024);
+        characterVisuals.setMaxCost(768 * 1024);
         initialized = true;
     }
-    return cache;
+    return cacheClass == EAssemblyCacheClass::CharacterVisual
+        ? characterVisuals : generalObjects;
 }
 
 QString meshCacheScope(const QString& modelName)
@@ -62,18 +64,6 @@ QString meshCacheScope(const QString& modelName)
         ? dynamic_cast<const COptString*>(settings->opt("resourceProfile")) : nullptr;
     return (profile ? profile->value() : QString()) + '|'
         + configuredResourceFingerprint(settings) + '|' + modelName.toLower();
-}
-
-QHash<QString, int>& assemblyUseCounts()
-{
-    static QHash<QString, int> counts;
-    return counts;
-}
-
-QSet<QString>& persistedAssemblies()
-{
-    static QSet<QString> keys;
-    return keys;
 }
 
 QHash<QString, float>& transientPartUvScaleCache()
@@ -88,24 +78,6 @@ QHash<QString, float>& transientProjectionMinZCache()
     return cache;
 }
 
-QVector<ei::SCachedVisualPart> serializableAssembly(const QVector<CPart*>& parts)
-{
-    QVector<ei::SCachedVisualPart> result;
-    result.reserve(parts.size());
-    for(const CPart* part : parts)
-    {
-        ei::SCachedVisualPart output;
-        output.name = part->name();
-        output.parentName = part->parentName();
-        output.restOffset = part->restOffset();
-        output.textureNumber = part->textureNumber();
-        output.vertices = part->vertData();
-        output.sourceVertexIndices = part->sourceVertexIndices();
-        result.append(output);
-    }
-    return result;
-}
-
 void cloneAssembly(QVector<CPart*>& destination, const QVector<CPart*>& source)
 {
     QElapsedTimer timer;
@@ -118,66 +90,26 @@ void cloneAssembly(QVector<CPart*>& destination, const QVector<CPart*>& source)
 
 void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
                          const QString& modelName, const QStringList& visibleParts,
-                         const QVector3D& complexion, QVector<CPart*>& destination)
+                         const QVector3D& complexion, QVector<CPart*>& destination,
+                         EAssemblyCacheClass cacheClass)
 {
     const QString key = scope + '|' + modelName.toLower() + '|'
         + visibleParts.join(';').toLower() + '|'
         + QString::number(complexion.x(), 'g', 8) + ','
         + QString::number(complexion.y(), 'g', 8) + ','
         + QString::number(complexion.z(), 'g', 8);
-    QCache<QString, CachedFigureAssembly>& cache = transientAssemblyCache();
+    QCache<QString, CachedFigureAssembly>& cache = transientAssemblyCache(cacheClass);
     CachedFigureAssembly* cached = cache.object(key);
-    const int usageCount = ++assemblyUseCounts()[key];
-    const QString diskDirectory = ei::visualCacheDirectory(
-        QStringLiteral("character-assemblies"));
-    const QString diskKey = ei::visualCacheKey(key.toUtf8());
-    if(cached && ei::shouldPersistReusableVisualArtifact(usageCount)
-            && !persistedAssemblies().contains(diskKey))
-    {
-        if(ei::writeCachedFigureAssembly(diskDirectory, diskKey,
-                                         serializableAssembly(cached->parts)))
-            persistedAssemblies().insert(diskKey);
-    }
     if(!cached)
     {
         cached = new CachedFigureAssembly;
-        QVector<ei::SCachedVisualPart> diskParts;
-        QElapsedTimer diskTimer;
-        diskTimer.start();
-        const bool diskHit = ei::readCachedFigureAssembly(diskDirectory, diskKey, &diskParts);
-        s_visualAssemblyTelemetry.diskReadMs += diskTimer.elapsed();
-        if(diskHit)
-        {
-            ++s_visualAssemblyTelemetry.diskHits;
-            persistedAssemblies().insert(diskKey);
-            cached->parts.reserve(diskParts.size());
-            for(const ei::SCachedVisualPart& source : diskParts)
-            {
-                CPart* part = new CPart;
-                part->name() = source.name;
-                part->setParentName(source.parentName);
-                part->setRestOffset(source.restOffset);
-                part->setTextureNumber(source.textureNumber);
-                part->vertData() = source.vertices;
-                part->setSourceVertexIndices(source.sourceVertexIndices);
-                part->update();
-                cached->parts.append(part);
-            }
-        }
-        else
-        {
-            ++s_visualAssemblyTelemetry.builds;
-            QElapsedTimer buildTimer;
-            buildTimer.start();
-            QStringList parts = visibleParts;
-            QVector3D renderComplexion = complexion;
-            figure->getVertexData(cached->parts, renderComplexion, parts);
-            s_visualAssemblyTelemetry.buildMs += buildTimer.elapsed();
-            if(ei::shouldPersistReusableVisualArtifact(usageCount)
-                    && ei::writeCachedFigureAssembly(
-                    diskDirectory, diskKey, serializableAssembly(cached->parts)))
-                persistedAssemblies().insert(diskKey);
-        }
+        ++s_visualAssemblyTelemetry.builds;
+        QElapsedTimer buildTimer;
+        buildTimer.start();
+        QStringList parts = visibleParts;
+        QVector3D renderComplexion = complexion;
+        figure->getVertexData(cached->parts, renderComplexion, parts);
+        s_visualAssemblyTelemetry.buildMs += buildTimer.elapsed();
         quint64 retainedBytes = 0;
         for(CPart* part : cached->parts)
             retainedBytes += quint64(part->vertData().size()) * sizeof(SVertexData);
@@ -834,7 +766,7 @@ void CObjectBase::recalcFigure()
     // assembly, while each object still receives its own lightweight CPart
     // wrappers for visibility, pose and picking state.
     buildCachedAssembly(m_pFigure, cacheScope, m_modelName, m_bodyParts,
-                        m_complection, m_aPart);
+                        m_complection, m_aPart, EAssemblyCacheClass::GeneralObject);
     rebuildTransientAnimationSkeleton();
     recalcMinPos();
 }
@@ -897,7 +829,7 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     const QString cacheScope = meshCacheScope(modelName);
     CPart::setCacheScope(cacheScope);
     buildCachedAssembly(m_pFigure, cacheScope, modelName, visibleParts,
-                        complexion, m_aPart);
+                        complexion, m_aPart, EAssemblyCacheClass::CharacterVisual);
     for(CPart* part : m_aPart)
     {
         const QString partTexture = ei::usesUnlayeredHumanoidTexture(part->name())

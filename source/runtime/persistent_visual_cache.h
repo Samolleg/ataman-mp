@@ -47,6 +47,7 @@ struct SCachedVisualPart
 QString visualCacheDirectoryForApplication(const QString& applicationDirectory,
                                            const QString& category);
 QString visualCacheDirectory(const QString& category);
+bool removeDeprecatedVisualAssemblyCacheForApplication(const QString& applicationDirectory);
 QString visualCacheKey(const QByteArray& identity);
 void setVisualCacheLimitMiB(int limitMiB);
 int visualCacheLimitMiB();
@@ -55,11 +56,6 @@ int visualCacheLimitMiB();
 // the complete character cache tree.
 void recordVisualCacheFileWrite(const QString& directory, qint64 previousBytes,
                                 qint64 currentBytes);
-
-inline bool shouldPersistReusableVisualArtifact(int useCount)
-{
-    return useCount >= 2;
-}
 
 bool readVisualCachePayload(const QString& directory, const QString& key,
                             quint32 payloadSchema, QByteArray* payload);

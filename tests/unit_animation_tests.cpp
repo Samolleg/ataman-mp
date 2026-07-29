@@ -111,7 +111,8 @@ private slots:
     void keepsAppearanceProgressVisibleBetweenWorkerBatches();
     void pumpsIncompleteIdleVisualPreparation();
     void retainsAppearanceBatchOwnershipUntilResultsAreConsumed();
-    void ignoresIdleVisualProgressAndPersistsOnlyReusedArtifacts();
+    void continuesVisualFinalizationWhileCameraMoves();
+    void ignoresIdleVisualProgressBeforeWorkStarts();
     void keepsAppearanceCacheBesideEditor();
     void rebuildsIncompatibleAppearanceCacheAutomatically();
     void cachesParsedAnimationAndRecoversFromCorruption();
@@ -119,6 +120,7 @@ private slots:
     void roundTripsFigureAssemblyAndUnknownPartNames();
     void retainsRecentlyUsedVisualsAcrossMapReplacement();
     void enforcesCombinedPersistentVisualCacheLimit();
+    void removesSlowerDeprecatedAssemblyCache();
     void malformedAndUnknownInputsFailStatic();
 };
 
@@ -178,7 +180,22 @@ void UnitAnimationTests::enforcesCombinedPersistentVisualCacheLimit()
     QVERIFY(ei::writeVisualCachePayload(atlases, QStringLiteral("unlimited"), 77,
                                         noisy + noisy));
     QVERIFY(QFileInfo(QDir(atlases).filePath(QStringLiteral("unlimited.cache"))).exists());
-    ei::setVisualCacheLimitMiB(1024);
+    ei::setVisualCacheLimitMiB(4096);
+}
+
+void UnitAnimationTests::removesSlowerDeprecatedAssemblyCache()
+{
+    QTemporaryDir application;
+    QVERIFY(application.isValid());
+    const QString directory = ei::visualCacheDirectoryForApplication(
+        application.path(), QStringLiteral("character-assemblies"));
+    QVERIFY(QDir().mkpath(directory));
+    QFile stale(QDir(directory).filePath(QStringLiteral("stale.cache")));
+    QVERIFY(stale.open(QIODevice::WriteOnly));
+    QVERIFY(stale.write("obsolete") > 0);
+    stale.close();
+    QVERIFY(ei::removeDeprecatedVisualAssemblyCacheForApplication(application.path()));
+    QVERIFY(!QDir(directory).exists());
 }
 
 void UnitAnimationTests::cachesParsedAnimationAndRecoversFromCorruption()
@@ -274,7 +291,15 @@ void UnitAnimationTests::retainsAppearanceBatchOwnershipUntilResultsAreConsumed(
     QVERIFY(!ei::canStartUnitAppearanceBatch(true, false));
 }
 
-void UnitAnimationTests::ignoresIdleVisualProgressAndPersistsOnlyReusedArtifacts()
+void UnitAnimationTests::continuesVisualFinalizationWhileCameraMoves()
+{
+    // Heavy-map regression: panning previously reduced the finalization limit
+    // to zero, leaving the visible progress job stuck until navigation ended.
+    QCOMPARE(ei::unitVisualFinalizationLimit(true), 1);
+    QCOMPARE(ei::unitVisualFinalizationLimit(false), 8);
+}
+
+void UnitAnimationTests::ignoresIdleVisualProgressBeforeWorkStarts()
 {
     // Exact load regression: 0 == 0 previously logged once per event-pumped
     // frame, producing multi-megabyte logs and turning a ~4 second MOB load
@@ -284,11 +309,6 @@ void UnitAnimationTests::ignoresIdleVisualProgressAndPersistsOnlyReusedArtifacts
     QVERIFY(!ei::shouldLogUnitVisualProgress(402, 31, 0));
     QVERIFY(ei::shouldLogUnitVisualProgress(402, 32, 0));
     QVERIFY(ei::shouldLogUnitVisualProgress(402, 402, 384));
-
-    // Do not fill the portable cache with one-off constitution/part variants.
-    QVERIFY(!ei::shouldPersistReusableVisualArtifact(1));
-    QVERIFY(ei::shouldPersistReusableVisualArtifact(2));
-    QVERIFY(ei::shouldPersistReusableVisualArtifact(20));
 }
 
 void UnitAnimationTests::keepsAppearanceCacheBesideEditor()

@@ -116,8 +116,8 @@ CSettings::CSettings(QWidget *parent) :
                                                 ui->tabGeneral);
     visualCacheLimitLabel->setToolTip(tr(
         "Maximum combined size of persistent character plans, decoded atlases, composites, "
-        "assemblies, and animations beside the editor. Oldest entries are removed first. "
-        "Enter 0 for no limit."));
+        "and animations beside the editor. Oldest entries are removed first. "
+        "The default is 4096 MiB; enter 0 for no limit."));
     QLineEdit* visualCacheLimit = new QLineEdit(ui->tabGeneral);
     visualCacheLimit->setObjectName("visualCacheLimitMiB");
     visualCacheLimit->setValidator(new QIntValidator(0, 1048576, visualCacheLimit));
@@ -145,7 +145,7 @@ CSettings::CSettings(QWidget *parent) :
     const COptInt* initialVisualCacheLimit = dynamic_cast<const COptInt*>(
         opt(eOptSetGeneral, "visualCacheLimitMiB"));
     ei::setVisualCacheLimitMiB(qMax(0, initialVisualCacheLimit
-        ? initialVisualCacheLimit->value() : 1024));
+        ? initialVisualCacheLimit->value() : 4096));
     const COptString* savedProfile = dynamic_cast<const COptString*>(opt(eOptSetResource, "resourceProfile"));
     const QString savedRoot = configuredGameRoot();
     if(savedProfile && !savedProfile->value().isEmpty() && !savedRoot.isEmpty())
@@ -512,7 +512,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("uiScalePercent", 100)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
-    aOpt.append(QSharedPointer<COpt>(new COptInt("visualCacheLimitMiB", 1024)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("visualCacheLimitMiB", 4096)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderFpsCap", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowQuality", 2)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("renderShadowDistance", 320)));
@@ -771,7 +771,7 @@ void CSettings::applyUiOptions()
     const COptInt* visualCacheLimit = dynamic_cast<const COptInt*>(
         opt(eOptSetGeneral, "visualCacheLimitMiB"));
     ei::setVisualCacheLimitMiB(qMax(0, visualCacheLimit
-        ? visualCacheLimit->value() : 1024));
+        ? visualCacheLimit->value() : 4096));
     emit autosaveSettingsApplied(autosaveEnabled && autosaveEnabled->value(),
                                  qBound(1, autosaveInterval ? autosaveInterval->value() : 5, 120));
     emit uiScaleApplied(qBound(75, uiScale ? uiScale->value() : 100, 200));

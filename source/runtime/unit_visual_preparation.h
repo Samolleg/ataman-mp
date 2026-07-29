@@ -43,6 +43,14 @@ inline bool canStartUnitAppearanceBatch(bool batchPending, bool watcherRunning)
     return !batchPending && !watcherRunning;
 }
 
+inline int unitVisualFinalizationLimit(bool cameraMoving)
+{
+    // Do not suspend the visible character-resolution job while the user is
+    // navigating. One finalization per moving frame keeps progress continuous
+    // without applying the larger idle-frame batch to camera interaction.
+    return cameraMoving ? 1 : 8;
+}
+
 }
 
 struct SUnitAppearancePreparationTask
