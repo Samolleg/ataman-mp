@@ -671,12 +671,68 @@ BuiltMap buildExpandedRuntimeProbe(
     if(!portableProfile.normalizeMembership(&portableProfileReport)
        || !portableProfile.validateBinding(
            baseName, portableProfile.atlasPixelSha256, requiredSlots,
-           &portableProfileReport)
-       || !CTerrainAtlasProfileStore::save(
-           portableProfile, portableProfileRoot, &portableProfileReport))
+           &portableProfileReport))
     {
         result.error = QStringLiteral(
             "Could not create the exact semantic profile for the expanded atlas.\n%1")
+            .arg(portableProfileReport.toText());
+        return result;
+    }
+    const STerrainAtlasAnalysis portableAnalysis =
+        portableProfile.approvedAnalysis(&portableProfileReport);
+    if(!portableAnalysis.usable
+       || portableAnalysis.describedSlots != requiredSlots)
+    {
+        result.error = QStringLiteral(
+            "The expanded semantic profile does not cover every physical slot.\n%1")
+            .arg(portableProfileReport.toText());
+        return result;
+    }
+    CMprDocument paintDocument;
+    CTerrainEditModel paintTerrain;
+    CValidationReport paintLoadReport;
+    if(!paintDocument.loadBytes(package.mprBytes, baseName + QStringLiteral(".mpr"),
+                                &paintLoadReport)
+       || !paintTerrain.load(paintDocument, &paintLoadReport))
+    {
+        result.error = QStringLiteral(
+            "The expanded paint-refusal regression map could not be reopened.\n%1")
+            .arg(paintLoadReport.toText());
+        return result;
+    }
+    STerrainTileBrush paintBrush;
+    paintBrush.centerX = qMin(110, paintTerrain.tileCountX() - 1);
+    paintBrush.centerY = qMin(62, paintTerrain.tileCountY() - 1);
+    paintBrush.radius = 0.0f;
+    bool paintAccepted = false;
+    CValidationReport paintReport;
+    for(const STerrainAtlasMaterial& material : portableAnalysis.materials)
+    {
+        if(material.layer != ETerrainAtlasLayer::Land || material.cornerOnly)
+            continue;
+        const STerrainTileCommand command = paintTerrain.makeVirtualMaterialPaint(
+            int(paintBrush.centerX), int(paintBrush.centerY), paintBrush,
+            ETerrainTileLayer::Land, material.id, portableAnalysis.landCatalog,
+            0x13579bdfu, &paintReport);
+        if(paintReport.hasErrors()) break;
+        if(!command.virtualVertices.isEmpty())
+        {
+            paintAccepted = true;
+            break;
+        }
+    }
+    if(!paintAccepted || paintReport.hasErrors())
+    {
+        result.error = QStringLiteral(
+            "Expanded-atlas brush preview was refused at the original failure coordinate.\n%1")
+            .arg(paintReport.toText());
+        return result;
+    }
+    if(!CTerrainAtlasProfileStore::save(
+           portableProfile, portableProfileRoot, &portableProfileReport))
+    {
+        result.error = QStringLiteral(
+            "Could not save the exact semantic profile for the expanded atlas.\n%1")
             .arg(portableProfileReport.toText());
         return result;
     }
