@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory = $true)][string]$FixtureRoot,
     [string]$QtBin = "",
     [ValidateNotNullOrEmpty()][int[]]$ProbePages = @(16, 32, 64, 128, 256),
+    [ValidateSet('hd','512px')][string]$ProbeVariant = 'hd',
     [int]$DwellMilliseconds = 20000,
     [int]$ProbeTimeoutSeconds = 120,
     [bool]$ForceDrawall = $true
@@ -13,8 +14,9 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot 'expanded_atlas_runtime_evidence.ps1')
 foreach ($pages in $ProbePages) {
-    if ($pages -notin @(16, 32, 64, 128, 256)) {
-        throw "ProbePages accepts only the generated Zone18 page counts: 16, 32, 64, 128, 256."
+    $accepted = if ($ProbeVariant -eq '512px') { @(128, 256) } else { @(16, 32, 64, 128, 256) }
+    if ($pages -notin $accepted) {
+        throw "ProbePages does not accept $pages for variant '$ProbeVariant' (allowed: $($accepted -join ', '))."
     }
 }
 $testExecutablePath = (Resolve-Path -LiteralPath $TestExecutable).Path
@@ -22,7 +24,8 @@ $gameRootPath = (Resolve-Path -LiteralPath $GameRoot).Path
 $modRootPath = (Resolve-Path -LiteralPath $ModRoot).Path
 $fixtureRootPath = (Resolve-Path -LiteralPath $FixtureRoot).Path
 $evidenceRoot = Join-Path (Split-Path -Parent $testExecutablePath) `
-    ("expanded-atlas-zone18-stress-{0}" -f [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
+    ("expanded-atlas-zone18-stress-{0}-{1}" -f $ProbeVariant,
+        [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Path $evidenceRoot | Out-Null
 
 if ($QtBin) {
@@ -129,6 +132,12 @@ function Invoke-AtlasProbe([int]$Pages) {
     $slots = [int]$manifest.active_slots
     if ([int]$manifest.texture_pages -ne $Pages -or $slots -ne $Pages * 64 -or
         [int]$manifest.highest_referenced_page -ne $Pages - 1 -or
+        [string]$manifest.probe_variant -ne $ProbeVariant -or
+        ($ProbeVariant -eq '512px' -and
+            ([int]$manifest.page_width -ne 512 -or
+             [int]$manifest.page_height -ne 512 -or
+             -not [bool]$manifest.test_only_resolution_probe -or
+             [bool]$manifest.silent_production_resampling)) -or
         $manifest.workload -ne 'installed-zone18-mpr-mob-with-drawall' -or
         ($ForceDrawall -and -not [bool]$manifest.drawall_required)) {
         throw "Fixture $Pages does not satisfy the Zone18 expanded-atlas stress contract."
@@ -235,6 +244,8 @@ function Invoke-AtlasProbe([int]$Pages) {
     $passed = Test-ExpandedAtlasProbePassed -Classification $classification
     return [pscustomobject]@{
         pages=$Pages; slots=$slots; passed=$passed; classification=$classification
+        probe_variant=$ProbeVariant; page_width=[int]$manifest.page_width
+        page_height=[int]$manifest.page_height
         timed_out=$timedOut; exit_code=$exitCode; report=$report; memory=$memory
         proxy_log_delta=$proxy; memory_data=$memoryObject
         authoritative_evidence=[bool]$authoritativeEvidence
@@ -268,6 +279,8 @@ function Write-CampaignSummary($Rows) {
     foreach ($row in $Rows) {
         $item = [ordered]@{
             pages=$row.pages; slots=$row.slots; passed=$row.passed
+            probe_variant=$row.probe_variant; page_width=$row.page_width
+            page_height=$row.page_height
             classification=$row.classification; timed_out=$row.timed_out
             exit_code=$row.exit_code; report=$row.report; memory=$row.memory
             proxy_log_delta=$row.proxy_log_delta
@@ -307,6 +320,7 @@ function Write-CampaignSummary($Rows) {
     foreach ($row in @($script:AllProbeAttempts)) {
         $attempts += [ordered]@{
             pages=$row.pages; slots=$row.slots; passed=$row.passed
+            probe_variant=$row.probe_variant
             classification=$row.classification; timed_out=$row.timed_out
             exit_code=$row.exit_code; report=$row.report; memory=$row.memory
             proxy_log_delta=$row.proxy_log_delta
@@ -320,8 +334,14 @@ function Write-CampaignSummary($Rows) {
         }
     }
     $summary = [ordered]@{
-        schema='ei-zone18-expanded-atlas-stress-v2'
+        schema='ei-zone18-expanded-atlas-stress-v3'
         captured_utc=[DateTime]::UtcNow.ToString('o')
+        probe_variant=$ProbeVariant
+        resolution_policy=if ($ProbeVariant -eq '512px') {
+            'controlled test-only stock Zone18 per-tile downsample to 64px; 512px MMP pages'
+        } else {
+            'authored HD Zone18 MMP pages'
+        }
         workload=if ($ForceDrawall) {
             'run-owned Zone18 MPR+MOB; drawall 1; installed JMV atlas imagery'
         } else {
@@ -344,7 +364,7 @@ function Write-CampaignSummary($Rows) {
 $rows = @()
 $script:AllProbeAttempts = @()
 foreach ($pages in $ProbePages) {
-    Write-Host "Starting Zone18 atlas stress: $($pages * 64) slots / $pages pages"
+    Write-Host "Starting Zone18 atlas stress: variant=$ProbeVariant $($pages * 64) slots / $pages pages"
     $row = $null
     for ($attempt = 1; $attempt -le 2; ++$attempt) {
         $script:CurrentProbeAttempt = $attempt

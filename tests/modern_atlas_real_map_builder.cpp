@@ -509,7 +509,7 @@ BuiltMap buildExpandedRuntimeProbe(
     const QVector<qint32>& materialIds,
     const QMap<qint32, QImage>& externalSources,
     const Atlas& sourceAtlas, const QString& outputDirectory,
-    const QString& portableProfileRoot)
+    const QString& portableProfileRoot, int targetPageSize = 0)
 {
     Q_UNUSED(materialIds);
     Q_UNUSED(externalSources);
@@ -546,18 +546,27 @@ BuiltMap buildExpandedRuntimeProbe(
     best.capacityLimit = requiredSlots;
     best.requiredSlots = requiredSlots;
     best.textureCount = targetPages;
-    const int tileSize = sourceAtlas.tiles.front().width();
-    if(tileSize <= 0 || sourceAtlas.tiles.front().height() != tileSize)
+    const int sourceTileSize = sourceAtlas.tiles.front().width();
+    if(sourceTileSize <= 0
+       || sourceAtlas.tiles.front().height() != sourceTileSize
+       || (targetPageSize > 0 && (targetPageSize % 8 != 0
+                                 || targetPageSize > sourceTileSize * 8)))
     {
         result.error = QStringLiteral("The source atlas tile dimensions are invalid.");
         return result;
     }
+    const int pageSize = targetPageSize > 0
+        ? targetPageSize : sourceTileSize * 8;
+    const int tileSize = pageSize / 8;
+    const bool resampled = tileSize != sourceTileSize;
     QCryptographicHash stable(QCryptographicHash::Sha256);
     QCryptographicHash semanticPixels(QCryptographicHash::Sha256);
     semanticPixels.addData(QByteArray::number(requiredSlots));
     semanticPixels.addData("\n", 1);
     stable.addData(nameSpace.toLower().toUtf8());
     stable.addData(QByteArray::number(targetPages));
+    stable.addData("\npage-size:", 11);
+    stable.addData(QByteArray::number(pageSize));
     best.tileTypes.reserve(requiredSlots);
     for(int slot = 0; slot < requiredSlots; ++slot)
         best.tileTypes.append(document.mapInfo().tileTypes.isEmpty() ? 0
@@ -574,6 +583,10 @@ BuiltMap buildExpandedRuntimeProbe(
             const int slot = page * 64 + local;
             QImage pixels = sourceAtlas.tiles.at(slot % sourceAtlas.tiles.size())
                 .convertToFormat(QImage::Format_RGBA8888);
+            if(resampled)
+                pixels = pixels.scaled(tileSize, tileSize,
+                    Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                    .convertToFormat(QImage::Format_RGBA8888);
             semanticPixels.addData(QByteArray::number(pixels.width()));
             semanticPixels.addData("x", 1);
             semanticPixels.addData(QByteArray::number(pixels.height()));
@@ -607,11 +620,27 @@ BuiltMap buildExpandedRuntimeProbe(
                 "The source atlas has no authored MMP page payloads.");
             return result;
         }
+        const QImage composed = CTerrainVirtualAtlas::composePage(
+            pageTiles, 0, tileSize);
         if(best.pages.isEmpty())
-            best.pages.append(CTerrainVirtualAtlas::composePage(
-                pageTiles, 0, tileSize));
-        best.pageMmpPayloads.append(sourceAtlas.pageMmpPayloads.at(
-            page % sourceAtlas.pageMmpPayloads.size()));
+            best.pages.append(composed);
+        if(resampled)
+        {
+            QString diagnostic;
+            const QByteArray payload = ei::encodeMmpDxt1(
+                composed, true, &diagnostic);
+            if(payload.isEmpty())
+            {
+                result.error = QStringLiteral(
+                    "Could not encode resampled runtime page %1: %2")
+                    .arg(page).arg(diagnostic);
+                return result;
+            }
+            best.pageMmpPayloads.append(payload);
+        }
+        else
+            best.pageMmpPayloads.append(sourceAtlas.pageMmpPayloads.at(
+                page % sourceAtlas.pageMmpPayloads.size()));
     }
     best.packedCells.reserve(cellCount);
     for(int cell = 0; cell < cellCount; ++cell)
@@ -627,9 +656,13 @@ BuiltMap buildExpandedRuntimeProbe(
         stable.addData(bytes, 2);
     }
     best.stableSha256 = stable.result().toHex();
-    best.isolatedNamespace = QStringLiteral("%1_runtime_%2p_%3")
-        .arg(nameSpace.toLower()).arg(targetPages)
-        .arg(QString::fromLatin1(best.stableSha256.left(12)));
+    best.isolatedNamespace = resampled
+        ? QStringLiteral("%1_runtime_%2p_%3px_%4")
+            .arg(nameSpace.toLower()).arg(targetPages).arg(pageSize)
+            .arg(QString::fromLatin1(best.stableSha256.left(12)))
+        : QStringLiteral("%1_runtime_%2p_%3")
+            .arg(nameSpace.toLower()).arg(targetPages)
+            .arg(QString::fromLatin1(best.stableSha256.left(12)));
     best.success = true;
     CValidationReport packageReport;
     const STerrainPortableAtlasPackage package =
@@ -763,24 +796,35 @@ BuiltMap buildExpandedRuntimeProbe(
     manifest.insert("isolated_namespace", baseName);
     manifest.insert("mpr_file", baseName + QStringLiteral(".mpr"));
     manifest.insert("atlas_file", baseName + QStringLiteral("-atlas.res"));
-    manifest.insert("semantic_profile_file", QDir(outputDirectory).relativeFilePath(
-        CTerrainAtlasProfileStore::profilePath(baseName, portableProfileRoot)));
+    manifest.insert("semantic_profile_file",
+        QDir(QFileInfo(outputDirectory).absoluteFilePath()).relativeFilePath(
+            QFileInfo(CTerrainAtlasProfileStore::profilePath(
+                baseName, portableProfileRoot)).absoluteFilePath()));
     manifest.insert("texture_pages", best.textureCount);
     manifest.insert("active_slots", best.requiredSlots);
     const int atlasColumns = targetPages <= 8 ? targetPages
         : qMax(1, int(std::ceil(std::sqrt(double(targetPages)))));
     const int atlasRows = (targetPages + atlasColumns - 1) / atlasColumns;
-    const int pageSize = tileSize * 8;
     manifest.insert("page_width", pageSize);
     manifest.insert("page_height", pageSize);
+    manifest.insert("source_page_width", sourceTileSize * 8);
+    manifest.insert("source_page_height", sourceTileSize * 8);
     manifest.insert("atlas_columns", atlasColumns);
     manifest.insert("atlas_rows", atlasRows);
     manifest.insert("combined_width", pageSize * atlasColumns);
     manifest.insert("combined_height", pageSize * atlasRows);
     manifest.insert("combined_rgba_bytes", double(qint64(pageSize)
         * atlasColumns * qint64(pageSize) * atlasRows * 4));
-    manifest.insert("pixel_policy", "exact-stock-zone18-repeat");
-    manifest.insert("page_payload_policy", "byte-identical-stock-mmp-repeat");
+    manifest.insert("probe_variant", resampled ? "512px" : "hd");
+    manifest.insert("pixel_policy", resampled
+        ? "stock-zone18-per-tile-resample" : "exact-stock-zone18-repeat");
+    manifest.insert("page_payload_policy", resampled
+        ? "deterministic-dxt1-with-authored-mips"
+        : "byte-identical-stock-mmp-repeat");
+    manifest.insert("resampling_policy", resampled
+        ? "qt-smooth-per-tile-128-to-64-v1" : "none");
+    manifest.insert("test_only_resolution_probe", resampled);
+    manifest.insert("silent_production_resampling", false);
     manifest.insert("source_cycle_slots", sourceAtlas.tiles.size());
     manifest.insert("highest_referenced_slot", highestReferencedSlot);
     manifest.insert("highest_referenced_page", targetPages - 1);
@@ -1013,7 +1057,7 @@ int main(int argc, char** argv)
     QTextStream err(stderr);
     if(application.arguments().size() < 3 || application.arguments().size() > 4)
     {
-        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only|--painted-only]\n";
+        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only|--runtime-lowres-only|--painted-only]\n";
         return 2;
     }
     const QString outputRoot = QDir::cleanPath(application.arguments().at(1));
@@ -1029,6 +1073,8 @@ int main(int argc, char** argv)
         QStringLiteral("--runtime-only"));
     const bool paintedOnly = application.arguments().contains(
         QStringLiteral("--painted-only"));
+    const bool runtimeLowresOnly = application.arguments().contains(
+        QStringLiteral("--runtime-lowres-only"));
     if(paintedOnly)
     {
         const QString sourceMpr = QDir(jmvRoot).filePath("Maps/zone18.mpr");
@@ -1048,6 +1094,99 @@ int main(int argc, char** argv)
             return 11;
         }
         out << QJsonDocument(painted.manifest).toJson(QJsonDocument::Indented);
+        return 0;
+    }
+    if(runtimeLowresOnly)
+    {
+        const QString sourceMpr = QDir(jmvRoot).filePath("Maps/zone18.mpr");
+        const QString sourceMob = QDir(jmvRoot).filePath("Maps/zone18.mob");
+        Atlas zone18 = assets.atlas(QStringLiteral("Zone18"), 512, &error);
+        if(!zone18.valid || !QFileInfo::exists(sourceMpr)
+           || !QFileInfo::exists(sourceMob))
+        {
+            err << "Zone18 low-resolution runtime source unavailable: "
+                << error << '\n';
+            return 4;
+        }
+        QJsonArray probes;
+        const QString collectionsDirectory = QDir(outputRoot).filePath(
+            QStringLiteral("collections"));
+        for(int pages : {128, 256})
+        {
+            const QString directory = QDir(outputRoot).filePath(
+                QStringLiteral("runtime-atlas-probes-512px/page-%1")
+                    .arg(pages, 3, 10, QLatin1Char('0')));
+            const BuiltMap probe = buildExpandedRuntimeProbe(
+                sourceMpr, sourceMob, QStringLiteral("Zone18"), pages,
+                {}, {}, zone18, directory, outputRoot, 512);
+            if(!probe.success)
+            {
+                err << "runtime-lowres-probe-" << pages << ": "
+                    << probe.error << '\n';
+                return 8;
+            }
+            if(probe.manifest.value("combined_width").toInt() > 8192
+               || probe.manifest.value("combined_height").toInt() > 8192)
+            {
+                err << "runtime-lowres-probe-" << pages
+                    << ": combined texture exceeds 8192x8192\n";
+                return 8;
+            }
+            const QString collectionName = QStringLiteral(
+                "zone18-expanded-%1-slots-512px-pages.collection")
+                .arg(pages * 64);
+            const QString collectionPath = QDir(collectionsDirectory).filePath(
+                collectionName);
+            SEnduranceCollection collection;
+            collection.name = QStringLiteral(
+                "Zone18 expanded atlas - %1 slots - 512px test pages")
+                .arg(pages * 64);
+            collection.profileId = QStringLiteral("jamais-vu");
+            const QString generatedMprPath = QFileInfo(
+                QDir(directory).filePath(
+                    probe.manifest.value("mpr_file").toString()))
+                .absoluteFilePath();
+            collection.mprReference = QDir(
+                QFileInfo(collectionPath).absolutePath())
+                .relativeFilePath(generatedMprPath);
+            collection.mobReferences.append(QStringLiteral("zone18.mob"));
+            if(!CCollectionDocument::save(collectionPath, collection, &error))
+            {
+                err << "runtime-lowres-probe-" << pages
+                    << " collection: " << error << '\n';
+                return 9;
+            }
+            QJsonObject item = probe.manifest;
+            item.insert("collection_file",
+                QStringLiteral("collections/") + collectionName);
+            item.insert("collection_mob", "zone18.mob");
+            probes.append(item);
+            out << "runtime-lowres-probe-" << pages << ": slots="
+                << probe.manifest.value("active_slots").toInt()
+                << " combined="
+                << probe.manifest.value("combined_width").toInt() << 'x'
+                << probe.manifest.value("combined_height").toInt() << '\n';
+            out.flush();
+        }
+        QJsonObject root;
+        root.insert("schema", "ei-zone18-expanded-atlas-lowres-fixtures-v1");
+        root.insert("asset_policy",
+            "Installed JMV Zone18 imagery resampled for controlled runtime testing; live files unmodified.");
+        root.insert("production_policy",
+            "Test-only. The editor must never silently downsample a user atlas.");
+        root.insert("runtime_atlas_probes_512px", probes);
+        root.insert("source_mpr_sha256",
+            QString::fromLatin1(fileSha256(sourceMpr)));
+        root.insert("source_mob_sha256",
+            QString::fromLatin1(fileSha256(sourceMob)));
+        QDir().mkpath(outputRoot);
+        if(!writeBytes(QDir(outputRoot).filePath("manifest.json"),
+                       QJsonDocument(root).toJson(QJsonDocument::Indented),
+                       &error))
+        {
+            err << error << '\n';
+            return 10;
+        }
         return 0;
     }
     if(runtimeOnly)
