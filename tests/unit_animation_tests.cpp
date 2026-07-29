@@ -109,6 +109,7 @@ private slots:
     void keepsAppearanceProgressVisibleBetweenWorkerBatches();
     void pumpsIncompleteIdleVisualPreparation();
     void retainsAppearanceBatchOwnershipUntilResultsAreConsumed();
+    void ignoresIdleVisualProgressAndPersistsOnlyReusedArtifacts();
     void keepsAppearanceCacheBesideEditor();
     void rebuildsIncompatibleAppearanceCacheAutomatically();
     void cachesParsedAnimationAndRecoversFromCorruption();
@@ -207,6 +208,23 @@ void UnitAnimationTests::retainsAppearanceBatchOwnershipUntilResultsAreConsumed(
     // Exact race: the future finished, but the queued result consumer has not
     // run. isRunning() alone previously allowed the future to be replaced.
     QVERIFY(!ei::canStartUnitAppearanceBatch(true, false));
+}
+
+void UnitAnimationTests::ignoresIdleVisualProgressAndPersistsOnlyReusedArtifacts()
+{
+    // Exact load regression: 0 == 0 previously logged once per event-pumped
+    // frame, producing multi-megabyte logs and turning a ~4 second MOB load
+    // into a 30-40 second load.
+    QVERIFY(!ei::shouldLogUnitVisualProgress(0, 0, -1));
+    QVERIFY(ei::shouldLogUnitVisualProgress(402, 0, -1));
+    QVERIFY(!ei::shouldLogUnitVisualProgress(402, 31, 0));
+    QVERIFY(ei::shouldLogUnitVisualProgress(402, 32, 0));
+    QVERIFY(ei::shouldLogUnitVisualProgress(402, 402, 384));
+
+    // Do not fill the portable cache with one-off constitution/part variants.
+    QVERIFY(!ei::shouldPersistReusableVisualArtifact(1));
+    QVERIFY(ei::shouldPersistReusableVisualArtifact(2));
+    QVERIFY(ei::shouldPersistReusableVisualArtifact(20));
 }
 
 void UnitAnimationTests::keepsAppearanceCacheBesideEditor()

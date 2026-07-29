@@ -6,24 +6,80 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QDateTime>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QSaveFile>
+#include <QSet>
 
 namespace {
 
 const quint32 kContainerMagic = 0x43495645; // EIVC
-const int kContainerSchema = 1;
+const int kContainerSchema = 2;
 const quint32 kImageSchema = 1;
 const quint32 kAssemblySchema = 1;
 const int kMaximumPayloadBytes = 512 * 1024 * 1024;
 const int kMaximumParts = 4096;
 const int kMaximumVertices = 16 * 1024 * 1024;
+QMutex s_cacheMutex;
+QSet<QString> s_preparedDirectories;
+QHash<QString, qint64> s_directoryBytes;
+
+qint64 directoryBudget(const QString& path)
+{
+    const QString category = QFileInfo(path).fileName().toLower();
+    if(category == QStringLiteral("character-atlases"))
+        return 96ll * 1024ll * 1024ll;
+    if(category == QStringLiteral("character-assemblies"))
+        return 96ll * 1024ll * 1024ll;
+    if(category == QStringLiteral("character-animations"))
+        return 16ll * 1024ll * 1024ll;
+    return 64ll * 1024ll * 1024ll;
+}
+
+qint64 cacheEntryBytes(const QDir& directory)
+{
+    qint64 total = 0;
+    for(const QFileInfo& entry : directory.entryInfoList(
+            QStringList() << QStringLiteral("*.cache"), QDir::Files))
+        total += entry.size();
+    return total;
+}
+
+void pruneDirectory(const QString& path)
+{
+    QDir directory(path);
+    QFileInfoList entries = directory.entryInfoList(
+        QStringList() << QStringLiteral("*.cache"), QDir::Files, QDir::Time | QDir::Reversed);
+    qint64 total = 0;
+    for(const QFileInfo& entry : entries)
+        total += entry.size();
+    const qint64 budget = directoryBudget(path);
+    for(const QFileInfo& entry : entries)
+    {
+        if(total <= budget)
+            break;
+        const qint64 size = entry.size();
+        if(QFile::remove(entry.absoluteFilePath()))
+            total -= size;
+    }
+    QMutexLocker locker(&s_cacheMutex);
+    s_directoryBytes.insert(QDir::cleanPath(path).toCaseFolded(), total);
+}
 
 bool prepareDirectory(const QString& path)
 {
     if(path.isEmpty())
         return false;
+    const QString normalized = QDir::cleanPath(path).toCaseFolded();
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        if(s_preparedDirectories.contains(normalized))
+            return true;
+    }
     QDir directory(path);
     const QString manifestPath = directory.filePath(QStringLiteral("cache-manifest.json"));
     bool compatible = false;
@@ -49,6 +105,12 @@ bool prepareDirectory(const QString& path)
         if(!output.commit())
             return false;
     }
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        s_preparedDirectories.insert(normalized);
+        s_directoryBytes.insert(normalized, cacheEntryBytes(QDir(path)));
+    }
+    pruneDirectory(path);
     return true;
 }
 
@@ -127,6 +189,10 @@ bool readVisualCachePayload(const QString& directory, const QString& key,
         return false;
     }
     *payload = unpacked;
+    input.close();
+    QFile touch(path);
+    if(touch.open(QIODevice::ReadOnly))
+        touch.setFileTime(QDateTime::currentDateTimeUtc(), QFileDevice::FileModificationTime);
     return true;
 }
 
@@ -135,7 +201,9 @@ bool writeVisualCachePayload(const QString& directory, const QString& key,
 {
     if(payload.size() > kMaximumPayloadBytes || !prepareDirectory(directory))
         return false;
-    QSaveFile output(entryPath(directory, key));
+    const QString path = entryPath(directory, key);
+    const qint64 previousSize = QFileInfo(path).size();
+    QSaveFile output(path);
     if(!output.open(QIODevice::WriteOnly))
         return false;
     QDataStream stream(&output);
@@ -143,7 +211,20 @@ bool writeVisualCachePayload(const QString& directory, const QString& key,
     stream << kContainerMagic << payloadSchema << quint32(payload.size())
            << QCryptographicHash::hash(payload, QCryptographicHash::Sha256)
            << qCompress(payload, 1);
-    return stream.status() == QDataStream::Ok && output.commit();
+    if(stream.status() != QDataStream::Ok || !output.commit())
+        return false;
+    const QString normalized = QDir::cleanPath(directory).toCaseFolded();
+    bool overBudget = false;
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        const qint64 total = qMax<qint64>(0, s_directoryBytes.value(normalized)
+            - previousSize + QFileInfo(path).size());
+        s_directoryBytes.insert(normalized, total);
+        overBudget = total > directoryBudget(directory);
+    }
+    if(overBudget)
+        pruneDirectory(directory);
+    return true;
 }
 
 bool readCachedVisualImage(const QString& directory, const QString& key, QImage* image)

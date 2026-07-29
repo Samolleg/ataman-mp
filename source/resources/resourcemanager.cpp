@@ -1040,6 +1040,14 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
         + ei::textureCacheKey(name, modelName);
     if(m_aTextureImages.contains(key))
         return m_aTextureImages.value(key);
+    const QString cacheDirectory = ei::visualCacheDirectory(QStringLiteral("character-atlases"));
+    const QString cacheKey = ei::visualCacheKey(key.toUtf8());
+    QImage cached;
+    if(ei::readCachedVisualImage(cacheDirectory, cacheKey, &cached))
+    {
+        m_aTextureImages.insert(key, cached);
+        return cached;
+    }
     for(const QString& candidate : ei::textureResourceCandidates(name, modelName))
     {
         QByteArray data;
@@ -1064,6 +1072,11 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
             return QImage();
         }
         m_aTextureImages.insert(key, image);
+        // Persist the decoded source layer once. Final body atlases are still
+        // composed and shared in memory by their complete ordered layer list;
+        // caching those composites duplicated the same base pixels across
+        // every armor combination and consumed hundreds of megabytes.
+        ei::writeCachedVisualImage(cacheDirectory, cacheKey, image);
         return image;
     }
     ei::log(eLogWarning, QString("Missing body-atlas layer: %1 model:%2").arg(name, modelName));
@@ -1080,17 +1093,6 @@ QImage CTextureList::layeredTextureImage(const QStringList& layerNames,
                                          const QString& modelName,
                                          QString* diagnostic)
 {
-    const QByteArray identity = (configuredResourceFingerprint(m_pSettings) + '|'
-        + modelName.toLower() + '|' + layerNames.join(';').toLower()).toUtf8();
-    const QString cacheDirectory = ei::visualCacheDirectory(QStringLiteral("character-atlases"));
-    const QString cacheKey = ei::visualCacheKey(identity);
-    QImage cached;
-    if(ei::readCachedVisualImage(cacheDirectory, cacheKey, &cached))
-    {
-        if(diagnostic)
-            diagnostic->clear();
-        return cached;
-    }
     QVector<QImage> layers;
     for(const QString& name : layerNames)
     {
@@ -1118,7 +1120,6 @@ QImage CTextureList::layeredTextureImage(const QStringList& layerNames,
     }
     if(diagnostic)
         diagnostic->clear();
-    ei::writeCachedVisualImage(cacheDirectory, cacheKey, composite);
     return composite;
 }
 

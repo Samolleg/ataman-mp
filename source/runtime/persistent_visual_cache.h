@@ -26,6 +26,11 @@ QString visualCacheDirectoryForApplication(const QString& applicationDirectory,
 QString visualCacheDirectory(const QString& category);
 QString visualCacheKey(const QByteArray& identity);
 
+inline bool shouldPersistReusableVisualArtifact(int useCount)
+{
+    return useCount >= 2;
+}
+
 bool readVisualCachePayload(const QString& directory, const QString& key,
                             quint32 payloadSchema, QByteArray* payload);
 bool writeVisualCachePayload(const QString& directory, const QString& key,

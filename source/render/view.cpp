@@ -6863,9 +6863,9 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
 
     m_unitAppearanceProgressCompleted = ei::completedUnitVisualCount(
         m_unitAppearanceProgressTotal, unresolved.size());
-    if(m_unitAppearanceProgressCompleted == m_unitAppearanceProgressTotal
-            || m_unitAppearanceLastLoggedCompleted < 0
-            || m_unitAppearanceProgressCompleted - m_unitAppearanceLastLoggedCompleted >= 32)
+    if(ei::shouldLogUnitVisualProgress(m_unitAppearanceProgressTotal,
+                                      m_unitAppearanceProgressCompleted,
+                                      m_unitAppearanceLastLoggedCompleted))
     {
         ei::log(eLogInfo, QString("Full character visual progress completed:%1 total:%2 "
                                  "batchPending:%3 watcherRunning:%4 cacheHits:%5")

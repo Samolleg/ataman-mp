@@ -25,6 +25,17 @@ inline bool shouldPumpUnitVisualPreparation(bool pending, int total, int complet
     return pending && total > 0 && completed < total;
 }
 
+inline bool shouldLogUnitVisualProgress(int total, int completed, int lastLoggedCompleted)
+{
+    // A completed 0/0 job is an idle state, not progress. Treating it as
+    // completed caused a synchronous workflow-log write on every viewport
+    // frame and every event-pump iteration during MOB loading.
+    return total > 0
+        && (completed == total
+            || lastLoggedCompleted < 0
+            || completed - lastLoggedCompleted >= 32);
+}
+
 inline bool canStartUnitAppearanceBatch(bool batchPending, bool watcherRunning)
 {
     // QFutureWatcher::isRunning() can turn false before its queued finished

@@ -1,7 +1,8 @@
 #include "objects\object_base.h"
 #include <QJsonArray>
 #include <QCache>
-#include <QFileInfo>
+#include <QHash>
+#include <QSet>
 #include <QString>
 #include "mob\mob.h"
 #include "landscape.h"
@@ -52,6 +53,36 @@ QString meshCacheScope(const QString& modelName)
         + configuredResourceFingerprint(settings) + '|' + modelName.toLower();
 }
 
+QHash<QString, int>& assemblyUseCounts()
+{
+    static QHash<QString, int> counts;
+    return counts;
+}
+
+QSet<QString>& persistedAssemblies()
+{
+    static QSet<QString> keys;
+    return keys;
+}
+
+QVector<ei::SCachedVisualPart> serializableAssembly(const QVector<CPart*>& parts)
+{
+    QVector<ei::SCachedVisualPart> result;
+    result.reserve(parts.size());
+    for(const CPart* part : parts)
+    {
+        ei::SCachedVisualPart output;
+        output.name = part->name();
+        output.parentName = part->parentName();
+        output.restOffset = part->restOffset();
+        output.textureNumber = part->textureNumber();
+        output.vertices = part->vertData();
+        output.sourceVertexIndices = part->sourceVertexIndices();
+        result.append(output);
+    }
+    return result;
+}
+
 void cloneAssembly(QVector<CPart*>& destination, const QVector<CPart*>& source)
 {
     destination.reserve(source.size());
@@ -70,15 +101,24 @@ void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
         + QString::number(complexion.z(), 'g', 8);
     QCache<QString, CachedFigureAssembly>& cache = transientAssemblyCache();
     CachedFigureAssembly* cached = cache.object(key);
+    const int usageCount = ++assemblyUseCounts()[key];
+    const QString diskDirectory = ei::visualCacheDirectory(
+        QStringLiteral("character-assemblies"));
+    const QString diskKey = ei::visualCacheKey(key.toUtf8());
+    if(cached && ei::shouldPersistReusableVisualArtifact(usageCount)
+            && !persistedAssemblies().contains(diskKey))
+    {
+        if(ei::writeCachedFigureAssembly(diskDirectory, diskKey,
+                                         serializableAssembly(cached->parts)))
+            persistedAssemblies().insert(diskKey);
+    }
     if(!cached)
     {
         cached = new CachedFigureAssembly;
-        const QString diskDirectory = ei::visualCacheDirectory(
-            QStringLiteral("character-assemblies"));
-        const QString diskKey = ei::visualCacheKey(key.toUtf8());
         QVector<ei::SCachedVisualPart> diskParts;
         if(ei::readCachedFigureAssembly(diskDirectory, diskKey, &diskParts))
         {
+            persistedAssemblies().insert(diskKey);
             cached->parts.reserve(diskParts.size());
             for(const ei::SCachedVisualPart& source : diskParts)
             {
@@ -98,19 +138,10 @@ void buildCachedAssembly(ei::CFigure* figure, const QString& scope,
             QStringList parts = visibleParts;
             QVector3D renderComplexion = complexion;
             figure->getVertexData(cached->parts, renderComplexion, parts);
-            diskParts.reserve(cached->parts.size());
-            for(const CPart* part : cached->parts)
-            {
-                ei::SCachedVisualPart output;
-                output.name = part->name();
-                output.parentName = part->parentName();
-                output.restOffset = part->restOffset();
-                output.textureNumber = part->textureNumber();
-                output.vertices = part->vertData();
-                output.sourceVertexIndices = part->sourceVertexIndices();
-                diskParts.append(output);
-            }
-            ei::writeCachedFigureAssembly(diskDirectory, diskKey, diskParts);
+            if(ei::shouldPersistReusableVisualArtifact(usageCount)
+                    && ei::writeCachedFigureAssembly(
+                    diskDirectory, diskKey, serializableAssembly(cached->parts)))
+                persistedAssemblies().insert(diskKey);
         }
         quint64 retainedBytes = 0;
         for(CPart* part : cached->parts)
