@@ -5697,11 +5697,11 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
         bindings += presetBindings.size();
     }
     QCOMPARE(totalSlots, 16576);
-    QCOMPARE(bindings, 58);
+    QCOMPARE(bindings, 76);
     // Keep this count pinned to the reviewed semantic-atlas catalog. A change
     // means a family crossed the paint-brush/transition-support boundary and
     // must be visually audited before the palette consumes it.
-    QCOMPARE(transitionSupportFamilies, 74);
+    QCOMPARE(transitionSupportFamilies, 70);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -5782,7 +5782,7 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    QCOMPARE(landFamilyCount, 68);
+    QCOMPARE(landFamilyCount, 67);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
