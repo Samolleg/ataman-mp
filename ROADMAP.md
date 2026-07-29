@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.23` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.24` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
@@ -50,6 +50,10 @@ during every map identity change. The release target is a usable complete
 workspace within five seconds on the current reference machine, measured
 separately for cold and warm loads; alpha.23 remains a tester milestone until
 that target and first-visible-unit behavior are confirmed. The remaining
+Alpha.24 persists successful character-appearance preparation by content hash,
+shows non-blocking progress for uncached background resolution, and smooths
+keyboard camera motion through fixed-step simulation with interpolated display.
+The remaining
 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the live clock, startup
 splash, and merged overlay behavior, plus version/tag/package housekeeping
