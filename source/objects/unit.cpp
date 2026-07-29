@@ -103,7 +103,10 @@ void CUnit::drawObjectVisual(bool isActive, QOpenGLShaderProgram* program)
         return;
     }
     if(!refreshTransientVisual())
+    {
+        CObjectBase::draw(isActive, program);
         return;
+    }
     refreshAnimationPose();
     CObjectBase::draw(isActive, program);
 }
@@ -121,7 +124,10 @@ void CUnit::drawSelect(QOpenGLShaderProgram* program)
     if(m_state == ENodeState::eHidden)
         return;
     if(!refreshTransientVisual())
+    {
+        CObjectBase::drawSelect(program);
         return;
+    }
     refreshAnimationPose();
     CObjectBase::drawSelect(program);
     for(auto& logic: m_aLogic)
@@ -136,6 +142,57 @@ void CUnit::preloadVisualResources()
     // projection. This resolves figure and texture resources before the unit
     // first enters the camera frustum; it does not alter serialized MOB data.
     refreshTransientVisual(true);
+}
+
+bool CUnit::needsAppearancePreparation() const
+{
+    const quint64 generation = ei::ProfileDatabaseContext::instance().generation();
+    if(m_resolvedDatabaseGeneration == generation && m_resolvedVisualRevision == m_visualRevision)
+        return false;
+    if(m_appearancePreparationInFlight)
+        return false;
+    return !(m_preparedAppearanceValid
+             && m_preparedAppearanceGeneration == generation
+             && m_preparedAppearanceRevision == m_visualRevision);
+}
+
+bool CUnit::takeAppearancePreparationTask(SUnitAppearancePreparationTask* task)
+{
+    if(!task || !needsAppearancePreparation())
+        return false;
+    ei::ProfileDatabaseContext& context = ei::ProfileDatabaseContext::instance();
+    const auto database = context.current();
+    task->unitKey = reinterpret_cast<quintptr>(this);
+    task->databaseGeneration = context.generation();
+    task->visualRevision = m_visualRevision;
+    task->providerId = context.providerForRole("characterAppearance");
+    task->database = database;
+    task->request.profileId = database.isNull() ? QString() : database->profileId;
+    task->request.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
+    task->request.prototype = m_prototypeName;
+    task->request.parentTemplate = m_parentTemplate;
+    task->request.model = m_modelName;
+    task->request.primaryTexture = m_primaryTexture;
+    task->request.secondaryTexture = m_secondaryTexture;
+    task->request.bodyParts = m_bodyParts;
+    task->request.dataSource = m_bImport ? EUnitVisualDataSource::EmbeddedMob
+                                        : EUnitVisualDataSource::ProfileDatabase;
+    m_appearancePreparationInFlight = true;
+    return true;
+}
+
+void CUnit::acceptAppearancePreparation(const SUnitAppearancePreparationResult& result)
+{
+    m_appearancePreparationInFlight = false;
+    if(result.databaseGeneration != ei::ProfileDatabaseContext::instance().generation()
+            || result.visualRevision != m_visualRevision)
+        return;
+    m_preparedAppearanceGeneration = result.databaseGeneration;
+    m_preparedAppearanceRevision = result.visualRevision;
+    m_preparedAppearanceResult = result.providerResult;
+    m_preparedAppearance = result.appearance;
+    m_preparedAppearanceDiagnostic = result.diagnostic;
+    m_preparedAppearanceValid = true;
 }
 
 namespace {
@@ -219,7 +276,18 @@ bool CUnit::refreshTransientVisual(bool force)
     appearanceRequest.dataSource = m_bImport ? EUnitVisualDataSource::EmbeddedMob
                                              : EUnitVisualDataSource::ProfileDatabase;
     QJsonObject appearance;
-    const SRuntimeProviderResult appearanceResult = appearanceResolver->resolve(appearanceRequest, &appearance);
+    SRuntimeProviderResult appearanceResult;
+    if(m_preparedAppearanceValid && m_preparedAppearanceGeneration == generation
+            && m_preparedAppearanceRevision == m_visualRevision)
+    {
+        appearance = m_preparedAppearance;
+        appearanceResult = m_preparedAppearanceResult;
+        if(!m_preparedAppearanceDiagnostic.isEmpty())
+            diagnostic = m_preparedAppearanceDiagnostic;
+        m_preparedAppearanceValid = false;
+    }
+    else
+        appearanceResult = appearanceResolver->resolve(appearanceRequest, &appearance);
     if(!appearanceResult.success)
     {
         m_visualDiagnostics.append(appearanceResult.code + ": " + appearanceResult.message);

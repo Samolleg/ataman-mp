@@ -2,6 +2,7 @@
 #include <QDataStream>
 #include "unit_animation.h"
 #include "profile_visual_provider.h"
+#include "unit_visual_preparation.h"
 
 namespace {
 
@@ -101,6 +102,7 @@ private slots:
     void preMultipliesChildRotationInEiOrder();
     void appliesDistanceTiers();
     void boundsColdVisualResolutionDuringCameraMovement();
+    void resolvesAppearancePreparationWithoutSceneObjects();
     void malformedAndUnknownInputsFailStatic();
 };
 
@@ -299,6 +301,27 @@ void UnitAnimationTests::boundsColdVisualResolutionDuringCameraMovement()
 
     frame.beginFrame(QVector3D(), 32, true, false);
     QVERIFY(frame.claimColdVisualResolution());
+}
+
+void UnitAnimationTests::resolvesAppearancePreparationWithoutSceneObjects()
+{
+    SUnitAppearancePreparationTask task;
+    task.unitKey = 42;
+    task.databaseGeneration = 7;
+    task.visualRevision = 3;
+    task.providerId = "jmv.v1";
+    task.request.model = "unhuma";
+    task.request.primaryTexture = "unhumaskin_01_x4";
+    task.request.bodyParts = QStringList() << "hd" << "bd";
+    task.request.dataSource = EUnitVisualDataSource::EmbeddedMob;
+    const QVector<SUnitAppearancePreparationResult> results
+        = resolveUnitAppearanceTasks({task});
+    QCOMPARE(results.size(), 1);
+    QCOMPARE(results.first().unitKey, quintptr(42));
+    QCOMPARE(results.first().databaseGeneration, quint64(7));
+    QCOMPARE(results.first().visualRevision, quint64(3));
+    QVERIFY(results.first().providerResult.success);
+    QCOMPARE(results.first().appearance.value("model").toString(), QString("unhuma"));
 }
 
 void UnitAnimationTests::malformedAndUnknownInputsFailStatic()

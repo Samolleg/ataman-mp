@@ -29,6 +29,7 @@
 #include "particle_animation.h"
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
+#include "unit_visual_preparation.h"
 
 class QLineEdit;
 class QFrame;
@@ -280,6 +281,7 @@ private:
     void refreshMobDirtyStates();
     void initShaders();
     void draw();
+    void scheduleUnitAppearancePreparation(const QVector3D& cameraPosition);
     void drawTestOverlaysOpenGl();
     CNode* pickObject(QList<CNode*>& aNode, int x, int y);
     void applyParam(SParam& param);
@@ -591,6 +593,8 @@ private:
     QString m_aiGraphSource;
     QString m_aiGraphLoadedSource;
     QFutureWatcher<SAiGraphPreviewBuildResult>* m_aiGraphBuildWatcher{nullptr};
+    QFutureWatcher<QVector<SUnitAppearancePreparationResult>>* m_unitAppearanceWatcher{nullptr};
+    QHash<quintptr, QPointer<CUnit>> m_unitAppearanceTargets;
     QTimer* m_aiGraphRegenerationTimer{nullptr};
     quint64 m_aiGraphBuildRequest{0};
     bool m_aiGraphAutoRegenerationEnabled{false};

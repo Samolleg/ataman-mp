@@ -2,6 +2,7 @@
 #define UNIT_H
 #include "objects\worldobj.h"
 #include "mob\mob.h"
+#include "runtime\unit_visual_preparation.h"
 
 class CSettings;
 
@@ -202,6 +203,9 @@ public:
     const QStringList& renderedBodyTextureLayers() const { return m_renderedBodyTextureLayers; }
     const QStringList& visualDiagnostics() const { return m_visualDiagnostics; }
     void preloadVisualResources();
+    bool needsAppearancePreparation() const;
+    bool takeAppearancePreparationTask(SUnitAppearancePreparationTask* task);
+    void acceptAppearancePreparation(const SUnitAppearancePreparationResult& result);
     bool updatePos(QVector3D& pos) override;
     QJsonObject toJson() override;
     void collectLogicNodes(QList<CNode*>& arrNode);
@@ -242,6 +246,13 @@ private:
     quint64 m_visualRevision{1};
     quint64 m_resolvedVisualRevision{0};
     quint64 m_resolvedDatabaseGeneration{0};
+    bool m_appearancePreparationInFlight{false};
+    bool m_preparedAppearanceValid{false};
+    quint64 m_preparedAppearanceGeneration{0};
+    quint64 m_preparedAppearanceRevision{0};
+    SRuntimeProviderResult m_preparedAppearanceResult;
+    QJsonObject m_preparedAppearance;
+    QString m_preparedAppearanceDiagnostic;
     QString m_resolvedAnimationModel;
     QStringList m_resolvedAnimationWeapons;
     QString m_animationFingerprint;

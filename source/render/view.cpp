@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <algorithm>
 
 #include "view.h"
 #include "gl_dispatch.h"
@@ -4639,6 +4640,7 @@ void CView::draw()
     m_visualWarmupCameraPivot = cameraPivot;
     m_visualWarmupCameraRotation = cameraRotation;
     m_visualWarmupCameraValid = true;
+    scheduleUnitAppearancePreparation(cameraPosition);
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
     const bool animationEnabled = !animationOption || animationOption->value();
@@ -6773,6 +6775,79 @@ bool CView::loadMob(QFileInfo &filePath)
             .arg(filePath.fileName()).arg(pMob->nodes().size()).arg(unitCount)
             .arg(loadTimer.elapsed()));
     return true;
+}
+
+void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition)
+{
+    if(m_unitAppearanceWatcher && m_unitAppearanceWatcher->isRunning())
+        return;
+
+    struct Candidate
+    {
+        CUnit* unit{nullptr};
+        float distanceSquared{0.0f};
+    };
+    QVector<Candidate> candidates;
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob || !isMobVisible(mob))
+            continue;
+        for(CNode* node : mob->nodes())
+            if(CUnit* unit = dynamic_cast<CUnit*>(node))
+                if(unit->nodeState() != ENodeState::eHidden && unit->needsAppearancePreparation())
+                {
+                    const QVector3D position = unit->drawPosition().isNull()
+                        ? unit->position() : unit->drawPosition();
+                    Candidate candidate;
+                    candidate.unit = unit;
+                    candidate.distanceSquared = (position - cameraPosition).lengthSquared();
+                    candidates.append(candidate);
+                }
+    }
+    if(candidates.isEmpty())
+        return;
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& left, const Candidate& right)
+    {
+        return left.distanceSquared < right.distanceSquared;
+    });
+
+    QVector<SUnitAppearancePreparationTask> tasks;
+    const int batchSize = qMin(16, candidates.size());
+    tasks.reserve(batchSize);
+    for(int index = 0; index < batchSize; ++index)
+    {
+        SUnitAppearancePreparationTask task;
+        if(!candidates.at(index).unit->takeAppearancePreparationTask(&task))
+            continue;
+        m_unitAppearanceTargets.insert(task.unitKey, QPointer<CUnit>(candidates.at(index).unit));
+        tasks.append(task);
+    }
+    if(tasks.isEmpty())
+        return;
+
+    if(!m_unitAppearanceWatcher)
+    {
+        m_unitAppearanceWatcher = new QFutureWatcher<QVector<SUnitAppearancePreparationResult>>(this);
+        connect(m_unitAppearanceWatcher,
+                &QFutureWatcher<QVector<SUnitAppearancePreparationResult>>::finished,
+                this, [this]()
+        {
+            const QVector<SUnitAppearancePreparationResult> results
+                = m_unitAppearanceWatcher->result();
+            for(const SUnitAppearancePreparationResult& result : results)
+            {
+                const QPointer<CUnit> unit = m_unitAppearanceTargets.value(result.unitKey);
+                if(unit)
+                    unit->acceptAppearancePreparation(result);
+                m_unitAppearanceTargets.remove(result.unitKey);
+            }
+            update();
+        });
+    }
+    m_unitAppearanceWatcher->setFuture(QtConcurrent::run([tasks]()
+    {
+        return resolveUnitAppearanceTasks(tasks);
+    }));
 }
 
 void CView::saveMobAs()
