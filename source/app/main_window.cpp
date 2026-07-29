@@ -3736,7 +3736,7 @@ void MainWindow::persistAiGraph()
         .arg(graphSource, activeMpr.fileName(), externalPath,
              primaryMob->filePath().absoluteFilePath());
     if(embedded)
-        detail += tr("\n\nThe primary MOB currently has an embedded graph. Exporting only the .grp is safe, but that file remains shadowed until embedded ownership is removed.");
+        detail += tr("\n\nThe primary MOB currently has an embedded graph. Export Runtime .grp writes the selected graph. Switch MOB to External .grp never writes the existing .grp; it only validates that file and removes embedded ownership from the MOB.");
     if(primaryMob->isDirty())
         detail += tr("\n\nThe primary MOB has unsaved edits. Bake or Switch will commit those edits together with the graph through the verified MOB save path.");
     if(!sharedWarning.isEmpty())
@@ -3812,15 +3812,16 @@ void MainWindow::persistAiGraph()
     }
     else
     {
-        const SAiGraphFileCommitResult result = exportExternal();
-        if(!result.success)
-            failureText = tr("The runtime .grp could not be committed, so the embedded graph was left untouched.\n\nPhase: %1\n%2")
-                .arg(result.phase, result.error);
+        updateProgress(tr("Validating existing %1 without changing it...")
+                           .arg(QFileInfo(externalPath).fileName()), 1, 6);
+        if(!validateExistingAiGraphFile(QFileInfo(externalPath), &graphError))
+            failureText = tr("The embedded graph was left untouched because no valid existing runtime .grp is available. Export a graph first, then retry the ownership switch.\n\n%1")
+                .arg(graphError);
         else if(!primaryMob->persistAiGraph(nullptr, &graphError, updateProgress))
-            failureText = tr("The exact runtime .grp was safely written, but the embedded graph could not be removed. The MOB still shadows the external file, so runtime ownership has not changed.\n\n%1")
+            failureText = tr("The existing runtime .grp was not changed, but the embedded graph could not be removed. The MOB still shadows the external file, so runtime ownership has not changed.\n\n%1")
                 .arg(graphError);
         else
-            successText = tr("Exported %1 and removed the embedded graph from %2. The active MPR now resolves the exact sibling .grp at runtime.")
+            successText = tr("Preserved the existing runtime graph %1 unchanged and removed the embedded graph from %2. The active MPR now resolves that sibling .grp at runtime.")
                 .arg(externalPath, primaryMob->filePath().fileName());
     }
     progress.setValue(progress.maximum());

@@ -207,3 +207,18 @@ SAiGraphFileCommitResult commitValidatedAiGraphFile(
     result.phase = QStringLiteral("complete");
     return result;
 }
+
+bool validateExistingAiGraphFile(const QFileInfo& source, QString* error)
+{
+    if(!source.isFile())
+    {
+        if(error)
+            *error = QStringLiteral("No external AI graph exists at %1.")
+                .arg(source.absoluteFilePath());
+        return false;
+    }
+    QByteArray bytes;
+    if(!readFile(source, &bytes, error))
+        return false;
+    return validateGraph(bytes, error);
+}

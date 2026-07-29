@@ -2302,20 +2302,15 @@ bool CMob::persistAiGraph(const QByteArray* graph, QString* error,
         if(error) *error = backup.error;
         return false;
     }
-    QFile raceCheck(m_filePath.absoluteFilePath());
-    if(!raceCheck.open(QIODevice::ReadOnly) || raceCheck.readAll() != diskBytes)
-    {
-        if(error) *error = "The primary MOB changed while the AI graph save was staged.";
-        return false;
-    }
-
     if(progress) progress("Atomically replacing the primary MOB...", 4, 6);
-    QSaveFile output(m_filePath.absoluteFilePath());
-    if(!output.open(QIODevice::WriteOnly)
-       || output.write(finalCandidate) != finalCandidate.size()
-       || !output.commit())
+    QString replacementError;
+    if(!atomicallyReplaceVerifiedFile(m_filePath, diskBytes, finalCandidate,
+                                      &replacementError))
     {
-        if(error) *error = output.errorString();
+        if(error)
+            *error = replacementError.isEmpty()
+                ? QStringLiteral("The primary MOB could not be atomically replaced.")
+                : replacementError;
         return false;
     }
     m_aiGraph = graph ? *graph : QByteArray();

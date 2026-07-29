@@ -84,6 +84,15 @@ SExistingFileComparison compareExistingFile(const QFileInfo& file,
 SStagedSaveValidation validateStagedSave(const QByteArray& data,
                                          const QFileInfo& destination);
 
+// Replaces an existing file only when its bytes still match the caller's
+// baseline. The race-check handle is closed before QSaveFile commits so the
+// replacement is valid on Windows. Callers remain responsible for creating a
+// verified backup before invoking this helper.
+bool atomicallyReplaceVerifiedFile(const QFileInfo& destination,
+                                   const QByteArray& expectedBytes,
+                                   const QByteArray& candidateBytes,
+                                   QString* error = nullptr);
+
 // Builds and validates a changed MPR candidate without creating or replacing
 // the destination. Replacement, backup, and source-race checks remain a later
 // explicit commit step.

@@ -49,4 +49,8 @@ struct SAiGraphFileCommitResult
 SAiGraphFileCommitResult commitValidatedAiGraphFile(
     const SAiGraphFileCommitRequest& request);
 
+// Read-only ownership-switch gate. This never creates or rewrites the GRP.
+// Callers may remove an embedded MOB graph only after this succeeds.
+bool validateExistingAiGraphFile(const QFileInfo& source, QString* error = nullptr);
+
 #endif // AI_GRAPH_PERSISTENCE_H

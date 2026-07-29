@@ -411,6 +411,76 @@ SMprSaveCommitResult commitStagedMprTransaction(
     return result;
 }
 
+bool atomicallyReplaceVerifiedFile(const QFileInfo& destination,
+                                   const QByteArray& expectedBytes,
+                                   const QByteArray& candidateBytes,
+                                   QString* error)
+{
+    if(error)
+        error->clear();
+    if(destination.absoluteFilePath().isEmpty())
+    {
+        if(error)
+            *error = QStringLiteral("The replacement destination is empty.");
+        return false;
+    }
+
+    QByteArray currentBytes;
+    QString readError;
+    if(!readFileBytes(destination, &currentBytes, &readError))
+    {
+        if(error)
+            *error = readError;
+        return false;
+    }
+    if(currentBytes != expectedBytes)
+    {
+        if(error)
+            *error = QStringLiteral(
+                "The destination changed before atomic replacement.");
+        return false;
+    }
+
+    // readFileBytes owns its QFile locally. It has returned and destroyed that
+    // handle before QSaveFile attempts the Windows rename/replace operation.
+    QSaveFile output(destination.absoluteFilePath());
+    if(!output.open(QIODevice::WriteOnly))
+    {
+        if(error)
+            *error = output.errorString();
+        return false;
+    }
+    if(output.write(candidateBytes) != candidateBytes.size())
+    {
+        if(error)
+            *error = output.errorString();
+        output.cancelWriting();
+        return false;
+    }
+    if(!output.commit())
+    {
+        if(error)
+            *error = output.errorString();
+        return false;
+    }
+
+    QByteArray committedBytes;
+    if(!readFileBytes(destination, &committedBytes, &readError))
+    {
+        if(error)
+            *error = readError;
+        return false;
+    }
+    if(committedBytes != candidateBytes)
+    {
+        if(error)
+            *error = QStringLiteral(
+                "The committed file differs from its validated candidate.");
+        return false;
+    }
+    return true;
+}
+
 SMprSaveCommitResult commitStagedMprCanvasResize(
     const CMprDocument& diskBaseline, const CMprDocument& resizeBaseline,
     const SMprCanvasResizeRequest& resize,
