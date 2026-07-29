@@ -80,9 +80,9 @@ CMapsBrowser::CMapsBrowser(QWidget* parent)
     });
 }
 
-void CMapsBrowser::refresh(const QVector<QString>& resourceRoots,
-                           const QVector<QString>& mapRoots,
-                           const QString& collectionsRoot)
+SMapCatalogResult CMapsBrowser::refresh(const QVector<QString>& resourceRoots,
+                                        const QVector<QString>& mapRoots,
+                                        const QString& collectionsRoot)
 {
     const SMapCatalogResult result = CMapCatalog::load(resourceRoots, mapRoots);
     m_entries = result.entries;
@@ -102,6 +102,7 @@ void CMapsBrowser::refresh(const QVector<QString>& resourceRoots,
             .arg(complete).arg(m_entries.size()).arg(result.sourceArchive));
         m_status->setToolTip(result.messages.join('\n'));
     }
+    return result;
 }
 
 void CMapsBrowser::rebuildTree()

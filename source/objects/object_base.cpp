@@ -724,8 +724,14 @@ void CObjectBase::recalcFigure()
         delete part;
     m_aPart.clear();
     m_figureComplexion = m_complection;
-    CPart::setCacheScope(meshCacheScope(m_modelName));
-    m_pFigure->getVertexData(m_aPart, m_complection, m_bodyParts);
+    const QString cacheScope = meshCacheScope(m_modelName);
+    CPart::setCacheScope(cacheScope);
+    // Static world objects used to repeat constitution interpolation and
+    // triangle generation for every instance. Reuse the exact immutable CPU
+    // assembly, while each object still receives its own lightweight CPart
+    // wrappers for visibility, pose and picking state.
+    buildCachedAssembly(m_pFigure, cacheScope, m_modelName, m_bodyParts,
+                        m_complection, m_aPart);
     rebuildTransientAnimationSkeleton();
     recalcMinPos();
 }

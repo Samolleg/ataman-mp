@@ -5,7 +5,7 @@ work is ordered from the newest planned minor line to the oldest completed one.
 An item is checked only after its implementation has landed and received the
 stated validation. Completed code should carry a commit, test, or release link.
 
-Current development line: `0.3.0-alpha.22` focused closed testing. Alpha.11
+Current development line: `0.3.0-alpha.23` focused closed testing. Alpha.11
 was withdrawn after its temporary-resource bootstrap passed the fixed world
 object's first word as the object pointer and crashed both normal and synthetic
 Test Current Map launches. Alpha.12 corrects the pointer contract and adds an
@@ -41,7 +41,15 @@ open editor windows, separates Apply from Save & Close in Settings, and keeps
 MMB camera orbit available during transforms and Play-from-Here movement. The
 alpha.21 follow-up covers every existing child widget during live scaling,
 wraps long entrance labels, restores Esc cancellation and wheel camera control
-during transforms, and makes Play-from-Here selection exclusive. The remaining
+during transforms, and makes Play-from-Here selection exclusive. Alpha.23
+begins the heavy-map object-load pass with a measured `gz18h` baseline of
+17–21 seconds: it removes the 9.2-second eager preload of 402 off-screen unit
+visuals, reuses exact immutable assembly geometry across repeated object
+instances, and reuses the map-catalog snapshot instead of rescanning resources
+during every map identity change. The release target is a usable complete
+workspace within five seconds on the current reference machine, measured
+separately for cold and warm loads; alpha.23 remains a tester milestone until
+that target and first-visible-unit behavior are confirmed. The remaining
 0.3 release work is the
 final runtime/corpus matrix, focused confirmation of the live clock, startup
 splash, and merged overlay behavior, plus version/tag/package housekeeping

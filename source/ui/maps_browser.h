@@ -19,8 +19,9 @@ class CMapsBrowser : public QWidget
 
 public:
     explicit CMapsBrowser(QWidget* parent = nullptr);
-    void refresh(const QVector<QString>& resourceRoots, const QVector<QString>& mapRoots,
-                 const QString& collectionsRoot);
+    SMapCatalogResult refresh(const QVector<QString>& resourceRoots,
+                              const QVector<QString>& mapRoots,
+                              const QString& collectionsRoot);
 
 signals:
     void openMapRequested(QString mprPath, QString mobPath, QString zoneId);

@@ -2193,13 +2193,9 @@ void MainWindow::refreshMapTestContext()
         m_spawnPositionLabel->setText(tr("Entrance spawn"));
     updateOutlinerSelectionPath();
 
-    QVector<QString> resources;
-    QVector<QString> maps;
-    if(COptStringList* value = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "resourceRoots")))
-        resources = value->value();
-    if(COptStringList* value = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "mapRoots")))
-        maps = value->value();
-    m_mapCatalog = CMapCatalog::load(resources, maps);
+    // refreshMapsBrowser() owns the potentially expensive archive/map-root
+    // scan. Map identity changes only query that already-current snapshot;
+    // loading a map must not rescan the same resources a second time.
     if(CLandscape::getInstance()->isMprLoad())
     {
         // An explicitly unmapped collection must stay unmapped. Do not infer
@@ -3188,7 +3184,8 @@ void MainWindow::refreshMapsBrowser()
     if(COptStringList* option = dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource, "mapRoots")))
         maps = option->value();
     QDir().mkpath(CCollectionDocument::defaultDirectory());
-    m_mapsBrowser->refresh(resources, maps, CCollectionDocument::defaultDirectory());
+    m_mapCatalog = m_mapsBrowser->refresh(
+        resources, maps, CCollectionDocument::defaultDirectory());
 }
 
 QVector<QString> MainWindow::activeMapRoots() const
@@ -4367,6 +4364,8 @@ void MainWindow::saveCollection(bool saveAs)
 void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
                              const QString& zoneId)
 {
+    QElapsedTimer workspaceLoadTimer;
+    workspaceLoadTimer.start();
     if(m_workspaceLoadInProgress)
     {
         statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
@@ -4415,6 +4414,8 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     progress.setValue(3);
     progress.close();
     endWorkspaceLoad();
+    ei::log(eLogInfo, QString("Workspace load complete kind:map identity:%1 elapsedMs:%2")
+        .arg(zoneId).arg(workspaceLoadTimer.elapsed()));
     rebuildWindowTitle();
     QTimer::singleShot(0, this, [this]()
     {

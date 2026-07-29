@@ -6707,6 +6707,8 @@ QVector3D CView::getTerrainPos(bool bLand)
 
 bool CView::loadMob(QFileInfo &filePath)
 {
+    QElapsedTimer loadTimer;
+    loadTimer.start();
     const auto normalizedPath = [](const QFileInfo& info)
     {
         const QString canonical = info.canonicalFilePath();
@@ -6738,56 +6740,16 @@ bool CView::loadMob(QFileInfo &filePath)
         delete pMob;
         return false;
     }
-    QElapsedTimer preloadTimer;
-    preloadTimer.start();
-    int preloadedUnits = 0;
     int unitCount = 0;
     for(CNode* node : pMob->nodes())
         if(dynamic_cast<CUnit*>(node))
             ++unitCount;
-    if(unitCount > 0)
-        m_pProgress->reset();
-    // Keep the UI responsive during large MOB loads without forcing an event
-    // pump and GL-context reacquisition for every unit. Twenty evenly spaced
-    // updates keeps the longest zone18 preload interval below a second.
-    const int progressStride = qMax(1, unitCount / 20);
-    int unitsSinceProgress = 0;
-    makeCurrent();
-    for(CNode* node : pMob->nodes())
-        if(CUnit* unit = dynamic_cast<CUnit*>(node))
-        {
-            // Progress updates process the Qt event queue. A paint or window
-            // event may change/release the thread's current GL context, so a
-            // single makeCurrent() before the loop is not a valid guarantee
-            // for the following unit's buffer/texture uploads.
-            ei::setCrashContext(QString("mob/unit-preload:%1").arg(unit->mapId()));
-            if(!QOpenGLContext::currentContext())
-            {
-                ei::log(eLogFatal, QString(
-                    "Unit visual preload stopped because no OpenGL context could be made current; unit:%1")
-                    .arg(unit->mapId()));
-                break;
-            }
-            unit->preloadVisualResources();
-            ++preloadedUnits;
-            ++unitsSinceProgress;
-            if(unitsSinceProgress >= progressStride || preloadedUnits == unitCount)
-            {
-                m_pProgress->update(100.0 * unitsSinceProgress / unitCount);
-                unitsSinceProgress = 0;
-                // Progress processing may allow another widget to change the
-                // current context. Reacquire only after that event boundary,
-                // rather than once for every unit.
-                makeCurrent();
-            }
-        }
-    makeCurrent();
-    doneCurrent();
-    ei::setCrashContext("idle after MOB preload");
-    if(unitCount > 0)
-        m_pProgress->finish();
-    ei::log(eLogInfo, QString("Preloaded visual resources for %1 units during MOB load in %2 ms")
-            .arg(preloadedUnits).arg(preloadTimer.elapsed()));
+    // Unit draw resolves visuals after frustum culling. Eagerly resolving
+    // every unit blocked zone18 for over nine seconds and created resources
+    // for hundreds of off-screen actors. Keep the document usable immediately;
+    // visible units resolve on first use and share the established caches.
+    ei::log(eLogInfo, QString("Deferred visual resource resolution for %1 units until visible")
+            .arg(unitCount));
     m_aMob.append(pMob);
     armOpenGlDiagnostics(QStringLiteral("MOB loaded: %1")
         .arg(filePath.fileName()), 6);
@@ -6799,6 +6761,9 @@ bool CView::loadMob(QFileInfo &filePath)
     changeCurrentMob(pMob);
     refreshAiGraphPreviewSource();
     emit mobStateChanged();
+    ei::log(eLogInfo, QString("MOB load complete file:%1 objects:%2 units:%3 elapsedMs:%4")
+            .arg(filePath.fileName()).arg(pMob->nodes().size()).arg(unitCount)
+            .arg(loadTimer.elapsed()));
     return true;
 }
 
