@@ -61,6 +61,15 @@ struct STerrainGlobalMaterialFamily
     QVector<STerrainGlobalMaterialSource> sources;
 };
 
+struct STerrainGlobalTransitionSource
+{
+    STerrainTransitionSignature signature;
+    ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
+    QString mprNamespace;
+    int textureCount{0};
+    int slot{-1};
+};
+
 struct STerrainAtlasProfileFamily
 {
     qint32 id{0};
@@ -194,6 +203,8 @@ public:
                                    const QByteArray& atlasIdentity = QByteArray(),
                                    qint32 localFamilyId = 0);
     static QVector<STerrainGlobalMaterialFamily> globalUniformFamilies(
+        CValidationReport* report = nullptr);
+    static QVector<STerrainGlobalTransitionSource> globalAuthoredTransitions(
         CValidationReport* report = nullptr);
     static CTerrainTransitionCatalog globalizedCatalog(
         const STerrainAtlasProfile& profile,

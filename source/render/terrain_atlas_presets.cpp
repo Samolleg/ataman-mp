@@ -215,6 +215,79 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
     return result;
 }
 
+QVector<STerrainGlobalTransitionSource>
+CTerrainAtlasPresetCatalog::globalAuthoredTransitions(CValidationReport* report)
+{
+    QVector<STerrainGlobalTransitionSource> result;
+    for(const QJsonValue& value : presetArray(report))
+    {
+        const QJsonObject preset = value.toObject();
+        const QByteArray atlasIdentity = presetAtlasIdentity(preset);
+        const QString mprNamespace = preset.value(QStringLiteral("namespace")).toString();
+        const int slotCount = preset.value(QStringLiteral("slotCount")).toInt();
+        const QByteArray signatures = QByteArray::fromBase64(
+            preset.value(QStringLiteral("signaturesBase64")).toString().toLatin1());
+        if(mprNamespace.isEmpty() || slotCount <= 0
+           || signatures.size() != slotCount * 4)
+            continue;
+        QMap<QPair<int, int>, qint32> globalByLocalAndLayer;
+        for(const QJsonValue& familyValue : preset.value(
+                QStringLiteral("families")).toArray())
+        {
+            const QJsonObject family = familyValue.toObject();
+            const int localId = family.value(QStringLiteral("id")).toInt(-1);
+            const QString name = family.value(QStringLiteral("name")).toString().trimmed();
+            if(localId < 0 || name.isEmpty())
+                continue;
+            for(const QJsonValue& layerValue : family.value(
+                    QStringLiteral("allowedLayers")).toArray())
+            {
+                const ETerrainAtlasLayer layer = layerValue.toString()
+                    == QStringLiteral("overlay")
+                    ? ETerrainAtlasLayer::Overlay : ETerrainAtlasLayer::Land;
+                globalByLocalAndLayer.insert(qMakePair(localId, int(layer)),
+                    globalMaterialId(name, layer, atlasIdentity, localId));
+            }
+        }
+        for(int slot = 0; slot < slotCount; ++slot)
+            for(ETerrainAtlasLayer layer : {ETerrainAtlasLayer::Land,
+                                            ETerrainAtlasLayer::Overlay})
+            {
+                qint32 corners[4] = {};
+                bool mapped = true;
+                for(int corner = 0; corner < 4; ++corner)
+                {
+                    const int localId = quint8(signatures.at(slot * 4 + corner));
+                    const auto found = globalByLocalAndLayer.constFind(
+                        qMakePair(localId, int(layer)));
+                    if(found == globalByLocalAndLayer.constEnd())
+                    {
+                        mapped = false;
+                        break;
+                    }
+                    corners[corner] = found.value();
+                }
+                if(!mapped)
+                    continue;
+                STerrainGlobalTransitionSource source;
+                STerrainTransitionSignature previewSignature;
+                previewSignature.northWest = corners[0];
+                previewSignature.northEast = corners[1];
+                previewSignature.southEast = corners[2];
+                previewSignature.southWest = corners[3];
+                source.signature = CTerrainTransitionCatalog::mirroredGridY(
+                    previewSignature);
+                source.layer = layer;
+                source.mprNamespace = mprNamespace;
+                source.textureCount = (slotCount + 63) / 64;
+                source.slot = slot;
+                result.append(source);
+                break;
+            }
+    }
+    return result;
+}
+
 CTerrainTransitionCatalog CTerrainAtlasPresetCatalog::globalizedCatalog(
     const STerrainAtlasProfile& profile,
     const CTerrainTransitionCatalog& source)

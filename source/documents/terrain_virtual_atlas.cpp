@@ -263,6 +263,57 @@ void terrainBlendDisplacement(ETerrainBlendStyle style, double u, double v,
     }
 }
 
+double terrainEdgeDisplacement(ETerrainBlendStyle style, qint32 first,
+                               qint32 second, double position, quint32 seed)
+{
+    if(first == second)
+        return 0.0;
+    const bool reversed = first > second;
+    if(reversed)
+    {
+        std::swap(first, second);
+        position = 1.0 - position;
+    }
+    const quint32 pairSeed = terrainNoiseHash(seed);
+    const double coarse = terrainValueNoise(position * 3.25, 0.375,
+                                             pairSeed) - 0.5;
+    const double detail = terrainValueNoise(position * 9.5, 1.875,
+                                             pairSeed ^ 0x27d4eb2fu) - 0.5;
+    const double tau = 6.28318530717958647692;
+    double displacement = coarse * 0.20 + detail * 0.07;
+    switch(style)
+    {
+    case ETerrainBlendStyle::Grass:
+        displacement += std::sin(position * 11.0 * tau
+            + double(pairSeed & 255u)) * 0.045;
+        break;
+    case ETerrainBlendStyle::Sand:
+        displacement = coarse * 0.09 + detail * 0.025;
+        break;
+    case ETerrainBlendStyle::Gravel:
+        displacement = coarse * 0.24 + detail * 0.11;
+        break;
+    case ETerrainBlendStyle::Snow:
+        displacement = coarse * 0.18
+            + std::sin(position * 4.0 * tau + double(pairSeed & 127u)) * 0.06;
+        break;
+    case ETerrainBlendStyle::Stone:
+    case ETerrainBlendStyle::Paving:
+    case ETerrainBlendStyle::Ice:
+        displacement = coarse * 0.14
+            + terrainTriangleWave(position * 6.0
+                + double(pairSeed & 63u) / 63.0) * 0.045;
+        break;
+    case ETerrainBlendStyle::Water:
+        displacement = coarse * 0.08
+            + std::sin(position * 5.0 * tau + double(pairSeed & 255u)) * 0.055;
+        break;
+    default:
+        break;
+    }
+    return reversed ? -displacement : displacement;
+}
+
 QRgb premultipliedBlend(const QRgb samples[4], const double weights[4])
 {
     double alpha = 0.0;
@@ -615,6 +666,38 @@ QImage CTerrainVirtualAtlas::generateTile(
         ids, m_materialSources, m_distributionSeed);
     const quint32 variantSeed = terrainNoiseHash(noiseSeed
         ^ quint32(variation + 1) * 0x9e3779b9u);
+    struct EdgeDescriptor
+    {
+        qint32 first{0};
+        qint32 second{0};
+        ETerrainBlendStyle style{ETerrainBlendStyle::Organic};
+        quint32 seed{0};
+    };
+    const auto makeEdge = [this](qint32 first, qint32 second) {
+        EdgeDescriptor edge;
+        edge.first = first;
+        edge.second = second;
+        const ETerrainBlendStyle firstStyle = m_materialBlendStyles.value(
+            first, ETerrainBlendStyle::Organic);
+        const ETerrainBlendStyle secondStyle = m_materialBlendStyles.value(
+            second, ETerrainBlendStyle::Organic);
+        edge.style = terrainBlendStylePriority(firstStyle)
+            >= terrainBlendStylePriority(secondStyle) ? firstStyle : secondStyle;
+        QVector<qint32> pair;
+        if(first <= second) pair << first << second;
+        else pair << second << first;
+        edge.seed = transitionNoiseSeed(
+            pair, m_materialSources, m_distributionSeed);
+        return edge;
+    };
+    const EdgeDescriptor topEdge = makeEdge(ids[0], ids[1]);
+    const EdgeDescriptor bottomEdge = makeEdge(ids[3], ids[2]);
+    const EdgeDescriptor leftEdge = makeEdge(ids[0], ids[3]);
+    const EdgeDescriptor rightEdge = makeEdge(ids[1], ids[2]);
+    const auto edgeWarp = [](const EdgeDescriptor& edge, double position) {
+        return terrainEdgeDisplacement(edge.style, edge.first, edge.second,
+                                       position, edge.seed);
+    };
     QImage result(size, size, QImage::Format_RGBA8888);
     for(int y = 0; y < size; ++y)
     {
@@ -627,18 +710,29 @@ QImage CTerrainVirtualAtlas::generateTile(
             // neighbouring exact tuples still produce byte-identical seams,
             // while the visible meeting line meanders like authored terrain
             // instead of dividing the tile into four geometric quadrants.
-            const double envelope = std::sin(u * 3.14159265358979323846)
-                                  * std::sin(v * 3.14159265358979323846);
+            const double sinU = std::sin(u * 3.14159265358979323846);
+            const double sinV = std::sin(v * 3.14159265358979323846);
+            const double envelope = sinU * sinV;
             double displacementX = 0.0;
             double displacementY = 0.0;
             double sharpness = 9.0;
             terrainBlendDisplacement(style, u, v, variantSeed, variation,
                                      &displacementX, &displacementY,
                                      &sharpness);
+            // Tangential edge warps are keyed only by the two endpoint
+            // materials. Adjacent tiles therefore share the same irregular
+            // silhouette instead of meeting at a repeated 90-degree quarter
+            // cut. Interior variation remains cell-specific.
+            const double horizontalEdgeWarp =
+                (1.0 - v) * edgeWarp(topEdge, u)
+                + v * edgeWarp(bottomEdge, u);
+            const double verticalEdgeWarp =
+                (1.0 - u) * edgeWarp(leftEdge, v)
+                + u * edgeWarp(rightEdge, v);
             const double warpedU = qBound(0.0,
-                u + envelope * displacementX, 1.0);
+                u + envelope * displacementX + sinU * horizontalEdgeWarp, 1.0);
             const double warpedV = qBound(0.0,
-                v + envelope * displacementY, 1.0);
+                v + envelope * displacementY + sinV * verticalEdgeWarp, 1.0);
             const double bilinear[4] = {
                 (1.0 - warpedU) * (1.0 - warpedV),
                 warpedU * (1.0 - warpedV),
@@ -683,6 +777,52 @@ QImage CTerrainVirtualAtlas::generateTile(
     return result;
 }
 
+bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
+    const STerrainTransitionSignature& signature, const QImage& pixels,
+    const QString& sourceLabel, CValidationReport* report)
+{
+    if(!m_valid || pixels.isNull() || pixels.size() != m_authoredTiles.front().size())
+    {
+        if(report) report->add("terrain.authored_library_pixels",
+            EValidationSeverity::Error,
+            "An authored global transition has invalid or incompatible pixels",
+            sourceLabel);
+        return false;
+    }
+    bool alreadyPresent = false;
+    m_authoredLibraryCatalog.selectForPaint(
+        signature, 0, 0, m_distributionSeed, &alreadyPresent);
+    if(alreadyPresent)
+        return true;
+    const int libraryIndex = m_authoredLibraryGeneratedIndices.size();
+    if(libraryIndex >= 16384)
+        return false;
+    STerrainFinalizedTile imported;
+    imported.canonicalSignature = signature;
+    imported.pixels = pixels.convertToFormat(QImage::Format_RGBA8888);
+    imported.pixelSha256 = imageHash(imported.pixels);
+    imported.authored = true;
+    imported.sourceSlot = -1;
+    const int generatedIndex = m_generatedTiles.size();
+    m_generatedTiles.append(imported);
+    m_generatedByPixels.insert(imported.pixelSha256, generatedIndex);
+    m_authoredLibraryGeneratedIndices.append(generatedIndex);
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(libraryIndex % 64);
+        packed.atlasIndex = quint8(libraryIndex / 64);
+        packed.rotation = quint8(rotation);
+        STerrainTransitionVariant variant;
+        variant.signature = CTerrainTransitionCatalog::rotated(
+            signature, -rotation);
+        variant.packedTile = packed.encode();
+        if(!m_authoredLibraryCatalog.addVariant(variant, report))
+            return false;
+    }
+    return true;
+}
+
 STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     CValidationReport* report)
@@ -703,6 +843,24 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
         result.authored = true;
         result.authoredPacked = packed;
         return result;
+    }
+
+    bool libraryAuthored = false;
+    const quint16 libraryPacked = m_authoredLibraryCatalog.selectForPaint(
+        signature, cellX, cellY, m_distributionSeed, &libraryAuthored);
+    if(libraryAuthored)
+    {
+        const SMprPackedTile decoded = SMprPackedTile::decode(libraryPacked);
+        const int libraryIndex = decoded.atlasSlot();
+        if(libraryIndex >= 0
+           && libraryIndex < m_authoredLibraryGeneratedIndices.size())
+        {
+            result.importedAuthored = true;
+            result.generatedIndex =
+                m_authoredLibraryGeneratedIndices.at(libraryIndex);
+            result.generatedRotation = decoded.rotation;
+            return result;
+        }
     }
 
     quint8 rotation = 0;
@@ -1116,6 +1274,14 @@ QString CTerrainWorkingAtlas::error() const
 int CTerrainWorkingAtlas::generatedTileCount() const
 {
     return m_resolver ? m_resolver->generatedTiles().size() : 0;
+}
+
+bool CTerrainWorkingAtlas::addAuthoredLibraryTransition(
+    const STerrainTransitionSignature& signature, const QImage& pixels,
+    const QString& sourceLabel, CValidationReport* report)
+{
+    return m_resolver && m_resolver->addAuthoredLibraryTransition(
+        signature, pixels, sourceLabel, report);
 }
 
 int CTerrainWorkingAtlas::activeTextureCount() const

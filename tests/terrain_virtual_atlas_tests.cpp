@@ -180,6 +180,7 @@ class TerrainVirtualAtlasTests:public QObject
 private slots:
     void virtualFieldPaintIsUnboundedByAtlas();
     void exactAuthoredTileIsReused();
+    void authoredGlobalBlendIsImportedBeforeGeneration();
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
     void generatesFourFamilyTupleWithOrientation();
@@ -233,6 +234,43 @@ void TerrainVirtualAtlasTests::exactAuthoredTileIsReused()
     QVERIFY(tile.authored);
     QCOMPARE(SMprPackedTile::decode(tile.authoredPacked).atlasSlot(),1);
     QCOMPARE(atlas.generatedTiles().size(),0);
+}
+
+void TerrainVirtualAtlasTests::authoredGlobalBlendIsImportedBeforeGeneration()
+{
+    Fixture fixture;
+    const STerrainTransitionSignature requested = signature(1, 2, 2, 1);
+    QImage authoredBlend(8, 8, QImage::Format_RGBA8888);
+    for(int y = 0; y < authoredBlend.height(); ++y)
+        for(int x = 0; x < authoredBlend.width(); ++x)
+            authoredBlend.setPixelColor(x, y, (x + y) & 1
+                ? QColor(17, 83, 149) : QColor(221, 137, 29));
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u);
+    CValidationReport report;
+    QVERIFY2(atlas.addAuthoredLibraryTransition(
+        requested, authoredBlend, QStringLiteral("stock-jmv-test"), &report),
+        qPrintable(report.toText()));
+    const STerrainVirtualTile resolved = atlas.resolve(requested, 4, 7, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(!resolved.authored);
+    QVERIFY(resolved.importedAuthored);
+    QVERIFY(resolved.generatedIndex >= 0);
+    QCOMPARE(atlas.generatedTiles().at(resolved.generatedIndex).pixels,
+             authoredBlend);
+    QVERIFY(atlas.generatedTiles().at(resolved.generatedIndex).authored);
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1, 1));
+    QVERIFY(field.setMaterial(1, 0, 2));
+    QVERIFY(field.setMaterial(1, 1, 2));
+    QVERIFY(field.setMaterial(0, 1, 1));
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("AuthoredLibrary"), 512, {1, 2, 3, 4}, &report);
+    QVERIFY2(finalized.success, qPrintable(finalized.error));
+    bool keptImportedPixels = false;
+    for(const STerrainFinalizedTile& tile : finalized.tiles)
+        keptImportedPixels |= tile.authored && tile.sourceSlot < 0
+            && tile.pixels == authoredBlend;
+    QVERIFY(keptImportedPixels);
 }
 
 void TerrainVirtualAtlasTests::generatesOneThreeTuple()

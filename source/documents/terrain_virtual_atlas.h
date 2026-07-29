@@ -41,6 +41,7 @@ struct STerrainVirtualTile
 {
     STerrainTransitionSignature signature;
     bool authored{false};
+    bool importedAuthored{false};
     quint16 authoredPacked{0};
     int generatedIndex{-1};
     quint8 generatedRotation{0};
@@ -134,6 +135,10 @@ public:
     STerrainVirtualTile resolve(const STerrainTransitionSignature& signature,
                                 int cellX, int cellY,
                                 CValidationReport* report = nullptr);
+    bool addAuthoredLibraryTransition(
+        const STerrainTransitionSignature& signature, const QImage& pixels,
+        const QString& sourceLabel = QString(),
+        CValidationReport* report = nullptr);
     const QVector<STerrainFinalizedTile>& generatedTiles() const
         { return m_generatedTiles; }
 
@@ -170,6 +175,8 @@ private:
     QMap<QByteArray, int> m_generatedBySignature;
     QMap<QByteArray, int> m_generatedByPixels;
     QVector<STerrainFinalizedTile> m_generatedTiles;
+    CTerrainTransitionCatalog m_authoredLibraryCatalog;
+    QVector<int> m_authoredLibraryGeneratedIndices;
     quint32 m_distributionSeed{0};
     bool m_valid{false};
     QString m_error;
@@ -198,6 +205,10 @@ public:
     int generatedTileCount() const;
     int activeTextureCount() const;
     QSet<int> takeChangedSlots();
+    bool addAuthoredLibraryTransition(
+        const STerrainTransitionSignature& signature, const QImage& pixels,
+        const QString& sourceLabel = QString(),
+        CValidationReport* report = nullptr);
 
     quint16 resolve(const STerrainTransitionSignature& signature,
                     int cellX, int cellY,

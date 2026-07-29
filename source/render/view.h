@@ -554,6 +554,11 @@ private:
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainGlobalMaterialFamily> m_terrainGlobalFamilies;
     QMap<qint32, QImage> m_terrainGlobalMaterialSources;
+    QMultiMap<QByteArray, STerrainGlobalTransitionSource>
+        m_terrainGlobalTransitionSources;
+    QMap<QString, QImage> m_terrainGlobalTransitionPageCache;
+    QMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
+        m_importedTerrainTransitions;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;
     SOverlaySurfaceCommand m_overlaySurfaceStrokeCommand;

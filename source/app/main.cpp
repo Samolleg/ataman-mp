@@ -1083,13 +1083,15 @@ int runHeadlessCommand(QApplication& app)
             grassVariantButtons == 2 && grassFamilyHeadings == 1
             && landscapeTools.selectPaintTerrainType(101)
             && landscapeTools.selectPaintTerrainType(102);
-        landscapeTools.resize(720, 900);
+        landscapeTools.resize(320, 900);
         landscapeTools.show();
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         QScrollArea* groundMaterialScroll =
             landscapeTools.findChild<QScrollArea*>("groundMaterialScroll");
         QScrollArea* overlayMaterialScroll =
             landscapeTools.findChild<QScrollArea*>("overlayMaterialScroll");
+        QTabWidget* materialPaletteTabs =
+            landscapeTools.findChild<QTabWidget*>("materialPaletteTabs");
         const QList<QToolButton*> paletteButtons =
             landscapeTools.findChildren<QToolButton*>();
         const bool materialPaletteScrollsAndFillsWidth = groundMaterialScroll
@@ -1107,6 +1109,11 @@ int runHeadlessCommand(QApplication& app)
                         || button->sizePolicy().horizontalPolicy()
                             == QSizePolicy::Expanding;
                 });
+        const bool landscapeToolsAreCompactAndPaletteFillsHeight =
+            landscapeTools.minimumSizeHint().width() <= 320
+            && landscapeTools.width() <= 320
+            && materialPaletteTabs && materialPaletteTabs->height() >= 300
+            && groundMaterialScroll && groundMaterialScroll->height() >= 260;
         landscapeTools.hide();
         QLabel* atlasSourceStatus =
             landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");
@@ -1130,7 +1137,7 @@ int runHeadlessCommand(QApplication& app)
         landscapeTools.setGeneratedAtlasTileCount(7);
         const bool generatedAtlasCountVisible = generatedAtlasStatus
             && generatedAtlasStatus->text() == QStringLiteral(
-                "512 authored + 7 generated = 519 active slots");
+                "512 original + 7 added exact = 519 active slots");
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
@@ -1343,6 +1350,7 @@ int runHeadlessCommand(QApplication& app)
             && uniqueMaterialPaletteCards
             && materialVariantsRemainDistinctAndGrouped
             && materialPaletteScrollsAndFillsWidth
+            && landscapeToolsAreCompactAndPaletteFillsHeight
             && defaultAtlasSourceVisible
             && localAtlasSourceVisible
             && generatedAtlasCountVisible
@@ -1428,6 +1436,8 @@ int runHeadlessCommand(QApplication& app)
                << materialVariantsRemainDistinctAndGrouped
                << " materialPaletteScrollsAndFillsWidth="
                << materialPaletteScrollsAndFillsWidth
+               << " landscapeToolsAreCompactAndPaletteFillsHeight="
+               << landscapeToolsAreCompactAndPaletteFillsHeight
                << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
                << " localAtlasSourceVisible=" << localAtlasSourceVisible
                << " generatedAtlasCountVisible=" << generatedAtlasCountVisible

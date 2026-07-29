@@ -73,14 +73,16 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_showOverlays(new QCheckBox(tr("Show overlays (J)"), this))
     , m_tilesetStatus(new QLabel(tr("Terrain materials are loaded from the MPR namespace template."), this))
     , m_atlasCoverage(new QLabel(tr("0 / 0 assigned"), this))
-    , m_generatedAtlasTiles(new QLabel(tr("New exact tiles: 0"), this))
+    , m_generatedAtlasTiles(new QLabel(tr("Added exact tiles: 0"), this))
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
 {
     QVBoxLayout* layout = new QVBoxLayout(this);
+    layout->setSizeConstraint(QLayout::SetNoConstraint);
     QLabel* warning = new QLabel(tr(
         "Terrain edits are undoable. Changed MPR saves use staged validation, backup, and atomic replacement."), this);
     warning->setWordWrap(true);
+    warning->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     warning->setStyleSheet("QLabel { color: #b06000; font-weight: bold; }");
     layout->addWidget(warning);
     m_showMainTerrain->setChecked(true);
@@ -144,8 +146,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "Overlay surface mode adds/removes coverage. Its Terrain material selects the atlas texture; its Surface material independently controls tint, opacity, illumination, waves, and texture warp. "
         "Overlay painting only changes the atlas texture on cells that already exist."), this);
     paintHelp->setWordWrap(true);
+    paintHelp->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     paintLayout->addWidget(paintHelp);
     m_tilesetStatus->setWordWrap(true);
+    m_tilesetStatus->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     paintLayout->addWidget(m_tilesetStatus);
 
     QVBoxLayout* groundPalette = new QVBoxLayout(m_groundMaterialPage);
@@ -180,6 +184,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_overlayMaterialScroll->setObjectName(QStringLiteral("overlayMaterialScroll"));
     m_materialTabs->addTab(m_groundMaterialScroll, tr("Ground"));
     m_materialTabs->addTab(m_overlayMaterialScroll, tr("Overlay"));
+    m_materialTabs->setObjectName(QStringLiteral("materialPaletteTabs"));
     paintLayout->addWidget(m_materialTabs, 1);
 
     m_paintRadius->setRange(1, 33);
@@ -231,9 +236,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     reviewAtlas->setToolTip(tr(
         "Inspect material thumbnails and visually assign unusual atlas tiles. "
         "This changes only the editor profile, not atlas images or MPR resources."));
-    QHBoxLayout* atlasRow = new QHBoxLayout;
+    m_atlasCoverage->setWordWrap(true);
+    m_generatedAtlasTiles->setWordWrap(true);
+    m_atlasCoverage->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_generatedAtlasTiles->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    QVBoxLayout* atlasRow = new QVBoxLayout;
     atlasRow->addWidget(reviewAtlas);
-    atlasRow->addWidget(m_atlasCoverage, 1);
+    atlasRow->addWidget(m_atlasCoverage);
     atlasRow->addWidget(m_generatedAtlasTiles);
     paintLayout->addLayout(atlasRow);
     QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
@@ -245,13 +254,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "is 1,024 slots (16 texture pages)."));
     paintLayout->addWidget(exportDiagnostic);
     paintLayout->addWidget(finalizeAtlas);
-    layout->addWidget(m_paintControls);
+    // The material palette is the primary authoring surface. Give it all
+    // remaining vertical space instead of leaving an empty stretch below the
+    // fixed heightmap controls.
+    layout->addWidget(m_paintControls, 1);
     layout->addSpacing(8);
     layout->addWidget(new QLabel(tr("Heightmap import"), this));
     layout->addWidget(m_flipVertical);
     QPushButton* importButton = new QPushButton(tr("Import grayscale heightmap..."), this);
     layout->addWidget(importButton);
-    layout->addStretch(1);
     connect(importButton, &QPushButton::clicked, this, &CLandscapeTools::importHeightmapRequested);
     connect(tilePicker, &QPushButton::clicked, this, &CLandscapeTools::tilePickerRequested);
     connect(reviewAtlas, &QPushButton::clicked, this, &CLandscapeTools::atlasProfileReviewRequested);
@@ -419,13 +430,13 @@ float CLandscapeTools::paintRadius() const
 
 void CLandscapeTools::setGeneratedAtlasTileCount(int count)
 {
-    const int generated = qMax(0, count);
-    const int active = m_authoredAtlasSlots + generated;
+    const int added = qMax(0, count);
+    const int active = m_authoredAtlasSlots + added;
     m_generatedAtlasTiles->setText(tr(
-        "%1 authored + %2 generated = %3 active slots")
-        .arg(m_authoredAtlasSlots).arg(generated).arg(active));
+        "%1 original + %2 added exact = %3 active slots")
+        .arg(m_authoredAtlasSlots).arg(added).arg(active));
     m_generatedAtlasTiles->setToolTip(tr(
-        "Authored slots remain byte-identical. Generated exact corner combinations are appended after them and cached for this map session."));
+        "Original slots remain byte-identical. Added exact tiles include reused stock JMV blends and newly generated combinations cached for this map session."));
 }
 ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {

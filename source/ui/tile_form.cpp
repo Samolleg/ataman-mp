@@ -65,6 +65,8 @@ CTileForm::CTileForm(QWidget *parent) :
     ui->tableTile->verticalHeader()->setVisible(false);
     ui->tableTile->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     ui->tableTile->horizontalHeader()->setStretchLastSection(true);
+    connect(ui->tableTile->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, [this](int) { ensureVisibleTileIcons(); });
 
     ui->tableQuick->verticalHeader()->setVisible(false);
     ui->tableQuick->setRowCount(1);
@@ -113,20 +115,12 @@ void CTileForm::fitTable()
         tableWidth -= ui->tableTile->verticalScrollBar()->width();
     int cellWidth = tableWidth/8;
 
-    int iIco(0);
     int nRow = m_nTilePerRow * m_nTextureAtlas;
+    for(int col(0); col<m_nTilePerRow; ++col)
+        ui->tableTile->setColumnWidth(col, cellWidth);
     for(int row(0); row<nRow; ++row)
-    {
         ui->tableTile->setRowHeight(row, (row+1)%8 == 0 ? (cellWidth + 6) : cellWidth);
-        for(int col(0); col<m_nTilePerRow; ++col)
-        {
-            ui->tableTile->setColumnWidth(col, cellWidth);
-            QTableWidgetItem *item = ui->tableTile->item(row, col);
-            QIcon scaledIco = m_icoList[iIco].pixmap(QSize(m_originalTilesize, m_originalTilesize)).scaled(cellWidth, cellWidth, Qt::KeepAspectRatio);
-            item->setIcon(scaledIco);
-            ++iIco;
-        }
-    }
+    ensureVisibleTileIcons();
 
     //quick panel
     int quickColWidth = ui->tableQuick->width()/8;
@@ -135,17 +129,50 @@ void CTileForm::fitTable()
     {
         ui->tableQuick->setColumnWidth(i, quickColWidth);
         QTableWidgetItem *item = ui->tableQuick->item(0, i);
-        QIcon scaledIco = m_icoList[m_arrQuickTile[i]].pixmap(QSize(m_originalTilesize, m_originalTilesize)).scaled(cellWidth, cellWidth, Qt::KeepAspectRatio);
+        QIcon scaledIco = iconForSlot(m_arrQuickTile[i]).pixmap(
+            QSize(m_originalTilesize, m_originalTilesize)).scaled(
+                cellWidth, cellWidth, Qt::KeepAspectRatio);
         item->setIcon(scaledIco);
     }
     ui->tableQuick->setFixedHeight(ui->tableQuick->horizontalHeader()->height()+quickColWidth + 2); // 2 pixel is select border
+}
+
+QIcon CTileForm::iconForSlot(int index)
+{
+    if(index < 0 || index >= m_tileImages.size())
+        return QIcon();
+    while(m_icoList.size() < m_tileImages.size())
+        m_icoList.append(QIcon());
+    if(m_icoList[index].isNull())
+        m_icoList[index] = QIcon(QPixmap::fromImage(m_tileImages.at(index)));
+    return m_icoList.at(index);
+}
+
+void CTileForm::ensureVisibleTileIcons()
+{
+    if(m_tileImages.isEmpty() || !ui->tableTile->viewport())
+        return;
+    int firstRow = ui->tableTile->rowAt(0);
+    int lastRow = ui->tableTile->rowAt(ui->tableTile->viewport()->height() - 1);
+    if(firstRow < 0) firstRow = 0;
+    if(lastRow < 0) lastRow = qMin(ui->tableTile->rowCount() - 1, firstRow + 12);
+    firstRow = qMax(0, firstRow - 1);
+    lastRow = qMin(ui->tableTile->rowCount() - 1, lastRow + 1);
+    for(int row = firstRow; row <= lastRow; ++row)
+        for(int column = 0; column < m_nTilePerRow; ++column)
+        {
+            const int slot = row * m_nTilePerRow + column;
+            QTableWidgetItem* item = ui->tableTile->item(row, column);
+            if(item && slot < m_tileImages.size() && item->icon().isNull())
+                item->setIcon(iconForSlot(slot));
+        }
 }
 
 QPixmap CTileForm::tileWithRot(int index, int rot)
 {
     QTransform transform;
     transform.rotate(90*rot);
-    return m_icoList[index].pixmap(QSize(32, 32)).transformed(transform);
+    return iconForSlot(index).pixmap(QSize(32, 32)).transformed(transform);
 }
 
 void CTileForm::updateMaterialData()
@@ -193,7 +220,9 @@ void CTileForm::updateQuickTable()
         QTableWidgetItem *item = ui->tableQuick->item(0, i);
         item->setText("");
         item->setTextAlignment(Qt::AlignCenter);
-        QIcon scaledIco = m_icoList[m_arrQuickTile[i]].pixmap(QSize(m_originalTilesize, m_originalTilesize)).scaled(quickColWidth, quickColWidth, Qt::KeepAspectRatio);
+        QIcon scaledIco = iconForSlot(m_arrQuickTile[i]).pixmap(
+            QSize(m_originalTilesize, m_originalTilesize)).scaled(
+                quickColWidth, quickColWidth, Qt::KeepAspectRatio);
         item->setIcon(scaledIco);
     }
 }
@@ -322,7 +351,6 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
 
     m_icoList.clear();
     QHash<qint64, QVector<QImage>> pageTiles;
-    QHash<qint64, QVector<QIcon>> pageIcons;
     for(int i(0); i<textureAtlasNumber; ++i)
     {
         const qint64 pageKey = arrImage.at(i).cacheKey();
@@ -331,14 +359,10 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
         {
             for(const QImage& tile : cachedTiles.value())
                 m_tileImages.append(tile);
-            for(const QIcon& icon : pageIcons.value(pageKey))
-                m_icoList.append(icon);
             continue;
         }
         QVector<QImage> physicalPageTiles;
-        QVector<QIcon> physicalPageIcons;
         physicalPageTiles.reserve(64);
-        physicalPageIcons.reserve(64);
         for(int col(0); col<m_nTilePerRow; ++col)
         {
             for(int row(0); row<m_nTilePerRow; ++row)
@@ -346,16 +370,18 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
                 QImage croppedImage = arrImage[i].copy(row*m_originalTilesize, col*m_originalTilesize, m_originalTilesize, m_originalTilesize);
                 croppedImage = croppedImage.mirrored(false, true);
                 croppedImage = croppedImage.convertToFormat(QImage::Format_RGBA8888);
-                QPixmap croppedPixmap = QPixmap::fromImage(croppedImage);
                 physicalPageTiles.append(croppedImage);
-                physicalPageIcons.append(QIcon(croppedPixmap));
             }
         }
         pageTiles.insert(pageKey, physicalPageTiles);
-        pageIcons.insert(pageKey, physicalPageIcons);
         for(const QImage& tile : physicalPageTiles) m_tileImages.append(tile);
-        for(const QIcon& icon : physicalPageIcons) m_icoList.append(icon);
     }
+
+    // Inspect Atlas is hidden during normal map loading. Preserve the full
+    // authored image vector for semantic painting, but create GPU-backed icons
+    // only for rows that the user actually opens or scrolls into view.
+    for(int slot = 0; slot < m_tileImages.size(); ++slot)
+        m_icoList.append(QIcon());
 
     int iIco(0);
     for(int row(0); row<nRow; ++row)
@@ -363,7 +389,6 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
         for(int col(0); col<m_nTilePerRow; ++col)
         {
             QTableWidgetItem *item = new QTableWidgetItem;
-            item->setIcon(m_icoList[iIco]);
             item->setText("");
             item->setTextAlignment(Qt::AlignTop);
             item->setFlags(item->flags() & ~Qt::ItemIsEditable);
@@ -384,7 +409,7 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
     {
         m_arrQuickTile[i] = i;
         QTableWidgetItem *item = new QTableWidgetItem;
-        item->setIcon(m_icoList[m_arrQuickTile[i]]);
+        item->setIcon(iconForSlot(m_arrQuickTile[i]));
         item->setText("");
         item->setTextAlignment(Qt::AlignCenter);
         //item->setFlags(item->flags() & ~Qt::ItemIsEditable);
@@ -419,16 +444,13 @@ bool CTileForm::replaceTileImages(const QVector<QImage>& images)
     }
     m_tileImages = images;
     m_icoList.clear();
-    m_icoList.reserve(images.size());
     for(int slot = 0; slot < images.size(); ++slot)
-    {
-        const QIcon icon(QPixmap::fromImage(images.at(slot)));
-        m_icoList.append(icon);
-        QTableWidgetItem* item = ui->tableTile->item(
-            slot / m_nTilePerRow, slot % m_nTilePerRow);
-        if(item)
-            item->setIcon(icon);
-    }
+        m_icoList.append(QIcon());
+    for(int row = 0; row < ui->tableTile->rowCount(); ++row)
+        for(int column = 0; column < m_nTilePerRow; ++column)
+            if(QTableWidgetItem* item = ui->tableTile->item(row, column))
+                item->setIcon(QIcon());
+    ensureVisibleTileIcons();
     updateQuickTable();
     return true;
 }

@@ -550,6 +550,9 @@ MainWindow::MainWindow(QWidget* parent) :
     m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools"), this);
     m_landscapeToolsDock->setObjectName("landscapeToolsDock");
     m_landscapeToolsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_landscapeToolsDock->setMinimumWidth(260);
+    m_landscapeTools->setMinimumWidth(0);
+    m_landscapeTools->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     m_landscapeToolsDock->setFeatures(QDockWidget::DockWidgetClosable |
                                       QDockWidget::DockWidgetMovable |
                                       QDockWidget::DockWidgetFloatable);

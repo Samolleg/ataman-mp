@@ -158,6 +158,49 @@ QMap<qint32, ETerrainBlendStyle> globalMaterialBlendStyles(
     return result;
 }
 
+QByteArray globalTransitionKey(const STerrainTransitionSignature& signature)
+{
+    QByteArray key(16, '\0');
+    const qint32 values[4] = {signature.northWest, signature.northEast,
+                             signature.southEast, signature.southWest};
+    for(int corner = 0; corner < 4; ++corner)
+        qToLittleEndian<qint32>(values[corner],
+            reinterpret_cast<uchar*>(key.data() + corner * 4));
+    return key;
+}
+
+QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
+                                const QSize& requiredSize,
+                                QMap<QString, QImage>* decodedPageCache)
+{
+    const QStringList names = ei::terrainTextureResourceNames(
+        source.mprNamespace, source.textureCount);
+    const int pageIndex = source.slot / 64;
+    if(pageIndex < 0 || pageIndex >= names.size())
+        return {};
+    const QString pageName = names.at(pageIndex).toCaseFolded();
+    QImage page;
+    if(decodedPageCache && decodedPageCache->contains(pageName))
+        page = decodedPageCache->value(pageName);
+    else
+    {
+        CTextureList::getInstance()->extractMmpToDxt1(page, pageName);
+        if(decodedPageCache) decodedPageCache->insert(pageName, page);
+    }
+    if(page.isNull() || page.width() != page.height() || page.width() % 8 != 0)
+        return {};
+    const int tileSize = page.width() / 8;
+    const int localSlot = source.slot % 64;
+    QImage tile = page.copy((localSlot % 8) * tileSize,
+                            (localSlot / 8) * tileSize,
+                            tileSize, tileSize).mirrored(false, true)
+                  .convertToFormat(QImage::Format_RGBA8888);
+    if(!requiredSize.isEmpty() && tile.size() != requiredSize)
+        tile = tile.scaled(requiredSize, Qt::IgnoreAspectRatio,
+                           Qt::SmoothTransformation);
+    return tile;
+}
+
 QVector4D aiGraphLayerColor(int layer)
 {
     static const QVector4D colors[CAiGraphDocument::LayerCount] = {
@@ -6475,6 +6518,9 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainPaintAudit.clear();
     m_terrainPaintActions.clear();
     m_terrainPaintActionId = 0;
+    m_terrainGlobalTransitionSources.clear();
+    m_terrainGlobalTransitionPageCache.clear();
+    m_importedTerrainTransitions.clear();
     if(m_landscapeTools)
         m_landscapeTools->setPaintTerrainTypes({}, {}, {});
     QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
@@ -6641,6 +6687,12 @@ void CView::rebuildTerrainAutoCatalog()
             ETerrainAtlasLayer::Overlay);
         m_terrainGlobalFamilies =
             CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+        for(const STerrainGlobalTransitionSource& source :
+                CTerrainAtlasPresetCatalog::globalAuthoredTransitions(&report))
+            for(int rotation = 0; rotation < 4; ++rotation)
+                m_terrainGlobalTransitionSources.insert(
+                    globalTransitionKey(CTerrainTransitionCatalog::rotated(
+                        source.signature, rotation)), source);
         const QSize requiredSize = m_pTileForm->tileImages().isEmpty()
             ? QSize() : m_pTileForm->tileImages().front().size();
         // A reviewed atlas page commonly supplies anchors for many material
@@ -7216,6 +7268,41 @@ bool CView::realizeWorkingTerrainSignature(
             "The live exact-transition cache is unavailable for this map.");
         return false;
     }
+    // Resolution order is user-visible policy: current map exact tuple first,
+    // then an exact authored tuple from any configured stock JMV atlas, and
+    // only then procedural generation. Global pages are decoded on demand so
+    // building the palette does not expand every atlas in the installation.
+    bool alreadyExact = false;
+    m_workingTerrainAtlas->catalog().selectForPaint(
+        signature, cellX, cellY, m_terrainSemanticSeed, &alreadyExact);
+    if(!alreadyExact)
+    {
+        const QList<STerrainGlobalTransitionSource> candidates =
+            m_terrainGlobalTransitionSources.values(globalTransitionKey(signature));
+        const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
+            ? QSize() : m_authoredTerrainTileImages.front().size();
+        for(const STerrainGlobalTransitionSource& source : candidates)
+        {
+            const QImage pixels = loadGlobalTransitionTile(
+                source, requiredSize, &m_terrainGlobalTransitionPageCache);
+            if(pixels.isNull())
+                continue;
+            const QString label = QStringLiteral("%1 slot %2")
+                .arg(source.mprNamespace).arg(source.slot);
+            CValidationReport importReport;
+            if(m_workingTerrainAtlas->addAuthoredLibraryTransition(
+                   source.signature, pixels, label, &importReport))
+            {
+                m_importedTerrainTransitions.insert(
+                    globalTransitionKey(source.signature),
+                    qMakePair(source.signature, pixels));
+                ei::log(eLogInfo, QString(
+                    "Terrain exact transition source: authored global %1")
+                    .arg(label));
+                break;
+            }
+        }
+    }
     const auto appendFindings = [report](const CValidationReport& source) {
         if(!report) return;
         for(const SValidationFinding& finding : source.findings())
@@ -7379,6 +7466,17 @@ void CView::finalizeVirtualTerrainAtlas()
     CTerrainVirtualAtlas atlas(catalog, authoredImages, m_terrainSemanticSeed,
                                m_terrainGlobalMaterialSources,
                                globalMaterialBlendStyles(m_terrainGlobalFamilies));
+    for(auto imported = m_importedTerrainTransitions.cbegin();
+        imported != m_importedTerrainTransitions.cend(); ++imported)
+        if(!atlas.addAuthoredLibraryTransition(
+               imported.value().first, imported.value().second,
+               QStringLiteral("stock-jmv-finalization"), &report))
+        {
+            QMessageBox::critical(this,tr("Atlas finalization refused"),
+                tr("An authored stock transition used by this map could not be imported into the isolated final atlas.\n\n%1")
+                    .arg(report.toText()));
+            return;
+        }
     const STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,
         kValidatedShippedTerrainAtlasSlotLimit,

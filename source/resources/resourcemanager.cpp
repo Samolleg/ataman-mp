@@ -1284,9 +1284,26 @@ int CTextureList::extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringLi
             continue;
         }
 
-        stream.device()->seek(header.size());
         QImage& img = outArrImage[index];
-        img = convert_DXT(stream, header.m_width, header.m_height).mirrored(false, true);
+        const qint64 blockBytes = qint64(qMax(1, (header.m_width + 3) / 4))
+            * qint64(qMax(1, (header.m_height + 3) / 4)) * 8;
+        if(blockBytes > std::numeric_limits<int>::max()
+           || header.size() + blockBytes > textureData.size())
+        {
+            ei::log(eLogWarning, "Truncated terrain texture payload: " + texName
+                    + " source:" + sourcePath);
+            continue;
+        }
+        QString decodeDiagnostic;
+        if(!ei::decodeDxtImage(textureData.mid(header.size(), int(blockBytes)),
+                               header.m_width, header.m_height,
+                               ei::DxtFormat::Dxt1, &img, &decodeDiagnostic))
+        {
+            ei::log(eLogWarning, "Cannot decode terrain texture: " + texName
+                    + " source:" + sourcePath + " diagnostic:" + decodeDiagnostic);
+            continue;
+        }
+        img = img.mirrored(false, true);
         decodedPayloads.insert(payloadSha256, img);
         ++nCount;
         ei::log(eLogInfo, QString("Resolved terrain tile atlas %1 source:%2 size:%3x%4")

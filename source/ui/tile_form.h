@@ -68,6 +68,8 @@ public:
 
 private:
     void fitTable();
+    QIcon iconForSlot(int index);
+    void ensureVisibleTileIcons();
     QPixmap tileWithRot(int index, int rot);
     void updateMaterialData();
     void updateAnimTileData();

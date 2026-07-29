@@ -255,8 +255,11 @@ bool decodeDxtImage(const QByteArray& compressed, int width, int height,
                     alpha = int((alphaIndices >> (4 * pixel)) & 0xfu) * 17;
                 else if(format == DxtFormat::Dxt5)
                     alpha = alphaValues[(alphaIndices >> (3 * pixel)) & 7u];
-                result.setPixel(x, y, qRgba(qRed(color), qGreen(color),
-                                            qBlue(color), alpha));
+                // Terrain pages contain millions of texels. QImage::setPixel
+                // repeats format and bounds dispatch for every one; this image
+                // has a fixed format and the coordinates were checked above.
+                reinterpret_cast<QRgb*>(result.scanLine(y))[x] =
+                    qRgba(qRed(color), qGreen(color), qBlue(color), alpha);
             }
         }
     *image = result;

@@ -345,6 +345,7 @@ private slots:
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
     void workingAtlasRealizesExactTransitionsBeyond512Slots();
+    void globalAuthoredTransitionLibraryIndexesRealStockBlends();
     void multiRowTerrainAtlasKeepsAuthoredPagesInPlace();
     void zone2TransitionOnlyGrassMapsToGlobalUniformFamily();
     void authoredPresetSupportsZone18SharedLayers();
@@ -5827,6 +5828,35 @@ void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots(
     QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(), 512);
     QCOMPARE(working.activeTextureCount(), 9);
     QCOMPARE(working.activeTileImages().size(), 9 * 64);
+}
+
+void EnduranceDocumentTests::globalAuthoredTransitionLibraryIndexesRealStockBlends()
+{
+    CValidationReport report;
+    const QVector<STerrainGlobalTransitionSource> transitions =
+        CTerrainAtlasPresetCatalog::globalAuthoredTransitions(&report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(!transitions.isEmpty());
+    int mixed = 0;
+    QSet<QString> namespaces;
+    for(const STerrainGlobalTransitionSource& source : transitions)
+    {
+        QVERIFY(!source.mprNamespace.isEmpty());
+        QVERIFY(source.textureCount > 0);
+        QVERIFY(source.slot >= 0);
+        QVERIFY(source.slot < source.textureCount * 64);
+        const qint32 corners[] = {source.signature.northWest,
+                                  source.signature.northEast,
+                                  source.signature.southEast,
+                                  source.signature.southWest};
+        for(qint32 corner : corners)
+            QVERIFY(corner > 255);
+        mixed += corners[0] != corners[1] || corners[0] != corners[2]
+            || corners[0] != corners[3];
+        namespaces.insert(source.mprNamespace.toCaseFolded());
+    }
+    QVERIFY2(mixed > 0, "The global authored library indexed no blended tiles.");
+    QVERIFY(namespaces.size() > 1);
 }
 
 void EnduranceDocumentTests::multiRowTerrainAtlasKeepsAuthoredPagesInPlace()
