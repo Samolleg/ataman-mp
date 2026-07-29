@@ -4,7 +4,10 @@
 #include <QByteArray>
 #include <QString>
 #include <QImage>
+#include <QMap>
+#include <QSet>
 #include <QVector>
+#include <functional>
 
 namespace ei {
 
@@ -27,6 +30,19 @@ bool decodeDxtImage(const QByteArray& compressed, int width, int height,
 // palette thumbnail. logicalSlot uses the MPR 0..63 tile ordering.
 bool decodeMmpDxt1AtlasTile(const QByteArray& mmp, int logicalSlot,
                             QImage* image, QString* diagnostic = nullptr);
+
+// Resolve one page payload at most once while a caller requests several
+// palette tiles from the same authored MMP. Failed page lookups are cached as
+// well, preventing every material-family fallback from repeating the same RES
+// scan/read. The cache lifetime remains caller-owned and can therefore be
+// bounded to one catalog rebuild.
+using MmpPayloadLoader = std::function<bool(const QString&, QByteArray*)>;
+bool decodeMmpDxt1AtlasTileCached(
+    const QString& pageName, int logicalSlot,
+    QMap<QString, QByteArray>* payloadCache,
+    QSet<QString>* missingPageCache,
+    const MmpPayloadLoader& loader,
+    QImage* image, QString* diagnostic = nullptr);
 
 // PNT3 stores four-pixel (16-byte) literal blocks separated by byte-counted
 // transparent runs. Only the first dword of each block is a control candidate:

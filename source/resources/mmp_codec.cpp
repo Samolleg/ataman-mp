@@ -530,6 +530,43 @@ bool decodeMmpDxt1AtlasTile(const QByteArray& mmp, int logicalSlot,
                           DxtFormat::Dxt1, image, diagnostic);
 }
 
+bool decodeMmpDxt1AtlasTileCached(
+    const QString& pageName, int logicalSlot,
+    QMap<QString, QByteArray>* payloadCache,
+    QSet<QString>* missingPageCache,
+    const MmpPayloadLoader& loader,
+    QImage* image, QString* diagnostic)
+{
+    if(!payloadCache || !missingPageCache || !loader || !image)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The cached DXT1 terrain tile request is incomplete.");
+        return false;
+    }
+    const QString key = pageName.toCaseFolded();
+    if(missingPageCache->contains(key))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The terrain atlas page was already unavailable in this catalog rebuild.");
+        return false;
+    }
+    auto found = payloadCache->constFind(key);
+    if(found == payloadCache->constEnd())
+    {
+        QByteArray payload;
+        if(!loader(key, &payload))
+        {
+            missingPageCache->insert(key);
+            if(diagnostic) *diagnostic = QStringLiteral(
+                "The terrain atlas page could not be resolved.");
+            return false;
+        }
+        found = payloadCache->insert(key, payload);
+    }
+    return decodeMmpDxt1AtlasTile(found.value(), logicalSlot,
+                                  image, diagnostic);
+}
+
 QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps,
                          QString* diagnostic)
 {

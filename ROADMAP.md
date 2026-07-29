@@ -463,6 +463,11 @@ limit; live painting remains independent of that ceiling.
   controlled player, exact page/slot evidence, and process memory telemetry.
   A 2048-slot map plus one generated/referenced extension page (2112 physical
   slots) also reaches gameplay authoritatively.
+- [x] Bound game-wide palette construction by source-page identity: each MMP
+  payload is read once per catalog rebuild, only requested DXT tiles are
+  decoded, failed page lookups are negatively cached, and editor-open logs
+  report renderer, canonical document, tile-table, and material-catalog phase
+  durations independently.
 - [ ] Replace the shipped runtime's monolithic terrain-atlas allocation before
   claiming 8192 slots. Both the normal Zone18 stress run and an independent
   no-`drawall` control crash after gameplay-ready while allocating the

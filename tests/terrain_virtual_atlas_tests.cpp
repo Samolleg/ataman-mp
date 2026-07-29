@@ -207,6 +207,7 @@ private slots:
     void gradedAlphaIsRefusedWithoutFlattening();
     void dxt1TerrainPagesMatchShippedMipContract();
     void dxt1AtlasTileDirectDecodeMatchesFullPageOrientation();
+    void dxt1AtlasTileCacheReadsEachPageOnce();
     void workingAtlasGeneratesImmediatelyAndReusesTuple();
     void expanded4096AtlasRetainsWorkingExtensionCapacity();
     void workingAtlasNeverReplacesAuthoredPixels();
@@ -997,6 +998,47 @@ void TerrainVirtualAtlasTests::dxt1AtlasTileDirectDecodeMatchesFullPageOrientati
             (slot % 8) * 16, (slot / 8) * 16, 16, 16).mirrored(false, true);
         QCOMPARE(direct, legacy);
     }
+}
+
+void TerrainVirtualAtlasTests::dxt1AtlasTileCacheReadsEachPageOnce()
+{
+    QVector<QImage> tiles;
+    for(int slot = 0; slot < 64; ++slot)
+        tiles.append(solid(qRgba(slot * 3, slot * 2, slot, 255)));
+    QString diagnostic;
+    const QByteArray payload = ei::encodeMmpDxt1(
+        CTerrainVirtualAtlas::composePage(tiles, 0, 8), true, &diagnostic);
+    QVERIFY2(!payload.isEmpty(), qPrintable(diagnostic));
+    QMap<QString, QByteArray> payloads;
+    QSet<QString> missing;
+    int availableReads = 0;
+    int missingReads = 0;
+    const ei::MmpPayloadLoader loader = [&](const QString& page,
+                                            QByteArray* bytes) {
+        if(page == QStringLiteral("available.mmp"))
+        {
+            ++availableReads;
+            *bytes = payload;
+            return true;
+        }
+        ++missingReads;
+        return false;
+    };
+    QImage first, second, absent;
+    QVERIFY(ei::decodeMmpDxt1AtlasTileCached(
+        "AVAILABLE.MMP", 0, &payloads, &missing, loader, &first, &diagnostic));
+    QVERIFY(ei::decodeMmpDxt1AtlasTileCached(
+        "available.mmp", 63, &payloads, &missing, loader, &second, &diagnostic));
+    QVERIFY(!ei::decodeMmpDxt1AtlasTileCached(
+        "missing.mmp", 0, &payloads, &missing, loader, &absent, &diagnostic));
+    QVERIFY(!ei::decodeMmpDxt1AtlasTileCached(
+        "MISSING.MMP", 1, &payloads, &missing, loader, &absent, &diagnostic));
+    QCOMPARE(availableReads, 1);
+    QCOMPARE(missingReads, 1);
+    QCOMPARE(payloads.size(), 1);
+    QCOMPARE(missing.size(), 1);
+    QVERIFY(!first.isNull());
+    QVERIFY(!second.isNull());
 }
 
 void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()

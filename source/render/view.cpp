@@ -37,6 +37,7 @@
 #include <QDateTime>
 #include "mob\mob.h"
 #include "resourcemanager.h"
+#include "mmp_codec.h"
 #include "resource_name.h"
 #include "node.h"
 #include "landscape.h"
@@ -99,6 +100,8 @@ CTerrainTransitionCatalog globalMaterialCatalog(
 QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
                                const QString& preferredNamespace,
                                const QSize& requiredSize,
+                               QMap<QString, QByteArray>* encodedPageCache,
+                               QSet<QString>* missingPageCache,
                                QMap<QString, QImage>* decodedTileCache)
 {
     QVector<STerrainGlobalMaterialSource> sources = family.sources;
@@ -127,11 +130,17 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
             return decodedTileCache->value(tileCacheKey);
         const int localSlot = source.uniformSlot % 64;
         QImage tile;
-        // The palette needs one reviewed uniform tile, not the other 63
-        // tiles on its MMP page. Direct block extraction cuts first-load work
-        // from dozens of 2048x2048 RGBA decodes to small 128/256px tiles.
-        if(!CTextureList::getInstance()->terrainMmpTile(
-               pageName, localSlot, &tile))
+        QString diagnostic;
+        // Several hundred material cards often share a few dozen MMP pages.
+        // Read each encoded page once, then decode only each requested tile.
+        // This avoids both whole-page RGBA expansion and repeated multi-MiB
+        // RES reads for every family on that page.
+        if(!ei::decodeMmpDxt1AtlasTileCached(
+               pageName, localSlot, encodedPageCache, missingPageCache,
+               [](const QString& name, QByteArray* payload) {
+                   return CTextureList::getInstance()->terrainMmpPayload(
+                       name, payload);
+               }, &tile, &diagnostic))
             continue;
         tile = tile.convertToFormat(QImage::Format_RGBA8888);
         if(requiredSize.isEmpty() || tile.size() == requiredSize)
@@ -5348,19 +5357,26 @@ void CView::loadLandscape(const QFileInfo& filePath)
     const QString mapLocalAtlas = filePath.dir().filePath(
         filePath.completeBaseName() + QStringLiteral("-atlas.res"));
     CTextureList::getInstance()->setMapLocalTerrainArchive(mapLocalAtlas);
+    QElapsedTimer totalLoadTimer;
+    QElapsedTimer phaseTimer;
+    totalLoadTimer.start();
+    phaseTimer.start();
     ei::setCrashContext("mpr/open/dispatch:" + filePath.fileName());
     m_pLand->readMap(filePath);
+    const qint64 rendererLoadMs = phaseTimer.elapsed();
     if(!m_pLand->isMprLoad())
     {
         CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
         ei::log(eLogWarning, "Landscape failed to load: " + filePath.absoluteFilePath());
         return;
     }
+    phaseTimer.restart();
     CValidationReport canonicalReport;
     m_terrainEditAvailable = m_mprDocument.load(filePath, &canonicalReport)
         && !canonicalReport.hasErrors()
         && m_terrainEdit.load(m_mprDocument, &canonicalReport)
         && !canonicalReport.hasErrors();
+    const qint64 canonicalLoadMs = phaseTimer.elapsed();
     if(!m_terrainEditAvailable)
     {
         ei::log(eLogWarning, "Canonical terrain editing disabled for this MPR:\n"
@@ -5390,8 +5406,16 @@ void CView::loadLandscape(const QFileInfo& filePath)
         m_mprModifyTimer->start();
     }
     m_pPreviewTile.reset(new CPreviewTile());
+    phaseTimer.restart();
     updateTileForm(true);
+    const qint64 tileTableMs = phaseTimer.elapsed();
+    phaseTimer.restart();
     rebuildTerrainAutoCatalog();
+    const qint64 materialCatalogMs = phaseTimer.elapsed();
+    ei::log(eLogInfo, QString(
+        "MPR editor load phases file:%1 rendererAtlasAndSectorsMs:%2 canonicalMs:%3 tileTableMs:%4 materialCatalogMs:%5 totalMs:%6")
+        .arg(filePath.fileName()).arg(rendererLoadMs).arg(canonicalLoadMs)
+        .arg(tileTableMs).arg(materialCatalogMs).arg(totalLoadTimer.elapsed()));
     refreshAiGraphPreviewSource();
     refreshMprSettingsDock();
     emit selectionStateChanged(nSelectedNodes() > 0);
@@ -6769,10 +6793,13 @@ void CView::rebuildTerrainAutoCatalog()
         // families. Decode each physical MMP only once per catalog rebuild;
         // the previous per-family decode made map opening spend tens of
         // seconds repeatedly expanding the same 2048x2048 DXT page.
+        QMap<QString, QByteArray> encodedGlobalPages;
+        QSet<QString> missingGlobalPages;
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             const QImage source = loadGlobalUniformSource(
                 family, mprNamespace, requiredSize,
+                &encodedGlobalPages, &missingGlobalPages,
                 &m_terrainGlobalUniformTileCache);
             if(source.isNull())
             {
@@ -6802,6 +6829,10 @@ void CView::rebuildTerrainAutoCatalog()
                 overlayChoices.append(choice);
             }
         }
+        ei::log(eLogInfo, QString(
+            "Game-wide material palette source pages loaded:%1 unavailable:%2 materialTiles:%3")
+            .arg(encodedGlobalPages.size()).arg(missingGlobalPages.size())
+            .arg(m_terrainGlobalMaterialSources.size()));
     }
     QString status = m_terrainAtlasAnalysis.usable
         ? tr("%1 loaded: %2 land and %3 overlay materials.")
