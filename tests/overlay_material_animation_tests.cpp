@@ -21,6 +21,7 @@ private slots:
     void derivesMaterialOpacity();
     void usesSharedOverlayVertexRules();
     void gatesUnderlayEmissionByPositiveDepth();
+    void mprSettingsUsesTopLevelWindowAndOverlaySlotShortcut();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -266,6 +267,24 @@ void OverlayMaterialAnimationTests::gatesUnderlayEmissionByPositiveDepth()
     QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 3.25f), red);
     QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 3.0f), QVector3D());
     QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 2.75f), QVector3D());
+}
+
+void OverlayMaterialAnimationTests::mprSettingsUsesTopLevelWindowAndOverlaySlotShortcut()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    const QByteArray view = viewFile.readAll();
+
+    QVERIFY2(view.contains("QDialog(nullptr, Qt::Window | Qt::WindowSystemMenuHint"),
+             "MPR Settings must use the same independent top-level window path as minimap export");
+    QVERIFY2(view.contains("showOverlayMaterialSlotsFromMprSettings"),
+             "The Materials Editor must expose a direct overlay-slot inspection shortcut");
+    QVERIFY2(view.contains("ELandscapeEditMode::OverlayPaint"),
+             "The shortcut must activate Paint existing overlays rather than another landscape mode");
+    QVERIFY2(view.contains("setOverlayMaterialSlotLabelsVisible(true)"),
+             "The shortcut must explicitly enable per-cell material-slot labels");
 }
 
 QTEST_APPLESS_MAIN(OverlayMaterialAnimationTests)

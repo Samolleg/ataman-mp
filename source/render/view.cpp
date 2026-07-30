@@ -923,6 +923,13 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
             setDrawLand(drawLand);
             setDrawWater(drawWater);
         });
+        connect(m_landscapeTools,
+                &CLandscapeTools::overlayMaterialSlotLabelsChanged,
+                this, [this](bool)
+        {
+            m_overlayMaterialSlotLabelsDirty = true;
+            update();
+        });
         m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
     }
 }
@@ -1221,6 +1228,13 @@ CView::~CView()
                          m_testEntranceLabelTextures.constData());
         m_testEntranceLabelTextures.clear();
         // Keep the context current for renderer member destruction below.
+    }
+    if(isValid() && !m_overlayMaterialSlotLabelTextures.isEmpty())
+    {
+        makeCurrent();
+        ei::gl::DeleteTextures(m_overlayMaterialSlotLabelTextures.size(),
+            m_overlayMaterialSlotLabelTextures.constData());
+        m_overlayMaterialSlotLabelTextures.clear();
     }
     m_aMob.clear();
 
@@ -3409,11 +3423,70 @@ void CView::rebuildAiGraphOverlayGeometry()
         }
 }
 
+void CView::rebuildOverlayMaterialSlotLabels()
+{
+    m_overlayMaterialSlotLabelPositions.clear();
+    m_overlayMaterialSlotLabelSlots.clear();
+    m_overlayMaterialSlotLabelImages.clear();
+
+    int maximumSlot = -1;
+    for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
+    {
+        for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
+        {
+            bool available = false;
+            const int slot = m_terrainEdit.overlayMaterialIndex(x, y, &available);
+            if(!available || slot < 0)
+                continue;
+            QVector3D center((float(x) + 0.5f) * 2.0f,
+                             (float(y) + 0.5f) * 2.0f, 0.0f);
+            if(!m_pLand->projectPt(center, false))
+                continue;
+            center.setZ(center.z() + 0.18f);
+            m_overlayMaterialSlotLabelPositions.append(center);
+            m_overlayMaterialSlotLabelSlots.append(slot);
+            maximumSlot = qMax(maximumSlot, slot);
+        }
+    }
+
+    const QFont labelFont = font();
+    const QFontMetrics metrics(labelFont);
+    const double scale = ei::uiScaleFactor();
+    const int horizontalPadding = qMax(4, qRound(4.0 * scale));
+    const int verticalPadding = qMax(2, qRound(2.0 * scale));
+    for(int slot = 0; slot <= maximumSlot; ++slot)
+    {
+        const QString label = QString::number(slot);
+        QImage image(metrics.horizontalAdvance(label) + horizontalPadding * 2,
+                     metrics.height() + verticalPadding * 2,
+                     QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(QColor(100, 225, 255, 235), qMax(1.0, scale)));
+        painter.setBrush(QColor(8, 42, 58, 205));
+        painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1),
+                                qMax(3, qRound(3.0 * scale)),
+                                qMax(3, qRound(3.0 * scale)));
+        painter.setPen(QColor(245, 252, 255));
+        painter.drawText(image.rect(), Qt::AlignCenter, label);
+        m_overlayMaterialSlotLabelImages.append(image);
+    }
+    m_overlayMaterialSlotLabelsDirty = false;
+    m_overlayMaterialSlotLabelTexturesDirty = true;
+}
+
 void CView::drawTestOverlaysOpenGl()
 {
+    const bool showOverlayMaterialSlots = m_landscapeTools
+        && m_landscapeTools->editingEnabled()
+        && m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint
+        && m_landscapeTools->overlayMaterialSlotLabelsVisible()
+        && m_terrainEditAvailable;
     if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
         && !m_terrainPaintOutlineValid && !m_sculptOutlineValid
-        && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()))
+        && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid())
+        && !showOverlayMaterialSlots)
        || width() <= 0 || height() <= 0)
         return;
 
@@ -3594,6 +3667,70 @@ void CView::drawTestOverlaysOpenGl()
         }
         ei::gl::BindTexture(GL_TEXTURE_2D, 0);
         m_program.disableAttributeArray(texture);
+    }
+
+    if(showOverlayMaterialSlots)
+    {
+        if(m_overlayMaterialSlotLabelsDirty)
+            rebuildOverlayMaterialSlotLabels();
+        if(m_overlayMaterialSlotLabelTexturesDirty)
+        {
+            if(!m_overlayMaterialSlotLabelTextures.isEmpty())
+                ei::gl::DeleteTextures(m_overlayMaterialSlotLabelTextures.size(),
+                    m_overlayMaterialSlotLabelTextures.constData());
+            m_overlayMaterialSlotLabelTextures.clear();
+            for(const QImage& image : m_overlayMaterialSlotLabelImages)
+                m_overlayMaterialSlotLabelTextures.append(
+                    bindTexture(image, GL_TEXTURE_2D, GL_RGBA));
+            m_overlayMaterialSlotLabelTexturesDirty = false;
+        }
+        if(texture >= 0 && !m_overlayMaterialSlotLabelTextures.isEmpty())
+        {
+            m_program.enableAttributeArray(texture);
+            m_program.setUniformValue("u_viewMmatrix", identity);
+            m_program.setUniformValue("u_projMmatrix", identity);
+            m_program.setUniformValue("customColor", QVector4D(0, 0, 0, 0));
+            m_program.setUniformValue("qt_Texture0", 0);
+            ei::gl::Disable(GL_DEPTH_TEST);
+            const QRect viewport(0, 0, width(), height());
+            const CViewFrustum frustum(m_projection * m_cam->viewMatrix());
+            const QVector<QVector2D> textureCoordinates = {
+                QVector2D(0, 0), QVector2D(1, 0),
+                QVector2D(1, 1), QVector2D(0, 1)
+            };
+            for(int index = 0; index < m_overlayMaterialSlotLabelPositions.size(); ++index)
+            {
+                const QVector3D& center = m_overlayMaterialSlotLabelPositions.at(index);
+                if(!frustum.intersectsSphere(center, 1.5f))
+                    continue;
+                const int slot = m_overlayMaterialSlotLabelSlots.at(index);
+                if(slot < 0 || slot >= m_overlayMaterialSlotLabelImages.size()
+                   || slot >= m_overlayMaterialSlotLabelTextures.size())
+                    continue;
+                const QVector3D projected = center.project(
+                    m_cam->viewMatrix(), m_projection, viewport);
+                if(projected.z() < 0.0f || projected.z() > 1.0f)
+                    continue;
+                const QImage& image = m_overlayMaterialSlotLabelImages.at(slot);
+                const float centerX = (2.0f * projected.x() / float(width())) - 1.0f;
+                const float centerY = (2.0f * projected.y() / float(height())) - 1.0f;
+                const float halfWidth = float(image.width()) / float(width());
+                const float halfHeight = float(image.height()) / float(height());
+                const QVector<QVector3D> quad = {
+                    QVector3D(centerX - halfWidth, centerY - halfHeight, 0),
+                    QVector3D(centerX + halfWidth, centerY - halfHeight, 0),
+                    QVector3D(centerX + halfWidth, centerY + halfHeight, 0),
+                    QVector3D(centerX - halfWidth, centerY + halfHeight, 0)
+                };
+                ei::gl::BindTexture(GL_TEXTURE_2D,
+                    m_overlayMaterialSlotLabelTextures.at(slot));
+                m_program.setAttributeArray(position, quad.constData());
+                m_program.setAttributeArray(texture, textureCoordinates.constData());
+                ei::gl::DrawArrays(GL_TRIANGLE_FAN, 0, quad.size());
+            }
+            ei::gl::BindTexture(GL_TEXTURE_2D, 0);
+            m_program.disableAttributeArray(texture);
+        }
     }
 
     if(m_testSpawnMarkerValid)
@@ -5970,6 +6107,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
         m_mprModifyTimer->start();
     }
     m_pPreviewTile.reset(new CPreviewTile());
+    m_overlayMaterialSlotLabelsDirty = true;
     updateTileForm(true);
     rebuildTerrainAutoCatalog();
     refreshAiGraphPreviewSource();
@@ -6007,6 +6145,7 @@ void CView::unloadLand(bool promptForSave)
     m_terrainEdit = CTerrainEditModel();
     m_mprMaterials.clear();
     m_mprAnimatedTiles.clear();
+    m_overlayMaterialSlotLabelsDirty = true;
     rebuildTerrainAutoCatalog();
     m_terrainSemanticSeed = 0;
     m_mprDocument = CMprDocument();
@@ -6312,6 +6451,7 @@ bool CView::adoptCommittedLandscapeBaseline(const QFileInfo& destination,
     m_pLand->setMaterials(renderMaterials(m_mprMaterials));
     m_pLand->setAnimTils(renderAnimatedTiles(m_mprAnimatedTiles));
     m_terrainEditAvailable = true;
+    m_overlayMaterialSlotLabelsDirty = true;
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
     rebuildTerrainAutoCatalog();
     m_pLand->setDirty(false);
@@ -8911,20 +9051,18 @@ void CView::openMapParameters()
         return;
     }
 
-    QMainWindow* host = qobject_cast<QMainWindow*>(window());
-    if(!host)
-        return;
-
-    QDockWidget* dock = new QDockWidget(tr("MPR Settings"), host);
+    QDialog* dock = new QDialog(nullptr, Qt::Window | Qt::WindowSystemMenuHint
+        | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint);
     m_mprSettingsDock = dock;
-    dock->setObjectName(QStringLiteral("mprSettingsDock"));
-    dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-    dock->setFeatures(QDockWidget::DockWidgetClosable |
-                      QDockWidget::DockWidgetMovable |
-                      QDockWidget::DockWidgetFloatable);
-    dock->setWindowFlags(dock->windowFlags() & ~Qt::WindowContextHelpButtonHint);
+    dock->setObjectName(QStringLiteral("mprSettingsWindow"));
+    dock->setWindowTitle(tr("MPR Settings"));
+    dock->setWindowIcon(QApplication::windowIcon());
+    dock->setModal(false);
+    dock->setAttribute(Qt::WA_DeleteOnClose);
     QWidget* container = new QWidget(dock);
-    dock->setWidget(container);
+    QVBoxLayout* windowLayout = new QVBoxLayout(dock);
+    windowLayout->setContentsMargins(0, 0, 0, 0);
+    windowLayout->addWidget(container);
     QVBoxLayout* containerLayout = new QVBoxLayout(container);
     QStackedWidget* statePages = new QStackedWidget(container);
     containerLayout->addWidget(statePages);
@@ -8971,6 +9109,24 @@ void CView::openMapParameters()
         "and many cells or texture families may share one material slot."), materialsPage);
     materialsExplanation->setWordWrap(true);
     materialsLayout->addWidget(materialsExplanation);
+    QPushButton* showMaterialSlots = new QPushButton(
+        tr("Show material slots on overlay tiles"), materialsPage);
+    showMaterialSlots->setObjectName(
+        QStringLiteral("showOverlayMaterialSlotsFromMprSettings"));
+    showMaterialSlots->setToolTip(tr(
+        "Open Landscape Tools in Paint existing overlays mode and label every active overlay cell "
+        "with the surface-material table slot it references."));
+    materialsLayout->addWidget(showMaterialSlots);
+    connect(showMaterialSlots, &QPushButton::clicked, dock, [this]()
+    {
+        if(!m_landscapeTools)
+            return;
+        m_landscapeTools->activateMode(ELandscapeEditMode::OverlayPaint, false);
+        m_landscapeTools->setOverlayMaterialSlotLabelsVisible(true);
+        emit showLandscapeToolsSignal();
+        syncLandscapeToolState();
+        update();
+    });
     QSplitter* materialsSplitter = new QSplitter(Qt::Horizontal, materialsPage);
     QTableWidget* materialTable = new QTableWidget(materialsSplitter);
     materialTable->setColumnCount(4);
@@ -9745,7 +9901,7 @@ void CView::openMapParameters()
     QPushButton* atlas = buttons->addButton(tr("Open Atlas Browser..."),
                                             QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::rejected, dock, &QDockWidget::hide);
+    connect(buttons, &QDialogButtonBox::rejected, dock, &QDialog::close);
     connect(atlas, &QPushButton::clicked, dock, [this]() { openAtlasTiles(); });
 
     const auto refreshSummary = [this, dimensionsValue, rangeValue, scaleValue,
@@ -9999,8 +10155,15 @@ void CView::openMapParameters()
     connect(m_pUndoStack, &QUndoStack::indexChanged, dock,
             [this](int) { refreshMprSettingsDock(); });
     refreshMprSettingsDock();
-    host->addDockWidget(Qt::RightDockWidgetArea, dock);
-    dock->resize(620, 520);
+    connect(dock, &QDialog::finished, this, [this, dock](int)
+    {
+        QSettings().setValue(QStringLiteral("mpr/settingsGeometry"), dock->saveGeometry());
+        m_refreshMprSettingsDock = {};
+    });
+    const QByteArray savedGeometry = QSettings().value(
+        QStringLiteral("mpr/settingsGeometry")).toByteArray();
+    if(savedGeometry.isEmpty() || !dock->restoreGeometry(savedGeometry))
+        dock->resize(1080, 720);
     dock->show();
     dock->raise();
 }
@@ -10693,6 +10856,7 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
         m_overlayPreviewSectorCount += command.sectors.size();
     }
     syncMprDirtyState();
+    m_overlayMaterialSlotLabelsDirty = true;
     m_sculptOutlineGeometryDirty = true;
     m_terrainPaintOutlineGeometryDirty = true;
     m_aiGraphOverlayDirty = true;
@@ -11507,6 +11671,7 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
             mob->reprojectForCurrentTerrain();
     }
     syncMprDirtyState();
+    m_overlayMaterialSlotLabelsDirty = true;
     m_sculptOutlineGeometryDirty = true;
     m_terrainPaintOutlineGeometryDirty = true;
     m_aiGraphOverlayDirty = true;
@@ -11945,6 +12110,7 @@ void CView::refreshUiScale()
 {
     setTestEntranceOverlays(m_testEntranceRectangles, m_testEntranceLabels,
                             m_selectedTestEntrance);
+    m_overlayMaterialSlotLabelsDirty = true;
 }
 
 void CView::moveCameraToPoint(const QVector3D& position)

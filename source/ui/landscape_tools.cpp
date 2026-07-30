@@ -32,6 +32,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_showUnderwaterFamilies(new QCheckBox(tr("Show underwater material families"), this))
     , m_allowLandFamiliesInOverlay(new QCheckBox(
           tr("Allow land-family tiles on overlays"), this))
+    , m_showOverlayMaterialSlots(new QCheckBox(
+          tr("Show surface material slot numbers on tiles"), this))
     , m_overlaySurfaceOperation(new QComboBox(this))
     , m_overlayMaterial(new QComboBox(this))
     , m_overlaySurfaceOperationLabel(new QLabel(tr("Overlay operation"), this))
@@ -165,6 +167,12 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintForm->addRow(m_manualTileSelection);
     paintForm->addRow(m_showUnderwaterFamilies);
     paintForm->addRow(m_allowLandFamiliesInOverlay);
+    m_showOverlayMaterialSlots->setObjectName(
+        QStringLiteral("showOverlayMaterialSlotLabels"));
+    m_showOverlayMaterialSlots->setToolTip(tr(
+        "Labels every active overlay cell with the MPR surface-material table slot it references. "
+        "This is an inspection overlay only and does not change the MPR."));
+    paintForm->addRow(m_showOverlayMaterialSlots);
     paintForm->addRow(m_overlaySurfaceOperationLabel, m_overlaySurfaceOperation);
     paintForm->addRow(m_overlayMaterialLabel, m_overlayMaterial);
     paintLayout->addLayout(paintForm);
@@ -204,6 +212,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             [this](bool) { refreshPaintTerrainTypes(); });
     connect(m_allowLandFamiliesInOverlay, &QCheckBox::toggled, this,
             [this](bool) { refreshPaintTerrainTypes(); });
+    connect(m_showOverlayMaterialSlots, &QCheckBox::toggled, this,
+            &CLandscapeTools::overlayMaterialSlotLabelsChanged);
     connect(m_overlaySurfaceOperation, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int)
     {
@@ -330,6 +340,8 @@ void CLandscapeTools::updateModeVisibility()
         editMode() == ELandscapeEditMode::TilePaint);
     m_allowLandFamiliesInOverlay->setVisible(
         editMode() == ELandscapeEditMode::OverlayPaint);
+    m_showOverlayMaterialSlots->setVisible(
+        editMode() == ELandscapeEditMode::OverlayPaint);
     const bool overlaySurface = editMode() == ELandscapeEditMode::OverlaySurface;
     m_overlaySurfaceOperation->setVisible(overlaySurface);
     m_overlaySurfaceOperationLabel->setVisible(overlaySurface);
@@ -441,6 +453,14 @@ void CLandscapeTools::adjustSculptRadius(int steps)
 void CLandscapeTools::adjustSculptStrength(int steps)
 {
     m_strength->setValue(m_strength->value() + steps * m_strength->singleStep());
+}
+bool CLandscapeTools::overlayMaterialSlotLabelsVisible() const
+{
+    return m_showOverlayMaterialSlots->isChecked();
+}
+void CLandscapeTools::setOverlayMaterialSlotLabelsVisible(bool visible)
+{
+    m_showOverlayMaterialSlots->setChecked(visible);
 }
 void CLandscapeTools::adjustRawDelta(int steps)
 {

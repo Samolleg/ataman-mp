@@ -1087,6 +1087,16 @@ int runHeadlessCommand(QApplication& app)
                 == EOverlaySurfaceOperation::Activate
             && !landscapeTools.manualTileSelectionEnabled()
             && landscapeTools.selectPaintTerrainType(5);
+        QCheckBox* overlaySlotLabels = landscapeTools.findChild<QCheckBox*>(
+            QStringLiteral("showOverlayMaterialSlotLabels"));
+        const bool overlaySlotLabelsHiddenOutsideOverlayPaint = overlaySlotLabels
+            && overlaySlotLabels->isHidden()
+            && !landscapeTools.overlayMaterialSlotLabelsVisible();
+        landscapeTools.activateMode(ELandscapeEditMode::OverlayPaint, false);
+        landscapeTools.setOverlayMaterialSlotLabelsVisible(true);
+        const bool overlaySlotLabelsAvailableInOverlayPaint = overlaySlotLabels
+            && !overlaySlotLabels->isHidden()
+            && landscapeTools.overlayMaterialSlotLabelsVisible();
         landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
         bool landModeSelectionValid = false;
         const bool programmaticModeRefreshesMaterials =
@@ -1695,6 +1705,8 @@ int runHeadlessCommand(QApplication& app)
                 && landscapeLayersVisibleByDefault
                 && landscapeVisibilityControlsWork
                 && overlaySurfaceToolSeparate
+                && overlaySlotLabelsHiddenOutsideOverlayPaint
+                && overlaySlotLabelsAvailableInOverlayPaint
                 && programmaticModeRefreshesMaterials
                 && sculptRaiseShowsFalloff
                 && sculptFlattenShowsTarget
@@ -1803,6 +1815,10 @@ int runHeadlessCommand(QApplication& app)
                << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
                << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
                << " overlaySurfaceToolSeparate=" << overlaySurfaceToolSeparate
+               << " overlaySlotLabelsHiddenOutsideOverlayPaint="
+               << overlaySlotLabelsHiddenOutsideOverlayPaint
+               << " overlaySlotLabelsAvailableInOverlayPaint="
+               << overlaySlotLabelsAvailableInOverlayPaint
                << " programmaticModeRefreshesMaterials="
                << programmaticModeRefreshesMaterials
                << " sculptRaiseShowsFalloff=" << sculptRaiseShowsFalloff
