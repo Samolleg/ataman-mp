@@ -7,6 +7,10 @@ class QMainWindow;
 class QDockWidget;
 class QTabBar;
 
+namespace ei {
+void enableNativeFloatingDockControls(QDockWidget* dock);
+}
+
 class CDockHiddenTab : public QObject
 {
     Q_OBJECT

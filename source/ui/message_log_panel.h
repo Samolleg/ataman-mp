@@ -25,6 +25,7 @@ private slots:
     void queueMessage(const SLogMessage& message);
     void flushPending();
     void refreshFilter();
+    void copySelectedMessages();
 
 private:
     bool matches(const SLogMessage& message) const;

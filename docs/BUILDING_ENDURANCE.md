@@ -88,8 +88,10 @@ out of sync even though the Qt application compiled successfully.
 Qt 5.12 also cannot reliably generate Makefiles below a non-ASCII Windows path.
 When necessary, the wrapper temporarily maps the repository to a free drive
 letter with `subst`, builds through that ASCII path, and removes the mapping on
-completion. This does not require elevation and does not persist across the
-build.
+completion. It deliberately never reuses an existing mapping: separate Git
+worktrees share repository identity and may have identical project files, so
+reusing a mapped drive can build the wrong checkout. This does not require
+elevation and does not persist across the build.
 
 This `PATH` setup is required even when `qmake.exe` is invoked by its absolute
 path. Qt's `uic`, `moc`, and `rcc` tools are dynamically linked executables and
@@ -162,9 +164,9 @@ after finalization; do not bypass either step for convenience builds.
 |---|---|---|
 | `uic`, `moc`, or `rcc` exits with `-1073741515` / `0xC0000135` | A Qt or MinGW runtime DLL is missing from the child-process `PATH`; this is not a source error. | Use `build_release.cmd` with the correct `-QtBin` and `-MinGwBin`, or set `EI_MAPPER_QT_BIN` and `EI_MAPPER_MINGW_BIN`. |
 | PowerShell says that running scripts is disabled | The machine's execution policy blocks direct `.ps1` invocation. | Use `build_release.cmd`. Its bypass applies only to that child process and does not change system policy. |
-| qmake displays the repository path as `??`, mojibake, or cannot write `Makefile.Release` | Qt 5.12 cannot reliably process the non-ASCII repository/build path. | Keep the shadow directory inside the repository and use the wrapper; it reuses or creates a temporary ASCII `subst` path and removes mappings it owns. |
+| qmake displays the repository path as `??`, mojibake, or cannot write `Makefile.Release` | Qt 5.12 cannot reliably process the non-ASCII repository/build path. | Keep the shadow directory inside the repository and use the wrapper; it creates a fresh temporary ASCII `subst` path and removes only that mapping. |
 | The wrapper cannot find `.git\HEAD` in a linked worktree | A Git worktree uses a UTF-8 `.git` pointer file instead of a `.git` directory. | Use the current wrapper. It resolves normal repositories and linked worktrees without assuming `.git\HEAD` exists. |
-| `Test-Path` reports access denied for an unrelated mapped, network, or virtual drive | The drive is enumerated by PowerShell but is not readable while the wrapper searches for an existing ASCII repository mapping. | Current wrappers skip inaccessible drives automatically. If this appears in an older checkout, update the build scripts rather than granting the build access to unrelated drives. |
+| qmake tries to write through a drive mapped to another worktree | An older wrapper reused a mapped drive because worktrees shared Git identity and the project file hash. | Use the current wrapper. It never reuses pre-existing mappings and claims a free drive for each build. |
 | qmake cannot rewrite a generated `.rc`, Makefile, or object file | A compiler process from an interrupted/timed-out build may still own the file. | Let `qmake`, `mingw32-make`, `uic`, and `moc` finish or exit, then rerun the wrapper. Do not delete a live shadow tree. |
 | `VERSION` changed but `--version` still prints the previous value | qmake regenerated the Makefile, but Make does not track changes to compiler command-line definitions as source dependencies. | Build in a fresh shadow directory for every packaged version and verify the executable with `--version` before staging it. |
 | qmake reports an unknown module or a compiler header/library is missing | The selected Qt kit and MinGW kit do not belong to a compatible installation. | Select the matching 64-bit Qt/MinGW pair; do not mix MSVC Qt libraries with MinGW. |

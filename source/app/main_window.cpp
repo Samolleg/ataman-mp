@@ -344,29 +344,6 @@ QString runtimeManifestProblem(const SResourceProfileEvaluation& profile)
     return problems.join('\n');
 }
 
-void enableNativeFloatingControls(QDockWidget* dock)
-{
-    if(!dock)
-        return;
-    const auto apply = [dock](bool floating)
-    {
-        if(!floating)
-            return;
-        const bool visible = dock->isVisible();
-        const Qt::WindowFlags required = Qt::Window | Qt::WindowTitleHint |
-            Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint |
-            Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
-        if((dock->windowFlags() & required) != required)
-        {
-            dock->setWindowFlags(dock->windowFlags() | required);
-            if(visible)
-                dock->show();
-        }
-    };
-    QObject::connect(dock, &QDockWidget::topLevelChanged, dock, apply);
-    apply(dock->isFloating());
-}
-
 void configureBlockingProgress(QProgressDialog* progress)
 {
     if(!progress)
@@ -444,7 +421,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pTileForm.reset(new CTileForm(this));
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
-    setDockNestingEnabled(true);
+    setDockOptions(dockOptions() | QMainWindow::AllowTabbedDocks |
+                   QMainWindow::AllowNestedDocks | QMainWindow::GroupedDragging);
     QWidget* outlinerContainer = new QWidget(this);
     QVBoxLayout* outlinerLayout = new QVBoxLayout(outlinerContainer);
     outlinerLayout->setContentsMargins(0, 0, 0, 0);
@@ -690,7 +668,7 @@ MainWindow::MainWindow(QWidget* parent) :
                                   QDockWidget::DockWidgetFloatable);
     m_validationDock->setWidget(validationWidget);
     addDockWidget(Qt::BottomDockWidgetArea, m_validationDock);
-    enableNativeFloatingControls(m_validationDock);
+    ei::enableNativeFloatingDockControls(m_validationDock);
     m_validationDock->setFloating(true);
     m_validationDock->resize(1100, 650);
     m_validationDock->hide();
@@ -705,6 +683,7 @@ MainWindow::MainWindow(QWidget* parent) :
                                   QDockWidget::DockWidgetFloatable);
     m_messageLogDock->setWidget(m_messageLogPanel);
     addDockWidget(Qt::BottomDockWidgetArea, m_messageLogDock);
+    ei::enableNativeFloatingDockControls(m_messageLogDock);
     resizeDocks({m_messageLogDock}, {190}, Qt::Vertical);
     m_validationTimer = new QTimer(this);
     m_validationTimer->setSingleShot(true);
@@ -1924,7 +1903,7 @@ void MainWindow::createUndoView()
                                QDockWidget::DockWidgetFloatable);
     m_historyDock->setWidget(m_undoView);
     addDockWidget(Qt::BottomDockWidgetArea, m_historyDock);
-    enableNativeFloatingControls(m_historyDock);
+    ei::enableNativeFloatingDockControls(m_historyDock);
     m_historyDock->setFloating(true);
     m_historyDock->resize(520, 560);
     m_historyDock->hide();

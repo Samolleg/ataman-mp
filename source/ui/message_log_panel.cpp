@@ -13,6 +13,8 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QSet>
+#include <QShortcut>
+#include <QColor>
 #include <algorithm>
 
 CMessageLogPanel::CMessageLogPanel(QWidget* parent) : QWidget(parent)
@@ -38,6 +40,9 @@ CMessageLogPanel::CMessageLogPanel(QWidget* parent) : QWidget(parent)
     m_warning = addType(tr("Warnings"), QStringLiteral("messageLogWarnings"));
     m_info = addType(tr("Info"), QStringLiteral("messageLogInfo"));
     m_debug = addType(tr("Debug"), QStringLiteral("messageLogDebug"));
+    m_error->setStyleSheet(QStringLiteral("QToolButton:checked { color: #ef5b5b; }"));
+    m_warning->setStyleSheet(QStringLiteral("QToolButton:checked { color: #e7c34f; }"));
+    m_debug->setStyleSheet(QStringLiteral("QToolButton:checked { color: #8f969e; }"));
     m_search = new QLineEdit(this);
     m_search->setObjectName(QStringLiteral("messageLogSearch"));
     m_search->setPlaceholderText(tr("Filter messages..."));
@@ -52,9 +57,10 @@ CMessageLogPanel::CMessageLogPanel(QWidget* parent) : QWidget(parent)
     m_table->setObjectName(QStringLiteral("messageLogTable"));
     m_table->setColumnCount(3);
     m_table->setHorizontalHeaderLabels({tr("Time"), tr("Type"), tr("Message")});
-    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_table->setColumnWidth(0, 90);
+    m_table->setColumnWidth(1, 90);
+    m_table->setColumnWidth(2, 640);
     m_table->verticalHeader()->hide();
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -70,15 +76,12 @@ CMessageLogPanel::CMessageLogPanel(QWidget* parent) : QWidget(parent)
         copy->setEnabled(!m_table->selectedItems().isEmpty());
         if(menu.exec(m_table->viewport()->mapToGlobal(point)) != copy)
             return;
-        QStringList lines;
-        QSet<int> rows;
-        for(QTableWidgetItem* item : m_table->selectedItems()) rows.insert(item->row());
-        QList<int> ordered = rows.values();
-        std::sort(ordered.begin(), ordered.end());
-        for(int row : ordered)
-            lines << m_table->item(row, 2)->data(Qt::UserRole).toString();
-        QApplication::clipboard()->setText(lines.join('\n'));
+        copySelectedMessages();
     });
+    QShortcut* copyShortcut = new QShortcut(QKeySequence::Copy, m_table);
+    copyShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(copyShortcut, &QShortcut::activated,
+            this, &CMessageLogPanel::copySelectedMessages);
 
     m_flushTimer = new QTimer(this);
     m_flushTimer->setSingleShot(true);
@@ -133,6 +136,12 @@ void CMessageLogPanel::appendRow(const SLogMessage& message)
     QTableWidgetItem* body = new QTableWidgetItem(message.message);
     body->setData(Qt::UserRole, message.formatted);
     body->setData(Qt::UserRole + 1, int(message.type));
+    if(message.type == eLogFatal)
+        type->setForeground(QColor(239, 91, 91));
+    else if(message.type == eLogWarning)
+        type->setForeground(QColor(231, 195, 79));
+    else if(message.type == eLogDebug)
+        type->setForeground(QColor(143, 150, 158));
     m_table->setItem(row, 0, time);
     m_table->setItem(row, 1, type);
     m_table->setItem(row, 2, body);
@@ -177,3 +186,18 @@ void CMessageLogPanel::setTypeVisible(ELogMessageType type, bool visible)
 }
 
 void CMessageLogPanel::setSearchText(const QString& text) { m_search->setText(text); }
+
+void CMessageLogPanel::copySelectedMessages()
+{
+    QStringList lines;
+    QSet<int> rows;
+    for(QTableWidgetItem* item : m_table->selectedItems()) rows.insert(item->row());
+    QList<int> ordered = rows.values();
+    std::sort(ordered.begin(), ordered.end());
+    for(int row : ordered)
+    {
+        if(QTableWidgetItem* message = m_table->item(row, 2))
+            lines << message->data(Qt::UserRole).toString();
+    }
+    if(!lines.isEmpty()) QApplication::clipboard()->setText(lines.join('\n'));
+}

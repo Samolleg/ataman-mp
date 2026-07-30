@@ -82,65 +82,25 @@ $executionRoot = $repositoryRoot
 $executionBuildPath = $buildPath
 $temporaryDrive = $null
 if (($repositoryRoot -match '[^\x00-\x7F]') -or ($buildPath -match '[^\x00-\x7F]')) {
-    $existingDrive = $null
-    foreach ($line in (& subst.exe)) {
-        if ($line -match '^([A-Z]):\\: => (.+)$' -and
-            $Matches[2].TrimEnd('\').Equals($repositoryRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
-            $existingDrive = "$($Matches[1]):"
-            break
-        }
-    }
-    # Windows PowerShell may decode `subst` output through an OEM code page,
-    # making a Unicode target impossible to compare. Recognize an existing
-    # repository mapping by its project and Git identity as a fallback.
-    if (-not $existingDrive) {
-        $projectHash = (Get-FileHash -LiteralPath (Join-Path $repositoryRoot 'ei_maper.pro') -Algorithm SHA256).Hash
-        $gitIdentity = Get-EnduranceGitRepositoryIdentity -Root $repositoryRoot
-        if (-not $gitIdentity) {
-            throw "Could not determine Git repository identity for '$repositoryRoot'."
-        }
-        foreach ($drive in (Get-PSDrive -PSProvider FileSystem)) {
-            $candidateProject = Join-Path $drive.Root 'ei_maper.pro'
-            # Disconnected network shares and sandbox/virtual drives may still
-            # be enumerated by Get-PSDrive while rejecting even Test-Path.
-            # They are not candidate repository mappings and must not abort an
-            # otherwise local release build.
-            try {
-                $hasProject = Test-Path -LiteralPath $candidateProject -PathType Leaf -ErrorAction Stop
-            } catch {
-                continue
-            }
-            if (-not $hasProject) {
-                continue
-            }
-            $candidateIdentity = Get-EnduranceGitRepositoryIdentity -Root $drive.Root
-            if ($candidateIdentity -and
-                ((Get-FileHash -LiteralPath $candidateProject -Algorithm SHA256).Hash -eq $projectHash) -and
-                ($candidateIdentity -eq $gitIdentity)) {
-                $existingDrive = "$($drive.Name):"
-                break
-            }
-        }
-    }
     if (-not $buildPath.StartsWith($repositoryRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "For a Unicode repository path, BuildDirectory must be located inside the repository."
     }
 
-    if ($existingDrive) {
-        $mappedDrive = $existingDrive
-    } else {
-        $usedDrives = @(Get-PSDrive -PSProvider FileSystem | ForEach-Object { $_.Name.ToUpperInvariant() })
-        $driveLetter = @('Z','Y','X','W','V','U','T','S','R','Q','P') |
-            Where-Object { $usedDrives -notcontains $_ } |
-            Select-Object -First 1
-        if (-not $driveLetter) {
-            throw "Qt 5.12 requires an ASCII build path, and no free temporary drive letter is available."
-        }
-        $temporaryDrive = "${driveLetter}:"
-        & subst.exe $temporaryDrive $repositoryRoot
-        if ($LASTEXITCODE -ne 0) { throw "Could not create temporary Qt build drive $temporaryDrive." }
-        $mappedDrive = $temporaryDrive
+    # Never reuse a pre-existing mapping. Different worktrees share Git
+    # identity and often the same project-file hash, so identity-based reuse
+    # can silently build the wrong checkout. Claim a free drive for this build
+    # and remove only that mapping in the finally block below.
+    $usedDrives = @(Get-PSDrive -PSProvider FileSystem | ForEach-Object { $_.Name.ToUpperInvariant() })
+    $driveLetter = @('Z','Y','X','W','V','U','T','S','R','Q','P') |
+        Where-Object { $usedDrives -notcontains $_ } |
+        Select-Object -First 1
+    if (-not $driveLetter) {
+        throw "Qt 5.12 requires an ASCII build path, and no free temporary drive letter is available."
     }
+    $temporaryDrive = "${driveLetter}:"
+    & subst.exe $temporaryDrive $repositoryRoot
+    if ($LASTEXITCODE -ne 0) { throw "Could not create temporary Qt build drive $temporaryDrive." }
+    $mappedDrive = $temporaryDrive
     $relativeBuild = $buildPath.Substring($repositoryRoot.Length).TrimStart('\')
     $executionRoot = "$mappedDrive\"
     $executionBuildPath = Join-Path $executionRoot $relativeBuild
@@ -150,6 +110,7 @@ if (($repositoryRoot -match '[^\x00-\x7F]') -or ($buildPath -match '[^\x00-\x7F]
 Write-Host "Qt bin:    $qtDirectory"
 Write-Host "MinGW bin: $mingwDirectory"
 Write-Host "Build:     $buildPath"
+if ($temporaryDrive) { Write-Host "ASCII root: $executionRoot" }
 
 Push-Location $executionBuildPath
 try {
@@ -157,6 +118,7 @@ try {
     # paths. Resolve the project relative to the shadow directory so builds
     # work when the repository lives under a Cyrillic (or other Unicode) path.
     $projectArgument = Resolve-Path -Relative $project
+    Write-Host "qmake project: $projectArgument"
     & $qmake $projectArgument "CONFIG+=release"
     if ($LASTEXITCODE -ne 0) { throw "qmake failed with exit code $LASTEXITCODE." }
 

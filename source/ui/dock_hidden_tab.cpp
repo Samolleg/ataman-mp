@@ -7,6 +7,43 @@
 #include <QTimer>
 #include <QWidget>
 #include <QVariant>
+#include <QApplication>
+#include <QIcon>
+#include <QMainWindow>
+
+void ei::enableNativeFloatingDockControls(QDockWidget* dock)
+{
+    if(!dock)
+        return;
+    const auto apply = [dock]()
+    {
+        QTimer::singleShot(0, dock, [dock]()
+        {
+            QWidget* floatingWindow = dock->window();
+            // A docked widget's window is the editor QMainWindow. A standalone
+            // dock or Qt's private floating tab-group host is a separate window.
+            if(!floatingWindow || qobject_cast<QMainWindow*>(floatingWindow))
+                return;
+            const bool visible = floatingWindow->isVisible();
+            const Qt::WindowFlags required = Qt::Window | Qt::WindowTitleHint |
+                Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint |
+                Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
+            if((floatingWindow->windowFlags() & required) == required)
+                return;
+            floatingWindow->setWindowFlags(floatingWindow->windowFlags() | required);
+            const QIcon icon = dock->windowIcon().isNull()
+                ? QApplication::windowIcon() : dock->windowIcon();
+            if(!icon.isNull()) floatingWindow->setWindowIcon(icon);
+            if(visible)
+                floatingWindow->show();
+        });
+    };
+    QObject::connect(dock, &QDockWidget::topLevelChanged, dock,
+                     [apply](bool) { apply(); });
+    QObject::connect(dock, &QDockWidget::visibilityChanged, dock,
+                     [apply](bool) { apply(); });
+    apply();
+}
 
 CDockHiddenTab::CDockHiddenTab(QMainWindow* window, QDockWidget* dock,
                                const QString& label, const QString& objectName)

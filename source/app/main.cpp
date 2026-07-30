@@ -16,6 +16,7 @@
 #include <QCheckBox>
 #include <QPushButton>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QKeySequenceEdit>
 #include <QLineEdit>
 #include <QTemporaryDir>
@@ -34,6 +35,7 @@
 #include <QPaintEvent>
 #include <QMouseEvent>
 #include <QScreen>
+#include <QRegularExpression>
 #include <QWidget>
 #include <QVariant>
 #include <QSettings>
@@ -1657,6 +1659,8 @@ int runHeadlessCommand(QApplication& app)
         CLogger::getInstance()->setLogLevel(eLogDebug);
         ei::log(eLogInfo, "ui-check searchable information");
         ei::log(eLogWarning, "ui-check searchable warning");
+        ei::log(eLogDebug, "ui-check severity debug");
+        ei::log(eLogFatal, "ui-check severity error");
         QEventLoop messageEvents;
         QTimer::singleShot(60, &messageEvents, &QEventLoop::quit);
         messageEvents.exec();
@@ -1664,12 +1668,68 @@ int runHeadlessCommand(QApplication& app)
         const bool messageLogSearchWorks = messageLog.visibleMessageCount() == 2;
         messageLog.setTypeVisible(eLogWarning, false);
         const bool messageLogTypeFilterWorks = messageLog.visibleMessageCount() == 1;
+        messageLog.setTypeVisible(eLogWarning, true);
+        QTableWidget* messageTable = messageLog.findChild<QTableWidget*>(
+                    QStringLiteral("messageLogTable"));
+        bool messageLogColumnsResizable = messageTable != nullptr;
+        bool messageLogSeverityColorsWork = messageTable != nullptr;
+        if(messageTable)
+        {
+            for(int column = 0; column < messageTable->columnCount(); ++column)
+                messageLogColumnsResizable = messageLogColumnsResizable
+                        && messageTable->horizontalHeader()->sectionResizeMode(column)
+                        == QHeaderView::Interactive;
+            messageTable->clearSelection();
+            for(int row = 0; row < messageTable->rowCount(); ++row)
+            {
+                QTableWidgetItem* body = messageTable->item(row, 2);
+                QTableWidgetItem* type = messageTable->item(row, 1);
+                if(body && type && body->text() == QStringLiteral("ui-check searchable information"))
+                    messageLogSeverityColorsWork = messageLogSeverityColorsWork
+                            && type->foreground().style() == Qt::NoBrush;
+                else if(body && type && body->text() == QStringLiteral("ui-check searchable warning"))
+                    messageLogSeverityColorsWork = messageLogSeverityColorsWork
+                            && type->foreground().color() == QColor(231, 195, 79);
+                else if(body && type && body->text() == QStringLiteral("ui-check severity debug"))
+                    messageLogSeverityColorsWork = messageLogSeverityColorsWork
+                            && type->foreground().color() == QColor(143, 150, 158);
+                else if(body && type && body->text() == QStringLiteral("ui-check severity error"))
+                    messageLogSeverityColorsWork = messageLogSeverityColorsWork
+                            && type->foreground().color() == QColor(239, 91, 91);
+                if(body && body->text().startsWith(QStringLiteral("ui-check searchable")))
+                    messageTable->selectionModel()->select(
+                        messageTable->model()->index(row, 0),
+                        QItemSelectionModel::Select | QItemSelectionModel::Rows);
+            }
+        }
+        QApplication::clipboard()->clear();
+        QMetaObject::invokeMethod(&messageLog, "copySelectedMessages",
+                                  Qt::DirectConnection);
+        const QString copiedMessages = QApplication::clipboard()->text();
+        const bool messageLogMultiCopyWorks = copiedMessages.contains("{INFO}")
+                && copiedMessages.contains("{WARNING}")
+                && copiedMessages.contains("ui-check searchable information")
+                && copiedMessages.contains("ui-check searchable warning")
+                && copiedMessages.contains(QRegularExpression(
+                    QStringLiteral("\\[\\d{2}\\.\\d{2}\\.\\d{4} ")));
 
         QMainWindow dockWindow;
+        dockWindow.setDockOptions(dockWindow.dockOptions()
+            | QMainWindow::AllowTabbedDocks | QMainWindow::AllowNestedDocks
+            | QMainWindow::GroupedDragging);
         dockWindow.setCentralWidget(new QWidget(&dockWindow));
         QDockWidget dockLabelProbe(QStringLiteral("Message Log"), &dockWindow);
+        QDockWidget validationDockProbe(QStringLiteral("Validation"), &dockWindow);
         dockLabelProbe.setWidget(new QWidget(&dockLabelProbe));
+        validationDockProbe.setWidget(new QWidget(&validationDockProbe));
         dockWindow.addDockWidget(Qt::BottomDockWidgetArea, &dockLabelProbe);
+        dockWindow.addDockWidget(Qt::BottomDockWidgetArea, &validationDockProbe);
+        dockWindow.tabifyDockWidget(&dockLabelProbe, &validationDockProbe);
+        ei::enableNativeFloatingDockControls(&dockLabelProbe);
+        const bool floatingDockGroupingEnabled = dockWindow.dockOptions().testFlag(
+                    QMainWindow::GroupedDragging)
+                && dockWindow.tabifiedDockWidgets(&dockLabelProbe).contains(
+                    &validationDockProbe);
         CDockHiddenTab hiddenTab(&dockWindow, &dockLabelProbe,
                                  QStringLiteral("Message Log"),
                                  QStringLiteral("dockHiddenTabProbe"));
@@ -1680,6 +1740,12 @@ int runHeadlessCommand(QApplication& app)
         hiddenDockEvents.exec();
         const bool dockedHiddenLabelAppears = hiddenTab.tabBar()->isVisible();
         dockLabelProbe.setFloating(true);
+        QApplication::processEvents();
+        const Qt::WindowFlags floatingFlags = dockLabelProbe.windowFlags();
+        const bool floatingDockWindowControls = floatingFlags.testFlag(
+                    Qt::WindowMinimizeButtonHint)
+                && floatingFlags.testFlag(Qt::WindowMaximizeButtonHint)
+                && floatingFlags.testFlag(Qt::WindowCloseButtonHint);
         dockLabelProbe.hide();
         QEventLoop floatingDockEvents;
         QTimer::singleShot(25, &floatingDockEvents, &QEventLoop::quit);
@@ -1762,7 +1828,10 @@ int runHeadlessCommand(QApplication& app)
                 && viewportBackgroundConsumesClick && viewportChildConsumesClick
                 && viewportSurfaceFullyOwned
                 && messageLogSearchWorks && messageLogTypeFilterWorks
-                && dockedHiddenLabelAppears && floatingClosedLabelRemoved;
+                && messageLogColumnsResizable && messageLogMultiCopyWorks
+                && messageLogSeverityColorsWork
+                && dockedHiddenLabelAppears && floatingClosedLabelRemoved
+                && floatingDockGroupingEnabled && floatingDockWindowControls;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -1892,8 +1961,13 @@ int runHeadlessCommand(QApplication& app)
                << " viewportSurfaceFullyOwned=" << viewportSurfaceFullyOwned
                << " messageLogSearchWorks=" << messageLogSearchWorks
                << " messageLogTypeFilterWorks=" << messageLogTypeFilterWorks
+               << " messageLogColumnsResizable=" << messageLogColumnsResizable
+               << " messageLogMultiCopyWorks=" << messageLogMultiCopyWorks
+               << " messageLogSeverityColorsWork=" << messageLogSeverityColorsWork
                << " dockedHiddenLabelAppears=" << dockedHiddenLabelAppears
                << " floatingClosedLabelRemoved=" << floatingClosedLabelRemoved
+               << " floatingDockGroupingEnabled=" << floatingDockGroupingEnabled
+               << " floatingDockWindowControls=" << floatingDockWindowControls
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()
                << " viewportSurfaceBottomRightAlpha="
                << viewportSurface.pixelColor(viewportSurface.width() - 2,

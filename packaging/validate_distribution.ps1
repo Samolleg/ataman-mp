@@ -26,6 +26,18 @@ foreach ($relative in $requiredFiles) {
     }
 }
 
+$requiredIcons = @(
+    'icons_fluent\copy.ico',
+    'icons_fluent\move.ico',
+    'icons_fluent\landscape.ico',
+    'icons_fluent\undo.ico'
+)
+foreach ($relative in $requiredIcons) {
+    if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) {
+        $failures.Add("required UI icon is missing: $relative")
+    }
+}
+
 $bridge = Join-Path $root 'runtime\EIMapperEnduranceJmvBridge.plg'
 if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
     $failures.Add('packaged JMV launch bridge is missing: runtime\EIMapperEnduranceJmvBridge.plg')
