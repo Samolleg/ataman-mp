@@ -63,6 +63,7 @@
 #include "ui/dock_hidden_tab.h"
 #include "ui/viewport_minimap_widget.h"
 #include "ui/minimap_export_dialog.h"
+#include "objects/object_base.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "endurance_ui_scale.h"
@@ -1661,6 +1662,13 @@ int runHeadlessCommand(QApplication& app)
         ei::log(eLogWarning, "ui-check searchable warning");
         ei::log(eLogDebug, "ui-check severity debug");
         ei::log(eLogFatal, "ui-check severity error");
+        const int messagesBeforeTexturelessDraw =
+                CLogger::getInstance()->sessionMessages().size();
+        CObjectBase texturelessObject;
+        texturelessObject.draw(false, nullptr);
+        const bool texturelessDrawDoesNotSpamLog =
+                CLogger::getInstance()->sessionMessages().size()
+                == messagesBeforeTexturelessDraw;
         QEventLoop messageEvents;
         QTimer::singleShot(60, &messageEvents, &QEventLoop::quit);
         messageEvents.exec();
@@ -1832,6 +1840,7 @@ int runHeadlessCommand(QApplication& app)
                 && messageLogSearchWorks && messageLogTypeFilterWorks
                 && messageLogColumnsResizable && messageLogMultiCopyWorks
                 && messageLogSeverityColorsWork
+                && texturelessDrawDoesNotSpamLog
                 && dockedHiddenLabelAppears && floatingClosedLabelRemoved
                 && floatingDockGroupingEnabled && floatingDockWindowControls
                 && floatingDockIsNormalWindow;
@@ -1967,6 +1976,7 @@ int runHeadlessCommand(QApplication& app)
                << " messageLogColumnsResizable=" << messageLogColumnsResizable
                << " messageLogMultiCopyWorks=" << messageLogMultiCopyWorks
                << " messageLogSeverityColorsWork=" << messageLogSeverityColorsWork
+               << " texturelessDrawDoesNotSpamLog=" << texturelessDrawDoesNotSpamLog
                << " dockedHiddenLabelAppears=" << dockedHiddenLabelAppears
                << " floatingClosedLabelRemoved=" << floatingClosedLabelRemoved
                << " floatingDockGroupingEnabled=" << floatingDockGroupingEnabled

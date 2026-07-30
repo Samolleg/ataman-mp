@@ -319,7 +319,11 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
     if(m_texture == nullptr)
     {
         loadTexture();
-        ei::log(eLogWarning, "empty texture, set default");
+        // A null texture is an expected transient state while profile visuals
+        // resolve in the background, and some editor-only helper objects never
+        // own a texture. Resource lookup already logs actionable missing names
+        // and model/candidate context; do not emit the same context-free warning
+        // once per object per rendered frame.
         return;
     }
 
