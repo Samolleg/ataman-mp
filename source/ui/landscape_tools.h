@@ -78,6 +78,7 @@ public:
     float paintRadius() const;
     ETerrainTileBrushShape paintShape() const;
     bool manualTileSelectionEnabled() const;
+    bool randomizeUniformRotation() const;
     bool landFamiliesAllowedInOverlay() const;
     EOverlaySurfaceOperation overlaySurfaceOperation() const;
     qint16 overlayMaterialIndex(bool* selected = nullptr) const;
@@ -150,6 +151,7 @@ private:
     QToolButton* m_circlePaintShape;
     QToolButton* m_squarePaintShape;
     QCheckBox* m_manualTileSelection;
+    QCheckBox* m_randomizeUniformRotation;
     QComboBox* m_paintIssueCategory;
     QToolButton* m_markPaintIssue;
     QComboBox* m_overlaySurfaceOperation;

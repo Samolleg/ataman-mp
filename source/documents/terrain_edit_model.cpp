@@ -208,6 +208,30 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
 {
     if(!stroke)
         return;
+    // The release resolver needs the brush identity for equal-coverage
+    // runtime terrain-type ties. Preserve it while composing incremental
+    // preview stamps into the one undoable stroke; previously only tile and
+    // vertex deltas survived, so the release path saw the default material 0
+    // and refused otherwise valid 2/2 transitions.
+    if(stamp.semanticAudit.valid)
+    {
+        if(!stroke->semanticAudit.valid)
+            stroke->semanticAudit = stamp.semanticAudit;
+        else
+        {
+            stroke->semanticAudit.requestedMaterialId =
+                stamp.semanticAudit.requestedMaterialId;
+            stroke->semanticAudit.brush = stamp.semanticAudit.brush;
+            stroke->semanticAudit.layer = stamp.semanticAudit.layer;
+            stroke->semanticAudit.solverMode = stamp.semanticAudit.solverMode;
+            stroke->semanticAudit.paintedCoreCells +=
+                stamp.semanticAudit.paintedCoreCells;
+            stroke->semanticAudit.paintedVertices +=
+                stamp.semanticAudit.paintedVertices;
+            stroke->semanticAudit.affectedCells +=
+                stamp.semanticAudit.affectedCells;
+        }
+    }
     for(const STerrainTileDelta& delta : stamp.deltas)
     {
         int existingIndex = -1;
@@ -4166,7 +4190,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
     int selectedCellX,int selectedCellY,const STerrainTileBrush& brush,
     ETerrainTileLayer layer,qint32 materialId,
     const CTerrainTransitionCatalog& catalog,quint32 distributionSeed,
-    CValidationReport* report)
+    CValidationReport* report,bool randomizeUniformRotation)
 {
     STerrainTileCommand command;
     command.description=layer==ETerrainTileLayer::Land
@@ -4252,7 +4276,14 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
     STerrainTransitionSignature pure;
     pure.northWest=pure.northEast=pure.southEast=pure.southWest=materialId;
     bool pureFound=false;
-    const quint16 purePacked=catalog.selectForPaint(pure,0,0,distributionSeed,&pureFound);
+    quint16 purePacked=catalog.selectForPaint(pure,0,0,distributionSeed,&pureFound);
+    if(pureFound && randomizeUniformRotation)
+    {
+        SMprPackedTile varied = SMprPackedTile::decode(purePacked);
+        varied.rotation = quint8((int(varied.rotation)
+            + int(distributionSeed & 3u)) & 3);
+        purePacked = varied.encode();
+    }
     QVector<int> cells=affected.values().toVector();std::sort(cells.begin(),cells.end());
     for(int cell:cells)
     {
@@ -4293,11 +4324,15 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
 
 STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
     const STerrainTileCommand& stroke,const CTerrainTransitionCatalog& catalog,
-    quint32 distributionSeed,CValidationReport* report) const
+    quint32 distributionSeed,CValidationReport* report,
+    bool randomizeUniformRotation) const
 {
     STerrainTileCommand command;
     command.description=QStringLiteral("Resolve virtual terrain stroke");
     command.semanticAudit.valid=true;
+    command.semanticAudit.requestedMaterialId=stroke.semanticAudit.requestedMaterialId;
+    command.semanticAudit.brush=stroke.semanticAudit.brush;
+    command.semanticAudit.layer=stroke.semanticAudit.layer;
     command.semanticAudit.solverMode=QStringLiteral("virtual-release-exact");
     if(stroke.virtualVertices.isEmpty())return command;
     const ETerrainTileLayer layer=stroke.virtualVertices.front().layer;
@@ -4338,8 +4373,15 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
         // coordinates may distribute edge-mask variants, but using them for a
         // uniform interior creates the checkerboard/slab artifacts seen in the
         // circle review map.
-        const quint16 after=catalog.selectForPaint(exact,
+        quint16 after=catalog.selectForPaint(exact,
             uniform ? 0 : x, uniform ? 0 : y, distributionSeed, &found);
+        if(found && uniform && randomizeUniformRotation)
+        {
+            SMprPackedTile varied = SMprPackedTile::decode(after);
+            varied.rotation = quint8((int(varied.rotation)
+                + int(distributionSeed & 3u)) & 3);
+            after = varied.encode();
+        }
         if(!found){++unresolved;continue;}
         command.semanticAudit.affectedCells.append(QPoint(x,y));
         if(after==before)continue;

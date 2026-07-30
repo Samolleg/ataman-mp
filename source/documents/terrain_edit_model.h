@@ -444,11 +444,13 @@ public:
         int selectedCellX, int selectedCellY,
         const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
-        quint32 distributionSeed, CValidationReport* report = nullptr);
+        quint32 distributionSeed, CValidationReport* report = nullptr,
+        bool randomizeUniformRotation = false);
     STerrainTileCommand makeVirtualStrokeResolution(
         const STerrainTileCommand& stroke,
         const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        bool randomizeUniformRotation = false) const;
     bool copyVirtualMaterialField(ETerrainTileLayer layer,
         CTerrainVirtualMaterialField* output,
         bool requireComplete = true) const;

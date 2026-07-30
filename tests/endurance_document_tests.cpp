@@ -347,6 +347,7 @@ private slots:
     void authoredPresetCatalogCoversKnownAtlasesAndMatchesZone1();
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
+    void stockMaskPoolRejectsOneCornerForeignEdgeLeaks();
     void workingAtlasRealizesExactTransitionsBeyond512Slots();
     void globalAuthoredTransitionLibraryIndexesRealStockBlends();
     void multiRowTerrainAtlasKeepsAuthoredPagesInPlace();
@@ -3889,6 +3890,9 @@ void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValue
     };
     STerrainTileCommand stroke;
     STerrainTileCommand first;
+    first.semanticAudit.valid = true;
+    first.semanticAudit.requestedMaterialId = 12345;
+    first.semanticAudit.solverMode = QStringLiteral("virtual-unblended-preview");
     first.deltas << delta(4, 5, ETerrainTileLayer::Land, 10, 11)
                  << delta(8, 9, ETerrainTileLayer::Land, 20, 21);
     STerrainTileCommand second;
@@ -3908,6 +3912,10 @@ void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValue
     QCOMPARE(stroke.deltas.at(1).layer, ETerrainTileLayer::Overlay);
     QCOMPARE(stroke.deltas.at(1).before, quint16(30));
     QCOMPARE(stroke.deltas.at(1).after, quint16(31));
+    QVERIFY(stroke.semanticAudit.valid);
+    QCOMPARE(stroke.semanticAudit.requestedMaterialId, qint32(12345));
+    QCOMPARE(stroke.semanticAudit.solverMode,
+             QStringLiteral("virtual-unblended-preview"));
 }
 
 void EnduranceDocumentTests::terrainHeightStrokeCompositionKeepsFirstAndFinalValues()
@@ -5754,11 +5762,11 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 76);
-    QCOMPARE(totalFamilies, 515);
+    QCOMPARE(totalFamilies, 502);
     // Keep this count pinned to the reviewed semantic-atlas catalog. A change
     // means a family crossed the paint-brush/transition-support boundary and
     // must be visually audited before the palette consumes it.
-    QCOMPARE(transitionSupportFamilies, 70);
+    QCOMPARE(transitionSupportFamilies, 62);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -5839,10 +5847,72 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    QCOMPARE(landFamilyCount, 67);
+    QCOMPARE(landFamilyCount, 70);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
+}
+
+void EnduranceDocumentTests::stockMaskPoolRejectsOneCornerForeignEdgeLeaks()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> tiles;
+    const QColor ownerColor(220, 40, 30);
+    const QColor otherColor(25, 65, 210);
+    for(int material = 1; material <= 2; ++material)
+    {
+        QImage image(32, 32, QImage::Format_RGBA8888);
+        image.fill(material == 1 ? ownerColor : otherColor);
+        tiles.append(image);
+        STerrainTransitionVariant pure;
+        pure.signature.northWest = pure.signature.northEast =
+            pure.signature.southEast = pure.signature.southWest = material;
+        pure.packedTile = quint16(material - 1);
+        QVERIFY(catalog.addVariant(pure));
+    }
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Grass}, {2, ETerrainBlendStyle::Soil}};
+    CTerrainVirtualAtlas atlas(catalog, tiles, 17u, {}, styles);
+    QVERIFY2(atlas.isValid(), qPrintable(atlas.error()));
+
+    STerrainTransitionSignature oneCorner;
+    oneCorner.northWest = 1;
+    oneCorner.northEast = oneCorner.southEast = oneCorner.southWest = 2;
+    const auto transition = [&](bool leaky) {
+        QImage pixels(32, 32, QImage::Format_RGBA8888);
+        for(int y = 0; y < pixels.height(); ++y)
+            for(int x = 0; x < pixels.width(); ++x)
+            {
+                const int fromBottom = pixels.height() - 1 - y;
+                const bool owner = leaky
+                    ? ((y == pixels.height() - 1 && x < 31)
+                       || (x == 0 && fromBottom < 31)
+                       || (x + fromBottom < 10))
+                    : (x + fromBottom < 18);
+                pixels.setPixelColor(x, y, owner ? ownerColor : otherColor);
+            }
+        return pixels;
+    };
+    QVERIFY(atlas.addStockBlendMaskTemplate(
+        oneCorner, transition(true), QStringLiteral("aaa-leaky-mask")));
+    QVERIFY(atlas.addStockBlendMaskTemplate(
+        oneCorner, transition(false), QStringLiteral("zzz-contained-mask")));
+
+    QString provenance;
+    const QImage selected = atlas.reviewBlendMask(
+        oneCorner, 1, 0, &provenance);
+    QVERIFY(!selected.isNull());
+    QCOMPARE(provenance, QStringLiteral("zzz-contained-mask"));
+    int foreignRight = 0;
+    int foreignTop = 0;
+    for(int index = 0; index < selected.height(); ++index)
+        foreignRight += selected.pixelColor(selected.width() - 1, index).red()
+            >= 128;
+    for(int index = 0; index < selected.width(); ++index)
+        foreignTop += selected.pixelColor(index, 0).red()
+            >= 128;
+    QCOMPARE(foreignRight, 0);
+    QCOMPARE(foreignTop, 0);
 }
 
 void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots()
@@ -5878,7 +5948,8 @@ void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots(
     for(int y = 0; y < reviewedMaskPixels.height(); ++y)
         for(int x = 0; x < reviewedMaskPixels.width(); ++x)
             reviewedMaskPixels.setPixelColor(x, y,
-                x + y < reviewedMaskPixels.width() - 1
+                x * x + (reviewedMaskPixels.height() - 1 - y)
+                    * (reviewedMaskPixels.height() - 1 - y) < 100
                     ? sources.value(1).pixelColor(x, y)
                     : sources.value(2).pixelColor(x, y));
     STerrainTransitionSignature reviewedOneCorner;

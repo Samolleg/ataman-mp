@@ -425,7 +425,7 @@ private slots:
     void materialNamesSelectExplicitBlendStyles();
     void materialBlendStylesProvideBoundedDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
-    void rotationsAndIdenticalPixelsAreDeduplicated();
+    void rotationsDeduplicateButSemanticAliasesRemainDistinct();
     void generatedTerrainTypeUsesMajorityAcrossRotation();
     void generatedTerrainTypeTieUsesPaintedMaterialAndTypedDedup();
     void unknownGeneratedTerrainTypeIsRefused();
@@ -1084,7 +1084,7 @@ void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
         QCOMPARE(preview.pixelColor(seamLeft, y), preview.pixelColor(seamRight, y));
 }
 
-void TerrainVirtualAtlasTests::rotationsAndIdenticalPixelsAreDeduplicated()
+void TerrainVirtualAtlasTests::rotationsDeduplicateButSemanticAliasesRemainDistinct()
 {
     Fixture fixture;
     CTestTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
@@ -1097,11 +1097,33 @@ void TerrainVirtualAtlasTests::rotationsAndIdenticalPixelsAreDeduplicated()
     QVERIFY(first.generatedRotation!=rotated.generatedRotation);
 
     Fixture duplicate(true);
-    CTestTerrainVirtualAtlas duplicateAtlas(duplicate.catalog,duplicate.images);
-    seedReviewedStockMasks(duplicateAtlas, duplicate);
-    const int a=duplicateAtlas.resolve(signature(1,2,3,3),0,0).generatedIndex;
-    const int b=duplicateAtlas.resolve(signature(1,2,4,4),0,0).generatedIndex;
-    QCOMPARE(a,b);
+    const QVector<qint32> duplicateTypes = {0, 1, 2, 2};
+    const QMap<qint32, qint32> duplicateMaterialTypes = {
+        {1, 0}, {2, 1}, {3, 2}, {4, 2}};
+    CTestTerrainVirtualAtlas duplicateAtlas(
+        duplicate.catalog, duplicate.images, 0, {}, {}, true,
+        duplicateTypes, duplicateMaterialTypes);
+    CValidationReport duplicateReport;
+    const QImage sharedPixels = duplicate.images.at(0);
+    QVERIFY(duplicateAtlas.addAuthoredLibraryTransition(
+        signature(1,3,3,3), sharedPixels, QStringLiteral("semantic-a"),
+        &duplicateReport));
+    QVERIFY(duplicateAtlas.addAuthoredLibraryTransition(
+        signature(1,4,4,4), sharedPixels, QStringLiteral("semantic-b"),
+        &duplicateReport));
+    const int a=duplicateAtlas.resolve(
+        signature(1,3,3,3),0,0,&duplicateReport,3).generatedIndex;
+    const int b=duplicateAtlas.resolve(
+        signature(1,4,4,4),0,0,&duplicateReport,4).generatedIndex;
+    QVERIFY2(!duplicateReport.hasErrors(), qPrintable(duplicateReport.toText()));
+    QVERIFY(a >= 0);
+    QVERIFY(b >= 0);
+    // Identical artwork cannot share a physical slot when its semantic corner
+    // identity differs: the portable profile has one signature per slot, so
+    // sharing here silently substitutes one brush after reopen.
+    QVERIFY(a != b);
+    QCOMPARE(duplicateAtlas.generatedTiles().at(a).pixels,
+             duplicateAtlas.generatedTiles().at(b).pixels);
 }
 
 void TerrainVirtualAtlasTests::generatedTerrainTypeUsesMajorityAcrossRotation()

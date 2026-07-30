@@ -66,6 +66,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_circlePaintShape(new QToolButton(this))
     , m_squarePaintShape(new QToolButton(this))
     , m_manualTileSelection(new QCheckBox(tr("Manual atlas tile mode (no blending)"), this))
+    , m_randomizeUniformRotation(new QCheckBox(
+          tr("Vary uniform texture rotation between strokes"), this))
     , m_paintIssueCategory(new QComboBox(this))
     , m_markPaintIssue(new QToolButton(this))
     , m_overlaySurfaceOperation(new QComboBox(this))
@@ -121,6 +123,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_flatten->setValue(20000);
 
     QSettings settings;
+    m_randomizeUniformRotation->setChecked(settings.value(
+        "ui/landscape/randomizeUniformRotation", true).toBool());
+    m_randomizeUniformRotation->setToolTip(tr(
+        "Uses one deterministic rotation for every uniform interior tile in a stroke. "
+        "Exact blend rotations remain fixed by their corner identities."));
     m_tool->setCurrentIndex(qBound(0,
         settings.value("ui/landscape/sculptTool", 0).toInt(), m_tool->count() - 1));
     m_radius->setValue(settings.value("ui/landscape/sculptRadius", 4.0).toDouble());
@@ -238,6 +245,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintForm->addRow(tr("Brush size (vertices)"), sizeWidget);
     paintForm->addRow(tr("Brush shape"), shapeWidget);
     paintForm->addRow(m_manualTileSelection);
+    paintForm->addRow(m_randomizeUniformRotation);
     paintForm->addRow(m_overlaySurfaceOperationLabel, m_overlaySurfaceOperation);
     paintForm->addRow(m_overlayMaterialLabel, m_overlayMaterial);
     paintLayout->addLayout(paintForm);
@@ -371,6 +379,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         emit paintTerrainTypeChanged(-1);
         emit editingStateChanged();
     });
+    connect(m_randomizeUniformRotation, &QCheckBox::toggled, this,
+            [](bool enabled) {
+                QSettings().setValue(
+                    "ui/landscape/randomizeUniformRotation", enabled);
+            });
     const auto visibilityChanged = [this](bool)
     {
         emit terrainVisibilityChanged(m_showMainTerrain->isChecked(),
@@ -560,6 +573,10 @@ bool CLandscapeTools::manualTileSelectionEnabled() const
 {
     return editMode() != ELandscapeEditMode::OverlaySurface
         && m_manualTileSelection->isChecked();
+}
+bool CLandscapeTools::randomizeUniformRotation() const
+{
+    return m_randomizeUniformRotation->isChecked();
 }
 bool CLandscapeTools::landFamiliesAllowedInOverlay() const
 {
@@ -803,6 +820,11 @@ void CLandscapeTools::rebuildMaterialPalette()
               button->setProperty("terrainContextualStamp", choice.contextualStamp);
               button->setCheckable(true);
               button->setAutoRaise(false);
+              button->setStyleSheet(QStringLiteral(
+                  "QToolButton { border: 2px solid palette(mid); padding: 2px; }"
+                  "QToolButton:hover { border-color: #ffd34e; }"
+                  "QToolButton:checked { border: 4px solid #d8ff35; "
+                  "background: #315b16; padding: 0px; }"));
               button->setToolTip(tr("%1 - %2 authored uniform source(s). %3")
                   .arg(choice.name).arg(choice.assignedSlots)
                   .arg(used ? tr("Currently used on this map.")

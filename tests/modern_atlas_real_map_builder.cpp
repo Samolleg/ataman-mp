@@ -829,6 +829,7 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         return result;
     }
     int unresolved = 0;
+    QStringList unresolvedDetails;
     for(int y = 0; y < field.tileHeight(); ++y)
         for(int x = 0; x < field.tileWidth(); ++x)
         {
@@ -837,12 +838,27 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                 finalized, finalized.packedCells.at(y * field.tileWidth() + x),
                 &found);
             if(!found || !sameSignature(actual, field.cellSignature(x, y)))
+            {
                 ++unresolved;
+                if(unresolvedDetails.size() < 24)
+                {
+                    const STerrainTransitionSignature expected =
+                        field.cellSignature(x, y);
+                    unresolvedDetails << QStringLiteral(
+                        "(%1,%2) expected %3/%4/%5/%6 got %7/%8/%9/%10")
+                        .arg(x).arg(y)
+                        .arg(expected.northWest).arg(expected.northEast)
+                        .arg(expected.southEast).arg(expected.southWest)
+                        .arg(actual.northWest).arg(actual.northEast)
+                        .arg(actual.southEast).arg(actual.southWest);
+                }
+            }
         }
     if(unresolved != 0)
     {
-        result.error = QStringLiteral("Finalized map contains %1 unresolved cells.")
-            .arg(unresolved);
+        result.error = QStringLiteral("Finalized map contains %1 unresolved cells.\n%2\n%3")
+            .arg(unresolved).arg(unresolvedDetails.join(QLatin1Char('\n')),
+                                 report.toText());
         return result;
     }
     const STerrainPortableAtlasPackage package =

@@ -32,19 +32,25 @@ QByteArray imageHash(const QImage& image)
     return hash.result().toHex();
 }
 
-QByteArray typedPixelKey(const QByteArray& pixelHash, qint32 runtimeType)
+QVector<qint32> corners(const STerrainTransitionSignature& signature)
+{
+    return {signature.northWest, signature.northEast,
+            signature.southEast, signature.southWest};
+}
+
+QByteArray typedPixelKey(const QByteArray& pixelHash, qint32 runtimeType,
+                         const STerrainTransitionSignature& signature)
 {
     QByteArray key = pixelHash;
     char bytes[4];
     qToLittleEndian<qint32>(runtimeType, reinterpret_cast<uchar*>(bytes));
     key.append(bytes, 4);
+    for(qint32 material : corners(signature))
+    {
+        qToLittleEndian<qint32>(material, reinterpret_cast<uchar*>(bytes));
+        key.append(bytes, 4);
+    }
     return key;
-}
-
-QVector<qint32> corners(const STerrainTransitionSignature& signature)
-{
-    return {signature.northWest, signature.northEast,
-            signature.southEast, signature.southWest};
 }
 
 bool signatureLess(const STerrainTransitionSignature& left,
@@ -261,6 +267,89 @@ bool reviewedMaskRejected(const QString& source, ETerrainBlendStyle ownerStyle,
     default:
         return false;
     }
+}
+
+bool oneCornerMaskLeaksToForeignEdge(
+    const QImage& mask, const STerrainTransitionSignature& requestedPreview,
+    qint32 ownerMaterial)
+{
+    if(mask.isNull() || mask.width() < 4 || mask.height() < 4)
+        return true;
+    QVector<bool> ownerCorners;
+    for(qint32 material : corners(requestedPreview))
+        ownerCorners.append(material == ownerMaterial);
+    int ownerCount = 0;
+    for(bool owner : ownerCorners) ownerCount += owner;
+    if(ownerCount != 1 && ownerCount != 3)
+        return false;
+
+    // Judge the minority island. A three-corner mask is the inverse of the
+    // same one-corner topology and must obey exactly the same containment
+    // rule. This catches the long L-shaped strips called out in the visual
+    // review without imposing a procedural replacement silhouette.
+    const bool invert = ownerCount == 3;
+    int minorityCorner = -1;
+    for(int corner = 0; corner < ownerCorners.size(); ++corner)
+        if(ownerCorners.at(corner) != invert)
+        {
+            minorityCorner = corner;
+            break;
+        }
+    if(minorityCorner < 0) return true;
+    const auto minority = [&mask, invert](int x, int y) {
+        const bool white = mask.pixelColor(x, y).red() >= 128;
+        return invert ? !white : white;
+    };
+    const bool left = minorityCorner == 0 || minorityCorner == 3;
+    const bool top = minorityCorner == 0 || minorityCorner == 1;
+    const int foreignX = left ? mask.width() - 1 : 0;
+    const int foreignY = top ? mask.height() - 1 : 0;
+    int foreignVertical = 0;
+    int foreignHorizontal = 0;
+    for(int y = 0; y < mask.height(); ++y)
+        foreignVertical += minority(foreignX, y);
+    for(int x = 0; x < mask.width(); ++x)
+        foreignHorizontal += minority(x, foreignY);
+    const int verticalAllowance = qMax(2, mask.height() / 32);
+    const int horizontalAllowance = qMax(2, mask.width() / 32);
+    if(foreignVertical > verticalAllowance
+       || foreignHorizontal > horizontalAllowance)
+        return true;
+
+    // A single forced black corner is insufficient: reject an island that
+    // runs almost the full length of either adjacent edge and creates the
+    // reported ninety-degree cut against the next tile.
+    const int ownX = left ? 0 : mask.width() - 1;
+    const int ownY = top ? 0 : mask.height() - 1;
+    int adjacentHorizontalReach = 0;
+    int adjacentVerticalReach = 0;
+    for(int x = 0; x < mask.width(); ++x)
+        if(minority(x, ownY))
+            adjacentHorizontalReach = qMax(adjacentHorizontalReach,
+                left ? x : mask.width() - 1 - x);
+    for(int y = 0; y < mask.height(); ++y)
+        if(minority(ownX, y))
+            adjacentVerticalReach = qMax(adjacentVerticalReach,
+                top ? y : mask.height() - 1 - y);
+    return adjacentHorizontalReach * 8 >= mask.width() * 7
+        || adjacentVerticalReach * 8 >= mask.height() * 7;
+}
+
+int maskBoundaryComplexity(const QImage& mask)
+{
+    int transitions = 0;
+    for(int y = 0; y < mask.height(); ++y)
+        for(int x = 0; x < mask.width(); ++x)
+        {
+            const bool owner = mask.pixelColor(x, y).red() >= 128;
+            if(x > 0)
+                transitions += owner
+                    != (mask.pixelColor(x - 1, y).red() >= 128);
+            if(y > 0)
+                transitions += owner
+                    != (mask.pixelColor(x, y - 1).red() >= 128);
+        }
+    return transitions;
 }
 
 QImage opaqueTerrainMaterialSource(const QImage& source)
@@ -898,10 +987,6 @@ QImage CTerrainVirtualAtlas::alignedStockMask(
                 if(inverted) candidate.mask.invertPixels();
                 candidate.source = item.sourceLabel;
                 candidate.hash = item.maskSha256;
-                const qint32 mappedOwner = inverted
-                    ? item.otherMaterial : item.ownerMaterial;
-                const qint32 mappedOther = inverted
-                    ? item.ownerMaterial : item.otherMaterial;
                 const ETerrainBlendStyle mappedOwnerStyle = inverted
                     ? item.otherStyle : item.ownerStyle;
                 const ETerrainBlendStyle mappedOtherStyle = inverted
@@ -909,13 +994,47 @@ QImage CTerrainVirtualAtlas::alignedStockMask(
                 if(reviewedMaskRejected(item.sourceLabel, mappedOwnerStyle,
                                         mappedOwnerStyle == mappedOtherStyle))
                     break;
-                const bool exactPair = mappedOwner == ownerMaterial
-                    && mappedOther == otherMaterial;
                 const bool exactStyles = mappedOwnerStyle == ownerStyle
                     && mappedOtherStyle == otherStyle;
-                candidate.score = exactPair ? 10000 : exactStyles ? 1500 : 0;
+                if(oneCornerMaskLeaksToForeignEdge(candidate.mask,
+                        requestedPreview, ownerMaterial))
+                    break;
+
+                // Generated transitions share a small reviewed mask language
+                // by visual material style. Do not privilege an exact
+                // subfamily pair: that made Winter/Sparse/Dark grass each pick
+                // unrelated masks despite all being grass. Exact authored
+                // pixel tiles are still reused by the catalog before this
+                // generation path is reached.
+                candidate.score = exactStyles ? 1500 : 0;
                 if(mappedOwnerStyle == ownerStyle) candidate.score += 700;
                 if(mappedOtherStyle == otherStyle) candidate.score += 350;
+                if(ownerStyle == ETerrainBlendStyle::Paving)
+                {
+                    // The reviewed paving masks commonly encode straight
+                    // courses and radial cuts. Rock/gravel silhouettes retain
+                    // substantial broken pieces and transfer much better to
+                    // slabs and paving artwork.
+                    if(mappedOwnerStyle == ETerrainBlendStyle::Stone
+                       || mappedOwnerStyle == ETerrainBlendStyle::Gravel)
+                        candidate.score += 2500;
+                    else if(mappedOwnerStyle == ETerrainBlendStyle::Paving)
+                        candidate.score -= 300;
+                }
+                if(ownerStyle == ETerrainBlendStyle::Stone
+                   && mappedOwnerStyle == ETerrainBlendStyle::Gravel)
+                    candidate.score += 250;
+                if(ownerStyle == ETerrainBlendStyle::Ice
+                   && mappedOwnerStyle == ETerrainBlendStyle::Snow)
+                    candidate.score += 250;
+                if(ownerStyle == ETerrainBlendStyle::Sand)
+                {
+                    // Prefer broad dune-like stock silhouettes over noisy
+                    // cheese-hole ownership fields. This is only a ranking of
+                    // real JMV masks; no synthetic sand pattern is introduced.
+                    const int complexity = maskBoundaryComplexity(candidate.mask);
+                    candidate.score -= qMin(640, (complexity / 64) * 64);
+                }
                 matches.append(candidate);
                 break;
             }
@@ -934,7 +1053,15 @@ QImage CTerrainVirtualAtlas::alignedStockMask(
     int pool = 0;
     while(pool < matches.size() && matches.at(pool).score == bestScore
           && pool < blendVariationCount()) ++pool;
-    const Candidate& selected = matches.at(variation % qMax(1, pool));
+    Candidate selected = matches.at(variation % qMax(1, pool));
+    const QPoint requestedCorners[4] = {{0, 0},
+        {selected.mask.width() - 1, 0},
+        {selected.mask.width() - 1, selected.mask.height() - 1},
+        {0, selected.mask.height() - 1}};
+    const QVector<qint32> requestedIds = corners(requestedPreview);
+    for(int corner = 0; corner < 4; ++corner)
+        selected.mask.setPixelColor(requestedCorners[corner],
+            requestedIds.at(corner) == ownerMaterial ? Qt::white : Qt::black);
     if(provenance) *provenance = selected.source;
     return selected.mask;
 }
@@ -1191,7 +1318,8 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     imported.stockDerivedBlend = true;
     const int generatedIndex = m_generatedTiles.size();
     m_generatedTiles.append(imported);
-    m_generatedByPixels.insert(typedPixelKey(imported.pixelSha256, -1),
+    m_generatedByPixels.insert(typedPixelKey(imported.pixelSha256, -1,
+                               imported.canonicalSignature),
                                generatedIndex);
     m_authoredLibraryGeneratedIndices.append(generatedIndex);
     for(int rotation = 0; rotation < 4; ++rotation)
@@ -1262,7 +1390,8 @@ int CTerrainVirtualAtlas::typedTileVariant(int sourceIndex, qint32 runtimeType)
     if(m_generatedTiles.at(sourceIndex).runtimeTerrainType == runtimeType)
         return sourceIndex;
     const QByteArray key = typedPixelKey(
-        m_generatedTiles.at(sourceIndex).pixelSha256, runtimeType);
+        m_generatedTiles.at(sourceIndex).pixelSha256, runtimeType,
+        m_generatedTiles.at(sourceIndex).canonicalSignature);
     const int existing = m_generatedByPixels.value(key, -1);
     if(existing >= 0) return existing;
     STerrainFinalizedTile variant = m_generatedTiles.at(sourceIndex);
@@ -1346,7 +1475,7 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
             return result;
         const QByteArray pixelsHash = imageHash(pixels);
         index = m_generatedByPixels.value(
-            typedPixelKey(pixelsHash, runtimeType), -1);
+            typedPixelKey(pixelsHash, runtimeType, canonical), -1);
         if(index < 0)
         {
             STerrainFinalizedTile generated;
@@ -1362,7 +1491,7 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
             index = m_generatedTiles.size();
             m_generatedTiles.append(generated);
             m_generatedByPixels.insert(
-                typedPixelKey(pixelsHash, runtimeType), index);
+                typedPixelKey(pixelsHash, runtimeType, canonical), index);
         }
         m_generatedBySignature.insert(key, index);
     }

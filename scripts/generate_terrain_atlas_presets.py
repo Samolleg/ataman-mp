@@ -843,6 +843,12 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         # from distinct uniform materials. In both source variants every one
         # of their 19 occurrences selects the established Stone / Lime
         # identity, and the complete tiles show the same cracked surface.
+        corrections = {
+            # The Ground / Common thumbnail is a mixed tile. Its NW corner
+            # is the established Ground / Dry surface in both complete-tile
+            # review and authored-map continuity.
+            (96, 0): 4,
+        }
         family_aliases = {8: 1, 11: 1, 12: 1}
         removed_ids = {8, 11, 12}
 
@@ -870,13 +876,30 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             # The complete tile and both source variants agree with 114
             # independent authored-map votes and no Sparse-dark votes.
             (60, 3): 5,
+
+            # Family-catalog review of each displayed thumbnail recovered
+            # mixed corners that the recipe had treated as uniform. These
+            # exact corners are independently supported by authored-map
+            # continuity; no neighbouring corners are inferred from them.
+            (28, 3): 5,
+            (71, 0): 8,
+            (394, 0): 8, (394, 1): 3,
+            (401, 0): 1, (401, 2): 1, (401, 3): 5,
+
+            # R50 resolved the matching one-corner Ground / Light fragment
+            # as the established Ground / Common material. This is the only
+            # family-19 occurrence in Zone6.
+            (485, 1): 8,
         }
         # Greenish, Grayish, and Gray were transition-only fragments of the
         # established pale cracked Stone / Lime surface. Every occurrence
         # independently chooses Lime in both original and HD pixels, and the
         # complete contact sheets show no distinct material boundary.
-        family_aliases = {14: 1, 16: 1, 20: 1}
-        removed_ids = {14, 16, 20}
+        # The reviewed family catalog also found no visible or structural
+        # boundary between Rock / Dark (6) and Ground / Mountainous (5).
+        # Fold the duplicate brush into the established Ground family.
+        family_aliases = {6: 5, 14: 1, 16: 1, 20: 1}
+        removed_ids = {6, 14, 16, 20}
 
     if namespace == "zone6_2":
         corrections = {
@@ -887,6 +910,22 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
 
             (230, 0): 8,
             (231, 0): 8,
+
+            # Exact thumbnail-corner decisions corroborated by map
+            # continuity. The R49 focused review selected Ground / Common
+            # for slot 261 NE. Slot 394 SW was explicitly confirmed as its
+            # existing Stone / Lime identity.
+            (28, 3): 5,
+            (71, 0): 8,
+            (261, 1): 8,
+            (394, 1): 3,
+
+            # R50 reviewed every remaining Ground / Light corner at the same
+            # scale. Slot 401's pale rocky NW/SE quadrants are Stone / Lime;
+            # slot 485 NE is Ground / Common. These are all three family-19
+            # occurrences, so the empty fragment family disappears.
+            (401, 0): 1, (401, 2): 1,
+            (485, 1): 8,
         }
         # Zone6_2 uses the same decoded stone fragments with shifted family
         # identifiers. Keep its semantic result aligned with Zone6. Cracked
@@ -894,8 +933,8 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         # brush identity: the atlas contains no 9/10 transition, all 50 uses
         # of uniform slot 50 meet family 10 at every supported vertex, and
         # both Ice corners of slot 60 do so at all nine authored-map uses.
-        family_aliases = {9: 10, 17: 1, 20: 1, 23: 1}
-        removed_ids = {9, 17, 20, 23}
+        family_aliases = {6: 5, 9: 10, 17: 1, 20: 1, 23: 1}
+        removed_ids = {6, 9, 17, 20, 23}
 
     if namespace == "zone7":
         corrections = {
@@ -925,6 +964,25 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             # NW and SE. HD/original pixels and authored-map votes agree.
             (149, 0): 10,
             (322, 0): 13, (322, 2): 13,
+
+            # Reviewed catalog thumbnails expose five additional mixed
+            # corners. The R49 same-scale comparison resolved slot 151 NW as
+            # Ground / Brown, matching the 46 authored-map neighbour votes.
+            (151, 0): 13,
+            (159, 0): 6,
+            (163, 2): 10,
+            (256, 0): 13,
+            (257, 3): 17,
+            (495, 1): 10,
+
+            # R50 resolved the complete Ground / Light and Ground / Dirt
+            # fragment sets corner by corner. No neighbouring tile is
+            # propagated: these are precisely the seven reviewed positions.
+            (412, 3): 17,
+            (226, 3): 17,
+            (329, 0): 13, (329, 2): 13, (329, 3): 17,
+            (335, 2): 13,
+            (480, 3): 17,
         }
         # Stone / Gray (8) is another false transition-only split. Its five
         # occurrences are the same pale cracked surface as the independent
@@ -932,6 +990,11 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         # one occurrence is byte-identical and all five agree visually.
         family_aliases = {8: 6}
         removed_ids = {8}
+        family_renames = {
+            1: "Rock / Underwater emerald",
+            4: "Sand / Underwater",
+            14: "Ground / Cracked",
+        }
 
     if namespace == "zone12":
         # Stone / Light was a false fragment family. Its complete set of
@@ -958,7 +1021,30 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             # continuity independently agree on all four corners.
             (166, 0): 3, (170, 0): 3,
             (240, 3): 8, (401, 3): 8,
+
+            # High-resolution family-catalog review corrected the displayed
+            # thumbnail corners below. Each accepted corner has authored-map
+            # support or agrees in both decoded source variants. Slot 63 SW
+            # had no map vote and conflicting decoded rankings, so it was
+            # resolved only after the R49 same-scale human comparison selected
+            # the existing Grass / Tundra family.
+            (15, 3): 6,
+            (63, 1): 3, (63, 2): 4, (63, 3): 4,
+            (164, 0): 3, (164, 1): 4,
+            (112, 0): 3,
+            (279, 3): 7,
+            (324, 0): 3,
+            (354, 1): 6, (354, 2): 1, (354, 3): 6,
+            (445, 3): 7,
+            (508, 3): 7,
         }
+        family_renames = {4: "Grass / Tundra"}
+        # Ground / Common has no four-corner tile in this atlas. Slot 164 was
+        # merely the old lowest mixed occurrence (2x Common + 2x Tundra), so
+        # it made a misleading family thumbnail. Slot 289 is the lowest
+        # three-of-four occurrence and therefore the truthful stamp fallback.
+        next(family for family in recipe["families"]
+             if family["id"] == 9)["thumbnailSlot"] = 289
 
     if namespace == "zone19":
         corrections = {
@@ -1026,6 +1112,7 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             (446, 1): 1,
         }
         removed_ids = {9}
+        family_renames = {7: "Paving / Sand ruins"}
 
     if namespace == "zone20":
         corrections = {
@@ -1037,6 +1124,13 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             (43, 0): 2, (45, 0): 2, (49, 0): 2, (51, 0): 2,
             (53, 0): 2, (55, 0): 2, (56, 0): 2, (58, 0): 2,
             (60, 0): 2, (62, 0): 2,
+
+
+            # Reviewed family thumbnails are mixed rather than uniform.
+            # Authored-map vertices and decoded quadrants agree on these
+            # exact assignments.
+            (37, 0): 2,
+            (158, 2): 2, (158, 3): 3,
         }
 
     if namespace == "zone15":
@@ -1396,7 +1490,10 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     # it consistently in Zone 5_1 as well; this is a display-name correction,
     # not a cross-namespace ID merge.
     if namespace == "zone5_1":
-        family_renames = {4: "Grass / Irregular"}
+        family_renames = {
+            4: "Grass / Irregular",
+            5: "Stone / Underwater",
+        }
 
     if not corrections and not family_renames and not family_aliases:
         return recipe

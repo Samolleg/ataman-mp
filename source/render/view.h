@@ -322,6 +322,7 @@ private:
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     bool terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell);
+    void showTerrainTileInformation(const QPoint& viewportPosition);
     void appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
                                        const QString& category);
     void updateTileForm(bool bGenerateNewTable = false);
@@ -593,6 +594,7 @@ private:
     int m_terrainPaintOutlineY{0};
     bool m_paintIssueDragActive{false};
     bool m_paintIssueHoverValid{false};
+    bool m_terrainTileInformationHeld{false};
     QPoint m_paintIssueHoverCell;
     QSet<QPoint> m_paintIssueSelectedCells;
     QPoint m_lastTerrainPaintCenter;

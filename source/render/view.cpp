@@ -9943,7 +9943,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         command = m_terrainEdit.makeVirtualMaterialPaint(
             qRound(brush.centerX), qRound(brush.centerY), vertexBrush,
             layer, terrainType, semanticCatalog,
-            m_tileStrokeDistributionSeed, &report);
+            m_tileStrokeDistributionSeed, &report,
+            m_landscapeTools && m_landscapeTools->randomizeUniformRotation());
     }
     STerrainPaintAuditAction audit;
     audit.actionId = m_terrainPaintActionId++;
@@ -10321,7 +10322,9 @@ void CView::endTileBrushGroup()
                     :(layer==ETerrainTileLayer::Land
                         ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog);
                 STerrainTileCommand resolution=m_terrainEdit.makeVirtualStrokeResolution(
-                    m_tileStrokeCommand,catalog,m_tileStrokeDistributionSeed,&releaseReport);
+                    m_tileStrokeCommand,catalog,m_tileStrokeDistributionSeed,&releaseReport,
+                    m_landscapeTools
+                        &&m_landscapeTools->randomizeUniformRotation());
                 if(releaseReport.hasErrors())
                 {
                     applyTerrainTilePreview(m_tileStrokeCommand,false);
@@ -10976,6 +10979,91 @@ bool CView::terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell)
     return true;
 }
 
+void CView::showTerrainTileInformation(const QPoint& viewportPosition)
+{
+    QPoint cell;
+    if(!terrainCellAtViewport(viewportPosition, &cell))
+    {
+        QToolTip::hideText();
+        return;
+    }
+    const bool land = terrainBrushProjectsToLand();
+    const ETerrainTileLayer layer = land ? ETerrainTileLayer::Land
+                                         : ETerrainTileLayer::Overlay;
+    bool available = false;
+    const quint16 packed = m_terrainEdit.packedTile(
+        cell.x(), cell.y(), layer, &available);
+    if(!available)
+    {
+        QToolTip::showText(mapToGlobal(viewportPosition + QPoint(18, 18)),
+            tr("Cell %1,%2 has no %3 terrain tile.")
+                .arg(cell.x()).arg(cell.y())
+                .arg(land ? tr("land") : tr("overlay")),
+            this, rect(), 60000);
+        return;
+    }
+    const CTerrainTransitionCatalog& catalog = land
+        ? (m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
+                                 : m_terrainAtlasAnalysis.landCatalog)
+        : m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies();
+    bool recognized = false;
+    const STerrainTransitionSignature signature =
+        catalog.gridSignatureForPacked(packed, &recognized);
+    QMap<qint32, QString> names;
+    for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
+        names.insert(family.id, family.name);
+    for(const STerrainAtlasMaterial& material : m_terrainAtlasAnalysis.materials)
+        if(!names.contains(material.id)) names.insert(material.id, material.name);
+    const auto materialName = [&names](qint32 id) {
+        return names.value(id, QStringLiteral("Material %1").arg(id));
+    };
+    const SMprPackedTile decoded = SMprPackedTile::decode(packed);
+    const int slot = decoded.atlasSlot();
+    qint32 runtimeType = -1;
+    if(land && m_workingTerrainAtlas)
+        runtimeType = m_workingTerrainAtlas->runtimeTerrainTypeForSlot(slot);
+    else if(land && m_pLand && slot >= 0 && slot < m_pLand->tileTypes().size())
+        runtimeType = qint32(m_pLand->tileTypes().at(slot));
+    const QString runtimeName = runtimeType >= 0
+        ? CResourceStringList::getInstance()->tileTypes().value(
+              ETileType(runtimeType), tr("Unknown"))
+        : tr("unavailable");
+    QStringList lines;
+    lines << tr("Cell %1,%2 — %3 slot %4, rotation %5")
+                 .arg(cell.x()).arg(cell.y())
+                 .arg(land ? tr("land") : tr("overlay"))
+                 .arg(slot).arg(decoded.rotation);
+    if(land)
+        lines << tr("Runtime terrain / ambience / traversal: %1 (%2)")
+                     .arg(runtimeName).arg(runtimeType);
+    if(recognized)
+    {
+        const QVector<qint32> ids = {signature.northWest,
+            signature.northEast, signature.southEast, signature.southWest};
+        QSet<qint32> unique;
+        for(qint32 id : ids) unique.insert(id);
+        if(unique.size() == 1)
+            lines << tr("Uniform brush: %1").arg(materialName(ids.front()));
+        else
+        {
+            QStringList blended;
+            for(qint32 id : unique) blended << materialName(id);
+            lines << tr("Blend: %1").arg(blended.join(QStringLiteral(" + ")));
+            lines << tr("Corners NW / NE / SE / SW: %1 / %2 / %3 / %4")
+                         .arg(materialName(ids.at(0)), materialName(ids.at(1)),
+                              materialName(ids.at(2)), materialName(ids.at(3)));
+        }
+    }
+    else
+        lines << tr("Semantic material identity: unrecognized");
+    if(land)
+        lines << (slot >= m_authoredTerrainTileImages.size()
+            ? tr("Atlas origin: generated exact working-cache tile")
+            : tr("Atlas origin: authored stock JMV tile"));
+    QToolTip::showText(mapToGlobal(viewportPosition + QPoint(18, 18)),
+        lines.join(QLatin1Char('\n')), this, rect(), 60000);
+}
+
 void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
                                           const QString& category)
 {
@@ -11170,6 +11258,15 @@ void CView::mousePressEvent(QMouseEvent* event)
     {
         event->accept();
         return;
+    }
+    if(m_landscapeTools && event->button() == Qt::RightButton
+       && (m_landscapeTools->tilePaintEnabled()
+           || m_landscapeTools->overlayPaintEnabled()))
+    {
+        m_terrainTileInformationHeld = true;
+        showTerrainTileInformation(event->pos());
+        // Keep propagating the press: right-click still samples this material
+        // into the brush while the hold tooltip explains the physical tile.
     }
     if(m_landscapeTools && m_landscapeTools->paintIssueMarkingEnabled()
        && event->button() == Qt::LeftButton)
@@ -11517,6 +11614,8 @@ void CView::mouseMoveEvent(QMouseEvent* event)
         event->accept();
         return;
     }
+    if(m_terrainTileInformationHeld && (event->buttons() & Qt::RightButton))
+        showTerrainTileInformation(event->pos());
     if(m_landscapeTools && m_landscapeTools->paintIssueMarkingEnabled())
     {
         QPoint cell;
@@ -11585,6 +11684,11 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
     {
         event->accept();
         return;
+    }
+    if(m_terrainTileInformationHeld && event->button() == Qt::RightButton)
+    {
+        m_terrainTileInformationHeld = false;
+        QToolTip::hideText();
     }
     if(m_paintIssueDragActive && event->button() == Qt::LeftButton)
     {
