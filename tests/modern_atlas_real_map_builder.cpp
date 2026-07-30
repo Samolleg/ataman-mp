@@ -386,8 +386,9 @@ QByteArray reviewImageHash(const QImage& source)
 
 QJsonObject writeBlendMaskReview(
     const CTerrainVirtualAtlas& atlas, const QVector<qint32>& materialIds,
-    const QMap<qint32, QString>& names, const QString& outputDirectory,
-    QString* error)
+    const QMap<qint32, QString>& names,
+    const QMap<QString, QImage>& stockBlendExamples,
+    const QString& outputDirectory, QString* error)
 {
     struct Topology
     {
@@ -433,7 +434,8 @@ QJsonObject writeBlendMaskReview(
     }
     QByteArray csv("sheet,row,column,owner_material_id,owner_material,owner_style,"
                    "support_scenario,support_material_id,support_material,topology,"
-                   "variation,provenance,mask_sha256,missing\n");
+                   "variation,provenance,mask_sha256,missing,source_example_sheet,"
+                   "source_example_missing\n");
     const auto csvText = [](QString value) {
         value.replace('"', QStringLiteral("\"\""));
         return QByteArray("\"") + value.toUtf8() + QByteArray("\"");
@@ -455,9 +457,17 @@ QJsonObject writeBlendMaskReview(
             QImage sheet(columns * tileSize, rowCount * tileSize,
                          QImage::Format_RGB888);
             sheet.fill(QColor(36, 36, 36));
+            QImage examples(columns * tileSize, rowCount * tileSize,
+                            QImage::Format_RGB888);
+            examples.fill(QColor(36, 36, 36));
             QPainter painter(&sheet);
+            QPainter examplePainter(&examples);
             painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+            examplePainter.setRenderHint(QPainter::SmoothPixmapTransform, false);
             const QString sheetName = QStringLiteral("%1-%2.png")
+                .arg(slug(CTerrainVirtualAtlas::blendStyleName(ownerStyle)))
+                .arg(page + 1, 2, 10, QLatin1Char('0'));
+            const QString exampleSheetName = QStringLiteral("%1-%2-sources.png")
                 .arg(slug(CTerrainVirtualAtlas::blendStyleName(ownerStyle)))
                 .arg(page + 1, 2, 10, QLatin1Char('0'));
             for(int localRow = 0; localRow < rowCount; ++localRow)
@@ -516,6 +526,19 @@ QJsonObject writeBlendMaskReview(
                                 mask.scaled(tileSize, tileSize,
                                     Qt::IgnoreAspectRatio, Qt::FastTransformation));
                         }
+                        const QImage sourceExample =
+                            stockBlendExamples.value(provenance);
+                        if(sourceExample.isNull())
+                        {
+                            examplePainter.fillRect(column * tileSize,
+                                localRow * tileSize, tileSize, tileSize,
+                                QColor(180, 0, 180));
+                        }
+                        else
+                            examplePainter.drawImage(column * tileSize,
+                                localRow * tileSize,
+                                sourceExample.scaled(tileSize, tileSize,
+                                    Qt::IgnoreAspectRatio, Qt::FastTransformation));
                         csv += csvText(sheetName) + ','
                             + QByteArray::number(firstRow + localRow) + ','
                             + QByteArray::number(column) + ','
@@ -530,18 +553,30 @@ QJsonObject writeBlendMaskReview(
                             + csvText(provenance) + ','
                             + csvText(mask.isNull() ? QString()
                                 : QString::fromLatin1(reviewImageHash(mask))) + ','
-                            + QByteArray::number(mask.isNull()) + '\n';
+                            + QByteArray::number(mask.isNull()) + ','
+                            + csvText(exampleSheetName) + ','
+                            + QByteArray::number(sourceExample.isNull()) + '\n';
                     }
             }
             painter.end();
+            examplePainter.end();
             if(!sheet.save(QDir(reviewDirectory).filePath(sheetName), "PNG"))
             {
                 if(error) *error = QStringLiteral("Could not write mask sheet %1")
                     .arg(sheetName);
                 return {};
             }
+            if(!examples.save(QDir(reviewDirectory).filePath(exampleSheetName),
+                              "PNG"))
+            {
+                if(error) *error = QStringLiteral(
+                    "Could not write stock source example sheet %1")
+                    .arg(exampleSheetName);
+                return {};
+            }
             QJsonObject sheetEntry;
             sheetEntry.insert(QStringLiteral("file"), sheetName);
+            sheetEntry.insert(QStringLiteral("source_examples"), exampleSheetName);
             sheetEntry.insert(QStringLiteral("style"),
                 CTerrainVirtualAtlas::blendStyleName(ownerStyle));
             sheetEntry.insert(QStringLiteral("first_row"), firstRow);
@@ -717,6 +752,11 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
             CTerrainVirtualAtlas::blendStyleForMaterialName(it.value()));
     CTerrainVirtualAtlas atlas(catalog, sourceAtlas.tiles, 0x4a4d5631u,
                                externalSources, blendStyles);
+    QMap<QString, QImage> stockBlendExamples;
+    for(int slot = 0; slot < sourceAtlas.tiles.size(); ++slot)
+        stockBlendExamples.insert(
+            QStringLiteral("current-map stock slot %1").arg(slot),
+            sourceAtlas.tiles.at(slot));
     int indexedStockTransitions = 0;
     if(stockAssets)
         for(const STerrainGlobalTransitionSource& transition :
@@ -732,11 +772,16 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                || stock.tiles.at(transition.slot).size()
                     != sourceAtlas.tiles.front().size())
                 continue;
+            const QString sourceLabel = transition.mprNamespace
+                + QStringLiteral(":") + QString::number(transition.slot);
             if(atlas.addAuthoredLibraryTransition(
                    transition.signature, stock.tiles.at(transition.slot),
-                   transition.mprNamespace + QStringLiteral(":")
-                       + QString::number(transition.slot), &report))
+                   sourceLabel, &report))
+            {
                 ++indexedStockTransitions;
+                stockBlendExamples.insert(sourceLabel,
+                                           stock.tiles.at(transition.slot));
+            }
         }
     const QVector<quint16> pinned = pinnedOverlay(terrain);
     const STerrainAtlasFinalization finalized = atlas.finalize(
@@ -777,7 +822,8 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         return result;
     }
     const QJsonObject maskReview = writeBlendMaskReview(
-        atlas, stampIds, names, outputDirectory, &result.error);
+        atlas, stampIds, names, stockBlendExamples,
+        outputDirectory, &result.error);
     if(maskReview.isEmpty()) return result;
     QByteArray materialIndex(
         "material_id,material,blend_style,x0,y0,width_vertices,height_vertices,shape\n");
