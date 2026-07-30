@@ -52,7 +52,7 @@ QString hostDescription(QDockWidget* dock, QWidget* host, const QString& reason)
     QScreen* screen = hostScreen(host);
     return QStringLiteral("DOCK_WINDOW reason:%1 dock:%2 host:0x%3 class:%4 type:%5 "
                           "visible:%6 maximized:%7 geometry:%8,%9,%10,%11 "
-                          "normal:%12,%13,%14,%15 screen:%16")
+                          "normal:%12,%13,%14,%15 screen:%16 dpi:%17 dpr:%18")
             .arg(reason, dock ? dock->objectName() : QStringLiteral("none"))
             .arg(quintptr(host), 0, 16)
             .arg(host ? host->metaObject()->className() : "none")
@@ -60,7 +60,9 @@ QString hostDescription(QDockWidget* dock, QWidget* host, const QString& reason)
             .arg(host && host->isVisible()).arg(host && host->isMaximized())
             .arg(geometry.x()).arg(geometry.y()).arg(geometry.width()).arg(geometry.height())
             .arg(normal.x()).arg(normal.y()).arg(normal.width()).arg(normal.height())
-            .arg(screen ? screen->name() : QStringLiteral("none"));
+            .arg(screen ? screen->name() : QStringLiteral("none"))
+            .arg(screen ? screen->logicalDotsPerInch() : 0.0, 0, 'f', 2)
+            .arg(screen ? screen->devicePixelRatio() : 1.0, 0, 'f', 2);
 }
 
 void logHost(QDockWidget* dock, QWidget* host, const QString& reason)
