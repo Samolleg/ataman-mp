@@ -13,6 +13,11 @@
 #include <QScreen>
 #include <QSettings>
 #include <QWindow>
+#include "log.h"
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 namespace {
 const char* kFloatingMaximized = "enduranceFloatingMaximized";
@@ -36,6 +41,58 @@ QScreen* hostScreen(QWidget* host)
     if(host->windowHandle() && host->windowHandle()->screen())
         return host->windowHandle()->screen();
     return QApplication::screenAt(host->geometry().center());
+}
+
+QString hostDescription(QDockWidget* dock, QWidget* host, const QString& reason)
+{
+    const QRect geometry = host ? host->geometry() : QRect();
+    const QRect normal = host && host->normalGeometry().isValid()
+            ? host->normalGeometry() : QRect();
+    QScreen* screen = hostScreen(host);
+    return QStringLiteral("DOCK_WINDOW reason:%1 dock:%2 host:0x%3 class:%4 type:%5 "
+                          "visible:%6 maximized:%7 geometry:%8,%9,%10,%11 "
+                          "normal:%12,%13,%14,%15 screen:%16")
+            .arg(reason, dock ? dock->objectName() : QStringLiteral("none"))
+            .arg(quintptr(host), 0, 16)
+            .arg(host ? host->metaObject()->className() : "none")
+            .arg(host ? int(host->windowType()) : -1)
+            .arg(host && host->isVisible()).arg(host && host->isMaximized())
+            .arg(geometry.x()).arg(geometry.y()).arg(geometry.width()).arg(geometry.height())
+            .arg(normal.x()).arg(normal.y()).arg(normal.width()).arg(normal.height())
+            .arg(screen ? screen->name() : QStringLiteral("none"));
+}
+
+void logHost(QDockWidget* dock, QWidget* host, const QString& reason)
+{
+    ei::log(eLogInfo, hostDescription(dock, host, reason));
+}
+
+void applyTaskbarIdentity(QWidget* host)
+{
+#ifdef Q_OS_WIN
+    if(!host || !host->isVisible()) return;
+    HWND hwnd = reinterpret_cast<HWND>(host->winId());
+    LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    exStyle &= ~LONG_PTR(WS_EX_TOOLWINDOW);
+    exStyle |= WS_EX_APPWINDOW;
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
+    // Retain Qt ownership for docking, but remove the native owner that makes
+    // Windows intentionally omit the floating diagnostics host from taskbar.
+    SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, 0);
+    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
+#else
+    Q_UNUSED(host);
+#endif
+}
+
+void copyRememberedState(QDockWidget* source, QDockWidget* target)
+{
+    if(!source || !target) return;
+    target->setProperty(kFloatingMaximized, source->property(kFloatingMaximized));
+    target->setProperty(kFloatingNormalGeometry, source->property(kFloatingNormalGeometry));
+    target->setProperty(kFloatingScreen, source->property(kFloatingScreen));
 }
 
 void rememberHost(QDockWidget* dock, QWidget* host, bool maximized)
@@ -97,7 +154,9 @@ void applyNativeWindowType(QDockWidget* dock, QWidget* host)
         else if(state.testFlag(Qt::WindowMinimized)) host->showMinimized();
         else host->setGeometry(geometry);
     }
+    applyTaskbarIdentity(host);
     host->setProperty("enduranceApplyingDockWindowFlags", false);
+    logHost(dock, host, QStringLiteral("native-window-applied"));
 }
 
 void restoreHostFromDock(QDockWidget* dock)
@@ -105,6 +164,16 @@ void restoreHostFromDock(QDockWidget* dock)
     QWidget* host = separateHost(dock);
     if(!host) return;
     applyNativeWindowType(dock, host);
+    applyTaskbarIdentity(host);
+    const bool wantsMaximized = dock->property(kFloatingMaximized).toBool();
+    // A different tab may already have restored this shared host. Never let a
+    // stale small normal geometry resize an already-maximized group window.
+    if(host->isMaximized())
+    {
+        if(wantsMaximized) rememberHost(dock, host, true);
+        logHost(dock, host, QStringLiteral("restore-skipped-host-already-maximized"));
+        return;
+    }
     const QRect normal = dock->property(kFloatingNormalGeometry).toRect();
     const QString screenName = dock->property(kFloatingScreen).toString();
     QScreen* target = nullptr;
@@ -112,7 +181,9 @@ void restoreHostFromDock(QDockWidget* dock)
         if(screen->name() == screenName) { target = screen; break; }
     if(target && host->windowHandle()) host->windowHandle()->setScreen(target);
     if(normal.isValid()) host->setGeometry(normal);
-    if(dock->property(kFloatingMaximized).toBool()) host->showMaximized();
+    if(wantsMaximized) host->showMaximized();
+    applyTaskbarIdentity(host);
+    logHost(dock, host, QStringLiteral("state-restored"));
 }
 
 class CFloatingDockController final : public QObject
@@ -173,12 +244,18 @@ private:
         QWidget* host = separateHost(m_dock);
         if(host != m_host)
         {
+            QWidget* previous = m_host;
             if(m_host) m_host->removeEventFilter(this);
             m_host = host;
             if(m_host) m_host->installEventFilter(this);
+            ei::log(eLogInfo, QStringLiteral(
+                    "DOCK_WINDOW host-changed dock:%1 old:0x%2 new:0x%3")
+                    .arg(m_dock->objectName()).arg(quintptr(previous), 0, 16)
+                    .arg(quintptr(host), 0, 16));
         }
         if(!m_host) return;
         applyNativeWindowType(m_dock, m_host);
+        applyTaskbarIdentity(m_host);
         // A host change is the reliable signal that Qt has created a floating
         // tab group. Reapply the preserved second-screen/maximized intent.
         if(m_dock->property(kFloatingMaximized).toBool())
@@ -211,6 +288,7 @@ void ei::saveFloatingDockWindowState(QDockWidget* dock)
                       dock->property(kFloatingNormalGeometry));
     settings.setValue(prefix + QStringLiteral("screen"),
                       dock->property(kFloatingScreen));
+    logHost(dock, host, QStringLiteral("state-saved"));
 }
 
 void ei::restoreFloatingDockWindowState(QDockWidget* dock)
@@ -224,6 +302,11 @@ void ei::restoreFloatingDockWindowState(QDockWidget* dock)
                       settings.value(prefix + QStringLiteral("normalGeometry")));
     dock->setProperty(kFloatingScreen,
                       settings.value(prefix + QStringLiteral("screen")));
+    ei::log(eLogInfo, QStringLiteral(
+            "DOCK_WINDOW restore-request dock:%1 maximized:%2 screen:%3")
+            .arg(dock->objectName())
+            .arg(dock->property(kFloatingMaximized).toBool())
+            .arg(dock->property(kFloatingScreen).toString()));
     QTimer::singleShot(0, dock, [dock]() { restoreHostFromDock(dock); });
 }
 
@@ -231,10 +314,22 @@ void ei::refreshFloatingDockTabs(QDockWidget* active, QDockWidget* peer)
 {
     if(!active) return;
     QTimer::singleShot(0, active, [active, peer]() {
-        // Either tab may retain the maximized intent while Qt is replacing the
-        // two standalone hosts with one QDockWidgetGroupWindow.
-        if(active->property(kFloatingMaximized).toBool()) restoreHostFromDock(active);
-        else if(peer && peer->property(kFloatingMaximized).toBool()) restoreHostFromDock(peer);
+        QWidget* activeHost = separateHost(active);
+        const bool sharedHost = peer && activeHost && separateHost(peer) == activeHost;
+        // Reconcile once for the whole shared host. A maximized member wins;
+        // its monitor and normal geometry become the group's state.
+        QDockWidget* source = active;
+        if(peer && peer->property(kFloatingMaximized).toBool()
+           && !active->property(kFloatingMaximized).toBool())
+            source = peer;
+        if(sharedHost && peer)
+        {
+            if(activeHost->isMaximized()) rememberHost(source, activeHost, true);
+            copyRememberedState(source, active);
+            copyRememberedState(source, peer);
+        }
+        restoreHostFromDock(source);
+        logHost(source, activeHost, QStringLiteral("tabs-reconciled"));
         refreshContents(active);
         if(peer) refreshContents(peer);
     });

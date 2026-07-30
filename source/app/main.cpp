@@ -1774,6 +1774,17 @@ int runHeadlessCommand(QApplication& app)
                 dockLabelProbe.windowType() == Qt::Window;
         dockLabelProbe.showMaximized();
         QApplication::processEvents();
+#ifdef Q_OS_WIN
+        const HWND floatingDockHwnd = reinterpret_cast<HWND>(dockLabelProbe.winId());
+        const LONG_PTR floatingDockExStyle = GetWindowLongPtrW(
+                    floatingDockHwnd, GWL_EXSTYLE);
+        const bool floatingDockTaskbarIdentity =
+                GetWindowLongPtrW(floatingDockHwnd, GWLP_HWNDPARENT) == 0
+                && (floatingDockExStyle & WS_EX_APPWINDOW) != 0
+                && (floatingDockExStyle & WS_EX_TOOLWINDOW) == 0;
+#else
+        const bool floatingDockTaskbarIdentity = true;
+#endif
         ei::saveFloatingDockWindowState(&dockLabelProbe);
         dockLabelProbe.showNormal();
         ei::restoreFloatingDockWindowState(&dockLabelProbe);
@@ -1875,7 +1886,7 @@ int runHeadlessCommand(QApplication& app)
                 && dockedHiddenLabelAppears && floatingClosedLabelRemoved
                 && floatingDockGroupingEnabled && floatingDockWindowControls
                 && floatingDockIsNormalWindow && floatingDockMaximizedRestores
-                && floatingDockTabRefreshRepaints;
+                && floatingDockTabRefreshRepaints && floatingDockTaskbarIdentity;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -2016,6 +2027,7 @@ int runHeadlessCommand(QApplication& app)
                << " floatingDockIsNormalWindow=" << floatingDockIsNormalWindow
                << " floatingDockMaximizedRestores=" << floatingDockMaximizedRestores
                << " floatingDockTabRefreshRepaints=" << floatingDockTabRefreshRepaints
+               << " floatingDockTaskbarIdentity=" << floatingDockTaskbarIdentity
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()
                << " viewportSurfaceBottomRightAlpha="
                << viewportSurface.pixelColor(viewportSurface.width() - 2,
