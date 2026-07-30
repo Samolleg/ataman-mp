@@ -3,6 +3,7 @@
 #include <QDockWidget>
 #include <QEvent>
 #include <QMainWindow>
+#include <QPointer>
 #include <QTabBar>
 #include <QTimer>
 #include <QWidget>
@@ -10,71 +11,233 @@
 #include <QApplication>
 #include <QIcon>
 #include <QScreen>
+#include <QSettings>
 #include <QWindow>
+
+namespace {
+const char* kFloatingMaximized = "enduranceFloatingMaximized";
+const char* kFloatingNormalGeometry = "enduranceFloatingNormalGeometry";
+const char* kFloatingScreen = "enduranceFloatingScreen";
+
+QString settingsPrefix(QDockWidget* dock)
+{
+    return QStringLiteral("ui/floatingDocks/%1/").arg(dock->objectName());
+}
+
+QWidget* separateHost(QDockWidget* dock)
+{
+    QWidget* host = dock ? dock->window() : nullptr;
+    return host && !qobject_cast<QMainWindow*>(host) ? host : nullptr;
+}
+
+QScreen* hostScreen(QWidget* host)
+{
+    if(!host) return nullptr;
+    if(host->windowHandle() && host->windowHandle()->screen())
+        return host->windowHandle()->screen();
+    return QApplication::screenAt(host->geometry().center());
+}
+
+void rememberHost(QDockWidget* dock, QWidget* host, bool maximized)
+{
+    if(!dock || !host) return;
+    dock->setProperty(kFloatingMaximized, maximized);
+    const QRect normal = host->normalGeometry().isValid()
+            ? host->normalGeometry() : host->geometry();
+    if(normal.isValid()) dock->setProperty(kFloatingNormalGeometry, normal);
+    if(QScreen* screen = hostScreen(host))
+        dock->setProperty(kFloatingScreen, screen->name());
+}
+
+void refreshContents(QDockWidget* dock)
+{
+    if(!dock || !dock->widget()) return;
+    dock->widget()->update();
+    const QList<QWidget*> descendants = dock->widget()->findChildren<QWidget*>();
+    for(QWidget* child : descendants)
+        if(child->isVisible()) child->update();
+    dock->widget()->repaint();
+    if(QWidget* host = separateHost(dock))
+    {
+        host->update();
+        host->repaint();
+    }
+}
+
+void applyNativeWindowType(QDockWidget* dock, QWidget* host)
+{
+    if(!dock || !host || host->property("enduranceApplyingDockWindowFlags").toBool())
+        return;
+    const Qt::WindowFlags required = Qt::Window | Qt::WindowTitleHint |
+        Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint |
+        Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
+    const Qt::WindowFlags current = host->windowFlags();
+    if(host->windowType() == Qt::Window && (current & required) == required)
+        return;
+
+    const bool visible = host->isVisible();
+    const QRect geometry = host->geometry();
+    const QRect normalGeometry = host->normalGeometry().isValid()
+            ? host->normalGeometry() : geometry;
+    const Qt::WindowStates state = host->windowState();
+    QScreen* screen = hostScreen(host);
+    host->setProperty("enduranceApplyingDockWindowFlags", true);
+    const Qt::WindowFlags nativeFlags =
+            (current & ~Qt::WindowType_Mask) | required;
+    host->setWindowFlags(nativeFlags);
+    const QIcon icon = dock->windowIcon().isNull()
+        ? QApplication::windowIcon() : dock->windowIcon();
+    if(!icon.isNull()) host->setWindowIcon(icon);
+    if(visible)
+    {
+        host->setGeometry(normalGeometry);
+        host->show();
+        if(screen && host->windowHandle()) host->windowHandle()->setScreen(screen);
+        if(state.testFlag(Qt::WindowMaximized)) host->showMaximized();
+        else if(state.testFlag(Qt::WindowMinimized)) host->showMinimized();
+        else host->setGeometry(geometry);
+    }
+    host->setProperty("enduranceApplyingDockWindowFlags", false);
+}
+
+void restoreHostFromDock(QDockWidget* dock)
+{
+    QWidget* host = separateHost(dock);
+    if(!host) return;
+    applyNativeWindowType(dock, host);
+    const QRect normal = dock->property(kFloatingNormalGeometry).toRect();
+    const QString screenName = dock->property(kFloatingScreen).toString();
+    QScreen* target = nullptr;
+    for(QScreen* screen : QApplication::screens())
+        if(screen->name() == screenName) { target = screen; break; }
+    if(target && host->windowHandle()) host->windowHandle()->setScreen(target);
+    if(normal.isValid()) host->setGeometry(normal);
+    if(dock->property(kFloatingMaximized).toBool()) host->showMaximized();
+}
+
+class CFloatingDockController final : public QObject
+{
+public:
+    explicit CFloatingDockController(QDockWidget* dock)
+        : QObject(dock), m_dock(dock)
+    {
+        setObjectName(QStringLiteral("enduranceFloatingDockController"));
+        connect(dock, &QDockWidget::topLevelChanged, this,
+                [this](bool) { scheduleSync(); });
+        connect(dock, &QDockWidget::visibilityChanged, this,
+                [this](bool visible) {
+            scheduleSync();
+            if(visible) QTimer::singleShot(0, m_dock, [this]() { refreshContents(m_dock); });
+        });
+        scheduleSync();
+    }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        if(watched != m_host) return QObject::eventFilter(watched, event);
+        if(event->type() == QEvent::WindowStateChange)
+        {
+            if(m_host->isMaximized()) rememberHost(m_dock, m_host, true);
+            else
+            {
+                // Qt briefly restores a maximized private group host while a
+                // second floating dock is inserted. Delay clearing the intent;
+                // a newly adopted group host can reapply it first.
+                QWidget* observed = m_host;
+                QTimer::singleShot(350, this, [this, observed]() {
+                    if(m_host == observed && observed && !observed->isMaximized())
+                        rememberHost(m_dock, observed, false);
+                });
+            }
+        }
+        else if(event->type() == QEvent::Move || event->type() == QEvent::Resize)
+        {
+            QWidget* observed = m_host;
+            QTimer::singleShot(250, this, [this, observed]() {
+                if(m_host == observed && observed && !observed->isMaximized())
+                    rememberHost(m_dock, observed, false);
+            });
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    void scheduleSync()
+    {
+        QTimer::singleShot(0, this, [this]() { sync(); });
+    }
+
+    void sync()
+    {
+        QWidget* host = separateHost(m_dock);
+        if(host != m_host)
+        {
+            if(m_host) m_host->removeEventFilter(this);
+            m_host = host;
+            if(m_host) m_host->installEventFilter(this);
+        }
+        if(!m_host) return;
+        applyNativeWindowType(m_dock, m_host);
+        // A host change is the reliable signal that Qt has created a floating
+        // tab group. Reapply the preserved second-screen/maximized intent.
+        if(m_dock->property(kFloatingMaximized).toBool())
+            restoreHostFromDock(m_dock);
+        refreshContents(m_dock);
+    }
+
+    QDockWidget* m_dock{nullptr};
+    QPointer<QWidget> m_host;
+};
+}
 
 void ei::enableNativeFloatingDockControls(QDockWidget* dock)
 {
-    if(!dock)
+    if(!dock || dock->property("enduranceFloatingDockControllerInstalled").toBool())
         return;
-    const auto apply = [dock]()
-    {
-        QTimer::singleShot(0, dock, [dock]()
-        {
-            QWidget* floatingWindow = dock->window();
-            // A docked widget's window is the editor QMainWindow. A standalone
-            // dock or Qt's private floating tab-group host is a separate window.
-            if(!floatingWindow || qobject_cast<QMainWindow*>(floatingWindow))
-                return;
-            if(floatingWindow->property("enduranceApplyingDockWindowFlags").toBool())
-                return;
-            const bool visible = floatingWindow->isVisible();
-            const Qt::WindowFlags required = Qt::Window | Qt::WindowTitleHint |
-                Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint |
-                Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
-            const Qt::WindowFlags current = floatingWindow->windowFlags();
-            if(floatingWindow->windowType() == Qt::Window
-               && (current & required) == required)
-                return;
-            const QRect geometry = floatingWindow->geometry();
-            const QRect normalGeometry = floatingWindow->normalGeometry().isValid()
-                    ? floatingWindow->normalGeometry() : geometry;
-            const Qt::WindowStates state = floatingWindow->windowState();
-            QScreen* screen = floatingWindow->windowHandle()
-                    ? floatingWindow->windowHandle()->screen()
-                    : QApplication::screenAt(geometry.center());
-            floatingWindow->setProperty("enduranceApplyingDockWindowFlags", true);
-            // Qt::Tool and Qt::Window are mutually exclusive values in the
-            // WindowType_Mask. OR-ing Qt::Window into Tool leaves a Tool and
-            // therefore produces no taskbar entry or Minimize/Maximize buttons.
-            const Qt::WindowFlags nativeFlags =
-                    (current & ~Qt::WindowType_Mask) | required;
-            floatingWindow->setWindowFlags(nativeFlags);
-            const QIcon icon = dock->windowIcon().isNull()
-                ? QApplication::windowIcon() : dock->windowIcon();
-            if(!icon.isNull()) floatingWindow->setWindowIcon(icon);
-            if(visible)
-            {
-                // Restore a normal geometry first so Windows chooses the same
-                // monitor before restoring the maximized state.
-                floatingWindow->setGeometry(normalGeometry);
-                floatingWindow->show();
-                if(screen && floatingWindow->windowHandle())
-                    floatingWindow->windowHandle()->setScreen(screen);
-                if(state.testFlag(Qt::WindowMaximized))
-                    floatingWindow->showMaximized();
-                else if(state.testFlag(Qt::WindowMinimized))
-                    floatingWindow->showMinimized();
-                else
-                    floatingWindow->setGeometry(geometry);
-            }
-            floatingWindow->setProperty("enduranceApplyingDockWindowFlags", false);
-        });
-    };
-    QObject::connect(dock, &QDockWidget::topLevelChanged, dock,
-                     [apply](bool) { apply(); });
-    QObject::connect(dock, &QDockWidget::visibilityChanged, dock,
-                     [apply](bool) { apply(); });
-    apply();
+    dock->setProperty("enduranceFloatingDockControllerInstalled", true);
+    new CFloatingDockController(dock);
+}
+
+void ei::saveFloatingDockWindowState(QDockWidget* dock)
+{
+    QWidget* host = separateHost(dock);
+    if(host) rememberHost(dock, host, host->isMaximized());
+    QSettings settings;
+    const QString prefix = settingsPrefix(dock);
+    settings.setValue(prefix + QStringLiteral("maximized"),
+                      dock->property(kFloatingMaximized));
+    settings.setValue(prefix + QStringLiteral("normalGeometry"),
+                      dock->property(kFloatingNormalGeometry));
+    settings.setValue(prefix + QStringLiteral("screen"),
+                      dock->property(kFloatingScreen));
+}
+
+void ei::restoreFloatingDockWindowState(QDockWidget* dock)
+{
+    if(!dock) return;
+    QSettings settings;
+    const QString prefix = settingsPrefix(dock);
+    dock->setProperty(kFloatingMaximized,
+                      settings.value(prefix + QStringLiteral("maximized"), false));
+    dock->setProperty(kFloatingNormalGeometry,
+                      settings.value(prefix + QStringLiteral("normalGeometry")));
+    dock->setProperty(kFloatingScreen,
+                      settings.value(prefix + QStringLiteral("screen")));
+    QTimer::singleShot(0, dock, [dock]() { restoreHostFromDock(dock); });
+}
+
+void ei::refreshFloatingDockTabs(QDockWidget* active, QDockWidget* peer)
+{
+    if(!active) return;
+    QTimer::singleShot(0, active, [active, peer]() {
+        // Either tab may retain the maximized intent while Qt is replacing the
+        // two standalone hosts with one QDockWidgetGroupWindow.
+        if(active->property(kFloatingMaximized).toBool()) restoreHostFromDock(active);
+        else if(peer && peer->property(kFloatingMaximized).toBool()) restoreHostFromDock(peer);
+        refreshContents(active);
+        if(peer) refreshContents(peer);
+    });
 }
 
 CDockHiddenTab::CDockHiddenTab(QMainWindow* window, QDockWidget* dock,

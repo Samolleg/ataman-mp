@@ -91,6 +91,19 @@ protected:
     }
 };
 
+class CPaintProbe final: public QWidget
+{
+public:
+    int paints{0};
+
+protected:
+    void paintEvent(QPaintEvent* event) override
+    {
+        ++paints;
+        QWidget::paintEvent(event);
+    }
+};
+
 class CStartupSplash final: public QWidget
 {
 public:
@@ -1728,7 +1741,10 @@ int runHeadlessCommand(QApplication& app)
         dockWindow.setCentralWidget(new QWidget(&dockWindow));
         QDockWidget dockLabelProbe(QStringLiteral("Message Log"), &dockWindow);
         QDockWidget validationDockProbe(QStringLiteral("Validation"), &dockWindow);
-        dockLabelProbe.setWidget(new QWidget(&dockLabelProbe));
+        dockLabelProbe.setObjectName(QStringLiteral("messageLogDockProbe"));
+        validationDockProbe.setObjectName(QStringLiteral("validationDockProbe"));
+        CPaintProbe* floatingPaintProbe = new CPaintProbe;
+        dockLabelProbe.setWidget(floatingPaintProbe);
         validationDockProbe.setWidget(new QWidget(&validationDockProbe));
         dockWindow.addDockWidget(Qt::BottomDockWidgetArea, &dockLabelProbe);
         dockWindow.addDockWidget(Qt::BottomDockWidgetArea, &validationDockProbe);
@@ -1756,6 +1772,21 @@ int runHeadlessCommand(QApplication& app)
                 && floatingFlags.testFlag(Qt::WindowCloseButtonHint);
         const bool floatingDockIsNormalWindow =
                 dockLabelProbe.windowType() == Qt::Window;
+        dockLabelProbe.showMaximized();
+        QApplication::processEvents();
+        ei::saveFloatingDockWindowState(&dockLabelProbe);
+        dockLabelProbe.showNormal();
+        ei::restoreFloatingDockWindowState(&dockLabelProbe);
+        QEventLoop floatingRestoreEvents;
+        QTimer::singleShot(25, &floatingRestoreEvents, &QEventLoop::quit);
+        floatingRestoreEvents.exec();
+        const bool floatingDockMaximizedRestores = dockLabelProbe.isMaximized();
+        const int paintsBeforeTabRefresh = floatingPaintProbe->paints;
+        ei::refreshFloatingDockTabs(&dockLabelProbe, &validationDockProbe);
+        QApplication::processEvents();
+        const bool floatingDockTabRefreshRepaints =
+                floatingPaintProbe->paints > paintsBeforeTabRefresh;
+        QSettings().remove(QStringLiteral("ui/floatingDocks/messageLogDockProbe"));
         dockLabelProbe.hide();
         QEventLoop floatingDockEvents;
         QTimer::singleShot(25, &floatingDockEvents, &QEventLoop::quit);
@@ -1843,7 +1874,8 @@ int runHeadlessCommand(QApplication& app)
                 && texturelessDrawDoesNotSpamLog
                 && dockedHiddenLabelAppears && floatingClosedLabelRemoved
                 && floatingDockGroupingEnabled && floatingDockWindowControls
-                && floatingDockIsNormalWindow;
+                && floatingDockIsNormalWindow && floatingDockMaximizedRestores
+                && floatingDockTabRefreshRepaints;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -1982,6 +2014,8 @@ int runHeadlessCommand(QApplication& app)
                << " floatingDockGroupingEnabled=" << floatingDockGroupingEnabled
                << " floatingDockWindowControls=" << floatingDockWindowControls
                << " floatingDockIsNormalWindow=" << floatingDockIsNormalWindow
+               << " floatingDockMaximizedRestores=" << floatingDockMaximizedRestores
+               << " floatingDockTabRefreshRepaints=" << floatingDockTabRefreshRepaints
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()
                << " viewportSurfaceBottomRightAlpha="
                << viewportSurface.pixelColor(viewportSurface.width() - 2,

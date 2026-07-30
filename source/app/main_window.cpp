@@ -684,6 +684,13 @@ MainWindow::MainWindow(QWidget* parent) :
     m_messageLogDock->setWidget(m_messageLogPanel);
     addDockWidget(Qt::BottomDockWidgetArea, m_messageLogDock);
     ei::enableNativeFloatingDockControls(m_messageLogDock);
+    connect(this, &QMainWindow::tabifiedDockWidgetActivated, this,
+            [this](QDockWidget* active) {
+        if(active == m_messageLogDock)
+            ei::refreshFloatingDockTabs(m_messageLogDock, m_validationDock);
+        else if(active == m_validationDock)
+            ei::refreshFloatingDockTabs(m_validationDock, m_messageLogDock);
+    });
     resizeDocks({m_messageLogDock}, {190}, Qt::Vertical);
     m_validationTimer = new QTimer(this);
     m_validationTimer->setSingleShot(true);
@@ -1029,6 +1036,8 @@ MainWindow::MainWindow(QWidget* parent) :
     QSettings uiSettings;
     restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
     restoreState(uiSettings.value("ui/mainWindowState").toByteArray());
+    ei::restoreFloatingDockWindowState(m_messageLogDock);
+    ei::restoreFloatingDockWindowState(m_validationDock);
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
     // Landscape editing is an explicit working mode, not session layout.
@@ -5769,6 +5778,8 @@ void MainWindow::saveUiState()
     if(m_landscapeToolsDock)
         hideLandscapeTools();
     QSettings uiSettings;
+    ei::saveFloatingDockWindowState(m_messageLogDock);
+    ei::saveFloatingDockWindowState(m_validationDock);
     uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
     uiSettings.setValue("ui/mainWindowState", saveState());
     uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
