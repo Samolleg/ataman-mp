@@ -13,15 +13,19 @@ history. The permanent safety and compatibility rules are in
 
 ## Authoring and workflow
 
-- [ ] Add a dockable, filterable workflow/message-log panel.
+- [ ] Add a dockable, filterable workflow/message-log panel with severity,
+  subsystem, text, and current-session filters; link relevant findings to
+  validation objects/files while retaining the complete rotating text log.
+- [ ] Complete a property-label and terminology pass against the English/Russian
+  object manuals and verified runtime meanings. Keep this presentation-only
+  unless a separately tested data-model correction is required.
+- [ ] Add structured patrol/look-point and magic-trap attachment editing:
+  owner/child lists, viewport selection, orphan/wrong-parent validation, and
+  complete compound copy/remap transactions.
 - [ ] Add Russian localization and an in-app language switch.
 - [ ] Add opt-in Windows associations for `.mpr`, `.mob`, and `.collection`.
 - [ ] Add a viewport action that copies the current camera transform as
   ready-to-paste game script calls.
-- [ ] Add a property-label and terminology pass against the English/Russian
-  object manuals and verified runtime meanings.
-- [ ] Add structured patrol/look-point and magic-trap attachment editing,
-  relationship validation, and compound copy/remap tools.
 - [ ] Add baseline/candidate swapping, 3D perspective comparison, deterministic
   JSON export, and explicit ambiguous-match handling to MOB Diff.
 - [ ] Add optional external MOB diff-tool integration.
@@ -32,11 +36,10 @@ history. The permanent safety and compatibility rules are in
 
 ## Resources, performance, and diagnostics
 
-- [ ] Complete background RES indexing and CPU decoding while keeping OpenGL
-  creation in bounded GUI-thread batches.
-- [ ] Persist archive indexes by path, size, timestamp, and header hash.
-- [ ] Add phase timings, shadowed assets, missing resources, and decode failures
-  to a dedicated diagnostics view.
+- [ ] Move the remaining cold RES index/decode work off the GUI thread and
+  persist archive indexes by path, size, timestamp, and header hash.
+- [ ] Surface existing phase timings, shadowed assets, missing resources, and
+  decode failures through the workflow/message-log panel.
 - [ ] Cover every observed Base/JMV MMP format with either correct decoding or
   an explicit asset/archive/format diagnostic.
 - [ ] Support explicitly configured ZIP archives as read-only loose texture
@@ -79,8 +82,8 @@ history. The permanent safety and compatibility rules are in
 - [ ] Complete the representative Base/JMV editor and runtime matrices.
 - [ ] Establish release signing/reputation guidance for the unsigned editor and
   its process-owned runtime bridge.
-- [ ] Investigate Windows 7 compatibility only after the supported modern
-  Windows release is stable; do not weaken the default renderer path.
+- [x] Confirm Windows 7 compatibility for the current Qt5 editor build without
+  weakening the default modern-Windows renderer path.
 - [ ] Keep Base support independent from JMV behavior and keep Test Current Map
   optional for profiles without a validated provider.
 - [ ] Consider Qt6/CMake modernization only after 1.0; use a major version if
@@ -89,56 +92,13 @@ history. The permanent safety and compatibility rules are in
 </details>
 
 <details open>
-<summary><strong>0.5.x — AI navigation graph completion</strong></summary>
+<summary><strong>0.4.x — lossless landscape and AI navigation</strong></summary>
 
 ## Release goal
 
-Deliver profile-aware AI graph inspection, comparison, object-aware
-regeneration, and explicit safe persistence without making graph rebuilding an
-ordinary MPR save side effect.
-
-## Goals
-
-- [x] Preserve and parse embedded `AI_GRAPH` and external `.grp` sources with
-  complete raw-byte coverage and explicit source ownership.
-- [x] Preview external same-basename graphs and stage them losslessly for Test
-  Current Map.
-- [x] Implement deterministic terrain/liquid/profile regeneration preview for
-  all eight movement profiles.
-- [x] Use the active non-stale regenerated graph for Play from Here, with a
-  conservative terrain fallback when no graph exists.
-- [ ] Add a Navigation viewport mode with layer/edge/cost/component inspection.
-- [ ] Compare embedded and external graphs without silently choosing when both
-  exist and differ.
-- [ ] Add deterministic graph diff and finish the Zone 6 frozen/unfrozen source
-  study.
-- [ ] Replace rendered-AABB object blocking with authored FIG-part navigation
-  bounds, oriented occupancy, bridge, door, and moving-object policy.
-- [ ] Track navigation-dirty regions and validate entrances, asymmetry,
-  isolation, clearance, and component changes.
-- [ ] Make graph persistence an explicit previewed, undoable, backed-up,
-  freshly reparsed, atomic operation.
-- [ ] Complete deterministic rebuild/path probes and Base/JMV runtime traversal
-  validation.
-
-## Approved changelists and evidence
-
-- Landscape/MPR/AI graph integration: `8751b58`.
-- Graph-aware Play from Here: `c369086`.
-- [AI graph profile policy](docs/validation/AI_GRAPH_PROFILE_POLICY.md).
-- [AI graph persistence validation](packaging/ALPHA26_AI_GRAPH_PERSISTENCE_R3.md).
-- [AI graph runtime validation](packaging/ALPHA26_AI_GRAPH_RUNTIME_R1.md).
-- [Public graph research reference](https://habr.com/ru/articles/769050/).
-
-</details>
-
-<details open>
-<summary><strong>0.4.x — lossless MPR/SEC and landscape editing</strong></summary>
-
-## Release goal
-
-Deliver safe production landscape editing. Changed MPRs must use the lossless
-document path and must never fall back to the legacy rebuilding serializer.
+Deliver safe production landscape editing and profile-aware AI navigation
+authoring. Changed MPRs must use the lossless document path and must never fall
+back to the legacy rebuilding serializer; graph persistence remains explicit.
 
 ## Completed foundation
 
@@ -160,6 +120,16 @@ document path and must never fall back to the legacy rebuilding serializer.
   grading, export, viewport navigation, and runtime staging.
 - [x] Add AI graph preview/regeneration/staging/persistence foundations and
   graph-aware Play from Here.
+- [x] Preserve and parse embedded `AI_GRAPH` and external `.grp` sources with
+  explicit ownership and lossless Test Current Map staging.
+- [x] Add Navigation viewport layer selection, node/link/isolation preview, and
+  loaded-versus-regenerated source override.
+- [x] Implement deterministic terrain/liquid/profile regeneration for all eight
+  movement profiles with authored object/bridge navigation rasterization.
+- [x] Make graph persistence an explicit previewed, backed-up, freshly
+  reparsed, atomic bake/export/ownership-switch operation.
+- [x] Add deterministic regeneration, component recoloring, structural reopen,
+  and graph-aware spawn/path projection tests.
 
 ## Remaining goals
 
@@ -172,10 +142,21 @@ document path and must never fall back to the legacy rebuilding serializer.
 - [ ] Runtime-confirm landscape edit-mode neutral geometry, overlay reset after
   unload/reload, traversal, liquid interaction, and changed-map save/load.
 - [ ] Offer explicit follow-up `map.txt` registration after new-MPR creation.
+- [ ] Add cost/component inspection and deterministic loaded/regenerated graph
+  diff, including the Zone 6 frozen/unfrozen source comparison.
+- [ ] Track navigation-dirty regions incrementally and validate entrance
+  reachability, asymmetry, isolation, clearance, and component changes.
+- [ ] Runtime-validate representative Base/JMV traversal against generated and
+  persisted graphs.
 
 ## Approved changelists and evidence
 
 - Completed landscape/MPR integration: `8751b58`.
+- Graph-aware Play from Here: `c369086`.
+- [AI graph profile policy](docs/validation/AI_GRAPH_PROFILE_POLICY.md).
+- [AI graph persistence validation](packaging/ALPHA26_AI_GRAPH_PERSISTENCE_R3.md).
+- [AI graph runtime validation](packaging/ALPHA26_AI_GRAPH_RUNTIME_R1.md).
+- [Public graph research reference](https://habr.com/ru/articles/769050/).
 - [MPR settings and height-range contract](docs/MPR_SETTINGS_AND_HEIGHT_RANGE.md).
 - [MPR settings validation](docs/validation/MPR_SETTINGS_HEIGHT_OPERATIONS_R1.md).
 - [MPR transaction foundation](docs/validation/MPR_MAXZ_TRANSACTION_FOUNDATION.md).
@@ -219,6 +200,9 @@ foundation as one coherent `0.3.0` release.
 - [x] Profile-correct humanoid appearance, equipment, animation, texture/UV
   inspection, camera-priority preparation, session caches, culling, and render
   queues.
+- [x] Add indexed RES lookup, negative resource caches, asynchronous character
+  preparation, persistent derived visual caches, bounded GUI-thread GPU work,
+  and load/render phase timings.
 - [x] Resource-driven environment lighting, authored point lights, particle
   reconstruction/batching, liquid material animation, time-of-day controls,
   and desktop OpenGL overlay confirmation.
@@ -282,6 +266,8 @@ foundation as one coherent `0.3.0` release.
   [`aa465c3`](https://github.com/Ilufus/ei-mapper-endurance/commit/aa465c3),
   [`13639ca`](https://github.com/Ilufus/ei-mapper-endurance/commit/13639ca),
   and [`2994805`](https://github.com/Ilufus/ei-mapper-endurance/commit/2994805).
+- Heavy-map loading and visual-cache work: `ab09e34`, `89405d0`, `0d3676d`,
+  and `e24e31b`.
 - Time, splash, and startup:
   [`7401874`](https://github.com/Ilufus/ei-mapper-endurance/commit/7401874)
   and [`3af2099`](https://github.com/Ilufus/ei-mapper-endurance/commit/3af2099).
