@@ -131,8 +131,11 @@ The settings window should separate:
 3. **Vertical scale:** explicit **Scale terrain with range** versus **Preserve
    heights by requantizing**, with a separate clamp decision where necessary.
 4. **Resize:** crop/expand preview and Save As transaction.
-5. **Atlas and liquids:** namespace review, atlas viewer, and validated
-   liquid/overlay material editing without direct atlas-image authoring.
+5. **Materials Editor:** namespace and read-only atlas-usage context plus
+   validated typed surface-material slot editing without direct atlas-image
+   authoring. Terrain textures and shared surface-material properties must be
+   presented as independent concepts. See
+   [MATERIALS_EDITOR_PLAN.md](MATERIALS_EDITOR_PLAN.md).
 
 The inherited tile-type editor remains out of scope. Endurance derives and
 uses atlas descriptions; it does not ask ordinary users to author encoded tile

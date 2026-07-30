@@ -595,10 +595,20 @@ must not independently change its shaders or animation policy.
 
 - [x] Add undoable creation, removal, sculpting, visibility, atlas-texture, and
   existing-material assignment tools for separate overlay surfaces.
-- [ ] Provide validated Base and JMV material presets while retaining manual
-  controls for mod-specific materials.
-- [ ] Add typed editing for liquid/surface material values; keep renderer-owned
-  animation semantics and shader policy outside the landscape transaction.
+- [ ] Refactor **MPR Settings -> Materials** into the explicit
+  [Materials Editor](docs/MATERIALS_EDITOR_PLAN.md). Keep read-only terrain
+  texture/atlas context separate from editable shared surface-material slots.
+- [ ] Provide validated Base and JMV surface-material presets while retaining
+  explicit typed controls for mod-specific materials.
+- [ ] Add typed editing for surface-material type, RGB, opacity, Illumination,
+  wave multiplier, and warp speed. Illumination maps directly to
+  self-illumination, and emitted RGB is the saturated product of material RGB
+  and Illumination; it is not a lava or texture-family flag. Keep
+  renderer-owned animation semantics and shader policy outside the landscape
+  transaction.
+- [ ] Before implementation, add root-cause tests for exact UI-field binding,
+  material-slot selection/sharing, lossless MPR serialization, and
+  texture-family/material independence.
 - [ ] Preserve unknown overlay records and extra archive members.
 
 Implement this as separate undoable transactions: activate/deactivate cells,
@@ -728,8 +738,9 @@ The following items are deliberately not hidden inside the completed baseline:
   embedded AI graphs, VSS, and editor directory metadata are never copied.
   Creation uses fresh reopen validation, backup, race checks, and atomic
   replacement rather than weakening the changed-MOB preservation path.
-- [ ] Complete typed overlay-material editing/presets and the final Base/JMV
-  overlay runtime matrix.
+- [ ] Complete the dedicated Materials Editor, validated surface-material
+  presets, and the final Base/JMV overlay runtime matrix. Follow
+  [the test-first ownership plan](docs/MATERIALS_EDITOR_PLAN.md).
 
 </details>
 
