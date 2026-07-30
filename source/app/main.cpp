@@ -1765,6 +1765,20 @@ int runHeadlessCommand(QApplication& app)
         const bool dockedHiddenLabelAppears = hiddenTab.tabBar()->isVisible();
         dockLabelProbe.setFloating(true);
         QApplication::processEvents();
+#ifdef Q_OS_WIN
+        const HWND floatingDockInitialHwnd = reinterpret_cast<HWND>(
+                    dockLabelProbe.winId());
+        const LONG_PTR floatingDockInitialStyle = GetWindowLongPtrW(
+                    floatingDockInitialHwnd, GWL_STYLE);
+        const bool floatingDockWindowControls =
+                (floatingDockInitialStyle & WS_MINIMIZEBOX) != 0
+                && (floatingDockInitialStyle & WS_MAXIMIZEBOX) != 0
+                && (floatingDockInitialStyle & WS_SYSMENU) != 0;
+        const bool floatingDockIsNormalWindow =
+                (floatingDockInitialStyle & WS_POPUP) == 0
+                && (floatingDockInitialStyle & WS_CAPTION) != 0
+                && (floatingDockInitialStyle & WS_THICKFRAME) != 0;
+#else
         const Qt::WindowFlags floatingFlags = dockLabelProbe.windowFlags();
         const bool floatingDockWindowControls = floatingFlags.testFlag(
                     Qt::WindowMinimizeButtonHint)
@@ -1772,6 +1786,7 @@ int runHeadlessCommand(QApplication& app)
                 && floatingFlags.testFlag(Qt::WindowCloseButtonHint);
         const bool floatingDockIsNormalWindow =
                 dockLabelProbe.windowType() == Qt::Window;
+#endif
         dockLabelProbe.showMaximized();
         QApplication::processEvents();
 #ifdef Q_OS_WIN
@@ -1886,7 +1901,9 @@ int runHeadlessCommand(QApplication& app)
                 && dockedHiddenLabelAppears && floatingClosedLabelRemoved
                 && floatingDockGroupingEnabled && floatingDockWindowControls
                 && floatingDockIsNormalWindow && floatingDockMaximizedRestores
-                && floatingDockTabRefreshRepaints && floatingDockTaskbarIdentity;
+                && floatingDockTabRefreshRepaints && floatingDockTaskbarIdentity
+                && QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling)
+                && QCoreApplication::testAttribute(Qt::AA_UseHighDpiPixmaps);
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -2028,6 +2045,10 @@ int runHeadlessCommand(QApplication& app)
                << " floatingDockMaximizedRestores=" << floatingDockMaximizedRestores
                << " floatingDockTabRefreshRepaints=" << floatingDockTabRefreshRepaints
                << " floatingDockTaskbarIdentity=" << floatingDockTaskbarIdentity
+               << " perMonitorDpiScaling="
+               << QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling)
+               << " highDpiPixmaps="
+               << QCoreApplication::testAttribute(Qt::AA_UseHighDpiPixmaps)
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()
                << " viewportSurfaceBottomRightAlpha="
                << viewportSurface.pixelColor(viewportSurface.width() - 2,
@@ -2188,6 +2209,12 @@ int runHeadlessCommand(QApplication& app)
 
 int main(int argc, char *argv[])
 {
+    // Let Qt derive each top-level window's base scale from the monitor it is
+    // currently on. Endurance's own UI scale remains an additional multiplier
+    // over DPI-aware point sizes rather than replacing Windows scaling.
+    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+
     const char* openGlBackend = requestedOpenGlBackend(argc, argv);
     const bool renderBenchmark = renderBenchmarkRequested(argc, argv);
     if(std::strcmp(openGlBackend, "angle") == 0)

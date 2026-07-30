@@ -10,6 +10,7 @@
 #include <QVariant>
 #include <QApplication>
 #include <QIcon>
+#include <QLayout>
 #include <QScreen>
 #include <QSettings>
 #include <QWindow>
@@ -70,8 +71,12 @@ void logHost(QDockWidget* dock, QWidget* host, const QString& reason)
 void applyTaskbarIdentity(QWidget* host)
 {
 #ifdef Q_OS_WIN
-    if(!host || !host->isVisible()) return;
+    if(!host) return;
     HWND hwnd = reinterpret_cast<HWND>(host->winId());
+    LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    style &= ~LONG_PTR(WS_POPUP);
+    style |= WS_OVERLAPPEDWINDOW;
+    SetWindowLongPtrW(hwnd, GWL_STYLE, style);
     LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
     exStyle &= ~LONG_PTR(WS_EX_TOOLWINDOW);
     exStyle |= WS_EX_APPWINDOW;
@@ -116,8 +121,18 @@ void refreshContents(QDockWidget* dock)
     dock->widget()->repaint();
     if(QWidget* host = separateHost(dock))
     {
+        if(host->layout())
+        {
+            host->layout()->invalidate();
+            host->layout()->activate();
+        }
         host->update();
         host->repaint();
+#ifdef Q_OS_WIN
+        RedrawWindow(reinterpret_cast<HWND>(host->winId()), nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN |
+                     RDW_FRAME | RDW_UPDATENOW);
+#endif
     }
 }
 
@@ -125,6 +140,18 @@ void applyNativeWindowType(QDockWidget* dock, QWidget* host)
 {
     if(!dock || !host || host->property("enduranceApplyingDockWindowFlags").toBool())
         return;
+#ifdef Q_OS_WIN
+    // Do not call QWidget::setWindowFlags() on QDockWidgetGroupWindow. Qt 5.12
+    // destroys/recreates its HWND and backing store, which can duplicate the
+    // host and leave the inactive tab painted until a resize. Update the same
+    // native HWND in place instead.
+    applyTaskbarIdentity(host);
+    const QIcon icon = dock->windowIcon().isNull()
+        ? QApplication::windowIcon() : dock->windowIcon();
+    if(!icon.isNull()) host->setWindowIcon(icon);
+    logHost(dock, host, QStringLiteral("native-window-applied-in-place"));
+    return;
+#else
     const Qt::WindowFlags required = Qt::Window | Qt::WindowTitleHint |
         Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint |
         Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
@@ -157,6 +184,7 @@ void applyNativeWindowType(QDockWidget* dock, QWidget* host)
     applyTaskbarIdentity(host);
     host->setProperty("enduranceApplyingDockWindowFlags", false);
     logHost(dock, host, QStringLiteral("native-window-applied"));
+#endif
 }
 
 void restoreHostFromDock(QDockWidget* dock)
@@ -330,6 +358,8 @@ void ei::refreshFloatingDockTabs(QDockWidget* active, QDockWidget* peer)
         }
         restoreHostFromDock(source);
         logHost(source, activeHost, QStringLiteral("tabs-reconciled"));
+        active->show();
+        active->raise();
         refreshContents(active);
         if(peer) refreshContents(peer);
     });
