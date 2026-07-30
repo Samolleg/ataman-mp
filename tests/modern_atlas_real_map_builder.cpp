@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMap>
+#include <QPainter>
 #include <QSet>
 #include <QTextCodec>
 #include <QTextStream>
@@ -373,6 +374,206 @@ QMap<qint32, QImage> globalSources(
     return result;
 }
 
+QByteArray reviewImageHash(const QImage& source)
+{
+    const QImage image = source.convertToFormat(QImage::Format_Grayscale8);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(int y = 0; y < image.height(); ++y)
+        hash.addData(reinterpret_cast<const char*>(image.constScanLine(y)),
+                     image.bytesPerLine());
+    return hash.result().toHex();
+}
+
+QJsonObject writeBlendMaskReview(
+    const CTerrainVirtualAtlas& atlas, const QVector<qint32>& materialIds,
+    const QMap<qint32, QString>& names, const QString& outputDirectory,
+    QString* error)
+{
+    struct Topology
+    {
+        QString name;
+        int variation{0};
+        int ownerCorners{1};
+        bool diagonal{false};
+    };
+    const QVector<Topology> topologies = {
+        {QStringLiteral("outer-1of4-v1"), 0, 1, false},
+        {QStringLiteral("outer-1of4-v2"), 1, 1, false},
+        {QStringLiteral("edge-2of4-v1"), 0, 2, false},
+        {QStringLiteral("edge-2of4-v2"), 1, 2, false},
+        {QStringLiteral("diagonal-2of4"), 0, 2, true},
+        {QStringLiteral("inside-3of4-v1"), 0, 3, false},
+        {QStringLiteral("inside-3of4-v2"), 1, 3, false}
+    };
+    QMap<qint32, ETerrainBlendStyle> styles;
+    QMap<ETerrainBlendStyle, QVector<qint32>> byStyle;
+    for(qint32 id : materialIds)
+    {
+        const ETerrainBlendStyle style =
+            CTerrainVirtualAtlas::blendStyleForMaterialName(names.value(id));
+        styles.insert(id, style);
+        byStyle[style].append(id);
+    }
+    qint32 commonGrass = -1;
+    for(qint32 id : materialIds)
+        if(names.value(id).compare(QStringLiteral("Grass / Common"),
+                                   Qt::CaseInsensitive) == 0)
+        {
+            commonGrass = id;
+            break;
+        }
+    if(commonGrass < 0 && !materialIds.isEmpty()) commonGrass = materialIds.front();
+
+    const QString reviewDirectory = QDir(outputDirectory).filePath(
+        QStringLiteral("blend-mask-review"));
+    if(!QDir().mkpath(reviewDirectory))
+    {
+        if(error) *error = QStringLiteral("Could not create %1").arg(reviewDirectory);
+        return {};
+    }
+    QByteArray csv("sheet,row,column,owner_material_id,owner_material,owner_style,"
+                   "support_scenario,support_material_id,support_material,topology,"
+                   "variation,provenance,mask_sha256,missing\n");
+    const auto csvText = [](QString value) {
+        value.replace('"', QStringLiteral("\"\""));
+        return QByteArray("\"") + value.toUtf8() + QByteArray("\"");
+    };
+    QJsonArray sheets;
+    int totalMasks = 0;
+    int missingMasks = 0;
+    const int rowsPerSheet = 20;
+    for(auto styleIt = byStyle.constBegin(); styleIt != byStyle.constEnd(); ++styleIt)
+    {
+        const ETerrainBlendStyle ownerStyle = styleIt.key();
+        const QVector<qint32>& owners = styleIt.value();
+        for(int page = 0; page * rowsPerSheet < owners.size(); ++page)
+        {
+            const int firstRow = page * rowsPerSheet;
+            const int rowCount = qMin(rowsPerSheet, owners.size() - firstRow);
+            const int columns = topologies.size() * 2;
+            const int tileSize = 256;
+            QImage sheet(columns * tileSize, rowCount * tileSize,
+                         QImage::Format_RGB888);
+            sheet.fill(QColor(36, 36, 36));
+            QPainter painter(&sheet);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+            const QString sheetName = QStringLiteral("%1-%2.png")
+                .arg(slug(CTerrainVirtualAtlas::blendStyleName(ownerStyle)))
+                .arg(page + 1, 2, 10, QLatin1Char('0'));
+            for(int localRow = 0; localRow < rowCount; ++localRow)
+            {
+                const qint32 owner = owners.at(firstRow + localRow);
+                qint32 sameStyle = -1;
+                for(qint32 candidate : owners)
+                    if(candidate != owner) { sameStyle = candidate; break; }
+                qint32 crossStyle = commonGrass;
+                if(crossStyle == owner || styles.value(crossStyle) == ownerStyle)
+                    for(qint32 candidate : materialIds)
+                        if(candidate != owner && styles.value(candidate) != ownerStyle)
+                        { crossStyle = candidate; break; }
+                if(sameStyle < 0) sameStyle = crossStyle;
+                const qint32 supports[2] = {crossStyle, sameStyle};
+                const QString scenarios[2] = {
+                    QStringLiteral("cross-style"), QStringLiteral("same-style")};
+                for(int scenario = 0; scenario < 2; ++scenario)
+                    for(int topologyIndex = 0;
+                        topologyIndex < topologies.size(); ++topologyIndex)
+                    {
+                        const Topology& topology = topologies.at(topologyIndex);
+                        const qint32 support = supports[scenario];
+                        STerrainTransitionSignature signature;
+                        signature.northWest = owner;
+                        signature.northEast = !topology.diagonal
+                            && topology.ownerCorners >= 2 ? owner : support;
+                        signature.southEast = topology.diagonal
+                            ? owner : (topology.ownerCorners >= 3 ? owner : support);
+                        signature.southWest = support;
+                        QString provenance;
+                        QImage mask = atlas.reviewBlendMask(
+                            signature, owner, topology.variation, &provenance);
+                        const int column = scenario * topologies.size()
+                            + topologyIndex;
+                        if(mask.isNull())
+                        {
+                            ++missingMasks;
+                            painter.fillRect(column * tileSize,
+                                localRow * tileSize, tileSize, tileSize,
+                                QColor(180, 0, 180));
+                            painter.setPen(QPen(Qt::black, 12));
+                            painter.drawLine(column * tileSize,
+                                localRow * tileSize,
+                                (column + 1) * tileSize - 1,
+                                (localRow + 1) * tileSize - 1);
+                            painter.drawLine((column + 1) * tileSize - 1,
+                                localRow * tileSize, column * tileSize,
+                                (localRow + 1) * tileSize - 1);
+                        }
+                        else
+                        {
+                            ++totalMasks;
+                            painter.drawImage(column * tileSize,
+                                localRow * tileSize,
+                                mask.scaled(tileSize, tileSize,
+                                    Qt::IgnoreAspectRatio, Qt::FastTransformation));
+                        }
+                        csv += csvText(sheetName) + ','
+                            + QByteArray::number(firstRow + localRow) + ','
+                            + QByteArray::number(column) + ','
+                            + QByteArray::number(owner) + ','
+                            + csvText(names.value(owner)) + ','
+                            + csvText(CTerrainVirtualAtlas::blendStyleName(ownerStyle)) + ','
+                            + csvText(scenarios[scenario]) + ','
+                            + QByteArray::number(support) + ','
+                            + csvText(names.value(support)) + ','
+                            + csvText(topology.name) + ','
+                            + QByteArray::number(topology.variation) + ','
+                            + csvText(provenance) + ','
+                            + csvText(mask.isNull() ? QString()
+                                : QString::fromLatin1(reviewImageHash(mask))) + ','
+                            + QByteArray::number(mask.isNull()) + '\n';
+                    }
+            }
+            painter.end();
+            if(!sheet.save(QDir(reviewDirectory).filePath(sheetName), "PNG"))
+            {
+                if(error) *error = QStringLiteral("Could not write mask sheet %1")
+                    .arg(sheetName);
+                return {};
+            }
+            QJsonObject sheetEntry;
+            sheetEntry.insert(QStringLiteral("file"), sheetName);
+            sheetEntry.insert(QStringLiteral("style"),
+                CTerrainVirtualAtlas::blendStyleName(ownerStyle));
+            sheetEntry.insert(QStringLiteral("first_row"), firstRow);
+            sheetEntry.insert(QStringLiteral("rows"), rowCount);
+            sheetEntry.insert(QStringLiteral("columns"), columns);
+            sheets.append(sheetEntry);
+        }
+    }
+    if(!writeBytes(QDir(reviewDirectory).filePath(QStringLiteral("index.csv")),
+                   csv, error)) return {};
+    QJsonObject manifest;
+    manifest.insert(QStringLiteral("schema"),
+                    QStringLiteral("ei-stock-derived-blend-mask-review-v1"));
+    manifest.insert(QStringLiteral("meaning"),
+        QStringLiteral("White is the requested brush material; black is support. "
+                       "Every cell is the exact stock-derived mask selected by generation."));
+    manifest.insert(QStringLiteral("material_count"), materialIds.size());
+    manifest.insert(QStringLiteral("selected_masks"), totalMasks);
+    manifest.insert(QStringLiteral("missing_masks"), missingMasks);
+    manifest.insert(QStringLiteral("columns_per_support"), topologies.size());
+    manifest.insert(QStringLiteral("support_scenarios"),
+                    QJsonArray{QStringLiteral("cross-style"),
+                               QStringLiteral("same-style")});
+    manifest.insert(QStringLiteral("sheets"), sheets);
+    manifest.insert(QStringLiteral("visual_review_status"),
+                    QStringLiteral("pending-human-review"));
+    if(!writeBytes(QDir(reviewDirectory).filePath(QStringLiteral("manifest.json")),
+                   QJsonDocument(manifest).toJson(QJsonDocument::Indented), error))
+        return {};
+    return manifest;
+}
+
 struct BuiltMap
 {
     bool success{false};
@@ -575,6 +776,9 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         result.error = QStringLiteral("Could not create %1").arg(outputDirectory);
         return result;
     }
+    const QJsonObject maskReview = writeBlendMaskReview(
+        atlas, stampIds, names, outputDirectory, &result.error);
+    if(maskReview.isEmpty()) return result;
     QByteArray materialIndex(
         "material_id,material,blend_style,x0,y0,width_vertices,height_vertices,shape\n");
     for(const QJsonValue& value : stamps)
@@ -718,6 +922,12 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                     generatedSlots.isEmpty() ? QString()
                     : QStringLiteral("generated-blends-review.png"));
     manifest.insert(QStringLiteral("generated_blend_review_columns"), 8);
+    manifest.insert(QStringLiteral("blend_mask_review"),
+                    QStringLiteral("blend-mask-review/manifest.json"));
+    manifest.insert(QStringLiteral("blend_mask_review_selected_masks"),
+                    maskReview.value(QStringLiteral("selected_masks")));
+    manifest.insert(QStringLiteral("blend_mask_review_missing_masks"),
+                    maskReview.value(QStringLiteral("missing_masks")));
     manifest.insert(QStringLiteral("total_active_slots"), finalized.requiredSlots);
     manifest.insert(QStringLiteral("texture_pages"), finalized.textureCount);
     manifest.insert(QStringLiteral("capacity_limit"), finalized.capacityLimit);

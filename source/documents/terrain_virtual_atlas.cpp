@@ -892,6 +892,21 @@ QImage CTerrainVirtualAtlas::alignedStockMask(
     return selected.mask;
 }
 
+QImage CTerrainVirtualAtlas::reviewBlendMask(
+    const STerrainTransitionSignature& gridSignature,
+    qint32 ownerMaterial, int variation, QString* provenance) const
+{
+    const STerrainTransitionSignature preview =
+        CTerrainTransitionCatalog::mirroredGridY(gridSignature);
+    const QVector<qint32> ids = corners(preview);
+    QSet<qint32> unique;
+    for(qint32 id : ids) unique.insert(id);
+    if(unique.size() != 2 || !unique.contains(ownerMaterial)) return {};
+    unique.remove(ownerMaterial);
+    return alignedStockMask(preview, ownerMaterial, *unique.constBegin(),
+                            qMax(0, variation), provenance);
+}
+
 QImage CTerrainVirtualAtlas::generateTile(
     const STerrainTransitionSignature& gridSignature,
     ETerrainBlendStyle style, int variation,

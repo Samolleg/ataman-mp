@@ -10991,7 +10991,8 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
         ? ETerrainTileLayer::Overlay : ETerrainTileLayer::Land;
     const CTerrainTransitionCatalog& catalog = overlay
         ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
-        : m_terrainAtlasAnalysis.landCatalog;
+        : (m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
+                                 : m_terrainAtlasAnalysis.landCatalog);
     bool materialSelected = false;
     const qint32 selectedMaterial = m_landscapeTools
         ? m_landscapeTools->paintTerrainType(&materialSelected) : -1;

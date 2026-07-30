@@ -166,6 +166,13 @@ public:
     { return registerBlendMaskTemplate(signature, pixels, sourceLabel, report); }
     int stockBlendMaskCountFor(
         const STerrainTransitionSignature& signature) const;
+    // Returns the exact stock-derived ownership mask selected by generation.
+    // White belongs to ownerMaterial; black belongs to the other material.
+    // This is exposed for deterministic human visual review, not editing.
+    QImage reviewBlendMask(
+        const STerrainTransitionSignature& gridSignature,
+        qint32 ownerMaterial, int variation = 0,
+        QString* provenance = nullptr) const;
     const QVector<STerrainFinalizedTile>& generatedTiles() const
         { return m_generatedTiles; }
 

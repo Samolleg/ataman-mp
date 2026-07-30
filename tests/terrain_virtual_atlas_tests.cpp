@@ -264,6 +264,7 @@ private slots:
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void missingStockMaskNeverFallsBackToProceduralArtwork();
     void authoredMapMasksAreAvailableBeforeFirstStroke();
+    void selectedStockMasksAreReviewableAndDeterministic();
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
     void generatesFourFamilyTupleWithOrientation();
@@ -435,6 +436,34 @@ void TerrainVirtualAtlasTests::authoredMapMasksAreAvailableBeforeFirstStroke()
         QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
         QVERIFY(resolved.generatedIndex >= 0);
     }
+}
+
+void TerrainVirtualAtlasTests::selectedStockMasksAreReviewableAndDeterministic()
+{
+    Fixture fixture;
+    CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u);
+    seedReviewedStockMasks(atlas, fixture);
+    const STerrainTransitionSignature requested = signature(1, 2, 2, 2);
+    QString firstSource;
+    QString secondSource;
+    const QImage first = atlas.reviewBlendMask(
+        requested, 1, 0, &firstSource);
+    const QImage repeated = atlas.reviewBlendMask(
+        requested, 1, 0, &secondSource);
+    QVERIFY(!first.isNull());
+    QCOMPARE(first, repeated);
+    QCOMPARE(firstSource, secondSource);
+    QVERIFY(firstSource.startsWith(QStringLiteral("reviewed-stock-fixture:")));
+    const STerrainTransitionSignature preview =
+        CTerrainTransitionCatalog::mirroredGridY(requested);
+    const QPoint points[4] = {{0, 0}, {first.width() - 1, 0},
+        {first.width() - 1, first.height() - 1}, {0, first.height() - 1}};
+    const qint32 corners[4] = {preview.northWest, preview.northEast,
+        preview.southEast, preview.southWest};
+    for(int corner = 0; corner < 4; ++corner)
+        QCOMPARE(first.pixelColor(points[corner]).value(),
+                 corners[corner] == 1 ? 255 : 0);
+    QVERIFY(atlas.reviewBlendMask(signature(1, 2, 3, 2), 1).isNull());
 }
 
 void TerrainVirtualAtlasTests::generatesOneThreeTuple()
