@@ -293,6 +293,8 @@ public:
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
     bool applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command, bool forward);
+    bool applyMprParametersPreview(const QVector<SMprMaterialRecord>& materials,
+                                   const QVector<SMprAnimatedTileRecord>& animatedTiles);
     void onLandscapeToolsShown();
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
@@ -321,6 +323,8 @@ protected:
 private:
     void closeMprSettingsDock();
     void refreshMprSettingsDock();
+    bool mprParametersDirty() const;
+    void syncMprDirtyState();
     bool saveLandscapeDocument(const QFileInfo& destination);
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
                                       bool adoptAsOpenBaseline);
@@ -587,6 +591,8 @@ private:
     CLandscapeTools* m_landscapeTools;
     CMprDocument m_mprDocument;
     CTerrainEditModel m_terrainEdit;
+    QVector<SMprMaterialRecord> m_mprMaterials;
+    QVector<SMprAnimatedTileRecord> m_mprAnimatedTiles;
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
     STerrainAtlasProfile m_terrainAtlasProfile;
     QString m_lastAtlasReviewPromptBinding;

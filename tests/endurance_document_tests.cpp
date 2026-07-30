@@ -466,6 +466,9 @@ private slots:
     void syntheticMprPreservesArchiveNamespaceAndInactiveSentinel();
     void mprSectorPatchIsProvenanceCheckedAndLocal();
     void mprMaxZPatchIsProvenanceCheckedAndLocal();
+    void mprMaterialRecordsBindEveryStoredFieldExactly();
+    void mprMaterialAndAnimationEditIsLosslessAndSlotStable();
+    void mprMaterialAndAnimationEditRejectsInvalidValues();
     void mprVerticalScaleTransactionReopensWithDerivedNormals();
     void mprLengthChangingTransactionsRelocateAndStaleFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
@@ -3293,6 +3296,94 @@ void EnduranceDocumentTests::terrainSurfaceSamplingMatchesRuntimeCellSelection()
     // Client terrain queries clamp to the final complete cell.
     QCOMPARE(flat.terrainSurfaceHeight(-20.0f, 200.0f, &available), 50.0f);
     QVERIFY(available);
+}
+
+void EnduranceDocumentTests::mprMaterialRecordsBindEveryStoredFieldExactly()
+{
+    CMprDocument document;
+    CValidationReport report;
+    QVERIFY2(document.loadBytes(syntheticMpr(), "material-fields.mpr", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(document.mapInfo().materials.size(), 2);
+    const SMprMaterialRecord first = document.mapInfo().materials.at(0);
+    QCOMPARE(first.type, qint32(3));
+    QCOMPARE(first.red, 0.2f);
+    QCOMPARE(first.green, 0.3f);
+    QCOMPARE(first.blue, 0.6f);
+    QCOMPARE(first.opacity, 0.7f);
+    QCOMPARE(first.selfIllumination, 0.0f);
+    QCOMPARE(first.waveMultiplier, 0.5f);
+    QCOMPARE(first.warpSpeed, 0.0f);
+    QCOMPARE(first.reserved1, 0.0f);
+    QCOMPARE(first.reserved2, 0.0f);
+    QCOMPARE(first.reserved3, 0.0f);
+}
+
+void EnduranceDocumentTests::mprMaterialAndAnimationEditIsLosslessAndSlotStable()
+{
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(), "material-edit.mpr", &report),
+             qPrintable(report.toText()));
+
+    QVector<SMprMaterialRecord> materials = baseline.mapInfo().materials;
+    materials[1].type = 1; // Texture identity must not force water/emission behavior.
+    materials[1].red = 0.75f;
+    materials[1].green = 0.25f;
+    materials[1].blue = 0.125f;
+    materials[1].opacity = 0.625f;
+    materials[1].selfIllumination = 0.8f;
+    materials[1].waveMultiplier = 0.4f;
+    materials[1].warpSpeed = 0.125f;
+    QVector<SMprAnimatedTileRecord> animations;
+    animations.append(SMprAnimatedTileRecord{1, 2});
+
+    CMprEditTransaction transaction("typed material edit");
+    QVERIFY2(baseline.appendMapParametersEdit(baseline.mapInfo().maxZ,
+                                               materials, animations,
+                                               &transaction, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(transaction.edits().size(), 1);
+    QByteArray candidate;
+    QVERIFY2(baseline.applyTransaction(transaction, &candidate, &report),
+             qPrintable(report.toText()));
+
+    CMprDocument reopened;
+    CValidationReport reopenedReport;
+    QVERIFY2(reopened.loadBytes(candidate, "material-edit-reopen.mpr", &reopenedReport),
+             qPrintable(reopenedReport.toText()));
+    QCOMPARE(reopened.mapInfo().materials, materials);
+    QCOMPARE(reopened.mapInfo().animatedTiles, animations);
+    QCOMPARE(reopened.mapInfo().tileTypes, baseline.mapInfo().tileTypes);
+    QCOMPARE(reopened.memberPayload("unknown.bin"), baseline.memberPayload("unknown.bin"));
+    QCOMPARE(reopened.memberPayload("CaveSet000000.SEC"),
+             baseline.memberPayload("CaveSet000000.SEC"));
+
+    // Both active sample tiles still reference shared material slot 1. Editing
+    // that table record must not rewrite texture slots or per-cell ownership.
+    const SMprSectorInfo sector = reopened.sectors().front();
+    QCOMPARE(sector.overlayMaterialIndices.at(1), qint16(1));
+    QCOMPARE(sector.overlayMaterialIndices.at(2), qint16(1));
+}
+
+void EnduranceDocumentTests::mprMaterialAndAnimationEditRejectsInvalidValues()
+{
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY(baseline.loadBytes(syntheticMpr(), "material-invalid.mpr", &report));
+    QVector<SMprMaterialRecord> materials = baseline.mapInfo().materials;
+    QVector<SMprAnimatedTileRecord> animations;
+    CMprEditTransaction transaction("invalid material edit");
+
+    materials[0].opacity = 1.1f;
+    QVERIFY(!baseline.appendMapParametersEdit(baseline.mapInfo().maxZ,
+                                               materials, animations,
+                                               &transaction, &report));
+    materials = baseline.mapInfo().materials;
+    animations.append(SMprAnimatedTileRecord{2, 2});
+    QVERIFY(!baseline.appendMapParametersEdit(baseline.mapInfo().maxZ,
+                                               materials, animations,
+                                               &transaction, &report));
 }
 
 void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()

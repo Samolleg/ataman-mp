@@ -84,6 +84,29 @@ void writeF32(QByteArray* bytes, quint64 offset, float value)
         reinterpret_cast<uchar*>(bytes->data() + offset));
 }
 
+void appendF32(QByteArray* bytes, float value)
+{
+    const int offset = bytes->size();
+    bytes->resize(offset + 4);
+    writeF32(bytes, quint64(offset), value);
+}
+
+void appendU32(QByteArray* bytes, quint32 value)
+{
+    const int offset = bytes->size();
+    bytes->resize(offset + 4);
+    qToLittleEndian<quint32>(value,
+        reinterpret_cast<uchar*>(bytes->data() + offset));
+}
+
+void appendU16(QByteArray* bytes, quint16 value)
+{
+    const int offset = bytes->size();
+    bytes->resize(offset + 2);
+    qToLittleEndian<quint16>(value,
+        reinterpret_cast<uchar*>(bytes->data() + offset));
+}
+
 void writeU32(QByteArray* bytes, quint64 offset, quint32 value)
 {
     qToLittleEndian<quint32>(value,
@@ -341,9 +364,41 @@ bool CMprDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
         }
         const quint64 tileTypeOffset = kMapHeaderSize
             + quint64(m_mapInfo.materialCount) * kMaterialSize;
+        m_mapInfo.materials.reserve(int(m_mapInfo.materialCount));
+        for(quint16 materialIndex = 0; materialIndex < m_mapInfo.materialCount;
+            ++materialIndex)
+        {
+            const quint64 offset = kMapHeaderSize
+                + quint64(materialIndex) * kMaterialSize;
+            SMprMaterialRecord material;
+            material.type = readI32(mp, offset);
+            material.red = readF32(mp, offset + 4);
+            material.green = readF32(mp, offset + 8);
+            material.blue = readF32(mp, offset + 12);
+            material.opacity = readF32(mp, offset + 16);
+            material.selfIllumination = readF32(mp, offset + 20);
+            material.waveMultiplier = readF32(mp, offset + 24);
+            material.warpSpeed = readF32(mp, offset + 28);
+            material.reserved1 = readF32(mp, offset + 32);
+            material.reserved2 = readF32(mp, offset + 36);
+            material.reserved3 = readF32(mp, offset + 40);
+            m_mapInfo.materials.append(material);
+        }
         m_mapInfo.tileTypes.reserve(int(m_mapInfo.tileCount));
         for(quint32 tile = 0; tile < m_mapInfo.tileCount; ++tile)
             m_mapInfo.tileTypes.append(readI32(mp, tileTypeOffset + quint64(tile) * 4));
+        const quint64 animationOffset = tileTypeOffset
+            + quint64(m_mapInfo.tileCount) * 4;
+        m_mapInfo.animatedTiles.reserve(int(m_mapInfo.animatedTileCount));
+        for(quint32 animationIndex = 0;
+            animationIndex < m_mapInfo.animatedTileCount; ++animationIndex)
+        {
+            const quint64 offset = animationOffset + quint64(animationIndex) * 4;
+            SMprAnimatedTileRecord animation;
+            animation.tileIndex = readU16(mp, offset);
+            animation.frameCount = readU16(mp, offset + 2);
+            m_mapInfo.animatedTiles.append(animation);
+        }
         if(m_mapInfo.parsedSize < quint64(mp.size()) && report)
             report->add("mpr.mp_trailing", EValidationSeverity::Warning,
                         QString("MP has %1 trailing bytes; they are preserved")
@@ -746,6 +801,98 @@ bool CMprDocument::appendMaxZEdit(float newMaxZ,
     }
     QByteArray replacement = member.payload;
     writeF32(&replacement, 4, newMaxZ);
+    transaction->replaceMemberPayload(member.name, member.sha256, replacement);
+    return true;
+}
+
+bool CMprDocument::appendMapParametersEdit(
+    float newMaxZ, const QVector<SMprMaterialRecord>& materials,
+    const QVector<SMprAnimatedTileRecord>& animatedTiles,
+    CMprEditTransaction* transaction, CValidationReport* report) const
+{
+    const auto fail = [report](const QString& code, const QString& message,
+                               const QString& location = QString()) {
+        if(report)
+            report->add(code, EValidationSeverity::Error, message, location);
+        return false;
+    };
+    if(!transaction)
+        return fail("mpr.parameters_transaction", "No MPR edit transaction was supplied");
+    if(!m_mapInfo.valid || !std::isfinite(newMaxZ) || newMaxZ <= 0.0f)
+        return fail("mpr.parameters_maxz", "maxZ must be finite and greater than zero");
+    if(materials.size() > int(std::numeric_limits<quint16>::max()))
+        return fail("mpr.parameters_material_count", "The material table exceeds the 16-bit format limit");
+
+    const auto finite = [](float value) { return std::isfinite(value); };
+    for(int index = 0; index < materials.size(); ++index)
+    {
+        const SMprMaterialRecord& material = materials.at(index);
+        const QString location = QString("material slot %1").arg(index);
+        if(material.type < 0 || material.type > 4)
+            return fail("mpr.material_type", "Material type must be between 0 and 4", location);
+        if(!finite(material.red) || !finite(material.green) || !finite(material.blue)
+           || !finite(material.opacity) || !finite(material.selfIllumination)
+           || !finite(material.waveMultiplier) || !finite(material.warpSpeed)
+           || !finite(material.reserved1) || !finite(material.reserved2)
+           || !finite(material.reserved3))
+            return fail("mpr.material_finite", "Every material value must be finite", location);
+        if(material.red < 0.0f || material.red > 1.0f
+           || material.green < 0.0f || material.green > 1.0f
+           || material.blue < 0.0f || material.blue > 1.0f
+           || material.opacity < 0.0f || material.opacity > 1.0f)
+            return fail("mpr.material_colour", "Tint channels and opacity must be between 0 and 1", location);
+        if(material.selfIllumination < 0.0f || material.waveMultiplier < 0.0f)
+            return fail("mpr.material_effect", "Illumination and wave multiplier cannot be negative", location);
+    }
+    for(int index = 0; index < animatedTiles.size(); ++index)
+    {
+        const SMprAnimatedTileRecord& animation = animatedTiles.at(index);
+        const QString location = QString("animated tile %1").arg(index);
+        if(animation.tileIndex >= m_mapInfo.tileCount)
+            return fail("mpr.animation_start", "Animation start slot is outside the atlas", location);
+        if(animation.frameCount > 0
+           && quint64(animation.tileIndex) + quint64(animation.frameCount)
+                > quint64(m_mapInfo.tileCount))
+            return fail("mpr.animation_range", "Animation frames extend beyond the atlas", location);
+    }
+
+    const int memberIndex = uniqueMemberIndex(m_mapInfo.memberName);
+    if(memberIndex < 0)
+        return fail("mpr.parameters_member", "The MP member is missing or ambiguous",
+                    m_mapInfo.memberName);
+    const SMprArchiveMember& member = m_members.at(memberIndex);
+    QByteArray replacement = member.payload.left(int(kMapHeaderSize));
+    writeF32(&replacement, 4, newMaxZ);
+    writeU16(&replacement, 32, quint16(materials.size()));
+    writeU32(&replacement, 34, quint32(animatedTiles.size()));
+    for(const SMprMaterialRecord& material : materials)
+    {
+        appendU32(&replacement, quint32(material.type));
+        appendF32(&replacement, material.red);
+        appendF32(&replacement, material.green);
+        appendF32(&replacement, material.blue);
+        appendF32(&replacement, material.opacity);
+        appendF32(&replacement, material.selfIllumination);
+        appendF32(&replacement, material.waveMultiplier);
+        appendF32(&replacement, material.warpSpeed);
+        appendF32(&replacement, material.reserved1);
+        appendF32(&replacement, material.reserved2);
+        appendF32(&replacement, material.reserved3);
+    }
+    const quint64 originalTileTypesOffset = kMapHeaderSize
+        + quint64(m_mapInfo.materialCount) * kMaterialSize;
+    replacement.append(member.payload.mid(int(originalTileTypesOffset),
+                                           int(quint64(m_mapInfo.tileCount) * 4)));
+    for(const SMprAnimatedTileRecord& animation : animatedTiles)
+    {
+        appendU16(&replacement, animation.tileIndex);
+        appendU16(&replacement, animation.frameCount);
+    }
+    replacement.append(member.payload.mid(int(m_mapInfo.parsedSize)));
+
+    if(newMaxZ == m_mapInfo.maxZ && materials == m_mapInfo.materials
+       && animatedTiles == m_mapInfo.animatedTiles)
+        return true;
     transaction->replaceMemberPayload(member.name, member.sha256, replacement);
     return true;
 }

@@ -31,6 +31,40 @@ struct SMprArchiveMember
     EMprMemberKind kind{EMprMemberKind::Unknown};
 };
 
+struct SMprMaterialRecord
+{
+    qint32 type{0};
+    float red{0.0f};
+    float green{0.0f};
+    float blue{0.0f};
+    float opacity{0.0f};
+    float selfIllumination{0.0f};
+    float waveMultiplier{0.0f};
+    float warpSpeed{0.0f};
+    float reserved1{0.0f};
+    float reserved2{0.0f};
+    float reserved3{0.0f};
+
+    bool operator==(const SMprMaterialRecord& other) const
+    {
+        return type == other.type && red == other.red && green == other.green
+            && blue == other.blue && opacity == other.opacity
+            && selfIllumination == other.selfIllumination
+            && waveMultiplier == other.waveMultiplier && warpSpeed == other.warpSpeed
+            && reserved1 == other.reserved1 && reserved2 == other.reserved2
+            && reserved3 == other.reserved3;
+    }
+};
+
+struct SMprAnimatedTileRecord
+{
+    quint16 tileIndex{0};
+    quint16 frameCount{0};
+
+    bool operator==(const SMprAnimatedTileRecord& other) const
+    { return tileIndex == other.tileIndex && frameCount == other.frameCount; }
+};
+
 struct SMprMapInfo
 {
     bool valid{false};
@@ -50,6 +84,8 @@ struct SMprMapInfo
     // Raw, read-only atlas slot categories from the MP member. Endurance uses
     // these for selection/diagnostics; changing them would be atlas editing.
     QVector<qint32> tileTypes;
+    QVector<SMprMaterialRecord> materials;
+    QVector<SMprAnimatedTileRecord> animatedTiles;
 
     qint32 tileType(int atlasSlot, bool* found = nullptr) const;
 };
@@ -185,6 +221,11 @@ public:
                           CValidationReport* report = nullptr) const;
     bool appendMaxZEdit(float newMaxZ, CMprEditTransaction* transaction,
                         CValidationReport* report = nullptr) const;
+    bool appendMapParametersEdit(float newMaxZ,
+                                 const QVector<SMprMaterialRecord>& materials,
+                                 const QVector<SMprAnimatedTileRecord>& animatedTiles,
+                                 CMprEditTransaction* transaction,
+                                 CValidationReport* report = nullptr) const;
     bool buildResizedCanvas(const SMprCanvasResizeRequest& request,
                             QByteArray* output,
                             CValidationReport* report = nullptr) const;

@@ -26,16 +26,17 @@ CTileForm::CTileForm(QWidget *parent) :
     ui->comboTileType->setEnabled(false);
     ui->comboTileType->setToolTip(tr("Atlas slot categories are MPR metadata and are not edited by the painting brush."));
     ui->comboActiveLiquidMaterial->setEnabled(false);
-    ui->comboActiveLiquidMaterial->setToolTip(tr("Overlay material editing is not enabled in this preview build."));
-    ui->tabWidget->setTabEnabled(1, true);
-    ui->tabWidget->setTabToolTip(1, tr("Read-only liquid-material and animated-tile inspection."));
-    QLabel* materialHelp = new QLabel(tr(
-        "Materials are overlay/liquid parameter slots stored in this MPR, not ground "
-        "textures. Overlay tiles reference one of these records for color, opacity, "
-        "illumination and animation behavior. Several tile families may share a slot; "
-        "the records are read-only until staged material serialization is validated."), this);
-    materialHelp->setWordWrap(true);
-    ui->verticalLayout->insertWidget(0, materialHelp);
+    ui->comboActiveLiquidMaterial->setToolTip(tr(
+        "Read-only surface-material reference for the selected atlas tile. Edit the "
+        "referenced record in MPR Settings > Materials Editor."));
+    // The inherited Materials page mixed surface records, atlas slots, and dormant
+    // animation metadata behind unlabeled sliders. MPR Settings now owns the typed,
+    // undoable editor; keep this window focused on direct atlas-tile selection.
+    QWidget* legacyMaterialsPage = ui->tabWidget->widget(1);
+    ui->tabWidget->removeTab(1);
+    if(legacyMaterialsPage)
+        legacyMaterialsPage->hide();
+    ui->tableTile->setContextMenuPolicy(Qt::NoContextMenu);
     ui->toolButtonAddMaterial->setEnabled(false);
     ui->toolButtonDelMaterial->setEnabled(false);
     ui->comboMaterialType->setEnabled(false);
