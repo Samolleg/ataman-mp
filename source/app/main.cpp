@@ -1746,6 +1746,8 @@ int runHeadlessCommand(QApplication& app)
                     Qt::WindowMinimizeButtonHint)
                 && floatingFlags.testFlag(Qt::WindowMaximizeButtonHint)
                 && floatingFlags.testFlag(Qt::WindowCloseButtonHint);
+        const bool floatingDockIsNormalWindow =
+                dockLabelProbe.windowType() == Qt::Window;
         dockLabelProbe.hide();
         QEventLoop floatingDockEvents;
         QTimer::singleShot(25, &floatingDockEvents, &QEventLoop::quit);
@@ -1831,7 +1833,8 @@ int runHeadlessCommand(QApplication& app)
                 && messageLogColumnsResizable && messageLogMultiCopyWorks
                 && messageLogSeverityColorsWork
                 && dockedHiddenLabelAppears && floatingClosedLabelRemoved
-                && floatingDockGroupingEnabled && floatingDockWindowControls;
+                && floatingDockGroupingEnabled && floatingDockWindowControls
+                && floatingDockIsNormalWindow;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -1968,6 +1971,7 @@ int runHeadlessCommand(QApplication& app)
                << " floatingClosedLabelRemoved=" << floatingClosedLabelRemoved
                << " floatingDockGroupingEnabled=" << floatingDockGroupingEnabled
                << " floatingDockWindowControls=" << floatingDockWindowControls
+               << " floatingDockIsNormalWindow=" << floatingDockIsNormalWindow
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()
                << " viewportSurfaceBottomRightAlpha="
                << viewportSurface.pixelColor(viewportSurface.width() - 2,

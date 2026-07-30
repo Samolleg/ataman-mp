@@ -9,7 +9,8 @@
 #include <QVariant>
 #include <QApplication>
 #include <QIcon>
-#include <QMainWindow>
+#include <QScreen>
+#include <QWindow>
 
 void ei::enableNativeFloatingDockControls(QDockWidget* dock)
 {
@@ -24,18 +25,49 @@ void ei::enableNativeFloatingDockControls(QDockWidget* dock)
             // dock or Qt's private floating tab-group host is a separate window.
             if(!floatingWindow || qobject_cast<QMainWindow*>(floatingWindow))
                 return;
+            if(floatingWindow->property("enduranceApplyingDockWindowFlags").toBool())
+                return;
             const bool visible = floatingWindow->isVisible();
             const Qt::WindowFlags required = Qt::Window | Qt::WindowTitleHint |
                 Qt::WindowSystemMenuHint | Qt::WindowMinimizeButtonHint |
                 Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint;
-            if((floatingWindow->windowFlags() & required) == required)
+            const Qt::WindowFlags current = floatingWindow->windowFlags();
+            if(floatingWindow->windowType() == Qt::Window
+               && (current & required) == required)
                 return;
-            floatingWindow->setWindowFlags(floatingWindow->windowFlags() | required);
+            const QRect geometry = floatingWindow->geometry();
+            const QRect normalGeometry = floatingWindow->normalGeometry().isValid()
+                    ? floatingWindow->normalGeometry() : geometry;
+            const Qt::WindowStates state = floatingWindow->windowState();
+            QScreen* screen = floatingWindow->windowHandle()
+                    ? floatingWindow->windowHandle()->screen()
+                    : QApplication::screenAt(geometry.center());
+            floatingWindow->setProperty("enduranceApplyingDockWindowFlags", true);
+            // Qt::Tool and Qt::Window are mutually exclusive values in the
+            // WindowType_Mask. OR-ing Qt::Window into Tool leaves a Tool and
+            // therefore produces no taskbar entry or Minimize/Maximize buttons.
+            const Qt::WindowFlags nativeFlags =
+                    (current & ~Qt::WindowType_Mask) | required;
+            floatingWindow->setWindowFlags(nativeFlags);
             const QIcon icon = dock->windowIcon().isNull()
                 ? QApplication::windowIcon() : dock->windowIcon();
             if(!icon.isNull()) floatingWindow->setWindowIcon(icon);
             if(visible)
+            {
+                // Restore a normal geometry first so Windows chooses the same
+                // monitor before restoring the maximized state.
+                floatingWindow->setGeometry(normalGeometry);
                 floatingWindow->show();
+                if(screen && floatingWindow->windowHandle())
+                    floatingWindow->windowHandle()->setScreen(screen);
+                if(state.testFlag(Qt::WindowMaximized))
+                    floatingWindow->showMaximized();
+                else if(state.testFlag(Qt::WindowMinimized))
+                    floatingWindow->showMinimized();
+                else
+                    floatingWindow->setGeometry(geometry);
+            }
+            floatingWindow->setProperty("enduranceApplyingDockWindowFlags", false);
         });
     };
     QObject::connect(dock, &QDockWidget::topLevelChanged, dock,
