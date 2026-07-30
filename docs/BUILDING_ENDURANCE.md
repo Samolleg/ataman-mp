@@ -18,12 +18,59 @@ main and every feature/integration worktree.
 
 ## Application
 
+### Canonical retained toolchain
+
+Endurance production builds use exactly Qt `5.12.12` `win64_mingw73` with
+`qt.tools.win64_mingw730`. The MSVC Qt kit is not an application-build fallback:
+the existing source intentionally uses GNU switch-range syntax and will not
+compile as the same target under MSVC.
+
+The main checkout retains the kit at:
+
+```text
+.tooling\Qt\5.12.12\mingw73_64\bin
+.tooling\Qt\Tools\mingw730_64\bin
+```
+
+`build_release.cmd` discovers those directories automatically. Cleanup tasks
+must not delete `.tooling\Qt`; it is retained build infrastructure, not a stale
+tester artifact. Linked worktrees may point `EI_MAPPER_QT_BIN` and
+`EI_MAPPER_MINGW_BIN` at the main checkout's retained kit rather than installing
+another copy.
+
+Qt 5.12 embeds its installation prefix in `qmake.exe`. Because this repository
+path contains non-ASCII characters, install or repatch the kit through a stable
+ASCII junction such as `C:\build-links\ei-mapper-main`; installing it directly
+through the Unicode path produces a broken `QT_INSTALL_PREFIX`. Verify a kit
+before building:
+
+```powershell
+qmake -query QMAKE_SPEC             # must be win32-g++
+qmake -query QT_INSTALL_PREFIX      # must resolve to an existing ASCII path
+Test-Path "$((qmake -query QT_INSTALL_PREFIX))\mkspecs\win32-g++"
+mingw32-make --version
+```
+
+One-time bootstrap, only when the retained kit is genuinely absent:
+
+```powershell
+$source = 'C:\path\to\ei-mapper-endurance'
+$link = 'C:\build-links\ei-mapper-main'
+New-Item -ItemType Junction -Path $link -Target $source
+py -m pip install aqtinstall
+py -m aqt install-qt windows desktop 5.12.12 win64_mingw73 -O "$link\.tooling\Qt"
+py -m aqt install-tool windows desktop tools_mingw qt.tools.win64_mingw730 -O "$link\.tooling\Qt"
+```
+
+Do not repeat bootstrap merely because a fresh shell cannot find `qmake`; first
+run the wrapper without arguments and inspect the retained paths above.
+
 Use the checked build wrapper from any PowerShell prompt:
 
 ```powershell
 .\scripts\build_release.cmd `
-  -QtBin C:\Qt\5.15.2\mingw81_64\bin `
-  -MinGwBin C:\Qt\Tools\mingw810_64\bin `
+  -QtBin .tooling\Qt\5.12.12\mingw73_64\bin `
+  -MinGwBin .tooling\Qt\Tools\mingw730_64\bin `
   -BuildDirectory build-release
 ```
 

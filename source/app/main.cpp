@@ -1654,6 +1654,7 @@ int runHeadlessCommand(QApplication& app)
                                               viewportSurface.height() - 2).alpha() == 255;
 
         CMessageLogPanel messageLog;
+        CLogger::getInstance()->setLogLevel(eLogDebug);
         ei::log(eLogInfo, "ui-check searchable information");
         ei::log(eLogWarning, "ui-check searchable warning");
         QEventLoop messageEvents;
@@ -1674,11 +1675,15 @@ int runHeadlessCommand(QApplication& app)
                                  QStringLiteral("dockHiddenTabProbe"));
         dockWindow.show();
         dockLabelProbe.hide();
-        QApplication::processEvents();
+        QEventLoop hiddenDockEvents;
+        QTimer::singleShot(25, &hiddenDockEvents, &QEventLoop::quit);
+        hiddenDockEvents.exec();
         const bool dockedHiddenLabelAppears = hiddenTab.tabBar()->isVisible();
         dockLabelProbe.setFloating(true);
         dockLabelProbe.hide();
-        QApplication::processEvents();
+        QEventLoop floatingDockEvents;
+        QTimer::singleShot(25, &floatingDockEvents, &QEventLoop::quit);
+        floatingDockEvents.exec();
         const bool floatingClosedLabelRemoved = !hiddenTab.tabBar()->isVisible();
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel

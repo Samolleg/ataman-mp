@@ -11,6 +11,22 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'build_repository_identity.ps1')
 
+# The shared Endurance checkout keeps its supported production kit here.  Use
+# it automatically so fresh agent shells and linked worktrees do not depend on
+# undocumented machine PATH state. Explicit arguments/environment still win.
+if (-not $QtBin) {
+    $bundledQt = Join-Path $repositoryRoot '.tooling\Qt\5.12.12\mingw73_64\bin'
+    if (Test-Path -LiteralPath (Join-Path $bundledQt 'qmake.exe') -PathType Leaf) {
+        $QtBin = $bundledQt
+    }
+}
+if (-not $MinGwBin) {
+    $bundledMinGw = Join-Path $repositoryRoot '.tooling\Qt\Tools\mingw730_64\bin'
+    if (Test-Path -LiteralPath (Join-Path $bundledMinGw 'mingw32-make.exe') -PathType Leaf) {
+        $MinGwBin = $bundledMinGw
+    }
+}
+
 function Resolve-ToolDirectory {
     param(
         [string]$ConfiguredDirectory,
@@ -56,6 +72,11 @@ $buildPath = (Resolve-Path -LiteralPath $buildPath).Path
 $qmake = Join-Path $qtDirectory "qmake.exe"
 $make = Join-Path $mingwDirectory "mingw32-make.exe"
 $project = Join-Path $repositoryRoot "ei_maper.pro"
+
+$qmakeSpec = (& $qmake -query QMAKE_SPEC).Trim()
+if ($LASTEXITCODE -ne 0 -or $qmakeSpec -ne 'win32-g++') {
+    throw "The selected Qt kit is '$qmakeSpec', not the required MinGW win32-g++ kit. Do not substitute the MSVC Qt kit. See docs/BUILDING_ENDURANCE.md."
+}
 
 $executionRoot = $repositoryRoot
 $executionBuildPath = $buildPath
