@@ -5550,6 +5550,41 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(zone2.slotDefinitions.at(393).signature.northWest, lime->id);
     QCOMPARE(zone2.slotDefinitions.at(416).signature.southWest, pink->id);
     QCOMPARE(zone2.slotDefinitions.at(285).signature.northWest, mossy->id);
+
+    CValidationReport bz3gReport;
+    const STerrainAtlasProfile bz3g = CTerrainAtlasPresetCatalog::exactProfile(
+        "bz3g",
+        "6752a5b4cefd3aedbd6889516b424f4e13afafe288e99406b500404aed62b014",
+        512, &bz3gReport);
+    QVERIFY2(bz3g.approved, qPrintable(bz3gReport.toText()));
+    QCOMPARE(bz3g.families.size(), 20);
+    const auto bz3gFamily = [&bz3g](qint32 id) {
+        return std::find_if(bz3g.families.cbegin(), bz3g.families.cend(),
+            [id](const STerrainAtlasProfileFamily& family) {
+                return family.id == id;
+            });
+    };
+    const auto darkGround = bz3gFamily(6);
+    QVERIFY(darkGround != bz3g.families.cend());
+    QCOMPARE(darkGround->name, QStringLiteral("Ground / Dark"));
+    QCOMPARE(darkGround->tileType, qint32(1));
+    QCOMPARE(darkGround->thumbnailSlot, 7);
+    for(const qint32 removedId : {7, 13, 16, 18})
+        QCOMPARE(bz3gFamily(removedId), bz3g.families.cend());
+    QCOMPARE(bz3g.slotDefinitions.at(108).signature.northWest, qint32(6));
+    QCOMPARE(bz3g.slotDefinitions.at(298).signature.northWest, qint32(2));
+    QCOMPARE(bz3g.slotDefinitions.at(450).signature.northEast, qint32(5));
+    QCOMPARE(bz3g.slotDefinitions.at(450).signature.southEast, qint32(2));
+
+    CValidationReport zone9Report;
+    const STerrainAtlasProfile zone9 = CTerrainAtlasPresetCatalog::exactProfile(
+        "zone9",
+        "bd5f43f33363351807dd6069ab1eb861fc1b66177500dc0d29710474253d77fe",
+        512, &zone9Report);
+    QVERIFY2(zone9.approved, qPrintable(zone9Report.toText()));
+    QCOMPARE(zone9.families.size(), bz3g.families.size());
+    QCOMPARE(zone9.slotDefinitions.at(450).signature,
+             bz3g.slotDefinitions.at(450).signature);
 }
 
 void EnduranceDocumentTests::semanticAtlasInferenceAssignsExactRepeatedPhysicalSlots()
@@ -5632,7 +5667,8 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     QVERIFY(!catalog.contains(QStringLiteral("attribution")));
     const QJsonArray presets = catalog.value(QStringLiteral("presets")).toArray();
     QCOMPARE(presets.size(), 38);
-    int totalSlots = 0, bindings = 0, transitionSupportFamilies = 0;
+    int totalSlots = 0, bindings = 0, totalFamilies = 0,
+        transitionSupportFamilies = 0;
     QHash<QString, QByteArray> identityByBinding;
     for(const QJsonValue& value : presets)
     {
@@ -5714,9 +5750,11 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
         QCOMPARE(analysis.describedSlots, slotCount);
         totalSlots += slotCount;
         bindings += presetBindings.size();
+        totalFamilies += profile.families.size();
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 76);
+    QCOMPARE(totalFamilies, 515);
     // Keep this count pinned to the reviewed semantic-atlas catalog. A change
     // means a family crossed the paint-brush/transition-support boundary and
     // must be visually audited before the palette consumes it.

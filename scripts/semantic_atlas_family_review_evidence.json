@@ -1,0 +1,55 @@
+{
+  "schema": "ei-semantic-atlas-family-review-evidence-v1",
+  "batches": [
+    {
+      "id": "family-catalog-batch-2",
+      "reviewedThrough": "Zone7",
+      "status": "unverified-review-evidence",
+      "instructions": "Use candidate comments as evidence only. Verify identities, exact connected corners, and visual consistency before changing presets.",
+      "entries": [
+        {"namespace": "Zone13", "familyId": 4, "comment": "Ground / Trampled should be Grass / Tundra or similar.", "hypothesis": "rename"},
+        {"namespace": "Zone13", "familyId": 5, "comment": "SW is family 6.", "cornerClaims": {"SW": 6}},
+        {"namespace": "Zone13", "familyId": 9, "comment": "NE is family 3; south corners are family 4.", "cornerClaims": {"NE": 3, "SE": 4, "SW": 4}},
+        {"namespace": "Zone13", "familyId": 10, "comment": "NE is family 3; south corners are family 4.", "cornerClaims": {"NE": 3, "SE": 4, "SW": 4}},
+        {"namespace": "Zone13", "familyId": 12, "comment": "NW is family 3.", "cornerClaims": {"NW": 3}},
+        {"namespace": "Zone13", "familyId": 13, "comment": "SW is family 7.", "cornerClaims": {"SW": 7}},
+        {"namespace": "Zone13", "familyId": 14, "comment": "NW is family 3.", "cornerClaims": {"NW": 3}},
+        {"namespace": "Zone13", "familyId": 15, "comment": "NE and SW are family 6; SE is family 1.", "cornerClaims": {"NE": 6, "SE": 1, "SW": 6}},
+        {"namespace": "Zone13", "familyId": 16, "comment": "SW is family 7.", "cornerClaims": {"SW": 7}},
+        {"namespace": "Zone13", "familyId": 17, "comment": "SW is family 7.", "cornerClaims": {"SW": 7}},
+        {"namespace": "Zone19", "familyId": 7, "comment": "Rock / Lime looks like stone/sand ruins; cross-check the prior review vocabulary.", "hypothesis": "rename"},
+        {"namespace": "Zone20", "familyId": 5, "comment": "NW is family 2.", "cornerClaims": {"NW": 2}},
+        {"namespace": "Zone20", "familyId": 6, "comment": "SW is family 3; SE is family 2.", "cornerClaims": {"SE": 2, "SW": 3}},
+        {"namespace": "Zone3Obr", "familyId": 10, "comment": "NW is family 4.", "cornerClaims": {"NW": 4}},
+        {"namespace": "Zone5_1", "familyId": 5, "comment": "Stone / Wet may be Stone / Underwater; cross-check the prior review vocabulary.", "hypothesis": "rename"},
+        {"namespace": "Zone6", "familyId": 6, "comment": "Looks like the same family as family 5.", "hypothesis": "merge", "candidateFamilyId": 5},
+        {"namespace": "Zone6", "familyId": 7, "comment": "SW is family 5.", "cornerClaims": {"SW": 5}},
+        {"namespace": "Zone6", "familyId": 11, "comment": "NW is family 8.", "cornerClaims": {"NW": 8}},
+        {"namespace": "Zone6", "familyId": 18, "comment": "NW is family 8; NE is family 3.", "cornerClaims": {"NW": 8, "NE": 3}},
+        {"namespace": "Zone6", "familyId": 19, "comment": "NW and SE are family 1; SW is family 5.", "cornerClaims": {"NW": 1, "SE": 1, "SW": 5}},
+        {"namespace": "Zone6_2", "familyId": 6, "comment": "Looks like the same family as family 5.", "hypothesis": "merge", "candidateFamilyId": 5},
+        {"namespace": "Zone6_2", "familyId": 7, "comment": "SW is family 5.", "cornerClaims": {"SW": 5}},
+        {"namespace": "Zone6_2", "familyId": 11, "comment": "SW is the normal snow family seen in other atlases.", "hypothesis": "cross-atlas-identity"},
+        {"namespace": "Zone6_2", "familyId": 14, "comment": "NW is family 8.", "cornerClaims": {"NW": 8}},
+        {"namespace": "Zone6_2", "familyId": 19, "comment": "NE is family 15.", "cornerClaims": {"NE": 15}},
+        {"namespace": "Zone6_2", "familyId": 22, "comment": "SW is family 8; NE is family 3.", "cornerClaims": {"SW": 8, "NE": 3}},
+        {"namespace": "Zone7", "familyId": 1, "comment": "Rock / Wet should be Rock / Underwater Emerald; it has the same hue as family 5.", "hypothesis": "rename"},
+        {"namespace": "Zone7", "familyId": 4, "comment": "Sand / Wet should be Sand / Underwater; cross-check the prior review vocabulary.", "hypothesis": "rename"},
+        {"namespace": "Zone7", "familyId": 14, "comment": "Rock / Light looks like Ground / Cracked.", "hypothesis": "rename"},
+        {"namespace": "Zone7", "familyId": 16, "comment": "NW is family 17.", "cornerClaims": {"NW": 17}},
+        {"namespace": "Zone7", "familyId": 18, "comment": "NW is family 6.", "cornerClaims": {"NW": 6}},
+        {"namespace": "Zone7", "familyId": 19, "comment": "SE is family 10.", "cornerClaims": {"SE": 10}},
+        {"namespace": "Zone7", "familyId": 21, "comment": "NW is family 13.", "cornerClaims": {"NW": 13}},
+        {"namespace": "Zone7", "familyId": 22, "comment": "SW is family 17.", "cornerClaims": {"SW": 17}},
+        {"namespace": "Zone7", "familyId": 23, "comment": "NE is family 10.", "cornerClaims": {"NE": 10}}
+      ]
+    },
+    {
+      "id": "family-catalog-batch-3",
+      "reviewedThrough": "ZoneMainMenuNew",
+      "status": "approved-no-changes",
+      "instructions": "All seven ZoneMainMenuNew families were reviewed and accepted without corrections.",
+      "entries": []
+    }
+  ]
+}
