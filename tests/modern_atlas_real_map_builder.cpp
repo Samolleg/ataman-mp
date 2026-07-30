@@ -575,6 +575,27 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         result.error = QStringLiteral("Could not create %1").arg(outputDirectory);
         return result;
     }
+    QByteArray materialIndex(
+        "material_id,material,blend_style,x0,y0,width_vertices,height_vertices,shape\n");
+    for(const QJsonValue& value : stamps)
+    {
+        const QJsonObject stamp = value.toObject();
+        const auto csv = [](QString text) {
+            text.replace('"', QStringLiteral("\"\""));
+            return QByteArray("\"") + text.toUtf8() + QByteArray("\"");
+        };
+        materialIndex += QByteArray::number(stamp.value("material_id").toInt()) + ','
+            + csv(stamp.value("material").toString()) + ','
+            + csv(stamp.value("blend_style").toString()) + ','
+            + QByteArray::number(stamp.value("x0").toInt()) + ','
+            + QByteArray::number(stamp.value("y0").toInt()) + ','
+            + QByteArray::number(stamp.value("width_vertices").toInt()) + ','
+            + QByteArray::number(stamp.value("height_vertices").toInt()) + ','
+            + csv(stamp.value("shape").toString()) + '\n';
+    }
+    if(!writeBytes(QDir(outputDirectory).filePath(
+           QStringLiteral("material-visual-review-index.csv")),
+           materialIndex, &result.error)) return result;
     const QString baseName = finalized.isolatedNamespace;
     if(!writeBytes(QDir(outputDirectory).filePath(baseName + QStringLiteral(".mpr")),
                    package.mprBytes, &result.error)
@@ -701,6 +722,18 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     manifest.insert(QStringLiteral("texture_pages"), finalized.textureCount);
     manifest.insert(QStringLiteral("capacity_limit"), finalized.capacityLimit);
     manifest.insert(QStringLiteral("unresolved_cells"), unresolved);
+    manifest.insert(QStringLiteral("semantic_resolution_status"),
+                    QStringLiteral("pass"));
+    manifest.insert(QStringLiteral("visual_review_status"),
+                    QStringLiteral("pending-human-review"));
+    manifest.insert(QStringLiteral("visual_review_is_automated"), false);
+    manifest.insert(QStringLiteral("visual_review_index"),
+                    QStringLiteral("material-visual-review-index.csv"));
+    manifest.insert(QStringLiteral("visual_review_instructions"),
+        QStringLiteral("Open the map in the editor and inspect every labeled material stamp. "
+                       "unresolved_cells=0 proves exact corner identity only; it does not prove "
+                       "that source families, masks, pixels, or rotations look correct. Use "
+                       "Mark bad tiles on map and send the generated paint-issues JSON."));
     manifest.insert(QStringLiteral("stable_sha256"),
                     QString::fromLatin1(finalized.stableSha256));
     manifest.insert(QStringLiteral("mpr_file"), baseName + QStringLiteral(".mpr"));
@@ -1931,7 +1964,11 @@ int main(int argc, char** argv)
         "`final-material-stripes` lays out the same final brush set as long isolated "
         "stripes so stock transition reuse and generated exact blends can be compared "
         "visually.\n\n"
-        "Every visual manifest must report `unresolved_cells: 0`. The "
+        "Every visual manifest must report `unresolved_cells: 0`, which proves "
+        "exact semantic corner resolution only. It is not a visual pass. Each map "
+        "therefore starts with `visual_review_status: pending-human-review` and includes "
+        "`material-visual-review-index.csv`. Use Landscape Tools -> Mark bad tiles on map "
+        "to record wrong families, blends, or rotations as a portable diagnostic JSON. The "
         "`runtime-atlas-probes` directory contains a deterministic 8-page control "
         "plus 9-page and 16-page MPR/RES pairs whose highest page is referenced "
         "by terrain for automated Test Current Map runtime validation.\n");

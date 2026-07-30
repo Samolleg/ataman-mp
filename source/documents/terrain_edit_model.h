@@ -449,7 +449,8 @@ public:
         const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
         CValidationReport* report = nullptr) const;
     bool copyVirtualMaterialField(ETerrainTileLayer layer,
-        CTerrainVirtualMaterialField* output) const;
+        CTerrainVirtualMaterialField* output,
+        bool requireComplete = true) const;
     bool virtualMaterialFieldActive(ETerrainTileLayer layer) const;
     STerrainTileCommand makeSemanticCornerMaterialPaint(
         int selectedCellX, int selectedCellY, int vertexX, int vertexY,

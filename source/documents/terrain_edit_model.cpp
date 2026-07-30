@@ -4317,7 +4317,15 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
         exact.northWest=values.at(nw);exact.northEast=values.at(ne);
         exact.southEast=values.at(se);exact.southWest=values.at(sw);
         bool found=false;
-        const quint16 after=catalog.selectForPaint(exact,x,y,distributionSeed,&found);
+        const bool uniform = exact.northWest == exact.northEast
+            && exact.northWest == exact.southEast
+            && exact.northWest == exact.southWest;
+        // A brush chooses one authored uniform variation for the stroke. Cell
+        // coordinates may distribute edge-mask variants, but using them for a
+        // uniform interior creates the checkerboard/slab artifacts seen in the
+        // circle review map.
+        const quint16 after=catalog.selectForPaint(exact,
+            uniform ? 0 : x, uniform ? 0 : y, distributionSeed, &found);
         if(!found){++unresolved;continue;}
         command.semanticAudit.affectedCells.append(QPoint(x,y));
         if(after==before)continue;

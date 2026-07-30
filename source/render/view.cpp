@@ -84,10 +84,20 @@
 #include "res_archive_document.h"
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
+#include "portable_diagnostic_writer.h"
 
 class CLogic;
 
 namespace {
+QString paintIssueCategoryLabel(const QString& category)
+{
+    if(category == QStringLiteral("tile-mismatch"))
+        return QObject::tr("WRONG MATERIAL / FAMILY");
+    if(category == QStringLiteral("wrong-rotation"))
+        return QObject::tr("WRONG ROTATION");
+    return QObject::tr("NO / WRONG BLEND");
+}
+
 CTerrainTransitionCatalog globalMaterialCatalog(
     const STerrainAtlasProfile& profile,
     const CTerrainTransitionCatalog& source,
@@ -906,6 +916,15 @@ void CView::closeLandscapeTools()
 void CView::syncLandscapeToolState()
 {
     finishSculptStroke();
+    const bool markingPaintIssue = m_landscapeTools
+        && m_landscapeTools->paintIssueMarkingEnabled();
+    if(!markingPaintIssue)
+    {
+        m_paintIssueDragActive = false;
+        m_paintIssueHoverValid = false;
+        m_paintIssueSelectedCells.clear();
+        QToolTip::hideText();
+    }
     if(m_landscapeTools)
     {
         const ELandscapeEditMode current = m_landscapeTools->editMode();
@@ -923,6 +942,19 @@ void CView::syncLandscapeToolState()
         if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
             changeOperation(EButtonOpSelect);
         setPreviewTile(false);
+        return;
+    }
+    if(markingPaintIssue)
+    {
+        endTileBrushGroup();
+        if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
+            changeOperation(EButtonOpSelect);
+        setPreviewTile(false);
+        unsetCursor();
+        emit updateMsg(tr("Paint issue marking mode: %1. Drag across every bad tile; normal painting is disabled until you choose a material brush.")
+                       .arg(paintIssueCategoryLabel(
+                           m_landscapeTools->paintIssueCategory())));
+        update();
         return;
     }
     switch(m_landscapeTools->editMode())
@@ -3103,8 +3135,12 @@ void CView::rebuildAiGraphOverlayGeometry()
 
 void CView::drawTestOverlaysOpenGl()
 {
+    const bool paintIssueOverlay = m_landscapeTools
+        && m_landscapeTools->paintIssueMarkingEnabled()
+        && (m_paintIssueHoverValid || !m_paintIssueSelectedCells.isEmpty());
     if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
         && !m_terrainPaintOutlineValid && !m_sculptOutlineValid
+        && !paintIssueOverlay
         && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()))
        || width() <= 0 || height() <= 0)
         return;
@@ -6488,6 +6524,47 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     const int position = program->attributeLocation("a_position");
     if(position < 0)
         return;
+    if(m_landscapeTools->paintIssueMarkingEnabled())
+    {
+        QSet<QPoint> highlighted = m_paintIssueSelectedCells;
+        if(m_paintIssueHoverValid)
+            highlighted.insert(m_paintIssueHoverCell);
+        glDepthFunc(GL_ALWAYS);
+        for(const QPoint& cell : highlighted)
+        {
+            QVector<QVector3D> boundary;
+            const QVector<QPointF> corners = {
+                QPointF(cell.x() * 2.0, cell.y() * 2.0),
+                QPointF((cell.x() + 1) * 2.0, cell.y() * 2.0),
+                QPointF((cell.x() + 1) * 2.0, (cell.y() + 1) * 2.0),
+                QPointF(cell.x() * 2.0, (cell.y() + 1) * 2.0)
+            };
+            for(const QPointF& corner : corners)
+            {
+                QVector3D point(corner.x(), corner.y(), 0.0f);
+                if(!m_pLand->projectPt(point, true)) continue;
+                point.setZ(point.z() + 0.18f);
+                boundary.append(point);
+            }
+            if(boundary.size() != 4) continue;
+            const bool selected = m_paintIssueSelectedCells.contains(cell);
+            if(selected)
+            {
+                program->setUniformValue("customColor",
+                                         QVector4D(1.0f, 0.05f, 0.05f, 0.20f));
+                program->setAttributeArray(position, boundary.constData());
+                glDrawArrays(GL_TRIANGLE_FAN, 0, boundary.size());
+            }
+            program->setUniformValue("customColor",
+                                     QVector4D(1.0f, 0.12f, 0.12f, 0.98f));
+            program->setAttributeArray(position, boundary.constData());
+            glLineWidth(selected ? 3.0f : 2.0f);
+            glDrawArrays(GL_LINE_LOOP, 0, boundary.size());
+        }
+        glLineWidth(1.0f);
+        glDepthFunc(GL_LESS);
+        return;
+    }
     if(m_landscapeTools->editMode() == ELandscapeEditMode::Sculpt
        || m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySculpt)
     {
@@ -9820,7 +9897,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         command = m_terrainEdit.makeVirtualMaterialPaint(
             qRound(brush.centerX), qRound(brush.centerY), vertexBrush,
             layer, terrainType, semanticCatalog,
-            m_terrainSemanticSeed, &report);
+            m_tileStrokeDistributionSeed, &report);
     }
     STerrainPaintAuditAction audit;
     audit.actionId = m_terrainPaintActionId++;
@@ -10092,7 +10169,7 @@ void CView::endTileBrushGroup()
             releaseTimer.start();
             qint64 resolveElapsed = 0;
             qint64 uploadElapsed = 0;
-            if(!m_terrainEdit.copyVirtualMaterialField(layer,&field))
+            if(!m_terrainEdit.copyVirtualMaterialField(layer,&field,false))
                 releaseReport.add("terrain.virtual_stroke_field",
                     EValidationSeverity::Error,
                     "The completed stroke has no complete vertex-material field.");
@@ -10196,7 +10273,7 @@ void CView::endTileBrushGroup()
                     :(layer==ETerrainTileLayer::Land
                         ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog);
                 STerrainTileCommand resolution=m_terrainEdit.makeVirtualStrokeResolution(
-                    m_tileStrokeCommand,catalog,m_terrainSemanticSeed,&releaseReport);
+                    m_tileStrokeCommand,catalog,m_tileStrokeDistributionSeed,&releaseReport);
                 if(releaseReport.hasErrors())
                 {
                     applyTerrainTilePreview(m_tileStrokeCommand,false);
@@ -10255,6 +10332,11 @@ void CView::beginTileBrushGroup()
     if(m_tilePaintStrokeActive || !m_pUndoStack)
         return;
     m_tilePaintStrokeActive = true;
+    // Uniform authored variations are chosen once per stroke. The seed is
+    // deterministic for undo/replay while adjacent strokes need not repeat the
+    // same texture variation.
+    m_tileStrokeDistributionSeed = m_terrainSemanticSeed
+        ^ (quint32(m_tileBrushCommandId + 1) * 0x9e3779b9u);
     m_tileStrokeCommand = STerrainTileCommand();
     m_tileStrokeCommand.description = tr("Paint terrain tiles");
     m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
@@ -10826,12 +10908,228 @@ void CView::moveCamToSelectedObjects()
     }
 }
 
+bool CView::terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell)
+{
+    if(!cell || !m_pLand || !m_pLand->isMprLoad()) return false;
+    bool hit = false;
+    QVector3D terrainPosition = getTerrainPos(
+        viewportPosition.x(), viewportPosition.y(), true, &hit);
+    if(!hit) return false;
+    CTile* tile = nullptr;
+    STileLocation location;
+    if(!m_pLand->pickTile(terrainPosition, tile, location, true)) return false;
+    *cell = QPoint(location.xSec * 16 + location.col,
+                   location.ySec * 16 + location.row);
+    return true;
+}
+
+void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
+                                          const QString& category)
+{
+    if(cells.isEmpty() || !m_terrainEditAvailable
+       || !m_pLand || !m_pLand->isMprLoad()) return;
+    int minimumX = std::numeric_limits<int>::max();
+    int minimumY = std::numeric_limits<int>::max();
+    int maximumX = std::numeric_limits<int>::min();
+    int maximumY = std::numeric_limits<int>::min();
+    for(const QPoint& cell : cells)
+    {
+        minimumX = qMin(minimumX, cell.x()); minimumY = qMin(minimumY, cell.y());
+        maximumX = qMax(maximumX, cell.x()); maximumY = qMax(maximumY, cell.y());
+    }
+    const QRect markedBounds(QPoint(minimumX, minimumY),
+                             QPoint(maximumX, maximumY));
+    const QString directoryPath = QDir(QCoreApplication::applicationDirPath())
+        .filePath(QStringLiteral("diagnostics/terrain-paint"));
+    if(!QDir().mkpath(directoryPath))
+    {
+        emit updateMsg(tr("Could not create the terrain-paint diagnostic folder."));
+        return;
+    }
+    const QString namespaceName = m_mprDocument.mapInfo().innerNamespace;
+    QString safeName = namespaceName.isEmpty()
+        ? QStringLiteral("terrain") : namespaceName.toLower();
+    safeName.replace(QRegExp(QStringLiteral("[^a-z0-9_-]+")), QStringLiteral("-"));
+    if(safeName.isEmpty()) safeName = QStringLiteral("terrain");
+    const QString path = QDir(directoryPath).filePath(
+        safeName + QStringLiteral("-paint-issues.json"));
+    QJsonObject root;
+    QFile existing(path);
+    if(existing.open(QIODevice::ReadOnly))
+    {
+        const QJsonDocument parsed = QJsonDocument::fromJson(existing.readAll());
+        if(parsed.isObject()) root = parsed.object();
+    }
+    const QString sourceHash = QString::fromLatin1(QCryptographicHash::hash(
+        m_mprDocument.originalBytes(), QCryptographicHash::Sha256).toHex());
+    if(root.value(QStringLiteral("schema")).toString()
+            != QStringLiteral("ei-mapper-endurance-paint-issue-marks")
+       || root.value(QStringLiteral("sourceMprSha256")).toString() != sourceHash)
+        root = QJsonObject();
+    root.insert(QStringLiteral("schema"),
+                QStringLiteral("ei-mapper-endurance-paint-issue-marks"));
+    root.insert(QStringLiteral("version"), 2);
+    root.insert(QStringLiteral("mprFileName"), m_pLand->filePath().fileName());
+    const QString applicationPath = QDir::cleanPath(
+        QCoreApplication::applicationDirPath());
+    const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
+    if(sourcePath.startsWith(applicationPath + QDir::separator(), Qt::CaseInsensitive))
+        root.insert(QStringLiteral("fixtureRelativePath"),
+            QDir(applicationPath).relativeFilePath(sourcePath).replace('\\', '/'));
+    root.insert(QStringLiteral("mprNamespace"), namespaceName);
+    root.insert(QStringLiteral("sourceMprSha256"), sourceHash);
+    root.insert(QStringLiteral("atlasPixelSha256"), m_pTileForm
+        ? QString::fromLatin1(terrainAtlasPixelSha256(m_pTileForm->tileImages()))
+        : QString());
+    root.insert(QStringLiteral("semanticProfileProvenance"),
+                m_terrainAtlasProfile.provenance);
+    const bool overlay = m_landscapeTools
+        && (m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint
+            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface);
+    const ETerrainTileLayer layer = overlay
+        ? ETerrainTileLayer::Overlay : ETerrainTileLayer::Land;
+    const CTerrainTransitionCatalog& catalog = overlay
+        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+        : m_terrainAtlasAnalysis.landCatalog;
+    bool materialSelected = false;
+    const qint32 selectedMaterial = m_landscapeTools
+        ? m_landscapeTools->paintTerrainType(&materialSelected) : -1;
+    QString selectedMaterialName;
+    for(const STerrainAtlasMaterial& material : m_terrainAtlasAnalysis.materials)
+        if(material.id == selectedMaterial
+           && ((material.layer == ETerrainAtlasLayer::Overlay) == overlay))
+        {
+            selectedMaterialName = material.name;
+            break;
+        }
+    QJsonObject mark;
+    mark.insert(QStringLiteral("id"), root.value(QStringLiteral("marks")).toArray().size());
+    mark.insert(QStringLiteral("timestampUtc"),
+                QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    mark.insert(QStringLiteral("category"), category);
+    mark.insert(QStringLiteral("layer"), overlay ? QStringLiteral("overlay")
+                                                  : QStringLiteral("land"));
+    mark.insert(QStringLiteral("selectedMaterialId"),
+                materialSelected ? selectedMaterial : -1);
+    mark.insert(QStringLiteral("selectedMaterial"), selectedMaterialName);
+    QJsonObject boundsJson;
+    boundsJson.insert(QStringLiteral("x0"), markedBounds.left());
+    boundsJson.insert(QStringLiteral("y0"), markedBounds.top());
+    boundsJson.insert(QStringLiteral("x1"), markedBounds.right());
+    boundsJson.insert(QStringLiteral("y1"), markedBounds.bottom());
+    mark.insert(QStringLiteral("markedCells"), boundsJson);
+    mark.insert(QStringLiteral("markedTileCount"), cells.size());
+    QVector<QPoint> orderedMarkedCells = cells.values().toVector();
+    std::sort(orderedMarkedCells.begin(), orderedMarkedCells.end(),
+              [](const QPoint& lhs, const QPoint& rhs) {
+                  return lhs.y() != rhs.y() ? lhs.y() < rhs.y() : lhs.x() < rhs.x();
+              });
+    QJsonArray selectedCells;
+    for(const QPoint& cell : orderedMarkedCells)
+    {
+        QJsonObject selected;
+        selected.insert(QStringLiteral("x"), cell.x());
+        selected.insert(QStringLiteral("y"), cell.y());
+        selectedCells.append(selected);
+    }
+    mark.insert(QStringLiteral("selectedCells"), selectedCells);
+    QJsonArray tiles;
+    const QRect snapshot = markedBounds.adjusted(-1, -1, 1, 1).intersected(
+        QRect(0, 0, m_terrainEdit.tileCountX(), m_terrainEdit.tileCountY()));
+    for(int y = snapshot.top(); y <= snapshot.bottom(); ++y)
+        for(int x = snapshot.left(); x <= snapshot.right(); ++x)
+        {
+            bool available = false;
+            const quint16 packed = m_terrainEdit.packedTile(x, y, layer, &available);
+            if(!available) continue;
+            bool recognized = false;
+            const STerrainTransitionSignature signature =
+                catalog.gridSignatureForPacked(packed, &recognized);
+            QJsonObject tile;
+            tile.insert(QStringLiteral("x"), x);
+            tile.insert(QStringLiteral("y"), y);
+            tile.insert(QStringLiteral("insideMark"), cells.contains(QPoint(x, y)));
+            tile.insert(QStringLiteral("packed"), packedTerrainTileJson(packed));
+            tile.insert(QStringLiteral("catalogRecognized"), recognized);
+            if(recognized)
+                tile.insert(QStringLiteral("gridCorners"),
+                            terrainGridSignatureJson(signature));
+            tiles.append(tile);
+        }
+    mark.insert(QStringLiteral("tileSnapshot"), tiles);
+    QJsonArray relatedActions;
+    const QRect related = markedBounds.adjusted(-2, -2, 2, 2);
+    for(const STerrainPaintAuditAction& action : m_terrainPaintActions)
+    {
+        bool intersects = false;
+        for(const QPoint& point : action.semantic.affectedCells)
+            if(related.contains(point)) { intersects = true; break; }
+        if(!intersects) continue;
+        QJsonObject item;
+        item.insert(QStringLiteral("actionId"), action.actionId);
+        item.insert(QStringLiteral("strokeId"), action.strokeId);
+        item.insert(QStringLiteral("outcome"), action.outcome);
+        item.insert(QStringLiteral("requestedMaterialId"),
+                    action.semantic.requestedMaterialId);
+        item.insert(QStringLiteral("backgroundMaterialId"),
+                    action.semantic.backgroundMaterialId);
+        item.insert(QStringLiteral("solverMode"), action.semantic.solverMode);
+        item.insert(QStringLiteral("solverNodes"), action.semantic.solverNodes);
+        item.insert(QStringLiteral("validation"), action.validation);
+        item.insert(QStringLiteral("changedTileCount"), action.deltas.size());
+        QJsonArray paintedVertices;
+        for(const QPoint& point : action.semantic.paintedVertices)
+        {
+            QJsonObject vertex;
+            vertex.insert(QStringLiteral("x"), point.x());
+            vertex.insert(QStringLiteral("y"), point.y());
+            paintedVertices.append(vertex);
+        }
+        item.insert(QStringLiteral("paintedVertices"), paintedVertices);
+        relatedActions.append(item);
+    }
+    mark.insert(QStringLiteral("relatedPaintActions"), relatedActions);
+    QJsonArray marks = root.value(QStringLiteral("marks")).toArray();
+    marks.append(mark);
+    root.insert(QStringLiteral("marks"), marks);
+    QString writeError;
+    if(!ei::writePortableDiagnostic(path,
+           QJsonDocument(root).toJson(QJsonDocument::Indented), &writeError))
+    {
+        emit updateMsg(tr("Could not write paint issue diagnostic: %1 (%2)")
+                       .arg(QDir::toNativeSeparators(path), writeError));
+        return;
+    }
+    ei::log(eLogInfo, QString(
+        "Terrain paint issue marked category:%1 tiles:%2 bounds:%3,%4-%5,%6 output:%7")
+        .arg(category).arg(cells.size()).arg(markedBounds.left()).arg(markedBounds.top())
+        .arg(markedBounds.right()).arg(markedBounds.bottom()).arg(path));
+    emit updateMsg(tr("Paint issue marked. Send this file: %1")
+                   .arg(QDir::toNativeSeparators(path)));
+}
+
 void CView::mousePressEvent(QMouseEvent* event)
 {
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
     {
+        event->accept();
+        return;
+    }
+    if(m_landscapeTools && m_landscapeTools->paintIssueMarkingEnabled()
+       && event->button() == Qt::LeftButton)
+    {
+        QPoint cell;
+        if(terrainCellAtViewport(event->pos(), &cell))
+        {
+            m_paintIssueDragActive = true;
+            m_paintIssueHoverValid = true;
+            m_paintIssueHoverCell = cell;
+            m_paintIssueSelectedCells.clear();
+            m_paintIssueSelectedCells.insert(cell);
+            update();
+        }
         event->accept();
         return;
     }
@@ -11165,6 +11463,44 @@ void CView::mouseMoveEvent(QMouseEvent* event)
         event->accept();
         return;
     }
+    if(m_landscapeTools && m_landscapeTools->paintIssueMarkingEnabled())
+    {
+        QPoint cell;
+        if(terrainCellAtViewport(event->pos(), &cell))
+        {
+            const QPoint previous = m_paintIssueHoverValid
+                ? m_paintIssueHoverCell : cell;
+            m_paintIssueHoverCell = cell;
+            m_paintIssueHoverValid = true;
+            if(m_paintIssueDragActive && (event->buttons() & Qt::LeftButton))
+            {
+                const int dx = cell.x() - previous.x();
+                const int dy = cell.y() - previous.y();
+                const int steps = qMax(qAbs(dx), qAbs(dy));
+                for(int step = 0; step <= steps; ++step)
+                {
+                    const int x = steps == 0 ? cell.x()
+                        : previous.x() + qRound(double(dx) * step / steps);
+                    const int y = steps == 0 ? cell.y()
+                        : previous.y() + qRound(double(dy) * step / steps);
+                    m_paintIssueSelectedCells.insert(QPoint(x, y));
+                }
+            }
+            QToolTip::showText(mapToGlobal(event->pos() + QPoint(18, 18)),
+                tr("MARK: %1").arg(paintIssueCategoryLabel(
+                    m_landscapeTools->paintIssueCategory())),
+                this, rect(), 60000);
+            update();
+        }
+        else
+        {
+            m_paintIssueHoverValid = false;
+            QToolTip::hideText();
+            update();
+        }
+        event->accept();
+        return;
+    }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
        && m_terrainEditAvailable)
     {
@@ -11193,6 +11529,23 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
     {
+        event->accept();
+        return;
+    }
+    if(m_paintIssueDragActive && event->button() == Qt::LeftButton)
+    {
+        QPoint cell;
+        if(terrainCellAtViewport(event->pos(), &cell))
+        {
+            m_paintIssueHoverValid = true;
+            m_paintIssueHoverCell = cell;
+            m_paintIssueSelectedCells.insert(cell);
+        }
+        m_paintIssueDragActive = false;
+        appendMarkedTerrainPaintIssue(m_paintIssueSelectedCells,
+            m_landscapeTools ? m_landscapeTools->paintIssueCategory()
+                             : QStringLiteral("no-blend"));
+        update();
         event->accept();
         return;
     }

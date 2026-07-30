@@ -20,6 +20,7 @@ SOURCES += \
     ../source/render/terrain_atlas_presets.cpp \
     ../source/documents/staged_save_validator.cpp \
     ../source/documents/backup_manager.cpp \
+    ../source/core/portable_diagnostic_writer.cpp \
     ../source/core/log.cpp
 
 HEADERS += \
@@ -35,4 +36,5 @@ HEADERS += \
     ../source/render/terrain_atlas_profile.h \
     ../source/documents/staged_save_validator.h \
     ../source/documents/backup_manager.h \
+    ../source/core/portable_diagnostic_writer.h \
     ../source/core/log.h

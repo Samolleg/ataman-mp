@@ -291,6 +291,8 @@ private slots:
     void workingPreviewPackagePreservesAuthoredPagesAndAppendsExtensions();
     void workingPreviewPackageStagesSeveralGeneratedPages();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
+    void overlayVirtualPaintAllowsSparseInactiveField();
+    void uniformStrokeUsesOneAuthoredVariationAcrossItsInterior();
     void preservedLayerSlotsArePinnedAndRemapped();
     void inactiveOverlaySentinelSurvivesLandFinalization();
     void gradedAlphaIsRefusedWithoutFlattening();
@@ -1285,6 +1287,131 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     CTerrainVirtualMaterialField undone;
     QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
     QCOMPARE(undone.material(8,8),qint32(1));
+}
+
+void TerrainVirtualAtlasTests::overlayVirtualPaintAllowsSparseInactiveField()
+{
+    Fixture fixture;
+    CMprDocument document;
+    CValidationReport report;
+    QVERIFY2(document.loadBytes(portableMpr(true), "sparse-overlay.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel model;
+    QVERIFY2(model.load(document, &report), qPrintable(report.toText()));
+
+    STerrainTileBrush activeArea;
+    activeArea.centerX = 8.0f;
+    activeArea.centerY = 8.0f;
+    activeArea.radius = 3.0f;
+    activeArea.shape = ETerrainTileBrushShape::Circle;
+    const SOverlaySurfaceCommand activation = model.makeOverlayActivation(
+        activeArea, 0, 0, 0, 0, &report);
+    QVERIFY2(!activation.isEmpty(), qPrintable(report.toText()));
+    QVERIFY2(model.apply(activation, true, &report), qPrintable(report.toText()));
+
+    STerrainTileBrush paint;
+    paint.centerX = 8.0f;
+    paint.centerY = 8.0f;
+    paint.radius = 1.0f;
+    paint.shape = ETerrainTileBrushShape::Circle;
+    const STerrainTileCommand command = model.makeVirtualMaterialPaint(
+        8, 8, paint, ETerrainTileLayer::Overlay, 2,
+        fixture.catalog, 71, &report);
+    QVERIFY2(!command.isEmpty(), qPrintable(report.toText()));
+    QVERIFY2(model.apply(command, true, &report), qPrintable(report.toText()));
+
+    CTerrainVirtualMaterialField strictField;
+    QVERIFY(!model.copyVirtualMaterialField(
+        ETerrainTileLayer::Overlay, &strictField));
+    CTerrainVirtualMaterialField sparseField;
+    QVERIFY(model.copyVirtualMaterialField(
+        ETerrainTileLayer::Overlay, &sparseField, false));
+    for(const auto& vertex : command.virtualVertices)
+    {
+        for(int y : {vertex.globalY - 1, vertex.globalY})
+            for(int x : {vertex.globalX - 1, vertex.globalX})
+            {
+                if(x < 0 || y < 0 || x >= sparseField.tileWidth()
+                   || y >= sparseField.tileHeight()) continue;
+                bool active = false;
+                model.packedTile(x, y, ETerrainTileLayer::Overlay, &active);
+                if(!active) continue;
+                bool found = false;
+                sparseField.cellSignature(x, y, &found);
+                QVERIFY2(found, qPrintable(QString(
+                    "active overlay cell %1,%2 lost its virtual material identity")
+                    .arg(x).arg(y)));
+            }
+    }
+}
+
+void TerrainVirtualAtlasTests::uniformStrokeUsesOneAuthoredVariationAcrossItsInterior()
+{
+    Fixture fixture;
+    int nextSlot = 4;
+    // Give material 2 a second legitimate uniform variation, then make every
+    // binary edge/corner tuple exact so release is testing distribution rather
+    // than generation availability.
+    STerrainTransitionVariant secondUniform;
+    secondUniform.signature = signature(2, 2, 2, 2);
+    SMprPackedTile secondPacked;
+    secondPacked.tileIndex = quint8(nextSlot++);
+    secondUniform.packedTile = secondPacked.encode();
+    QVERIFY(fixture.catalog.addVariant(secondUniform));
+    for(int bits = 1; bits < 15; ++bits)
+    {
+        const auto value = [bits](int bit) { return (bits & (1 << bit)) ? 2 : 1; };
+        STerrainTransitionVariant variant;
+        variant.signature = signature(value(0), value(1), value(2), value(3));
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(nextSlot++);
+        variant.packedTile = packed.encode();
+        fixture.catalog.addVariant(variant);
+    }
+
+    QByteArray payload;
+    QDataStream sec(&payload, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = "CaveSet000000.SEC";
+    source.sectorX = 0; source.sectorY = 0; source.type = 0;
+    source.payload = payload; source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(64, 1), 0));
+    STerrainTileBrush brush;
+    brush.centerX = 8; brush.centerY = 8; brush.radius = 4;
+    const quint32 strokeSeed = 0x98761234u;
+    const STerrainTileCommand preview = model.makeVirtualMaterialPaint(
+        8, 8, brush, ETerrainTileLayer::Land, 2,
+        fixture.catalog, strokeSeed, &report);
+    QVERIFY2(!preview.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(model.apply(preview, true, &report));
+    const STerrainTileCommand resolution = model.makeVirtualStrokeResolution(
+        preview, fixture.catalog, strokeSeed, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(model.apply(resolution, true, &report));
+
+    CTerrainVirtualMaterialField field;
+    QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land, &field));
+    QSet<quint16> interiorTiles;
+    for(int y = 0; y < field.tileHeight(); ++y)
+        for(int x = 0; x < field.tileWidth(); ++x)
+        {
+            bool found = false;
+            const STerrainTransitionSignature exact = field.cellSignature(x, y, &found);
+            if(!found || !(exact == signature(2, 2, 2, 2))) continue;
+            bool available = false;
+            interiorTiles.insert(model.packedTile(
+                x, y, ETerrainTileLayer::Land, &available));
+            QVERIFY(available);
+        }
+    QVERIFY(interiorTiles.size() > 0);
+    QCOMPARE(interiorTiles.size(), 1);
 }
 
 void TerrainVirtualAtlasTests::externalUniformFamilyPaintsAndBlendsWithoutAuthoredSlot()

@@ -1168,6 +1168,30 @@ int runHeadlessCommand(QApplication& app)
             materialAtlasButton->click();
         const bool materialAtlasActionWorks = materialAtlasButtonAvailable
             && semanticAtlasReviewRequested;
+        QComboBox* paintIssueCategory =
+            landscapeTools.findChild<QComboBox*>("paintIssueCategory");
+        QToolButton* markPaintIssueButton =
+            landscapeTools.findChild<QToolButton*>("markPaintIssueButton");
+        const bool paintIssueMarkerAvailable = paintIssueCategory
+            && paintIssueCategory->count() == 3
+            && paintIssueCategory->itemData(0).toString() == "no-blend"
+            && paintIssueCategory->itemData(1).toString() == "tile-mismatch"
+            && paintIssueCategory->itemData(2).toString() == "wrong-rotation"
+            && markPaintIssueButton && markPaintIssueButton->isCheckable();
+        if(markPaintIssueButton) markPaintIssueButton->setChecked(true);
+        bool materialSelectedWhileMarking = false;
+        const bool paintIssueMarkerActivates = paintIssueMarkerAvailable
+            && landscapeTools.paintIssueMarkingEnabled()
+            && landscapeTools.paintIssueCategory() == "no-blend"
+            && landscapeTools.paintTerrainType(&materialSelectedWhileMarking) == 0
+            && !materialSelectedWhileMarking
+            && markPaintIssueButton->text().contains("MARKING");
+        bool materialSelectedAfterMarker = false;
+        const bool paintIssueMarkerMutuallyExclusive =
+            landscapeTools.selectPaintTerrainType(9)
+            && !landscapeTools.paintIssueMarkingEnabled()
+            && landscapeTools.paintTerrainType(&materialSelectedAfterMarker) == 9
+            && materialSelectedAfterMarker;
 
         QWidget primaryWindow;
         bool settingsTabsUsable = false;
@@ -1375,6 +1399,8 @@ int runHeadlessCommand(QApplication& app)
             && expandedAtlasCapacityIsYellow
             && unstableAtlasCapacityIsRedButInformational
                 && materialAtlasActionWorks
+                && paintIssueMarkerActivates
+                && paintIssueMarkerMutuallyExclusive
                 && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
@@ -1473,6 +1499,9 @@ int runHeadlessCommand(QApplication& app)
                << " unstableAtlasCapacityIsRedButInformational="
                << unstableAtlasCapacityIsRedButInformational
                << " materialAtlasActionWorks=" << materialAtlasActionWorks
+               << " paintIssueMarkerActivates=" << paintIssueMarkerActivates
+               << " paintIssueMarkerMutuallyExclusive="
+               << paintIssueMarkerMutuallyExclusive
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
                << (passed ? "PASS" : "FAIL")

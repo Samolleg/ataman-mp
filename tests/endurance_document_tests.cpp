@@ -10,6 +10,7 @@
 #include "landscape_edit_policy.h"
 #include "mmp_codec.h"
 #include "operation_history_policy.h"
+#include "portable_diagnostic_writer.h"
 #include "terrain_edit_model.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
@@ -276,6 +277,7 @@ class EnduranceDocumentTests : public QObject
 
 private slots:
     void persistentPaintOperationSurvivesHistoryNavigation();
+    void portableDiagnosticCanReplaceExistingReportInPlace();
     void persistentPaintOperationSurvivesDocumentTransition();
     void landscapeLayerChangesResetBrushSelection();
     void landscapeWheelDirectionUsesAvailableDelta();
@@ -366,6 +368,21 @@ private slots:
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
 };
+
+void EnduranceDocumentTests::portableDiagnosticCanReplaceExistingReportInPlace()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = QDir(directory.path()).filePath("paint-issues.json");
+    QString error;
+    QVERIFY2(ei::writePortableDiagnostic(path, QByteArray("first"), &error),
+             qPrintable(error));
+    QVERIFY2(ei::writePortableDiagnostic(path, QByteArray("second-report"), &error),
+             qPrintable(error));
+    QFile report(path);
+    QVERIFY(report.open(QIODevice::ReadOnly));
+    QCOMPARE(report.readAll(), QByteArray("second-report"));
+}
 
 void EnduranceDocumentTests::persistentPaintOperationSurvivesHistoryNavigation()
 {

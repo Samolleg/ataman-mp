@@ -88,6 +88,9 @@ public:
     void adjustPaintTerrainType(int steps);
     qint32 paintTerrainType(bool* selected = nullptr) const;
     qint32 paintTerrainSupport() const;
+    bool paintIssueMarkingEnabled() const;
+    QString paintIssueCategory() const;
+    void setPaintIssueMarkingEnabled(bool enabled);
     void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& landTypes,
                               const QVector<QPair<qint32, QString>>& underwaterTypes,
                               const QVector<QPair<qint32, QString>>& overlayTypes,
@@ -147,6 +150,8 @@ private:
     QToolButton* m_circlePaintShape;
     QToolButton* m_squarePaintShape;
     QCheckBox* m_manualTileSelection;
+    QComboBox* m_paintIssueCategory;
+    QToolButton* m_markPaintIssue;
     QComboBox* m_overlaySurfaceOperation;
     QComboBox* m_overlayMaterial;
     QLabel* m_overlaySurfaceOperationLabel;
@@ -171,6 +176,8 @@ private:
     void refreshPaintTerrainTypes();
     void rebuildMaterialPalette();
     void refreshAtlasCapacity(int activeSlots);
+    void updatePaintIssueUi();
+    void clearPaintMaterialSelection();
 };
 
 #endif

@@ -419,11 +419,20 @@ int CTerrainVirtualMaterialField::paint(const STerrainTileBrush& brush,
 STerrainTransitionSignature CTerrainVirtualMaterialField::cellSignature(
     int cellX, int cellY, bool* found) const
 {
-    const bool valid = cellX >= 0 && cellX < m_tileWidth
+    bool valid = cellX >= 0 && cellX < m_tileWidth
         && cellY >= 0 && cellY < m_tileHeight;
-    if(found)
-        *found = valid;
     STerrainTransitionSignature result;
+    if(valid)
+    {
+        const qint32 unset = std::numeric_limits<qint32>::min();
+        const int nw = cellY * vertexWidth() + cellX;
+        const int ne = nw + 1;
+        const int sw = (cellY + 1) * vertexWidth() + cellX;
+        const int se = sw + 1;
+        valid = m_materials.at(nw) != unset && m_materials.at(ne) != unset
+            && m_materials.at(se) != unset && m_materials.at(sw) != unset;
+    }
+    if(found) *found = valid;
     if(!valid)
         return result;
     result.northWest = material(cellX, cellY);
@@ -452,7 +461,8 @@ QByteArray CTerrainVirtualMaterialField::stableSha256() const
 }
 
 bool CTerrainEditModel::copyVirtualMaterialField(
-    ETerrainTileLayer layer,CTerrainVirtualMaterialField* output) const
+    ETerrainTileLayer layer,CTerrainVirtualMaterialField* output,
+    bool requireComplete) const
 {
     if(!output)return false;
     const QVector<qint32>& values=layer==ETerrainTileLayer::Land
@@ -463,7 +473,7 @@ bool CTerrainEditModel::copyVirtualMaterialField(
     for(int y=0;y<=tileCountY();++y)for(int x=0;x<=tileCountX();++x)
     {
         const qint32 value=values.at(y*(tileCountX()+1)+x);
-        if(value==unset)return false;
+        if(value==unset&&requireComplete)return false;
         output->setMaterial(x,y,value);
     }
     return true;

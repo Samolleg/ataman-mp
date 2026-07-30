@@ -21,6 +21,13 @@
 #include <QFutureWatcher>
 #include <functional>
 
+#if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
+inline uint qHash(const QPoint& point, uint seed = 0)
+{
+    return qHash(qMakePair(point.x(), point.y()), seed);
+}
+#endif
+
 #include "types.h"
 #include "select_window.h"
 #include "mpr_document.h"
@@ -313,6 +320,9 @@ private:
                                      bool success);
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
+    bool terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell);
+    void appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
+                                       const QString& category);
     void updateTileForm(bool bGenerateNewTable = false);
     void saveSession();
     bool closeMobParameterWindow(CMob* mob);
@@ -571,6 +581,7 @@ private:
     QVector<STerrainPaintAuditAction> m_terrainPaintActions;
     int m_terrainPaintActionId{0};
     quint32 m_terrainSemanticSeed{0};
+    quint32 m_tileStrokeDistributionSeed{0};
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};
@@ -578,6 +589,10 @@ private:
     bool m_terrainPaintProjectionLand{true};
     int m_terrainPaintOutlineX{0};
     int m_terrainPaintOutlineY{0};
+    bool m_paintIssueDragActive{false};
+    bool m_paintIssueHoverValid{false};
+    QPoint m_paintIssueHoverCell;
+    QSet<QPoint> m_paintIssueSelectedCells;
     QPoint m_lastTerrainPaintCenter;
     bool m_lastTerrainPaintCenterValid{false};
     bool m_lastTerrainPaintLayerLand{true};

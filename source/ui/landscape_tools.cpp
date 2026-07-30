@@ -66,6 +66,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_circlePaintShape(new QToolButton(this))
     , m_squarePaintShape(new QToolButton(this))
     , m_manualTileSelection(new QCheckBox(tr("Manual atlas tile mode (no blending)"), this))
+    , m_paintIssueCategory(new QComboBox(this))
+    , m_markPaintIssue(new QToolButton(this))
     , m_overlaySurfaceOperation(new QComboBox(this))
     , m_overlayMaterial(new QComboBox(this))
     , m_overlaySurfaceOperationLabel(new QLabel(tr("Overlay operation"), this))
@@ -264,6 +266,24 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     atlasRow->addWidget(m_atlasCapacityWarning);
     paintLayout->addLayout(atlasRow);
     QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
+    m_paintIssueCategory->addItem(tr("No / wrong blend"), QStringLiteral("no-blend"));
+    m_paintIssueCategory->addItem(tr("Wrong material / family"), QStringLiteral("tile-mismatch"));
+    m_paintIssueCategory->addItem(tr("Wrong rotation"), QStringLiteral("wrong-rotation"));
+    m_paintIssueCategory->setObjectName(QStringLiteral("paintIssueCategory"));
+    m_markPaintIssue->setText(tr("Mark bad tiles on map"));
+    m_markPaintIssue->setObjectName(QStringLiteral("markPaintIssueButton"));
+    m_markPaintIssue->setCheckable(true);
+    m_markPaintIssue->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_markPaintIssue->setStyleSheet(QStringLiteral(
+        "QToolButton:checked { background: #9f1f1f; color: white; "
+        "font-weight: bold; border: 2px solid #ff6b6b; }"));
+    m_markPaintIssue->setToolTip(tr(
+        "Choose an issue type, enable marking, then drag across every visibly bad tile. "
+        "Painting is disabled while marking. Each drag appends exact tile, corner, rotation, "
+        "atlas-binding, and stroke information to a portable diagnostic JSON."));
+    QHBoxLayout* issueRow = new QHBoxLayout;
+    issueRow->addWidget(m_paintIssueCategory, 1);
+    issueRow->addWidget(m_markPaintIssue);
     QPushButton* finalizeAtlas = new QPushButton(
         tr("Finalize map-specific atlas package..."), this);
     finalizeAtlas->setToolTip(tr(
@@ -272,6 +292,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "The packed format allows 16,384 slots; sizes above 4,096 remain potentially "
         "unstable and are clearly warned, but staging is not blocked."));
     paintLayout->addWidget(exportDiagnostic);
+    paintLayout->addLayout(issueRow);
     paintLayout->addWidget(finalizeAtlas);
     // The material palette is the primary authoring surface. Give it all
     // remaining vertical space instead of leaving an empty stretch below the
@@ -286,18 +307,32 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(tilePicker, &QPushButton::clicked, this, &CLandscapeTools::tilePickerRequested);
     connect(reviewAtlas, &QPushButton::clicked, this, &CLandscapeTools::atlasProfileReviewRequested);
     connect(exportDiagnostic, &QPushButton::clicked, this, &CLandscapeTools::exportPaintDiagnosticRequested);
+    connect(m_markPaintIssue, &QToolButton::toggled, this, [this](bool enabled) {
+        if(enabled)
+        {
+            clearPaintMaterialSelection();
+            emit paintTerrainTypeChanged(-1);
+        }
+        updatePaintIssueUi();
+        emit editingStateChanged();
+    });
+    connect(m_paintIssueCategory,
+            QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int) { updatePaintIssueUi(); emit editingStateChanged(); });
     connect(finalizeAtlas, &QPushButton::clicked, this, &CLandscapeTools::finalizeVirtualAtlasRequested);
     m_atlasCoverage->setObjectName(QStringLiteral("materialAtlasSourceStatus"));
     m_generatedAtlasTiles->setObjectName(QStringLiteral("generatedAtlasTileCount"));
     refreshAtlasCapacity(0);
     connect(m_groundMaterialButtons, QOverload<int>::of(&QButtonGroup::buttonClicked),
             this, [this](int) {
+                setPaintIssueMarkingEnabled(false);
                 bool selected = false;
                 const qint32 material = paintTerrainType(&selected);
                 emit paintTerrainTypeChanged(selected ? material : -1);
             });
     connect(m_overlayMaterialButtons, QOverload<int>::of(&QButtonGroup::buttonClicked),
             this, [this](int) {
+                setPaintIssueMarkingEnabled(false);
                 bool selected = false;
                 const qint32 material = paintTerrainType(&selected);
                 emit paintTerrainTypeChanged(selected ? material : -1);
@@ -355,6 +390,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(m_flatten, QOverload<int>::of(&QSpinBox::valueChanged), this,
             [](int value) { QSettings().setValue("ui/landscape/flattenHeight", value); });
     updateModeVisibility();
+    updatePaintIssueUi();
 }
 
 QSize CLandscapeTools::minimumSizeHint() const
@@ -608,6 +644,48 @@ qint32 CLandscapeTools::paintTerrainSupport() const
     return button && button->property("terrainContextualStamp").toBool()
         ? button->property("terrainSupportMaterialId").toInt() : 0;
 }
+bool CLandscapeTools::paintIssueMarkingEnabled() const
+{
+    return m_markPaintIssue && m_markPaintIssue->isChecked();
+}
+QString CLandscapeTools::paintIssueCategory() const
+{
+    return m_paintIssueCategory
+        ? m_paintIssueCategory->currentData().toString()
+        : QStringLiteral("no-blend");
+}
+void CLandscapeTools::setPaintIssueMarkingEnabled(bool enabled)
+{
+    if(m_markPaintIssue && m_markPaintIssue->isChecked() != enabled)
+        m_markPaintIssue->setChecked(enabled);
+}
+void CLandscapeTools::clearPaintMaterialSelection()
+{
+    const auto clear = [](QButtonGroup* group) {
+        if(!group) return;
+        const bool exclusive = group->exclusive();
+        group->setExclusive(false);
+        for(QAbstractButton* button : group->buttons())
+            button->setChecked(false);
+        group->setExclusive(exclusive);
+    };
+    clear(m_groundMaterialButtons);
+    clear(m_overlayMaterialButtons);
+}
+void CLandscapeTools::updatePaintIssueUi()
+{
+    const bool marking = paintIssueMarkingEnabled();
+    const QString category = m_paintIssueCategory
+        ? m_paintIssueCategory->currentText() : tr("No / wrong blend");
+    if(m_markPaintIssue)
+        m_markPaintIssue->setText(marking
+            ? tr("MARKING: %1").arg(category.toUpper())
+            : tr("Mark bad tiles on map"));
+    if(m_paintRadius) m_paintRadius->setEnabled(!marking);
+    if(m_circlePaintShape) m_circlePaintShape->setEnabled(!marking);
+    if(m_squarePaintShape) m_squarePaintShape->setEnabled(!marking);
+    if(m_manualTileSelection) m_manualTileSelection->setEnabled(!marking);
+}
 void CLandscapeTools::setPaintTerrainTypes(
     const QVector<QPair<qint32, QString>>& landTypes,
     const QVector<QPair<qint32, QString>>& underwaterTypes,
@@ -761,12 +839,15 @@ void CLandscapeTools::rebuildMaterialPalette()
             }
         return false;
     };
-    if(!restore(m_groundMaterialButtons, previousGround)
-       && !m_groundMaterialButtons->buttons().isEmpty())
-        m_groundMaterialButtons->buttons().front()->setChecked(true);
-    if(!restore(m_overlayMaterialButtons, previousOverlay)
-       && !m_overlayMaterialButtons->buttons().isEmpty())
-        m_overlayMaterialButtons->buttons().front()->setChecked(true);
+    if(!paintIssueMarkingEnabled())
+    {
+        if(!restore(m_groundMaterialButtons, previousGround)
+           && !m_groundMaterialButtons->buttons().isEmpty())
+            m_groundMaterialButtons->buttons().front()->setChecked(true);
+        if(!restore(m_overlayMaterialButtons, previousOverlay)
+           && !m_overlayMaterialButtons->buttons().isEmpty())
+            m_overlayMaterialButtons->buttons().front()->setChecked(true);
+    }
 }
 
 void CLandscapeTools::resizeEvent(QResizeEvent* event)
@@ -842,6 +923,7 @@ bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
     for(QAbstractButton* button : group->buttons())
         if(button->property("terrainMaterialId").toInt() == terrainType)
         {
+            setPaintIssueMarkingEnabled(false);
             button->setChecked(true);
             return true;
         }
