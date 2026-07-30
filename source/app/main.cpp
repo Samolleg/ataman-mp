@@ -42,6 +42,9 @@
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QGraphicsView>
+#include <QMainWindow>
+#include <QDockWidget>
+#include <QTabBar>
 #include <cstdio>
 #include <cstring>
 
@@ -54,6 +57,8 @@
 #include "ui/landscape_tools.h"
 #include "ui/bodypartedit_form.h"
 #include "ui/validation_panel_layout.h"
+#include "ui/message_log_panel.h"
+#include "ui/dock_hidden_tab.h"
 #include "ui/viewport_minimap_widget.h"
 #include "ui/minimap_export_dialog.h"
 #include "window_lifecycle.h"
@@ -1648,6 +1653,34 @@ int runHeadlessCommand(QApplication& app)
                 && viewportSurface.pixelColor(viewportSurface.width() - 2,
                                               viewportSurface.height() - 2).alpha() == 255;
 
+        CMessageLogPanel messageLog;
+        ei::log(eLogInfo, "ui-check searchable information");
+        ei::log(eLogWarning, "ui-check searchable warning");
+        QEventLoop messageEvents;
+        QTimer::singleShot(60, &messageEvents, &QEventLoop::quit);
+        messageEvents.exec();
+        messageLog.setSearchText(QStringLiteral("searchable"));
+        const bool messageLogSearchWorks = messageLog.visibleMessageCount() == 2;
+        messageLog.setTypeVisible(eLogWarning, false);
+        const bool messageLogTypeFilterWorks = messageLog.visibleMessageCount() == 1;
+
+        QMainWindow dockWindow;
+        dockWindow.setCentralWidget(new QWidget(&dockWindow));
+        QDockWidget dockLabelProbe(QStringLiteral("Message Log"), &dockWindow);
+        dockLabelProbe.setWidget(new QWidget(&dockLabelProbe));
+        dockWindow.addDockWidget(Qt::BottomDockWidgetArea, &dockLabelProbe);
+        CDockHiddenTab hiddenTab(&dockWindow, &dockLabelProbe,
+                                 QStringLiteral("Message Log"),
+                                 QStringLiteral("dockHiddenTabProbe"));
+        dockWindow.show();
+        dockLabelProbe.hide();
+        QApplication::processEvents();
+        const bool dockedHiddenLabelAppears = hiddenTab.tabBar()->isVisible();
+        dockLabelProbe.setFloating(true);
+        dockLabelProbe.hide();
+        QApplication::processEvents();
+        const bool floatingClosedLabelRemoved = !hiddenTab.tabBar()->isVisible();
+
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
@@ -1722,7 +1755,9 @@ int runHeadlessCommand(QApplication& app)
                 && semanticAtlasReviewButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic
                 && viewportBackgroundConsumesClick && viewportChildConsumesClick
-                && viewportSurfaceFullyOwned;
+                && viewportSurfaceFullyOwned
+                && messageLogSearchWorks && messageLogTypeFilterWorks
+                && dockedHiddenLabelAppears && floatingClosedLabelRemoved;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -1850,6 +1885,10 @@ int runHeadlessCommand(QApplication& app)
                << " viewportBackgroundConsumesClick=" << viewportBackgroundConsumesClick
                << " viewportChildConsumesClick=" << viewportChildConsumesClick
                << " viewportSurfaceFullyOwned=" << viewportSurfaceFullyOwned
+               << " messageLogSearchWorks=" << messageLogSearchWorks
+               << " messageLogTypeFilterWorks=" << messageLogTypeFilterWorks
+               << " dockedHiddenLabelAppears=" << dockedHiddenLabelAppears
+               << " floatingClosedLabelRemoved=" << floatingClosedLabelRemoved
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()
                << " viewportSurfaceBottomRightAlpha="
                << viewportSurface.pixelColor(viewportSurface.width() - 2,

@@ -73,6 +73,8 @@
 #include "node.h"
 #include "settings.h"
 #include "ui/validation_panel_layout.h"
+#include "ui/message_log_panel.h"
+#include "ui/dock_hidden_tab.h"
 #include "endurance_ui_scale.h"
 #include "select_window.h"
 #include "createobjectform.h"
@@ -442,6 +444,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pTileForm.reset(new CTileForm(this));
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
+    setDockNestingEnabled(true);
     QWidget* outlinerContainer = new QWidget(this);
     QVBoxLayout* outlinerLayout = new QVBoxLayout(outlinerContainer);
     outlinerLayout->setContentsMargins(0, 0, 0, 0);
@@ -691,6 +694,18 @@ MainWindow::MainWindow(QWidget* parent) :
     m_validationDock->setFloating(true);
     m_validationDock->resize(1100, 650);
     m_validationDock->hide();
+
+    m_messageLogPanel = new CMessageLogPanel(this);
+    m_messageLogDock = new QDockWidget(tr("Message Log"), this);
+    m_messageLogDock->setObjectName(QStringLiteral("messageLogDock"));
+    m_messageLogDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea |
+                                      Qt::RightDockWidgetArea);
+    m_messageLogDock->setFeatures(QDockWidget::DockWidgetClosable |
+                                  QDockWidget::DockWidgetMovable |
+                                  QDockWidget::DockWidgetFloatable);
+    m_messageLogDock->setWidget(m_messageLogPanel);
+    addDockWidget(Qt::BottomDockWidgetArea, m_messageLogDock);
+    resizeDocks({m_messageLogDock}, {190}, Qt::Vertical);
     m_validationTimer = new QTimer(this);
     m_validationTimer->setSingleShot(true);
     connect(m_validationTimer, &QTimer::timeout, this, &MainWindow::refreshMobFamilyValidation);
@@ -726,6 +741,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QMenu* viewMenu = new QMenu(tr("View"), this);
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
+    viewMenu->addAction(m_messageLogDock->toggleViewAction());
     m_landscapeTools = new CLandscapeTools(this);
     m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools"), this);
     m_landscapeToolsDock->setObjectName("landscapeToolsDock");
@@ -869,6 +885,11 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(openTestRunsFolder);
     m_ui->menuTools->addAction(openBugReportingGuide);
     viewMenu->addAction(showUnitTexture);
+
+    m_mapsHiddenTab = new CDockHiddenTab(this, m_mapsDock,
+        tr("Maps && Collections"), QStringLiteral("mapsAndCollectionsHiddenTab"));
+    m_messageLogHiddenTab = new CDockHiddenTab(this, m_messageLogDock,
+        tr("Message Log"), QStringLiteral("messageLogHiddenTab"));
     connect(openMapCatalog, &QAction::triggered, this, [this]()
     {
         CMapTableEditorDialog dialog(this);
@@ -1052,6 +1073,9 @@ MainWindow::MainWindow(QWidget* parent) :
         m_loadedMapDock->show();
         m_outlinerDock->show();
         m_propertiesDock->show();
+        m_messageLogDock->setFloating(false);
+        addDockWidget(Qt::BottomDockWidgetArea, m_messageLogDock);
+        m_messageLogDock->show();
         uiSettings.setValue("ui/mapsBrowser/mapsExpanded", true);
         uiSettings.setValue("ui/mapsBrowser/collectionsExpanded", true);
     }
@@ -1359,6 +1383,8 @@ MainWindow::MainWindow(QWidget* parent) :
         }
         if(m_pView)
             m_pView->setFocus();
+        if(m_mapsHiddenTab) m_mapsHiddenTab->refresh();
+        if(m_messageLogHiddenTab) m_messageLogHiddenTab->refresh();
     });
     QAction* fullScreenAction = new QAction(tr("Toggle fullscreen"), this);
     fullScreenAction->setObjectName("actionToggleFullscreen");
@@ -2666,6 +2692,7 @@ void MainWindow::initShortcuts()
     m_externalScriptAction->setShortcut(shortcut("shortcutExternalMobScript", "Ctrl+Alt+M"));
     m_ui->actionReset_logic_paths->setShortcut(shortcut("shortcutResetLogicPaths", "Ctrl+P"));
     m_mapsDock->toggleViewAction()->setShortcut(shortcut("shortcutMapsBrowser", "Ctrl+Space"));
+    m_messageLogDock->toggleViewAction()->setShortcut(shortcut("shortcutMessageLog", "Alt+L"));
     m_mapTestAction->setShortcut(shortcut("shortcutTestMap", "Ctrl+F5"));
     m_stopMapTestAction->setShortcut(shortcut("shortcutStopMapTest", "Shift+Esc"));
     const struct { EButtonOp type; const char* option; const char* fallback; const char* label; } operations[] = {

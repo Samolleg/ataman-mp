@@ -63,6 +63,8 @@ class QSlider;
 class QDoubleSpinBox;
 class CViewportMinimapWidget;
 class CMinimapExportDialog;
+class CMessageLogPanel;
+class CDockHiddenTab;
 
 struct SWindowTitle
 {
@@ -270,6 +272,10 @@ private:
     quint64 m_landscapeVisibilityGeneration{0};
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;
+    QDockWidget* m_messageLogDock{nullptr};
+    CMessageLogPanel* m_messageLogPanel{nullptr};
+    CDockHiddenTab* m_mapsHiddenTab{nullptr};
+    CDockHiddenTab* m_messageLogHiddenTab{nullptr};
     QDockWidget* m_outlinerDock;
     QDockWidget* m_propertiesDock;
     QDockWidget* m_loadedMapDock;

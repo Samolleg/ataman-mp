@@ -13,9 +13,9 @@ history. The permanent safety and compatibility rules are in
 
 ## Authoring and workflow
 
-- [ ] Add a dockable, filterable workflow/message-log panel with severity,
-  subsystem, text, and current-session filters; link relevant findings to
-  validation objects/files while retaining the complete rotating text log.
+- [x] Add a dockable current-session Message Log with severity and text filters,
+  bottom-console layout, configurable shortcut, and shared hidden-dock edge tabs;
+  retain the complete rotating text log as the authoritative record.
 - [ ] Complete a property-label and terminology pass against the English/Russian
   object manuals and verified runtime meanings. Keep this presentation-only
   unless a separately tested data-model correction is required.
