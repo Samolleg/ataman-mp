@@ -1040,6 +1040,11 @@ MainWindow::MainWindow(QWidget* parent) :
     ei::restoreFloatingDockWindowState(m_validationDock);
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
+    // QMainWindow's opaque state reliably restores ownership and tab topology,
+    // but Qt 5.12 can collapse the other dock columns to their minimum widths
+    // after a floating tab group is reconstructed. Restore explicit extents
+    // once the shown window has its final screen geometry.
+    QTimer::singleShot(0, this, &MainWindow::restoreMainDockExtents);
     // Landscape editing is an explicit working mode, not session layout.
     // Always start closed while preserving the user's last sculpt controls.
     m_landscapeToolsDock->hide();
@@ -5784,8 +5789,74 @@ void MainWindow::saveUiState()
     uiSettings.setValue("ui/mainWindowState", saveState());
     uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
     uiSettings.setValue("ui/outlinerSplitter", m_ui->outlinerSplitter->saveState());
+    saveMainDockExtents(uiSettings);
     uiSettings.sync();
     m_uiStateSaved = true;
+}
+
+void MainWindow::saveMainDockExtents(QSettings& settings) const
+{
+    const QString prefix = QStringLiteral("ui/mainDockExtentsV1/");
+    auto saveDock = [&settings, &prefix](const QString& name, QDockWidget* dock) {
+        if(!dock || dock->isFloating()) return;
+        const QSize size = dock->size();
+        if(size.width() > 0) settings.setValue(prefix + name + "/width", size.width());
+        if(size.height() > 0) settings.setValue(prefix + name + "/height", size.height());
+    };
+    saveDock(QStringLiteral("maps"), m_mapsDock);
+    saveDock(QStringLiteral("loadedMap"), m_loadedMapDock);
+    saveDock(QStringLiteral("outliner"), m_outlinerDock);
+    saveDock(QStringLiteral("properties"), m_propertiesDock);
+    saveDock(QStringLiteral("messageLog"), m_messageLogDock);
+    ei::log(eLogInfo, QStringLiteral(
+            "MAIN_DOCK_EXTENTS saved maps:%1 loaded:%2 outliner:%3 properties:%4")
+            .arg(m_mapsDock ? m_mapsDock->width() : 0)
+            .arg(m_loadedMapDock ? m_loadedMapDock->width() : 0)
+            .arg(m_outlinerDock ? m_outlinerDock->width() : 0)
+            .arg(m_propertiesDock ? m_propertiesDock->width() : 0));
+}
+
+void MainWindow::restoreMainDockExtents()
+{
+    QSettings settings;
+    const QString prefix = QStringLiteral("ui/mainDockExtentsV1/");
+    const int mapsWidth = settings.value(prefix + "maps/width", 0).toInt();
+    const int loadedWidth = settings.value(prefix + "loadedMap/width", 0).toInt();
+    const int outlinerWidth = settings.value(prefix + "outliner/width", 0).toInt();
+    const int propertiesWidth = settings.value(prefix + "properties/width", 0).toInt();
+    const int rightWidth = qMax(loadedWidth, qMax(outlinerWidth, propertiesWidth));
+    if(mapsWidth > 0 && m_mapsDock && !m_mapsDock->isFloating())
+        resizeDocks(QList<QDockWidget*>() << m_mapsDock,
+                    QList<int>() << mapsWidth, Qt::Horizontal);
+    if(rightWidth > 0 && m_loadedMapDock && !m_loadedMapDock->isFloating())
+        resizeDocks(QList<QDockWidget*>() << m_loadedMapDock,
+                    QList<int>() << rightWidth, Qt::Horizontal);
+
+    QList<QDockWidget*> rightDocks;
+    QList<int> rightHeights;
+    auto addHeight = [&settings, &prefix, &rightDocks, &rightHeights](
+            const QString& name, QDockWidget* dock) {
+        const int height = settings.value(prefix + name + "/height", 0).toInt();
+        if(height > 0 && dock && !dock->isFloating()) {
+            rightDocks.append(dock);
+            rightHeights.append(height);
+        }
+    };
+    addHeight(QStringLiteral("loadedMap"), m_loadedMapDock);
+    addHeight(QStringLiteral("outliner"), m_outlinerDock);
+    addHeight(QStringLiteral("properties"), m_propertiesDock);
+    if(!rightDocks.isEmpty()) resizeDocks(rightDocks, rightHeights, Qt::Vertical);
+
+    const int logHeight = settings.value(prefix + "messageLog/height", 0).toInt();
+    if(logHeight > 0 && m_messageLogDock && !m_messageLogDock->isFloating())
+        resizeDocks(QList<QDockWidget*>() << m_messageLogDock,
+                    QList<int>() << logHeight, Qt::Vertical);
+    QStringList heightValues;
+    for(int value : rightHeights) heightValues.append(QString::number(value));
+    ei::log(eLogInfo, QStringLiteral(
+            "MAIN_DOCK_EXTENTS restored maps:%1 right:%2 heights:%3")
+            .arg(mapsWidth).arg(rightWidth)
+            .arg(heightValues.join(',')));
 }
 
 void MainWindow::closeHotReloadProgress()

@@ -61,6 +61,7 @@ class QScrollArea;
 class QListWidget;
 class QSlider;
 class QDoubleSpinBox;
+class QSettings;
 class CViewportMinimapWidget;
 class CMinimapExportDialog;
 class CMessageLogPanel;
@@ -171,6 +172,8 @@ private:
     void toggleLandscapeTools();
     void handleEscapeShortcut();
     void saveUiState();
+    void saveMainDockExtents(QSettings& settings) const;
+    void restoreMainDockExtents();
     void closeHotReloadProgress();
     QVector<SMapSpawnObstacle> mapTestObstacles() const;
     const SMapTravelZone* selectedTravelZone() const;

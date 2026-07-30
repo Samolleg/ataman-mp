@@ -1804,7 +1804,10 @@ int runHeadlessCommand(QApplication& app)
         dockLabelProbe.showNormal();
         ei::restoreFloatingDockWindowState(&dockLabelProbe);
         QEventLoop floatingRestoreEvents;
-        QTimer::singleShot(25, &floatingRestoreEvents, &QEventLoop::quit);
+        // Native maximize restoration is asynchronous on Windows; allow the
+        // real state-change event to arrive instead of making this test depend
+        // on a single scheduler slice.
+        QTimer::singleShot(100, &floatingRestoreEvents, &QEventLoop::quit);
         floatingRestoreEvents.exec();
         const bool floatingDockMaximizedRestores = dockLabelProbe.isMaximized();
         const int paintsBeforeTabRefresh = floatingPaintProbe->paints;
