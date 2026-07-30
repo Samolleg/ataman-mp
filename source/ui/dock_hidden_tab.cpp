@@ -15,6 +15,7 @@
 #include <QSettings>
 #include <QWindow>
 #include "log.h"
+#include "endurance_ui_scale.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -24,6 +25,7 @@ namespace {
 const char* kFloatingMaximized = "enduranceFloatingMaximized";
 const char* kFloatingNormalGeometry = "enduranceFloatingNormalGeometry";
 const char* kFloatingScreen = "enduranceFloatingScreen";
+const char* kUiScaleScreenSignature = "enduranceUiScaleScreenSignature";
 
 QString settingsPrefix(QDockWidget* dock)
 {
@@ -68,6 +70,37 @@ QString hostDescription(QDockWidget* dock, QWidget* host, const QString& reason)
 void logHost(QDockWidget* dock, QWidget* host, const QString& reason)
 {
     ei::log(eLogInfo, hostDescription(dock, host, reason));
+}
+
+void refreshUiScaleForHostScreen(QWidget* host)
+{
+    if(!host) return;
+    // A standalone floating QDockWidget already receives ordinary Qt font
+    // updates. The stale monitor rasterization occurs on Qt's private shared
+    // QDockWidgetGroupWindow used for tabbed floating diagnostics.
+    if(qobject_cast<QDockWidget*>(host)) return;
+    QScreen* screen = hostScreen(host);
+    if(!screen) return;
+    const QString signature = QStringLiteral("%1:%2:%3")
+            .arg(screen->name())
+            .arg(screen->logicalDotsPerInch(), 0, 'f', 2)
+            .arg(qRound(ei::uiScaleFactor() * 100.0));
+    if(host->property(kUiScaleScreenSignature).toString() == signature)
+        return;
+    // Mark before posting so Move/Resize bursts coalesce. Reapplying the same
+    // Endurance percentage is intentional: Qt 5.12 otherwise retains fonts
+    // rasterized for the monitor where its private dock-group host was born.
+    host->setProperty(kUiScaleScreenSignature, signature);
+    QPointer<QWidget> guardedHost(host);
+    QTimer::singleShot(0, host, [guardedHost, signature]() {
+        if(!guardedHost) return;
+        ei::applyUiScalePercent(qRound(ei::uiScaleFactor() * 100.0));
+        guardedHost->updateGeometry();
+        guardedHost->update();
+        ei::log(eLogInfo, QStringLiteral(
+                "DOCK_WINDOW ui-scale-refreshed host:0x%1 signature:%2")
+                .arg(quintptr(guardedHost.data()), 0, 16).arg(signature));
+    });
 }
 
 void applyTaskbarIdentity(QWidget* host)
@@ -213,6 +246,7 @@ void restoreHostFromDock(QDockWidget* dock)
     if(normal.isValid()) host->setGeometry(normal);
     if(wantsMaximized) host->showMaximized();
     applyTaskbarIdentity(host);
+    refreshUiScaleForHostScreen(host);
     logHost(dock, host, QStringLiteral("state-restored"));
 }
 
@@ -254,6 +288,7 @@ protected:
         }
         else if(event->type() == QEvent::Move || event->type() == QEvent::Resize)
         {
+            refreshUiScaleForHostScreen(m_host);
             QWidget* observed = m_host;
             QTimer::singleShot(250, this, [this, observed]() {
                 if(m_host == observed && observed && !observed->isMaximized())
@@ -286,6 +321,7 @@ private:
         if(!m_host) return;
         applyNativeWindowType(m_dock, m_host);
         applyTaskbarIdentity(m_host);
+        refreshUiScaleForHostScreen(m_host);
         // A host change is the reliable signal that Qt has created a floating
         // tab group. Reapply the preserved second-screen/maximized intent.
         if(m_dock->property(kFloatingMaximized).toBool())
@@ -309,7 +345,13 @@ void ei::enableNativeFloatingDockControls(QDockWidget* dock)
 void ei::saveFloatingDockWindowState(QDockWidget* dock)
 {
     QWidget* host = separateHost(dock);
-    if(host) rememberHost(dock, host, host->isMaximized());
+    // Windows can briefly report the private host as normal while Qt rebuilds
+    // native style/state. Retain the controller's last confirmed maximized
+    // intent; an intentional user restore clears it through the delayed stable
+    // WindowStateChange path before ordinary shutdown.
+    if(host) rememberHost(dock, host,
+                          host->isMaximized()
+                          || dock->property(kFloatingMaximized).toBool());
     QSettings settings;
     const QString prefix = settingsPrefix(dock);
     settings.setValue(prefix + QStringLiteral("maximized"),

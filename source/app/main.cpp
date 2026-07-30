@@ -1807,7 +1807,7 @@ int runHeadlessCommand(QApplication& app)
         // Native maximize restoration is asynchronous on Windows; allow the
         // real state-change event to arrive instead of making this test depend
         // on a single scheduler slice.
-        QTimer::singleShot(100, &floatingRestoreEvents, &QEventLoop::quit);
+        QTimer::singleShot(500, &floatingRestoreEvents, &QEventLoop::quit);
         floatingRestoreEvents.exec();
         const bool floatingDockMaximizedRestores = dockLabelProbe.isMaximized();
         const int paintsBeforeTabRefresh = floatingPaintProbe->paints;
