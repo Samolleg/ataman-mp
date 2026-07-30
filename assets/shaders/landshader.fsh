@@ -53,6 +53,7 @@ varying highp vec2 v_texture;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
 varying highp vec3 v_materialEmission;
+varying highp float v_materialOpacity;
 
 float unpackShadowDepth(vec4 encodedDepth)
 {
@@ -202,6 +203,7 @@ void main(void)
     }
   }
   vec4 resColor = vec4(clamp(light, 0.0, 1.0), 1.0) * texColor;
+  resColor.a *= clamp(v_materialOpacity, 0.0, 1.0);
   if (u_environmentEnabled && u_fogEnabled)
   {
     float fog = max(clamp((v_viewDepth - u_fogStart) /

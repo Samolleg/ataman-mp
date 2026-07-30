@@ -43,10 +43,12 @@ void CLandscape::unloadMpr()
     m_aTileTypes.clear();
     m_aAnimTile.clear();
     m_bDirty = false;
+    m_materialDrawDataDirty = false;
 }
 
 CLandscape::CLandscape():
   m_bDirty(false),
+  m_materialDrawDataDirty(false),
   m_canonicalTerrain(nullptr)
 {
     m_aSector.clear();
@@ -354,8 +356,27 @@ bool CLandscape::adoptCanonicalSave(const QFileInfo& path, const QByteArray& byt
     return true;
 }
 
+void CLandscape::setMaterials(const QVector<SMaterial>& arrMat)
+{
+    m_aMaterial = arrMat;
+    m_materialDrawDataDirty = true;
+}
+
+void CLandscape::refreshMaterialDrawDataIfNeeded()
+{
+    if(!m_materialDrawDataDirty)
+        return;
+
+    for(auto& sectorRow : m_aSector)
+        for(CSector* sector : sectorRow)
+            if(sector)
+                sector->updateDrawData();
+    m_materialDrawDataDirty = false;
+}
+
 void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum)
 {
+    refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
     for (auto& xSec: m_aSector)
@@ -378,6 +399,7 @@ void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum
 
 void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* frustum)
 {
+    refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
     for (auto& xSec: m_aSector)

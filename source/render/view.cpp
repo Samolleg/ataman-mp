@@ -5672,7 +5672,9 @@ void CView::draw()
         if (!m_landProgram.bind())
             close();
 
-        m_landProgram.setUniformValue("transparency", 0.3f);
+        // Overlay opacity is authored per material and carried in the sector
+        // vertex payload. Do not apply the inherited global 0.3 subtraction.
+        m_landProgram.setUniformValue("transparency", 0.0f);
         const CWorldSet* overlayWorldSet = m_environmentMob
             ? &m_environmentMob->worldSet() : nullptr;
         const QVector3D overlayWindDirection = overlayWorldSet
@@ -9003,8 +9005,8 @@ void CView::openMapParameters()
     QDoubleSpinBox* materialBlue = makeMaterialFloat(0.0, 1.0, tr("Exact stored blue tint component (0-1)."));
     QDoubleSpinBox* materialOpacity = makeMaterialFloat(0.0, 1.0, tr("Exact stored surface opacity: 0 is transparent and 1 is opaque."));
     QDoubleSpinBox* materialIllumination = makeMaterialFloat(0.0, 1000000.0, tr("Exact stored scalar self-illumination. Emitted RGB is clamp(tint RGB x illumination, 0-1). It is a material property, not a lava-texture flag."));
-    QDoubleSpinBox* materialWave = makeMaterialFloat(0.0, 1000000.0, tr("Exact stored scalar multiplier for wind-driven water displacement. It is not a vector: wind direction and strength come from the world environment."));
-    QDoubleSpinBox* materialWarp = makeMaterialFloat(-1000000.0, 1000000.0, tr("Exact stored scalar warp-speed value. The stock runtime ignores this authored value and uses a fixed 0.05 rate; Endurance preserves and displays it for compatibility."));
+    QDoubleSpinBox* materialWave = makeMaterialFloat(0.0, 1000000.0, tr("Exact stored scalar multiplier for wind-driven water displacement. It is not a vector: wind direction and strength come from the world environment. It affects both displacement amplitude and apparent wave-phase speed."));
+    QDoubleSpinBox* materialWarp = makeMaterialFloat(-1000000.0, 1000000.0, tr("Exact stored scalar warp-speed value. The confirmed gameplay path ignores this authored value and uses a fixed 0.05 lateral-warp rate. Liquids can still appear to move at different speeds because Wave multiplier also scales their wave phase."));
     materialRed->setObjectName(QStringLiteral("mprMaterialRed"));
     materialGreen->setObjectName(QStringLiteral("mprMaterialGreen"));
     materialBlue->setObjectName(QStringLiteral("mprMaterialBlue"));
@@ -9098,7 +9100,7 @@ void CView::openMapParameters()
         const double r = qBound(0.0, materialRed->value() * materialIllumination->value(), 1.0);
         const double g = qBound(0.0, materialGreen->value() * materialIllumination->value(), 1.0);
         const double b = qBound(0.0, materialBlue->value() * materialIllumination->value(), 1.0);
-        materialEffect->setText(tr("Emitted RGB: %1, %2, %3. Authored warp speed: %4 (stored but ignored by the stock runtime; effective compatibility rate is 0.05).")
+        materialEffect->setText(tr("Emitted RGB: %1, %2, %3. Stored warp speed: %4 (not used by the confirmed gameplay path; lateral warp uses 0.05). Wave multiplier also changes apparent wave-phase speed.")
             .arg(r, 0, 'f', 4).arg(g, 0, 'f', 4).arg(b, 0, 'f', 4)
             .arg(materialWarp->value(), 0, 'g', 8));
     };

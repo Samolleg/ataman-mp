@@ -83,7 +83,7 @@ public:
     uint widthInWorldUnits() const { return m_header.nXSector * 32u; }
     uint heightInWorldUnits() const { return m_header.nYSector * 32u; }
     const QVector<SMaterial>& materials() const {return m_aMaterial;}
-    void setMaterials(const QVector<SMaterial>& arrMat) {m_aMaterial = arrMat;}
+    void setMaterials(const QVector<SMaterial>& arrMat);
     const QVector<ETileType>& tileTypes() const {return m_aTileTypes;}
     void setTileTypes(const QVector<ETileType>& arrType) {m_aTileTypes = arrType;}
     const QVector<SAnimTile>& animTiles() const {return m_aAnimTile;}
@@ -107,6 +107,7 @@ private:
     ~CLandscape();
     bool readHeader(QDataStream& stream);
     bool serializeMpr(const QString& zoneName, CResFile& mprFile);
+    void refreshMaterialDrawDataIfNeeded();
 
 private:
     static CLandscape* m_pLand;
@@ -121,6 +122,7 @@ private:
     QByteArray m_originalMprData;
     QVector<int> m_arrIncorectTiles;
     bool m_bDirty;
+    bool m_materialDrawDataDirty;
     const CTerrainEditModel* m_canonicalTerrain;
 };
 
