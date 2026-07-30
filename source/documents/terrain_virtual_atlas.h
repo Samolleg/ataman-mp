@@ -46,6 +46,7 @@ struct STerrainVirtualTile
     quint16 authoredPacked{0};
     int generatedIndex{-1};
     quint8 generatedRotation{0};
+    qint32 runtimeTerrainType{-1};
 };
 
 struct STerrainAtlasUsage
@@ -66,6 +67,9 @@ struct STerrainFinalizedTile
     // record the stock JMV source used to review/reconstruct their artwork.
     QString blendProvenance;
     bool stockDerivedBlend{false};
+    // Runtime MP terrain class. This is physical-slot metadata, independent
+    // of semantic material IDs and packed rotation.
+    qint32 runtimeTerrainType{-1};
 };
 
 struct STerrainBlendMaskTemplate
@@ -142,7 +146,9 @@ public:
                          quint32 distributionSeed = 0,
                          const QMap<qint32, QImage>& externalMaterialSources = {},
                          const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles = {},
-                         bool generatedTilesOpaque = true);
+                         bool generatedTilesOpaque = true,
+                         const QVector<qint32>& sourceTileTypes = {},
+                         const QMap<qint32, qint32>& materialRuntimeTypes = {});
 
     static ETerrainBlendStyle blendStyleForMaterialName(const QString& name);
     static QString blendStyleName(ETerrainBlendStyle style);
@@ -154,7 +160,9 @@ public:
     QString error() const { return m_error; }
     STerrainVirtualTile resolve(const STerrainTransitionSignature& signature,
                                 int cellX, int cellY,
-                                CValidationReport* report = nullptr);
+                                CValidationReport* report = nullptr,
+                                qint32 preferredPaintMaterial = 0,
+                                qint32 preferredRuntimeType = -1);
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
@@ -181,7 +189,8 @@ public:
                                        int capacityLimit = kValidatedShippedTerrainAtlasSlotLimit,
                                        const QVector<qint32>& sourceTileTypes = {},
                                        CValidationReport* report = nullptr,
-                                       const QVector<quint16>& pinnedPackedTiles = {});
+                                       const QVector<quint16>& pinnedPackedTiles = {},
+                                       const QVector<qint32>& preferredCellTypes = {});
 
     static QImage composePage(const QVector<QImage>& tiles, int firstTile,
                               int tileSize);
@@ -197,6 +206,7 @@ public:
         ETerrainTileLayer layer, CValidationReport* report = nullptr);
     static STerrainPortableAtlasPackage buildWorkingPreviewPackage(
         const CMprDocument& source, const QVector<QImage>& activeTiles,
+        const QVector<qint32>& activeTileTypes,
         const QVector<QByteArray>& authoredPagePayloads,
         CValidationReport* report = nullptr);
 
@@ -219,11 +229,18 @@ private:
         const STerrainTransitionSignature& signature) const;
     int blendVariation(int cellX, int cellY,
                        ETerrainBlendStyle style, int limit) const;
+    qint32 resolvedRuntimeType(
+        const STerrainTransitionSignature& signature,
+        qint32 preferredPaintMaterial, qint32 preferredRuntimeType,
+        CValidationReport* report) const;
+    int typedTileVariant(int sourceIndex, qint32 runtimeType);
 
     const CTerrainTransitionCatalog& m_catalog;
     QVector<QImage> m_authoredTiles;
     QMap<qint32, QImage> m_materialSources;
     QMap<qint32, int> m_materialSourceSlots;
+    QVector<qint32> m_sourceTileTypes;
+    QMap<qint32, qint32> m_materialRuntimeTypes;
     QMap<qint32, ETerrainBlendStyle> m_materialBlendStyles;
     QMap<QByteArray, int> m_generatedBySignature;
     QMap<QByteArray, int> m_generatedByPixels;
@@ -249,13 +266,17 @@ public:
                          quint32 distributionSeed = 0,
                          int capacityLimit = 512,
                          const QMap<qint32, QImage>& externalMaterialSources = {},
-                         const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles = {});
+                         const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles = {},
+                         const QVector<qint32>& sourceTileTypes = {},
+                         const QMap<qint32, qint32>& materialRuntimeTypes = {});
 
     bool isValid() const;
     QString error() const;
     const CTerrainTransitionCatalog& catalog() const { return m_workingCatalog; }
     const QVector<QImage>& tileImages() const { return m_workingImages; }
     QVector<QImage> activeTileImages() const;
+    QVector<qint32> activeTileTypes() const;
+    qint32 runtimeTerrainTypeForSlot(int slot) const;
     int capacityLimit() const { return m_capacityLimit; }
     int generatedTileCount() const;
     int activeTextureCount() const;
@@ -276,7 +297,8 @@ public:
                     QMap<int, quint64>* workingUsage,
                     const QSet<int>& protectedSlots,
                     bool* generated = nullptr,
-                    CValidationReport* report = nullptr);
+                    CValidationReport* report = nullptr,
+                    qint32 preferredPaintMaterial = 0);
 
 private:
     int realize(bool generated, int sourceIndex,
@@ -290,6 +312,7 @@ private:
     CTerrainTransitionCatalog m_workingCatalog;
     QVector<QImage> m_authoredImages;
     QVector<QImage> m_workingImages;
+    QVector<qint32> m_workingTileTypes;
     QSharedPointer<CTerrainVirtualAtlas> m_resolver;
     QMap<QPair<int, int>, int> m_virtualToWorking;
     QMap<int, QPair<int, int>> m_workingToVirtual;

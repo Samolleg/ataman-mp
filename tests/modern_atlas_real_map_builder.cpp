@@ -656,6 +656,17 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         result.error = QStringLiteral("The virtual field dimensions are invalid.");
         return result;
     }
+    QVector<qint32> paintedMaterial(
+        field.tileWidth() * field.tileHeight(), base);
+    const auto markPaintedCells = [&](int vertexX, int vertexY,
+                                      int vertexWidth, int vertexHeight,
+                                      qint32 material) {
+        for(int y = qMax(0, vertexY - 1);
+            y <= qMin(field.tileHeight() - 1, vertexY + vertexHeight - 1); ++y)
+            for(int x = qMax(0, vertexX - 1);
+                x <= qMin(field.tileWidth() - 1, vertexX + vertexWidth - 1); ++x)
+                paintedMaterial[y * field.tileWidth() + x] = material;
+    };
     const int spacing = circleLayout ? 8 : 5;
     const int margin = 2;
     const int columns = qMax(1, (field.vertexWidth() - margin * 2) / spacing);
@@ -686,7 +697,10 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
             if(stampIds.at(index) == base && stampIds.size() > 1)
                 for(int y = y0; y < y0 + 7; ++y)
                     for(int x = x0; x < x0 + 7; ++x)
+                    {
                         field.setMaterial(x, y, stampIds.at(1));
+                        markPaintedCells(x, y, 1, 1, stampIds.at(1));
+                    }
             STerrainTileBrush brush;
             brush.centerX = float(x0 + 3);
             brush.centerY = float(y0 + 3);
@@ -697,6 +711,8 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                 for(int x = x0; x < x0 + 7; ++x)
                 {
                     const int dx=x-(x0+3),dy=y-(y0+3);
+                    if(dx*dx+dy*dy<=9)
+                        markPaintedCells(x, y, 1, 1, stampIds.at(index));
                     if(dx*dx+dy*dy<=9
                        &&field.material(x,y)!=stampIds.at(index))
                     {
@@ -708,9 +724,12 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                 }
         }
         else
+        {
             for(int y = y0; y < y0 + height; ++y)
                 for(int x = x0; x < x0 + width; ++x)
                     field.setMaterial(x, y, stampIds.at(index));
+            markPaintedCells(x0, y0, width, height, stampIds.at(index));
+        }
         QJsonObject stamp;
         stamp.insert(QStringLiteral("material_id"), stampIds.at(index));
         stamp.insert(QStringLiteral("material"), names.value(stampIds.at(index)));
@@ -737,9 +756,16 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
             const int x = margin + (group / 4) * 3;
             if(x + 1 >= field.vertexWidth()) break;
             field.setMaterial(x, junctionY, stampIds.at(group));
+            markPaintedCells(x, junctionY, 1, 1, stampIds.at(group));
             field.setMaterial(x + 1, junctionY, stampIds.at(group + 1));
+            markPaintedCells(x + 1, junctionY, 1, 1,
+                             stampIds.at(group + 1));
             field.setMaterial(x + 1, junctionY + 1, stampIds.at(group + 2));
+            markPaintedCells(x + 1, junctionY + 1, 1, 1,
+                             stampIds.at(group + 2));
             field.setMaterial(x, junctionY + 1, stampIds.at(group + 3));
+            markPaintedCells(x, junctionY + 1, 1, 1,
+                             stampIds.at(group + 3));
             QJsonObject junction;
             junction.insert(QStringLiteral("cell_x"), x);
             junction.insert(QStringLiteral("cell_y"), junctionY);
@@ -750,8 +776,14 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     for(auto it = names.constBegin(); it != names.constEnd(); ++it)
         blendStyles.insert(it.key(),
             CTerrainVirtualAtlas::blendStyleForMaterialName(it.value()));
+    QMap<qint32, qint32> runtimeTypes;
+    for(const STerrainGlobalMaterialFamily& family :
+            CTerrainAtlasPresetCatalog::globalUniformFamilies(&report))
+        if(family.runtimeTerrainType >= 0 && family.runtimeTerrainType < 16)
+            runtimeTypes.insert(family.id, family.runtimeTerrainType);
     CTerrainVirtualAtlas atlas(catalog, sourceAtlas.tiles, 0x4a4d5631u,
-                               externalSources, blendStyles);
+                               externalSources, blendStyles, true,
+                               document.mapInfo().tileTypes, runtimeTypes);
     QMap<QString, QImage> stockBlendExamples;
     for(int slot = 0; slot < sourceAtlas.tiles.size(); ++slot)
         stockBlendExamples.insert(
@@ -784,8 +816,13 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
             }
         }
     const QVector<quint16> pinned = pinnedOverlay(terrain);
+    QVector<qint32> preferredCellTypes;
+    preferredCellTypes.reserve(paintedMaterial.size());
+    for(qint32 material : paintedMaterial)
+        preferredCellTypes.append(runtimeTypes.value(material, -1));
     const STerrainAtlasFinalization finalized = atlas.finalize(
-        field, nameSpace, 16384, document.mapInfo().tileTypes, &report, pinned);
+        field, nameSpace, 16384, document.mapInfo().tileTypes, &report, pinned,
+        preferredCellTypes);
     if(!finalized.success)
     {
         result.error = finalized.error + QLatin1Char('\n') + report.toText();
@@ -1465,13 +1502,25 @@ BuiltMap buildPaintedExtensionRuntimeProbe(
         uniformImages.append(sourceAtlas.tiles.at(
             paintable.at(index).representativeSlot));
     }
-    CTerrainVirtualAtlas generator(uniformCatalog, uniformImages, 0x2048u);
+    QVector<qint32> uniformTypes;
+    QMap<qint32, qint32> uniformRuntimeTypes;
+    for(int index = 0; index < 2; ++index)
+    {
+        const int sourceSlot = paintable.at(index).representativeSlot;
+        const qint32 type = sourceSlot >= 0
+            && sourceSlot < controlDocument.mapInfo().tileTypes.size()
+            ? controlDocument.mapInfo().tileTypes.at(sourceSlot) : -1;
+        uniformTypes.append(type);
+        uniformRuntimeTypes.insert(paintable.at(index).id, type);
+    }
+    CTerrainVirtualAtlas generator(uniformCatalog, uniformImages, 0x2048u,
+        {}, {}, true, uniformTypes, uniformRuntimeTypes);
     STerrainTransitionSignature requested;
     requested.northWest = paintable.at(0).id;
     requested.northEast = requested.southEast = requested.southWest =
         paintable.at(1).id;
     const STerrainVirtualTile generated = generator.resolve(
-        requested, 0, 0, &report);
+        requested, 0, 0, &report, paintable.at(0).id);
     if(generated.authored || generated.generatedIndex < 0
        || generator.generatedTiles().at(generated.generatedIndex).pixels.isNull())
     {
@@ -1540,6 +1589,13 @@ BuiltMap buildPaintedExtensionRuntimeProbe(
         generator.generatedTiles().at(generated.generatedIndex).pixels;
     for(int slot = baseSlots; slot < activeSlots; ++slot)
         activeTiles.append(generatedPixels);
+    QVector<qint32> activeTileTypes;
+    activeTileTypes.reserve(activeSlots);
+    for(int slot = 0; slot < baseSlots; ++slot)
+        activeTileTypes.append(controlDocument.mapInfo().tileTypes.at(
+            slot % controlDocument.mapInfo().tileTypes.size()));
+    for(int slot = baseSlots; slot < activeSlots; ++slot)
+        activeTileTypes.append(generated.runtimeTerrainType);
     QVector<QByteArray> authoredPages;
     authoredPages.reserve(32);
     for(int page = 0; page < 32; ++page)
@@ -1547,7 +1603,8 @@ BuiltMap buildPaintedExtensionRuntimeProbe(
             page % sourceAtlas.pageMmpPayloads.size()));
     const STerrainPortableAtlasPackage package =
         CTerrainVirtualAtlas::buildWorkingPreviewPackage(
-            paintedDocument, activeTiles, authoredPages, &report);
+            paintedDocument, activeTiles, activeTileTypes,
+            authoredPages, &report);
     if(!package.success)
     {
         result.error = package.error + QLatin1Char('\n') + report.toText();
@@ -2107,12 +2164,26 @@ int main(int argc, char** argv)
         const QString directory = QDir(outputRoot).filePath(
             QStringLiteral("zone-set/")
             + QString::fromLatin1(zone.nameSpace).toLower());
-        const BuiltMap built = buildMap(sourcePath, zone.nameSpace,
+        BuiltMap built = buildMap(sourcePath, zone.nameSpace,
             localIds, globalNames, external, sourceAtlas, &assets, directory);
         if(!built.success)
         {
             err << zone.nameSpace << ": " << built.error << '\n';
             return 6;
+        }
+        const QString zoneCollectionPath = QDir(outputRoot).filePath(
+            QStringLiteral("zone-set-%1.collection")
+                .arg(QString::fromLatin1(zone.nameSpace).toLower()));
+        const QString mobReference = QString::fromLatin1(zone.file)
+            .replace(QStringLiteral(".mpr"), QStringLiteral(".mob"),
+                     Qt::CaseInsensitive);
+        if(!writeMapCollection(zoneCollectionPath, directory, &built,
+               QStringLiteral("Material stamps - %1 environment")
+                   .arg(QString::fromLatin1(zone.nameSpace)),
+               mobReference, &error))
+        {
+            err << zone.nameSpace << " collection: " << error << '\n';
+            return 9;
         }
         outputs.append(built.manifest);
         out << zone.nameSpace << ": materials=" << localIds.size()
@@ -2123,13 +2194,22 @@ int main(int argc, char** argv)
     const QString fullSource = QDir(jmvRoot).filePath(QStringLiteral("Maps/zone2.mpr"));
     const QString fullDirectory = QDir(outputRoot).filePath(
         QStringLiteral("full-game-family-stamp"));
-    const BuiltMap full = buildMap(fullSource, QStringLiteral("Zone2"),
+    BuiltMap full = buildMap(fullSource, QStringLiteral("Zone2"),
         globalLandIds, globalNames, zone2External, zone2, &assets,
         fullDirectory);
     if(!full.success)
     {
         err << "full-family: " << full.error << '\n';
         return 7;
+    }
+    const QString fullCollectionPath = QDir(outputRoot).filePath(
+        QStringLiteral("full-game-family-stamp.collection"));
+    if(!writeMapCollection(fullCollectionPath, fullDirectory, &full,
+           QStringLiteral("Every reviewed material family - Zone2 environment"),
+           QStringLiteral("zone2.mob"), &error))
+    {
+        err << "full-family collection: " << error << '\n';
+        return 9;
     }
     outputs.append(full.manifest);
     const QString stripeDirectory = QDir(outputRoot).filePath(

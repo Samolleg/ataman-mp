@@ -140,6 +140,8 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                 continue;
             const int thumbnailSlot = familyObject.value(
                 QStringLiteral("thumbnailSlot")).toInt(-1);
+            const qint32 runtimeTerrainType = familyObject.value(
+                QStringLiteral("tileType")).toInt(-1);
             // A brush may only come from the reviewed pure anchor selected for
             // the family. Falling back to any tuple merely labelled uniform
             // allowed visually mixed transition imagery to leak into the
@@ -174,6 +176,7 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                     global.layer = layer;
                     global.id = globalMaterialId(global.name, layer,
                                                  atlasIdentity, localId);
+                    global.runtimeTerrainType = runtimeTerrainType;
                     const QString previous = identityKeys.value(global.id);
                     if(!previous.isEmpty() && previous != key)
                     {
@@ -184,6 +187,23 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                         continue;
                     }
                     identityKeys.insert(global.id, key);
+                }
+                else if(global.runtimeTerrainType != runtimeTerrainType)
+                {
+                    if(report) report->add(
+                        "terrain.global_family_runtime_type_conflict",
+                        EValidationSeverity::Warning,
+                        "Excluded a visual variation whose runtime terrain type disagrees with its paint material",
+                        QStringLiteral("%1: kept %2, excluded %3 from %4 slot %5")
+                            .arg(global.name)
+                            .arg(global.runtimeTerrainType)
+                            .arg(runtimeTerrainType)
+                            .arg(mprNamespace)
+                            .arg(uniformSlot));
+                    // A brush has one reviewed gameplay identity. Retaining a
+                    // visually similar source with a different MP class would
+                    // make traversal/ambience vary randomly between strokes.
+                    continue;
                 }
                 bool duplicate = false;
                 for(const STerrainGlobalMaterialSource& source : global.sources)

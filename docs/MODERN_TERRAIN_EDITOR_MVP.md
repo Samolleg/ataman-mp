@@ -33,6 +33,22 @@ orientation is explicit. Quarter-turn-equivalent signatures and identical
 pixels are deduplicated, and page mipmaps use premultiplied downsampling.
 DXT1 binary alpha is preserved; graded alpha is refused rather than flattened.
 
+Every physical atlas slot also carries the signed MP terrain-class entry used
+by ambience and AI traversal generation. Editor material IDs remain separate
+from these runtime IDs (0..15). Generated transitions use equal corner
+coverage: a majority runtime class wins, while an exact tie uses the class of
+the material being painted. That decision is stored with the generated
+identity and is independent of rotation. Pixel deduplication therefore keys on
+both encoded pixels and runtime class; visually identical slots remain
+separate when their gameplay class differs. Unknown classes refuse generation
+instead of silently becoming Grass, and the live working package carries the
+same class vector that finalization writes.
+
+Grouped visual variations are admitted to one paint material only when their
+reviewed MP runtime class agrees. A conflicting source variation is excluded
+with a validation warning, preventing randomized strokes from silently
+changing ambience or traversal behavior.
+
 Only map-wide used slots plus slots referenced by the preserved opposite layer
 survive dense repacking. Every SEC reference is remapped. Painting remains
 independent of physical capacity. Finalization currently accepts up to 1,024
@@ -58,7 +74,12 @@ materials with compact-square, horizontal, vertical, and both diagonal paint
 shapes, plus three- and four-family junctions. Its oracle compares every saved
 cell's exact four semantic corners with the authoritative intended vertex
 field, checks shared-edge continuity and mandatory touched vertices, repeats
-finalization for stable hashes, and loads every generated MPR again.
+finalization for stable hashes, and loads every generated MPR again. Dedicated
+runtime-class regressions cover majority resolution, painted-material ties,
+rotation independence, typed pixel deduplication, unknown-class refusal, and
+working-preview propagation. Terrain strokes also schedule regeneration of an
+already-generated AI graph preview; a loaded authored graph remains a static
+user-selected override.
 
 The distributable visual workload is a real-JMV Zone2 stripe collection. It
 stamps every reviewed uniform family, forces missing multi-family junctions,

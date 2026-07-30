@@ -755,8 +755,21 @@ void CTerrainEditModel::enableWorkingAtlasSlots(int slotCount)
     const int bounded = qBound(0, slotCount, 16384);
     if(bounded <= m_tileTypes.size())
         return;
+    const int previous = m_tileTypes.size();
     m_tileTypes.resize(bounded);
+    for(int slot = previous; slot < bounded; ++slot)
+        m_tileTypes[slot] = -1;
     m_textureCount = qMax(m_textureCount, (bounded + 63) / 64);
+}
+
+bool CTerrainEditModel::setWorkingAtlasSlotType(
+    int slot, qint32 runtimeTerrainType)
+{
+    if(slot < 0 || slot >= m_tileTypes.size()
+       || runtimeTerrainType < 0 || runtimeTerrainType >= 16)
+        return false;
+    m_tileTypes[slot] = runtimeTerrainType;
+    return true;
 }
 
 int CTerrainEditModel::globalIndex(int x, int y) const
@@ -892,7 +905,8 @@ quint16 CTerrainEditModel::packedTile(int globalX, int globalY,
 qint32 CTerrainEditModel::tileType(quint16 packed, bool* found) const
 {
     const int slot = SMprPackedTile::decode(packed).atlasSlot();
-    const bool present = slot >= 0 && slot < m_tileTypes.size();
+    const bool present = slot >= 0 && slot < m_tileTypes.size()
+        && m_tileTypes.at(slot) >= 0 && m_tileTypes.at(slot) < 16;
     if(found)
         *found = present;
     return present ? m_tileTypes.at(slot) : 0;

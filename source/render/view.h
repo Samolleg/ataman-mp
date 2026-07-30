@@ -345,7 +345,8 @@ private:
     bool realizeWorkingTerrainSignature(
         const STerrainTransitionSignature& signature, int cellX, int cellY,
         QMap<int, quint64>* usage, CValidationReport* report,
-        bool* generated = nullptr);
+        bool* generated = nullptr,
+        qint32 preferredPaintMaterial = 0);
     bool syncWorkingTerrainAtlas(CValidationReport* report);
     void reviewTerrainAtlasProfile();
     void finalizeVirtualTerrainAtlas();

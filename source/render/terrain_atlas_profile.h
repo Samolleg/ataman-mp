@@ -60,6 +60,7 @@ struct STerrainGlobalMaterialFamily
     QString name;
     QString theme;
     ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
+    qint32 runtimeTerrainType{-1};
     QVector<STerrainGlobalMaterialSource> sources;
 };
 

@@ -342,6 +342,7 @@ public:
                      const QVector<qint32>& tileTypes = QVector<qint32>(),
                      int materialCount = 0);
     void enableWorkingAtlasSlots(int slotCount);
+    bool setWorkingAtlasSlotType(int slot, qint32 runtimeTerrainType);
 
     int vertexCountX() const { return m_vertexCountX; }
     int vertexCountY() const { return m_vertexCountY; }

@@ -5869,7 +5869,11 @@ void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots(
         source.fill(QColor(material * 45, 30 + material * 20, 180));
         sources.insert(material, source);
     }
-    CTerrainWorkingAtlas working(authored, tiles, 77u, 1024, sources);
+    QVector<qint32> tileTypes(tiles.size(), 0);
+    const QMap<qint32, qint32> materialTypes = {
+        {1, 1}, {2, 2}, {3, 3}, {4, 4}};
+    CTerrainWorkingAtlas working(authored, tiles, 77u, 1024, sources, {},
+                                 tileTypes, materialTypes);
     QImage reviewedMaskPixels(16, 16, QImage::Format_RGBA8888);
     for(int y = 0; y < reviewedMaskPixels.height(); ++y)
         for(int x = 0; x < reviewedMaskPixels.width(); ++x)
@@ -5898,7 +5902,7 @@ void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots(
     CValidationReport report;
     bool generated = false;
     const quint16 packed = working.resolve(
-        fourFamily, 10, 20, &usage, {}, &generated, &report);
+        fourFamily, 10, 20, &usage, {}, &generated, &report, 1);
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QVERIFY(generated);
     QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(), 512);

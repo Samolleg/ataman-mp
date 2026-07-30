@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 
 #include "endurance_document.h"
@@ -29,6 +30,15 @@ QByteArray imageHash(const QImage& image)
         hash.addData(reinterpret_cast<const char*>(rgba.constScanLine(y)),
                      rgba.bytesPerLine());
     return hash.result().toHex();
+}
+
+QByteArray typedPixelKey(const QByteArray& pixelHash, qint32 runtimeType)
+{
+    QByteArray key = pixelHash;
+    char bytes[4];
+    qToLittleEndian<qint32>(runtimeType, reinterpret_cast<uchar*>(bytes));
+    key.append(bytes, 4);
+    return key;
 }
 
 QVector<qint32> corners(const STerrainTransitionSignature& signature)
@@ -118,52 +128,13 @@ QImage cleanAnchoredMask(const QImage& source,
     for(int corner = 0; corner < 4 && corner < ownerCorners.size(); ++corner)
         binary[cornerIndices[corner]] = ownerCorners.at(corner) ? 1 : 0;
 
-    // A valid two-material transition owns only regions connected to one of
-    // that material's requested corners. Size alone is insufficient: a large
-    // detached block creates the square notches/crosses visible around a
-    // circular stroke. Apply the same rule to support regions so large holes
-    // cannot survive either.
-    for(int value = 0; value <= 1; ++value)
-    {
-        QVector<quint8> anchored(count, 0);
-        QVector<int> queue;
-        for(int corner = 0; corner < 4 && corner < ownerCorners.size(); ++corner)
-            if(binary[cornerIndices[corner]] == value)
-            {
-                anchored[cornerIndices[corner]] = 1;
-                queue.append(cornerIndices[corner]);
-            }
-        for(int cursor = 0; cursor < queue.size(); ++cursor)
-        {
-            const int index = queue.at(cursor);
-            const int x = index % width;
-            const int y = index / width;
-            const int neighbours[4] = {index - 1, index + 1,
-                                        index - width, index + width};
-            for(int direction = 0; direction < 4; ++direction)
-            {
-                if((direction == 0 && x == 0)
-                   || (direction == 1 && x + 1 == width)
-                   || (direction == 2 && y == 0)
-                   || (direction == 3 && y + 1 == height))
-                    continue;
-                const int next = neighbours[direction];
-                if(!anchored[next] && binary[next] == value)
-                {
-                    anchored[next] = 1;
-                    queue.append(next);
-                }
-            }
-        }
-        for(int index = 0; index < count; ++index)
-            if(binary[index] == value && !anchored[index])
-                binary[index] = quint8(1 - value);
-    }
-
-    // Remove both tiny owner islands and tiny support pinholes. The threshold
-    // scales with authored resolution: 8x8 fixtures retain their shape while
-    // 256px JMV masks reject the grain-sized components seen in generated art.
-    const int minimumArea = qMax(3, count / 1024);
+    // Preserve stock-authored chips, strands and gravel clumps while removing
+    // both DXT grain and the large detached square regions which caused the
+    // reported inside-corner crosses. Corner-connected regions are always
+    // authoritative. Detached regions survive only in the substantial-detail
+    // band; this is deliberately area based, not a blanket flood-fill erase.
+    const int minimumArea = qMax(3, count / 4096);
+    const int maximumDetachedArea = qMax(minimumArea, count / 32);
     for(int pass = 0; pass < 2; ++pass)
     {
         QVector<quint8> visited(count, 0);
@@ -174,9 +145,12 @@ QImage cleanAnchoredMask(const QImage& source,
             QVector<int> component;
             component.append(start);
             visited[start] = 1;
+            bool anchored = false;
             for(int cursor = 0; cursor < component.size(); ++cursor)
             {
                 const int index = component.at(cursor);
+                for(int corner = 0; corner < 4; ++corner)
+                    anchored = anchored || index == cornerIndices[corner];
                 const int x = index % width;
                 const int y = index / width;
                 const int neighbours[4] = {index - 1, index + 1,
@@ -196,7 +170,8 @@ QImage cleanAnchoredMask(const QImage& source,
                     }
                 }
             }
-            if(component.size() < minimumArea)
+            if(!anchored && (component.size() < minimumArea
+                             || component.size() > maximumDetachedArea))
                 for(int index : component) binary[index] = !value;
         }
     }
@@ -215,39 +190,77 @@ QImage cleanAnchoredMask(const QImage& source,
                 ? quint8(authored) : quint8(binary[index] ? 255 : 0);
         }
 
-    // Smooth the cleaned authored ramp enough to reject isolated DXT grain,
-    // while preserving substantial material shapes and the original gradient.
-    const int radius = qMin(width, height) < 32
-        ? 0 : qBound(1, qMin(width, height) / 64, 4);
-    QVector<int> integral((width + 1) * (height + 1), 0);
-    for(int y = 0; y < height; ++y)
-    {
-        int row = 0;
-        for(int x = 0; x < width; ++x)
-        {
-            row += cleaned[y * width + x];
-            integral[(y + 1) * (width + 1) + x + 1] =
-                integral[y * (width + 1) + x + 1] + row;
-        }
-    }
+    // Stock art already carries its authored tonal ramp. Do not box-blur it:
+    // at 256px the old radius-four pass visibly downrezzed crisp masks and
+    // erased the small shapes the review explicitly asked us to retain.
     QImage result(source.size(), QImage::Format_Grayscale8);
     for(int y = 0; y < height; ++y)
         for(int x = 0; x < width; ++x)
         {
-            const int x0 = qMax(0, x - radius);
-            const int y0 = qMax(0, y - radius);
-            const int x1 = qMin(width - 1, x + radius);
-            const int y1 = qMin(height - 1, y + radius);
-            const int stride = width + 1;
-            const int sum = integral[(y1 + 1) * stride + x1 + 1]
-                - integral[y0 * stride + x1 + 1]
-                - integral[(y1 + 1) * stride + x0]
-                + integral[y0 * stride + x0];
-            const int samples = (x1 - x0 + 1) * (y1 - y0 + 1);
-            const int value = sum / qMax(1, samples);
+            const int value = cleaned[y * width + x];
             result.setPixelColor(x, y, QColor(value, value, value));
         }
     return result;
+}
+
+bool reviewedMaskRejected(const QString& source, ETerrainBlendStyle ownerStyle,
+                          bool sameStyle)
+{
+    const auto normalizedLabel = [](QString value) {
+        value.remove(QLatin1Char(' '));
+        value.replace(QStringLiteral("slot"), QStringLiteral(":"),
+                      Qt::CaseInsensitive);
+        return value;
+    };
+    const QString normalizedSource = normalizedLabel(source);
+    const auto matches = [&normalizedSource, &normalizedLabel](const char* suffix) {
+        return normalizedSource.endsWith(
+            normalizedLabel(QString::fromLatin1(suffix)), Qt::CaseInsensitive);
+    };
+    const auto any = [&matches](std::initializer_list<const char*> values) {
+        for(const char* value : values) if(matches(value)) return true;
+        return false;
+    };
+    // Decisions exported from the user's r31 review. A source rejected for a
+    // cross-family transfer is excluded throughout that visual style. Sources
+    // that were acceptable cross-family but failed same-style transfer are
+    // excluded only for the latter selection pool.
+    switch(ownerStyle)
+    {
+    case ETerrainBlendStyle::Ice:
+        if(any({"bz11k:204", "Zone6_2:58", "bz11k:408",
+                "Zone6_2:285", "Zone6_2:54"})) return true;
+        return sameStyle && any({"Zone6_2:296", "Zone6_2:60"});
+    case ETerrainBlendStyle::Sand:
+        if(any({"bz4g:449", "bz5g:482", "Zone7:497", "bz4g:401",
+                "Zone13:442", "bz4g:495", "bz5g:431"})) return true;
+        return sameStyle && any({"bz13h:101", "Zone7:125", "Zone7:423",
+                                 "Zone7:165", "bz13h:418"});
+    case ETerrainBlendStyle::Gravel:
+        return sameStyle && any({"Zone6:300", "Zone6:301", "Zone6:216",
+                                 "bz14h:223", "Zone6:231", "Zone6:398"});
+    case ETerrainBlendStyle::Stone:
+        if(matches("BaseGipat:320")) return true;
+        return sameStyle && any({"Bz7g:11", "Bz7g:12", "Bz7g:134",
+                                 "Bz7g:217"});
+    case ETerrainBlendStyle::Grass:
+        if(any({"Zone7:216", "Zone7:160", "Zone7:122", "Zone7:123"}))
+            return true;
+        return sameStyle && any({"BaseGipat:100", "BaseGipat:101",
+            "BaseGipat:128", "BaseGipat:129", "BaseGipat:384",
+            "BaseGipat:192", "BaseGipat:193", "Zone6:290",
+            "Zone6:291", "Zone6:420"});
+    case ETerrainBlendStyle::Snow:
+        if(matches("bz10k:290")) return true;
+        return sameStyle && any({"bz10k:211", "bz10k:194", "Zone13:233",
+                                 "bz10k:202", "bz10k:234"});
+    case ETerrainBlendStyle::Paving:
+        if(any({"Zone10:383", "Zone10:182", "Zone10:183"})) return true;
+        return sameStyle && any({"Zone10:282", "Zone10:283", "Zone10:114",
+                                 "Zone10:115", "Zone10:395"});
+    default:
+        return false;
+    }
 }
 
 QImage opaqueTerrainMaterialSource(const QImage& source)
@@ -540,8 +553,11 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
     const QVector<QImage>& authoredTiles, quint32 distributionSeed,
     const QMap<qint32, QImage>& externalMaterialSources,
     const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles,
-    bool generatedTilesOpaque)
+    bool generatedTilesOpaque, const QVector<qint32>& sourceTileTypes,
+    const QMap<qint32, qint32>& materialRuntimeTypes)
     : m_catalog(catalog), m_authoredTiles(authoredTiles),
+      m_sourceTileTypes(sourceTileTypes),
+      m_materialRuntimeTypes(materialRuntimeTypes),
       m_materialBlendStyles(materialBlendStyles),
       m_distributionSeed(distributionSeed),
       m_generatedTilesOpaque(generatedTilesOpaque)
@@ -582,6 +598,12 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
                     : authoredTiles.at(slot).convertToFormat(
                         QImage::Format_RGBA8888));
                 m_materialSourceSlots.insert(material,slot);
+                if(!m_materialRuntimeTypes.contains(material)
+                   && slot < m_sourceTileTypes.size()
+                   && m_sourceTileTypes.at(slot) >= 0
+                   && m_sourceTileTypes.at(slot) < 16)
+                    m_materialRuntimeTypes.insert(
+                        material, m_sourceTileTypes.at(slot));
             }
         }
     }
@@ -794,6 +816,28 @@ bool CTerrainVirtualAtlas::registerBlendMaskTemplate(
         mask.setPixelColor(points[corner], previewCorners.at(corner) == owner
             ? Qt::white : Qt::black);
 
+    int ownedPixels = 0;
+    for(int y = 0; y < mask.height(); ++y)
+        for(int x = 0; x < mask.width(); ++x)
+            ownedPixels += mask.pixelColor(x, y).red() >= 128;
+    const double ownedFraction = double(ownedPixels)
+        / double(qMax(1, mask.width() * mask.height()));
+    int ownedCorners = 0;
+    for(bool owned : ownerCorners) ownedCorners += owned;
+    const double minimumOwned = ownedCorners == 1 ? 0.01
+        : ownedCorners == 2 ? 0.05 : 0.20;
+    const double maximumOwned = ownedCorners == 1 ? 0.80
+        : ownedCorners == 2 ? 0.95 : 0.99;
+    if(ownedFraction < minimumOwned || ownedFraction > maximumOwned)
+    {
+        if(report) report->add("terrain.stock_blend_mask_rejected",
+            EValidationSeverity::Warning,
+            "Rejected a degenerate near-solid stock transition mask",
+            QStringLiteral("%1 (%2% owner)").arg(sourceLabel)
+                .arg(qRound(ownedFraction * 100.0)));
+        return true;
+    }
+
     STerrainBlendMaskTemplate candidate;
     candidate.signature = signature;
     candidate.ownershipMask = mask;
@@ -862,6 +906,9 @@ QImage CTerrainVirtualAtlas::alignedStockMask(
                     ? item.otherStyle : item.ownerStyle;
                 const ETerrainBlendStyle mappedOtherStyle = inverted
                     ? item.ownerStyle : item.otherStyle;
+                if(reviewedMaskRejected(item.sourceLabel, mappedOwnerStyle,
+                                        mappedOwnerStyle == mappedOtherStyle))
+                    break;
                 const bool exactPair = mappedOwner == ownerMaterial
                     && mappedOther == otherMaterial;
                 const bool exactStyles = mappedOwnerStyle == ownerStyle
@@ -1144,7 +1191,8 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     imported.stockDerivedBlend = true;
     const int generatedIndex = m_generatedTiles.size();
     m_generatedTiles.append(imported);
-    m_generatedByPixels.insert(imported.pixelSha256, generatedIndex);
+    m_generatedByPixels.insert(typedPixelKey(imported.pixelSha256, -1),
+                               generatedIndex);
     m_authoredLibraryGeneratedIndices.append(generatedIndex);
     for(int rotation = 0; rotation < 4; ++rotation)
     {
@@ -1162,9 +1210,73 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     return true;
 }
 
+qint32 CTerrainVirtualAtlas::resolvedRuntimeType(
+    const STerrainTransitionSignature& signature,
+    qint32 preferredPaintMaterial, qint32 preferredRuntimeType,
+    CValidationReport* report) const
+{
+    QMap<qint32, int> coverage;
+    for(qint32 material : corners(signature))
+    {
+        const qint32 type = m_materialRuntimeTypes.value(material, -1);
+        if(type < 0 || type >= 16)
+        {
+            if(report) report->add("terrain.generated_type_unknown",
+                EValidationSeverity::Error,
+                "A generated terrain identity has no reviewed runtime terrain type",
+                QStringLiteral("semantic material %1").arg(material));
+            return -1;
+        }
+        ++coverage[type];
+    }
+    int maximum = 0;
+    QVector<qint32> tied;
+    for(auto it = coverage.cbegin(); it != coverage.cend(); ++it)
+    {
+        if(it.value() > maximum)
+        {
+            maximum = it.value();
+            tied = {it.key()};
+        }
+        else if(it.value() == maximum)
+            tied.append(it.key());
+    }
+    if(tied.size() == 1)
+        return tied.front();
+    qint32 tieType = preferredRuntimeType;
+    if(tieType < 0 && preferredPaintMaterial != 0)
+        tieType = m_materialRuntimeTypes.value(preferredPaintMaterial, -1);
+    if(tied.contains(tieType))
+        return tieType;
+    if(report) report->add("terrain.generated_type_tie",
+        EValidationSeverity::Error,
+        "An equal-coverage generated transition requires the runtime type of the material currently being painted");
+    return -1;
+}
+
+int CTerrainVirtualAtlas::typedTileVariant(int sourceIndex, qint32 runtimeType)
+{
+    if(sourceIndex < 0 || sourceIndex >= m_generatedTiles.size()
+       || runtimeType < 0 || runtimeType >= 16)
+        return -1;
+    if(m_generatedTiles.at(sourceIndex).runtimeTerrainType == runtimeType)
+        return sourceIndex;
+    const QByteArray key = typedPixelKey(
+        m_generatedTiles.at(sourceIndex).pixelSha256, runtimeType);
+    const int existing = m_generatedByPixels.value(key, -1);
+    if(existing >= 0) return existing;
+    STerrainFinalizedTile variant = m_generatedTiles.at(sourceIndex);
+    variant.runtimeTerrainType = runtimeType;
+    const int index = m_generatedTiles.size();
+    m_generatedTiles.append(variant);
+    m_generatedByPixels.insert(key, index);
+    return index;
+}
+
 STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
-    CValidationReport* report)
+    CValidationReport* report, qint32 preferredPaintMaterial,
+    qint32 preferredRuntimeType)
 {
     STerrainVirtualTile result;
     result.signature = signature;
@@ -1181,8 +1293,16 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     {
         result.authored = true;
         result.authoredPacked = packed;
+        const int slot = SMprPackedTile::decode(packed).atlasSlot();
+        result.runtimeTerrainType = slot >= 0 && slot < m_sourceTileTypes.size()
+            ? m_sourceTileTypes.at(slot) : -1;
         return result;
     }
+
+    const qint32 runtimeType = resolvedRuntimeType(
+        signature, preferredPaintMaterial, preferredRuntimeType, report);
+    if(runtimeType < 0)
+        return result;
 
     bool libraryAuthored = false;
     const quint16 libraryPacked = m_authoredLibraryCatalog.selectForPaint(
@@ -1195,9 +1315,10 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
            && libraryIndex < m_authoredLibraryGeneratedIndices.size())
         {
             result.importedAuthored = true;
-            result.generatedIndex =
-                m_authoredLibraryGeneratedIndices.at(libraryIndex);
+            result.generatedIndex = typedTileVariant(
+                m_authoredLibraryGeneratedIndices.at(libraryIndex), runtimeType);
             result.generatedRotation = decoded.rotation;
+            result.runtimeTerrainType = runtimeType;
             return result;
         }
     }
@@ -1211,6 +1332,10 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     QByteArray key = signatureKey(canonical);
     key.append(char(terrainBlendStylePriority(style)));
     key.append(char(variation));
+    char typeBytes[4];
+    qToLittleEndian<qint32>(runtimeType,
+        reinterpret_cast<uchar*>(typeBytes));
+    key.append(typeBytes, 4);
     int index = m_generatedBySignature.value(key, -1);
     if(index < 0)
     {
@@ -1220,7 +1345,8 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
         if(pixels.isNull())
             return result;
         const QByteArray pixelsHash = imageHash(pixels);
-        index = m_generatedByPixels.value(pixelsHash, -1);
+        index = m_generatedByPixels.value(
+            typedPixelKey(pixelsHash, runtimeType), -1);
         if(index < 0)
         {
             STerrainFinalizedTile generated;
@@ -1232,14 +1358,17 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
             QSet<qint32> generatedMaterials;
             for(qint32 id : corners(canonical)) generatedMaterials.insert(id);
             generated.stockDerivedBlend = generatedMaterials.size() > 1;
+            generated.runtimeTerrainType = runtimeType;
             index = m_generatedTiles.size();
             m_generatedTiles.append(generated);
-            m_generatedByPixels.insert(pixelsHash, index);
+            m_generatedByPixels.insert(
+                typedPixelKey(pixelsHash, runtimeType), index);
         }
         m_generatedBySignature.insert(key, index);
     }
     result.generatedIndex = index;
     result.generatedRotation = rotation;
+    result.runtimeTerrainType = runtimeType;
     return result;
 }
 
@@ -1305,7 +1434,8 @@ bool CTerrainVirtualAtlas::decodePhysicalTileImages(
 STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     const CTerrainVirtualMaterialField& field, const QString& sourceNamespace,
     int capacityLimit, const QVector<qint32>& sourceTileTypes,
-    CValidationReport* report,const QVector<quint16>& pinnedPackedTiles)
+    CValidationReport* report,const QVector<quint16>& pinnedPackedTiles,
+    const QVector<qint32>& preferredCellTypes)
 {
     STerrainAtlasFinalization result;
     result.capacityLimit = capacityLimit;
@@ -1327,7 +1457,11 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     {
         for(int x = 0; x < field.tileWidth(); ++x)
         {
-            const STerrainVirtualTile tile = resolve(field.cellSignature(x, y), x, y, report);
+            const int cellIndex = y * field.tileWidth() + x;
+            const qint32 preferredType = cellIndex < preferredCellTypes.size()
+                ? preferredCellTypes.at(cellIndex) : -1;
+            const STerrainVirtualTile tile = resolve(
+                field.cellSignature(x, y), x, y, report, 0, preferredType);
             if(!tile.authored && tile.generatedIndex < 0)
             {
                 result.error = QStringLiteral(
@@ -1356,6 +1490,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
                     output.sourceSlot = sourceSlot;
                     output.pixels = m_authoredTiles.at(sourceSlot);
                     output.pixelSha256 = imageHash(output.pixels);
+                    output.runtimeTerrainType = sourceSlot < sourceTileTypes.size()
+                        ? sourceTileTypes.at(sourceSlot) : -1;
                     bool found = false;
                     SMprPackedTile basePacked;
                     basePacked.tileIndex = quint8(sourceSlot % 64);
@@ -1389,6 +1525,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         denseImages.append(m_authoredTiles.at(sourceSlot));
         STerrainFinalizedTile output;output.authored=true;output.sourceSlot=sourceSlot;
         output.pixels=m_authoredTiles.at(sourceSlot);output.pixelSha256=imageHash(output.pixels);
+        output.runtimeTerrainType=sourceSlot<sourceTileTypes.size()
+            ?sourceTileTypes.at(sourceSlot):-1;
         SMprPackedTile base;base.tileIndex=quint8(sourceSlot%64);base.atlasIndex=quint8(sourceSlot/64);
         bool found=false;output.canonicalSignature=m_catalog.gridSignatureForPacked(base.encode(),&found);
         result.tiles.append(output);
@@ -1431,10 +1569,19 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     result.tileTypes.reserve(result.tiles.size());
     for(const STerrainFinalizedTile& tile : result.tiles)
     {
-        const int typeSource=tile.authored?tile.sourceSlot
-            :m_materialSourceSlots.value(tile.canonicalSignature.northWest,-1);
-        result.tileTypes.append(typeSource>=0&&typeSource<sourceTileTypes.size()
-            ?sourceTileTypes.at(typeSource):qint32(0));
+        const qint32 type = tile.runtimeTerrainType;
+        if(type < 0 || type >= 16)
+        {
+            result.error = QStringLiteral(
+                "A finalized physical atlas slot has no reviewed runtime terrain type.");
+            if(report) report->add("terrain.finalized_type_unknown",
+                EValidationSeverity::Error, result.error,
+                tile.authored
+                    ? QStringLiteral("source slot %1").arg(tile.sourceSlot)
+                    : QString::fromLatin1(tile.pixelSha256));
+            return result;
+        }
+        result.tileTypes.append(type);
     }
     const int tileSize = denseImages.front().width();
     result.textureCount = (denseImages.size() + 63) / 64;
@@ -1456,7 +1603,13 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     stable.addData(sourceNamespace.toUtf8().toLower());
     stable.addData(field.stableSha256());
     for(const STerrainFinalizedTile& tile : result.tiles)
+    {
         stable.addData(tile.pixelSha256);
+        char typeBytes[4];
+        qToLittleEndian<qint32>(tile.runtimeTerrainType,
+            reinterpret_cast<uchar*>(typeBytes));
+        stable.addData(typeBytes, 4);
+    }
     for(quint16 packed : result.packedCells)
     {
         char bytes[2];
@@ -1655,6 +1808,7 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
 
 STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
     const CMprDocument& source, const QVector<QImage>& activeTiles,
+    const QVector<qint32>& activeTileTypes,
     const QVector<QByteArray>& authoredPagePayloads,
     CValidationReport* report)
 {
@@ -1663,7 +1817,8 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
     if(!map.valid || activeTiles.isEmpty() || activeTiles.size() % 64 != 0
        || activeTiles.size() > kMprPackedTerrainAtlasSlotLimit
        || authoredPagePayloads.size() != int(map.textureCount)
-       || activeTiles.size() < int(map.tileCount))
+       || activeTiles.size() < int(map.tileCount)
+       || activeTileTypes.size() != activeTiles.size())
     {
         result.error = QStringLiteral(
             "The working terrain atlas does not match the staged MPR baseline.");
@@ -1698,8 +1853,17 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
         result.error = QStringLiteral("The staged MP tile-type array is truncated.");
         return result;
     }
-    QVector<qint32> tileTypes = map.tileTypes;
-    tileTypes.resize(activeTiles.size());
+    const QVector<qint32> tileTypes = activeTileTypes;
+    for(int slot = 0; slot < tileTypes.size(); ++slot)
+        if(tileTypes.at(slot) < 0 || tileTypes.at(slot) >= 16)
+        {
+            result.error = QStringLiteral(
+                "Working atlas slot %1 has no reviewed runtime terrain type; staging was refused.")
+                .arg(slot);
+            if(report) report->add("terrain.working_type_unknown",
+                EValidationSeverity::Error, result.error);
+            return result;
+        }
     QByteArray replacementMp = originalMp.left(tileTypeOffset);
     for(qint32 type : tileTypes)
     {
@@ -1817,9 +1981,12 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     const QVector<QImage>& authoredTiles, quint32 distributionSeed,
     int capacityLimit,
     const QMap<qint32, QImage>& externalMaterialSources,
-    const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles)
+    const QMap<qint32, ETerrainBlendStyle>& materialBlendStyles,
+    const QVector<qint32>& sourceTileTypes,
+    const QMap<qint32, qint32>& materialRuntimeTypes)
     : m_authoredCatalog(authoredCatalog), m_workingCatalog(authoredCatalog),
       m_authoredImages(authoredTiles), m_workingImages(authoredTiles),
+      m_workingTileTypes(sourceTileTypes),
       m_capacityLimit(qBound(authoredTiles.size(), capacityLimit,
                              kMprPackedTerrainAtlasSlotLimit))
 {
@@ -1831,9 +1998,13 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
         for(int slot = authoredTiles.size(); slot < m_workingImages.size(); ++slot)
             m_workingImages[slot] = blank;
     }
+    m_workingTileTypes.resize(m_capacityLimit);
+    for(int slot = sourceTileTypes.size(); slot < m_workingTileTypes.size(); ++slot)
+        m_workingTileTypes[slot] = -1;
     m_resolver.reset(new CTerrainVirtualAtlas(
         m_authoredCatalog, m_authoredImages, distributionSeed,
-        externalMaterialSources, materialBlendStyles));
+        externalMaterialSources, materialBlendStyles, true,
+        sourceTileTypes, materialRuntimeTypes));
     for(int slot = 0; slot < m_authoredImages.size(); ++slot)
     {
         const QPair<int, int> key(0, slot);
@@ -1894,6 +2065,17 @@ QVector<QImage> CTerrainWorkingAtlas::activeTileImages() const
     return m_workingImages.mid(0, activeTextureCount() * 64);
 }
 
+QVector<qint32> CTerrainWorkingAtlas::activeTileTypes() const
+{
+    return m_workingTileTypes.mid(0, activeTextureCount() * 64);
+}
+
+qint32 CTerrainWorkingAtlas::runtimeTerrainTypeForSlot(int slot) const
+{
+    return slot >= 0 && slot < m_workingTileTypes.size()
+        ? m_workingTileTypes.at(slot) : -1;
+}
+
 QSet<int> CTerrainWorkingAtlas::takeChangedSlots()
 {
     const QSet<int> result = m_changedSlots;
@@ -1952,6 +2134,17 @@ int CTerrainWorkingAtlas::realize(
         return -1;
     }
     m_workingImages[workingSlot] = pixels;
+    const qint32 runtimeType = generated
+        ? m_resolver->generatedTiles().value(sourceIndex).runtimeTerrainType
+        : m_workingTileTypes.value(sourceIndex, -1);
+    if(runtimeType < 0 || runtimeType >= 16)
+    {
+        if(report) report->add("terrain.working_type_unknown",
+            EValidationSeverity::Error,
+            "The exact transition has no reviewed runtime terrain type.");
+        return -1;
+    }
+    m_workingTileTypes[workingSlot] = runtimeType;
     m_virtualToWorking.insert(key, workingSlot);
     m_workingToVirtual.insert(workingSlot, key);
     installCatalogVariants(generated, sourceIndex, workingSlot);
@@ -2007,7 +2200,8 @@ void CTerrainWorkingAtlas::installCatalogVariants(
 quint16 CTerrainWorkingAtlas::resolve(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     QMap<int, quint64>* workingUsage, const QSet<int>& protectedSlots,
-    bool* generated, CValidationReport* report)
+    bool* generated, CValidationReport* report,
+    qint32 preferredPaintMaterial)
 {
     if(generated)
         *generated = false;
@@ -2018,7 +2212,7 @@ quint16 CTerrainWorkingAtlas::resolve(
         return 0;
     }
     const STerrainVirtualTile tile = m_resolver->resolve(
-        signature, cellX, cellY, report);
+        signature, cellX, cellY, report, preferredPaintMaterial);
     const bool isGenerated = !tile.authored;
     const int sourceIndex = tile.authored
         ? SMprPackedTile::decode(tile.authoredPacked).atlasSlot()
