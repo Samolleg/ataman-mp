@@ -13,9 +13,6 @@ history. The permanent safety and compatibility rules are in
 
 ## Authoring and workflow
 
-- [x] Add a dockable current-session Message Log with severity and text filters,
-  bottom-console layout, configurable shortcut, and shared hidden-dock edge tabs;
-  retain the complete rotating text log as the authoritative record.
 - [ ] Complete a property-label and terminology pass against the English/Russian
   object manuals and verified runtime meanings. Keep this presentation-only
   unless a separately tested data-model correction is required.
@@ -213,6 +210,9 @@ foundation as one coherent `0.3.0` release.
   facing restoration, transition deferral, orphan recovery, and cleanup.
 - [x] Startup splash, UI scaling, accessibility fixes, camera-speed controls,
   frame-rate-independent movement, and clean first-run setup.
+- [x] Dockable, filterable Message Log and MOB Family Validation with shared
+  dock/floating tabs, persistent multi-monitor layout, correct View toggles,
+  newest-message following, and main-window-owned shutdown.
 - [x] Integrate the completed lossless landscape/MPR/minimap/AI graph foundation.
 
 ## Release gate
@@ -271,6 +271,12 @@ foundation as one coherent `0.3.0` release.
 - Time, splash, and startup:
   [`7401874`](https://github.com/Ilufus/ei-mapper-endurance/commit/7401874)
   and [`3af2099`](https://github.com/Ilufus/ei-mapper-endurance/commit/3af2099).
+- Message Log and validation-window workflow:
+  [`fb2a854`](https://github.com/Ilufus/ei-mapper-endurance/commit/fb2a854),
+  [`42949a2`](https://github.com/Ilufus/ei-mapper-endurance/commit/42949a2),
+  [`c9d5214`](https://github.com/Ilufus/ei-mapper-endurance/commit/c9d5214),
+  [`3049773`](https://github.com/Ilufus/ei-mapper-endurance/commit/3049773),
+  and [`14e972a`](https://github.com/Ilufus/ei-mapper-endurance/commit/14e972a).
 - Current landscape/MPR integration: `8751b58`.
 - [MOB hardening validation](docs/validation/MOB_HARDENING_VALIDATION.md).
 - [Particle rendering status](docs/PARTICLE_RENDERING_STATUS.md).
