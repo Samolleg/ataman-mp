@@ -13,9 +13,10 @@ history. The permanent safety and compatibility rules are in
 
 ## Authoring and workflow
 
-- [ ] Complete a property-label and terminology pass against the English/Russian
-  object manuals and verified runtime meanings. Keep this presentation-only
-  unless a separately tested data-model correction is required.
+- [x] Complete the object-property label/tooltip audit and expose previously
+  hidden safe fields plus all five unit logic slots. Serialized names and values
+  remain unchanged; structural object type stays read-only
+  ([`55b8510`](https://github.com/Ilufus/ei-mapper-endurance/commit/55b8510)).
 - [ ] Add structured patrol/look-point and magic-trap attachment editing:
   owner/child lists, viewport selection, orphan/wrong-parent validation, and
   complete compound copy/remap transactions.
