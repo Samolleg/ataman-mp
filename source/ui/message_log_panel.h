@@ -42,6 +42,8 @@ private:
     QTimer* m_flushTimer{nullptr};
     QVector<SLogMessage> m_messages;
     QVector<SLogMessage> m_pending;
+    bool m_followNewest{true};
+    bool m_programmaticScroll{false};
 };
 
 #endif

@@ -518,6 +518,7 @@ int runHeadlessCommand(QApplication& app)
 
     if(uiWidgetCheck)
     {
+        app.setQuitOnLastWindowClosed(false);
         QList<QString>& figures = CObjectList::getInstance()->figureList();
         figures = {"alpha", "hammer", "Harpy", "echo", "house"};
         QSharedPointer<IPropertyBase> value(new propStr(eObjParam_TEMPLATE, "original_model"));
@@ -1733,6 +1734,41 @@ int runHeadlessCommand(QApplication& app)
                 && copiedMessages.contains("ui-check searchable warning")
                 && copiedMessages.contains(QRegularExpression(
                     QStringLiteral("\\[\\d{2}\\.\\d{2}\\.\\d{4} ")));
+        messageLog.setSearchText(QString());
+        messageLog.setAttribute(Qt::WA_DontShowOnScreen);
+        messageLog.resize(800, 160);
+        messageLog.show();
+        QApplication::processEvents();
+        QScrollBar* messageScroll = messageTable
+                ? messageTable->verticalScrollBar() : nullptr;
+        if(messageScroll) messageScroll->setValue(messageScroll->maximum());
+        quint64 testSequence = CLogger::getInstance()->sessionMessages().isEmpty()
+                ? 1000000 : CLogger::getInstance()->sessionMessages().last().sequence + 1000;
+        const auto appendLogProbe = [&messageLog, &testSequence](const QString& text) {
+            SLogMessage message;
+            message.sequence = testSequence++;
+            message.type = eLogInfo;
+            message.timestamp = QDateTime::currentDateTime();
+            message.message = text;
+            message.formatted = text;
+            QMetaObject::invokeMethod(&messageLog, "queueMessage", Qt::DirectConnection,
+                                      Q_ARG(SLogMessage, message));
+            QMetaObject::invokeMethod(&messageLog, "flushPending", Qt::DirectConnection);
+        };
+        appendLogProbe(QStringLiteral("ui-check follow newest"));
+        const bool messageLogStartsAtBottom = messageScroll
+                && messageScroll->value() == messageScroll->maximum();
+        const bool messageLogCanScroll = messageScroll
+                && messageScroll->maximum() > messageScroll->minimum();
+        if(messageLogCanScroll) messageScroll->setValue(messageScroll->minimum());
+        appendLogProbe(QStringLiteral("ui-check preserve manual scroll"));
+        const bool messageLogManualScrollPreserved = !messageLogCanScroll
+                || messageScroll->value() < messageScroll->maximum();
+        if(messageScroll) messageScroll->setValue(messageScroll->maximum());
+        appendLogProbe(QStringLiteral("ui-check resume follow newest"));
+        const bool messageLogFollowResumesAtBottom = messageScroll
+                && messageScroll->value() == messageScroll->maximum();
+        messageLog.hide();
 
         QMainWindow dockWindow;
         dockWindow.setDockOptions(dockWindow.dockOptions()
@@ -1816,11 +1852,14 @@ int runHeadlessCommand(QApplication& app)
         const bool floatingDockTabRefreshRepaints =
                 floatingPaintProbe->paints > paintsBeforeTabRefresh;
         QSettings().remove(QStringLiteral("ui/floatingDocks/messageLogDockProbe"));
-        dockLabelProbe.hide();
+        QPointer<QWidget> floatingDockHost = dockLabelProbe.window();
+        ei::closeFloatingDockHost(&dockLabelProbe);
         QEventLoop floatingDockEvents;
         QTimer::singleShot(25, &floatingDockEvents, &QEventLoop::quit);
         floatingDockEvents.exec();
         const bool floatingClosedLabelRemoved = !hiddenTab.tabBar()->isVisible();
+        const bool floatingDockHostClosed = !dockLabelProbe.isVisible()
+                && (!floatingDockHost || !floatingDockHost->isVisible());
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
@@ -1900,11 +1939,14 @@ int runHeadlessCommand(QApplication& app)
                 && messageLogSearchWorks && messageLogTypeFilterWorks
                 && messageLogColumnsResizable && messageLogMultiCopyWorks
                 && messageLogSeverityColorsWork
+                && messageLogStartsAtBottom && messageLogManualScrollPreserved
+                && messageLogFollowResumesAtBottom
                 && texturelessDrawDoesNotSpamLog
                 && dockedHiddenLabelAppears && floatingClosedLabelRemoved
                 && floatingDockGroupingEnabled && floatingDockWindowControls
                 && floatingDockIsNormalWindow && floatingDockMaximizedRestores
                 && floatingDockTabRefreshRepaints && floatingDockTaskbarIdentity
+                && floatingDockHostClosed
                 && QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
                 && !QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling);
         QTextStream output(stdout);
@@ -2039,6 +2081,9 @@ int runHeadlessCommand(QApplication& app)
                << " messageLogColumnsResizable=" << messageLogColumnsResizable
                << " messageLogMultiCopyWorks=" << messageLogMultiCopyWorks
                << " messageLogSeverityColorsWork=" << messageLogSeverityColorsWork
+               << " messageLogStartsAtBottom=" << messageLogStartsAtBottom
+               << " messageLogManualScrollPreserved=" << messageLogManualScrollPreserved
+               << " messageLogFollowResumesAtBottom=" << messageLogFollowResumesAtBottom
                << " texturelessDrawDoesNotSpamLog=" << texturelessDrawDoesNotSpamLog
                << " dockedHiddenLabelAppears=" << dockedHiddenLabelAppears
                << " floatingClosedLabelRemoved=" << floatingClosedLabelRemoved
@@ -2048,6 +2093,7 @@ int runHeadlessCommand(QApplication& app)
                << " floatingDockMaximizedRestores=" << floatingDockMaximizedRestores
                << " floatingDockTabRefreshRepaints=" << floatingDockTabRefreshRepaints
                << " floatingDockTaskbarIdentity=" << floatingDockTaskbarIdentity
+               << " floatingDockHostClosed=" << floatingDockHostClosed
                << " physicalPixelViewportScaling="
                << QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()

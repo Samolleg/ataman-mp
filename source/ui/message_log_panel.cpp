@@ -68,6 +68,12 @@ CMessageLogPanel::CMessageLogPanel(QWidget* parent) : QWidget(parent)
     m_table->setWordWrap(false);
     m_table->setContextMenuPolicy(Qt::CustomContextMenu);
     root->addWidget(m_table, 1);
+    connect(m_table->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, [this](int value) {
+        if(m_programmaticScroll) return;
+        QScrollBar* bar = m_table->verticalScrollBar();
+        m_followNewest = value >= bar->maximum() - 1;
+    });
 
     connect(m_search, &QLineEdit::textChanged, this, &CMessageLogPanel::refreshFilter);
     connect(m_table, &QTableWidget::customContextMenuRequested, this, [this](const QPoint& point) {
@@ -93,6 +99,12 @@ CMessageLogPanel::CMessageLogPanel(QWidget* parent) : QWidget(parent)
     m_messages = logger->sessionMessages();
     for(const SLogMessage& message : m_messages) appendRow(message);
     refreshFilter();
+    QTimer::singleShot(0, this, [this]() {
+        if(!m_followNewest) return;
+        m_programmaticScroll = true;
+        m_table->scrollToBottom();
+        m_programmaticScroll = false;
+    });
 }
 
 QString CMessageLogPanel::typeName(ELogMessageType type) const
@@ -116,8 +128,8 @@ void CMessageLogPanel::queueMessage(const SLogMessage& message)
 
 void CMessageLogPanel::flushPending()
 {
-    const bool follow = m_table->verticalScrollBar()->value()
-            >= m_table->verticalScrollBar()->maximum() - 1;
+    const bool follow = m_followNewest;
+    m_programmaticScroll = true;
     for(const SLogMessage& message : qAsConst(m_pending)) {
         m_messages.append(message);
         appendRow(message);
@@ -125,6 +137,8 @@ void CMessageLogPanel::flushPending()
     m_pending.clear();
     refreshFilter();
     if(follow) m_table->scrollToBottom();
+    m_programmaticScroll = false;
+    m_followNewest = follow;
 }
 
 void CMessageLogPanel::appendRow(const SLogMessage& message)
@@ -162,6 +176,8 @@ bool CMessageLogPanel::matches(const SLogMessage& message) const
 
 void CMessageLogPanel::refreshFilter()
 {
+    const bool follow = m_followNewest;
+    m_programmaticScroll = true;
     int visible = 0;
     for(int row = 0; row < m_table->rowCount() && row < m_messages.size(); ++row) {
         const bool show = matches(m_messages.at(row));
@@ -169,6 +185,9 @@ void CMessageLogPanel::refreshFilter()
         if(show) ++visible;
     }
     m_status->setText(tr("%1 / %2").arg(visible).arg(m_messages.size()));
+    if(follow) m_table->scrollToBottom();
+    m_programmaticScroll = false;
+    m_followNewest = follow;
 }
 
 int CMessageLogPanel::visibleMessageCount() const

@@ -224,6 +224,7 @@ void applyNativeWindowType(QDockWidget* dock, QWidget* host)
 
 void restoreHostFromDock(QDockWidget* dock)
 {
+    if(dock && dock->property("enduranceClosingFloatingHost").toBool()) return;
     QWidget* host = separateHost(dock);
     if(!host) return;
     applyNativeWindowType(dock, host);
@@ -306,6 +307,7 @@ private:
 
     void sync()
     {
+        if(m_dock->property("enduranceClosingFloatingHost").toBool()) return;
         QWidget* host = separateHost(m_dock);
         if(host != m_host)
         {
@@ -407,6 +409,19 @@ void ei::refreshFloatingDockTabs(QDockWidget* active, QDockWidget* peer)
         refreshContents(active);
         if(peer) refreshContents(peer);
     });
+}
+
+void ei::closeFloatingDockHost(QDockWidget* dock)
+{
+    if(!dock) return;
+    dock->setProperty("enduranceClosingFloatingHost", true);
+    QPointer<QWidget> host = separateHost(dock);
+    dock->hide();
+    if(host)
+    {
+        host->setProperty("enduranceClosingFloatingHost", true);
+        host->hide();
+    }
 }
 
 CDockHiddenTab::CDockHiddenTab(QMainWindow* window, QDockWidget* dock,

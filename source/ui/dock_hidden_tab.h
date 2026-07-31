@@ -12,6 +12,7 @@ void enableNativeFloatingDockControls(QDockWidget* dock);
 void saveFloatingDockWindowState(QDockWidget* dock);
 void restoreFloatingDockWindowState(QDockWidget* dock);
 void refreshFloatingDockTabs(QDockWidget* active, QDockWidget* peer);
+void closeFloatingDockHost(QDockWidget* dock);
 }
 
 class CDockHiddenTab : public QObject
