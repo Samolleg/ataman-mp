@@ -10738,15 +10738,19 @@ void CView::collectObjectTreeData()
                 CLogic* logic = unit->logicAt(logicIndex);
                 if(!logic)
                     continue;
+                const int patrolCount = std::count_if(
+                    logic->patrolPoints().cbegin(), logic->patrolPoints().cend(),
+                    [](CPatrolPoint* patrol)
+                    { return patrol && !patrol->isMarkDeleted(); });
                 const QString suffix = logicIndex == 0 ? tr(" (default)") : QString();
                 auto slotItem = new QTreeWidgetItem(ownerItem);
                 slotItem->setText(0, tr("Logic %1%2").arg(logicIndex).arg(suffix));
-                slotItem->setText(1, QString::number(logic->patrolPoints().size()));
+                slotItem->setText(1, QString::number(patrolCount));
                 slotItem->setData(0, Qt::UserRole + 10, logicIndex);
                 slotItem->setData(0, Qt::UserRole + 11,
                     QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(unit)));
                 slotItem->setToolTip(0, tr("Behavior setup %1; %2 patrol points")
-                    .arg(logicIndex).arg(logic->patrolPoints().size()));
+                    .arg(logicIndex).arg(patrolCount));
                 slotItem->setExpanded(logicIndex == m_logicSlotIndex);
                 int patrolNumber = 0;
                 for(CPatrolPoint* patrol : logic->patrolPoints())
@@ -10756,7 +10760,11 @@ void CView::collectObjectTreeData()
                     auto patrolItem = new CTreeObject(
                         static_cast<QTreeWidgetItem*>(slotItem), patrol);
                     patrolItem->setText(0, tr("Patrol point %1").arg(++patrolNumber));
-                    patrolItem->setText(1, QString::number(patrol->lookPoint().size()));
+                    const int lookCount = std::count_if(
+                        patrol->lookPoint().cbegin(), patrol->lookPoint().cend(),
+                        [](CLookPoint* look)
+                        { return look && !look->isMarkDeleted(); });
+                    patrolItem->setText(1, QString::number(lookCount));
                     int lookNumber = 0;
                     for(CLookPoint* look : patrol->lookPoint())
                     {
@@ -10772,8 +10780,12 @@ void CView::collectObjectTreeData()
         }
         if(CMagicTrap* trap = dynamic_cast<CMagicTrap*>(node))
         {
+            const int areaCount = std::count_if(
+                trap->actZones().cbegin(), trap->actZones().cend(),
+                [](CActivationZone* area)
+                { return area && !area->isMarkDeleted(); });
             auto areasItem = new QTreeWidgetItem(ownerItem);
-            areasItem->setText(0, tr("Activation areas (%1)").arg(trap->actZones().size()));
+            areasItem->setText(0, tr("Activation areas (%1)").arg(areaCount));
             int areaNumber = 0;
             for(CActivationZone* area : trap->actZones())
             {
@@ -10782,8 +10794,12 @@ void CView::collectObjectTreeData()
                 auto item = new CTreeObject(static_cast<QTreeWidgetItem*>(areasItem), area);
                 item->setText(0, tr("Activation area %1").arg(++areaNumber));
             }
+            const int targetCount = std::count_if(
+                trap->castPoints().cbegin(), trap->castPoints().cend(),
+                [](CTrapCastPoint* target)
+                { return target && !target->isMarkDeleted(); });
             auto targetsItem = new QTreeWidgetItem(ownerItem);
-            targetsItem->setText(0, tr("Cast targets (%1)").arg(trap->castPoints().size()));
+            targetsItem->setText(0, tr("Cast targets (%1)").arg(targetCount));
             int targetNumber = 0;
             for(CTrapCastPoint* target : trap->castPoints())
             {
