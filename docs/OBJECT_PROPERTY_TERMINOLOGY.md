@@ -65,18 +65,19 @@ their exact serialized ordering has been verified.
 
 Each unit has five serialized logic slots.
 
-Endurance exposes all five slots through the selector shown in Logic mode. The
-first slot is the default setup; slots two through five correspond to world
-alarms 1 through 4. Property editing, visualization, patrol/look-point editing,
+Endurance exposes all five slots as Logic 0 through Logic 4 through the selector
+shown for unit-only selections in Logic mode. Logic 0 is the default setup;
+Logic 1 through Logic 4 correspond directly to world alarms 1 through 4.
+Property editing, visualization, patrol/look-point editing,
 and undo/redo follow the selected slot.
 
 | UI label | Value | Current property UI | Tooltip |
 |---|---|---|---|
-| Logic enabled | On/off | Exposed for the selected slot | Allow this behavior setup to activate when its corresponding world alarm is raised. The first setup is always available. |
+| Logic enabled | On/off | Exposed for the selected slot | For Logic 1-4, allow this setup to activate when its corresponding world alarm is raised. Logic 0 is the default enabled slot and ignores this setting. |
 | Behaviour | See values below | Exposed for the selected slot | Controls how the unit moves and guards while this logic is active. |
 | Call-for-help radius | Distance | Exposed for the selected slot | Distance within which allied units can respond for help. |
 | Guard radius | Distance | Exposed for Guard area in the selected slot | Area the unit guards around the guard position. |
-| Guard position | X, Y, Z | Exposed for the selected slot | Center used by guard and sentry behaviour. |
+| Guard position | X, Y, Z | Exposed for the selected slot | Center used by Guard area. Alarm guard uses the active alarm coordinates instead. |
 | Always active | On/off | Exposed for the selected slot | Keep this unit's AI running regardless of distance. Otherwise it activates within twice the player's maximum vision range plus 20 metres. |
 | Aggression mode | See values below | Exposed for the selected slot | Controls how the unit reacts to enemies. |
 | Alarm condition | `0` Enemy seen, `1` Attacked, `2` Suspicion | Exposed for the selected slot | Event that makes this unit raise its configured alarm. |

@@ -470,11 +470,11 @@ MainWindow::MainWindow(QWidget* parent) :
     logicSlotLayout->setContentsMargins(4, 3, 4, 3);
     logicSlotLayout->addWidget(new QLabel(tr("Behavior setup:"), m_logicSlotBar));
     m_logicSlotCombo = new QComboBox(m_logicSlotBar);
-    m_logicSlotCombo->addItem(tr("Logic 1 (default)"), 0);
-    m_logicSlotCombo->addItem(tr("Logic 2 (responds to alarm 1)"), 1);
-    m_logicSlotCombo->addItem(tr("Logic 3 (responds to alarm 2)"), 2);
-    m_logicSlotCombo->addItem(tr("Logic 4 (responds to alarm 3)"), 3);
-    m_logicSlotCombo->addItem(tr("Logic 5 (responds to alarm 4)"), 4);
+    m_logicSlotCombo->addItem(tr("Logic 0 (default)"), 0);
+    m_logicSlotCombo->addItem(tr("Logic 1 (responds to alarm 1)"), 1);
+    m_logicSlotCombo->addItem(tr("Logic 2 (responds to alarm 2)"), 2);
+    m_logicSlotCombo->addItem(tr("Logic 3 (responds to alarm 3)"), 3);
+    m_logicSlotCombo->addItem(tr("Logic 4 (responds to alarm 4)"), 4);
     m_logicSlotCombo->setItemData(0, tr("The unit's normal behavior setup."), Qt::ToolTipRole);
     for(int slot = 1; slot < m_logicSlotCombo->count(); ++slot)
         m_logicSlotCombo->setItemData(slot,
@@ -1566,6 +1566,8 @@ MainWindow::MainWindow(QWidget* parent) :
         updateLogicSlotBarVisibility();
         updateOutlinerSelectionPath();
     });
+    connect(m_pView, &CView::selectionStateChanged, this,
+            [this](bool) { updateLogicSlotBarVisibility(); });
 
 
 //    m_ui->progressBar->setValue(0);
@@ -1800,10 +1802,48 @@ void MainWindow::updateUnitTexturePreview()
 void MainWindow::updateLogicSlotBarVisibility()
 {
     bool show = CScene::getInstance()->getMode() == eEditModeLogic && m_pView;
+    QList<CUnit*> units;
     if(show)
     {
         const QList<CNode*> selected = m_pView->selectionSnapshot();
-        show = selected.size() == 1 && dynamic_cast<CUnit*>(selected.first());
+        show = !selected.isEmpty();
+        for(CNode* node : selected)
+        {
+            CUnit* unit = dynamic_cast<CUnit*>(node);
+            if(!unit)
+            {
+                show = false;
+                break;
+            }
+            units.append(unit);
+        }
+    }
+    if(show && m_logicSlotCombo)
+    {
+        const QSignalBlocker blocker(m_logicSlotCombo);
+        m_logicSlotCombo->setItemText(0, tr("Logic 0 (default)"));
+        m_logicSlotCombo->setItemData(0, tr(
+            "The normal behavior and the reset target for alarm 0. Logic 0 is enabled by default and ignores the Logic enabled setting."),
+            Qt::ToolTipRole);
+        for(int slot = 1; slot < m_logicSlotCombo->count(); ++slot)
+        {
+            int enabledCount = 0;
+            for(CUnit* unit : units)
+            {
+                QSharedPointer<IPropertyBase> enabled;
+                unit->getLogicParamAt(slot, enabled, eObjParam_LOGIC_USE);
+                const propBool* value = dynamic_cast<const propBool*>(enabled.get());
+                if(value && value->isInit() && value->value())
+                    ++enabledCount;
+            }
+            const QString state = enabledCount == 0 ? tr("disabled")
+                : (enabledCount == units.size() ? tr("enabled") : tr("mixed"));
+            m_logicSlotCombo->setItemText(slot,
+                tr("Logic %1 (alarm %1; %2)").arg(slot).arg(state));
+            m_logicSlotCombo->setItemData(slot, tr(
+                "Responds to world alarm %1. Selected units: %2.").arg(slot).arg(state),
+                Qt::ToolTipRole);
+        }
     }
     if(m_logicSlotBar)
         m_logicSlotBar->setVisible(show);

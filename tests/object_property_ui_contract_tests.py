@@ -27,7 +27,7 @@ def main() -> int:
     particle_cpp = source("source/objects/particle.cpp")
     table_cpp = source("source/layout_components/tablemanager.cpp")
 
-    for slot in range(1, 6):
+    for slot in range(5):
         require(main_window, f'"Logic {slot}', f"logic-slot {slot} selector entry")
     require(view_h, "int logicSlotIndex() const", "selected logic-slot API")
     require(view_cpp, "void CView::setLogicSlotIndex(int index)", "slot switching")
@@ -50,6 +50,11 @@ def main() -> int:
     require(particle_cpp, "propStr name(eObjParam_NAME", "particle name")
     require(table_cpp, "Object type is read-only", "unsafe raw type-paste refusal")
     require(table_cpp, "m_aRowToolTip[eObjParam_PARENT_TEMPLATE]", "audited tooltips")
+    require(
+        table_cpp,
+        'm_aRowToolTip[eObjParam_GUARD_PLACE] = "Center used by Guard area. Alarm guard uses the active alarm coordinates instead.";',
+        "guard-position tooltip distinguishes Guard area from Alarm guard",
+    )
 
     forbidden = (
         "m_aLogic.front()->collectlogicParams",

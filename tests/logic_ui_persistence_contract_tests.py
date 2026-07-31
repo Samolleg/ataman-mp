@@ -34,12 +34,25 @@ def main() -> int:
             "central logic-selector visibility helper")
     require(main_window, "void MainWindow::updateLogicSlotBarVisibility()",
             "logic-selector visibility implementation")
-    require(main_window, "dynamic_cast<CUnit*>(selected.first())",
-            "single-unit selection requirement")
+    require(main_window, "show = !selected.isEmpty();",
+            "non-empty selection requirement")
+    require(main_window, "for(CNode* node : selected)",
+            "all-selected-nodes type check")
+    require(main_window, "if(!unit)",
+            "mixed selections rejected")
     require(main_window, "updateLogicSlotBarVisibility();",
             "selection/mode visibility refresh")
     require(main_window, "Activates when world alarm %1 is raised",
             "behavior-setup option explanations")
+    for slot in range(5):
+        require(main_window, f'"Logic {slot}',
+                f"zero-based logic slot {slot} label")
+    require(main_window, "unit->getLogicParamAt(slot, enabled, eObjParam_LOGIC_USE);",
+            "selected-unit slot enablement summary")
+    require(main_window, 'tr("mixed")',
+            "mixed slot enablement label")
+    require(main_window, 'setItemText(0, tr("Logic 0 (default)"))',
+            "concise default slot label")
 
     require(table_manager,
             "QString staticChoiceToolTip(EObjParam type, uint value)",
@@ -55,6 +68,8 @@ def main() -> int:
         require(table_manager, expected, f"known dropdown explanation: {expected}")
     require(table_manager, 'm_aRowName[eObjParam_LOGIC_ALARM_NUMBER] = "Alarm raised";',
             "outbound alarm label")
+    require(table_manager, "Logic 0 is the default enabled slot and ignores this setting.",
+            "default-slot Logic enabled explanation")
 
     print("logic UI persistence contract: PASS")
     return 0

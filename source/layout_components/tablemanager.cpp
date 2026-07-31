@@ -971,11 +971,11 @@ void CTableManager::initRowName()
     m_aRowToolTip[eObjParam_UNIT_QUEST_ITEMS] = "Quest inventory stored directly in this MOB. Used when Use MOB unit values is on.";
     m_aRowToolTip[eObjParam_UNIT_STATS] = "Unit parameters stored directly in this MOB. Used when Use MOB unit values is on.";
 
-    m_aRowToolTip[eObjParam_LOGIC_USE] = "Allow this behavior setup to activate when its corresponding world alarm is raised. The first setup is always available.";
+    m_aRowToolTip[eObjParam_LOGIC_USE] = "For Logic 1-4, allow this setup to activate when its corresponding world alarm is raised. Logic 0 is the default enabled slot and ignores this setting.";
     m_aRowToolTip[eObjParam_LOGIC_BEHAVIOUR] = "Controls how the unit moves and guards while this logic is active.";
     m_aRowToolTip[eObjParam_GUARD_ALARM] = "Distance within which allied units can respond for help.";
     m_aRowToolTip[eObjParam_GUARD_RADIUS] = "Area the unit guards around the guard position.";
-    m_aRowToolTip[eObjParam_GUARD_PLACE] = "Center used by guard and sentry behaviour.";
+    m_aRowToolTip[eObjParam_GUARD_PLACE] = "Center used by Guard area. Alarm guard uses the active alarm coordinates instead.";
     m_aRowToolTip[eObjParam_ALWAYS_ACTIVE] = "Keep this unit's AI running regardless of distance. Otherwise it activates within twice the player's maximum vision range plus 20 metres.";
     m_aRowToolTip[eObjParam_AGRESSION_MODE] = "Controls how the unit reacts to enemies.";
     m_aRowToolTip[eObjParam_LOGIC_ALARM_CONDITION] = "Event that makes this unit raise its configured alarm.";
