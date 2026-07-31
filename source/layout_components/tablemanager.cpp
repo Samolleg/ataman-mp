@@ -13,6 +13,7 @@
 #include <QMimeData>
 #include <QApplication>
 #include <QToolTip>
+#include <QHelpEvent>
 #include <QContextMenuEvent>
 #include <QMenu>
 #include <QSet>
@@ -42,11 +43,11 @@ QString staticChoiceToolTip(EObjParam type, uint value)
         switch(value)
         {
         case 0: return QObject::tr("Remains in place and faces the configured direction.");
-        case 1: return QObject::tr("Guards the configured position and radius.");
+        case 1: return QObject::tr("Roams to random points within Guard radius around Guard position.");
         case 2: return QObject::tr("Follows the configured patrol points.");
         case 3: return QObject::tr("Remains in place and looks around.");
         case 4: return QObject::tr("Leaves control to the player or map scripts.");
-        case 5: return QObject::tr("Guards the position where the active alarm was raised.");
+        case 5: return QObject::tr("Roams to random points within Guard radius around the active alarm coordinates.");
         }
     }
     if(type == eObjParam_AGRESSION_MODE)
@@ -938,7 +939,7 @@ void CTableManager::initRowName()
     m_aRowName[eObjParam_GUARD_PLACE] = "Guard position";
     m_aRowName[eObjParam_GUARD_RADIUS] = "Guard radius";
     m_aRowName[eObjParam_GUARD_ALARM] = "Call-for-help radius";
-    m_aRowName[eObjParam_LOGIC_BEHAVIOUR] = "Behaviour";
+    m_aRowName[eObjParam_LOGIC_BEHAVIOUR] = "Behavior";
     m_aRowName[eObjParam_AGRESSION_MODE] = "Aggression mode";
     m_aRowName[eObjParam_LOGIC_USE] = "Logic enabled";
     m_aRowName[eObjParam_LOGIC_CYCLIC] = "Patrol route repeats";
@@ -979,8 +980,8 @@ void CTableManager::initRowName()
     m_aRowToolTip[eObjParam_LOGIC_USE] = "For Logic 1-4, allow this setup to activate when its corresponding world alarm is raised. Logic 0 is the default enabled slot and ignores this setting.";
     m_aRowToolTip[eObjParam_LOGIC_BEHAVIOUR] = "Controls how the unit moves and guards while this logic is active.";
     m_aRowToolTip[eObjParam_GUARD_ALARM] = "Distance within which allied units can respond for help.";
-    m_aRowToolTip[eObjParam_GUARD_RADIUS] = "Area the unit guards around the guard position.";
-    m_aRowToolTip[eObjParam_GUARD_PLACE] = "Center used by Guard area. Alarm guard uses the active alarm coordinates instead.";
+    m_aRowToolTip[eObjParam_GUARD_RADIUS] = "Maximum roaming distance for Guard area and Alarm guard. The unit moves to random points inside this radius.";
+    m_aRowToolTip[eObjParam_GUARD_PLACE] = "Center of random roaming for Guard area. Alarm guard ignores this value and uses the active alarm coordinates.";
     m_aRowToolTip[eObjParam_ALWAYS_ACTIVE] = "Keep this unit's AI running regardless of distance. Otherwise it activates within twice the player's maximum vision range plus 20 metres.";
     m_aRowToolTip[eObjParam_AGRESSION_MODE] = "Controls how the unit reacts to enemies.";
     m_aRowToolTip[eObjParam_LOGIC_ALARM_CONDITION] = "Event that makes this unit raise its configured alarm.";
@@ -988,7 +989,7 @@ void CTableManager::initRowName()
     m_aRowToolTip[eObjParam_LOGIC_ALARM_NUMBER] = "World alarm this unit raises when its alarm condition occurs. 0 raises no alarm.";
     m_aRowToolTip[eObjParam_VIEW_WAIT] = "Time spent looking toward this point. 15 ticks equal one second.";
     m_aRowToolTip[eObjParam_VIEW_TURN_SPEED] = "How quickly the unit turns toward this point. 0 turns immediately.";
-    m_aRowToolTip[eObjParam_VIEW_FLAGS] = "0 uses normal behaviour. 1 rests at the point.";
+    m_aRowToolTip[eObjParam_VIEW_FLAGS] = "0 uses normal behavior. 1 rests at the point.";
 
     m_aRowToolTip[eObjParam_LEVER_SCIENCE_STATS_Type_Open] = "Ways the player may operate this lever.";
     m_aRowToolTip[eObjParam_LEVER_SCIENCE_STATS_Key_ID] = "Key number required when Key is an allowed interaction.";
@@ -1329,7 +1330,11 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             registerPropertyRow(i, item);
             ++i;
 
-            if(item->isInit() && (EBehaviourType(dynamic_cast<propUint*>(item.get())->value()) == EBehaviourType::eRadius))
+            const EBehaviourType behavior = item->isInit()
+                ? EBehaviourType(dynamic_cast<propUint*>(item.get())->value())
+                : EBehaviourType::eIdle;
+            if(item->isInit() && (behavior == EBehaviourType::eRadius
+                                  || behavior == EBehaviourType::eGuardAlaram))
             {
                 m_pTable->insertRow(i);
                 m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[eObjParam_GUARD_RADIUS]));
@@ -1586,6 +1591,9 @@ CComboStItem::CComboStItem(const QSharedPointer<IPropertyBase>& prop)
     }
 
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
+    view()->setMouseTracking(true);
+    view()->viewport()->setMouseTracking(true);
+    view()->viewport()->installEventFilter(this);
     //lineEdit()->setPlaceholderText("Select item");
     //addItems(m_valueList.values());
     // QComboBox's default QStandardItemModel stores ToolTipRole. QStringListModel
@@ -1606,6 +1614,23 @@ CComboStItem::CComboStItem(const QSharedPointer<IPropertyBase>& prop)
         setCurrentIndex(0);
     }
     QObject::connect(this, SIGNAL(currentIndexChanged(QString)), this, SLOT(_onChange(QString))); //reconnect default currentIndexChanged to override
+}
+
+bool CComboStItem::eventFilter(QObject* watched, QEvent* event)
+{
+    if(watched == view()->viewport() && event->type() == QEvent::ToolTip)
+    {
+        QHelpEvent* help = static_cast<QHelpEvent*>(event);
+        const QModelIndex index = view()->indexAt(help->pos());
+        const QString tooltip = index.data(Qt::ToolTipRole).toString();
+        if(!tooltip.isEmpty())
+        {
+            QToolTip::showText(help->globalPos(), tooltip, view());
+            event->accept();
+            return true;
+        }
+    }
+    return QComboBox::eventFilter(watched, event);
 }
 
 void CComboStItem::_onChange(QString str)

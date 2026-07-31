@@ -61,10 +61,16 @@ def main() -> int:
             "contextual Behavior-to-Object action help")
     require(main_window, "m_behaviorModeButton->setChecked(behaviorMode);",
             "bottom toggle synchronized to active mode")
+    require(main_window, "m_behaviorModeButton->setText(target);",
+            "bottom mode help names the mode Ctrl+Tab will switch to")
 
     require(table_manager,
             "QString staticChoiceToolTip(EObjParam type, uint value)",
             "per-value dropdown explanations")
+    require(table_manager, "view()->viewport()->installEventFilter(this);",
+            "explicit popup tooltip delivery on retained Qt")
+    require(table_manager, "event->type() == QEvent::ToolTip",
+            "popup tooltip event handling")
     require(table_manager, "setItemData(index, tooltip, Qt::ToolTipRole)",
             "dropdown item tooltip role")
     require(table_manager, "addItems(m_valueList.values());",
@@ -78,9 +84,25 @@ def main() -> int:
         "Attacks enemies on sight.",
         "Attacks only in response to aggression.",
         "Raises the configured alarm when the unit sees an enemy.",
-        "Guards the position where the active alarm was raised.",
+        "Roams to random points within Guard radius around Guard position.",
+        "Roams to random points within Guard radius around the active alarm coordinates.",
     ):
         require(table_manager, expected, f"known dropdown explanation: {expected}")
+    require(table_manager, "EBehaviourType::eGuardAlaram",
+            "Guard radius is visible for Alarm guard as well as Guard area")
+    require(table_manager,
+            'm_aRowName[eObjParam_LOGIC_BEHAVIOUR] = "Behavior";',
+            "American-English Behavior property label")
+    for relative in (
+        "source/layout_components/tablemanager.cpp",
+        "source/app/main_window.cpp",
+        "source/app/main_window.ui",
+        "source/app/settings.ui",
+        "source/core/undo.cpp",
+    ):
+        text = source(relative)
+        if '"Behaviour' in text or ' behaviour"' in text or ' behaviour setup' in text:
+            raise AssertionError(f"user-visible British-English spelling remains: {relative}")
     require(table_manager, 'm_aRowName[eObjParam_LOGIC_ALARM_NUMBER] = "Alarm raised";',
             "outbound alarm label")
     require(table_manager, "Logic 0 is the default enabled slot and ignores this setting.",

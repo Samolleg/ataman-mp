@@ -107,6 +107,7 @@ public:
             QComboBox::wheelEvent(e);
     }
     void keyPressEvent(QKeyEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 public slots:
     void _onChange(QString str); //override default 'on change event'

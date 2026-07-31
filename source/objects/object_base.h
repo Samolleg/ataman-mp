@@ -16,6 +16,7 @@
 class CMob;
 
 namespace ei {
+QString editorHelperFigureIdentity(const QString& modelName, const CFigure* figure);
 struct SVisualAssemblyCacheTelemetry
 {
     int memoryHits{0};

@@ -589,22 +589,38 @@ int runHeadlessCommand(QApplication& app)
         QList<QSharedPointer<IPropertyBase>> staticChoiceProperties;
         staticChoiceProperties
             << QSharedPointer<IPropertyBase>(new propUint(eObjParam_TYPE, 50))
-            << QSharedPointer<IPropertyBase>(new propChar(eObjParam_AGRESSION_MODE, 0));
+            << QSharedPointer<IPropertyBase>(new propChar(eObjParam_AGRESSION_MODE, 0))
+            << QSharedPointer<IPropertyBase>(new propChar(eObjParam_LOGIC_ALARM_CONDITION, 0));
         QTableWidget staticChoiceTable;
         CTableManager staticChoiceManager(&staticChoiceTable);
         staticChoiceManager.setNewData(staticChoiceProperties);
         const int unitCategoryRow = rowForType(staticChoiceTable, eObjParam_TYPE);
         const int aggressionRow = rowForType(staticChoiceTable, eObjParam_AGRESSION_MODE);
+        const int alarmConditionRow = rowForType(
+            staticChoiceTable, eObjParam_LOGIC_ALARM_CONDITION);
         CComboStItem* unitCategoryCombo = qobject_cast<CComboStItem*>(
             staticChoiceTable.cellWidget(unitCategoryRow, 1));
         CComboStItem* aggressionCombo = qobject_cast<CComboStItem*>(
             staticChoiceTable.cellWidget(aggressionRow, 1));
+        CComboStItem* alarmConditionCombo = qobject_cast<CComboStItem*>(
+            staticChoiceTable.cellWidget(alarmConditionRow, 1));
         const int attackIndex = aggressionCombo
             ? aggressionCombo->findText(QStringLiteral("Attack")) : -1;
         const bool staticChoiceItemDataStored = aggressionCombo
             && attackIndex >= 0
             && aggressionCombo->itemData(attackIndex, Qt::ToolTipRole).toString()
                 == QStringLiteral("Attacks enemies on sight.");
+        const QStringList expectedAlarmTooltips = {
+            QStringLiteral("Raises the configured alarm when the unit sees an enemy."),
+            QStringLiteral("Raises the configured alarm when the unit is attacked."),
+            QStringLiteral("Raises the configured alarm when the unit becomes suspicious.")};
+        bool alarmConditionItemTooltipsWork = alarmConditionCombo
+            && alarmConditionCombo->count() == expectedAlarmTooltips.size();
+        for(int index = 0; alarmConditionItemTooltipsWork
+                && index < expectedAlarmTooltips.size(); ++index)
+            alarmConditionItemTooltipsWork =
+                alarmConditionCombo->itemData(index, Qt::ToolTipRole).toString()
+                    == expectedAlarmTooltips.at(index);
         const bool staticChoicePopupTooltipClear = aggressionCombo
             && aggressionCombo->view()->toolTip().isEmpty()
             && aggressionCombo->view()->viewport()->toolTip().isEmpty();
@@ -614,6 +630,11 @@ int runHeadlessCommand(QApplication& app)
             && unitCategoryCombo->findText(QStringLiteral("Human (50)")) >= 0
             && unitCategoryCombo->findText(QStringLiteral("Animal (51)")) >= 0
             && unitCategoryCombo->findText(QStringLiteral("Monster (52)")) >= 0;
+        const bool helperFigureCacheIdentityDistinct =
+            ei::editorHelperFigureIdentity(QString(),
+                reinterpret_cast<const ei::CFigure*>(quintptr(1)))
+            != ei::editorHelperFigureIdentity(QString(),
+                reinterpret_cast<const ei::CFigure*>(quintptr(2)));
         QList<QSharedPointer<IPropertyBase>> sourceProperties;
         sourceProperties << QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE, "copied_model"))
                          << QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR, "copied_texture"));
@@ -1916,7 +1937,8 @@ int runHeadlessCommand(QApplication& app)
                 dockDiagnosticCount() == dockDiagnosticsBefore;
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
-                && staticChoiceItemTooltipsWork && unitCategoryIdsVisible
+                && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork
+                && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
@@ -2018,7 +2040,9 @@ int runHeadlessCommand(QApplication& app)
                << " staticChoiceItemDataStored=" << staticChoiceItemDataStored
                << " staticChoicePopupTooltipClear=" << staticChoicePopupTooltipClear
                << " staticChoiceItemTooltipsWork=" << staticChoiceItemTooltipsWork
+               << " alarmConditionItemTooltipsWork=" << alarmConditionItemTooltipsWork
                << " unitCategoryIdsVisible=" << unitCategoryIdsVisible
+               << " helperFigureCacheIdentityDistinct=" << helperFigureCacheIdentityDistinct
                << " settingsTabsUsable=" << settingsTabsUsable
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
                << " autosaveSettingsPersist=" << autosaveSettingsPersist

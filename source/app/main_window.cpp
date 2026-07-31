@@ -1919,7 +1919,7 @@ void MainWindow::updateBehaviorModeUi()
         m_behaviorModeButton->setChecked(behaviorMode);
         m_behaviorModeButton->setIcon(behaviorModeIcon(behaviorMode,
             m_behaviorModeButton->palette().color(QPalette::ButtonText)));
-        m_behaviorModeButton->setText(tr("Behavior"));
+        m_behaviorModeButton->setText(target);
         m_behaviorModeButton->setToolTip(tooltip);
         m_behaviorModeButton->setAccessibleName(target);
     }

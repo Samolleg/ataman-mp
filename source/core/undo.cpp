@@ -465,7 +465,7 @@ void CCreatePatrolCommand::redo()
     if(!m_mob)
         return;
     m_mob->createPatrolByHash(m_pointHash, m_logicSlot);
-    setText(m_switchesToPath ? "Create first patrol point and enable Path behaviour"
+    setText(m_switchesToPath ? "Create first patrol point and enable Path behavior"
                              : "Create patrol point");
 }
 

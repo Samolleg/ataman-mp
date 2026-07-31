@@ -178,6 +178,14 @@ ENavigationVolumeKind navigationKindForPart(const QString& name)
 
 namespace ei {
 
+QString editorHelperFigureIdentity(const QString& modelName, const CFigure* figure)
+{
+    const QString normalized = modelName.trimmed().toLower();
+    if(!normalized.isEmpty())
+        return normalized;
+    return QStringLiteral("editor-helper@%1").arg(quintptr(figure), 0, 16);
+}
+
 void resetVisualAssemblyCacheTelemetry()
 {
     s_visualAssemblyTelemetry = SVisualAssemblyCacheTelemetry();
@@ -842,13 +850,17 @@ void CObjectBase::recalcFigure()
         delete part;
     m_aPart.clear();
     m_figureComplexion = m_complection;
-    const QString cacheScope = meshCacheScope(m_modelName);
+    // Editor-only helpers intentionally have no serialized model name. They
+    // still need distinct cache identities; otherwise the first helper built
+    // supplies its geometry to every later helper.
+    const QString figureIdentity = ei::editorHelperFigureIdentity(m_modelName, m_pFigure);
+    const QString cacheScope = meshCacheScope(figureIdentity);
     CPart::setCacheScope(cacheScope);
     // Static world objects used to repeat constitution interpolation and
     // triangle generation for every instance. Reuse the exact immutable CPU
     // assembly, while each object still receives its own lightweight CPart
     // wrappers for visibility, pose and picking state.
-    buildCachedAssembly(m_pFigure, cacheScope, m_modelName, m_bodyParts,
+    buildCachedAssembly(m_pFigure, cacheScope, figureIdentity, m_bodyParts,
                         m_complection, m_aPart, EAssemblyCacheClass::GeneralObject);
     rebuildTransientAnimationSkeleton();
     recalcMinPos();

@@ -21,6 +21,7 @@ def main() -> int:
     view_h = source("source/render/view.h")
     view_cpp = source("source/render/view.cpp")
     unit_cpp = source("source/objects/unit.cpp")
+    object_base_cpp = source("source/objects/object_base.cpp")
     undo_cpp = source("source/core/undo.cpp")
     world_cpp = source("source/objects/worldobj.cpp")
     sound_cpp = source("source/objects/sound.cpp")
@@ -33,6 +34,8 @@ def main() -> int:
     require(view_cpp, "void CView::setLogicSlotIndex(int index)", "slot switching")
     require(unit_cpp, "editorLogic()->collectlogicParams", "slot-aware logic properties")
     require(unit_cpp, "editorLogic()->collectPatrolNodes", "slot-aware patrol projection")
+    require(object_base_cpp, "editorHelperFigureIdentity",
+            "distinct shared-cache identity for editor helper figures")
     require(undo_cpp, "m_logicSlot(pView ? pView->logicSlotIndex() : 0)",
             "slot provenance in undo commands")
     require(undo_cpp, "applyLogicParamAt(m_logicSlot", "slot-aware unit undo")
@@ -57,7 +60,7 @@ def main() -> int:
     )
     require(
         table_cpp,
-        'm_aRowToolTip[eObjParam_GUARD_PLACE] = "Center used by Guard area. Alarm guard uses the active alarm coordinates instead.";',
+        'm_aRowToolTip[eObjParam_GUARD_PLACE] = "Center of random roaming for Guard area. Alarm guard ignores this value and uses the active alarm coordinates.";',
         "guard-position tooltip distinguishes Guard area from Alarm guard",
     )
 
