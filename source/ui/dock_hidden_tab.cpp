@@ -14,7 +14,6 @@
 #include <QScreen>
 #include <QSettings>
 #include <QWindow>
-#include "log.h"
 #include "endurance_ui_scale.h"
 
 #ifdef Q_OS_WIN
@@ -46,32 +45,6 @@ QScreen* hostScreen(QWidget* host)
     return QApplication::screenAt(host->geometry().center());
 }
 
-QString hostDescription(QDockWidget* dock, QWidget* host, const QString& reason)
-{
-    const QRect geometry = host ? host->geometry() : QRect();
-    const QRect normal = host && host->normalGeometry().isValid()
-            ? host->normalGeometry() : QRect();
-    QScreen* screen = hostScreen(host);
-    return QStringLiteral("DOCK_WINDOW reason:%1 dock:%2 host:0x%3 class:%4 type:%5 "
-                          "visible:%6 maximized:%7 geometry:%8,%9,%10,%11 "
-                          "normal:%12,%13,%14,%15 screen:%16 dpi:%17 dpr:%18")
-            .arg(reason, dock ? dock->objectName() : QStringLiteral("none"))
-            .arg(quintptr(host), 0, 16)
-            .arg(host ? host->metaObject()->className() : "none")
-            .arg(host ? int(host->windowType()) : -1)
-            .arg(host && host->isVisible()).arg(host && host->isMaximized())
-            .arg(geometry.x()).arg(geometry.y()).arg(geometry.width()).arg(geometry.height())
-            .arg(normal.x()).arg(normal.y()).arg(normal.width()).arg(normal.height())
-            .arg(screen ? screen->name() : QStringLiteral("none"))
-            .arg(screen ? screen->logicalDotsPerInch() : 0.0, 0, 'f', 2)
-            .arg(screen ? screen->devicePixelRatio() : 1.0, 0, 'f', 2);
-}
-
-void logHost(QDockWidget* dock, QWidget* host, const QString& reason)
-{
-    ei::log(eLogInfo, hostDescription(dock, host, reason));
-}
-
 void refreshUiScaleForHostScreen(QWidget* host)
 {
     if(!host) return;
@@ -97,9 +70,6 @@ void refreshUiScaleForHostScreen(QWidget* host)
         ei::applyUiScalePercent(qRound(ei::uiScaleFactor() * 100.0));
         guardedHost->updateGeometry();
         guardedHost->update();
-        ei::log(eLogInfo, QStringLiteral(
-                "DOCK_WINDOW ui-scale-refreshed host:0x%1 signature:%2")
-                .arg(quintptr(guardedHost.data()), 0, 16).arg(signature));
     });
 }
 
@@ -184,7 +154,6 @@ void applyNativeWindowType(QDockWidget* dock, QWidget* host)
     const QIcon icon = dock->windowIcon().isNull()
         ? QApplication::windowIcon() : dock->windowIcon();
     if(!icon.isNull()) host->setWindowIcon(icon);
-    logHost(dock, host, QStringLiteral("native-window-applied-in-place"));
     return;
 #else
     const Qt::WindowFlags required = Qt::Window | Qt::WindowTitleHint |
@@ -218,7 +187,6 @@ void applyNativeWindowType(QDockWidget* dock, QWidget* host)
     }
     applyTaskbarIdentity(host);
     host->setProperty("enduranceApplyingDockWindowFlags", false);
-    logHost(dock, host, QStringLiteral("native-window-applied"));
 #endif
 }
 
@@ -235,7 +203,6 @@ void restoreHostFromDock(QDockWidget* dock)
     if(host->isMaximized())
     {
         if(wantsMaximized) rememberHost(dock, host, true);
-        logHost(dock, host, QStringLiteral("restore-skipped-host-already-maximized"));
         return;
     }
     const QRect normal = dock->property(kFloatingNormalGeometry).toRect();
@@ -248,7 +215,6 @@ void restoreHostFromDock(QDockWidget* dock)
     if(wantsMaximized) host->showMaximized();
     applyTaskbarIdentity(host);
     refreshUiScaleForHostScreen(host);
-    logHost(dock, host, QStringLiteral("state-restored"));
 }
 
 class CFloatingDockController final : public QObject
@@ -311,14 +277,9 @@ private:
         QWidget* host = separateHost(m_dock);
         if(host != m_host)
         {
-            QWidget* previous = m_host;
             if(m_host) m_host->removeEventFilter(this);
             m_host = host;
             if(m_host) m_host->installEventFilter(this);
-            ei::log(eLogInfo, QStringLiteral(
-                    "DOCK_WINDOW host-changed dock:%1 old:0x%2 new:0x%3")
-                    .arg(m_dock->objectName()).arg(quintptr(previous), 0, 16)
-                    .arg(quintptr(host), 0, 16));
         }
         if(!m_host) return;
         applyNativeWindowType(m_dock, m_host);
@@ -362,7 +323,6 @@ void ei::saveFloatingDockWindowState(QDockWidget* dock)
                       dock->property(kFloatingNormalGeometry));
     settings.setValue(prefix + QStringLiteral("screen"),
                       dock->property(kFloatingScreen));
-    logHost(dock, host, QStringLiteral("state-saved"));
 }
 
 void ei::restoreFloatingDockWindowState(QDockWidget* dock)
@@ -376,11 +336,6 @@ void ei::restoreFloatingDockWindowState(QDockWidget* dock)
                       settings.value(prefix + QStringLiteral("normalGeometry")));
     dock->setProperty(kFloatingScreen,
                       settings.value(prefix + QStringLiteral("screen")));
-    ei::log(eLogInfo, QStringLiteral(
-            "DOCK_WINDOW restore-request dock:%1 maximized:%2 screen:%3")
-            .arg(dock->objectName())
-            .arg(dock->property(kFloatingMaximized).toBool())
-            .arg(dock->property(kFloatingScreen).toString()));
     QTimer::singleShot(0, dock, [dock]() { restoreHostFromDock(dock); });
 }
 
@@ -403,7 +358,6 @@ void ei::refreshFloatingDockTabs(QDockWidget* active, QDockWidget* peer)
             copyRememberedState(source, peer);
         }
         restoreHostFromDock(source);
-        logHost(source, activeHost, QStringLiteral("tabs-reconciled"));
         active->show();
         active->raise();
         refreshContents(active);

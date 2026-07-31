@@ -1770,6 +1770,14 @@ int runHeadlessCommand(QApplication& app)
                 && messageScroll->value() == messageScroll->maximum();
         messageLog.hide();
 
+        const auto dockDiagnosticCount = []() {
+            int count = 0;
+            const QVector<SLogMessage> messages = CLogger::getInstance()->sessionMessages();
+            for(const SLogMessage& message : messages)
+                if(message.message.contains(QStringLiteral("DOCK_WINDOW"))) ++count;
+            return count;
+        };
+        const int dockDiagnosticsBefore = dockDiagnosticCount();
         QMainWindow dockWindow;
         dockWindow.setDockOptions(dockWindow.dockOptions()
             | QMainWindow::AllowTabbedDocks | QMainWindow::AllowNestedDocks
@@ -1876,6 +1884,8 @@ int runHeadlessCommand(QApplication& app)
         const bool floatingClosedLabelRemoved = !hiddenTab.tabBar()->isVisible();
         const bool floatingDockHostClosed = !dockLabelProbe.isVisible()
                 && (!floatingDockHost || !floatingDockHost->isVisible());
+        const bool routineDockDiagnosticsSuppressed =
+                dockDiagnosticCount() == dockDiagnosticsBefore;
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
@@ -1965,6 +1975,7 @@ int runHeadlessCommand(QApplication& app)
                 && floatingDockHostClosed
                 && validationViewStartsUnchecked && validationViewShowsAndChecks
                 && validationViewHidesAndUnchecks && validationViewReopensBesideMessageLog
+                && routineDockDiagnosticsSuppressed
                 && QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
                 && !QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling);
         QTextStream output(stdout);
@@ -2117,6 +2128,7 @@ int runHeadlessCommand(QApplication& app)
                << " validationViewHidesAndUnchecks=" << validationViewHidesAndUnchecks
                << " validationViewReopensBesideMessageLog="
                << validationViewReopensBesideMessageLog
+               << " routineDockDiagnosticsSuppressed=" << routineDockDiagnosticsSuppressed
                << " physicalPixelViewportScaling="
                << QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()
