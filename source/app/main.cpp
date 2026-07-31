@@ -1794,6 +1794,22 @@ int runHeadlessCommand(QApplication& app)
                                  QStringLiteral("Message Log"),
                                  QStringLiteral("dockHiddenTabProbe"));
         dockWindow.show();
+        QAction* validationViewAction = validationDockProbe.toggleViewAction();
+        validationDockProbe.hide();
+        QApplication::processEvents();
+        const bool validationViewStartsUnchecked = !validationViewAction->isChecked();
+        validationViewAction->trigger();
+        QApplication::processEvents();
+        const bool validationViewShowsAndChecks = validationDockProbe.isVisible()
+                && validationViewAction->isChecked();
+        validationViewAction->trigger();
+        QApplication::processEvents();
+        const bool validationViewHidesAndUnchecks = !validationDockProbe.isVisible()
+                && !validationViewAction->isChecked();
+        validationViewAction->trigger();
+        QApplication::processEvents();
+        const bool validationViewReopensBesideMessageLog = validationDockProbe.isVisible()
+                && validationViewAction->isChecked() && dockLabelProbe.isVisible();
         dockLabelProbe.hide();
         QEventLoop hiddenDockEvents;
         QTimer::singleShot(25, &hiddenDockEvents, &QEventLoop::quit);
@@ -1947,6 +1963,8 @@ int runHeadlessCommand(QApplication& app)
                 && floatingDockIsNormalWindow && floatingDockMaximizedRestores
                 && floatingDockTabRefreshRepaints && floatingDockTaskbarIdentity
                 && floatingDockHostClosed
+                && validationViewStartsUnchecked && validationViewShowsAndChecks
+                && validationViewHidesAndUnchecks && validationViewReopensBesideMessageLog
                 && QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
                 && !QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling);
         QTextStream output(stdout);
@@ -2094,6 +2112,11 @@ int runHeadlessCommand(QApplication& app)
                << " floatingDockTabRefreshRepaints=" << floatingDockTabRefreshRepaints
                << " floatingDockTaskbarIdentity=" << floatingDockTaskbarIdentity
                << " floatingDockHostClosed=" << floatingDockHostClosed
+               << " validationViewStartsUnchecked=" << validationViewStartsUnchecked
+               << " validationViewShowsAndChecks=" << validationViewShowsAndChecks
+               << " validationViewHidesAndUnchecks=" << validationViewHidesAndUnchecks
+               << " validationViewReopensBesideMessageLog="
+               << validationViewReopensBesideMessageLog
                << " physicalPixelViewportScaling="
                << QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()

@@ -755,9 +755,21 @@ MainWindow::MainWindow(QWidget* parent) :
     viewMenu->addAction(m_outlinerDock->toggleViewAction());
     viewMenu->addAction(m_propertiesDock->toggleViewAction());
     m_ui->menuTools->removeAction(m_ui->actionShow_undo_redo);
-    QAction* openValidationPanel = viewMenu->addAction(tr("MOB Family Validation"));
-    connect(openValidationPanel, &QAction::triggered,
-            this, &MainWindow::showMobFamilyValidation);
+    QAction* openValidationPanel = m_validationDock->toggleViewAction();
+    openValidationPanel->setText(tr("MOB Family Validation"));
+    viewMenu->addAction(openValidationPanel);
+    connect(openValidationPanel, &QAction::toggled, this, [this](bool visible)
+    {
+        if(!visible) return;
+        QTimer::singleShot(0, this, [this]()
+        {
+            if(!m_validationDock || !m_validationDock->isVisible()) return;
+            ei::refreshFloatingDockTabs(m_validationDock, m_messageLogDock);
+            m_validationDock->raise();
+            m_validationDock->activateWindow();
+            m_validationDock->setFocus();
+        });
+    });
     connect(m_mapsBrowser, &CMapsBrowser::openMapRequested,
             this, &MainWindow::openMapPair);
     connect(m_mapsBrowser, &CMapsBrowser::editMapRequested,
@@ -4526,6 +4538,7 @@ void MainWindow::showMobFamilyValidation()
     if(m_validationDock)
     {
         m_validationDock->show();
+        ei::refreshFloatingDockTabs(m_validationDock, m_messageLogDock);
         m_validationDock->raise();
         m_validationDock->activateWindow();
         m_validationDock->setFocus();
