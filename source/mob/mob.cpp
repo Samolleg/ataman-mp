@@ -572,7 +572,7 @@ int CMob::getPatrolId(uint unitMapId, CPatrolPoint* pPoint)
     return -1;
 }
 
-void CMob::createPatrolByHash(QString hash)
+void CMob::createPatrolByHash(QString hash, int logicSlot)
 {
     QStringList list = hash.split(".");
     if(list.size()<2)
@@ -581,15 +581,16 @@ void CMob::createPatrolByHash(QString hash)
     }
 
     CNode* pNode = nullptr;
-    foreach(pNode, m_aLogicNode)
+    foreach(pNode, m_aNode)
     {
         if(pNode->nodeType() == eUnit && pNode->mapId() == list[0].toUInt())
         {
             CUnit* pUnit = dynamic_cast<CUnit*>(pNode);
+            const int slot = logicSlot >= 0 ? logicSlot : pUnit->editorLogicIndex();
             if(list.size()==2)
-                pUnit->createPatrolByIndex(list[1].toInt());
+                pUnit->createPatrolByIndex(slot, list[1].toInt());
             else if(list.size()==3)
-                pUnit->createViewByIndex(list[1].toInt(), list[2].toInt());
+                pUnit->createViewByIndex(slot, list[1].toInt(), list[2].toInt());
 
             break;
         }
@@ -598,18 +599,19 @@ void CMob::createPatrolByHash(QString hash)
     logicNodesUpdate();
 }
 
-void CMob::undo_createPatrolByHash(QString hash)
+void CMob::undo_createPatrolByHash(QString hash, int logicSlot)
 {
     QStringList list = hash.split(".");
     if(list.size()==2) // patrol point
     {
         CNode* pNode = nullptr;
-        foreach(pNode, m_aLogicNode)
+        foreach(pNode, m_aNode)
         {
             if(pNode->nodeType() == eUnit && pNode->mapId() == list[0].toUInt())
             {
                 CUnit* pUnit = dynamic_cast<CUnit*>(pNode);
-                pUnit->undo_createPatrolByIndex(list[1].toInt());
+                const int slot = logicSlot >= 0 ? logicSlot : pUnit->editorLogicIndex();
+                pUnit->undo_createPatrolByIndex(slot, list[1].toInt());
                 break;
             }
         }
@@ -617,12 +619,13 @@ void CMob::undo_createPatrolByHash(QString hash)
     else if(list.size()==3)
     {
         CNode* pNode = nullptr;
-        foreach(pNode, m_aLogicNode)
+        foreach(pNode, m_aNode)
         {
             if(pNode->nodeType() == eUnit && pNode->mapId() == list[0].toUInt())
             {
                 CUnit* pUnit = dynamic_cast<CUnit*>(pNode);
-                pUnit->undo_createViewByIndex(list[1].toInt(), list[2].toInt());
+                const int slot = logicSlot >= 0 ? logicSlot : pUnit->editorLogicIndex();
+                pUnit->undo_createViewByIndex(slot, list[1].toInt(), list[2].toInt());
                 break;
             }
         }
@@ -630,25 +633,26 @@ void CMob::undo_createPatrolByHash(QString hash)
     logicNodesUpdate();
 }
 
-CPatrolPoint *CMob::patrolPointById(int unitId, int patrolId)
+CPatrolPoint *CMob::patrolPointById(int unitId, int patrolId, int logicSlot)
 {
     CNode* pNode = nullptr;
-    foreach(pNode, m_aLogicNode)
+    foreach(pNode, m_aNode)
     {
         if(pNode->nodeType() == eUnit && pNode->mapId() == (uint)unitId)
         {
             CUnit* pUnit = dynamic_cast<CUnit*>(pNode);
-            return pUnit->patrolByIndex(patrolId);
+            const int slot = logicSlot >= 0 ? logicSlot : pUnit->editorLogicIndex();
+            return pUnit->patrolByIndex(slot, patrolId);
         }
     }
     Q_ASSERT(false && "cant find patrol point by unit map id");
     return nullptr;
 }
 
-CLookPoint *CMob::viewPointById(int unitId, int patrolId, int viewId)
+CLookPoint *CMob::viewPointById(int unitId, int patrolId, int viewId, int logicSlot)
 {
-    CPatrolPoint* pPoint = patrolPointById(unitId, patrolId);
-    return pPoint->viewByIndex(viewId);
+    CPatrolPoint* pPoint = patrolPointById(unitId, patrolId, logicSlot);
+    return pPoint ? pPoint->viewByIndex(viewId) : nullptr;
 }
 
 void CMob::getTrapZoneHash(int &unitMapIdOut, int &zoneIdOut, CActivationZone *pZone)

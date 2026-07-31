@@ -281,6 +281,8 @@ private:
     CDockHiddenTab* m_messageLogHiddenTab{nullptr};
     QDockWidget* m_outlinerDock;
     QDockWidget* m_propertiesDock;
+    QWidget* m_logicSlotBar{nullptr};
+    QComboBox* m_logicSlotCombo{nullptr};
     QDockWidget* m_loadedMapDock;
     QTreeWidget* m_loadedMapTree;
     QTreeWidget* m_validationTree;

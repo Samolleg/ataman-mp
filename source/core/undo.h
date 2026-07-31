@@ -57,6 +57,7 @@ private:
     CView* m_pView;
     CMob* m_pMob;
     QString m_nodeHash;
+    int m_logicSlot;
 };
 
 class CCreateNodeCommand: public QObject, public QUndoCommand
@@ -160,6 +161,7 @@ protected:
     int m_patrolId;
     int m_viewId;
     int m_auxPointId;
+    int m_logicSlot;
     bool m_oldValueCaptured;
 };
 
@@ -215,6 +217,7 @@ private:
     CView* m_pView;
     CMob* m_mob;
     QString m_pointHash;
+    int m_logicSlot;
     CUnit* m_firstPointUnit;
     uint m_previousBehaviour;
     bool m_switchesToPath;

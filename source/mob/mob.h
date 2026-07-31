@@ -132,10 +132,11 @@ public:
     void getPatrolHash(int& unitMapIdOut, int& pointIdOut, CPatrolPoint* pPoint);
     void getViewHash(int& unitMapIdOut, int& pointIdOut, int& viewIdOut, CLookPoint* pPoint);
     int getPatrolId(uint unitMapId, CPatrolPoint* pPoint);
-    void createPatrolByHash(QString hash);
-    void undo_createPatrolByHash(QString hash);
-    CPatrolPoint* patrolPointById(int unitId, int patrolId);
-    CLookPoint* viewPointById(int unitId, int patrolId, int viewId);
+    void createPatrolByHash(QString hash, int logicSlot = -1);
+    void undo_createPatrolByHash(QString hash, int logicSlot = -1);
+    CPatrolPoint* patrolPointById(int unitId, int patrolId, int logicSlot = -1);
+    CLookPoint* viewPointById(int unitId, int patrolId, int viewId,
+                            int logicSlot = -1);
     void getTrapZoneHash(int& unitMapIdOut, int& zoneIdOut, CActivationZone* pZone);
     CActivationZone* actZoneById(int trapId, int zoneId);
     void getTrapCastHash(int& unitMapIdOut, int& pointIdOut, CTrapCastPoint* pCast);

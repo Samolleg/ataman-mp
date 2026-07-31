@@ -207,7 +207,9 @@ void CSound::collectParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENodeTyp
     if (comm != eSound)
         return;
 
-    propUint range(eObjParam_RANGE, m_range);
+    propStr name(eObjParam_NAME, m_name);
+    util::addParam(aProp, &name);
+    propUint range(eObjParam_SOUND_INNER_RADIUS, m_range);
     util::addParam(aProp, &range);
     propUint min(eObjParam_SOUND_MIN, m_min);
     util::addParam(aProp, &min);
@@ -227,7 +229,7 @@ void CSound::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
 {
     switch (propType)
     {
-    case eObjParam_RANGE:
+    case eObjParam_SOUND_INNER_RADIUS:
     {
         prop.reset(new propUint(propType, m_range));
         break;
@@ -271,7 +273,7 @@ void CSound::applyParam(const QSharedPointer<IPropertyBase>& prop)
 {
     switch (prop->type())
     {
-    case eObjParam_RANGE:
+    case eObjParam_SOUND_INNER_RADIUS:
     {
         m_range = dynamic_cast<propUint*>(prop.get())->value();
         break;

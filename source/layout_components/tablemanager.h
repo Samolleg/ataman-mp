@@ -337,6 +337,7 @@ public slots:
 private:
     QTableWidget* m_pTable;
     QMap<EObjParam, QString> m_aRowName;
+    QMap<EObjParam, QString> m_aRowToolTip;
     QMap<EObjParam, QMap<uint, QString>> m_comboMap;
     QMap<int, QSharedPointer<IPropertyBase>> m_rowValues;
     bool m_readOnly{false};

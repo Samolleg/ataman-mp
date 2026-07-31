@@ -118,6 +118,8 @@ void CParticle::collectParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENode
     if (comm != eParticle)
         return;
 
+    propStr name(eObjParam_NAME, m_name);
+    util::addParam(aProp, &name);
     propUint kind(eObjParam_PARTICL_TYPE, m_kind);
     util::addParam(aProp, &kind);
     propFloat scale(eObjParam_PARTICL_SCALE, m_scale);

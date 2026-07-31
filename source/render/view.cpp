@@ -7778,8 +7778,12 @@ bool CView::loadMob(QFileInfo &filePath)
     }
     int unitCount = 0;
     for(CNode* node : pMob->nodes())
-        if(dynamic_cast<CUnit*>(node))
+        if(CUnit* unit = dynamic_cast<CUnit*>(node))
+        {
+            unit->setEditorLogicIndex(m_logicSlotIndex);
             ++unitCount;
+        }
+    pMob->logicNodesUpdate();
     // Unit draw resolves visuals after frustum culling. Eagerly resolving
     // every unit blocked zone18 for over nine seconds and created resources
     // for hundreds of off-screen actors. Keep the document usable immediately;
@@ -10500,6 +10504,33 @@ void CView::viewParameters()
     m_tableManager->setNewData(aProp);
     m_tableManager->setReadOnly(!hasEditableSelection());
     emit selectionStateChanged(true);
+}
+
+void CView::setLogicSlotIndex(int index)
+{
+    const int bounded = qBound(0, index, 4);
+    if(m_logicSlotIndex == bounded)
+        return;
+
+    for(CMob* mob : m_aMob)
+    {
+        if(!mob)
+            continue;
+        for(CNode* node : mob->nodes())
+        {
+            CUnit* unit = dynamic_cast<CUnit*>(node);
+            if(!unit)
+                continue;
+            unit->clearLogicSelect();
+            unit->setEditorLogicIndex(bounded);
+        }
+        mob->logicNodesUpdate();
+    }
+    m_logicSlotIndex = bounded;
+    if(m_pTree)
+        collectObjectTreeData();
+    viewParameters();
+    update();
 }
 
 void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)

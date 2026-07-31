@@ -118,7 +118,7 @@ void CUnit::drawLogicVisual(bool isActive, QOpenGLShaderProgram* program)
     if (m_aLogic.empty() || m_state == ENodeState::eHidden)
         return;
 
-    m_aLogic.front()->draw(isActive, program);
+    editorLogic()->draw(isActive, program);
 }
 
 void CUnit::drawSelect(QOpenGLShaderProgram* program)
@@ -132,10 +132,8 @@ void CUnit::drawSelect(QOpenGLShaderProgram* program)
     }
     refreshAnimationPose();
     CObjectBase::drawSelect(program);
-    for(auto& logic: m_aLogic)
-    {
-        logic->drawSelect(program);
-    }
+    if(CScene::getInstance()->getMode() == eEditModeLogic)
+        editorLogic()->drawSelect(program);
 }
 
 void CUnit::preloadVisualResources()
@@ -951,7 +949,7 @@ void CUnit::collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENod
     if (comm != eUnit)
         return;
 
-    m_aLogic.front()->collectlogicParams(aProp);
+    editorLogic()->collectlogicParams(aProp);
 }
 
 void CUnit::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
@@ -1061,13 +1059,13 @@ void CUnit::applyParam(const QSharedPointer<IPropertyBase>& prop)
 
 void CUnit::getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
 {
-    m_aLogic.front()->getLogicParam(prop, propType);
+    editorLogic()->getLogicParam(prop, propType);
     return;
 }
 
 void CUnit::applyLogicParam(const QSharedPointer<IPropertyBase>& prop)
 {
-    m_aLogic.front()->applyLogicParam(prop);
+    editorLogic()->applyLogicParam(prop);
 }
 
 bool CUnit::updatePos(QVector3D &pos)
@@ -1075,7 +1073,7 @@ bool CUnit::updatePos(QVector3D &pos)
     QVector3D offset = pos - m_position;
     CObjectBase::updatePos(pos);
     Q_ASSERT(!m_aLogic.isEmpty());
-    CLogic* pLogic = m_aLogic.front();
+    CLogic* pLogic = editorLogic();
 
     if(CScene::getInstance()->getMode() == eEditModeLogic)
     {
@@ -1084,7 +1082,7 @@ bool CUnit::updatePos(QVector3D &pos)
         pos.setZ(0.0f);
         CLandscape::getInstance()->projectPt(pos);
         pLogic->setGuardPlacement(pos);
-        m_aLogic.front()->updateLogicLines();
+        pLogic->updateLogicLines();
     }
     else
         m_aLogic.front()->updatePos(offset);
@@ -1128,75 +1126,136 @@ QJsonObject CUnit::toJson()
 
 void CUnit::collectLogicNodes(QList<CNode *> &arrNode)
 {
-    m_aLogic.front()->collectPatrolNodes(arrNode);
+    editorLogic()->collectPatrolNodes(arrNode);
 }
 
 void CUnit::clearLogicSelect()
 {
-    m_aLogic.front()->clearPatrolSelect();
+    editorLogic()->clearPatrolSelect();
 }
 
 void CUnit::clearPaths()
 {
-    m_aLogic.front()->clearLogicPaths();
+    editorLogic()->clearLogicPaths();
     addFirstPatrolPoint();
 }
 
 bool CUnit::isChild(CPatrolPoint *pPointIn)
 {
-    return m_aLogic.front()->isChild(pPointIn);
+    return editorLogic()->isChild(pPointIn);
 }
 
 void CUnit::addFirstPatrolPoint()
 {
     QVector3D pos(m_position);
     CLandscape::getInstance()->projectPt(pos);
-    m_aLogic.front()->addFirstPoint(pos);
+    editorLogic()->addFirstPoint(pos);
 }
 
 void CUnit::undo_addFirstPatrolPoint()
 {
-    m_aLogic.front()->undo_addFirstPoint();
+    editorLogic()->undo_addFirstPoint();
 }
 
 bool CUnit::isBehaviourPath()
 {
-    return m_aLogic.front()->isBehaviourPath();
+    return editorLogic()->isBehaviourPath();
 }
 
 int CUnit::getPatrolId(CPatrolPoint *pPoint)
 {
-    return m_aLogic.front()->getPatrolId(pPoint);
+    return editorLogic()->getPatrolId(pPoint);
 }
 
 void CUnit::getViewId(int &parentPatrol, int &parentView, CLookPoint *pPoint)
 {
-    m_aLogic.front()->getViewId(parentPatrol, parentView, pPoint);
+    editorLogic()->getViewId(parentPatrol, parentView, pPoint);
 }
 
 void CUnit::createPatrolByIndex(int index)
 {
-    m_aLogic.front()->createPatrolByIndex(index);
+    editorLogic()->createPatrolByIndex(index);
 }
 
 void CUnit::undo_createPatrolByIndex(int index)
 {
-    m_aLogic.front()->undo_createPatrolByIndex(index);
+    editorLogic()->undo_createPatrolByIndex(index);
 }
 
 void CUnit::createViewByIndex(int pointId, int viewId)
 {
-    m_aLogic.front()->createViewByIndex(pointId, viewId);
+    editorLogic()->createViewByIndex(pointId, viewId);
 }
 
 void CUnit::undo_createViewByIndex(int pointId, int viewId)
 {
-    m_aLogic.front()->undo_createViewByIndex(pointId, viewId);
+    editorLogic()->undo_createViewByIndex(pointId, viewId);
 }
 
 CPatrolPoint *CUnit::patrolByIndex(int index)
 {
-    return m_aLogic.front()->patrolByIndex(index);
+    return editorLogic()->patrolByIndex(index);
+}
+
+CLogic* CUnit::editorLogic() const
+{
+    Q_ASSERT(!m_aLogic.isEmpty());
+    return m_aLogic.at(qBound(0, m_editorLogicIndex, m_aLogic.size() - 1));
+}
+
+void CUnit::setEditorLogicIndex(int index)
+{
+    m_editorLogicIndex = qBound(0, index, qMax(0, m_aLogic.size() - 1));
+}
+
+void CUnit::getLogicParamAt(int index, QSharedPointer<IPropertyBase>& prop,
+                            EObjParam propType)
+{
+    if(index >= 0 && index < m_aLogic.size())
+        m_aLogic.at(index)->getLogicParam(prop, propType);
+}
+
+void CUnit::applyLogicParamAt(int index, const QSharedPointer<IPropertyBase>& prop)
+{
+    if(index >= 0 && index < m_aLogic.size())
+        m_aLogic.at(index)->applyLogicParam(prop);
+}
+
+CPatrolPoint* CUnit::patrolByIndex(int logicIndex, int patrolIndex)
+{
+    if(logicIndex < 0 || logicIndex >= m_aLogic.size())
+        return nullptr;
+    return m_aLogic.at(logicIndex)->patrolByIndex(patrolIndex);
+}
+
+CLookPoint* CUnit::viewByIndex(int logicIndex, int patrolIndex, int viewIndex)
+{
+    CPatrolPoint* patrol = patrolByIndex(logicIndex, patrolIndex);
+    return patrol ? patrol->viewByIndex(viewIndex) : nullptr;
+}
+
+void CUnit::createPatrolByIndex(int logicIndex, int index)
+{
+    if(logicIndex >= 0 && logicIndex < m_aLogic.size())
+        m_aLogic.at(logicIndex)->createPatrolByIndex(index);
+}
+
+void CUnit::undo_createPatrolByIndex(int logicIndex, int index)
+{
+    if(logicIndex >= 0 && logicIndex < m_aLogic.size())
+        m_aLogic.at(logicIndex)->undo_createPatrolByIndex(index);
+}
+
+void CUnit::createViewByIndex(int logicIndex, int pointId, int viewId)
+{
+    if(logicIndex >= 0 && logicIndex < m_aLogic.size())
+        m_aLogic.at(logicIndex)->createViewByIndex(pointId, viewId);
+}
+
+void CUnit::undo_createViewByIndex(int logicIndex, int pointId, int viewId)
+{
+    if(logicIndex >= 0 && logicIndex < m_aLogic.size())
+        m_aLogic.at(logicIndex)->undo_createViewByIndex(pointId, viewId);
 }
 
 void CUnit::resetLogic()
@@ -1249,8 +1308,10 @@ CLogic::CLogic(CUnit* unit, bool bUse):
     ,m_bCyclic(false)
     ,m_behaviour(eRadius)
     ,m_guardRadius(10.0f)
+    ,m_numAlarm(0)
     ,m_use(bUse)
     ,m_wait(0.0f)
+    ,m_alarmCondition(0)
     ,m_help(10.0f)
     ,m_alwaysActive(0)
     ,m_agressionMode(0)
@@ -1751,6 +1812,8 @@ void CLogic::clearLogicPaths()
 
 void CLogic::collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp)
 {
+    propBool enabled(eObjParam_LOGIC_USE, m_use != 0);
+    util::addParam(aProp, &enabled);
     propUint beh(eObjParam_LOGIC_BEHAVIOUR, m_behaviour);
     util::addParam(aProp, &beh);
     propFloat help(eObjParam_GUARD_ALARM, m_help);
@@ -1768,11 +1831,22 @@ void CLogic::collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp)
     util::addParam(aProp, &bAlwaysActive);
     propChar agrMode(eObjParam_AGRESSION_MODE, m_agressionMode);
     util::addParam(aProp, &agrMode);
+    propChar alarmCondition(eObjParam_LOGIC_ALARM_CONDITION, m_alarmCondition);
+    util::addParam(aProp, &alarmCondition);
+    propBool cyclic(eObjParam_LOGIC_CYCLIC, m_bCyclic);
+    util::addParam(aProp, &cyclic);
+    propFloat wait(eObjParam_LOGIC_WAIT, m_wait);
+    util::addParam(aProp, &wait);
+    propChar alarmNumber(eObjParam_LOGIC_ALARM_NUMBER, m_numAlarm);
+    util::addParam(aProp, &alarmNumber);
 }
 
 void CLogic::getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
 {
     switch (propType){
+    case eObjParam_LOGIC_USE:
+        prop.reset(new propBool(propType, m_use != 0));
+        break;
     case eObjParam_LOGIC_BEHAVIOUR:
     {
         prop.reset(new propUint(propType, m_behaviour));
@@ -1803,6 +1877,18 @@ void CLogic::getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propTy
         prop.reset(new propChar(propType, m_agressionMode));
         break;
     }
+    case eObjParam_LOGIC_ALARM_CONDITION:
+        prop.reset(new propChar(propType, m_alarmCondition));
+        break;
+    case eObjParam_LOGIC_CYCLIC:
+        prop.reset(new propBool(propType, m_bCyclic));
+        break;
+    case eObjParam_LOGIC_WAIT:
+        prop.reset(new propFloat(propType, m_wait));
+        break;
+    case eObjParam_LOGIC_ALARM_NUMBER:
+        prop.reset(new propChar(propType, m_numAlarm));
+        break;
     default:
         Q_ASSERT(false);
     }
@@ -1813,6 +1899,9 @@ void CLogic::getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propTy
 void CLogic::applyLogicParam(const QSharedPointer<IPropertyBase>& prop)
 {
     switch (prop->type()){
+    case eObjParam_LOGIC_USE:
+        m_use = dynamic_cast<const propBool*>(prop.get())->value() ? 1 : 0;
+        break;
     case eObjParam_LOGIC_BEHAVIOUR:
     {
         m_behaviour = (EBehaviourType)dynamic_cast<const propUint*>(prop.get())->value();
@@ -1846,6 +1935,19 @@ void CLogic::applyLogicParam(const QSharedPointer<IPropertyBase>& prop)
         m_agressionMode = dynamic_cast<const propChar*>(prop.get())->value();
         break;
     }
+    case eObjParam_LOGIC_ALARM_CONDITION:
+        m_alarmCondition = dynamic_cast<const propChar*>(prop.get())->value();
+        break;
+    case eObjParam_LOGIC_CYCLIC:
+        m_bCyclic = dynamic_cast<const propBool*>(prop.get())->value();
+        createLogicLines();
+        break;
+    case eObjParam_LOGIC_WAIT:
+        m_wait = dynamic_cast<const propFloat*>(prop.get())->value();
+        break;
+    case eObjParam_LOGIC_ALARM_NUMBER:
+        m_numAlarm = dynamic_cast<const propChar*>(prop.get())->value();
+        break;
     default:
         Q_ASSERT(false);
     }
@@ -1858,6 +1960,26 @@ bool CLogic::isChild(CPatrolPoint *pPointIn)
     {
         if(pPoint == pPointIn)
             return true;
+    }
+    return false;
+}
+
+bool CLogic::owns(const CPatrolPoint* point) const
+{
+    return m_aPatrolPt.contains(const_cast<CPatrolPoint*>(point));
+}
+
+bool CLogic::owns(const CLookPoint* point, int* patrolIndex, int* lookIndex) const
+{
+    for(int patrol = 0; patrol < m_aPatrolPt.size(); ++patrol)
+    {
+        const int look = m_aPatrolPt.at(patrol)->lookPoint().indexOf(
+            const_cast<CLookPoint*>(point));
+        if(look < 0)
+            continue;
+        if(patrolIndex) *patrolIndex = patrol;
+        if(lookIndex) *lookIndex = look;
+        return true;
     }
     return false;
 }
@@ -2648,6 +2770,9 @@ void CLookPoint::getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam pr
         prop.reset(new propUint(propType, m_turnSpeed));
         break;
     }
+    case eObjParam_VIEW_FLAGS:
+        prop.reset(new propChar(propType, m_flag));
+        break;
     default:
         Q_ASSERT(false);
     }
@@ -2694,6 +2819,9 @@ void CLookPoint::applyLogicParam(const QSharedPointer<IPropertyBase>& prop)
         m_turnSpeed = dynamic_cast<const propUint*>(prop.get())->value();
         break;
     }
+    case eObjParam_VIEW_FLAGS:
+        m_flag = dynamic_cast<const propChar*>(prop.get())->value();
+        break;
     default:
         Q_ASSERT(false);
     }
@@ -2717,7 +2845,8 @@ void CLookPoint::collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp,
     util::addParam(aProp, &wait); //TODO: calc to seconds
     propUint speed(eObjParam_VIEW_TURN_SPEED, m_turnSpeed);
     util::addParam(aProp, &speed);
-    // m_flag ?
+    propChar flags(eObjParam_VIEW_FLAGS, m_flag);
+    util::addParam(aProp, &flags);
 }
 
 uint CLookPoint::deserialize(util::CMobParser& parser)

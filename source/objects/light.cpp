@@ -144,7 +144,7 @@ void CLight::collectParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENodeTyp
     //util::addParam(aProp, eObjParam_POSITION, util::makeString(m_position));
     prop3D color(eObjParam_LIGHT_COLOR, m_color);
     util::addParam(aProp, &color);
-    propFloat range(eObjParam_RANGE, m_range);
+    propFloat range(eObjParam_LIGHT_RADIUS, m_range);
     util::addParam(aProp, &range);
     propStr name(eObjParam_NAME, m_name);
     util::addParam(aProp, &name);
@@ -165,7 +165,7 @@ void CLight::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
         prop.reset(new prop3D(propType, m_color));
         break;
     }
-    case eObjParam_RANGE:
+    case eObjParam_LIGHT_RADIUS:
     {
         prop.reset(new propFloat(propType, m_range));
         break;
@@ -188,7 +188,7 @@ void CLight::applyParam(const QSharedPointer<IPropertyBase>& prop)
         m_color = dynamic_cast<prop3D*>(prop.get())->value();
         break;
     }
-    case eObjParam_RANGE:
+    case eObjParam_LIGHT_RADIUS:
     {
         m_range = dynamic_cast<propFloat*>(prop.get())->value();
         break;

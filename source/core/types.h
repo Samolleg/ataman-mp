@@ -97,6 +97,7 @@ enum EObjParam
     ,eObjParam_NID
 
     ,eObjParam_TYPE
+    ,eObjParam_OBJECT_TYPE
     ,eObjParam_TEMPLATE
     ,eObjParam_BODYPARTS
     ,eObjParam_PRIM_TXTR
@@ -114,6 +115,11 @@ enum EObjParam
     ,eObjParam_LOGIC_BEHAVIOUR
     ,eObjParam_GUARD_RADIUS
     ,eObjParam_GUARD_ALARM
+    ,eObjParam_LOGIC_USE
+    ,eObjParam_LOGIC_CYCLIC
+    ,eObjParam_LOGIC_WAIT
+    ,eObjParam_LOGIC_ALARM_CONDITION
+    ,eObjParam_LOGIC_ALARM_NUMBER
 
     //DONT CHANGE ORDER (table manager use indices ariphmethic)
     ,eObjParam_GUARD_PLACE_X
@@ -123,6 +129,7 @@ enum EObjParam
 
     ,eObjParam_VIEW_WAIT
     ,eObjParam_VIEW_TURN_SPEED
+    ,eObjParam_VIEW_FLAGS
 
     ,eObjParam_IS_SHADOW
     ,eObjParam_TORCH_PTLINK
@@ -133,6 +140,8 @@ enum EObjParam
     ,eObjParam_PARENT_ID
 
     ,eObjParam_RANGE
+    ,eObjParam_LIGHT_RADIUS
+    ,eObjParam_SOUND_INNER_RADIUS
     ,eObjParam_SOUND_RESNAME
     ,eObjParam_SOUND_AMBIENT
     ,eObjParam_SOUND_IS_MUSIC

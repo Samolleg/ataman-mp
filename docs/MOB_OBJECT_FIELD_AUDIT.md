@@ -4,6 +4,11 @@ This audit compares `Obj_EN.html` and `Obj_RU.html` with Endurance's parser, ser
 property UI. The manuals are useful tool-author documentation, but they are not an authoritative
 engine schema.
 
+The proposed English display labels, enum values, and concise evidence-only
+tooltips are maintained in [`OBJECT_PROPERTY_TERMINOLOGY.md`](OBJECT_PROPERTY_TERMINOLOGY.md).
+That specification changes presentation only; serialized field names and values
+remain unchanged.
+
 ## Language comparison
 
 The documents contain the same eight object families, 22 headings, 13 tables, and 80
@@ -19,9 +24,9 @@ The reviewed English file has SHA-256
 
 | Area | Current state | Recommended addition |
 |---|---|---|
-| Common object | Secondary texture is parsed and writable but omitted from the property list | Expose it with the same safe entry/filter behavior as primary texture |
-| Logic | Behaviour/model, help radius, point, active, and aggression mode are exposed | Add AlarmCond, Cyclic, Wait, Used, and AlarmNumb |
-| Look/action point | XYZ, wait, and turn speed are exposed | Add the parsed action flags |
+| Common object | Secondary texture and read-only ordinary object type are exposed | Keep resource validation profile-aware |
+| Logic | All five slots and their serialized fields are selectable and editable in Logic mode | Add relationship-focused patrol/look tooling |
+| Look/action point | XYZ, wait, turn speed, and action flags are exposed | Add a compound list for owned points |
 | Magic trap | Areas and targets can be manipulated as viewport nodes | Add an exact list/table view for coordinates, radius, ordering, and count |
 | Unit | Inventory strings and 51 Stats values exist | Add database-backed validation, enum/unit tooltips, and keep Stats collapsible/advanced |
 | Lever | Science tuple is split into vague labels | Group and explain the tuple while preserving its raw values |
@@ -30,6 +35,10 @@ The reviewed English file has SHA-256
 
 Fields backed by resource/database names should support autocomplete and validation without forbidding
 profile-specific JMV values.
+
+Endurance exposes, draws, and edits all five serialized unit logic slots through
+the selector shown in Logic mode. Undo/redo records the selected slot so a later
+slot switch cannot redirect an existing history entry.
 
 ## Better kept hidden or advanced
 
@@ -106,8 +115,9 @@ states and are emitted to both validation output and the workflow log.
 
 ## Research queue
 
-- Establish exact runtime grammar/semantics for InScript, Parent/ParentID, QuestInfo, inventory and
-  spell strings, logic flags/timing, sound/light units, and all 51 Stats fields.
+- Establish exact runtime semantics for ParentID, inventory and spell strings,
+  optional sound records, and all 51 Stats fields.
+- Keep the look-point turn-speed value as its verified unsigned 32-bit field.
 - Complete object and particle type maps, directory membership semantics, optional record coverage,
   and profile-specific JMV extensions.
 - Inventory other game-tolerated malformed legacy structures. Any future exception must be narrow,

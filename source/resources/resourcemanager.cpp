@@ -1767,10 +1767,10 @@ const char* CResourceStringList::noLiquidIndexName()
 void CResourceStringList::initResourceString()
 {
     QMap<uint, QString> map;
-    map[0] = "Not active";
+    map[0] = "Disabled";
     map[1] = "Hand";
-    map[2] = "Picklock (unused)";
-    map[4] = "Crowbar (unused)";
+    map[2] = "Picklock";
+    map[4] = "Crowbar";
     map[5] = "Hand or Crowbar";
     map[8] = "Key";
     map[9] = "Hand or Key";
@@ -1797,11 +1797,13 @@ void CResourceStringList::initResourceString()
     m_propValueName[eObjParam_LIGHT_SHADOW] = map;
     m_propValueName[eObjParam_TRAP_CAST_ONCE] = map;
     m_propValueName[eObjParam_ALWAYS_ACTIVE] = map;
+    m_propValueName[eObjParam_LOGIC_USE] = map;
+    m_propValueName[eObjParam_LOGIC_CYCLIC] = map;
 
     map.clear();
     map[50] = "Human";
     map[51] = "Animal";
-    map[52] = "Monstr";
+    map[52] = "Monster";
     m_propValueName[eObjParam_TYPE] = map;
 
     map.clear();
@@ -1892,20 +1894,26 @@ void CResourceStringList::initResourceString()
     m_propValueName[eObjParam_PARTICL_TYPE] = map;
 
     map.clear();
-    map[0] = "Idle";
-    map[1] = "Guard radius";
-    map[2] = "Path";
-    map[3] = "Place";
-    map[4] = "Briffing";
-    map[5] = "Guard Alaram";
+    map[0] = "Stay";
+    map[1] = "Guard area";
+    map[2] = "Patrol";
+    map[3] = "Sentry";
+    map[4] = "Player/script controlled";
+    map[5] = "Alarm guard";
     m_propValueName[eObjParam_LOGIC_BEHAVIOUR] = map;
 
     map.clear();
     map[0] = "Attack";
-    map[1] = "Revenge";
-    map[2] = "Fear";
-    map[3] = "Fear player";
+    map[1] = "Retaliate";
+    map[2] = "Flee enemies";
+    map[3] = "Flee enemies and player";
     m_propValueName[eObjParam_AGRESSION_MODE] = map;
+
+    map.clear();
+    map[0] = "Enemy seen";
+    map[1] = "Attacked";
+    map[2] = "Suspicion";
+    m_propValueName[eObjParam_LOGIC_ALARM_CONDITION] = map;
 
     map.clear();
     map[0] = "HP";

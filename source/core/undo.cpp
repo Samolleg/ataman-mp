@@ -256,6 +256,7 @@ CChangeLogicParam::CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPo
   ,m_patrolId(-1)
   ,m_viewId(-1)
   ,m_auxPointId(-1)
+  ,m_logicSlot(pView ? pView->logicSlotIndex() : 0)
   ,m_oldValueCaptured(false)
 {
     m_newValue.reset(prop->clone());
@@ -293,8 +294,8 @@ CNode* CChangeLogicParam::resolveNode() const
         return nullptr;
     switch(m_nodeType)
     {
-    case ePatrolPoint: return m_pMob->patrolPointById(int(m_ownerMapId), m_patrolId);
-    case eLookPoint: return m_pMob->viewPointById(int(m_ownerMapId), m_patrolId, m_viewId);
+    case ePatrolPoint: return m_pMob->patrolPointById(int(m_ownerMapId), m_patrolId, m_logicSlot);
+    case eLookPoint: return m_pMob->viewPointById(int(m_ownerMapId), m_patrolId, m_viewId, m_logicSlot);
     case eTrapActZone: return m_pMob->actZoneById(int(m_ownerMapId), m_auxPointId);
     case eTrapCastPoint: return m_pMob->trapCastById(int(m_ownerMapId), m_auxPointId);
     default: return m_pMob->nodeByMapId(m_ownerMapId);
@@ -309,7 +310,10 @@ void CChangeLogicParam::undo()
         ei::log(eLogWarning, "Logic property undo skipped because its target no longer exists");
         return;
     }
-    m_pNode->applyLogicParam(m_oldValue);
+    if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode))
+        unit->applyLogicParamAt(m_logicSlot, m_oldValue);
+    else
+        m_pNode->applyLogicParam(m_oldValue);
 
     emit updateParam();
     m_pView->setDurty(m_pMob);
@@ -325,10 +329,16 @@ void CChangeLogicParam::redo()
     }
     if(!m_oldValueCaptured)
     {
-        m_pNode->getLogicParam(m_oldValue, m_newValue->type());
+        if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode))
+            unit->getLogicParamAt(m_logicSlot, m_oldValue, m_newValue->type());
+        else
+            m_pNode->getLogicParam(m_oldValue, m_newValue->type());
         m_oldValueCaptured = !m_oldValue.isNull();
     }
-    m_pNode->applyLogicParam(m_newValue);
+    if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode))
+        unit->applyLogicParamAt(m_logicSlot, m_newValue);
+    else
+        m_pNode->applyLogicParam(m_newValue);
 
     emit updateParam();
     m_pView->setDurty(m_pMob);
@@ -408,6 +418,7 @@ CCreatePatrolCommand::CCreatePatrolCommand(CView* pView, QString pointHash, QUnd
   ,m_pView(pView)
   ,m_mob(pView ? pView->currentMob() : nullptr)
   ,m_pointHash(pointHash)
+  ,m_logicSlot(pView ? pView->logicSlotIndex() : 0)
   ,m_firstPointUnit(nullptr)
   ,m_previousBehaviour(0)
   ,m_switchesToPath(false)
@@ -419,7 +430,7 @@ CCreatePatrolCommand::CCreatePatrolCommand(CView* pView, QString pointHash, QUnd
         if(m_firstPointUnit)
         {
             QSharedPointer<IPropertyBase> behaviour;
-            m_firstPointUnit->getLogicParam(behaviour, eObjParam_LOGIC_BEHAVIOUR);
+            m_firstPointUnit->getLogicParamAt(m_logicSlot, behaviour, eObjParam_LOGIC_BEHAVIOUR);
             const propUint* value = dynamic_cast<const propUint*>(behaviour.get());
             if(value)
             {
@@ -434,12 +445,12 @@ void CCreatePatrolCommand::undo()
 {
     if(!m_mob)
         return;
-    m_mob->undo_createPatrolByHash(m_pointHash);
+    m_mob->undo_createPatrolByHash(m_pointHash, m_logicSlot);
     if(m_switchesToPath && m_firstPointUnit)
     {
         QSharedPointer<IPropertyBase> behaviour(
             new propUint(eObjParam_LOGIC_BEHAVIOUR, m_previousBehaviour));
-        m_firstPointUnit->applyLogicParam(behaviour);
+        m_firstPointUnit->applyLogicParamAt(m_logicSlot, behaviour);
     }
 }
 
@@ -449,11 +460,11 @@ void CCreatePatrolCommand::redo()
     {
         QSharedPointer<IPropertyBase> behaviour(
             new propUint(eObjParam_LOGIC_BEHAVIOUR, uint(EBehaviourType::ePath)));
-        m_firstPointUnit->applyLogicParam(behaviour);
+        m_firstPointUnit->applyLogicParamAt(m_logicSlot, behaviour);
     }
     if(!m_mob)
         return;
-    m_mob->createPatrolByHash(m_pointHash);
+    m_mob->createPatrolByHash(m_pointHash, m_logicSlot);
     setText(m_switchesToPath ? "Create first patrol point and enable Path behaviour"
                              : "Create patrol point");
 }
@@ -497,6 +508,7 @@ CDeleteLogicPoint::CDeleteLogicPoint(CView *pView, QString hash, QUndoCommand *p
   ,m_pView(pView)
   ,m_pMob(pView ? pView->currentMob() : nullptr)
   ,m_nodeHash(hash)
+  ,m_logicSlot(pView ? pView->logicSlotIndex() : 0)
 {
 }
 
@@ -509,13 +521,13 @@ void CDeleteLogicPoint::undo()
     }
     else if(list.size()==2)
     {//patrol point
-        CPatrolPoint* pPoint = m_pMob->patrolPointById(list[0].toInt(), list[1].toInt());
-        pPoint->markAsDeleted(false);
+        CPatrolPoint* pPoint = m_pMob->patrolPointById(list[0].toInt(), list[1].toInt(), m_logicSlot);
+        if(pPoint) pPoint->markAsDeleted(false);
     }
     else if(list.size()==3)
     {//look point
-        CLookPoint* pPoint = m_pMob->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt());
-        pPoint->markAsDeleted(false);
+        CLookPoint* pPoint = m_pMob->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt(), m_logicSlot);
+        if(pPoint) pPoint->markAsDeleted(false);
     }
     else if(list.size() == 4) //trap zone
     {
@@ -538,13 +550,13 @@ void CDeleteLogicPoint::redo()
     }
     else if(list.size()==2)
     {//patrol point
-        CPatrolPoint* pPoint = m_pMob->patrolPointById(list[0].toInt(), list[1].toInt());
-        pPoint->markAsDeleted(true);
+        CPatrolPoint* pPoint = m_pMob->patrolPointById(list[0].toInt(), list[1].toInt(), m_logicSlot);
+        if(pPoint) pPoint->markAsDeleted(true);
     }
     else if(list.size()==3)
     {//look point
-        CLookPoint* pPoint = m_pMob->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt());
-        pPoint->markAsDeleted(true);
+        CLookPoint* pPoint = m_pMob->viewPointById(list[0].toInt(), list[1].toInt(), list[2].toInt(), m_logicSlot);
+        if(pPoint) pPoint->markAsDeleted(true);
     }
     else if(list.size() == 4) //trap zone
     {

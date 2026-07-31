@@ -461,13 +461,36 @@ MainWindow::MainWindow(QWidget* parent) :
                                QDockWidget::DockWidgetFloatable);
     m_outlinerDock->setWidget(outlinerContainer);
 
+    QWidget* propertiesContainer = new QWidget(this);
+    QVBoxLayout* propertiesLayout = new QVBoxLayout(propertiesContainer);
+    propertiesLayout->setContentsMargins(0, 0, 0, 0);
+    propertiesLayout->setSpacing(3);
+    m_logicSlotBar = new QWidget(propertiesContainer);
+    QHBoxLayout* logicSlotLayout = new QHBoxLayout(m_logicSlotBar);
+    logicSlotLayout->setContentsMargins(4, 3, 4, 3);
+    logicSlotLayout->addWidget(new QLabel(tr("Behavior setup:"), m_logicSlotBar));
+    m_logicSlotCombo = new QComboBox(m_logicSlotBar);
+    m_logicSlotCombo->addItem(tr("Logic 1 (default)"), 0);
+    m_logicSlotCombo->addItem(tr("Logic 2 (alarm 1)"), 1);
+    m_logicSlotCombo->addItem(tr("Logic 3 (alarm 2)"), 2);
+    m_logicSlotCombo->addItem(tr("Logic 4 (alarm 3)"), 3);
+    m_logicSlotCombo->addItem(tr("Logic 5 (alarm 4)"), 4);
+    m_logicSlotCombo->setToolTip(tr(
+        "Select which of the unit's five behavior setups is shown and edited. "
+        "The first setup is the default; the others activate from world alarms 1 to 4."));
+    logicSlotLayout->addWidget(m_logicSlotCombo, 1);
+    m_logicSlotBar->hide();
+    propertiesLayout->addWidget(m_logicSlotBar);
+    m_ui->tableWidget->setParent(propertiesContainer);
+    propertiesLayout->addWidget(m_ui->tableWidget, 1);
+
     m_propertiesDock = new QDockWidget(tr("Object Properties"), this);
     m_propertiesDock->setObjectName("objectPropertiesDock");
     m_propertiesDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     m_propertiesDock->setFeatures(QDockWidget::DockWidgetClosable |
                                  QDockWidget::DockWidgetMovable |
                                  QDockWidget::DockWidgetFloatable);
-    m_propertiesDock->setWidget(m_ui->tableWidget);
+    m_propertiesDock->setWidget(propertiesContainer);
     addDockWidget(Qt::RightDockWidgetArea, m_outlinerDock);
     splitDockWidget(m_outlinerDock, m_propertiesDock, Qt::Vertical);
     m_ui->outlinerSplitter->hide();
@@ -1446,6 +1469,17 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->actionSave_all_MOB_s->setEnabled(false);
     QObject::connect(m_pView, SIGNAL(updateMainWindowTitle(eTitleTypeData,QString)), this, SLOT(updateWindowTitle(eTitleTypeData,QString)));
     QObject::connect(CScene::getInstance(), SIGNAL(modeChanged()), m_pView, SLOT(viewParameters()));
+    connect(m_logicSlotCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int comboIndex)
+    {
+        if(m_pView)
+            m_pView->setLogicSlotIndex(m_logicSlotCombo->itemData(comboIndex).toInt());
+    });
+    connect(CScene::getInstance(), &CScene::modeChanged, this, [this]()
+    {
+        if(m_logicSlotBar)
+            m_logicSlotBar->setVisible(CScene::getInstance()->getMode() == eEditModeLogic);
+    });
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
     connect(m_pView, &CView::showLandscapeToolsSignal, this, [this]()
     {

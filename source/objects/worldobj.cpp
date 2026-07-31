@@ -329,7 +329,13 @@ void CWorldObj::collectParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENode
         util::addParam(aProp, &dipNum);
     }
 
-    //addParam(aParam, eObjParam_TYPE, QString::number(m_type));
+    if(nodeType() != ENodeType::eUnit)
+    {
+        // Structural type changes require an explicit conversion transaction.
+        // Expose the stored value read-only instead of offering a raw rewrite.
+        propUint objectType(eObjParam_OBJECT_TYPE, m_type);
+        util::addParam(aProp, &objectType);
+    }
     propStr name(eObjParam_NAME, m_name);
     util::addParam(aProp, &name);
     propStr model(eObjParam_TEMPLATE, m_modelName);
@@ -347,7 +353,8 @@ void CWorldObj::collectParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENode
     util::addParam(aProp, &parentTemplate);
     propStr primTexture(eObjParam_PRIM_TXTR, m_primaryTexture);
     util::addParam(aProp, &primTexture);
-    //addParam(aParam, eObjParam_SEC_TXTR, m_secondaryTexture);
+    propStr secondaryTexture(eObjParam_SEC_TXTR, m_secondaryTexture);
+    util::addParam(aProp, &secondaryTexture);
 
     QVector3D rotEuler = getEulerRotation();
     //prop3D rot(eObjParam_ROTATION, rotEuler);

@@ -132,6 +132,9 @@ public:
     void undo_createViewByIndex(int pointId, int viewId);
     CPatrolPoint* patrolByIndex(int index);
     void setGuardPlacement(QVector3D pos) {m_guardPlacement = pos;}
+    bool owns(const CPatrolPoint* point) const;
+    bool owns(const CLookPoint* point, int* patrolIndex = nullptr,
+              int* lookIndex = nullptr) const;
 
 
 public slots:
@@ -224,12 +227,24 @@ public:
     void createViewByIndex(int pointId, int viewId);
     void undo_createViewByIndex(int pointId, int viewId);
     CPatrolPoint *patrolByIndex(int index);
+    int editorLogicIndex() const { return m_editorLogicIndex; }
+    void setEditorLogicIndex(int index);
+    void getLogicParamAt(int index, QSharedPointer<IPropertyBase>& prop,
+                         EObjParam propType);
+    void applyLogicParamAt(int index, const QSharedPointer<IPropertyBase>& prop);
+    CPatrolPoint* patrolByIndex(int logicIndex, int patrolIndex);
+    CLookPoint* viewByIndex(int logicIndex, int patrolIndex, int viewIndex);
+    void createPatrolByIndex(int logicIndex, int index);
+    void undo_createPatrolByIndex(int logicIndex, int index);
+    void createViewByIndex(int logicIndex, int pointId, int viewId);
+    void undo_createViewByIndex(int logicIndex, int pointId, int viewId);
     void resetLogic();
     void refreshLogicProjection();
     QVector<QVector3D> movementState() const;
     bool restoreMovementState(const QVector<QVector3D>& state);
 
 private:
+    CLogic* editorLogic() const;
     bool refreshTransientVisual(bool force = false);
     void refreshAnimationPose();
     //"UNIT_R", eNull};
@@ -245,6 +260,7 @@ private:
     bool m_bImport;//"UNIT_NEED_IMPORT", eByte};
     //
     QVector<CLogic*> m_aLogic;
+    int m_editorLogicIndex{0};
     quint64 m_visualRevision{1};
     quint64 m_resolvedVisualRevision{0};
     quint64 m_resolvedDatabaseGeneration{0};

@@ -226,6 +226,8 @@ public:
     void hideSelectedNodes();
     void unHideAll();
     CMob* currentMob() {return m_activeMob;}
+    int logicSlotIndex() const { return m_logicSlotIndex; }
+    void setLogicSlotIndex(int index);
     bool hasEditableSelection() const;
     QOpenGLShaderProgram& shaderObject() {return m_program;}
     void setDirtyMpr();
@@ -567,6 +569,7 @@ private:
     QFile m_clipboard_buffer_file;
     QFile m_recentOpenedFile_file;
     CMob* m_activeMob;
+    int m_logicSlotIndex{0};
     CTreeView* m_pTree;
     QList<CMobParameters*> m_arrParamWindow;
     QSharedPointer<CExternalScriptWorkspaceManager> m_scriptWorkspaces;
