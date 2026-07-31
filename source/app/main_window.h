@@ -165,6 +165,7 @@ private:
     void endWorkspaceLoad();
     void updateLoadedMapPanel();
     void updateOutlinerSelectionPath();
+    void updateLogicSlotBarVisibility();
     void previewLoadedMapVisibility(QTreeWidgetItem* item);
     void commitLoadedMapVisibilityDrag();
     void showLandscapeTools();

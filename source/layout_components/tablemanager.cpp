@@ -35,6 +35,42 @@ namespace {
 const char* kPropertyMimeType = "application/x-ei-mapper-property-type";
 QList<QSharedPointer<IPropertyBase>> g_propertyClipboard;
 
+QString staticChoiceToolTip(EObjParam type, uint value)
+{
+    if(type == eObjParam_LOGIC_BEHAVIOUR)
+    {
+        switch(value)
+        {
+        case 0: return QObject::tr("Remains in place and faces the configured direction.");
+        case 1: return QObject::tr("Guards the configured position and radius.");
+        case 2: return QObject::tr("Follows the configured patrol points.");
+        case 3: return QObject::tr("Remains in place and looks around.");
+        case 4: return QObject::tr("Leaves control to the player or map scripts.");
+        case 5: return QObject::tr("Guards the position where the active alarm was raised.");
+        }
+    }
+    if(type == eObjParam_AGRESSION_MODE)
+    {
+        switch(value)
+        {
+        case 0: return QObject::tr("Attacks enemies on sight.");
+        case 1: return QObject::tr("Attacks only in response to aggression.");
+        case 2: return QObject::tr("Flees from enemies.");
+        case 3: return QObject::tr("Flees from enemies and the player's party.");
+        }
+    }
+    if(type == eObjParam_LOGIC_ALARM_CONDITION)
+    {
+        switch(value)
+        {
+        case 0: return QObject::tr("Raises the configured alarm when the unit sees an enemy.");
+        case 1: return QObject::tr("Raises the configured alarm when the unit is attacked.");
+        case 2: return QObject::tr("Raises the configured alarm when the unit becomes suspicious.");
+        }
+    }
+    return QString();
+}
+
 bool numericValue(const IPropertyBase* property, double* value)
 {
     if(!property || !property->isInit() || !value || dynamic_cast<const propBool*>(property))
@@ -903,7 +939,7 @@ void CTableManager::initRowName()
     m_aRowName[eObjParam_LOGIC_CYCLIC] = "Patrol route repeats";
     m_aRowName[eObjParam_LOGIC_WAIT] = "Guard idle time";
     m_aRowName[eObjParam_LOGIC_ALARM_CONDITION] = "Alarm condition";
-    m_aRowName[eObjParam_LOGIC_ALARM_NUMBER] = "Alarm number";
+    m_aRowName[eObjParam_LOGIC_ALARM_NUMBER] = "Alarm raised";
     m_aRowName[eObjParam_VIEW_WAIT] = "Wait time";
     m_aRowName[eObjParam_VIEW_TURN_SPEED] = "Turn speed";
     m_aRowName[eObjParam_VIEW_FLAGS] = "Action flags";
@@ -1550,6 +1586,13 @@ CComboStItem::CComboStItem(const QSharedPointer<IPropertyBase>& prop)
     //addItems(m_valueList.values());
     m_pListModel->setStringList(m_valueList.values());
     setModel(m_pListModel.get());
+    int index = 0;
+    for(auto it = m_valueList.constBegin(); it != m_valueList.constEnd(); ++it, ++index)
+    {
+        const QString tooltip = staticChoiceToolTip(prop->type(), it.key());
+        if(!tooltip.isEmpty())
+            setItemData(index, tooltip, Qt::ToolTipRole);
+    }
     if(m_pValue->isInit())
         setCurrentText(m_valueList[m_pValue->toString().toUInt()]);
     else

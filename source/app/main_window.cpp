@@ -471,10 +471,15 @@ MainWindow::MainWindow(QWidget* parent) :
     logicSlotLayout->addWidget(new QLabel(tr("Behavior setup:"), m_logicSlotBar));
     m_logicSlotCombo = new QComboBox(m_logicSlotBar);
     m_logicSlotCombo->addItem(tr("Logic 1 (default)"), 0);
-    m_logicSlotCombo->addItem(tr("Logic 2 (alarm 1)"), 1);
-    m_logicSlotCombo->addItem(tr("Logic 3 (alarm 2)"), 2);
-    m_logicSlotCombo->addItem(tr("Logic 4 (alarm 3)"), 3);
-    m_logicSlotCombo->addItem(tr("Logic 5 (alarm 4)"), 4);
+    m_logicSlotCombo->addItem(tr("Logic 2 (responds to alarm 1)"), 1);
+    m_logicSlotCombo->addItem(tr("Logic 3 (responds to alarm 2)"), 2);
+    m_logicSlotCombo->addItem(tr("Logic 4 (responds to alarm 3)"), 3);
+    m_logicSlotCombo->addItem(tr("Logic 5 (responds to alarm 4)"), 4);
+    m_logicSlotCombo->setItemData(0, tr("The unit's normal behavior setup."), Qt::ToolTipRole);
+    for(int slot = 1; slot < m_logicSlotCombo->count(); ++slot)
+        m_logicSlotCombo->setItemData(slot,
+            tr("Activates when world alarm %1 is raised, if Logic enabled is on.").arg(slot),
+            Qt::ToolTipRole);
     m_logicSlotCombo->setToolTip(tr(
         "Select which of the unit's five behavior setups is shown and edited. "
         "The first setup is the default; the others activate from world alarms 1 to 4."));
@@ -1069,8 +1074,11 @@ MainWindow::MainWindow(QWidget* parent) :
     viewMenu->insertAction(openValidationPanel, m_historyDock->toggleViewAction());
 
     QSettings uiSettings;
+    const QByteArray savedMainWindowState =
+            uiSettings.value("ui/mainWindowState").toByteArray();
+    const bool initializeDefaultDockLayout = firstRunSetup && savedMainWindowState.isEmpty();
     restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
-    restoreState(uiSettings.value("ui/mainWindowState").toByteArray());
+    restoreState(savedMainWindowState);
     ei::restoreFloatingDockWindowState(m_messageLogDock);
     ei::restoreFloatingDockWindowState(m_validationDock);
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
@@ -1084,7 +1092,7 @@ MainWindow::MainWindow(QWidget* parent) :
     // Always start closed while preserving the user's last sculpt controls.
     m_landscapeToolsDock->hide();
     m_landscapeTools->setEditingEnabled(false, false);
-    if(firstRunSetup)
+    if(initializeDefaultDockLayout)
     {
         // A new profile must start from the documented usable workspace even
         // if Windows still contains dock state from an older/test install.
@@ -1477,8 +1485,7 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(CScene::getInstance(), &CScene::modeChanged, this, [this]()
     {
-        if(m_logicSlotBar)
-            m_logicSlotBar->setVisible(CScene::getInstance()->getMode() == eEditModeLogic);
+        updateLogicSlotBarVisibility();
     });
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
     connect(m_pView, &CView::showLandscapeToolsSignal, this, [this]()
@@ -1556,6 +1563,7 @@ MainWindow::MainWindow(QWidget* parent) :
             m_pView->setTestSpawnMarkerSelected(false);
             updateOperationAvailability();
         }
+        updateLogicSlotBarVisibility();
         updateOutlinerSelectionPath();
     });
 
@@ -1787,6 +1795,18 @@ void MainWindow::updateUnitTexturePreview()
     }
     m_unitTextureUpdating = false;
     renderUnitTexturePreview();
+}
+
+void MainWindow::updateLogicSlotBarVisibility()
+{
+    bool show = CScene::getInstance()->getMode() == eEditModeLogic && m_pView;
+    if(show)
+    {
+        const QList<CNode*> selected = m_pView->selectionSnapshot();
+        show = selected.size() == 1 && dynamic_cast<CUnit*>(selected.first());
+    }
+    if(m_logicSlotBar)
+        m_logicSlotBar->setVisible(show);
 }
 
 void MainWindow::renderUnitTexturePreview()

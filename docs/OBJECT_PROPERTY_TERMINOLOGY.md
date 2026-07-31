@@ -82,7 +82,7 @@ and undo/redo follow the selected slot.
 | Alarm condition | `0` Enemy seen, `1` Attacked, `2` Suspicion | Exposed for the selected slot | Event that makes this unit raise its configured alarm. |
 | Patrol route repeats | On/off | Exposed for the selected slot | On returns from the last patrol point to the first. Off follows the route back in reverse. |
 | Guard idle time | Float | Exposed for the selected slot | — |
-| Alarm number | Unsigned integer | Exposed for the selected slot | World alarm this unit raises when its alarm condition occurs. `0` raises no alarm. |
+| Alarm raised | Unsigned integer | Exposed for the selected slot | World alarm this unit raises when its alarm condition occurs. `0` raises no alarm. |
 
 Behaviour values:
 
