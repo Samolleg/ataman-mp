@@ -542,7 +542,7 @@
   </action>
   <action name="actionChange_mod_e">
    <property name="text">
-    <string>Change Mod&amp;e</string>
+    <string>Switch to Behavior mode</string>
    </property>
   </action>
   <action name="actionCopy_IDs_to_clipboard">

@@ -52,6 +52,11 @@ def main() -> int:
     require(table_cpp, "m_aRowToolTip[eObjParam_PARENT_TEMPLATE]", "audited tooltips")
     require(
         table_cpp,
+        "WARNING: An empty list enables every model part; incompatible combinations can crash the game, especially on units.",
+        "explicit empty-model-parts crash warning",
+    )
+    require(
+        table_cpp,
         'm_aRowToolTip[eObjParam_GUARD_PLACE] = "Center used by Guard area. Alarm guard uses the active alarm coordinates instead.";',
         "guard-position tooltip distinguishes Guard area from Alarm guard",
     )

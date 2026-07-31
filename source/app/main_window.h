@@ -166,6 +166,7 @@ private:
     void updateLoadedMapPanel();
     void updateOutlinerSelectionPath();
     void updateLogicSlotBarVisibility();
+    void updateBehaviorModeUi();
     void previewLoadedMapVisibility(QTreeWidgetItem* item);
     void commitLoadedMapVisibilityDrag();
     void showLandscapeTools();
@@ -284,6 +285,7 @@ private:
     QDockWidget* m_propertiesDock;
     QWidget* m_logicSlotBar{nullptr};
     QComboBox* m_logicSlotCombo{nullptr};
+    QToolButton* m_behaviorModeButton{nullptr};
     QDockWidget* m_loadedMapDock;
     QTreeWidget* m_loadedMapTree;
     QTreeWidget* m_validationTree;

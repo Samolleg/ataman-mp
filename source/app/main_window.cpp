@@ -274,6 +274,38 @@ QIcon entranceVisibilityIcon(bool visible, const QColor& color)
     return QIcon(pixmap);
 }
 
+QIcon behaviorModeIcon(bool active, const QColor& foreground)
+{
+    QPixmap pixmap(28, 28);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const QColor color = active ? QColor(52, 152, 219) : foreground;
+    painter.setPen(QPen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+
+    painter.drawEllipse(QPointF(9.0, 8.0), 4.2, 4.2);
+    QPainterPath shoulders;
+    shoulders.moveTo(2.8, 21.8);
+    shoulders.cubicTo(3.5, 15.2, 7.0, 13.3, 10.0, 13.3);
+    shoulders.cubicTo(12.0, 13.3, 13.6, 14.0, 14.8, 15.1);
+    painter.drawPath(shoulders);
+
+    const QPointF gearCenter(19.3, 18.6);
+    painter.drawEllipse(gearCenter, 4.0, 4.0);
+    painter.drawEllipse(gearCenter, 1.35, 1.35);
+    for(int spoke = 0; spoke < 8; ++spoke)
+    {
+        const qreal angle = spoke * M_PI / 4.0;
+        const QPointF inner(gearCenter.x() + std::cos(angle) * 4.4,
+                            gearCenter.y() + std::sin(angle) * 4.4);
+        const QPointF outer(gearCenter.x() + std::cos(angle) * 6.0,
+                            gearCenter.y() + std::sin(angle) * 6.0);
+        painter.drawLine(inner, outer);
+    }
+    return QIcon(pixmap);
+}
+
 void updateEntranceVisibilityButtonAppearance(QToolButton* button, bool visible)
 {
     if(!button)
@@ -1486,6 +1518,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(CScene::getInstance(), &CScene::modeChanged, this, [this]()
     {
         updateLogicSlotBarVisibility();
+        updateBehaviorModeUi();
     });
     QObject::connect(m_pView, SIGNAL(showOutlinerSignal(bool)), this, SLOT(showOutliner(bool)));
     connect(m_pView, &CView::showLandscapeToolsSignal, this, [this]()
@@ -1801,18 +1834,20 @@ void MainWindow::updateUnitTexturePreview()
 
 void MainWindow::updateLogicSlotBarVisibility()
 {
-    bool show = CScene::getInstance()->getMode() == eEditModeLogic && m_pView;
+    const bool show = CScene::getInstance()->getMode() == eEditModeLogic;
     QList<CUnit*> units;
-    if(show)
+    bool unitSelection = show && m_pView;
+    if(unitSelection)
     {
         const QList<CNode*> selected = m_pView->selectionSnapshot();
-        show = !selected.isEmpty();
+        unitSelection = !selected.isEmpty();
         for(CNode* node : selected)
         {
             CUnit* unit = dynamic_cast<CUnit*>(node);
             if(!unit)
             {
-                show = false;
+                unitSelection = false;
+                units.clear();
                 break;
             }
             units.append(unit);
@@ -1828,25 +1863,66 @@ void MainWindow::updateLogicSlotBarVisibility()
         for(int slot = 1; slot < m_logicSlotCombo->count(); ++slot)
         {
             int enabledCount = 0;
-            for(CUnit* unit : units)
+            if(unitSelection)
             {
-                QSharedPointer<IPropertyBase> enabled;
-                unit->getLogicParamAt(slot, enabled, eObjParam_LOGIC_USE);
-                const propBool* value = dynamic_cast<const propBool*>(enabled.get());
-                if(value && value->isInit() && value->value())
-                    ++enabledCount;
+                for(CUnit* unit : units)
+                {
+                    QSharedPointer<IPropertyBase> enabled;
+                    unit->getLogicParamAt(slot, enabled, eObjParam_LOGIC_USE);
+                    const propBool* value = dynamic_cast<const propBool*>(enabled.get());
+                    if(value && value->isInit() && value->value())
+                        ++enabledCount;
+                }
             }
-            const QString state = enabledCount == 0 ? tr("disabled")
-                : (enabledCount == units.size() ? tr("enabled") : tr("mixed"));
-            m_logicSlotCombo->setItemText(slot,
-                tr("Logic %1 (alarm %1; %2)").arg(slot).arg(state));
-            m_logicSlotCombo->setItemData(slot, tr(
-                "Responds to world alarm %1. Selected units: %2.").arg(slot).arg(state),
-                Qt::ToolTipRole);
+            if(unitSelection)
+            {
+                const QString state = enabledCount == 0 ? tr("disabled")
+                    : (enabledCount == units.size() ? tr("enabled") : tr("mixed"));
+                m_logicSlotCombo->setItemText(slot,
+                    tr("Logic %1 (alarm %1; selection: %2)").arg(slot).arg(state));
+                m_logicSlotCombo->setItemData(slot, tr(
+                    "Responds to world alarm %1. Unit selection: %2.").arg(slot).arg(state),
+                    Qt::ToolTipRole);
+            }
+            else
+            {
+                m_logicSlotCombo->setItemText(slot, tr("Logic %1 (alarm %1)").arg(slot));
+                m_logicSlotCombo->setItemData(slot,
+                    tr("Responds to world alarm %1, if Logic enabled is on.").arg(slot),
+                    Qt::ToolTipRole);
+            }
         }
     }
     if(m_logicSlotBar)
         m_logicSlotBar->setVisible(show);
+}
+
+void MainWindow::updateBehaviorModeUi()
+{
+    const bool behaviorMode = CScene::getInstance()->getMode() == eEditModeLogic;
+    const QString target = behaviorMode
+        ? tr("Switch to Object mode") : tr("Switch to Behavior mode");
+    const QString shortcutText = m_ui->actionChange_mod_e->shortcut()
+        .toString(QKeySequence::NativeText);
+    const QString tooltip = shortcutText.isEmpty()
+        ? target : target + " (" + shortcutText + ")";
+    {
+        const QSignalBlocker actionBlocker(m_ui->actionChange_mod_e);
+        m_ui->actionChange_mod_e->setChecked(behaviorMode);
+        m_ui->actionChange_mod_e->setText(target);
+        m_ui->actionChange_mod_e->setToolTip(tooltip);
+        m_ui->actionChange_mod_e->setStatusTip(tooltip);
+    }
+    if(m_behaviorModeButton)
+    {
+        const QSignalBlocker buttonBlocker(m_behaviorModeButton);
+        m_behaviorModeButton->setChecked(behaviorMode);
+        m_behaviorModeButton->setIcon(behaviorModeIcon(behaviorMode,
+            m_behaviorModeButton->palette().color(QPalette::ButtonText)));
+        m_behaviorModeButton->setText(tr("Behavior"));
+        m_behaviorModeButton->setToolTip(tooltip);
+        m_behaviorModeButton->setAccessibleName(target);
+    }
 }
 
 void MainWindow::renderUnitTexturePreview()
@@ -2827,6 +2903,7 @@ void MainWindow::initShortcuts()
     escapeShortcut->setContext(Qt::ApplicationShortcut);
     connect(escapeShortcut, &QShortcut::activated,
             this, &MainWindow::handleEscapeShortcut);
+    updateBehaviorModeUi();
 }
 
 void MainWindow::createViewportToolbars()
@@ -2948,6 +3025,16 @@ void MainWindow::createViewportToolbars()
             m_pView->setFocus();
         });
     }
+    m_ui->actionChange_mod_e->setCheckable(true);
+    m_behaviorModeButton = new QToolButton(operationBar);
+    m_behaviorModeButton->setObjectName("behaviorModeButton");
+    m_behaviorModeButton->setCheckable(true);
+    m_behaviorModeButton->setAutoRaise(true);
+    m_behaviorModeButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    operationLayout->addWidget(m_behaviorModeButton);
+    connect(m_behaviorModeButton, &QToolButton::clicked,
+            m_ui->actionChange_mod_e, &QAction::trigger);
+    updateBehaviorModeUi();
     operationLayout->addStretch(1);
     operationLayout->addWidget(new QLabel(tr("Camera Speed:"), operationBar));
     m_cameraSpeedSlider = new QSlider(Qt::Horizontal, operationBar);

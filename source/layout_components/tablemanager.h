@@ -117,7 +117,6 @@ signals:
 private:
     QSharedPointer<IPropertyBase> m_pValue; //stored value;
     QMap<uint, QString> m_valueList;
-    QSharedPointer<QStringListModel> m_pListModel;
 };
 
 

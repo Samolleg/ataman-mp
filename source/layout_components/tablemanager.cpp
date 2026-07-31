@@ -584,10 +584,15 @@ void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyB
     if(editor && !tooltip.isEmpty())
     {
         editor->setToolTip(tooltip);
-        const QList<QWidget*> children = editor->findChildren<QWidget*>();
-        for(QWidget* child : children)
-            if(child->toolTip().isEmpty())
-                child->setToolTip(tooltip);
+        // A combo popup resolves per-item help through the model's ToolTipRole.
+        // Giving its view/viewport the property tooltip masks that item help.
+        if(!qobject_cast<QComboBox*>(editor))
+        {
+            const QList<QWidget*> children = editor->findChildren<QWidget*>();
+            for(QWidget* child : children)
+                if(child->toolTip().isEmpty())
+                    child->setToolTip(tooltip);
+        }
     }
     installClipboardFilter(editor, row);
 }
@@ -949,7 +954,7 @@ void CTableManager::initRowName()
     m_aRowToolTip[eObjParam_PLAYER] = "Ownership and diplomacy group used by this object.";
     m_aRowToolTip[eObjParam_NAME] = "Name stored with this object in the MOB.";
     m_aRowToolTip[eObjParam_TEMPLATE] = "Model used to render this object.";
-    m_aRowToolTip[eObjParam_BODYPARTS] = "Model parts stored for this object. An empty list enables all parts.";
+    m_aRowToolTip[eObjParam_BODYPARTS] = "Model parts stored for this object. WARNING: An empty list enables every model part; incompatible combinations can crash the game, especially on units.";
     m_aRowToolTip[eObjParam_PARENT_TEMPLATE] = "Preserved object-template value. Normal units use Database prototype instead.";
     m_aRowToolTip[eObjParam_PRIM_TXTR] = "Texture used by the model's primary texture set.";
     m_aRowToolTip[eObjParam_SEC_TXTR] = "Texture used by the model's second texture set, when the model has one.";
@@ -1574,7 +1579,6 @@ void CValueItem::onTextChangeEnd()
 
 CComboStItem::CComboStItem(const QSharedPointer<IPropertyBase>& prop)
 {
-    m_pListModel.reset(new QStringListModel());
     m_pValue.reset(prop->clone());
     if(!CResourceStringList::getInstance()->getPropList(m_valueList, prop->type()))
     {// case for property that has self-named value (without int-string convertion
@@ -1584,8 +1588,9 @@ CComboStItem::CComboStItem(const QSharedPointer<IPropertyBase>& prop)
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     //lineEdit()->setPlaceholderText("Select item");
     //addItems(m_valueList.values());
-    m_pListModel->setStringList(m_valueList.values());
-    setModel(m_pListModel.get());
+    // QComboBox's default QStandardItemModel stores ToolTipRole. QStringListModel
+    // rejects that role, leaving every popup entry without its specific help.
+    addItems(m_valueList.values());
     int index = 0;
     for(auto it = m_valueList.constBegin(); it != m_valueList.constEnd(); ++it, ++index)
     {

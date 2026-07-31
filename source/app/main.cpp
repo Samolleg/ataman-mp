@@ -586,6 +586,34 @@ int runHeadlessCommand(QApplication& app)
             }
             return -1;
         };
+        QList<QSharedPointer<IPropertyBase>> staticChoiceProperties;
+        staticChoiceProperties
+            << QSharedPointer<IPropertyBase>(new propUint(eObjParam_TYPE, 50))
+            << QSharedPointer<IPropertyBase>(new propChar(eObjParam_AGRESSION_MODE, 0));
+        QTableWidget staticChoiceTable;
+        CTableManager staticChoiceManager(&staticChoiceTable);
+        staticChoiceManager.setNewData(staticChoiceProperties);
+        const int unitCategoryRow = rowForType(staticChoiceTable, eObjParam_TYPE);
+        const int aggressionRow = rowForType(staticChoiceTable, eObjParam_AGRESSION_MODE);
+        CComboStItem* unitCategoryCombo = qobject_cast<CComboStItem*>(
+            staticChoiceTable.cellWidget(unitCategoryRow, 1));
+        CComboStItem* aggressionCombo = qobject_cast<CComboStItem*>(
+            staticChoiceTable.cellWidget(aggressionRow, 1));
+        const int attackIndex = aggressionCombo
+            ? aggressionCombo->findText(QStringLiteral("Attack")) : -1;
+        const bool staticChoiceItemDataStored = aggressionCombo
+            && attackIndex >= 0
+            && aggressionCombo->itemData(attackIndex, Qt::ToolTipRole).toString()
+                == QStringLiteral("Attacks enemies on sight.");
+        const bool staticChoicePopupTooltipClear = aggressionCombo
+            && aggressionCombo->view()->toolTip().isEmpty()
+            && aggressionCombo->view()->viewport()->toolTip().isEmpty();
+        const bool staticChoiceItemTooltipsWork = staticChoiceItemDataStored
+            && staticChoicePopupTooltipClear;
+        const bool unitCategoryIdsVisible = unitCategoryCombo
+            && unitCategoryCombo->findText(QStringLiteral("Human (50)")) >= 0
+            && unitCategoryCombo->findText(QStringLiteral("Animal (51)")) >= 0
+            && unitCategoryCombo->findText(QStringLiteral("Monster (52)")) >= 0;
         QList<QSharedPointer<IPropertyBase>> sourceProperties;
         sourceProperties << QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE, "copied_model"))
                          << QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR, "copied_texture"));
@@ -1888,6 +1916,7 @@ int runHeadlessCommand(QApplication& app)
                 dockDiagnosticCount() == dockDiagnosticsBefore;
 
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
+                && staticChoiceItemTooltipsWork && unitCategoryIdsVisible
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
@@ -1986,6 +2015,10 @@ int runHeadlessCommand(QApplication& app)
                << " escapeCancel=" << escapeCancel
                << " enterCommit=" << enterCommit
                << " clickCommit=" << clickCommit
+               << " staticChoiceItemDataStored=" << staticChoiceItemDataStored
+               << " staticChoicePopupTooltipClear=" << staticChoicePopupTooltipClear
+               << " staticChoiceItemTooltipsWork=" << staticChoiceItemTooltipsWork
+               << " unitCategoryIdsVisible=" << unitCategoryIdsVisible
                << " settingsTabsUsable=" << settingsTabsUsable
                << " settingsShortcutsPersist=" << settingsShortcutsPersist
                << " autosaveSettingsPersist=" << autosaveSettingsPersist

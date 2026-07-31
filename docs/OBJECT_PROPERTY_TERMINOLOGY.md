@@ -25,7 +25,7 @@ These apply to scenery, units, levers, traps, and torches unless noted.
 | Player group | `0`-`31` | Exposed for units and traps only | Ownership and diplomacy group used by this object. |
 | Name | Text | Exposed | Name stored with this object in the MOB. |
 | Model | Model resource name | Exposed | Model used to render this object. |
-| Model parts | Ordered list of part names | Exposed except on traps | Model parts stored for this object. An empty list enables all parts. |
+| Model parts | Ordered list of part names | Exposed except on traps | Model parts stored for this object. WARNING: An empty list enables every model part; incompatible combinations can crash the game, especially on units. |
 | Parent template | Text | Exposed | Preserved object-template value. Normal units use Database prototype instead. |
 | Primary texture | Texture resource name | Exposed | Texture used by the model's primary texture set. |
 | Secondary texture | Texture resource name | Exposed | Texture used by the model's second texture set, when the model has one. |
@@ -47,7 +47,7 @@ Units also contain all applicable common world-object values.
 
 | UI label | Value | Current property UI | Tooltip |
 |---|---|---|---|
-| Unit category | `50` Human, `51` Animal, `52` Monster | Exposed | Serialized unit category. |
+| Unit category | `50` Human, `51` Animal, `52` Monster | Exposed as Human (50), Animal (51), or Monster (52) | Serialized unit category. |
 | Use MOB unit values | On/off | Exposed | On uses the equipment, inventory, spells, and parameters stored in this MOB. Off uses the Database prototype. |
 | Database prototype | Unit database name | Exposed | Unit definition used by the game. |
 | Equipped armor | Ordered item list | Exposed | Armor stored directly in this MOB. Used when Use MOB unit values is on. |
@@ -66,7 +66,7 @@ their exact serialized ordering has been verified.
 Each unit has five serialized logic slots.
 
 Endurance exposes all five slots as Logic 0 through Logic 4 through the selector
-shown for unit-only selections in Logic mode. Logic 0 is the default setup;
+shown throughout Behavior mode. Logic 0 is the default setup;
 Logic 1 through Logic 4 correspond directly to world alarms 1 through 4.
 Property editing, visualization, patrol/look-point editing,
 and undo/redo follow the selected slot.

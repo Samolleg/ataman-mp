@@ -1801,9 +1801,9 @@ void CResourceStringList::initResourceString()
     m_propValueName[eObjParam_LOGIC_CYCLIC] = map;
 
     map.clear();
-    map[50] = "Human";
-    map[51] = "Animal";
-    map[52] = "Monster";
+    map[50] = "Human (50)";
+    map[51] = "Animal (51)";
+    map[52] = "Monster (52)";
     m_propValueName[eObjParam_TYPE] = map;
 
     map.clear();

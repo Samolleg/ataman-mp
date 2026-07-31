@@ -34,12 +34,12 @@ def main() -> int:
             "central logic-selector visibility helper")
     require(main_window, "void MainWindow::updateLogicSlotBarVisibility()",
             "logic-selector visibility implementation")
-    require(main_window, "show = !selected.isEmpty();",
-            "non-empty selection requirement")
-    require(main_window, "for(CNode* node : selected)",
-            "all-selected-nodes type check")
-    require(main_window, "if(!unit)",
-            "mixed selections rejected")
+    require(main_window, "const bool show = CScene::getInstance()->getMode() == eEditModeLogic;",
+            "behavior setup remains visible throughout Behavior mode")
+    require(main_window, 'tr("Logic %1 (alarm %1; selection: %2)")',
+            "unit-selection enablement suffix")
+    require(main_window, 'tr("Logic %1 (alarm %1)")',
+            "selection-independent alarm-slot label")
     require(main_window, "updateLogicSlotBarVisibility();",
             "selection/mode visibility refresh")
     require(main_window, "Activates when world alarm %1 is raised",
@@ -53,12 +53,27 @@ def main() -> int:
             "mixed slot enablement label")
     require(main_window, 'setItemText(0, tr("Logic 0 (default)"))',
             "concise default slot label")
+    require(main_window, 'setObjectName("behaviorModeButton")',
+            "bottom Behavior-mode toggle")
+    require(main_window, 'tr("Switch to Behavior mode")',
+            "contextual Object-to-Behavior action help")
+    require(main_window, 'tr("Switch to Object mode")',
+            "contextual Behavior-to-Object action help")
+    require(main_window, "m_behaviorModeButton->setChecked(behaviorMode);",
+            "bottom toggle synchronized to active mode")
 
     require(table_manager,
             "QString staticChoiceToolTip(EObjParam type, uint value)",
             "per-value dropdown explanations")
     require(table_manager, "setItemData(index, tooltip, Qt::ToolTipRole)",
             "dropdown item tooltip role")
+    require(table_manager, "addItems(m_valueList.values());",
+            "role-capable default static-choice model")
+    require(table_manager, "if(!qobject_cast<QComboBox*>(editor))",
+            "property tooltip excluded from combo popup children")
+    for category in ("Human (50)", "Animal (51)", "Monster (52)"):
+        require(source("source/resources/resourcemanager.cpp"), category,
+                f"numeric unit category label: {category}")
     for expected in (
         "Attacks enemies on sight.",
         "Attacks only in response to aggression.",
