@@ -55,6 +55,7 @@
 #include "resource_profile.h"
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
+#include "layout_components/tree_view.h"
 #include "layout_components/viewport_widget.h"
 #include "ui/landscape_tools.h"
 #include "ui/bodypartedit_form.h"
@@ -519,6 +520,32 @@ int runHeadlessCommand(QApplication& app)
     if(uiWidgetCheck)
     {
         app.setQuitOnLastWindowClosed(false);
+        CTreeView behaviorFilterTree;
+        CObjectBase behaviorFilterNode;
+        auto behaviorOwner = new QTreeWidgetItem(&behaviorFilterTree);
+        behaviorOwner->setText(0, QStringLiteral("Unit owner"));
+        auto behaviorLook = new CTreeObject(behaviorOwner, &behaviorFilterNode);
+        behaviorLook->setText(0, QStringLiteral("Look point 1"));
+        behaviorLook->setData(0, CTreeView::BehaviorItemRole, true);
+        behaviorLook->setData(0, CTreeView::FilterTextRole,
+                              QStringLiteral("Look point 1"));
+        behaviorFilterTree.setFilterText(QStringLiteral("look"));
+        behaviorFilterTree.applyFilter();
+        const bool behaviorFilterUsesCachedText = !behaviorLook->isHidden();
+
+        // Reproduce typing immediately before a hierarchy rebuild. The pending
+        // debounce must be cancelled before the old rows are destroyed.
+        behaviorFilterTree.setFilterText(QStringLiteral("look"));
+        behaviorFilterTree.prepareForRebuild();
+        behaviorFilterTree.clear();
+        auto rebuiltLook = new QTreeWidgetItem(&behaviorFilterTree);
+        rebuiltLook->setText(0, QStringLiteral("Look point 2"));
+        rebuiltLook->setData(0, CTreeView::BehaviorItemRole, true);
+        rebuiltLook->setData(0, CTreeView::FilterTextRole,
+                             QStringLiteral("Look point 2"));
+        behaviorFilterTree.applyFilter();
+        const bool behaviorFilterRebuildSafe = !rebuiltLook->isHidden();
+
         QList<QString>& figures = CObjectList::getInstance()->figureList();
         figures = {"alpha", "hammer", "Harpy", "echo", "house"};
         QSharedPointer<IPropertyBase> value(new propStr(eObjParam_TEMPLATE, "original_model"));
@@ -1936,7 +1963,8 @@ int runHeadlessCommand(QApplication& app)
         const bool routineDockDiagnosticsSuppressed =
                 dockDiagnosticCount() == dockDiagnosticsBefore;
 
-        const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
+        const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+                && prefixesOnly && valueStable && focusCancel && escapeCancel
                 && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
@@ -2030,7 +2058,9 @@ int runHeadlessCommand(QApplication& app)
                 && QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
                 && !QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling);
         QTextStream output(stdout);
-        output << "asset-picker prefixes=" << completions.join(",") << "\n"
+        output << "behaviorFilterUsesCachedText=" << behaviorFilterUsesCachedText
+               << " behaviorFilterRebuildSafe=" << behaviorFilterRebuildSafe << "\n"
+               << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
                << " valueStable=" << valueStable
                << " focusCancel=" << focusCancel

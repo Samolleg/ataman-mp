@@ -10745,6 +10745,9 @@ void CView::collectObjectTreeData()
                 const QString suffix = logicIndex == 0 ? tr(" (default)") : QString();
                 auto slotItem = new QTreeWidgetItem(ownerItem);
                 slotItem->setText(0, tr("Logic %1%2").arg(logicIndex).arg(suffix));
+                slotItem->setData(0, CTreeView::BehaviorItemRole, true);
+                slotItem->setData(0, CTreeView::FilterTextRole,
+                    tr("Logic %1 behavior setup").arg(logicIndex));
                 slotItem->setText(1, QString::number(patrolCount));
                 slotItem->setData(0, Qt::UserRole + 10, logicIndex);
                 slotItem->setData(0, Qt::UserRole + 11,
@@ -10760,6 +10763,9 @@ void CView::collectObjectTreeData()
                     auto patrolItem = new CTreeObject(
                         static_cast<QTreeWidgetItem*>(slotItem), patrol);
                     patrolItem->setText(0, tr("Patrol point %1").arg(++patrolNumber));
+                    patrolItem->setData(0, CTreeView::BehaviorItemRole, true);
+                    patrolItem->setData(0, CTreeView::FilterTextRole,
+                        patrolItem->text(0));
                     const int lookCount = std::count_if(
                         patrol->lookPoint().cbegin(), patrol->lookPoint().cend(),
                         [](CLookPoint* look)
@@ -10773,6 +10779,9 @@ void CView::collectObjectTreeData()
                         auto lookItem = new CTreeObject(
                             static_cast<QTreeWidgetItem*>(patrolItem), look);
                         lookItem->setText(0, tr("Look point %1").arg(++lookNumber));
+                        lookItem->setData(0, CTreeView::BehaviorItemRole, true);
+                        lookItem->setData(0, CTreeView::FilterTextRole,
+                            lookItem->text(0));
                     }
                 }
             }
@@ -10786,6 +10795,8 @@ void CView::collectObjectTreeData()
                 { return area && !area->isMarkDeleted(); });
             auto areasItem = new QTreeWidgetItem(ownerItem);
             areasItem->setText(0, tr("Activation areas (%1)").arg(areaCount));
+            areasItem->setData(0, CTreeView::BehaviorItemRole, true);
+            areasItem->setData(0, CTreeView::FilterTextRole, areasItem->text(0));
             int areaNumber = 0;
             for(CActivationZone* area : trap->actZones())
             {
@@ -10793,6 +10804,8 @@ void CView::collectObjectTreeData()
                     continue;
                 auto item = new CTreeObject(static_cast<QTreeWidgetItem*>(areasItem), area);
                 item->setText(0, tr("Activation area %1").arg(++areaNumber));
+                item->setData(0, CTreeView::BehaviorItemRole, true);
+                item->setData(0, CTreeView::FilterTextRole, item->text(0));
             }
             const int targetCount = std::count_if(
                 trap->castPoints().cbegin(), trap->castPoints().cend(),
@@ -10800,6 +10813,8 @@ void CView::collectObjectTreeData()
                 { return target && !target->isMarkDeleted(); });
             auto targetsItem = new QTreeWidgetItem(ownerItem);
             targetsItem->setText(0, tr("Cast targets (%1)").arg(targetCount));
+            targetsItem->setData(0, CTreeView::BehaviorItemRole, true);
+            targetsItem->setData(0, CTreeView::FilterTextRole, targetsItem->text(0));
             int targetNumber = 0;
             for(CTrapCastPoint* target : trap->castPoints())
             {
@@ -10807,6 +10822,8 @@ void CView::collectObjectTreeData()
                     continue;
                 auto item = new CTreeObject(static_cast<QTreeWidgetItem*>(targetsItem), target);
                 item->setText(0, tr("Cast target %1").arg(++targetNumber));
+                item->setData(0, CTreeView::BehaviorItemRole, true);
+                item->setData(0, CTreeView::FilterTextRole, item->text(0));
             }
         }
     };
@@ -12549,7 +12566,7 @@ void CView::selectedObjectToClipboardBuffer()
         QJsonArray behaviorData;
         QString kind;
         bool mixedKinds = false;
-        for(CNode* node : selectedNodes())
+        for(CNode* node : selectionSnapshot())
         {
             QJsonObject point;
             QString nodeKind;
@@ -12737,7 +12754,7 @@ bool CView::pasteBehaviorPoints(const QJsonObject& clipboard)
 
     QSet<uint> destinationUnits;
     QSet<QString> destinationPatrols;
-    for(CNode* node : selectedNodes())
+    for(CNode* node : selectionSnapshot())
     {
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
         {
@@ -12813,7 +12830,7 @@ void CView::selectBehaviorParent()
 {
     if(!m_activeMob || CScene::getInstance()->getMode() != eEditModeLogic)
         return;
-    const QList<CNode*> selection = selectedNodes();
+    const QList<CNode*> selection = selectionSnapshot();
     if(selection.size() != 1)
         return;
     CNode* selected = selection.front();
@@ -12858,7 +12875,7 @@ void CView::selectAdjacentBehaviorPoint(int offset)
     if(!m_activeMob || offset == 0
        || CScene::getInstance()->getMode() != eEditModeLogic)
         return;
-    const QList<CNode*> selection = selectedNodes();
+    const QList<CNode*> selection = selectionSnapshot();
     if(selection.size() != 1)
         return;
     CNode* selected = selection.front();
@@ -13228,7 +13245,7 @@ void CView::duplicateSelectedObjects()
 {
     // Logic points have their own P/L creation workflow and must not cause
     // Ctrl+D to replay a stale normal-object clipboard.
-    if(!m_activeMob || selectedNodes().isEmpty())
+    if(!m_activeMob || selectionSnapshot().isEmpty())
         return;
     selectedObjectToClipboardBuffer();
     clipboradObjectsToScene();

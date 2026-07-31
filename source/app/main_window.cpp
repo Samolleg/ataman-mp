@@ -123,6 +123,52 @@ constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
 constexpr int kLoadedMapMob = 2;
 
+class CElidedPathLabel final : public QLabel
+{
+public:
+    explicit CElidedPathLabel(QWidget* parent = nullptr) : QLabel(parent)
+    {
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        setMinimumWidth(0);
+    }
+
+    void setFullText(const QString& text)
+    {
+        m_fullText = text;
+        updateElision();
+    }
+
+    QSize sizeHint() const override
+    {
+        QSize result = QLabel::sizeHint();
+        result.setWidth(0);
+        return result;
+    }
+
+    QSize minimumSizeHint() const override
+    {
+        QSize result = QLabel::minimumSizeHint();
+        result.setWidth(0);
+        return result;
+    }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override
+    {
+        QLabel::resizeEvent(event);
+        updateElision();
+    }
+
+private:
+    void updateElision()
+    {
+        QLabel::setText(fontMetrics().elidedText(
+            m_fullText, Qt::ElideLeft, qMax(0, contentsRect().width())));
+    }
+
+    QString m_fullText;
+};
+
 struct SNewMprHeightmap
 {
     QImage image;
@@ -475,7 +521,7 @@ MainWindow::MainWindow(QWidget* parent) :
     filterLayout->addWidget(m_outlinerFilterEdit, 1);
     filterLayout->addWidget(m_outlinerFilterStatus);
     outlinerLayout->addLayout(filterLayout);
-    m_outlinerSelectionPath = new QLabel(outlinerContainer);
+    m_outlinerSelectionPath = new CElidedPathLabel(outlinerContainer);
     m_outlinerSelectionPath->setTextFormat(Qt::PlainText);
     m_outlinerSelectionPath->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_outlinerSelectionPath->setStyleSheet(
@@ -501,18 +547,6 @@ MainWindow::MainWindow(QWidget* parent) :
     propertiesHeaderLayout->setContentsMargins(0, 0, 0, 0);
     propertiesHeaderLayout->setSpacing(2);
     propertiesHeaderLayout->addWidget(m_outlinerSelectionPath, 1);
-    m_selectBehaviorParentButton = new QToolButton(m_objectPropertiesHeader);
-    m_selectBehaviorParentButton->setText(tr("Parent"));
-    m_selectBehaviorParentButton->setToolTip(tr("Select owning object"));
-    m_selectPreviousBehaviorPointButton = new QToolButton(m_objectPropertiesHeader);
-    m_selectPreviousBehaviorPointButton->setText(QString::fromUtf8("\u25c0"));
-    m_selectPreviousBehaviorPointButton->setToolTip(tr("Select previous sibling point"));
-    m_selectNextBehaviorPointButton = new QToolButton(m_objectPropertiesHeader);
-    m_selectNextBehaviorPointButton->setText(QString::fromUtf8("\u25b6"));
-    m_selectNextBehaviorPointButton->setToolTip(tr("Select next sibling point"));
-    propertiesHeaderLayout->addWidget(m_selectBehaviorParentButton);
-    propertiesHeaderLayout->addWidget(m_selectPreviousBehaviorPointButton);
-    propertiesHeaderLayout->addWidget(m_selectNextBehaviorPointButton);
     m_objectPropertiesHeader->hide();
     propertiesLayout->addWidget(m_objectPropertiesHeader);
     m_logicSlotBar = new QWidget(propertiesContainer);
@@ -536,6 +570,25 @@ MainWindow::MainWindow(QWidget* parent) :
     logicSlotLayout->addWidget(m_logicSlotCombo, 1);
     m_logicSlotBar->hide();
     propertiesLayout->addWidget(m_logicSlotBar);
+    m_behaviorNavigationBar = new QWidget(propertiesContainer);
+    QHBoxLayout* behaviorNavigationLayout = new QHBoxLayout(m_behaviorNavigationBar);
+    behaviorNavigationLayout->setContentsMargins(4, 0, 4, 0);
+    behaviorNavigationLayout->setSpacing(2);
+    m_selectBehaviorParentButton = new QToolButton(m_behaviorNavigationBar);
+    m_selectBehaviorParentButton->setText(tr("Parent"));
+    m_selectBehaviorParentButton->setToolTip(tr("Select owning object"));
+    m_selectPreviousBehaviorPointButton = new QToolButton(m_behaviorNavigationBar);
+    m_selectPreviousBehaviorPointButton->setText(QString::fromUtf8("\u25c0"));
+    m_selectPreviousBehaviorPointButton->setToolTip(tr("Select previous sibling point"));
+    m_selectNextBehaviorPointButton = new QToolButton(m_behaviorNavigationBar);
+    m_selectNextBehaviorPointButton->setText(QString::fromUtf8("\u25b6"));
+    m_selectNextBehaviorPointButton->setToolTip(tr("Select next sibling point"));
+    behaviorNavigationLayout->addWidget(m_selectBehaviorParentButton);
+    behaviorNavigationLayout->addStretch(1);
+    behaviorNavigationLayout->addWidget(m_selectPreviousBehaviorPointButton);
+    behaviorNavigationLayout->addWidget(m_selectNextBehaviorPointButton);
+    m_behaviorNavigationBar->hide();
+    propertiesLayout->addWidget(m_behaviorNavigationBar);
     m_ui->tableWidget->setParent(propertiesContainer);
     propertiesLayout->addWidget(m_ui->tableWidget, 1);
 
@@ -5793,9 +5846,11 @@ void MainWindow::updateOutlinerSelectionPath()
     {
         const bool visible = show
             && CScene::getInstance()->getMode() == eEditModeLogic;
-        m_selectBehaviorParentButton->setVisible(visible);
-        m_selectPreviousBehaviorPointButton->setVisible(visible);
-        m_selectNextBehaviorPointButton->setVisible(visible);
+        m_behaviorNavigationBar->setVisible(visible);
+    };
+    const auto setPathText = [this](const QString& text)
+    {
+        static_cast<CElidedPathLabel*>(m_outlinerSelectionPath)->setFullText(text);
     };
 
     const bool customSelected = m_customSpawnSelected && m_customSpawn.valid
@@ -5810,7 +5865,7 @@ void MainWindow::updateOutlinerSelectionPath()
         m_outlinerSelectionPath->setStyleSheet(
             "QLabel { background: #29424a; color: white; padding: 5px 7px; "
             "border-left: 3px solid #32c8e6; }");
-        m_outlinerSelectionPath->setText(coordinates);
+        setPathText(coordinates);
         m_outlinerSelectionPath->setToolTip(coordinates);
         m_outlinerSelectionPath->show();
         showNavigation(false);
@@ -5831,7 +5886,7 @@ void MainWindow::updateOutlinerSelectionPath()
         m_outlinerSelectionPath->setStyleSheet(includesLockedObject
             ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
             : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
-        m_outlinerSelectionPath->setText(summary);
+        setPathText(summary);
         m_outlinerSelectionPath->setToolTip(summary);
         m_outlinerSelectionPath->show();
         showNavigation(false);
@@ -5841,14 +5896,25 @@ void MainWindow::updateOutlinerSelectionPath()
     QTreeWidgetItem* item = m_ui->treeWidget->currentItem();
     if(!item || !item->parent())
     {
+        showNavigation(false);
         m_outlinerSelectionPath->hide();
         m_objectPropertiesHeader->hide();
         return;
     }
 
     QStringList path;
+    const bool behaviorSelection = item->data(
+        0, CTreeView::BehaviorItemRole).toBool();
     for(QTreeWidgetItem* part = item; part; part = part->parent())
+    {
         path.prepend(part->text(0));
+        // Behavior breadcrumbs contain only the selected point, its logical
+        // parents, and the owning unit/trap. MOB/type categories add no useful
+        // selection context and consume the space reserved for the leaf.
+        if(behaviorSelection && !part->data(
+               0, CTreeView::BehaviorItemRole).toBool())
+            break;
+    }
 
     const QString hierarchy = path.join(QString::fromUtf8(" \u203a "));
     bool locked = false;
@@ -5858,10 +5924,10 @@ void MainWindow::updateOutlinerSelectionPath()
     m_outlinerSelectionPath->setStyleSheet(locked
         ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
         : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
-    m_outlinerSelectionPath->setText(hierarchy);
+    setPathText(hierarchy);
     m_outlinerSelectionPath->setToolTip(tr("Selected object: %1").arg(hierarchy));
     m_outlinerSelectionPath->show();
-    showNavigation(true);
+    showNavigation(behaviorSelection);
     m_objectPropertiesHeader->show();
 }
 

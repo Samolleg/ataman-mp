@@ -452,6 +452,10 @@ void CCreatePatrolCommand::undo()
             new propUint(eObjParam_LOGIC_BEHAVIOUR, m_previousBehaviour));
         m_firstPointUnit->applyLogicParamAt(m_logicSlot, behaviour);
     }
+    m_pView->collectObjectTreeData();
+    m_pView->viewParameters();
+    m_pView->setDurty(m_mob);
+    m_pView->update();
 }
 
 void CCreatePatrolCommand::redo()
@@ -467,6 +471,10 @@ void CCreatePatrolCommand::redo()
     m_mob->createPatrolByHash(m_pointHash, m_logicSlot);
     setText(m_switchesToPath ? "Create first patrol point and enable Path behavior"
                              : "Create patrol point");
+    m_pView->collectObjectTreeData();
+    m_pView->viewParameters();
+    m_pView->setDurty(m_mob);
+    m_pView->update();
 }
 
 CCreateTrapPointCommand::CCreateTrapPointCommand(CView *pView, uint trapId, bool bActZone, QUndoCommand *parent):
@@ -479,17 +487,29 @@ CCreateTrapPointCommand::CCreateTrapPointCommand(CView *pView, uint trapId, bool
 
 void CCreateTrapPointCommand::undo()
 {
-    CMagicTrap* pTrap = dynamic_cast<CMagicTrap*>(m_pView->currentMob()->nodeByMapId(m_trapId));
+    CMob* mob = m_pView ? m_pView->currentMob() : nullptr;
+    CMagicTrap* pTrap = mob
+        ? dynamic_cast<CMagicTrap*>(mob->nodeByMapId(m_trapId)) : nullptr;
+    if(!pTrap)
+        return;
     if(m_bActZone)
         pTrap->deleteLastActZone();
     else
         pTrap->deleteLastCastPoint();
-    m_pView->currentMob()->logicNodesUpdate();
+    mob->logicNodesUpdate();
+    m_pView->collectObjectTreeData();
+    m_pView->viewParameters();
+    m_pView->setDurty(mob);
+    m_pView->update();
 }
 
 void CCreateTrapPointCommand::redo()
 {
-    CMagicTrap* pTrap = dynamic_cast<CMagicTrap*>(m_pView->currentMob()->nodeByMapId(m_trapId));
+    CMob* mob = m_pView ? m_pView->currentMob() : nullptr;
+    CMagicTrap* pTrap = mob
+        ? dynamic_cast<CMagicTrap*>(mob->nodeByMapId(m_trapId)) : nullptr;
+    if(!pTrap)
+        return;
     if(m_bActZone)
     {
         auto pZone = pTrap->createActZone();
@@ -500,7 +520,11 @@ void CCreateTrapPointCommand::redo()
         auto pCast = pTrap->createCastPoint();
         pCast->setState(ENodeState::eSelect);
     }
-    m_pView->currentMob()->logicNodesUpdate();
+    mob->logicNodesUpdate();
+    m_pView->collectObjectTreeData();
+    m_pView->viewParameters();
+    m_pView->setDurty(mob);
+    m_pView->update();
 }
 
 CDeleteLogicPoint::CDeleteLogicPoint(CView *pView, QString hash, QUndoCommand *parent):
@@ -610,6 +634,11 @@ void CDeleteLogicPoint::undo()
         CTrapCastPoint* pCast = m_pMob->trapCastById(list[0].toInt(), list[4].toInt());
         pCast->markAsDeleted(false);
     }
+    m_pMob->logicNodesUpdate();
+    m_pView->collectObjectTreeData();
+    m_pView->viewParameters();
+    m_pView->setDurty(m_pMob);
+    m_pView->update();
 }
 
 void CDeleteLogicPoint::redo()
@@ -640,7 +669,11 @@ void CDeleteLogicPoint::redo()
         pCast->markAsDeleted(true);
     }
     setText("Point deleted");
+    m_pMob->logicNodesUpdate();
+    m_pView->collectObjectTreeData();
+    m_pView->viewParameters();
     m_pView->setDurty(m_pMob);
+    m_pView->update();
 }
 
 CRoundMobCommand::CRoundMobCommand(CView *pView, QUndoCommand *parent):

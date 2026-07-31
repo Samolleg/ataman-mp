@@ -28,6 +28,9 @@ CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
 
 void CTreeView::prepareForRebuild()
 {
+    // A delayed filter must never run against QTreeWidgetItems that are about
+    // to be destroyed by collectObjectTreeData().
+    m_filterTimer->stop();
     m_expansionBeforeFilter.clear();
 }
 
@@ -144,10 +147,25 @@ bool CTreeView::nodeMatches(CNode* node, const QStringList& terms) const
 bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
                            bool ancestorMatched, int* visible, int* total)
 {
+    const bool behaviorItem = item->data(0, BehaviorItemRole).toBool();
     CTreeObject* objectItem = dynamic_cast<CTreeObject*>(item);
     CNode* node = objectItem ? objectItem->node() : nullptr;
     if(node && total)
         ++(*total);
+    const QString cachedText = item->data(0, FilterTextRole).toString();
+    const bool cachedTextMatch = behaviorItem && !terms.isEmpty()
+        && std::all_of(terms.begin(), terms.end(), [this, &cachedText](const QString& term)
+           {
+               QString value = term;
+               ETextMatchMode mode = ETextMatchMode::Contains;
+               if(value.startsWith('~'))
+               {
+                   value.remove(0, 1);
+                   mode = ETextMatchMode::Fuzzy;
+               }
+               return !term.contains(':') && !term.contains('=')
+                   && textMatches(cachedText, value, mode);
+           });
     const bool textualGroupMatch = !node && !terms.isEmpty()
         && std::all_of(terms.begin(), terms.end(), [this, item](const QString& term)
            {
@@ -165,7 +183,11 @@ bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
     // Units group), every descendant is visible. Avoid rebuilding expensive
     // object metadata for thousands of children that cannot change the result.
     const bool selfMatches = terms.isEmpty() || ancestorMatched
-        || (node && nodeMatches(node, terms))
+        // Behavior rows can outlive a logic projection refresh until the next
+        // tree rebuild. Their searchable text is cached when the row is built,
+        // so filtering never dereferences a possibly stale logic-node pointer.
+        || cachedTextMatch
+        || (node && !behaviorItem && nodeMatches(node, terms))
         || textualGroupMatch;
     bool childMatches = false;
     for(int index = 0; index < item->childCount(); ++index)

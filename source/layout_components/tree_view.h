@@ -38,6 +38,12 @@ class CTreeView : public QTreeWidget
 {
     Q_OBJECT
 public:
+    enum EItemDataRole
+    {
+        BehaviorItemRole = Qt::UserRole + 20,
+        FilterTextRole
+    };
+
     explicit CTreeView(QWidget *parent = nullptr);
     void attachView(CView* pView) {m_pView = pView;}
     QString objectNameByType(ENodeType type) const;

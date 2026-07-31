@@ -70,6 +70,10 @@ def main() -> int:
             "cast-target-only trap relationship geometry")
     require(main_window, "propertiesLayout->addWidget(m_objectPropertiesHeader);",
             "selection title above Object Properties")
+    require(main_window, "propertiesLayout->addWidget(m_behaviorNavigationBar);",
+            "contextual Behavior navigation row in the dynamic properties area")
+    require(main_window, "Qt::ElideLeft",
+            "selection hierarchy that preserves the selected leaf when narrow")
     require(view, "appendBehaviorTreeChildren",
             "Behavior-mode outliner hierarchy builder")
     require(view, 'tr("Logic %1%2")', "five logic-slot hierarchy labels")
@@ -79,6 +83,10 @@ def main() -> int:
             "read-only patrol hierarchy access")
     require(tree, "setLogicSlotIndex(logicSlot);",
             "outliner child selection switches to its owning logic slot")
+    require(tree, "BehaviorItemRole",
+            "cached Behavior-row filtering without node dereferences")
+    require(tree, "m_filterTimer->stop();",
+            "pending filter cancellation before an outliner rebuild")
     require(view, 'obj.insert("Content", "Behavior points");',
             "typed Behavior-point clipboard payload")
     require(view, "pasteBehaviorPoints(obj)",
@@ -97,6 +105,12 @@ def main() -> int:
             "parent selection implementation")
     require(view, "void CView::selectAdjacentBehaviorPoint(int offset)",
             "sibling navigation implementation")
+    behavior_functions = view[view.index("void CView::selectedObjectToClipboardBuffer()"):
+                              view.index("void CView::hideSelectedNodes()")]
+    if "for(CNode* node : selectedNodes())" in behavior_functions:
+        raise AssertionError("Behavior authoring still drops logic-point selections")
+    require(undo, "m_pView->collectObjectTreeData();",
+            "immediate outliner refresh from Behavior point undo commands")
 
     print("behavior authoring contract: PASS")
     return 0
