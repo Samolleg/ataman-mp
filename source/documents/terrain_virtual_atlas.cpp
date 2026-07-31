@@ -297,8 +297,11 @@ bool oneCornerMaskLeaksToForeignEdge(
         }
     if(minorityCorner < 0) return true;
     const auto minority = [&mask, invert](int x, int y) {
-        const bool white = mask.pixelColor(x, y).red() >= 128;
-        return invert ? !white : white;
+        const int value = mask.pixelColor(x, y).red();
+        // A transferred 10-45% strand remains plainly visible in the composed
+        // texture even though it does not cross the binary ownership midpoint.
+        // Judge meaningful tonal influence, not only the >=128 topology.
+        return invert ? value <= 231 : value >= 24;
     };
     const bool left = minorityCorner == 0 || minorityCorner == 3;
     const bool top = minorityCorner == 0 || minorityCorner == 1;
@@ -310,8 +313,8 @@ bool oneCornerMaskLeaksToForeignEdge(
         foreignVertical += minority(foreignX, y);
     for(int x = 0; x < mask.width(); ++x)
         foreignHorizontal += minority(x, foreignY);
-    const int verticalAllowance = qMax(2, mask.height() / 32);
-    const int horizontalAllowance = qMax(2, mask.width() / 32);
+    const int verticalAllowance = qMax(1, mask.height() / 128);
+    const int horizontalAllowance = qMax(1, mask.width() / 128);
     if(foreignVertical > verticalAllowance
        || foreignHorizontal > horizontalAllowance)
         return true;
@@ -331,8 +334,8 @@ bool oneCornerMaskLeaksToForeignEdge(
         if(minority(ownX, y))
             adjacentVerticalReach = qMax(adjacentVerticalReach,
                 top ? y : mask.height() - 1 - y);
-    return adjacentHorizontalReach * 8 >= mask.width() * 7
-        || adjacentVerticalReach * 8 >= mask.height() * 7;
+    return adjacentHorizontalReach * 4 >= mask.width() * 3
+        || adjacentVerticalReach * 4 >= mask.height() * 3;
 }
 
 int maskBoundaryComplexity(const QImage& mask)
@@ -991,8 +994,12 @@ QImage CTerrainVirtualAtlas::alignedStockMask(
                     ? item.otherStyle : item.ownerStyle;
                 const ETerrainBlendStyle mappedOtherStyle = inverted
                     ? item.ownerStyle : item.otherStyle;
-                if(reviewedMaskRejected(item.sourceLabel, mappedOwnerStyle,
-                                        mappedOwnerStyle == mappedOtherStyle))
+                // Review decisions describe how a source mask transfers into
+                // the requested brush style. Keying them by the source-side
+                // style let rejected snow/grass masks bypass Ice and Paving
+                // reviews whenever the source pair was cross-style.
+                if(reviewedMaskRejected(item.sourceLabel, ownerStyle,
+                                        ownerStyle == otherStyle))
                     break;
                 const bool exactStyles = mappedOwnerStyle == ownerStyle
                     && mappedOtherStyle == otherStyle;

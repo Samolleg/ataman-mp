@@ -7719,6 +7719,20 @@ bool CView::realizeWorkingTerrainSignature(
     return true;
 }
 
+QByteArray terrainTilePixelSha256(const QImage& source)
+{
+    const QImage image = source.convertToFormat(QImage::Format_RGBA8888);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    const qint32 width = image.width();
+    const qint32 height = image.height();
+    hash.addData(reinterpret_cast<const char*>(&width), sizeof(width));
+    hash.addData(reinterpret_cast<const char*>(&height), sizeof(height));
+    for(int y = 0; y < image.height(); ++y)
+        hash.addData(reinterpret_cast<const char*>(image.constScanLine(y)),
+                     image.bytesPerLine());
+    return hash.result().toHex();
+}
+
 bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
 {
     if(!m_workingTerrainAtlas)
@@ -10246,8 +10260,17 @@ void CView::endTileBrushGroup()
                     m_workingTerrainAtlas->catalog().selectForPaint(
                         signature,x,y,m_terrainSemanticSeed,&exactAvailable);
                     if(!exactAvailable)
-                        missing.insert(globalTransitionKey(signature),
-                                       {signature,x,y});
+                    {
+                        // Qt's retained MinGW 7.3 kit compiles as C++11, where
+                        // a type with default member initializers is not an
+                        // aggregate. Build the value explicitly instead of
+                        // relying on a newer braced-initializer rule.
+                        SMissingSignature item;
+                        item.signature=signature;
+                        item.x=x;
+                        item.y=y;
+                        missing.insert(globalTransitionKey(signature),item);
+                    }
                 }
                 QProgressDialog progress(
                     tr("Resolving exact terrain blends..."), QString(),
@@ -11192,6 +11215,12 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
             tile.insert(QStringLiteral("y"), y);
             tile.insert(QStringLiteral("insideMark"), cells.contains(QPoint(x, y)));
             tile.insert(QStringLiteral("packed"), packedTerrainTileJson(packed));
+            const int physicalSlot = SMprPackedTile::decode(packed).atlasSlot();
+            if(m_pTileForm && physicalSlot >= 0
+               && physicalSlot < m_pTileForm->tileImages().size())
+                tile.insert(QStringLiteral("physicalPixelSha256"),
+                    QString::fromLatin1(terrainTilePixelSha256(
+                        m_pTileForm->tileImages().at(physicalSlot))));
             tile.insert(QStringLiteral("catalogRecognized"), recognized);
             if(recognized)
                 tile.insert(QStringLiteral("gridCorners"),

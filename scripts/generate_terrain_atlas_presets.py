@@ -353,7 +353,7 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             (155, 0): 2, (157, 3): 7, (186, 0): 1,
             (210, 2): 1, (215, 0): 2, (242, 0): 2,
             (246, 2): 1, (267, 3): 7, (271, 3): 23,
-            (283, 0): 2, (309, 3): 7, (360, 0): 2,
+            (283, 0): 2, (309, 3): 14, (360, 0): 2,
             (294, 3): 14, (353, 1): 3,
             (371, 2): 1, (382, 1): 2, (387, 0): 2,
             (393, 1): 7, (406, 0): 2, (410, 3): 3,
@@ -389,15 +389,14 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             (485, 0): 8, (485, 2): 15,
             (506, 0): 4, (506, 3): 4,
 
-            # Human-reviewed exact-pixel ambiguity: retain Grass / Faded.
-            # A grouped uniform-variant review then proved that slots 142,
-            # 195, and 299 are wholly Faded; 198 is Faded except for its NW
-            # Burnt corner; and 493/494 are Faded except for their SE Burnt
-            # corners. Slot 211 was then reviewed as Common/Dark/Mossy/Mossy.
+            # Historical grouped review provisionally retained Grass / Faded
+            # for the close Faded/Burnt set. The later in-game checkerboard
+            # and explicit corner review below supersede these provisional
+            # values. Slot 211 was reviewed as Common/Dark/Mossy/Mossy.
             # Slot 115 SW and the west side of slot 190 are the brighter Fresh
-            # family, not Common; slot 309 SW is also visibly Faded and has a
-            # unique exact Faded anchor after the mixed uniform group is held
-            # out.
+            # family, not Common. A later in-game checkerboard split the
+            # contaminated Faded/Burnt anchors; slot 309 SW is byte-identical
+            # to the clean Burnt anchor in both original and HD atlases.
             (169, 3): 7,
             (142, 0): 7, (142, 1): 7, (142, 2): 7, (142, 3): 7,
             (195, 0): 7, (195, 1): 7, (195, 2): 7, (195, 3): 7,
@@ -414,6 +413,30 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             (201, 3): 7, (219, 3): 7, (270, 3): 7,
             (485, 3): 7, (491, 3): 7, (505, 3): 7,
 
+            # Grouped high-resolution review showed that slots 268 and 284
+            # are three-corner Faded transitions around Ground / Brown, not
+            # uniform Faded interiors. Preserve the authored orientation:
+            # Brown is NW in 268 and SE in 284.
+            (268, 0): 8,
+            (284, 2): 8,
+
+            # The in-game three-slot checkerboard separated the two close
+            # grass hues that the static sheet had collapsed as Faded. Slot
+            # 26 remains the clean Faded anchor. Slot 195 is the clean Burnt
+            # anchor: its NE/SE/SW vertex patches are byte-identical to the
+            # independently reviewed Burnt corners of slots 212 and 297.
+            # Human review then resolved the connected mixed tiles below.
+            # A labeled follow-up then resolved every remaining corner:
+            # 494 NE is Brown; 299 NE/SE and 198 SE/SW are Burnt. The complete
+            # post-review exact-pixel audit additionally proves slot 309 SW is
+            # Burnt in both archive variants.
+            (142, 1): 14, (142, 2): 14, (142, 3): 14,
+            (195, 0): 14, (195, 1): 14, (195, 2): 14, (195, 3): 14,
+            (299, 0): 8, (299, 1): 14, (299, 2): 14, (299, 3): 14,
+            (198, 1): 8, (198, 2): 14, (198, 3): 14,
+            (493, 1): 14, (493, 3): 14,
+            (494, 1): 8, (494, 3): 14,
+
             # Slot 423 falsely validated itself as uniform Faded. Its SW
             # corner is byte-identical in both original and HD atlases to two
             # independent Zone 2 Fresh anchors and Fresh anchors in bz4g,
@@ -425,8 +448,11 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             # identical to the independent Grass / Dark slot 0 anchor, while
             # slot 273 SW is byte-identical to the independent Grass / Fresh
             # slot 27 anchor. Their other, merely similar quarters remain
-            # untouched for grouped visual review.
+            # untouched for grouped visual review. The same independent
+            # original+HD match proves slot 115 NE is Dark, as recorded by the
+            # earlier false-uniform audit but previously omitted from output.
             (98, 1): 1,
+            (115, 1): 1,
             (273, 3): 3,
 
             # Slot 199 is visibly a limestone/grass transition, not a uniform
@@ -1534,6 +1560,11 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         irregular = next(family for family in result["families"]
                          if family["id"] == 9)
         irregular["thumbnailSlot"] = 117
+        burnt = next(family for family in result["families"]
+                     if family["id"] == 14)
+        # The in-game checkerboard established slot 195 as the first truthful
+        # four-corner Burnt preview; the old slot 122 was a mixed transition.
+        burnt["thumbnailSlot"] = 195
     return result
 
 

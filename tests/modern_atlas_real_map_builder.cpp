@@ -978,10 +978,38 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     int authored = 0;
     int importedStock = 0;
     QJsonArray generatedBlendSources;
-    for(const STerrainFinalizedTile& tile : finalized.tiles)
+    QJsonArray physicalTileIdentities;
+    for(int physicalSlot = 0; physicalSlot < finalized.tiles.size(); ++physicalSlot)
     {
+        const STerrainFinalizedTile& tile = finalized.tiles.at(physicalSlot);
         authored += tile.authored;
         importedStock += tile.authored && tile.sourceSlot < 0;
+        QJsonObject identity;
+        identity.insert(QStringLiteral("physical_slot"), physicalSlot);
+        identity.insert(QStringLiteral("kind"), tile.authored
+            ? (tile.sourceSlot >= 0 ? QStringLiteral("source-authored")
+                                    : QStringLiteral("imported-stock"))
+            : QStringLiteral("generated-exact"));
+        identity.insert(QStringLiteral("source_namespace"),
+                        tile.authored && tile.sourceSlot >= 0
+                            ? nameSpace : QString());
+        identity.insert(QStringLiteral("source_slot"), tile.sourceSlot);
+        identity.insert(QStringLiteral("pixel_sha256"),
+                        QString::fromLatin1(tile.pixelSha256));
+        identity.insert(QStringLiteral("provenance"), tile.blendProvenance);
+        identity.insert(QStringLiteral("runtime_terrain_type"),
+                        tile.runtimeTerrainType);
+        QJsonObject signature;
+        signature.insert(QStringLiteral("northWest"),
+                         tile.canonicalSignature.northWest);
+        signature.insert(QStringLiteral("northEast"),
+                         tile.canonicalSignature.northEast);
+        signature.insert(QStringLiteral("southEast"),
+                         tile.canonicalSignature.southEast);
+        signature.insert(QStringLiteral("southWest"),
+                         tile.canonicalSignature.southWest);
+        identity.insert(QStringLiteral("canonical_signature"), signature);
+        physicalTileIdentities.append(identity);
         if(!tile.authored)
         {
             QJsonObject source;
@@ -1017,6 +1045,18 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                     finalized.tiles.size() - authored);
     manifest.insert(QStringLiteral("generated_blend_sources"),
                     generatedBlendSources);
+    manifest.insert(QStringLiteral("physical_tile_identities"),
+                    physicalTileIdentities);
+    QByteArray packedCells;
+    packedCells.resize(finalized.packedCells.size() * int(sizeof(quint16)));
+    for(int index = 0; index < finalized.packedCells.size(); ++index)
+        qToLittleEndian<quint16>(finalized.packedCells.at(index),
+            reinterpret_cast<uchar*>(packedCells.data()
+                + index * int(sizeof(quint16))));
+    manifest.insert(QStringLiteral("packed_cell_width"), field.tileWidth());
+    manifest.insert(QStringLiteral("packed_cell_height"), field.tileHeight());
+    manifest.insert(QStringLiteral("packed_cells_le16_base64"),
+                    QString::fromLatin1(packedCells.toBase64()));
     manifest.insert(QStringLiteral("generated_blend_review"),
                     generatedSlots.isEmpty() ? QString()
                     : QStringLiteral("generated-blends-review.png"));

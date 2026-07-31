@@ -421,6 +421,9 @@ private slots:
     void stockMaskTransferPreservesSubstantialAuthoredFragments();
     void stockMaskTransferPreservesNativeEdgeDetail();
     void degenerateStockMasksAreRejected();
+    void softOneCornerLeakIsRejectedBeforeMaskSelection();
+    void oneCornerMaskCannotRunAlongMostOfAdjacentEdge();
+    void reviewedTargetStyleRejectionsApplyToTransferredMasks();
     void reviewedBadPavingCutIsNotSelected();
     void materialNamesSelectExplicitBlendStyles();
     void materialBlendStylesProvideBoundedDistinctVariants();
@@ -950,6 +953,123 @@ void TerrainVirtualAtlasTests::degenerateStockMasksAreRejected()
     QVERIFY(atlas.addStockBlendMaskTemplate(signature(1, 1, 2, 2),
         allOwner, QStringLiteral("all-white-regression")));
     QCOMPARE(atlas.stockBlendMaskCountFor(signature(1, 1, 2, 2)), 0);
+}
+
+void TerrainVirtualAtlasTests::softOneCornerLeakIsRejectedBeforeMaskSelection()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    fixture.images[0].fill(QColor(230, 20, 20, 255));
+    fixture.images[1].fill(QColor(20, 220, 20, 255));
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Grass}, {2, ETerrainBlendStyle::Grass}
+    };
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0, {}, styles);
+    const auto mixed = [](const QColor& owner, const QColor& other, double amount) {
+        return QColor(qRound(owner.red() * amount + other.red() * (1.0 - amount)),
+                      qRound(owner.green() * amount + other.green() * (1.0 - amount)),
+                      qRound(owner.blue() * amount + other.blue() * (1.0 - amount)),
+                      255);
+    };
+    QImage leaking(64, 64, QImage::Format_RGBA8888);
+    QImage contained(64, 64, QImage::Format_RGBA8888);
+    leaking.fill(fixture.images[1].pixelColor(0, 0));
+    contained.fill(fixture.images[1].pixelColor(0, 0));
+    // Grid-Y mirroring puts owner 1 at preview SW. Both candidates have a
+    // valid substantial island there, but the first also carries a 45%-owner
+    // strand across the opposite (right) edge. It remains visibly transferred
+    // after blending while staying below the old binary 128 leak threshold.
+    for(int y = 34; y < 64; ++y)
+        for(int x = 0; x < 30 - (63 - y) / 2; ++x)
+        {
+            leaking.setPixelColor(x, y, fixture.images[0].pixelColor(x, y));
+            contained.setPixelColor(x, y, fixture.images[0].pixelColor(x, y));
+        }
+    for(int x = 18; x < 64; ++x)
+        for(int y = 48; y < 54; ++y)
+            leaking.setPixelColor(x, y, mixed(
+                fixture.images[0].pixelColor(x, y),
+                fixture.images[1].pixelColor(x, y), 0.45));
+    QVERIFY(atlas.addStockBlendMaskTemplate(signature(1, 2, 2, 2),
+        leaking, QStringLiteral("a-soft-foreign-edge-leak")));
+    QVERIFY(atlas.addStockBlendMaskTemplate(signature(1, 2, 2, 2),
+        contained, QStringLiteral("z-contained-grass-island")));
+    QString provenance;
+    QVERIFY(!atlas.reviewBlendMask(signature(1, 2, 2, 2), 1, 0,
+                                   &provenance).isNull());
+    QCOMPARE(provenance, QStringLiteral("z-contained-grass-island"));
+}
+
+void TerrainVirtualAtlasTests::oneCornerMaskCannotRunAlongMostOfAdjacentEdge()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    fixture.images[0].fill(QColor(230, 20, 20, 255));
+    fixture.images[1].fill(QColor(20, 220, 20, 255));
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Grass}, {2, ETerrainBlendStyle::Grass}
+    };
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0, {}, styles);
+    QImage reaching(64, 64, QImage::Format_RGBA8888);
+    QImage contained(64, 64, QImage::Format_RGBA8888);
+    reaching.fill(fixture.images[1].pixelColor(0, 0));
+    contained.fill(fixture.images[1].pixelColor(0, 0));
+    for(int y = 42; y < 64; ++y)
+        for(int x = 0; x < 29; ++x)
+        {
+            reaching.setPixelColor(x, y, fixture.images[0].pixelColor(x, y));
+            contained.setPixelColor(x, y, fixture.images[0].pixelColor(x, y));
+        }
+    // The malformed winter-grass style reaches more than three quarters of
+    // the adjacent bottom edge without touching the formally foreign edge.
+    for(int y = 59; y < 64; ++y)
+        for(int x = 29; x < 52; ++x)
+            reaching.setPixelColor(x, y, fixture.images[0].pixelColor(x, y));
+    QVERIFY(atlas.addStockBlendMaskTemplate(signature(1, 2, 2, 2),
+        reaching, QStringLiteral("a-reaching-winter-grass")));
+    QVERIFY(atlas.addStockBlendMaskTemplate(signature(1, 2, 2, 2),
+        contained, QStringLiteral("z-contained-grass")));
+    QString provenance;
+    QVERIFY(!atlas.reviewBlendMask(signature(1, 2, 2, 2), 1, 0,
+                                   &provenance).isNull());
+    QCOMPARE(provenance, QStringLiteral("z-contained-grass"));
+}
+
+void TerrainVirtualAtlasTests::reviewedTargetStyleRejectionsApplyToTransferredMasks()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Ice}, {2, ETerrainBlendStyle::Ice},
+        {3, ETerrainBlendStyle::Snow}, {4, ETerrainBlendStyle::Grass}
+    };
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0, {}, styles);
+    auto transition = [&](int phase) {
+        QImage image(64, 64, QImage::Format_RGBA8888);
+        for(int y = 0; y < 64; ++y)
+            for(int x = 0; x < 64; ++x)
+            {
+                const int edge = 25 + int(6.0 * std::sin((y + phase) * 0.27));
+                image.setPixelColor(x, y, x < edge
+                    ? fixture.images[2].pixelColor(x, y)
+                    : fixture.images[3].pixelColor(x, y));
+            }
+        return image;
+    };
+    QVERIFY(atlas.addStockBlendMaskTemplate(signature(3, 3, 4, 4),
+        transition(0), QStringLiteral("Zone6_2:296")));
+    QVERIFY(atlas.addStockBlendMaskTemplate(signature(3, 3, 4, 4),
+        transition(7), QStringLiteral("zz-reviewed-ice-transfer")));
+    QString provenance;
+    QVERIFY(!atlas.reviewBlendMask(signature(1, 1, 2, 2), 1, 0,
+                                   &provenance).isNull());
+    QCOMPARE(provenance, QStringLiteral("zz-reviewed-ice-transfer"));
 }
 
 void TerrainVirtualAtlasTests::reviewedBadPavingCutIsNotSelected()

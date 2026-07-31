@@ -5847,7 +5847,9 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    QCOMPARE(landFamilyCount, 70);
+    // The reviewed Zone2 Faded/Burnt split adds one independently paintable
+    // four-corner uniform family to the global land catalog.
+    QCOMPARE(landFamilyCount, 71);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
