@@ -512,6 +512,77 @@ CDeleteLogicPoint::CDeleteLogicPoint(CView *pView, QString hash, QUndoCommand *p
 {
 }
 
+CAppendBehaviorPointCommand::CAppendBehaviorPointCommand(
+        CView* view, CMob* mob, uint unitId, int logicSlot, int patrolId,
+        const QJsonObject& pointData, bool lookPoint, QUndoCommand* parent)
+    : QUndoCommand(parent), m_view(view), m_mob(mob), m_unitId(unitId),
+      m_logicSlot(logicSlot), m_patrolId(patrolId), m_previousIndex(-1),
+      m_pointData(pointData), m_lookPoint(lookPoint)
+{
+    CUnit* unit = m_mob
+        ? dynamic_cast<CUnit*>(m_mob->nodeByMapId(m_unitId)) : nullptr;
+    if(unit)
+    {
+        if(m_lookPoint)
+        {
+            CPatrolPoint* patrol = unit->patrolByIndex(m_logicSlot, m_patrolId);
+            if(patrol) m_previousIndex = patrol->lookPoint().size() - 1;
+        }
+        else if(CLogic* logic = unit->logicAt(m_logicSlot))
+            m_previousIndex = logic->patrolPoints().size() - 1;
+    }
+    setText(m_lookPoint ? "Paste look point" : "Paste patrol point");
+}
+
+void CAppendBehaviorPointCommand::refresh()
+{
+    if(!m_mob || !m_view)
+        return;
+    if(CUnit* unit = dynamic_cast<CUnit*>(m_mob->nodeByMapId(m_unitId)))
+        unit->refreshLogicProjection();
+    m_mob->logicNodesUpdate();
+    m_view->collectObjectTreeData();
+    m_view->viewParameters();
+    m_view->setDurty(m_mob);
+    m_view->update();
+}
+
+void CAppendBehaviorPointCommand::redo()
+{
+    CUnit* unit = m_mob
+        ? dynamic_cast<CUnit*>(m_mob->nodeByMapId(m_unitId)) : nullptr;
+    if(!unit || m_previousIndex < -1)
+        return;
+    if(m_lookPoint)
+    {
+        unit->createViewByIndex(m_logicSlot, m_patrolId, m_previousIndex);
+        CLookPoint* created = unit->viewByIndex(
+            m_logicSlot, m_patrolId, m_previousIndex + 1);
+        if(created) created->deSerializeJson(m_pointData);
+    }
+    else
+    {
+        unit->createPatrolByIndex(m_logicSlot, m_previousIndex);
+        CPatrolPoint* created = unit->patrolByIndex(
+            m_logicSlot, m_previousIndex + 1);
+        if(created) created->deSerializeJson(m_pointData);
+    }
+    refresh();
+}
+
+void CAppendBehaviorPointCommand::undo()
+{
+    CUnit* unit = m_mob
+        ? dynamic_cast<CUnit*>(m_mob->nodeByMapId(m_unitId)) : nullptr;
+    if(!unit)
+        return;
+    if(m_lookPoint)
+        unit->undo_createViewByIndex(m_logicSlot, m_patrolId, m_previousIndex);
+    else
+        unit->undo_createPatrolByIndex(m_logicSlot, m_previousIndex);
+    refresh();
+}
+
 void CDeleteLogicPoint::undo()
 {
     QStringList list = m_nodeHash.split(".");

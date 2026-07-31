@@ -529,7 +529,7 @@ void CSettings::initOptions()
         {"shortcutSaveAllMobs", "Alt+Shift+S"},
         {"shortcutUndo", "Ctrl+Z"},
         {"shortcutRedo", "Ctrl+Y"},
-        {"shortcutHistory", "Ctrl+L"},
+        {"shortcutHistory", "Ctrl+H"},
         {"shortcutCreateObject", "Ctrl+N"},
         {"shortcutDuplicateObjects", "Ctrl+D"},
         {"shortcutMobParameters", "Ctrl+M"},
@@ -546,7 +546,7 @@ void CSettings::initOptions()
         {"shortcutMoveTool", "G"},
         {"shortcutRotateTool", "R"},
         {"shortcutScaleTool", "T"},
-        {"shortcutTileBrushTool", "L"}
+        {"shortcutTileBrushTool", "Ctrl+L"}
     };
     for(auto it = shortcutDefaults.constBegin(); it != shortcutDefaults.constEnd(); ++it)
         m_aOptCategory[eOptSetKeyBinding].append(

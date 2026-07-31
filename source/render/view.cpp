@@ -5466,20 +5466,7 @@ void CView::draw()
                 colorSubmittedNodes.insert(node);
                 if(performance.collecting())
                     ++performance.counters().nodesSubmitted;
-                if(!traverseHelpers && node->nodeState() == ENodeState::eSelect)
-                {
-                    node->drawLogicVisual(false, &m_program);
-                    if(performance.collecting())
-                        ++performance.counters().logicSubmissions;
-                }
             }
-            if(traverseHelpers)
-                for(CNode* node : mob->nodes())
-                {
-                    node->drawLogicVisual(false, &m_program);
-                    if(performance.collecting())
-                        ++performance.counters().logicSubmissions;
-                }
         }
 
         // Draw the active MOB in two passes so a selected duplicate remains
@@ -5498,14 +5485,6 @@ void CView::draw()
                     ++performance.counters().nodesSubmitted;
             }
         }
-        if(traverseHelpers)
-            for(CNode* node : m_activeMob->nodes())
-                if(node->nodeState() != ENodeState::eSelect)
-                {
-                    node->drawLogicVisual(true, &m_program);
-                    if(performance.collecting())
-                        ++performance.counters().logicSubmissions;
-                }
         if(environmentEnabled && shadowsEnabled)
         {
             // A caster outside the color frustum can still project a visible
@@ -5572,15 +5551,37 @@ void CView::draw()
                             mob == m_activeMob ? activeHighlight : lockedHighlight);
                         node->drawObjectVisual(mob == m_activeMob, &m_program);
                         renderQueue.flush();
-                        node->drawLogicVisual(mob == m_activeMob, &m_program);
                         if(performance.collecting())
                         {
                             ++performance.counters().nodesSubmitted;
-                            ++performance.counters().logicSubmissions;
                         }
                     }
         m_program.setUniformValue("u_highlightColor", activeHighlight);
         renderQueue.flush();
+        const auto drawBehaviorHelpers = [&]()
+        {
+            if(m_minimapCaptureActive)
+                return;
+            for(CMob* mob : m_aMob)
+            {
+                if(!isMobVisible(mob))
+                    continue;
+                for(CNode* node : mob->nodes())
+                {
+                    if(!traverseHelpers && node->nodeState() != ENodeState::eSelect)
+                        continue;
+                    node->drawLogicVisual(mob == m_activeMob, &m_program);
+                    if(performance.collecting())
+                        ++performance.counters().logicSubmissions;
+                }
+            }
+            // Patrol/look/trap marker models join the object queue, while their
+            // relationship lines draw immediately. Flush only after terrain
+            // and selected objects are complete so neither can paint over the
+            // helpers.
+            renderQueue.flush();
+        };
+        drawBehaviorHelpers();
         ei::gl::DepthFunc(GL_LESS);
     }
 
@@ -10725,6 +10726,74 @@ void CView::collectObjectTreeData()
     m_pTree->header()->setStretchLastSection(false);
     m_pTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_pTree->resizeColumnToContents(1);
+    const auto appendBehaviorTreeChildren = [this](CTreeObject* ownerItem, CNode* node)
+    {
+        if(!ownerItem || !node
+           || CScene::getInstance()->getMode() != eEditModeLogic)
+            return;
+        if(CUnit* unit = dynamic_cast<CUnit*>(node))
+        {
+            for(int logicIndex = 0; logicIndex < unit->logicCount(); ++logicIndex)
+            {
+                CLogic* logic = unit->logicAt(logicIndex);
+                if(!logic)
+                    continue;
+                const QString suffix = logicIndex == 0 ? tr(" (default)") : QString();
+                auto slotItem = new QTreeWidgetItem(ownerItem);
+                slotItem->setText(0, tr("Logic %1%2").arg(logicIndex).arg(suffix));
+                slotItem->setText(1, QString::number(logic->patrolPoints().size()));
+                slotItem->setData(0, Qt::UserRole + 10, logicIndex);
+                slotItem->setData(0, Qt::UserRole + 11,
+                    QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(unit)));
+                slotItem->setToolTip(0, tr("Behavior setup %1; %2 patrol points")
+                    .arg(logicIndex).arg(logic->patrolPoints().size()));
+                slotItem->setExpanded(logicIndex == m_logicSlotIndex);
+                int patrolNumber = 0;
+                for(CPatrolPoint* patrol : logic->patrolPoints())
+                {
+                    if(!patrol || patrol->isMarkDeleted())
+                        continue;
+                    auto patrolItem = new CTreeObject(
+                        static_cast<QTreeWidgetItem*>(slotItem), patrol);
+                    patrolItem->setText(0, tr("Patrol point %1").arg(++patrolNumber));
+                    patrolItem->setText(1, QString::number(patrol->lookPoint().size()));
+                    int lookNumber = 0;
+                    for(CLookPoint* look : patrol->lookPoint())
+                    {
+                        if(!look || look->isMarkDeleted())
+                            continue;
+                        auto lookItem = new CTreeObject(
+                            static_cast<QTreeWidgetItem*>(patrolItem), look);
+                        lookItem->setText(0, tr("Look point %1").arg(++lookNumber));
+                    }
+                }
+            }
+            return;
+        }
+        if(CMagicTrap* trap = dynamic_cast<CMagicTrap*>(node))
+        {
+            auto areasItem = new QTreeWidgetItem(ownerItem);
+            areasItem->setText(0, tr("Activation areas (%1)").arg(trap->actZones().size()));
+            int areaNumber = 0;
+            for(CActivationZone* area : trap->actZones())
+            {
+                if(!area || area->isMarkDeleted())
+                    continue;
+                auto item = new CTreeObject(static_cast<QTreeWidgetItem*>(areasItem), area);
+                item->setText(0, tr("Activation area %1").arg(++areaNumber));
+            }
+            auto targetsItem = new QTreeWidgetItem(ownerItem);
+            targetsItem->setText(0, tr("Cast targets (%1)").arg(trap->castPoints().size()));
+            int targetNumber = 0;
+            for(CTrapCastPoint* target : trap->castPoints())
+            {
+                if(!target || target->isMarkDeleted())
+                    continue;
+                auto item = new CTreeObject(static_cast<QTreeWidgetItem*>(targetsItem), target);
+                item->setText(0, tr("Cast target %1").arg(++targetNumber));
+            }
+        }
+    };
     for(CMob* mob : m_aMob)
     {
         if(!mob)
@@ -10774,6 +10843,7 @@ void CView::collectObjectTreeData()
                 if(groupIt.value().size() == 1)
                 {
                     groupItem->setNode(groupIt.value().front());
+                    appendBehaviorTreeChildren(groupItem, groupIt.value().front());
                     groupItem->setToolTip(0, mob == m_activeMob
                         ? tr("Belongs to active MOB %1").arg(mob->mobName())
                         : tr("Belongs to locked MOB %1. Double-click to make it active.")
@@ -10784,6 +10854,7 @@ void CView::collectObjectTreeData()
                     {
                         auto objectItem = new CTreeObject(groupItem, node);
                         objectItem->setText(0, QString::number(node->mapId()));
+                        appendBehaviorTreeChildren(objectItem, node);
                         objectItem->setToolTip(0, mob == m_activeMob
                             ? tr("Belongs to active MOB %1").arg(mob->mobName())
                             : tr("Belongs to locked MOB %1. Double-click to make it active.")
@@ -12457,6 +12528,59 @@ void CView::selectedObjectToClipboardBuffer()
     if(nullptr == m_activeMob)
         return;
 
+    if(CScene::getInstance()->getMode() == eEditModeLogic)
+    {
+        QJsonArray behaviorData;
+        QString kind;
+        bool mixedKinds = false;
+        for(CNode* node : selectedNodes())
+        {
+            QJsonObject point;
+            QString nodeKind;
+            if(CPatrolPoint* patrol = dynamic_cast<CPatrolPoint*>(node))
+            {
+                patrol->serializeJson(point);
+                nodeKind = QStringLiteral("Patrol");
+            }
+            else if(CLookPoint* look = dynamic_cast<CLookPoint*>(node))
+            {
+                look->serializeJson(point);
+                nodeKind = QStringLiteral("Look");
+            }
+            else
+                continue;
+            if(!kind.isEmpty() && kind != nodeKind)
+                mixedKinds = true;
+            kind = nodeKind;
+            behaviorData.append(point);
+        }
+        if(mixedKinds)
+        {
+            emit updateMsg(tr("Copy either patrol points or look points, not both together."));
+            return;
+        }
+        if(!behaviorData.isEmpty())
+        {
+            QJsonObject obj;
+            obj.insert("Version", 3);
+            obj.insert("Content", "Behavior points");
+            obj.insert("Kind", kind);
+            obj.insert("Data", behaviorData);
+            QJsonDocument doc(obj);
+            if(m_clipboard_buffer_file.open(QIODevice::WriteOnly))
+            {
+                m_clipboard_buffer_file.write(
+                    doc.toJson(QJsonDocument::JsonFormat::Indented));
+                m_clipboard_buffer_file.close();
+                emit updateMsg(kind == QStringLiteral("Patrol")
+                    ? tr("Copied %1 patrol point(s), including their look points.")
+                        .arg(behaviorData.size())
+                    : tr("Copied %1 look point(s).").arg(behaviorData.size()));
+            }
+            return;
+        }
+    }
+
     QJsonArray arrObj;
     for(CNode* pNode : selectedNodes())
         if (pNode->nodeState() & ENodeState::eSelect)
@@ -12532,6 +12656,11 @@ void CView::clipboradObjectsToScene()
     m_clipboard_buffer_file.close();
     //todo: check if has no error
     QJsonObject obj = doc.object();
+    if(obj["Content"].toString() == QStringLiteral("Behavior points"))
+    {
+        pasteBehaviorPoints(obj);
+        return;
+    }
     if (obj["Version"].toInt() != 2)
         return;
 
@@ -12578,6 +12707,193 @@ void CView::clipboradObjectsToScene()
 
     viewParameters();
     emit loadedMapStateChanged();
+}
+
+bool CView::pasteBehaviorPoints(const QJsonObject& clipboard)
+{
+    if(!m_activeMob || CScene::getInstance()->getMode() != eEditModeLogic)
+        return false;
+    const QString kind = clipboard["Kind"].toString();
+    const QJsonArray data = clipboard["Data"].toArray();
+    if(data.isEmpty() || (kind != QStringLiteral("Patrol")
+                          && kind != QStringLiteral("Look")))
+        return false;
+
+    QSet<uint> destinationUnits;
+    QSet<QString> destinationPatrols;
+    for(CNode* node : selectedNodes())
+    {
+        if(CUnit* unit = dynamic_cast<CUnit*>(node))
+        {
+            if(kind == QStringLiteral("Patrol"))
+                destinationUnits.insert(unit->mapId());
+            continue;
+        }
+        int unitId = -1;
+        int patrolId = -1;
+        if(CPatrolPoint* patrol = dynamic_cast<CPatrolPoint*>(node))
+            m_activeMob->getPatrolHash(unitId, patrolId, patrol);
+        else if(CLookPoint* look = dynamic_cast<CLookPoint*>(node))
+        {
+            int lookId = -1;
+            m_activeMob->getViewHash(unitId, patrolId, lookId, look);
+        }
+        if(unitId < 0 || patrolId < 0)
+            continue;
+        if(kind == QStringLiteral("Patrol"))
+            destinationUnits.insert(uint(unitId));
+        else
+            destinationPatrols.insert(QString("%1.%2").arg(unitId).arg(patrolId));
+    }
+
+    const int destinationCount = kind == QStringLiteral("Patrol")
+        ? destinationUnits.size() : destinationPatrols.size();
+    if(destinationCount == 0)
+    {
+        emit updateMsg(kind == QStringLiteral("Patrol")
+            ? tr("Select one or more units (or their patrol points) to append patrols.")
+            : tr("Select one or more patrols (or their look points) to append look points."));
+        return false;
+    }
+
+    m_activeMob->clearSelect(true);
+    const int commandCount = destinationCount * data.size();
+    if(commandCount > 1)
+        m_pUndoStack->beginMacro(kind == QStringLiteral("Patrol")
+            ? tr("Paste %1 patrol points").arg(commandCount)
+            : tr("Paste %1 look points").arg(commandCount));
+    if(kind == QStringLiteral("Patrol"))
+    {
+        for(uint unitId : destinationUnits)
+            for(const QJsonValue& value : data)
+                m_pUndoStack->push(new CAppendBehaviorPointCommand(
+                    this, m_activeMob, unitId, m_logicSlotIndex, -1,
+                    value.toObject(), false));
+    }
+    else
+    {
+        for(const QString& destination : destinationPatrols)
+        {
+            const QStringList parts = destination.split('.');
+            if(parts.size() != 2)
+                continue;
+            for(const QJsonValue& value : data)
+                m_pUndoStack->push(new CAppendBehaviorPointCommand(
+                    this, m_activeMob, parts[0].toUInt(), m_logicSlotIndex,
+                    parts[1].toInt(), value.toObject(), true));
+        }
+    }
+    if(commandCount > 1)
+        m_pUndoStack->endMacro();
+    emit loadedMapStateChanged();
+    emit updateMsg(kind == QStringLiteral("Patrol")
+        ? tr("Appended %1 patrol point(s) to Logic %2.")
+            .arg(commandCount).arg(m_logicSlotIndex)
+        : tr("Appended %1 look point(s).").arg(commandCount));
+    return true;
+}
+
+void CView::selectBehaviorParent()
+{
+    if(!m_activeMob || CScene::getInstance()->getMode() != eEditModeLogic)
+        return;
+    const QList<CNode*> selection = selectedNodes();
+    if(selection.size() != 1)
+        return;
+    CNode* selected = selection.front();
+    CNode* parent = nullptr;
+    if(CPatrolPoint* patrol = dynamic_cast<CPatrolPoint*>(selected))
+    {
+        int unitId = -1;
+        int patrolId = -1;
+        m_activeMob->getPatrolHash(unitId, patrolId, patrol);
+        parent = unitId >= 0 ? m_activeMob->nodeByMapId(uint(unitId)) : nullptr;
+    }
+    else if(CLookPoint* look = dynamic_cast<CLookPoint*>(selected))
+    {
+        int unitId = -1;
+        int patrolId = -1;
+        int lookId = -1;
+        m_activeMob->getViewHash(unitId, patrolId, lookId, look);
+        if(unitId >= 0 && patrolId >= 0)
+            parent = m_activeMob->patrolPointById(
+                unitId, patrolId, m_logicSlotIndex);
+    }
+    else if(CActivationZone* area = dynamic_cast<CActivationZone*>(selected))
+        parent = m_activeMob->nodeByMapId(m_activeMob->trapIdByPoint(area));
+    else if(CTrapCastPoint* target = dynamic_cast<CTrapCastPoint*>(selected))
+        parent = m_activeMob->nodeByMapId(m_activeMob->trapIdByPoint(target));
+    if(parent)
+        selectNode(parent, false);
+}
+
+void CView::selectPreviousBehaviorPoint()
+{
+    selectAdjacentBehaviorPoint(-1);
+}
+
+void CView::selectNextBehaviorPoint()
+{
+    selectAdjacentBehaviorPoint(1);
+}
+
+void CView::selectAdjacentBehaviorPoint(int offset)
+{
+    if(!m_activeMob || offset == 0
+       || CScene::getInstance()->getMode() != eEditModeLogic)
+        return;
+    const QList<CNode*> selection = selectedNodes();
+    if(selection.size() != 1)
+        return;
+    CNode* selected = selection.front();
+    CNode* sibling = nullptr;
+    if(CPatrolPoint* patrol = dynamic_cast<CPatrolPoint*>(selected))
+    {
+        int unitId = -1;
+        int patrolId = -1;
+        m_activeMob->getPatrolHash(unitId, patrolId, patrol);
+        CUnit* unit = unitId >= 0
+            ? dynamic_cast<CUnit*>(m_activeMob->nodeByMapId(uint(unitId))) : nullptr;
+        if(unit && unit->logicAt(m_logicSlotIndex))
+        {
+            const int next = patrolId + offset;
+            if(next >= 0 && next < unit->logicAt(m_logicSlotIndex)->patrolPoints().size())
+                sibling = unit->patrolByIndex(m_logicSlotIndex, next);
+        }
+    }
+    else if(CLookPoint* look = dynamic_cast<CLookPoint*>(selected))
+    {
+        int unitId = -1;
+        int patrolId = -1;
+        int lookId = -1;
+        m_activeMob->getViewHash(unitId, patrolId, lookId, look);
+        CPatrolPoint* patrol = unitId >= 0 && patrolId >= 0
+            ? m_activeMob->patrolPointById(unitId, patrolId, m_logicSlotIndex)
+            : nullptr;
+        const int next = lookId + offset;
+        if(patrol && next >= 0 && next < patrol->lookPoint().size())
+            sibling = patrol->viewByIndex(next);
+    }
+    else if(CActivationZone* area = dynamic_cast<CActivationZone*>(selected))
+    {
+        const uint trapId = m_activeMob->trapIdByPoint(area);
+        CMagicTrap* trap = dynamic_cast<CMagicTrap*>(m_activeMob->nodeByMapId(trapId));
+        const int index = trap ? trap->getZoneId(area) : -1;
+        const int next = index + offset;
+        if(trap && next >= 0 && next < trap->actZones().size())
+            sibling = trap->actZoneById(next);
+    }
+    else if(CTrapCastPoint* target = dynamic_cast<CTrapCastPoint*>(selected))
+    {
+        const uint trapId = m_activeMob->trapIdByPoint(target);
+        CMagicTrap* trap = dynamic_cast<CMagicTrap*>(m_activeMob->nodeByMapId(trapId));
+        const int index = trap ? trap->getCastPointId(target) : -1;
+        const int next = index + offset;
+        if(trap && next >= 0 && next < trap->castPoints().size())
+            sibling = trap->castPointById(next);
+    }
+    if(sibling)
+        selectNode(sibling, false);
 }
 
 void CView::hideSelectedNodes()

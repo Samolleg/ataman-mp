@@ -1203,6 +1203,11 @@ CLogic* CUnit::editorLogic() const
     return m_aLogic.at(qBound(0, m_editorLogicIndex, m_aLogic.size() - 1));
 }
 
+CLogic* CUnit::logicAt(int index) const
+{
+    return index >= 0 && index < m_aLogic.size() ? m_aLogic.at(index) : nullptr;
+}
+
 void CUnit::setEditorLogicIndex(int index)
 {
     m_editorLogicIndex = qBound(0, index, qMax(0, m_aLogic.size() - 1));

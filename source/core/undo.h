@@ -223,6 +223,28 @@ private:
     bool m_switchesToPath;
 };
 
+class CAppendBehaviorPointCommand: public QUndoCommand
+{
+public:
+    CAppendBehaviorPointCommand(CView* view, CMob* mob, uint unitId,
+                                int logicSlot, int patrolId,
+                                const QJsonObject& pointData, bool lookPoint,
+                                QUndoCommand* parent = nullptr);
+    void undo() override;
+    void redo() override;
+
+private:
+    void refresh();
+    CView* m_view;
+    CMob* m_mob;
+    uint m_unitId;
+    int m_logicSlot;
+    int m_patrolId;
+    int m_previousIndex;
+    QJsonObject m_pointData;
+    bool m_lookPoint;
+};
+
 class CCreateTrapPointCommand: public QUndoCommand
 {
 public:

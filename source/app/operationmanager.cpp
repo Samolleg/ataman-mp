@@ -73,8 +73,11 @@ void CSelect::keyPress(COperation *pOp, EKeyCode key)
     }
     case eKey_R:
     {
-        pOp->setCurrent(new CRotateAxis(m_pView, EOperateAxisZ));
-        delete this;
+        if(!pOp->keyManager()->isPressed(eKey_Ctrl))
+        {
+            pOp->setCurrent(new CRotateAxis(m_pView, EOperateAxisZ));
+            delete this;
+        }
         break;
     }
     case eKey_T:
@@ -107,20 +110,23 @@ void CSelect::keyPress(COperation *pOp, EKeyCode key)
     {
         if (pOp->keyManager()->isPressed(eKey_Alt))
             m_pView->unHideAll();
-        else
+        else if(!pOp->keyManager()->isPressed(eKey_Ctrl))
             m_pView->hideSelectedNodes();
 
         break;
     }
     case eKey_P:
     {
-        if(CScene::getInstance()->getMode() == eEditModeLogic)
+        if(!pOp->keyManager()->isPressed(eKey_Ctrl)
+           && CScene::getInstance()->getMode() == eEditModeLogic)
             m_pView->addLogicPoint(false);
         break;
     }
     case eKey_L:
     {
-        if(CScene::getInstance()->getMode() == eEditModeLogic)
+        if(!pOp->keyManager()->isPressed(eKey_Ctrl)
+           && !pOp->keyManager()->isPressed(eKey_Alt)
+           && CScene::getInstance()->getMode() == eEditModeLogic)
             m_pView->addLogicPoint(true);
         break;
     }

@@ -25,9 +25,9 @@ The reviewed English file has SHA-256
 | Area | Current state | Recommended addition |
 |---|---|---|
 | Common object | Secondary texture and read-only ordinary object type are exposed | Keep resource validation profile-aware |
-| Logic | All five slots and their serialized fields are selectable and editable in Logic mode | Add relationship-focused patrol/look tooling |
-| Look/action point | XYZ, wait, turn speed, and action flags are exposed | Add a compound list for owned points |
-| Magic trap | Areas and targets can be manipulated as viewport nodes | Add an exact list/table view for coordinates, radius, ordering, and count |
+| Logic | All five slots are editable and appear as collapsed owner hierarchies in Behavior mode | Add route-level operations such as reverse and cyclic-route previews |
+| Look/action point | Owned points are listed, navigable, copyable, and append-pastable with undo | Add an exact compound table for batch coordinate/timing edits |
+| Magic trap | Areas and targets appear below their trap and support parent/sibling navigation | Add an exact list/table view for coordinates, radius, ordering, and count |
 | Unit | Inventory strings and 51 Stats values exist | Add database-backed validation, enum/unit tooltips, and keep Stats collapsible/advanced |
 | Lever | Science tuple is split into vague labels | Group and explain the tuple while preserving its raw values |
 | Sound/light/particle | Values are editable but several labels lack units or symbolic meanings | Add tooltips, named particle/type choices, and raw fallback |
@@ -38,7 +38,9 @@ profile-specific JMV values.
 
 Endurance exposes, draws, and edits all five serialized unit logic slots through
 the selector shown in Logic mode. Undo/redo records the selected slot so a later
-slot switch cannot redirect an existing history entry.
+slot switch cannot redirect an existing history entry. Each slot owns a separate
+ordered patrol array. Magic traps do not have logic slots; each trap owns one
+ordered activation-area array and one ordered cast-target array.
 
 ## Better kept hidden or advanced
 

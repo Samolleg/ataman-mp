@@ -482,7 +482,6 @@ MainWindow::MainWindow(QWidget* parent) :
         "QLabel { background: #29424a; color: white; padding: 5px 7px; "
         "border-left: 3px solid #32c8e6; }");
     m_outlinerSelectionPath->hide();
-    outlinerLayout->addWidget(m_outlinerSelectionPath);
     m_ui->treeWidget->setParent(outlinerContainer);
     outlinerLayout->addWidget(m_ui->treeWidget, 1);
     m_outlinerDock = new QDockWidget(tr("Object Outliner"), this);
@@ -497,6 +496,25 @@ MainWindow::MainWindow(QWidget* parent) :
     QVBoxLayout* propertiesLayout = new QVBoxLayout(propertiesContainer);
     propertiesLayout->setContentsMargins(0, 0, 0, 0);
     propertiesLayout->setSpacing(3);
+    m_objectPropertiesHeader = new QWidget(propertiesContainer);
+    QHBoxLayout* propertiesHeaderLayout = new QHBoxLayout(m_objectPropertiesHeader);
+    propertiesHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    propertiesHeaderLayout->setSpacing(2);
+    propertiesHeaderLayout->addWidget(m_outlinerSelectionPath, 1);
+    m_selectBehaviorParentButton = new QToolButton(m_objectPropertiesHeader);
+    m_selectBehaviorParentButton->setText(tr("Parent"));
+    m_selectBehaviorParentButton->setToolTip(tr("Select owning object"));
+    m_selectPreviousBehaviorPointButton = new QToolButton(m_objectPropertiesHeader);
+    m_selectPreviousBehaviorPointButton->setText(QString::fromUtf8("\u25c0"));
+    m_selectPreviousBehaviorPointButton->setToolTip(tr("Select previous sibling point"));
+    m_selectNextBehaviorPointButton = new QToolButton(m_objectPropertiesHeader);
+    m_selectNextBehaviorPointButton->setText(QString::fromUtf8("\u25b6"));
+    m_selectNextBehaviorPointButton->setToolTip(tr("Select next sibling point"));
+    propertiesHeaderLayout->addWidget(m_selectBehaviorParentButton);
+    propertiesHeaderLayout->addWidget(m_selectPreviousBehaviorPointButton);
+    propertiesHeaderLayout->addWidget(m_selectNextBehaviorPointButton);
+    m_objectPropertiesHeader->hide();
+    propertiesLayout->addWidget(m_objectPropertiesHeader);
     m_logicSlotBar = new QWidget(propertiesContainer);
     QHBoxLayout* logicSlotLayout = new QHBoxLayout(m_logicSlotBar);
     logicSlotLayout->setContentsMargins(4, 3, 4, 3);
@@ -528,6 +546,12 @@ MainWindow::MainWindow(QWidget* parent) :
                                  QDockWidget::DockWidgetMovable |
                                  QDockWidget::DockWidgetFloatable);
     m_propertiesDock->setWidget(propertiesContainer);
+    connect(m_selectBehaviorParentButton, &QToolButton::clicked, this,
+            [this]() { if(m_pView) m_pView->selectBehaviorParent(); });
+    connect(m_selectPreviousBehaviorPointButton, &QToolButton::clicked, this,
+            [this]() { if(m_pView) m_pView->selectPreviousBehaviorPoint(); });
+    connect(m_selectNextBehaviorPointButton, &QToolButton::clicked, this,
+            [this]() { if(m_pView) m_pView->selectNextBehaviorPoint(); });
     addDockWidget(Qt::RightDockWidgetArea, m_outlinerDock);
     splitDockWidget(m_outlinerDock, m_propertiesDock, Qt::Vertical);
     m_ui->outlinerSplitter->hide();
@@ -1517,6 +1541,8 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(CScene::getInstance(), &CScene::modeChanged, this, [this]()
     {
+        if(m_pView)
+            m_pView->collectObjectTreeData();
         updateLogicSlotBarVisibility();
         updateBehaviorModeUi();
     });
@@ -2828,15 +2854,30 @@ void MainWindow::moveCameraToActiveSpawn()
 
 void MainWindow::initShortcuts()
 {
+    bool migratedShortcuts = false;
     if(COptString* landscapeShortcut = dynamic_cast<COptString*>(
            m_settings->opt(eOptSetKeyBinding, "shortcutTileBrushTool")))
     {
-        if(landscapeShortcut->value().compare(QStringLiteral("B"), Qt::CaseInsensitive) == 0)
+        const QString current = landscapeShortcut->value().trimmed();
+        if(current.compare(QStringLiteral("B"), Qt::CaseInsensitive) == 0
+           || current.compare(QStringLiteral("L"), Qt::CaseInsensitive) == 0)
         {
-            landscapeShortcut->setValue(QStringLiteral("L"));
-            m_settings->persistOptions();
+            landscapeShortcut->setValue(QStringLiteral("Ctrl+L"));
+            migratedShortcuts = true;
         }
     }
+    if(COptString* historyShortcut = dynamic_cast<COptString*>(
+           m_settings->opt(eOptSetKeyBinding, "shortcutHistory")))
+    {
+        if(historyShortcut->value().trimmed().compare(
+               QStringLiteral("Ctrl+L"), Qt::CaseInsensitive) == 0)
+        {
+            historyShortcut->setValue(QStringLiteral("Ctrl+H"));
+            migratedShortcuts = true;
+        }
+    }
+    if(migratedShortcuts)
+        m_settings->persistOptions();
     const auto shortcut = [this](const char* name, const char* fallback)
     {
         COptString* option = dynamic_cast<COptString*>(m_settings->opt(eOptSetKeyBinding, name));
@@ -2857,7 +2898,7 @@ void MainWindow::initShortcuts()
     m_ui->actionClose_all->setShortcut(QKeySequence(Qt::CTRL + eKey_Q));
     m_ui->actionUndo->setShortcut(shortcut("shortcutUndo", "Ctrl+Z"));
     m_ui->actionRedo->setShortcut(shortcut("shortcutRedo", "Ctrl+Y"));
-    m_historyDock->toggleViewAction()->setShortcut(shortcut("shortcutHistory", "Ctrl+L"));
+    m_historyDock->toggleViewAction()->setShortcut(shortcut("shortcutHistory", "Ctrl+H"));
     m_ui->actionCreate_new_object->setShortcut(shortcut("shortcutCreateObject", "Ctrl+N"));
     m_ui->actionDuplicate_selected_objects->setShortcut(shortcut("shortcutDuplicateObjects", "Ctrl+D"));
     m_ui->actionReset_cam_position->setShortcut(shortcut("shortcutResetCamera", "Ctrl+R"));
@@ -2875,7 +2916,7 @@ void MainWindow::initShortcuts()
         {EButtonOpMove, "shortcutMoveTool", "G", "Move selected objects"},
         {EButtonOpRotate, "shortcutRotateTool", "R", "Rotate selected objects"},
         {EButtonOpScale, "shortcutScaleTool", "T", "Scale selected objects"},
-        {EButtonOpTilebrush, "shortcutTileBrushTool", "L", "Landscape Tools"}
+        {EButtonOpTilebrush, "shortcutTileBrushTool", "Ctrl+L", "Landscape Tools"}
     };
     for(const auto& operation : operations)
     {
@@ -5745,8 +5786,17 @@ void MainWindow::updateLoadedMapPanel()
 
 void MainWindow::updateOutlinerSelectionPath()
 {
-    if(!m_outlinerSelectionPath || !m_ui || !m_ui->treeWidget)
+    if(!m_outlinerSelectionPath || !m_objectPropertiesHeader
+       || !m_ui || !m_ui->treeWidget)
         return;
+    const auto showNavigation = [this](bool show)
+    {
+        const bool visible = show
+            && CScene::getInstance()->getMode() == eEditModeLogic;
+        m_selectBehaviorParentButton->setVisible(visible);
+        m_selectPreviousBehaviorPointButton->setVisible(visible);
+        m_selectNextBehaviorPointButton->setVisible(visible);
+    };
 
     const bool customSelected = m_customSpawnSelected && m_customSpawn.valid
         && m_customSpawn.custom
@@ -5763,6 +5813,8 @@ void MainWindow::updateOutlinerSelectionPath()
         m_outlinerSelectionPath->setText(coordinates);
         m_outlinerSelectionPath->setToolTip(coordinates);
         m_outlinerSelectionPath->show();
+        showNavigation(false);
+        m_objectPropertiesHeader->show();
         return;
     }
 
@@ -5782,36 +5834,21 @@ void MainWindow::updateOutlinerSelectionPath()
         m_outlinerSelectionPath->setText(summary);
         m_outlinerSelectionPath->setToolTip(summary);
         m_outlinerSelectionPath->show();
+        showNavigation(false);
+        m_objectPropertiesHeader->show();
         return;
     }
     QTreeWidgetItem* item = m_ui->treeWidget->currentItem();
     if(!item || !item->parent())
     {
         m_outlinerSelectionPath->hide();
+        m_objectPropertiesHeader->hide();
         return;
     }
 
     QStringList path;
     for(QTreeWidgetItem* part = item; part; part = part->parent())
         path.prepend(part->text(0));
-
-    bool ancestorOutsideViewport = false;
-    for(QTreeWidgetItem* ancestor = item->parent(); ancestor;
-        ancestor = ancestor->parent())
-    {
-        const QRect ancestorRect = m_ui->treeWidget->visualItemRect(ancestor);
-        if(ancestor->isHidden() || !ancestorRect.isValid()
-           || !m_ui->treeWidget->viewport()->rect().contains(ancestorRect))
-        {
-            ancestorOutsideViewport = true;
-            break;
-        }
-    }
-    if(!ancestorOutsideViewport)
-    {
-        m_outlinerSelectionPath->hide();
-        return;
-    }
 
     const QString hierarchy = path.join(QString::fromUtf8(" \u203a "));
     bool locked = false;
@@ -5822,8 +5859,10 @@ void MainWindow::updateOutlinerSelectionPath()
         ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
         : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
     m_outlinerSelectionPath->setText(hierarchy);
-    m_outlinerSelectionPath->setToolTip(tr("Selected object hierarchy: %1").arg(hierarchy));
+    m_outlinerSelectionPath->setToolTip(tr("Selected object: %1").arg(hierarchy));
     m_outlinerSelectionPath->show();
+    showNavigation(true);
+    m_objectPropertiesHeader->show();
 }
 
 void MainWindow::updateDocumentActionAvailability()

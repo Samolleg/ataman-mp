@@ -135,6 +135,7 @@ public:
     bool owns(const CPatrolPoint* point) const;
     bool owns(const CLookPoint* point, int* patrolIndex = nullptr,
               int* lookIndex = nullptr) const;
+    const QVector<CPatrolPoint*>& patrolPoints() const { return m_aPatrolPt; }
 
 
 public slots:
@@ -234,6 +235,8 @@ public:
     void applyLogicParamAt(int index, const QSharedPointer<IPropertyBase>& prop);
     CPatrolPoint* patrolByIndex(int logicIndex, int patrolIndex);
     CLookPoint* viewByIndex(int logicIndex, int patrolIndex, int viewIndex);
+    CLogic* logicAt(int index) const;
+    int logicCount() const { return m_aLogic.size(); }
     void createPatrolByIndex(int logicIndex, int index);
     void undo_createPatrolByIndex(int logicIndex, int index);
     void createViewByIndex(int logicIndex, int pointId, int viewId);

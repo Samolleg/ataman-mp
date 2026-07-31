@@ -302,6 +302,10 @@ private:
     QLineEdit* m_outlinerFilterEdit{nullptr};
     QLabel* m_outlinerFilterStatus{nullptr};
     QLabel* m_outlinerSelectionPath{nullptr};
+    QWidget* m_objectPropertiesHeader{nullptr};
+    QToolButton* m_selectBehaviorParentButton{nullptr};
+    QToolButton* m_selectPreviousBehaviorPointButton{nullptr};
+    QToolButton* m_selectNextBehaviorPointButton{nullptr};
     bool m_loadedMapVisibilityDragging{false};
     Qt::CheckState m_loadedMapVisibilityTarget{Qt::Unchecked};
     QSet<QString> m_loadedMapVisibilityKeys;

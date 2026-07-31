@@ -361,11 +361,29 @@ void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
             QTreeWidgetItem* next = pending.takeLast();
             if(CTreeObject* childObject = dynamic_cast<CTreeObject*>(next))
                 if(childObject->node() && !nodes.contains(childObject->node()))
+                {
                     nodes.append(childObject->node());
+                    continue;
+                }
             for(int index = 0; index < next->childCount(); ++index)
                 pending.append(next->child(index));
         }
     }
+    int logicSlot = -1;
+    for(QTreeWidgetItem* ancestor = pItem; ancestor; ancestor = ancestor->parent())
+        if(ancestor->data(0, Qt::UserRole + 10).isValid())
+        {
+            logicSlot = ancestor->data(0, Qt::UserRole + 10).toInt();
+            if(nodes.isEmpty())
+            {
+                CNode* owner = reinterpret_cast<CNode*>(
+                    ancestor->data(0, Qt::UserRole + 11).toULongLong());
+                if(owner) nodes.append(owner);
+            }
+            break;
+        }
+    if(logicSlot >= 0)
+        m_pView->setLogicSlotIndex(logicSlot);
     const Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
     m_pView->selectNodes(nodes,
         modifiers.testFlag(Qt::ShiftModifier)
@@ -454,7 +472,15 @@ void CTreeView::itemDoubleClickedOver(QTreeWidgetItem* pItem, int column)
     CTreeObject* objectItem = dynamic_cast<CTreeObject*>(pItem);
     if(!objectItem || !objectItem->node() || column != 0)
         return;
-    m_pView->selectNode(objectItem->node(), false, true);
+    CNode* node = objectItem->node();
+    for(QTreeWidgetItem* ancestor = pItem; ancestor; ancestor = ancestor->parent())
+        if(ancestor->data(0, Qt::UserRole + 10).isValid())
+        {
+            m_pView->setLogicSlotIndex(
+                ancestor->data(0, Qt::UserRole + 10).toInt());
+            break;
+        }
+    m_pView->selectNode(node, false, true);
     m_pView->moveCamToSelectedObjects();
 }
 

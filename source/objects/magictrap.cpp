@@ -614,7 +614,7 @@ void CMagicTrap::update()
 
     //recalc points beetwen trap and activation zones
     m_aDrawingLine.clear();
-    if(m_aActZone.empty())
+    if(m_aActZone.empty() && m_aCastPoint.empty())
         return;
 
     m_aDrawingLine.append(m_drawPosition); // self position

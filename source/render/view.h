@@ -220,6 +220,10 @@ public:
     void deleteSelectedNodes();
     void selectedObjectToClipboardBuffer();
     void clipboradObjectsToScene();
+    bool pasteBehaviorPoints(const QJsonObject& clipboard);
+    void selectBehaviorParent();
+    void selectPreviousBehaviorPoint();
+    void selectNextBehaviorPoint();
     void duplicateSelectedObjects();
     bool canConvertSelectedWorldObjectToLever() const;
     void convertSelectedWorldObjectToLever();
@@ -364,6 +368,7 @@ private:
     void syncLandscapeToolState();
     bool handleLandscapeShortcut(QKeyEvent* event, bool pressed);
     void clearLandscapeBrushSelection();
+    void selectAdjacentBehaviorPoint(int offset);
     void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();
     QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;

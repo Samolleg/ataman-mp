@@ -912,7 +912,7 @@
              </item>
              <item row="18" column="1">
               <widget class="QKeySequenceEdit" name="shortcutHistory">
-               <property name="keySequence"><string>Ctrl+L</string></property>
+               <property name="keySequence"><string>Ctrl+H</string></property>
               </widget>
              </item>
              <item row="19" column="0">
@@ -989,7 +989,7 @@
              <item row="32" column="0"><widget class="QLabel" name="labelScaleToolShortcut"><property name="text"><string>Scale selected objects</string></property></widget></item>
              <item row="32" column="1"><widget class="QKeySequenceEdit" name="shortcutScaleTool"><property name="keySequence"><string>T</string></property></widget></item>
              <item row="33" column="0"><widget class="QLabel" name="labelTileBrushToolShortcut"><property name="text"><string>Landscape tools</string></property></widget></item>
-             <item row="33" column="1"><widget class="QKeySequenceEdit" name="shortcutTileBrushTool"><property name="keySequence"><string>L</string></property></widget></item>
+             <item row="33" column="1"><widget class="QKeySequenceEdit" name="shortcutTileBrushTool"><property name="keySequence"><string>Ctrl+L</string></property></widget></item>
              <item row="34" column="0">
               <widget class="QLabel" name="labelCameraSpeedWheelGesture">
                <property name="toolTip"><string>Modifier used with the mouse wheel over the viewport to change camera speed.</string></property>
