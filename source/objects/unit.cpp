@@ -13,6 +13,7 @@
 #include "profile_database.h"
 #include "profile_visual_provider.h"
 #include "persistent_visual_cache.h"
+#include "render_queue.h"
 
 #include <QJsonArray>
 #include <QRegularExpression>
@@ -1359,7 +1360,10 @@ CLogic::~CLogic()
 
 void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
 {
-    if(!m_use)
+    const bool disabledAuthoringPreview = !m_use
+        && isActive
+        && CScene::getInstance()->getMode() == eEditModeLogic;
+    if(!m_use && !disabledAuthoringPreview)
         return;
 
     drawHelp(isActive, program);
@@ -1396,7 +1400,10 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
     QMatrix4x4 matrix;
     matrix.setToIdentity();
     program->setUniformValue("u_modelMmatrix", matrix);
-    if (m_behaviour == EBehaviourType::eRadius)
+    const QVector4D disabledLogicColor(0.46f, 0.46f, 0.46f, 0.82f);
+    if(disabledAuthoringPreview)
+        program->setUniformValue("customColor", disabledLogicColor);
+    else if (m_behaviour == EBehaviourType::eRadius)
         program->setUniformValue("customColor", QVector4D(0.9f, 0.4f, 0.1f, 1.0f));
     else
         program->setUniformValue("customColor", QVector4D(0.8f, 0.8f, 0.2f, 1.0f));
@@ -1441,10 +1448,10 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
         // groups last so a nearby later point cannot paint over the highlight.
         for(auto& pp : m_aPatrolPt)
             if(pp->nodeState() != ENodeState::eSelect && !pp->hasSelectedLookPoint())
-                pp->draw(isActive, program);
+                pp->draw(isActive, program, disabledAuthoringPreview);
         for(auto& pp : m_aPatrolPt)
             if(pp->nodeState() == ENodeState::eSelect || pp->hasSelectedLookPoint())
-                pp->draw(isActive, program);
+                pp->draw(isActive, program, disabledAuthoringPreview);
     }
 
     ei::gl::Enable(GL_DEPTH_TEST);
@@ -1452,11 +1459,14 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
 
 void CLogic::drawSelect(QOpenGLShaderProgram* program)
 {
-    if(!m_use)
+    const bool disabledAuthoringPreview = !m_use
+        && CScene::getInstance()->getMode() == eEditModeLogic;
+    if(!m_use && !disabledAuthoringPreview)
         return;
 
     COptBool* pOpt = dynamic_cast<COptBool*>(CObjectList::getInstance()->settings()->opt("drawLogic"));
-    if (pOpt && !pOpt->value())
+    if(pOpt && !pOpt->value()
+       && CScene::getInstance()->getMode() != eEditModeLogic)
         return;
 
     ei::gl::Disable(GL_DEPTH_TEST);
@@ -1872,6 +1882,15 @@ void CLogic::getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propTy
         prop.reset(new prop3D(propType, m_guardPlacement));
         break;
     }
+    case eObjParam_GUARD_PLACE_X:
+        prop.reset(new propFloat(propType, m_guardPlacement.x()));
+        break;
+    case eObjParam_GUARD_PLACE_Y:
+        prop.reset(new propFloat(propType, m_guardPlacement.y()));
+        break;
+    case eObjParam_GUARD_PLACE_Z:
+        prop.reset(new propFloat(propType, m_guardPlacement.z()));
+        break;
     case eObjParam_ALWAYS_ACTIVE:
     {
         prop.reset(new propBool(propType, m_alwaysActive));
@@ -1928,8 +1947,21 @@ void CLogic::applyLogicParam(const QSharedPointer<IPropertyBase>& prop)
     case eObjParam_GUARD_PLACE:
     {
         m_guardPlacement = dynamic_cast<const prop3D*>(prop.get())->value();
+        createLogicLines();
         break;
     }
+    case eObjParam_GUARD_PLACE_X:
+        m_guardPlacement.setX(dynamic_cast<const propFloat*>(prop.get())->value());
+        createLogicLines();
+        break;
+    case eObjParam_GUARD_PLACE_Y:
+        m_guardPlacement.setY(dynamic_cast<const propFloat*>(prop.get())->value());
+        createLogicLines();
+        break;
+    case eObjParam_GUARD_PLACE_Z:
+        m_guardPlacement.setZ(dynamic_cast<const propFloat*>(prop.get())->value());
+        createLogicLines();
+        break;
     case eObjParam_ALWAYS_ACTIVE:
     {
         m_alwaysActive = dynamic_cast<const propBool*>(prop.get())->value();
@@ -2312,10 +2344,23 @@ CPatrolPoint::~CPatrolPoint()
 
 void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program)
 {
+    draw(isActive, program, false);
+}
+
+void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program, bool muted)
+{
     if(isMarkDeleted())
         return;
 
+    const QVector4D disabledLogicColor(0.46f, 0.46f, 0.46f, 0.82f);
+    if(muted)
+        program->setUniformValue("customColor", disabledLogicColor);
     CObjectBase::draw(isActive, program);
+    if(muted)
+    {
+        RenderQueueContext::instance().flush();
+        program->setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+    }
 
     if(m_aDrawingLine.size() == 0) // do not draw looking point if absent
         return;
@@ -2324,7 +2369,8 @@ void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program)
     matrix.setToIdentity();
     program->setUniformValue("u_modelMmatrix", matrix);
 
-    program->setUniformValue("customColor", QVector4D(0.12f, 0.4f, 0.8f, 1.0));
+    program->setUniformValue("customColor", muted
+        ? disabledLogicColor : QVector4D(0.12f, 0.4f, 0.8f, 1.0f));
     int offset(0);
     // Tell OpenGL which VBOs to use
 
@@ -2350,15 +2396,42 @@ void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program)
     program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
     for(auto& look: m_aLookPt)
         if(look->nodeState() != ENodeState::eSelect)
+        {
+            if(muted)
+                program->setUniformValue("customColor", disabledLogicColor);
             look->draw(isActive, program);
+            if(muted)
+            {
+                RenderQueueContext::instance().flush();
+                program->setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+            }
+        }
     for(auto& look: m_aLookPt)
         if(look->nodeState() == ENodeState::eSelect)
+        {
+            if(muted)
+                program->setUniformValue("customColor", disabledLogicColor);
             look->draw(isActive, program);
+            if(muted)
+            {
+                RenderQueueContext::instance().flush();
+                program->setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+            }
+        }
 
     // The point itself may overlap a look point or another large point marker.
     // Repaint a selected point last so its highlight is always visible.
     if(nodeState() == ENodeState::eSelect)
+    {
+        if(muted)
+            program->setUniformValue("customColor", disabledLogicColor);
         CObjectBase::draw(isActive, program);
+        if(muted)
+        {
+            RenderQueueContext::instance().flush();
+            program->setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+        }
+    }
 }
 
 bool CPatrolPoint::hasSelectedLookPoint() const

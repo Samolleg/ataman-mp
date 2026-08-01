@@ -136,6 +136,37 @@ def main() -> int:
     require(add_logic, "collectObjectTreeData();",
             "post-creation outliner selection handoff")
 
+    logic_draw = unit[unit.index("void CLogic::draw(bool isActive"):
+                      unit.index("void CLogic::drawSelect")]
+    require(logic_draw, "disabledAuthoringPreview",
+            "disabled active-slot Behavior preview")
+    require(logic_draw, "disabledLogicColor",
+            "muted disabled-slot connection color")
+    require(logic_draw, "pp->draw(isActive, program, disabledAuthoringPreview)",
+            "muted disabled-slot patrol and look models")
+    patrol_draw = unit[unit.index("void CPatrolPoint::draw(bool isActive"):
+                       unit.index("bool CPatrolPoint::hasSelectedLookPoint")]
+    require(patrol_draw, "RenderQueueContext::instance().flush();",
+            "muted helper-model tint surviving deferred rendering")
+    logic_select = unit[unit.index("void CLogic::drawSelect"):
+                        unit.index("void CLogic::createLogicLines")]
+    require(logic_select, "disabledAuthoringPreview",
+            "picking disabled-slot Behavior points")
+    require(logic_select, "CScene::getInstance()->getMode() != eEditModeLogic",
+            "Behavior point picking independent of the ordinary Draw Logic option")
+
+    get_logic = unit[unit.index("void CLogic::getLogicParam"):
+                     unit.index("void CLogic::applyLogicParam")]
+    apply_logic = unit[unit.index("void CLogic::applyLogicParam"):
+                       unit.index("uint CLogic::deserialize")]
+    for component in ("X", "Y", "Z"):
+        require(get_logic, f"case eObjParam_GUARD_PLACE_{component}:",
+                f"Guard-position {component} component readback")
+        require(apply_logic, f"case eObjParam_GUARD_PLACE_{component}:",
+                f"Guard-position {component} component editing")
+    require(apply_logic, "createLogicLines();",
+            "Guard-position visualization refresh after property edits")
+
     print("behavior authoring contract: PASS")
     return 0
 

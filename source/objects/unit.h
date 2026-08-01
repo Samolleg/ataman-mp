@@ -48,6 +48,7 @@ public:
     ~CPatrolPoint();
     ENodeType nodeType() override {return ENodeType::ePatrolPoint;}
     void draw(bool isActive, QOpenGLShaderProgram* program) override final;
+    void draw(bool isActive, QOpenGLShaderProgram* program, bool muted);
     void drawSelect(QOpenGLShaderProgram* program = nullptr) override final;
     bool hasSelectedLookPoint() const;
     uint deserialize(util::CMobParser& parser) override final;
