@@ -18,6 +18,7 @@ private slots:
     void selectsModernAndFallbackCapabilities();
     void appliesRenderSchedulingOptions();
     void derivesEnvironmentFromWorldValues();
+    void combinesShadowCastingPointLights();
 };
 
 void RenderQueueTests::alphaClassification()
@@ -211,6 +212,28 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QCOMPARE(ei::clockValueToHours(1230), 12.5f);
     QCOMPARE(ei::clockValueToHours(2360), 23.0f + 59.0f / 60.0f);
     QCOMPARE(ei::clockValueToHours(2400), 23.0f + 59.0f / 60.0f);
+}
+
+void RenderQueueTests::combinesShadowCastingPointLights()
+{
+    const QVector3D down(0.0f, 0.0f, -1.0f);
+    QCOMPARE(ei::shadowProjectionDirection(down, QVector3D(1.0f, 1.0f, 1.0f),
+                                            1.0f, {}, QVector3D()), down);
+
+    ei::SScenePointLight light;
+    light.position = QVector3D(-10.0f, 0.0f, 0.0f);
+    light.color = QVector3D(255.0f, 255.0f, 255.0f);
+    light.range = 20.0f;
+    light.castsShadow = true;
+    const QVector3D pointOnly = ei::shadowProjectionDirection(
+        down, QVector3D(), 0.0f, {light}, QVector3D());
+    QVERIFY(pointOnly.x() > 0.93f);
+    QVERIFY(pointOnly.z() < -0.33f);
+    QVERIFY(qAbs(pointOnly.length() - 1.0f) < 0.00001f);
+
+    light.castsShadow = false;
+    QCOMPARE(ei::shadowProjectionDirection(down, QVector3D(), 0.0f,
+                                            {light}, QVector3D()), down);
 }
 
 QTEST_APPLESS_MAIN(RenderQueueTests)

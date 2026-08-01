@@ -403,6 +403,7 @@ private:
     bool renderShadowMap(const QVector3D& cameraPosition,
                          const QVector3D& shadowFocus,
                          const ei::SRenderEnvironment& environment,
+                         const QVector<ei::SScenePointLight>& sceneLights,
                          RenderQueueContext& queue,
                          float maximumDistance);
     bool ensureShadowFramebuffers(int quality);

@@ -2628,6 +2628,7 @@ bool CView::ensureShadowFramebuffers(int quality)
 bool CView::renderShadowMap(const QVector3D& cameraPosition,
                             const QVector3D& shadowFocus,
                             const ei::SRenderEnvironment& environment,
+                            const QVector<ei::SScenePointLight>& sceneLights,
                             RenderQueueContext& queue,
                             float maximumDistance)
 {
@@ -2643,10 +2644,12 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     // views, reducing the closest actor and tree shadows to a handful of
     // texels. Keep its world-space budget fixed; the far cascade owns reach.
     m_nearShadowSplit = qMin(safeMaximumDistance, 48.0f);
+    const QVector3D lightDirection = ei::shadowProjectionDirection(
+        environment.sunDirection, environment.sunColor, environment.sunStrength,
+        sceneLights, shadowFocus);
     QVector3D up(0.0f, 0.0f, 1.0f);
-    if(qAbs(QVector3D::dotProduct(environment.sunDirection.normalized(), up)) > 0.96f)
+    if(qAbs(QVector3D::dotProduct(lightDirection, up)) > 0.96f)
         up = QVector3D(0.0f, 1.0f, 0.0f);
-    const QVector3D lightDirection = environment.sunDirection.normalized();
     const QVector3D lightRight = QVector3D::crossProduct(lightDirection, up).normalized();
     const QVector3D lightUp = QVector3D::crossProduct(lightRight, lightDirection).normalized();
     const QMatrix4x4 cameraView = m_cam->viewMatrix();
@@ -5275,6 +5278,7 @@ void CView::draw()
                         sceneLight.position = runtimePosition;
                         sceneLight.color = light->lightColor();
                         sceneLight.range = light->range();
+                        sceneLight.castsShadow = light->shadowEnabled();
                         sceneLights.append(sceneLight);
                     }
                 }
@@ -5490,7 +5494,9 @@ void CView::draw()
             // A caster outside the color frustum can still project a visible
             // shadow. Collect that geometry for the shadow pass only.
             renderQueue.setShadowOnlyCollection(true);
-            const QVector3D shadowSweep = environment.sunDirection.normalized()
+            const QVector3D shadowSweep = ei::shadowProjectionDirection(
+                environment.sunDirection, environment.sunColor,
+                environment.sunStrength, sceneLights, cameraPivot)
                 * maximumShadowDistance;
             for(CMob* mob : m_aMob)
             {
@@ -5536,7 +5542,7 @@ void CView::draw()
             renderQueue.setShadowOnlyCollection(false);
         }
         const bool shadowReady = environmentEnabled && shadowsEnabled
-            && renderShadowMap(cameraPosition, cameraPivot, environment,
+            && renderShadowMap(cameraPosition, cameraPivot, environment, sceneLights,
                                renderQueue, maximumShadowDistance);
         drawTerrainColor(shadowReady);
         renderQueue.flush();

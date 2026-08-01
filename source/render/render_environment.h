@@ -15,6 +15,7 @@ struct SScenePointLight
     QVector3D position;
     QVector3D color;
     float range{0.0f};
+    bool castsShadow{false};
 };
 
 struct SRenderEnvironment
@@ -42,6 +43,11 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
                                                bool caveEnvironment = false,
                                                const QString& region = QStringLiteral("gipat"));
 float clockValueToHours(int hourMinuteValue);
+QVector3D shadowProjectionDirection(const QVector3D& sunDirection,
+                                    const QVector3D& sunColor,
+                                    float sunStrength,
+                                    const QVector<SScenePointLight>& lights,
+                                    const QVector3D& casterPosition);
 
 }
 

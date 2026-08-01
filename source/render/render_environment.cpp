@@ -200,4 +200,61 @@ SRenderEnvironment renderEnvironment(const CWorldSet* worldSet,
         caveEnvironment, region);
 }
 
+QVector3D shadowProjectionDirection(const QVector3D& sunDirection,
+                                    const QVector3D& sunColor,
+                                    float sunStrength,
+                                    const QVector<SScenePointLight>& lights,
+                                    const QVector3D& casterPosition)
+{
+    const auto normalizedColor = [](QVector3D color)
+    {
+        const float maximum = qMax(color.x(), qMax(color.y(), color.z()));
+        if(maximum > 1.01f)
+            color /= 255.0f;
+        return color;
+    };
+    const auto luminance = [&](const QVector3D& color)
+    {
+        const QVector3D value = normalizedColor(color);
+        return 0.3f * value.x() + 0.6f * value.y() + 0.1f * value.z();
+    };
+
+    QVector3D direction;
+    if(!sunDirection.isNull())
+        direction += sunDirection.normalized()
+            * qMax(0.0f, sunStrength) * luminance(sunColor);
+    for(const SScenePointLight& light : lights)
+    {
+        if(!light.castsShadow || light.range <= 0.0f)
+            continue;
+        const QVector3D offset = casterPosition - light.position;
+        const float distanceSquared = offset.lengthSquared();
+        const float rangeSquared = light.range * light.range;
+        if(distanceSquared <= 0.000001f || distanceSquared >= rangeSquared)
+            continue;
+        const float attenuation = 1.0f - distanceSquared / rangeSquared;
+        direction += offset / qSqrt(distanceSquared)
+            * attenuation * luminance(light.color);
+    }
+
+    if(direction.lengthSquared() <= 0.000001f)
+        direction = sunDirection.isNull()
+            ? QVector3D(0.0f, 0.0f, -1.0f) : sunDirection.normalized();
+    else
+        direction.normalize();
+
+    // Very shallow projections become unbounded and unstable. The native
+    // projected-shadow path applies the same 20-degree floor after combining
+    // eligible directional and point lights.
+    const float horizontal = qSqrt(direction.x() * direction.x()
+                                   + direction.y() * direction.y());
+    if(horizontal > 0.000001f
+            && qAtan2(qAbs(direction.z()), horizontal) < qDegreesToRadians(20.0f))
+    {
+        direction.setZ(-horizontal * qTan(qDegreesToRadians(20.0f)));
+        direction.normalize();
+    }
+    return direction;
+}
+
 }
