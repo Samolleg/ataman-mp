@@ -512,30 +512,21 @@ void CMagicTrap::clearLogicSelect()
 
 bool CMagicTrap::updatePos(QVector3D &pos)
 {
-    bool bRes(false);
-    if(CScene::getInstance()->getMode() == eEditModeLogic)
+    const QVector3D offset = pos - m_position;
+    QVector3D childPosition;
+    for(CTrapCastPoint* castPoint : m_aCastPoint)
     {
-        bRes = CObjectBase::updatePos(pos);
-        return bRes;
+        childPosition = castPoint->position() + offset;
+        castPoint->updatePos(childPosition);
     }
-    else
+    for(CActivationZone* area : m_aActZone)
     {
-        QVector3D offset = pos - m_position;
-        QVector3D posN;
-        for(auto& castPoint : m_aCastPoint)
-        {
-            posN = castPoint->position() + offset;
-            castPoint->updatePos(posN);
-        }
-        for(auto& pActZone : m_aActZone)
-        {
-            posN = pActZone->position() + offset;
-            pActZone->updatePos(posN);
-        }
-        bRes = CObjectBase::updatePos(pos);
+        childPosition = area->position() + offset;
+        area->updatePos(childPosition);
     }
+    const bool result = CObjectBase::updatePos(pos);
     update();
-    return bRes;
+    return result;
 }
 
 void CMagicTrap::setDrawPosition(QVector3D pos)

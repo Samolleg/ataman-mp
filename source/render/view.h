@@ -569,6 +569,9 @@ private:
     CMob* m_pendingPasteMob;
     QList<CNode*> m_pendingPasteNodes;
     QList<CNode*> m_pendingPasteOriginalSelection;
+    QList<CNode*> m_pendingBehaviorPasteNodes;
+    QList<CNode*> m_pendingBehaviorPasteOriginalSelection;
+    QString m_pendingBehaviorPasteKind;
     //EOperationType m_operationType;
     QSharedPointer<CSelectFrame> m_selectFrame;
     QFile m_clipboard_buffer_file;

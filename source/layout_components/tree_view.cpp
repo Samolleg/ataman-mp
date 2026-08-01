@@ -14,6 +14,7 @@
 #include "objects/unit.h"
 #include "mob/mob.h"
 #include "log.h"
+#include "scene.h"
 
 CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
     m_filterTimer(new QTimer(this))
@@ -544,6 +545,11 @@ void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
         if(item && wanted.contains(item->node()))
         {
             item->setSelected(true);
+            if(CScene::getInstance()->getMode() == eEditModeLogic
+               && item->node()
+               && (item->node()->nodeType() == eUnit
+                   || item->node()->nodeType() == eMagicTrap))
+                expandBehaviorHierarchy(item);
             for(QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent())
                 parent->setExpanded(true);
             if(item->node() == primaryNode)
@@ -558,6 +564,23 @@ void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
             scrollToItem(primaryItem, QAbstractItemView::PositionAtCenter);
     }
     applyFilter();
+}
+
+void CTreeView::expandBehaviorHierarchy(QTreeWidgetItem* ownerItem)
+{
+    if(!ownerItem)
+        return;
+    ownerItem->setExpanded(true);
+    for(int index = 0; index < ownerItem->childCount(); ++index)
+    {
+        QTreeWidgetItem* child = ownerItem->child(index);
+        if(!child || !child->data(0, BehaviorItemRole).toBool())
+            continue;
+        const QVariant slot = child->data(0, Qt::UserRole + 10);
+        if(!slot.isValid() || !m_pView
+           || slot.toInt() == m_pView->logicSlotIndex())
+            child->setExpanded(true);
+    }
 }
 
 void CTreeView::clearViewportSelectionMarker()

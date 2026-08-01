@@ -12012,9 +12012,13 @@ bool CView::cancelPendingOperation()
     const EOperationMethod method = m_pOp->operationMethod();
     const bool cancelPastePreview = m_pendingOperationOwnsPaste;
     const bool cancelLogicPlacement = m_pendingLogicPlacementMacro;
+    const bool cancelBehaviorPaste = !m_pendingBehaviorPasteNodes.isEmpty();
     CMob* pasteMob = m_pendingPasteMob;
     const QList<CNode*> pasteNodes = m_pendingPasteNodes;
     const QList<CNode*> originalSelection = m_pendingPasteOriginalSelection;
+    const QList<CNode*> behaviorPasteNodes = m_pendingBehaviorPasteNodes;
+    const QList<CNode*> behaviorOriginalSelection =
+        m_pendingBehaviorPasteOriginalSelection;
     QString methodName;
     switch(method)
     {
@@ -12049,6 +12053,9 @@ bool CView::cancelPendingOperation()
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();
     m_pendingPasteOriginalSelection.clear();
+    m_pendingBehaviorPasteNodes.clear();
+    m_pendingBehaviorPasteOriginalSelection.clear();
+    m_pendingBehaviorPasteKind.clear();
 
     if(cancelPastePreview && pasteMob)
     {
@@ -12068,6 +12075,55 @@ bool CView::cancelPendingOperation()
     {
         m_pUndoStack->endMacro();
         m_pUndoStack->undo();
+    }
+    if(cancelBehaviorPaste && m_activeMob)
+    {
+        for(auto it = behaviorPasteNodes.crbegin();
+            it != behaviorPasteNodes.crend(); ++it)
+        {
+            CNode* node = *it;
+            if(CPatrolPoint* patrol = dynamic_cast<CPatrolPoint*>(node))
+            {
+                int unitId = -1;
+                int patrolId = -1;
+                m_activeMob->getPatrolHash(unitId, patrolId, patrol);
+                CUnit* unit = unitId >= 0
+                    ? dynamic_cast<CUnit*>(m_activeMob->nodeByMapId(uint(unitId)))
+                    : nullptr;
+                if(unit && patrolId >= 0)
+                    unit->undo_createPatrolByIndex(m_logicSlotIndex, patrolId - 1);
+            }
+            else if(CLookPoint* look = dynamic_cast<CLookPoint*>(node))
+            {
+                int unitId = -1;
+                int patrolId = -1;
+                int lookId = -1;
+                m_activeMob->getViewHash(unitId, patrolId, lookId, look);
+                CUnit* unit = unitId >= 0
+                    ? dynamic_cast<CUnit*>(m_activeMob->nodeByMapId(uint(unitId)))
+                    : nullptr;
+                if(unit && patrolId >= 0 && lookId >= 0)
+                    unit->undo_createViewByIndex(
+                        m_logicSlotIndex, patrolId, lookId - 1);
+            }
+            else if(CActivationZone* area = dynamic_cast<CActivationZone*>(node))
+            {
+                CMagicTrap* trap = dynamic_cast<CMagicTrap*>(
+                    m_activeMob->nodeByMapId(m_activeMob->trapIdByPoint(area)));
+                if(trap) trap->deleteLastActZone();
+            }
+            else if(CTrapCastPoint* target = dynamic_cast<CTrapCastPoint*>(node))
+            {
+                CMagicTrap* trap = dynamic_cast<CMagicTrap*>(
+                    m_activeMob->nodeByMapId(m_activeMob->trapIdByPoint(target)));
+                if(trap) trap->deleteLastCastPoint();
+            }
+            // The next ownership lookup must not traverse a logic-node cache
+            // containing a point that this iteration just destroyed.
+            m_activeMob->logicNodesUpdate();
+        }
+        collectObjectTreeData();
+        restoreSelection(behaviorOriginalSelection);
     }
     m_pOp->changeState(new CSelect(this));
     ei::log(eLogInfo, QString("Cancelled pending viewport operation method:%1 trackedObjects:%2")
@@ -12136,12 +12192,47 @@ void CView::operationSetBackup(EOperationAxisType operationType)
 
     m_operationBackup.clear();
     m_unitMovementBackup.clear();
-    for (auto& node : CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+    const QList<CNode*> candidates = CScene::getInstance()->getMode() == eEditModeLogic
+        ? m_activeMob->logicNodes() : m_activeMob->nodes();
+    QSet<CNode*> selected;
+    for(CNode* node : candidates)
+        if(node && node->nodeState() == ENodeState::eSelect)
+            selected.insert(node);
+    for(CNode* node : candidates)
     {
         if (node->nodeState() != ENodeState::eSelect)
             continue;
         if(!node->isOperationAxisAllow(operationType))
             continue;
+        // A selected hierarchy root owns its descendants' translation. Do not
+        // back up or transform the same child separately, which would apply
+        // the movement twice when parent and child are both selected.
+        if(CLookPoint* look = dynamic_cast<CLookPoint*>(node))
+        {
+            int unitId = -1;
+            int patrolId = -1;
+            int lookId = -1;
+            m_activeMob->getViewHash(unitId, patrolId, lookId, look);
+            CPatrolPoint* patrol = unitId >= 0 && patrolId >= 0
+                ? m_activeMob->patrolPointById(
+                    unitId, patrolId, m_logicSlotIndex) : nullptr;
+            if(selected.contains(patrol))
+                continue;
+        }
+        else if(CActivationZone* area = dynamic_cast<CActivationZone*>(node))
+        {
+            CNode* trap = m_activeMob->nodeByMapId(
+                m_activeMob->trapIdByPoint(area));
+            if(selected.contains(trap))
+                continue;
+        }
+        else if(CTrapCastPoint* target = dynamic_cast<CTrapCastPoint*>(node))
+        {
+            CNode* trap = m_activeMob->nodeByMapId(
+                m_activeMob->trapIdByPoint(target));
+            if(selected.contains(trap))
+                continue;
+        }
 
         switch (operationType)
         {
@@ -12192,6 +12283,7 @@ void CView::operationApply(EOperationAxisType operationType)
 {
     const bool committingPaste = m_pendingOperationOwnsPaste
             && m_pendingPasteMob && !m_pendingPasteNodes.isEmpty();
+    const bool committingBehaviorPaste = !m_pendingBehaviorPasteNodes.isEmpty();
     if(committingPaste)
     {
         m_pUndoStack->beginMacro(QString("Paste %1 object%2")
@@ -12208,13 +12300,24 @@ void CView::operationApply(EOperationAxisType operationType)
                                                   m_pendingPasteNodes,
                                                   "Select pasted objects"));
     }
+    if(committingBehaviorPaste)
+    {
+        m_pUndoStack->push(new CBehaviorPasteCommand(
+            this, m_activeMob, m_pendingBehaviorPasteNodes,
+            m_pendingBehaviorPasteOriginalSelection,
+            m_pendingBehaviorPasteKind));
+        setDurty(m_activeMob);
+        viewParameters();
+        emit loadedMapStateChanged();
+    }
 
     QQuaternion quat;
     QVector3D rot;
     // A paste and its automatically-started placement transform are one user
     // action. Keep the Paste macro open through the transform commands so one
     // Undo removes the pasted objects instead of merely moving them back.
-    const bool grouped = !committingPaste && !m_pendingLogicPlacementMacro
+    const bool grouped = !committingPaste && !committingBehaviorPaste
+            && !m_pendingLogicPlacementMacro
             && m_operationBackup.size() > 1;
     if(grouped)
     {
@@ -12227,6 +12330,7 @@ void CView::operationApply(EOperationAxisType operationType)
             action = "Scale";
         m_pUndoStack->beginMacro(QString("%1 %2 objects").arg(action).arg(m_operationBackup.size()));
     }
+    if(!committingBehaviorPaste)
     for(auto& pair : m_operationBackup.toStdMap())
     {
         switch (operationType)
@@ -12243,6 +12347,17 @@ void CView::operationApply(EOperationAxisType operationType)
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
                     CChangeProp* pOp = new CChangeProp(this, pair.first, pos);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+                    pair.first->updatePos(m_operationBackup[pair.first]);
+                    m_pUndoStack->push(pOp);
+                    break;
+                }
+                case eMagicTrap:
+                {
+                    QSharedPointer<IPropertyBase> pos(
+                        new prop3D(eObjParam_POSITION, pair.first->position()));
+                    CChangeProp* pOp = new CChangeProp(this, pair.first, pos);
+                    QObject::connect(pOp, SIGNAL(updateParam()),
+                                     this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]);
                     m_pUndoStack->push(pOp);
                     break;
@@ -12340,6 +12455,9 @@ void CView::operationApply(EOperationAxisType operationType)
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();
     m_pendingPasteOriginalSelection.clear();
+    m_pendingBehaviorPasteNodes.clear();
+    m_pendingBehaviorPasteOriginalSelection.clear();
+    m_pendingBehaviorPasteKind.clear();
 }
 
 void CView::moveTo(QVector3D &dir)
@@ -12348,11 +12466,10 @@ void CView::moveTo(QVector3D &dir)
         return;
 
     QVector3D pos;
-    for (auto& node : CScene::getInstance()->getMode() == eEditModeLogic ? m_activeMob->logicNodes() : m_activeMob->nodes())
+    // operationSetBackup() contains the canonical transform roots and removes
+    // selected descendants whose parent will carry them.
+    for(CNode* node : m_operationBackup.keys())
     {
-        if (node->nodeState() != ENodeState::eSelect)
-            continue;
-
         pos = node->position() + dir;
         node->updatePos(pos);
     }
@@ -12580,6 +12697,21 @@ void CView::selectedObjectToClipboardBuffer()
                 look->serializeJson(point);
                 nodeKind = QStringLiteral("Look");
             }
+            else if(CActivationZone* area = dynamic_cast<CActivationZone*>(node))
+            {
+                QJsonArray serialized;
+                area->serializeJsonArray(serialized);
+                if(!serialized.isEmpty())
+                    point = serialized.first().toObject();
+                nodeKind = QStringLiteral("Activation area");
+            }
+            else if(CTrapCastPoint* target = dynamic_cast<CTrapCastPoint*>(node))
+            {
+                QJsonArray position;
+                target->serializeJsonArray(position);
+                point.insert(QStringLiteral("Position"), position);
+                nodeKind = QStringLiteral("Cast target");
+            }
             else
                 continue;
             if(!kind.isEmpty() && kind != nodeKind)
@@ -12589,26 +12721,35 @@ void CView::selectedObjectToClipboardBuffer()
         }
         if(mixedKinds)
         {
-            emit updateMsg(tr("Copy either patrol points or look points, not both together."));
+            emit updateMsg(tr("Copy one Behavior point type at a time; different point types have different owners."));
             return;
         }
         if(!behaviorData.isEmpty())
         {
             QJsonObject obj;
-            obj.insert("Version", 3);
+            obj.insert("Version", 4);
             obj.insert("Content", "Behavior points");
             obj.insert("Kind", kind);
             obj.insert("Data", behaviorData);
+            const QPoint cursor = QWidget::mapFromGlobal(QCursor::pos());
+            const QVector3D terrain = getTerrainPos(cursor.x(), cursor.y());
+            QJsonArray mousePosition;
+            mousePosition.append(terrain.x());
+            mousePosition.append(terrain.y());
+            mousePosition.append(terrain.z());
+            obj.insert("Mouse position", mousePosition);
             QJsonDocument doc(obj);
             if(m_clipboard_buffer_file.open(QIODevice::WriteOnly))
             {
                 m_clipboard_buffer_file.write(
                     doc.toJson(QJsonDocument::JsonFormat::Indented));
                 m_clipboard_buffer_file.close();
-                emit updateMsg(kind == QStringLiteral("Patrol")
-                    ? tr("Copied %1 patrol point(s), including their look points.")
-                        .arg(behaviorData.size())
-                    : tr("Copied %1 look point(s).").arg(behaviorData.size()));
+                if(kind == QStringLiteral("Patrol"))
+                    emit updateMsg(tr("Copied %1 patrol point(s), including their look points.")
+                        .arg(behaviorData.size()));
+                else
+                    emit updateMsg(tr("Copied %1 %2(s).")
+                        .arg(behaviorData.size()).arg(kind.toLower()));
             }
             return;
         }
@@ -12748,18 +12889,29 @@ bool CView::pasteBehaviorPoints(const QJsonObject& clipboard)
         return false;
     const QString kind = clipboard["Kind"].toString();
     const QJsonArray data = clipboard["Data"].toArray();
-    if(data.isEmpty() || (kind != QStringLiteral("Patrol")
-                          && kind != QStringLiteral("Look")))
+    const bool patrolKind = kind == QStringLiteral("Patrol");
+    const bool lookKind = kind == QStringLiteral("Look");
+    const bool activationKind = kind == QStringLiteral("Activation area");
+    const bool castKind = kind == QStringLiteral("Cast target");
+    if(data.isEmpty() || (!patrolKind && !lookKind
+                          && !activationKind && !castKind))
         return false;
 
     QSet<uint> destinationUnits;
     QSet<QString> destinationPatrols;
+    QSet<uint> destinationTraps;
     for(CNode* node : selectionSnapshot())
     {
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
         {
-            if(kind == QStringLiteral("Patrol"))
+            if(patrolKind)
                 destinationUnits.insert(unit->mapId());
+            continue;
+        }
+        if(CMagicTrap* trap = dynamic_cast<CMagicTrap*>(node))
+        {
+            if(activationKind || castKind)
+                destinationTraps.insert(trap->mapId());
             continue;
         }
         int unitId = -1;
@@ -12771,58 +12923,151 @@ bool CView::pasteBehaviorPoints(const QJsonObject& clipboard)
             int lookId = -1;
             m_activeMob->getViewHash(unitId, patrolId, lookId, look);
         }
-        if(unitId < 0 || patrolId < 0)
-            continue;
-        if(kind == QStringLiteral("Patrol"))
-            destinationUnits.insert(uint(unitId));
-        else
-            destinationPatrols.insert(QString("%1.%2").arg(unitId).arg(patrolId));
+        if(unitId >= 0 && patrolId >= 0)
+        {
+            if(patrolKind)
+                destinationUnits.insert(uint(unitId));
+            else if(lookKind)
+                destinationPatrols.insert(
+                    QString("%1.%2").arg(unitId).arg(patrolId));
+        }
+        if(CActivationZone* area = dynamic_cast<CActivationZone*>(node))
+        {
+            if(activationKind || castKind)
+                destinationTraps.insert(m_activeMob->trapIdByPoint(area));
+        }
+        else if(CTrapCastPoint* target = dynamic_cast<CTrapCastPoint*>(node))
+        {
+            if(activationKind || castKind)
+                destinationTraps.insert(m_activeMob->trapIdByPoint(target));
+        }
     }
 
-    const int destinationCount = kind == QStringLiteral("Patrol")
-        ? destinationUnits.size() : destinationPatrols.size();
+    const int destinationCount = patrolKind ? destinationUnits.size()
+        : lookKind ? destinationPatrols.size() : destinationTraps.size();
     if(destinationCount == 0)
     {
-        emit updateMsg(kind == QStringLiteral("Patrol")
-            ? tr("Select one or more units (or their patrol points) to append patrols.")
-            : tr("Select one or more patrols (or their look points) to append look points."));
+        if(patrolKind)
+            emit updateMsg(tr("Select one or more units (or their patrol points) to append patrols."));
+        else if(lookKind)
+            emit updateMsg(tr("Select one or more patrols (or their look points) to append look points."));
+        else
+            emit updateMsg(tr("Select one or more traps (or their child points) to append %1s.")
+                .arg(kind.toLower()));
         return false;
     }
 
+    const QList<CNode*> originalSelection = selectionSnapshot();
     m_activeMob->clearSelect(true);
-    const int commandCount = destinationCount * data.size();
-    if(commandCount > 1)
-        m_pUndoStack->beginMacro(kind == QStringLiteral("Patrol")
-            ? tr("Paste %1 patrol points").arg(commandCount)
-            : tr("Paste %1 look points").arg(commandCount));
-    if(kind == QStringLiteral("Patrol"))
+    QList<CNode*> previewNodes;
+    if(patrolKind)
     {
         for(uint unitId : destinationUnits)
+        {
+            CUnit* unit = dynamic_cast<CUnit*>(m_activeMob->nodeByMapId(unitId));
+            CLogic* logic = unit ? unit->logicAt(m_logicSlotIndex) : nullptr;
+            if(!unit || !logic)
+                continue;
             for(const QJsonValue& value : data)
-                m_pUndoStack->push(new CAppendBehaviorPointCommand(
-                    this, m_activeMob, unitId, m_logicSlotIndex, -1,
-                    value.toObject(), false));
+            {
+                const int previous = logic->patrolPoints().size() - 1;
+                unit->createPatrolByIndex(m_logicSlotIndex, previous);
+                CPatrolPoint* created = unit->patrolByIndex(
+                    m_logicSlotIndex, previous + 1);
+                if(created)
+                {
+                    created->deSerializeJson(value.toObject());
+                    previewNodes.append(created);
+                }
+            }
+        }
     }
-    else
+    else if(lookKind)
     {
         for(const QString& destination : destinationPatrols)
         {
             const QStringList parts = destination.split('.');
             if(parts.size() != 2)
                 continue;
+            CUnit* unit = dynamic_cast<CUnit*>(
+                m_activeMob->nodeByMapId(parts[0].toUInt()));
+            CPatrolPoint* patrol = unit ? unit->patrolByIndex(
+                m_logicSlotIndex, parts[1].toInt()) : nullptr;
+            if(!unit || !patrol)
+                continue;
             for(const QJsonValue& value : data)
-                m_pUndoStack->push(new CAppendBehaviorPointCommand(
-                    this, m_activeMob, parts[0].toUInt(), m_logicSlotIndex,
-                    parts[1].toInt(), value.toObject(), true));
+            {
+                const int previous = patrol->lookPoint().size() - 1;
+                unit->createViewByIndex(
+                    m_logicSlotIndex, parts[1].toInt(), previous);
+                CLookPoint* created = unit->viewByIndex(
+                    m_logicSlotIndex, parts[1].toInt(), previous + 1);
+                if(created)
+                {
+                    created->deSerializeJson(value.toObject());
+                    previewNodes.append(created);
+                }
+            }
         }
     }
-    if(commandCount > 1)
-        m_pUndoStack->endMacro();
+    else
+    {
+        for(uint trapId : destinationTraps)
+        {
+            CMagicTrap* trap = dynamic_cast<CMagicTrap*>(
+                m_activeMob->nodeByMapId(trapId));
+            if(!trap)
+                continue;
+            for(const QJsonValue& value : data)
+            {
+                CNode* created = nullptr;
+                if(activationKind)
+                {
+                    CActivationZone* area = trap->createActZone();
+                    area->deSerializeJson(value.toObject());
+                    created = area;
+                }
+                else
+                {
+                    CTrapCastPoint* target = trap->createCastPoint();
+                    target->deSerializeJsonArray(
+                        value.toObject().value("Position").toArray());
+                    created = target;
+                }
+                if(created)
+                    previewNodes.append(created);
+            }
+        }
+    }
+
+    if(previewNodes.isEmpty())
+    {
+        restoreSelection(originalSelection);
+        return false;
+    }
+    for(CNode* node : previewNodes)
+        node->setState(ENodeState::eSelect);
+    m_activeMob->logicNodesUpdate();
+    collectObjectTreeData();
+    m_pendingBehaviorPasteNodes = previewNodes;
+    m_pendingBehaviorPasteOriginalSelection = originalSelection;
+    m_pendingBehaviorPasteKind = kind.toLower();
+    m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
+
+    const QJsonArray sourceMouse = clipboard["Mouse position"].toArray();
+    if(sourceMouse.size() == 3)
+    {
+        const QVector3D oldMouse(sourceMouse[0].toDouble(),
+                                 sourceMouse[1].toDouble(),
+                                 sourceMouse[2].toDouble());
+        const QPoint cursor = QWidget::mapFromGlobal(QCursor::pos());
+        QVector3D mouseDifference = getTerrainPos(cursor.x(), cursor.y()) - oldMouse;
+        mouseDifference.setZ(0.0f);
+        moveTo(mouseDifference);
+    }
+    emit updateMsg(tr("Placing %1 pasted %2(s); click to commit or Esc to cancel.")
+        .arg(previewNodes.size()).arg(kind.toLower()));
     emit loadedMapStateChanged();
-    emit updateMsg(kind == QStringLiteral("Patrol")
-        ? tr("Appended %1 patrol point(s) to Logic %2.")
-            .arg(commandCount).arg(m_logicSlotIndex)
-        : tr("Appended %1 look point(s).").arg(commandCount));
     return true;
 }
 
@@ -13559,6 +13804,10 @@ void CView::addLogicPoint(bool bLookPoint)
 
     if(bChangeToMove)
     {
+        // Creation commands rebuild while their source points are still
+        // selected. Rebuild once more after clearing those sources so the
+        // outliner highlight follows the newly created placement targets.
+        collectObjectTreeData();
         m_pendingLogicPlacementMacro = true;
         m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
     }

@@ -76,6 +76,7 @@ private:
     bool filterItem(QTreeWidgetItem* item, const QStringList& terms,
                     bool ancestorMatched, int* visible, int* total);
     bool nodeMatches(CNode* node, const QStringList& terms) const;
+    void expandBehaviorHierarchy(QTreeWidgetItem* ownerItem);
     bool textMatches(const QString& candidate, const QString& query,
                      ETextMatchMode mode = ETextMatchMode::Contains) const;
     QString validationState(CNode* node) const;

@@ -25,6 +25,8 @@ def main() -> int:
     view = source("source/render/view.cpp")
     trap = source("source/objects/magictrap.cpp")
     unit_h = source("source/objects/unit.h")
+    unit = source("source/objects/unit.cpp")
+    magic_trap = source("source/objects/magictrap.cpp")
     tree = source("source/layout_components/tree_view.cpp")
     undo_h = source("source/core/undo.h")
     undo = source("source/core/undo.cpp")
@@ -111,6 +113,28 @@ def main() -> int:
         raise AssertionError("Behavior authoring still drops logic-point selections")
     require(undo, "m_pView->collectObjectTreeData();",
             "immediate outliner refresh from Behavior point undo commands")
+    require(undo_h, "class CBehaviorPasteCommand",
+            "one-command Behavior paste/duplicate history transaction")
+    require(view, "m_pendingBehaviorPasteNodes",
+            "temporary Behavior paste preview state")
+    require(view, 'nodeKind = QStringLiteral("Activation area")',
+            "activation-area clipboard support")
+    require(view, 'nodeKind = QStringLiteral("Cast target")',
+            "cast-target clipboard support")
+    patrol_move = unit[unit.index("bool CPatrolPoint::updatePos"):
+                       unit.index("void CPatrolPoint::markAsDeleted")]
+    require(patrol_move, "look->updatePos",
+            "patrol translation carrying its look-point children")
+    trap_move = magic_trap[magic_trap.index("bool CMagicTrap::updatePos"):
+                           magic_trap.index("void CMagicTrap::setDrawPosition")]
+    if "eEditModeLogic" in trap_move:
+        raise AssertionError("Behavior-mode trap movement still leaves trap children behind")
+    require(tree, "expandBehaviorHierarchy",
+            "unit/trap owner selection expanding its Behavior hierarchy")
+    add_logic = view[view.index("void CView::addLogicPoint"):
+                     view.index("void CView::copySelectedIDsToClipboard")]
+    require(add_logic, "collectObjectTreeData();",
+            "post-creation outliner selection handoff")
 
     print("behavior authoring contract: PASS")
     return 0

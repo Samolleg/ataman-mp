@@ -2637,9 +2637,24 @@ void CPatrolPoint::clearLookSelect()
 
 bool CPatrolPoint::updatePos(QVector3D &pos)
 {
-    bool res = CObjectBase::updatePos(pos);
+    const QVector3D offset = pos - m_position;
+    for(CLookPoint* look : m_aLookPt)
+    {
+        if(!look)
+            continue;
+        QVector3D childPosition = look->position() + offset;
+        look->updatePos(childPosition);
+    }
+    m_position = pos;
+    QVector3D displayPosition = pos;
+    if(CLandscape::getInstance()->isMprLoad())
+    {
+        displayPosition.setZ(0.0f);
+        CLandscape::getInstance()->projectPt(displayPosition);
+    }
+    setDrawPosition(displayPosition);
     emit patrolChanges();
-    return res;
+    return true;
 }
 
 void CPatrolPoint::markAsDeleted(bool bDeleted)
@@ -2944,9 +2959,16 @@ uint CLookPoint::serialize(util::CMobParser &parser)
 
 bool CLookPoint::updatePos(QVector3D &pos)
 {
-    bool res = CObjectBase::updatePos(pos);
+    m_position = pos;
+    QVector3D displayPosition = pos;
+    if(CLandscape::getInstance()->isMprLoad())
+    {
+        displayPosition.setZ(0.0f);
+        CLandscape::getInstance()->projectPt(displayPosition);
+    }
+    setDrawPosition(displayPosition);
     emit lookPointChanges();
-    return res;
+    return true;
 }
 
 void CLookPoint::markAsDeleted(bool bDeleted)

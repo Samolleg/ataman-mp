@@ -607,6 +607,48 @@ void CAppendBehaviorPointCommand::undo()
     refresh();
 }
 
+CBehaviorPasteCommand::CBehaviorPasteCommand(
+        CView* view, CMob* mob, const QList<CNode*>& pastedNodes,
+        const QList<CNode*>& originalSelection, const QString& pointKind,
+        QUndoCommand* parent)
+    : QUndoCommand(parent), m_view(view), m_mob(mob),
+      m_pastedNodes(pastedNodes), m_originalSelection(originalSelection),
+      m_firstRedo(true)
+{
+    setText(QString("Paste %1 %2")
+        .arg(m_pastedNodes.size()).arg(pointKind));
+}
+
+void CBehaviorPasteCommand::refresh(const QList<CNode*>& selection)
+{
+    if(!m_view || !m_mob)
+        return;
+    m_mob->logicNodesUpdate();
+    m_view->collectObjectTreeData();
+    m_view->restoreSelection(selection);
+    m_view->setDurty(m_mob);
+    m_view->update();
+}
+
+void CBehaviorPasteCommand::undo()
+{
+    for(CNode* node : m_pastedNodes)
+        if(node) node->markAsDeleted(true);
+    refresh(m_originalSelection);
+}
+
+void CBehaviorPasteCommand::redo()
+{
+    if(m_firstRedo)
+    {
+        m_firstRedo = false;
+        return;
+    }
+    for(CNode* node : m_pastedNodes)
+        if(node) node->markAsDeleted(false);
+    refresh(m_pastedNodes);
+}
+
 void CDeleteLogicPoint::undo()
 {
     QStringList list = m_nodeHash.split(".");

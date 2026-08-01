@@ -245,6 +245,26 @@ private:
     bool m_lookPoint;
 };
 
+class CBehaviorPasteCommand: public QUndoCommand
+{
+public:
+    CBehaviorPasteCommand(CView* view, CMob* mob,
+                          const QList<CNode*>& pastedNodes,
+                          const QList<CNode*>& originalSelection,
+                          const QString& pointKind,
+                          QUndoCommand* parent = nullptr);
+    void undo() override;
+    void redo() override;
+
+private:
+    void refresh(const QList<CNode*>& selection);
+    CView* m_view;
+    CMob* m_mob;
+    QList<CNode*> m_pastedNodes;
+    QList<CNode*> m_originalSelection;
+    bool m_firstRedo;
+};
+
 class CCreateTrapPointCommand: public QUndoCommand
 {
 public:
