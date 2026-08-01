@@ -575,13 +575,18 @@ void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyB
     if(row < 0 || value.isNull())
         return;
     m_rowValues.insert(row, clonePropertyValue(value));
+    const QString tooltip = value->type() == eObjParam_IS_SHADOW
+            && m_torchPropertyContext
+        ? tr("Controls only whether the torch/campfire model casts its own silhouette. "
+             "It does not disable shadows produced by the embedded point light; "
+             "TORCH records have no separate shadow flag for that light.")
+        : m_aRowToolTip.value(value->type());
     if(QTableWidgetItem* label = m_pTable->item(row, 0))
     {
         label->setData(Qt::UserRole, int(value->type()));
-        label->setToolTip(m_aRowToolTip.value(value->type()));
+        label->setToolTip(tooltip);
     }
     QWidget* editor = m_pTable->cellWidget(row, 1);
-    const QString tooltip = m_aRowToolTip.value(value->type());
     if(editor && !tooltip.isEmpty())
     {
         editor->setToolTip(tooltip);
@@ -1168,6 +1173,13 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
     const int verticalScroll = m_pTable->verticalScrollBar()->value();
     const int horizontalScroll = m_pTable->horizontalScrollBar()->value();
     reset();
+    m_torchPropertyContext = false;
+    for(const QSharedPointer<IPropertyBase>& property : aProp)
+        if(property && property->type() == eObjParam_TORCH_STRENGHT)
+        {
+            m_torchPropertyContext = true;
+            break;
+        }
     int i(0); // row number
     EObjParam type;
     m_pTable->blockSignals(true); //block sending signals

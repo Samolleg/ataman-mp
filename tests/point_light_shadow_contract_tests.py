@@ -17,9 +17,7 @@ class PointLightShadowContractTests(unittest.TestCase):
 
         self.assertIn("bool castsShadow", environment)
         self.assertIn("sceneLight.castsShadow = light->shadowEnabled();", view)
-        self.assertIn(
-            "sceneLight.castsShadow = torch->castsRenderShadow();", view
-        )
+        self.assertIn("sceneLight.castsShadow = true;", view)
         self.assertIn("shadowLights.append(sceneLight);", view)
 
     def test_shadow_light_membership_is_not_camera_frustum_dependent(self):
@@ -39,8 +37,7 @@ class PointLightShadowContractTests(unittest.TestCase):
             re.DOTALL,
         ))
         self.assertRegex(collection, re.compile(
-            r"sceneLight\.castsShadow = torch->castsRenderShadow\(\);\s*"
-            r"if\(sceneLight\.castsShadow\)\s*"
+            r"sceneLight\.castsShadow = true;\s*"
             r"shadowLights\.append\(sceneLight\);\s*"
             r"if\(!cullingEnabled\s*\|\|\s*frustum\.intersectsSphere",
             re.DOTALL,
@@ -87,6 +84,16 @@ class PointLightShadowContractTests(unittest.TestCase):
 
         self.assertIn("!m_openGlesCompatibility", view)
         self.assertIn("!shadowContext->isOpenGLES()", view)
+
+    def test_torch_shadow_tooltip_distinguishes_object_and_embedded_light(self):
+        table = (ROOT / "source/layout_components/tablemanager.cpp").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("m_torchPropertyContext", table)
+        self.assertIn("torch/campfire model casts its own silhouette", table)
+        self.assertIn("embedded point light", table)
+        self.assertIn("no separate shadow flag", table)
 
 
 if __name__ == "__main__":
