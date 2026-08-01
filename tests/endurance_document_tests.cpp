@@ -12,6 +12,7 @@
 #include "operation_history_policy.h"
 #include "portable_diagnostic_writer.h"
 #include "terrain_edit_model.h"
+#include "terrain_tile_information_policy.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
 #include "terrain_virtual_atlas.h"
@@ -276,6 +277,7 @@ class EnduranceDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void terrainTileInformationPersistsWithoutBlinking();
     void persistentPaintOperationSurvivesHistoryNavigation();
     void portableDiagnosticCanReplaceExistingReportInPlace();
     void persistentPaintOperationSurvivesDocumentTransition();
@@ -369,6 +371,29 @@ private slots:
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
 };
+
+void EnduranceDocumentTests::terrainTileInformationPersistsWithoutBlinking()
+{
+    CTerrainTileInformationPolicy policy;
+    QCOMPARE(policy.rightPress(QPoint(12, 8)),
+             ETerrainTileInformationAction::Show);
+    QCOMPARE(policy.mouseMove(QPoint(12, 8), true),
+             ETerrainTileInformationAction::None);
+    QCOMPARE(policy.mouseMove(QPoint(13, 8), true),
+             ETerrainTileInformationAction::Show);
+    QCOMPARE(policy.cell(), QPoint(13, 8));
+    QCOMPARE(policy.mouseMove(QPoint(13, 8), true),
+             ETerrainTileInformationAction::None);
+    QCOMPARE(policy.rightRelease(), ETerrainTileInformationAction::None);
+    QVERIFY(policy.visible());
+    QVERIFY(!policy.rightHeld());
+    QCOMPARE(policy.cell(), QPoint(13, 8));
+    QCOMPARE(policy.mouseMove(QPoint(14, 8), false),
+             ETerrainTileInformationAction::None);
+    QVERIFY(policy.visible());
+    QCOMPARE(policy.cancel(), ETerrainTileInformationAction::Hide);
+    QVERIFY(!policy.visible());
+}
 
 void EnduranceDocumentTests::portableDiagnosticCanReplaceExistingReportInPlace()
 {
@@ -5478,17 +5503,17 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(profile.provenance,
              QStringLiteral("built-in-material-atlas-v2"));
     QCOMPARE(profile.assignedSlotCount(), 512);
-    QCOMPARE(profile.families.size(), 12);
+    QCOMPARE(profile.families.size(), 9);
     QCOMPARE(std::count_if(profile.families.cbegin(), profile.families.cend(),
         [](const STerrainAtlasProfileFamily& family) {
             return !family.paintSelectable;
-        }), 3);
-    const auto wetRock = std::find_if(profile.families.cbegin(), profile.families.cend(),
+        }), 0);
+    const auto stoneLime = std::find_if(profile.families.cbegin(), profile.families.cend(),
         [](const STerrainAtlasProfileFamily& family) {
-            return family.name == QStringLiteral("Rock / Wet");
+            return family.name == QStringLiteral("Stone / Lime");
         });
-    QVERIFY(wetRock != profile.families.cend());
-    QVERIFY(!wetRock->paintSelectable);
+    QVERIFY(stoneLime != profile.families.cend());
+    QVERIFY(stoneLime->paintSelectable);
     QCOMPARE(profile.slotDefinitions.at(50).signature.northWest, qint32(4));
     QCOMPARE(profile.slotDefinitions.at(50).signature.northEast, qint32(4));
     QCOMPARE(profile.slotDefinitions.at(50).signature.southEast, qint32(3));
@@ -5565,7 +5590,7 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
         "6752a5b4cefd3aedbd6889516b424f4e13afafe288e99406b500404aed62b014",
         512, &bz3gReport);
     QVERIFY2(bz3g.approved, qPrintable(bz3gReport.toText()));
-    QCOMPARE(bz3g.families.size(), 20);
+    QCOMPARE(bz3g.families.size(), 19);
     const auto bz3gFamily = [&bz3g](qint32 id) {
         return std::find_if(bz3g.families.cbegin(), bz3g.families.cend(),
             [id](const STerrainAtlasProfileFamily& family) {
@@ -5761,12 +5786,12 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
         totalFamilies += profile.families.size();
     }
     QCOMPARE(totalSlots, 16576);
-    QCOMPARE(bindings, 76);
-    QCOMPARE(totalFamilies, 502);
+    QCOMPARE(bindings, 58);
+    QCOMPARE(totalFamilies, 461);
     // Keep this count pinned to the reviewed semantic-atlas catalog. A change
     // means a family crossed the paint-brush/transition-support boundary and
     // must be visually audited before the palette consumes it.
-    QCOMPARE(transitionSupportFamilies, 62);
+    QCOMPARE(transitionSupportFamilies, 43);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -5847,9 +5872,10 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    // The reviewed Zone2 Faded/Burnt split adds one independently paintable
-    // four-corner uniform family to the global land catalog.
-    QCOMPARE(landFamilyCount, 71);
+    // Keep this pinned to the frozen R66 global palette. The exact-corner
+    // reviews and reviewed family merges are allowed to change this only when
+    // the semantic audit and regenerated visual collections change together.
+    QCOMPARE(landFamilyCount, 73);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);

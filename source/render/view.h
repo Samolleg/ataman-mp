@@ -32,6 +32,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "select_window.h"
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
+#include "terrain_tile_information_policy.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
 #include "spatial_grid.h"
@@ -594,7 +595,8 @@ private:
     int m_terrainPaintOutlineY{0};
     bool m_paintIssueDragActive{false};
     bool m_paintIssueHoverValid{false};
-    bool m_terrainTileInformationHeld{false};
+    CTerrainTileInformationPolicy m_terrainTileInformationPolicy;
+    bool m_paintIssueTooltipVisible{false};
     QPoint m_paintIssueHoverCell;
     QSet<QPoint> m_paintIssueSelectedCells;
     QPoint m_lastTerrainPaintCenter;

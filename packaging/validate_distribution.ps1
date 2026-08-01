@@ -37,6 +37,30 @@ foreach ($dump in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object
     $failures.Add("private runtime artifact included: $($dump.FullName.Substring($root.Length + 1))")
 }
 
+# Collection paths are relative to the descriptor, not to an arbitrary
+# staging source. A package can contain the MPR bytes yet still present the
+# editor with a missing map if the descriptor was moved without its relative
+# layout (the modern-atlas R34 package exposed exactly this failure).
+foreach ($collection in Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.collection') {
+    $relativeCollection = $collection.FullName.Substring($root.Length + 1)
+    $text = Get-Content -LiteralPath $collection.FullName -Raw
+    $match = [regex]::Match($text, '(?m)^\s*mpr\s*=\s*"([^"]*)"\s*$')
+    if (-not $match.Success -or [string]::IsNullOrWhiteSpace($match.Groups[1].Value)) {
+        $failures.Add("collection has no MPR reference: $relativeCollection")
+        continue
+    }
+    $reference = $match.Groups[1].Value.Replace('/', '\')
+    $resolved = [IO.Path]::GetFullPath((Join-Path $collection.DirectoryName $reference))
+    $insidePackage = $resolved.StartsWith(
+        $root + '\', [System.StringComparison]::OrdinalIgnoreCase)
+    if (-not $insidePackage) {
+        $failures.Add("collection MPR escapes the package: $relativeCollection -> $reference")
+    }
+    elseif (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        $failures.Add("collection MPR is missing: $relativeCollection -> $reference")
+    }
+}
+
 foreach ($profile in Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.semantic-atlas.json') {
     $relative = $profile.FullName.Substring($root.Length + 1)
     try {

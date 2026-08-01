@@ -914,6 +914,10 @@ void CView::setLandscapeInteractionSuspended(bool suspended)
     m_sculptRepeatTimer->stop();
     m_sculptOutlineValid = false;
     m_terrainPaintOutlineValid = false;
+    if(m_terrainTileInformationPolicy.cancel()
+       == ETerrainTileInformationAction::Hide)
+        QToolTip::hideText();
+    m_paintIssueTooltipVisible = false;
     setPreviewTile(false);
     unsetCursor();
     if(suspended && m_pOp
@@ -938,8 +942,19 @@ void CView::syncLandscapeToolState()
         m_paintIssueDragActive = false;
         m_paintIssueHoverValid = false;
         m_paintIssueSelectedCells.clear();
-        QToolTip::hideText();
+        if(m_paintIssueTooltipVisible)
+        {
+            QToolTip::hideText();
+            m_paintIssueTooltipVisible = false;
+        }
     }
+    const bool tileInformationAvailable = m_landscapeTools
+        && (m_landscapeTools->tilePaintEnabled()
+            || m_landscapeTools->overlayPaintEnabled());
+    if(!tileInformationAvailable
+       && m_terrainTileInformationPolicy.cancel()
+          == ETerrainTileInformationAction::Hide)
+        QToolTip::hideText();
     if(m_landscapeTools)
     {
         const ELandscapeEditMode current = m_landscapeTools->editMode();
@@ -11083,6 +11098,7 @@ void CView::showTerrainTileInformation(const QPoint& viewportPosition)
         lines << (slot >= m_authoredTerrainTileImages.size()
             ? tr("Atlas origin: generated exact working-cache tile")
             : tr("Atlas origin: authored stock JMV tile"));
+    m_paintIssueTooltipVisible = false;
     QToolTip::showText(mapToGlobal(viewportPosition + QPoint(18, 18)),
         lines.join(QLatin1Char('\n')), this, rect(), 60000);
 }
@@ -11288,14 +11304,25 @@ void CView::mousePressEvent(QMouseEvent* event)
         event->accept();
         return;
     }
+    if(event->button() != Qt::RightButton
+       && m_terrainTileInformationPolicy.cancel()
+          == ETerrainTileInformationAction::Hide)
+        QToolTip::hideText();
     if(m_landscapeTools && event->button() == Qt::RightButton
        && (m_landscapeTools->tilePaintEnabled()
            || m_landscapeTools->overlayPaintEnabled()))
     {
-        m_terrainTileInformationHeld = true;
-        showTerrainTileInformation(event->pos());
+        QPoint cell;
+        if(terrainCellAtViewport(event->pos(), &cell))
+        {
+            m_terrainTileInformationPolicy.rightPress(cell);
+            showTerrainTileInformation(event->pos());
+        }
+        else if(m_terrainTileInformationPolicy.cancel()
+                == ETerrainTileInformationAction::Hide)
+            QToolTip::hideText();
         // Keep propagating the press: right-click still samples this material
-        // into the brush while the hold tooltip explains the physical tile.
+        // into the brush while the persistent tooltip explains the tile.
     }
     if(m_landscapeTools && m_landscapeTools->paintIssueMarkingEnabled()
        && event->button() == Qt::LeftButton)
@@ -11643,8 +11670,20 @@ void CView::mouseMoveEvent(QMouseEvent* event)
         event->accept();
         return;
     }
-    if(m_terrainTileInformationHeld && (event->buttons() & Qt::RightButton))
-        showTerrainTileInformation(event->pos());
+    if(m_terrainTileInformationPolicy.rightHeld())
+    {
+        QPoint cell;
+        if(terrainCellAtViewport(event->pos(), &cell))
+        {
+            if(m_terrainTileInformationPolicy.mouseMove(cell,
+                    event->buttons() & Qt::RightButton)
+               == ETerrainTileInformationAction::Show)
+                showTerrainTileInformation(event->pos());
+        }
+        else if(m_terrainTileInformationPolicy.cancel()
+                == ETerrainTileInformationAction::Hide)
+            QToolTip::hideText();
+    }
     if(m_landscapeTools && m_landscapeTools->paintIssueMarkingEnabled())
     {
         QPoint cell;
@@ -11672,12 +11711,14 @@ void CView::mouseMoveEvent(QMouseEvent* event)
                 tr("MARK: %1").arg(paintIssueCategoryLabel(
                     m_landscapeTools->paintIssueCategory())),
                 this, rect(), 60000);
+            m_paintIssueTooltipVisible = true;
             update();
         }
         else
         {
             m_paintIssueHoverValid = false;
             QToolTip::hideText();
+            m_paintIssueTooltipVisible = false;
             update();
         }
         event->accept();
@@ -11714,10 +11755,10 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-    if(m_terrainTileInformationHeld && event->button() == Qt::RightButton)
+    if(m_terrainTileInformationPolicy.rightHeld()
+       && event->button() == Qt::RightButton)
     {
-        m_terrainTileInformationHeld = false;
-        QToolTip::hideText();
+        m_terrainTileInformationPolicy.rightRelease();
     }
     if(m_paintIssueDragActive && event->button() == Qt::LeftButton)
     {

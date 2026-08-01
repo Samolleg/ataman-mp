@@ -854,6 +854,72 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             # complete-tile review, and independent map vertices agree.
             (97, 1): 3, (97, 3): 3,
             (137, 1): 5,
+
+            # Focused full-tile review established that the former Ground / Dry
+            # anchor at slot 398 is the plain member of Slabs / Square. Apply
+            # only transition corners explicitly reviewed with it. R58 then
+            # reviewed the final 20 exact-pixel overlaps individually and
+            # assigned every one to Slabs / Square. Other Ground / Dry corners
+            # remain untouched: they do not share this exact candidate and
+            # still require separate evidence before family 12 can be removed.
+            (178, 3): 6,
+            (211, 1): 6, (211, 2): 6, (211, 3): 6,
+            (260, 1): 6, (260, 2): 6, (260, 3): 6,
+            (326, 1): 6, (326, 2): 6, (326, 3): 6,
+            (398, 0): 6, (398, 1): 6, (398, 2): 6, (398, 3): 6,
+            (491, 2): 6, (491, 3): 6,
+            (503, 2): 6, (503, 3): 6,
+            (180, 3): 6,
+            (212, 1): 6, (212, 2): 6, (212, 3): 6,
+            (217, 3): 6,
+            (220, 3): 6,
+            (276, 2): 6,
+            (324, 3): 6,
+            (361, 2): 6,
+            (391, 3): 6,
+            (392, 3): 6,
+            (412, 3): 6,
+            (427, 2): 6,
+            (476, 3): 6,
+            (481, 3): 6,
+            (483, 3): 6,
+            (487, 3): 6,
+            (489, 3): 6,
+            (495, 3): 6,
+            (500, 2): 6,
+
+            # R59 reviewed every remaining Ground / Dry corner. Thirty-nine
+            # belong to Slabs / Square; slot 495 NW and slot 502 NE belong to
+            # Slabs / Carved. This exhausts family 12 exactly, so it is removed
+            # below rather than left as an ownerless internal palette family.
+            (144, 3): 6, (145, 3): 6, (146, 3): 6,
+            (147, 3): 6, (148, 3): 6,
+            (217, 2): 6,
+            (219, 2): 6, (219, 3): 6,
+            (220, 2): 6,
+            (276, 1): 6, (276, 3): 6,
+            (294, 1): 6, (294, 3): 6,
+            (295, 1): 6, (295, 3): 6,
+            (297, 3): 6,
+            (317, 2): 6, (317, 3): 6,
+            (332, 2): 6, (332, 3): 6,
+            (333, 2): 6, (333, 3): 6,
+            (346, 3): 6,
+            (353, 3): 6,
+            (361, 3): 6,
+            (381, 3): 6,
+            (382, 3): 6,
+            (399, 3): 6,
+            (410, 3): 6,
+            (427, 3): 6,
+            (433, 3): 6,
+            (458, 3): 6,
+            (463, 3): 6,
+            (487, 2): 6,
+            (489, 2): 6,
+            (495, 0): 9, (495, 2): 6,
+            (500, 3): 6,
+            (502, 1): 9, (502, 2): 6, (502, 3): 6,
         }
         # The grouped comparison explicitly merged Irregular dark into the
         # established Grass / Irregular family. Rewrite every occurrence so
@@ -862,7 +928,7 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             for corner_index, name in enumerate(corner_names):
                 if slot["signature"][name] == 8:
                     corrections[(slot["slot"], corner_index)] = 11
-        removed_ids = {8}
+        removed_ids = {8, 12}
 
     if namespace == "zone3obr":
         # Three labels were created from isolated pale-stone corners, not
@@ -1520,6 +1586,274 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             4: "Grass / Irregular",
             5: "Stone / Underwater",
         }
+
+    # R59 global-confidence review. Family-wide selections are aliases;
+    # "Only this corner" and explicitly named additional corners are exact
+    # edits. Notes containing uncertainty (might/probably/needs review) are
+    # deliberately excluded and remain questionnaire work.
+    r59_aliases = {
+        "bz11k": {18: 16},
+        # Zone14 is the canonical decoded identity for the content-identical
+        # bz11k atlas. The rule must live on both inputs because canonical
+        # substitution occurs after namespace-local review.
+        "zone14": {18: 16},
+        "bz13h": {12: 1, 13: 2},
+        # Zone15 likewise owns the decoded identity shared by bz13h.
+        "zone15": {12: 1, 13: 2},
+        "zone1": {11: 8, 12: 7},
+        "zone10": {18: 6, 20: 6, 21: 9},
+    }
+    r59_corrections = {
+        "bz11k": {
+            (235, 3): 16,
+            (300, 3): 19,
+        },
+        "zone14": {
+            (235, 3): 16,
+            (300, 3): 19,
+        },
+        "bz13h": {
+            (13, 0): 8,
+        },
+        "zone15": {
+            (13, 0): 8,
+        },
+        "bz16h": {
+            (95, 0): 6,
+            (449, 0): 13,
+        },
+        "bz3g": {
+            (265, 3): 10,
+            (383, 0): 5,
+        },
+        "bz4g": {
+            (174, 2): 3,
+            (280, 3): 5,
+            (294, 0): 3,
+            (370, 0): 9, (370, 1): 9,
+            (370, 2): 1, (370, 3): 3,
+            (437, 3): 5,
+        },
+        "bz5g": {
+            (310, 2): 8,
+            (317, 3): 4,
+        },
+        # Zone8 is the canonical owner for the identical bz5g/bz6g pages.
+        "zone8": {
+            (310, 2): 8,
+            (317, 3): 4,
+        },
+        "bz7g": {
+            (162, 2): 1,
+        },
+        "bz8k": {
+            (323, 2): 2, (323, 3): 2,
+        },
+        # bz9k is the canonical owner for identical bz8k/Zone11 pages.
+        "bz9k": {
+            (323, 2): 2, (323, 3): 2,
+        },
+        "zone1": {
+            (338, 3): 7,
+        },
+        "zone10": {
+            (287, 0): 3, (287, 3): 6,
+            (323, 3): 6,
+            # Exact decoded SW pixels shared with reviewed slot 323. These
+            # copies are structural identity, not nearest-colour inference.
+            (354, 3): 6, (416, 3): 6, (479, 3): 6,
+            (465, 2): 2,
+            (471, 3): 6,
+            (486, 3): 6,
+        },
+        "zone13": {
+            (178, 1): 6, (178, 2): 6, (178, 3): 6,
+            (283, 3): 7,
+            (450, 3): 7,
+            (477, 0): 6, (477, 2): 6,
+            (497, 3): 3,
+        },
+        "zone20": {
+            (189, 0): 2,
+        },
+        "zone6": {
+            (278, 0): 8,
+            (471, 0): 3,
+        },
+        "zone6_2": {
+            (278, 0): 8,
+            (471, 0): 3,
+        },
+        "zone7": {
+            (333, 3): 1,
+        },
+    }
+    corrections.update(r59_corrections.get(namespace, {}))
+    selected_aliases = r59_aliases.get(namespace, {})
+    family_aliases.update(selected_aliases)
+    removed_ids.update(selected_aliases)
+
+    # R62 focused review. Apply only direct selections. Notes asking for more
+    # visual evidence remain questionnaire work: the tentative Zone10
+    # Ground / Mountainous merge, bz8k Sand / Dark rename, Zone13 ground
+    # comparison, and cross-atlas water/sand/rock comparisons are not inferred.
+    r62_aliases = {
+        "bz4g": {25: 8},
+        # Zone4 owns the decoded identity shared by bz4g.
+        "zone4": {25: 8},
+        "zone10": {10: 5},
+        "zone3obr": {10: 4},
+    }
+    r62_corrections = {
+        "bz11k": {
+            (235, 2): 16,
+        },
+        # Zone14 owns the decoded identity shared by bz11k.
+        "zone14": {
+            (235, 2): 16,
+        },
+        "bz8k": {
+            (428, 3): 7,
+            (444, 3): 7,
+        },
+        # bz9k owns the decoded identity shared by bz8k and Zone11.
+        "bz9k": {
+            (428, 3): 7,
+            (444, 3): 7,
+        },
+        "zone20": {
+            # The reviewer identified both highlighted greenish corners. Slot
+            # 38 NW independently ranks Stone / Greenish first; its other
+            # three corners remain Stone / Black.
+            (38, 0): 2,
+            (190, 0): 2,
+        },
+    }
+    corrections.update(r62_corrections.get(namespace, {}))
+    selected_aliases = r62_aliases.get(namespace, {})
+    family_aliases.update(selected_aliases)
+    removed_ids.update(selected_aliases)
+
+    # R63 focused review. Cross-atlas statements establish semantic naming
+    # evidence but do not merge namespace-local family IDs. Unanswered water,
+    # sand, and Zone10 slab comparisons remain explicit follow-up work.
+    r63_aliases = {
+        "zone13": {14: 3},
+    }
+    r63_corrections = {
+        "bz11k": {
+            (33, 0): 1,
+            (33, 1): 5,
+            (33, 2): 5,
+            (33, 3): 5,
+            (55, 3): 5,
+            (58, 3): 5,
+        },
+        # Zone14 owns the decoded identity shared by bz11k.
+        "zone14": {
+            (33, 0): 1,
+            (33, 1): 5,
+            (33, 2): 5,
+            (33, 3): 5,
+            (55, 3): 5,
+            (58, 3): 5,
+        },
+        "zone10": {
+            (291, 1): 5,
+        },
+        "zone13": {
+            # Apply this exact exception before merging the remaining former
+            # Ground / Dry references into Ground / Light.
+            (325, 0): 9,
+        },
+    }
+    r63_renames = {
+        "bz8k": {7: "Grass / Yellow lichen"},
+        # bz9k owns the decoded identity shared by bz8k and Zone11.
+        "bz9k": {7: "Grass / Yellow lichen"},
+    }
+    corrections.update(r63_corrections.get(namespace, {}))
+    selected_aliases = r63_aliases.get(namespace, {})
+    family_aliases.update(selected_aliases)
+    removed_ids.update(selected_aliases)
+    family_renames.update(r63_renames.get(namespace, {}))
+
+    # R64 focused review. Apply only exact corner selections. The review's
+    # "420W" shorthand does not identify one of the four stored corners, and
+    # slot 445 was described as NW even though its unresolved family is NE;
+    # both remain unchanged for a marked-corner follow-up. Slot 452 was
+    # explicitly excluded from the Ground / Dirt selections.
+    r64_corrections = {
+        "zone10": {
+            (213, 3): 6,
+            (292, 1): 5,
+            (293, 1): 5,
+            (306, 0): 5,
+            (313, 0): 5,
+            (314, 0): 5,
+            (322, 1): 5,
+            (375, 1): 5,
+            (419, 0): 5,
+            (486, 2): 1,
+        },
+    }
+    r64_renames = {
+        "bz5g": {14: "Sand / Grainy"},
+        "bz6g": {14: "Sand / Grainy"},
+        # Zone8 owns the decoded identity shared by bz5g and bz6g. Its family
+        # 11 is the same slot-98 material under the canonical table.
+        "zone8": {11: "Sand / Grainy"},
+    }
+    corrections.update(r64_corrections.get(namespace, {}))
+    family_renames.update(r64_renames.get(namespace, {}))
+
+    # R65 focused review classified every corner remaining in the local
+    # Rock / Dark bucket as Stone / Black. Zone14 owns the byte-identical
+    # decoded atlas used by bz11k, so preserve the decision on both namespace
+    # inputs. The separately questioned slots 36 and 61 belong to other family
+    # IDs and are intentionally unaffected by this alias.
+    r65_aliases = {
+        # BaseGipat's seven transition-only "Still" corners match Zone1's
+        # single water family and use the same Swamp boundary topology as the
+        # local Waves variations. They are authored variations of one water
+        # material, not a third overlay material.
+        "basegipat": {10: 5},
+        "bz11k": {5: 8},
+        "zone14": {5: 8},
+    }
+    r65_renames = {
+        "basegipat": {5: "Water / Still"},
+    }
+    selected_aliases = r65_aliases.get(namespace, {})
+    family_aliases.update(selected_aliases)
+    removed_ids.update(selected_aliases)
+    family_renames.update(r65_renames.get(namespace, {}))
+
+    # R66 exact-corner review. These replace two false-uniform bz11k/Zone14
+    # tiles and the remaining mixed Zone10 bucket members. Names in the review
+    # are mapped only to existing, independently reviewed local identities;
+    # adjacent or same-named corners are not inferred.
+    r66_corrections = {
+        "bz11k": {
+            (36, 0): 1, (36, 1): 8, (36, 2): 8, (36, 3): 8,
+            (61, 0): 8, (61, 1): 1, (61, 2): 8, (61, 3): 16,
+        },
+        "zone14": {
+            (36, 0): 1, (36, 1): 8, (36, 2): 8, (36, 3): 8,
+            (61, 0): 8, (61, 1): 1, (61, 2): 8, (61, 3): 16,
+        },
+        "zone10": {
+            (293, 0): 1,
+            (306, 1): 1,
+            (419, 2): 1,
+            (420, 0): 5, (420, 2): 1,
+            (445, 1): 5,
+            (452, 1): 3, (452, 2): 1,
+            (214, 0): 1, (214, 1): 1, (214, 2): 1, (214, 3): 6,
+            (375, 0): 2, (375, 1): 5, (375, 2): 2, (375, 3): 3,
+        },
+    }
+    corrections.update(r66_corrections.get(namespace, {}))
 
     if not corrections and not family_renames and not family_aliases:
         return recipe
