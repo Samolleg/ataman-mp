@@ -1,4 +1,4 @@
-# Alpha 26 point-light shadows revision 3 test
+# Alpha 26 point-light shadows revision 4 test
 
 ## What changed
 
@@ -9,6 +9,9 @@
   removes its influence from the shadow direction.
 - Torch-generated point lights and other authored shadow-producing objects now
   participate in the caster-local projected shadow by default.
+- A torch or campfire's inherited **Cast shadow** flag now controls both its
+  mesh silhouette and whether its generated point light steers nearby shadows.
+  Turning it off does not disable the torch's illumination or particle effect.
 - Shadow-producing lights remain eligible when the camera rotates away from
   the light itself; color-light frustum culling no longer changes shadow
   ownership.
@@ -41,7 +44,9 @@ not add another full-scene traversal.
    disappear close to the caster, and changes direction without flickering.
 6. In Zone 11, inspect ordinary torches beside visible casters and confirm
    their projected shadows respond without adding a **Cast shadows** property
-   to the torch record.
+   to the torch record. Toggle the torch's inherited **Cast shadow** flag off
+   and confirm its illumination remains while its shadow influence disappears;
+   toggle it on and confirm the influence returns.
 7. With light 121 influencing nearby shadows, orbit the camera through a full
    rotation without moving the pivot. Confirm the shadow direction does not
    snap back to the sun when the light leaves the viewport.

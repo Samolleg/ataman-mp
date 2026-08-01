@@ -5424,10 +5424,13 @@ void CView::draw()
                         sceneLight.position = position;
                         sceneLight.color = QVector3D(0.8f, 0.8f, 0.8f);
                         sceneLight.range = range;
-                        // Native torches register an ordinary point light and
-                        // do not opt out of projected-shadow participation.
-                        sceneLight.castsShadow = true;
-                        shadowLights.append(sceneLight);
+                        // TORCH has no separate LIGHT_SHADOW field. Use its
+                        // inherited OBJ_IS_SHADOW authoring control for both
+                        // the visible object's silhouette and the generated
+                        // point light, while leaving illumination enabled.
+                        sceneLight.castsShadow = torch->castsRenderShadow();
+                        if(sceneLight.castsShadow)
+                            shadowLights.append(sceneLight);
                         if(!cullingEnabled
                                 || frustum.intersectsSphere(position, range))
                             sceneLights.append(sceneLight);

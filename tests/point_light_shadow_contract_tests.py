@@ -17,7 +17,9 @@ class PointLightShadowContractTests(unittest.TestCase):
 
         self.assertIn("bool castsShadow", environment)
         self.assertIn("sceneLight.castsShadow = light->shadowEnabled();", view)
-        self.assertIn("sceneLight.castsShadow = true;", view)
+        self.assertIn(
+            "sceneLight.castsShadow = torch->castsRenderShadow();", view
+        )
         self.assertIn("shadowLights.append(sceneLight);", view)
 
     def test_shadow_light_membership_is_not_camera_frustum_dependent(self):
@@ -37,7 +39,8 @@ class PointLightShadowContractTests(unittest.TestCase):
             re.DOTALL,
         ))
         self.assertRegex(collection, re.compile(
-            r"sceneLight\.castsShadow = true;\s*"
+            r"sceneLight\.castsShadow = torch->castsRenderShadow\(\);\s*"
+            r"if\(sceneLight\.castsShadow\)\s*"
             r"shadowLights\.append\(sceneLight\);\s*"
             r"if\(!cullingEnabled\s*\|\|\s*frustum\.intersectsSphere",
             re.DOTALL,
