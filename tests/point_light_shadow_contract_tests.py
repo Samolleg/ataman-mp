@@ -45,12 +45,18 @@ class PointLightShadowContractTests(unittest.TestCase):
         self.assertNotIn("shadowLights.resize", collection)
 
         self.assertIn(
-            "environment.sunStrength, shadowLights, cameraPivot)", view
-        )
-        self.assertIn(
             "renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,",
             view,
         )
+
+    def test_point_light_direction_is_evaluated_per_caster_not_camera_pivot(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("queue.shadowCasterGroups", view)
+        self.assertIn("sceneLights, group.center, &pointInfluenced", view)
+        self.assertNotIn("sceneLights, shadowFocus", view)
+        self.assertIn("environment.sunStrength, {}, cameraPivot", view)
+        self.assertIn("&localOwners", view)
 
     def test_shadow_enabled_point_lights_drive_the_shadow_projection(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
@@ -62,7 +68,7 @@ class PointLightShadowContractTests(unittest.TestCase):
         self.assertIn("shadowProjectionDirection", view)
         self.assertIn("sceneLights", view)
 
-    def test_existing_receivers_keep_sampling_the_combined_projection(self):
+    def test_receivers_sample_sun_cascades_and_caster_local_atlas(self):
         for shader_name in ("fshader.fsh", "landshader.fsh"):
             shader = (ROOT / "assets/shaders" / shader_name).read_text(
                 encoding="utf-8"
@@ -70,6 +76,8 @@ class PointLightShadowContractTests(unittest.TestCase):
             with self.subTest(shader=shader_name):
                 self.assertIn("u_shadowsEnabled", shader)
                 self.assertIn("cascadeVisibility", shader)
+                self.assertIn("localShadowVisibility", shader)
+                self.assertIn("u_localShadowMatrices", shader)
 
     def test_angle_compatibility_keeps_the_atlas_path_disabled(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")

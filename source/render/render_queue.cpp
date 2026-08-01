@@ -138,7 +138,8 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
                                 const QMatrix4x4& modelMatrix,
                                 ERenderMaterialClass materialClass, bool highlighted,
                                 bool castsShadow, bool dynamicShadow,
-                                const QVector3D& materialEmission)
+                                const QVector3D& materialEmission,
+                                quintptr shadowOwner)
 {
     if(!m_collecting || !part || !texture || !part->isDrawable())
         return;
@@ -156,6 +157,7 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
     item.castsShadow = castsShadow;
     item.dynamicShadow = dynamicShadow;
     item.materialEmission = materialEmission;
+    item.shadowOwner = shadowOwner;
     item.colorVisible = !m_shadowOnlyCollection;
     item.shadowBoundsCenter = item.instanceMatrix.map(part->localBoundsCenter());
     const QVector3D scaleX(item.instanceMatrix(0, 0), item.instanceMatrix(1, 0),
@@ -169,6 +171,53 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
     const QVector3D position(modelMatrix(0, 3), modelMatrix(1, 3), modelMatrix(2, 3));
     item.cameraDistanceSquared = (position - m_cameraPosition).lengthSquared();
     m_items.append(item);
+}
+
+QVector<SShadowCasterGroup> RenderQueueContext::shadowCasterGroups(
+        float maximumDistance) const
+{
+    QVector<SShadowCasterGroup> result;
+    QHash<quintptr, int> indices;
+    for(const SRenderItem& item : m_items)
+    {
+        if(!item.castsShadow || !item.shadowOwner
+                || !shadowItemWithinDistance(item, maximumDistance)
+                || item.shadowBoundsRadius <= 0.0f)
+            continue;
+        const int existing = indices.value(item.shadowOwner, -1);
+        if(existing < 0)
+        {
+            SShadowCasterGroup group;
+            group.owner = item.shadowOwner;
+            group.center = item.shadowBoundsCenter;
+            group.radius = item.shadowBoundsRadius;
+            group.cameraDistanceSquared = item.cameraDistanceSquared;
+            group.dynamic = item.dynamicShadow;
+            indices.insert(item.shadowOwner, result.size());
+            result.append(group);
+            continue;
+        }
+        SShadowCasterGroup& group = result[existing];
+        const QVector3D delta = item.shadowBoundsCenter - group.center;
+        const float distance = delta.length();
+        if(distance + item.shadowBoundsRadius > group.radius)
+        {
+            const float newRadius = (group.radius + distance
+                                     + item.shadowBoundsRadius) * 0.5f;
+            if(distance > 0.000001f)
+                group.center += delta / distance * (newRadius - group.radius);
+            group.radius = newRadius;
+        }
+        group.cameraDistanceSquared = qMin(group.cameraDistanceSquared,
+                                            item.cameraDistanceSquared);
+        group.dynamic = group.dynamic || item.dynamicShadow;
+    }
+    std::sort(result.begin(), result.end(), [](const SShadowCasterGroup& left,
+                                               const SShadowCasterGroup& right)
+    {
+        return left.cameraDistanceSquared < right.cameraDistanceSquared;
+    });
+    return result;
 }
 
 QVector<SShadowCasterBounds> RenderQueueContext::shadowCasterBounds(
@@ -210,7 +259,9 @@ QByteArray RenderQueueContext::staticShadowFingerprint() const
 void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
                                      float maximumDistance,
                                      const QMatrix4x4& lightSpaceMatrix,
-                                     bool dynamicOnly, bool staticOnly)
+                                     bool dynamicOnly, bool staticOnly,
+                                     const QSet<quintptr>* excludedOwners,
+                                     quintptr onlyOwner)
 {
     if(!shadowProgram || m_items.isEmpty())
         return;
@@ -230,7 +281,9 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
         if(!source.castsShadow || !shadowItemWithinDistance(source, maximumDistance)
                 || !shadowItemIntersectsLightSpace(source, lightSpaceMatrix)
                 || (dynamicOnly && !source.dynamicShadow)
-                || (staticOnly && source.dynamicShadow))
+                || (staticOnly && source.dynamicShadow)
+                || (onlyOwner && source.shadowOwner != onlyOwner)
+                || (excludedOwners && excludedOwners->contains(source.shadowOwner)))
             continue;
         SRenderItem item = source;
         item.highlighted = false;
@@ -375,6 +428,7 @@ void RenderQueueContext::flush()
     bool previousHighlight = false;
     QVector3D previousEmission;
     bool haveEmission = false;
+    int activeLocalShadowSkip = -2;
     float previousUvScale = 0.0f;
     bool haveBatch = false;
     bool activeHighlight = false;
@@ -432,6 +486,12 @@ void RenderQueueContext::flush()
         const int runLength = m_instancingEnabled
             ? instanceBatchLength(colorItems, itemIndex) : 1;
         bool instanced = false;
+        const int localShadowSkip = m_localShadowOwners.indexOf(item.shadowOwner);
+        if(localShadowSkip != activeLocalShadowSkip)
+        {
+            activeLocalShadowSkip = localShadowSkip;
+            m_program->setUniformValue("u_localShadowSkipIndex", localShadowSkip);
+        }
         m_program->setUniformValue("u_receiveDynamicShadow", !item.dynamicShadow);
         m_program->setUniformValue(m_materialEmissionLocation, item.materialEmission);
         if(item.highlighted != activeHighlight)
@@ -461,6 +521,7 @@ void RenderQueueContext::flush()
     m_program->setUniformValue(m_partAnimatedLocation, false);
     m_program->setUniformValue(m_highlightLocation, false);
     m_program->setUniformValue("u_receiveDynamicShadow", true);
+    m_program->setUniformValue("u_localShadowSkipIndex", -1);
     m_program->setUniformValue(m_materialEmissionLocation, QVector3D());
     if(supportsFixedFunctionAlphaTest())
         ei::gl::Enable(GL_ALPHA_TEST);

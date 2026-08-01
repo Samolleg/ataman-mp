@@ -19,6 +19,7 @@ private slots:
     void appliesRenderSchedulingOptions();
     void derivesEnvironmentFromWorldValues();
     void combinesShadowCastingPointLights();
+    void pointLightInfluenceIsCasterLocalAndFallsWithDistance();
 };
 
 void RenderQueueTests::alphaClassification()
@@ -234,6 +235,27 @@ void RenderQueueTests::combinesShadowCastingPointLights()
     light.castsShadow = false;
     QCOMPARE(ei::shadowProjectionDirection(down, QVector3D(), 0.0f,
                                             {light}, QVector3D()), down);
+}
+
+void RenderQueueTests::pointLightInfluenceIsCasterLocalAndFallsWithDistance()
+{
+    ei::SScenePointLight light;
+    light.position = QVector3D();
+    light.color = QVector3D(1.0f, 1.0f, 1.0f);
+    light.range = 10.0f;
+    light.castsShadow = true;
+    bool nearInfluenced = false;
+    bool edgeInfluenced = false;
+    bool outsideInfluenced = true;
+    ei::shadowProjectionDirection(QVector3D(0.0f, 0.0f, -1.0f), QVector3D(),
+        0.0f, {light}, QVector3D(1.0f, 0.0f, 0.0f), &nearInfluenced);
+    ei::shadowProjectionDirection(QVector3D(0.0f, 0.0f, -1.0f), QVector3D(),
+        0.0f, {light}, QVector3D(9.0f, 0.0f, 0.0f), &edgeInfluenced);
+    ei::shadowProjectionDirection(QVector3D(0.0f, 0.0f, -1.0f), QVector3D(),
+        0.0f, {light}, QVector3D(10.01f, 0.0f, 0.0f), &outsideInfluenced);
+    QVERIFY(nearInfluenced);
+    QVERIFY(edgeInfluenced);
+    QVERIFY(!outsideInfluenced);
 }
 
 QTEST_APPLESS_MAIN(RenderQueueTests)

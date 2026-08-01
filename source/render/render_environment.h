@@ -9,6 +9,7 @@ class CWorldSet;
 namespace ei {
 
 constexpr int kMaxScenePointLights = 64;
+constexpr int kMaxLocalShadowCasters = 16;
 
 struct SScenePointLight
 {
@@ -47,7 +48,8 @@ QVector3D shadowProjectionDirection(const QVector3D& sunDirection,
                                     const QVector3D& sunColor,
                                     float sunStrength,
                                     const QVector<SScenePointLight>& lights,
-                                    const QVector3D& casterPosition);
+                                    const QVector3D& casterPosition,
+                                    bool* pointLightInfluenced = nullptr);
 
 }
 

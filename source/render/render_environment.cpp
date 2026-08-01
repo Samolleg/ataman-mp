@@ -204,8 +204,11 @@ QVector3D shadowProjectionDirection(const QVector3D& sunDirection,
                                     const QVector3D& sunColor,
                                     float sunStrength,
                                     const QVector<SScenePointLight>& lights,
-                                    const QVector3D& casterPosition)
+                                    const QVector3D& casterPosition,
+                                    bool* pointLightInfluenced)
 {
+    if(pointLightInfluenced)
+        *pointLightInfluenced = false;
     const auto normalizedColor = [](QVector3D color)
     {
         const float maximum = qMax(color.x(), qMax(color.y(), color.z()));
@@ -233,8 +236,12 @@ QVector3D shadowProjectionDirection(const QVector3D& sunDirection,
         if(distanceSquared <= 0.000001f || distanceSquared >= rangeSquared)
             continue;
         const float attenuation = 1.0f - distanceSquared / rangeSquared;
-        direction += offset / qSqrt(distanceSquared)
-            * attenuation * luminance(light.color);
+        const float weight = attenuation * luminance(light.color);
+        if(weight <= 0.0f)
+            continue;
+        direction += offset / qSqrt(distanceSquared) * weight;
+        if(pointLightInfluenced)
+            *pointLightInfluenced = true;
     }
 
     if(direction.lengthSquared() <= 0.000001f)
