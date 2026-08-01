@@ -1855,6 +1855,37 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     }
     corrections.update(r66_corrections.get(namespace, {}))
 
+    # R67 cross-atlas identity review. These families have byte-identical
+    # uniform authored tiles across the named atlases. Unify only their
+    # user-facing names; per-map allowed layers and underwater availability
+    # remain owned by each existing family record.
+    r67_renames = {
+        "bz3g": {6: "Ground / Dark"},
+        "zone6": {5: "Ground / Dark"},
+        "zone6_2": {5: "Ground / Dark"},
+        "bz5g": {
+            1: "Rock / Underwater emerald",
+            2: "Sand / Underwater",
+            14: "Sand / Grainy",
+        },
+        "bz6g": {
+            1: "Rock / Underwater emerald",
+            2: "Sand / Underwater",
+            14: "Sand / Grainy",
+        },
+        "zone8": {
+            1: "Rock / Underwater emerald",
+            2: "Sand / Underwater",
+            11: "Sand / Grainy",
+        },
+        "zone7": {
+            1: "Rock / Underwater emerald",
+            4: "Sand / Underwater",
+            15: "Sand / Grainy",
+        },
+    }
+    family_renames.update(r67_renames.get(namespace, {}))
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)

@@ -5872,10 +5872,10 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    // Keep this pinned to the frozen R66 global palette. The exact-corner
-    // reviews and reviewed family merges are allowed to change this only when
-    // the semantic audit and regenerated visual collections change together.
-    QCOMPARE(landFamilyCount, 73);
+    // Keep this pinned to the reviewed R67 global palette. The name-only
+    // cross-atlas consolidations reduce three global identities without
+    // changing signatures, bindings, layers, or per-map underwater roles.
+    QCOMPARE(landFamilyCount, 70);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
