@@ -1209,6 +1209,15 @@ CLogic* CUnit::logicAt(int index) const
     return index >= 0 && index < m_aLogic.size() ? m_aLogic.at(index) : nullptr;
 }
 
+CLogic* CUnit::swapLogicAt(int index, CLogic* replacement)
+{
+    if(index < 0 || index >= m_aLogic.size() || !replacement)
+        return replacement;
+    CLogic* previous = m_aLogic[index];
+    m_aLogic[index] = replacement;
+    return previous;
+}
+
 void CUnit::setEditorLogicIndex(int index)
 {
     m_editorLogicIndex = qBound(0, index, qMax(0, m_aLogic.size() - 1));
@@ -2213,11 +2222,20 @@ void CLogic::serializeJson(QJsonObject& obj)
     QJsonArray ppArr;
     for(auto& pp: m_aPatrolPt)
     {
+        if(pp->isMarkDeleted())
+            continue;
         QJsonObject ppObj;
         pp->serializeJson(ppObj);
         ppArr.append(ppObj);
     }
     obj.insert("Patrol Points", ppArr);
+}
+
+void CLogic::replaceFromJson(const QJsonObject& data)
+{
+    qDeleteAll(m_aPatrolPt);
+    m_aPatrolPt.clear();
+    deSerializeJson(data);
 }
 
 void CLogic::deSerializeJson(QJsonObject data)

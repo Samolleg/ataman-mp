@@ -546,6 +546,30 @@ int runHeadlessCommand(QApplication& app)
         behaviorFilterTree.applyFilter();
         const bool behaviorFilterRebuildSafe = !rebuiltLook->isHidden();
 
+        CUnit* virtualLogicOwner = reinterpret_cast<CUnit*>(quintptr(1));
+        auto virtualLogicRow = new QTreeWidgetItem(&behaviorFilterTree);
+        virtualLogicRow->setData(0, Qt::UserRole + 10, 4);
+        virtualLogicRow->setData(0, Qt::UserRole + 11,
+            QVariant::fromValue<qulonglong>(
+                reinterpret_cast<qulonglong>(virtualLogicOwner)));
+        behaviorFilterTree.focusLogicSlot(virtualLogicOwner, 4);
+        const bool virtualLogicFocusWorks = behaviorFilterTree.currentItem()
+                == virtualLogicRow && virtualLogicRow->isSelected()
+                && behaviorFilterTree.focusedLogicUnit() == virtualLogicOwner
+                && behaviorFilterTree.focusedLogicSlot() == 4;
+        behaviorFilterTree.clear();
+        auto rebuiltLogicRow = new QTreeWidgetItem(&behaviorFilterTree);
+        rebuiltLogicRow->setData(0, Qt::UserRole + 10, 4);
+        rebuiltLogicRow->setData(0, Qt::UserRole + 11,
+            QVariant::fromValue<qulonglong>(
+                reinterpret_cast<qulonglong>(virtualLogicOwner)));
+        behaviorFilterTree.focusLogicSlot(
+            behaviorFilterTree.focusedLogicUnit(),
+            behaviorFilterTree.focusedLogicSlot());
+        const bool virtualLogicFocusSurvivesRebuild =
+                behaviorFilterTree.currentItem() == rebuiltLogicRow
+                && rebuiltLogicRow->isSelected();
+
         QList<QString>& figures = CObjectList::getInstance()->figureList();
         figures = {"alpha", "hammer", "Harpy", "echo", "house"};
         QSharedPointer<IPropertyBase> value(new propStr(eObjParam_TEMPLATE, "original_model"));
@@ -1964,6 +1988,7 @@ int runHeadlessCommand(QApplication& app)
                 dockDiagnosticCount() == dockDiagnosticsBefore;
 
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+                && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
                 && prefixesOnly && valueStable && focusCancel && escapeCancel
                 && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
@@ -2059,7 +2084,10 @@ int runHeadlessCommand(QApplication& app)
                 && !QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling);
         QTextStream output(stdout);
         output << "behaviorFilterUsesCachedText=" << behaviorFilterUsesCachedText
-               << " behaviorFilterRebuildSafe=" << behaviorFilterRebuildSafe << "\n"
+               << " behaviorFilterRebuildSafe=" << behaviorFilterRebuildSafe
+               << " virtualLogicFocusWorks=" << virtualLogicFocusWorks
+               << " virtualLogicFocusSurvivesRebuild="
+               << virtualLogicFocusSurvivesRebuild << "\n"
                << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
                << " valueStable=" << valueStable

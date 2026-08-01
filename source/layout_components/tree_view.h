@@ -7,7 +7,9 @@
 
 class CView;
 class CNode;
+class CUnit;
 class QTimer;
+class QContextMenuEvent;
 
 ///
 /// \brief The CTreeObject class stores additional information about the object ID so that it can be selected in the 3D scene.
@@ -53,6 +55,10 @@ public:
     void markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
                    bool scrollToPrimary = false);
     void clearViewportSelectionMarker();
+    CUnit* focusedLogicUnit() const { return m_focusedLogicUnit; }
+    int focusedLogicSlot() const { return m_focusedLogicSlot; }
+    void focusLogicSlot(CUnit* owner, int logicSlot, bool scrollToItem = false);
+    void clearLogicSlotFocus();
     void prepareForRebuild();
     void setValidationNids(const QSet<uint>& critical, const QSet<uint>& warning);
 
@@ -61,6 +67,7 @@ signals:
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
 
 private:
     enum class ETextMatchMode
@@ -99,6 +106,8 @@ private:
     QHash<QTreeWidgetItem*, bool> m_expansionBeforeFilter;
     QSet<uint> m_criticalNids;
     QSet<uint> m_warningNids;
+    CUnit* m_focusedLogicUnit{nullptr};
+    int m_focusedLogicSlot{-1};
 };
 
 #endif // CTREEVIEW_H

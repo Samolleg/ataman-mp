@@ -5875,6 +5875,10 @@ void MainWindow::updateOutlinerSelectionPath()
 
     const QList<CNode*> selectedNodes = m_pView
         ? m_pView->selectionSnapshot() : QList<CNode*>();
+    QTreeWidgetItem* item = m_ui->treeWidget->currentItem();
+    const bool virtualLogicSelection = item
+        && item->data(0, Qt::UserRole + 10).isValid()
+        && !dynamic_cast<CTreeObject*>(item);
     if(selectedNodes.size() > 1)
     {
         bool includesLockedObject = false;
@@ -5882,7 +5886,10 @@ void MainWindow::updateOutlinerSelectionPath()
             if(CMob* owner = m_pView->ownerMob(node))
                 includesLockedObject = includesLockedObject
                     || owner != m_pView->currentMob();
-        const QString summary = tr("%1 objects selected").arg(selectedNodes.size());
+        const QString summary = virtualLogicSelection
+            ? tr("%1 — %2 units selected")
+                .arg(item->text(0)).arg(selectedNodes.size())
+            : tr("%1 objects selected").arg(selectedNodes.size());
         m_outlinerSelectionPath->setStyleSheet(includesLockedObject
             ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
             : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
@@ -5893,7 +5900,6 @@ void MainWindow::updateOutlinerSelectionPath()
         m_objectPropertiesHeader->show();
         return;
     }
-    QTreeWidgetItem* item = m_ui->treeWidget->currentItem();
     if(!item || !item->parent())
     {
         showNavigation(false);
@@ -5925,9 +5931,11 @@ void MainWindow::updateOutlinerSelectionPath()
         ? "QLabel { background: #5c400c; color: white; padding: 5px 7px; border-left: 3px solid #ff8c1a; }"
         : "QLabel { background: #29424a; color: white; padding: 5px 7px; border-left: 3px solid #32c8e6; }");
     setPathText(hierarchy);
-    m_outlinerSelectionPath->setToolTip(tr("Selected object: %1").arg(hierarchy));
+    m_outlinerSelectionPath->setToolTip(virtualLogicSelection
+        ? tr("Selected Behavior setup: %1").arg(hierarchy)
+        : tr("Selected object: %1").arg(hierarchy));
     m_outlinerSelectionPath->show();
-    showNavigation(behaviorSelection);
+    showNavigation(behaviorSelection && !virtualLogicSelection);
     m_objectPropertiesHeader->show();
 }
 

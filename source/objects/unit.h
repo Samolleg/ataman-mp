@@ -110,6 +110,7 @@ public:
     uint deserialize(util::CMobParser& parser);
     void serializeJson(QJsonObject& obj);
     void deSerializeJson(QJsonObject data);
+    void replaceFromJson(const QJsonObject& data);
     uint serialize(util::CMobParser& parser);
     bool isUse() {return m_use;}
     void updatePos(QVector3D& offset);
@@ -237,6 +238,7 @@ public:
     CPatrolPoint* patrolByIndex(int logicIndex, int patrolIndex);
     CLookPoint* viewByIndex(int logicIndex, int patrolIndex, int viewIndex);
     CLogic* logicAt(int index) const;
+    CLogic* swapLogicAt(int index, CLogic* replacement);
     int logicCount() const { return m_aLogic.size(); }
     void createPatrolByIndex(int logicIndex, int index);
     void undo_createPatrolByIndex(int logicIndex, int index);

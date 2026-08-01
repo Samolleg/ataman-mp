@@ -10,6 +10,8 @@
 #include <QRegularExpression>
 #include <QElapsedTimer>
 #include <QSignalBlocker>
+#include <QContextMenuEvent>
+#include <QMenu>
 #include <algorithm>
 #include "objects/unit.h"
 #include "mob/mob.h"
@@ -247,7 +249,10 @@ void CTreeView::keyPressEvent(QKeyEvent *pEvent)
 {
     if(pEvent->matches(QKeySequence::Copy))
     {
-        m_pView->selectedObjectToClipboardBuffer();
+        if(focusedLogicUnit() && focusedLogicSlot() >= 0)
+            m_pView->copyLogicSlot(focusedLogicUnit(), focusedLogicSlot());
+        else
+            m_pView->selectedObjectToClipboardBuffer();
         pEvent->accept();
         return;
     }
@@ -274,6 +279,35 @@ void CTreeView::keyPressEvent(QKeyEvent *pEvent)
         return;
     }
     QTreeWidget::keyPressEvent(pEvent);
+}
+
+void CTreeView::contextMenuEvent(QContextMenuEvent* event)
+{
+    QTreeWidgetItem* item = itemAt(event->pos());
+    if(!item || !item->data(0, Qt::UserRole + 10).isValid()
+       || dynamic_cast<CTreeObject*>(item))
+    {
+        QTreeWidget::contextMenuEvent(event);
+        return;
+    }
+    CUnit* owner = reinterpret_cast<CUnit*>(
+        item->data(0, Qt::UserRole + 11).toULongLong());
+    const int logicSlot = item->data(0, Qt::UserRole + 10).toInt();
+    if(!owner)
+        return;
+    focusLogicSlot(owner, logicSlot);
+    QMenu menu(this);
+    QAction* copy = menu.addAction(tr("Copy Logic slot"));
+    QAction* paste = menu.addAction(tr("Paste Logic slot"));
+    QAction* pasteWorld = menu.addAction(
+        tr("Paste Logic slot at original world positions"));
+    QAction* selected = menu.exec(event->globalPos());
+    if(selected == copy)
+        m_pView->copyLogicSlot(owner, logicSlot);
+    else if(selected == paste)
+        m_pView->pasteLogicSlotFromClipboard(false);
+    else if(selected == pasteWorld)
+        m_pView->pasteLogicSlotFromClipboard(true);
 }
 
 int CTreeView::parentDeepCount(QTreeWidgetItem *pItem)
@@ -369,6 +403,29 @@ void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
         return;
     }
 
+    if(pItem->data(0, Qt::UserRole + 10).isValid()
+       && !dynamic_cast<CTreeObject*>(pItem))
+    {
+        const int logicSlot = pItem->data(0, Qt::UserRole + 10).toInt();
+        CUnit* owner = reinterpret_cast<CUnit*>(
+            pItem->data(0, Qt::UserRole + 11).toULongLong());
+        if(owner)
+        {
+            m_focusedLogicUnit = owner;
+            m_focusedLogicSlot = logicSlot;
+            const QList<CNode*> selected = m_pView->selectionSnapshot();
+            const bool preserveUnitGroup = selected.size() > 1
+                && selected.contains(owner)
+                && std::all_of(selected.begin(), selected.end(), [](CNode* node)
+                   { return dynamic_cast<CUnit*>(node) != nullptr; });
+            if(!preserveUnitGroup)
+                m_pView->selectNode(owner, false);
+            m_pView->setLogicSlotIndex(logicSlot);
+            focusLogicSlot(owner, logicSlot, false);
+        }
+        return;
+    }
+
     CTreeObject* objectItem = dynamic_cast<CTreeObject*>(pItem);
     if(!objectItem)
         return;
@@ -407,6 +464,7 @@ void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
         }
     if(logicSlot >= 0)
         m_pView->setLogicSlotIndex(logicSlot);
+    clearLogicSlotFocus();
     const Qt::KeyboardModifiers modifiers = QApplication::keyboardModifiers();
     m_pView->selectNodes(nodes,
         modifiers.testFlag(Qt::ShiftModifier)
@@ -492,6 +550,13 @@ void CTreeView::addNodeToTree(CNode *pNode)
 
 void CTreeView::itemDoubleClickedOver(QTreeWidgetItem* pItem, int column)
 {
+    if(pItem->data(0, Qt::UserRole + 10).isValid()
+       && !dynamic_cast<CTreeObject*>(pItem))
+    {
+        itemClickedOver(pItem, column);
+        return;
+    }
+
     CTreeObject* objectItem = dynamic_cast<CTreeObject*>(pItem);
     if(!objectItem || !objectItem->node() || column != 0)
         return;
@@ -536,6 +601,8 @@ void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
         return;
     }
 
+    if(m_focusedLogicUnit && !wanted.contains(m_focusedLogicUnit))
+        clearLogicSlotFocus();
     clearSelection();
     CTreeObject* primaryItem = nullptr;
     QTreeWidgetItemIterator it(this);
@@ -544,7 +611,8 @@ void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
         CTreeObject* item = dynamic_cast<CTreeObject*>(*it);
         if(item && wanted.contains(item->node()))
         {
-            item->setSelected(true);
+            if(item->node() != m_focusedLogicUnit)
+                item->setSelected(true);
             if(CScene::getInstance()->getMode() == eEditModeLogic
                && item->node()
                && (item->node()->nodeType() == eUnit
@@ -563,7 +631,44 @@ void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
         if(scrollToPrimary)
             scrollToItem(primaryItem, QAbstractItemView::PositionAtCenter);
     }
+    if(m_focusedLogicUnit)
+        focusLogicSlot(m_focusedLogicUnit, m_focusedLogicSlot, scrollToPrimary);
     applyFilter();
+}
+
+void CTreeView::focusLogicSlot(CUnit* owner, int logicSlot, bool scrollToFocused)
+{
+    m_focusedLogicUnit = owner;
+    m_focusedLogicSlot = logicSlot;
+    QTreeWidgetItemIterator it(this);
+    while(*it)
+    {
+        QTreeWidgetItem* item = *it;
+        if(!dynamic_cast<CTreeObject*>(item)
+           && item->data(0, Qt::UserRole + 10).isValid()
+           && item->data(0, Qt::UserRole + 10).toInt() == logicSlot
+           && reinterpret_cast<CUnit*>(item->data(
+                0, Qt::UserRole + 11).toULongLong()) == owner)
+        {
+            clearSelection();
+            item->setSelected(true);
+            setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
+            for(QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent())
+                parent->setExpanded(true);
+            item->setExpanded(true);
+            if(scrollToFocused)
+                scrollToItem(item, QAbstractItemView::PositionAtCenter);
+            return;
+        }
+        ++it;
+    }
+    clearLogicSlotFocus();
+}
+
+void CTreeView::clearLogicSlotFocus()
+{
+    m_focusedLogicUnit = nullptr;
+    m_focusedLogicSlot = -1;
 }
 
 void CTreeView::expandBehaviorHierarchy(QTreeWidgetItem* ownerItem)
@@ -585,6 +690,7 @@ void CTreeView::expandBehaviorHierarchy(QTreeWidgetItem* ownerItem)
 
 void CTreeView::clearViewportSelectionMarker()
 {
+    clearLogicSlotFocus();
     clearSelection();
     setCurrentItem(nullptr);
 }

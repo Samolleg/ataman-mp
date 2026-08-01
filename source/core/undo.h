@@ -14,6 +14,7 @@ class MainWindow;
 class CPatrolPoint;
 class CLookPoint;
 class CUnit;
+class CLogic;
 class IPropertyBase;
 
 class CDeleteNodeCommand: public QObject, public QUndoCommand
@@ -263,6 +264,34 @@ private:
     QList<CNode*> m_pastedNodes;
     QList<CNode*> m_originalSelection;
     bool m_firstRedo;
+};
+
+struct SLogicSlotReplacement
+{
+    uint unitId{0};
+    int logicSlot{0};
+    QJsonObject after;
+    CLogic* alternate{nullptr};
+};
+
+class CReplaceLogicSlotsCommand : public QUndoCommand
+{
+public:
+    CReplaceLogicSlotsCommand(CView* view, CMob* mob,
+                              const QVector<SLogicSlotReplacement>& replacements,
+                              uint focusedUnitId, int focusedLogicSlot,
+                              QUndoCommand* parent = nullptr);
+    ~CReplaceLogicSlotsCommand() override;
+    void undo() override;
+    void redo() override;
+
+private:
+    void apply(bool after);
+    CView* m_view;
+    CMob* m_mob;
+    QVector<SLogicSlotReplacement> m_replacements;
+    uint m_focusedUnitId;
+    int m_focusedLogicSlot;
 };
 
 class CCreateTrapPointCommand: public QUndoCommand

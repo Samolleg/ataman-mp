@@ -221,6 +221,9 @@ public:
     void selectedObjectToClipboardBuffer();
     void clipboradObjectsToScene();
     bool pasteBehaviorPoints(const QJsonObject& clipboard);
+    bool copyLogicSlot(CUnit* owner, int logicSlot);
+    bool pasteLogicSlot(const QJsonObject& clipboard, bool preserveWorldPositions = false);
+    bool pasteLogicSlotFromClipboard(bool preserveWorldPositions = false);
     void selectBehaviorParent();
     void selectPreviousBehaviorPoint();
     void selectNextBehaviorPoint();

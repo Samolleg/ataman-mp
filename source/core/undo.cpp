@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "log.h"
 #include "property.h"
+#include "layout_components/tree_view.h"
 
 
 //CChangeModelParam::CChangeModelParam(CView* pView, uint nodeId, EObjParam &objParam, QString value, QUndoCommand *parent):
@@ -647,6 +648,72 @@ void CBehaviorPasteCommand::redo()
     for(CNode* node : m_pastedNodes)
         if(node) node->markAsDeleted(false);
     refresh(m_pastedNodes);
+}
+
+CReplaceLogicSlotsCommand::CReplaceLogicSlotsCommand(
+        CView* view, CMob* mob,
+        const QVector<SLogicSlotReplacement>& replacements,
+        uint focusedUnitId, int focusedLogicSlot, QUndoCommand* parent)
+    : QUndoCommand(parent), m_view(view), m_mob(mob),
+      m_replacements(replacements), m_focusedUnitId(focusedUnitId),
+      m_focusedLogicSlot(focusedLogicSlot)
+{
+    for(SLogicSlotReplacement& replacement : m_replacements)
+    {
+        CUnit* unit = m_mob ? dynamic_cast<CUnit*>(
+            m_mob->nodeByMapId(replacement.unitId)) : nullptr;
+        if(!unit || !unit->logicAt(replacement.logicSlot))
+            continue;
+        replacement.alternate = new CLogic(unit);
+        replacement.alternate->replaceFromJson(replacement.after);
+    }
+    setText(replacements.size() == 1 ? "Paste Logic slot"
+        : QString("Paste Logic slot to %1 units").arg(replacements.size()));
+}
+
+CReplaceLogicSlotsCommand::~CReplaceLogicSlotsCommand()
+{
+    for(SLogicSlotReplacement& replacement : m_replacements)
+        delete replacement.alternate;
+}
+
+void CReplaceLogicSlotsCommand::apply(bool useAfter)
+{
+    Q_UNUSED(useAfter);
+    if(!m_view || !m_mob)
+        return;
+    QList<CNode*> units;
+    for(SLogicSlotReplacement& replacement : m_replacements)
+    {
+        CUnit* unit = dynamic_cast<CUnit*>(
+            m_mob->nodeByMapId(replacement.unitId));
+        if(!unit || !replacement.alternate)
+            continue;
+        replacement.alternate = unit->swapLogicAt(
+            replacement.logicSlot, replacement.alternate);
+        unit->refreshLogicProjection();
+        units.append(unit);
+    }
+    m_mob->logicNodesUpdate();
+    m_view->collectObjectTreeData();
+    m_view->restoreSelection(units);
+    CUnit* focused = dynamic_cast<CUnit*>(m_mob->nodeByMapId(m_focusedUnitId));
+    if(focused && m_view->objectTree())
+        m_view->objectTree()->focusLogicSlot(
+            focused, m_focusedLogicSlot, false);
+    m_view->viewParameters();
+    m_view->setDurty(m_mob);
+    m_view->update();
+}
+
+void CReplaceLogicSlotsCommand::undo()
+{
+    apply(false);
+}
+
+void CReplaceLogicSlotsCommand::redo()
+{
+    apply(true);
 }
 
 void CDeleteLogicPoint::undo()

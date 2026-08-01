@@ -12673,10 +12673,149 @@ void CView::deleteSelectedNodes()
     //updateViewTree();
 }
 
+bool CView::copyLogicSlot(CUnit* owner, int logicSlot)
+{
+    if(!owner || !m_activeMob || ownerMob(owner) != m_activeMob)
+        return false;
+    CLogic* logic = owner->logicAt(logicSlot);
+    if(!logic)
+        return false;
+    QJsonObject data;
+    logic->serializeJson(data);
+    QJsonArray sourcePosition{owner->position().x(), owner->position().y(),
+                              owner->position().z()};
+    QJsonObject obj;
+    obj.insert("Version", 1);
+    obj.insert("Content", "Behavior logic slot");
+    obj.insert("Source slot", logicSlot);
+    obj.insert("Source unit position", sourcePosition);
+    obj.insert("Data", data);
+    if(!m_clipboard_buffer_file.open(QIODevice::WriteOnly))
+        return false;
+    m_clipboard_buffer_file.write(
+        QJsonDocument(obj).toJson(QJsonDocument::Indented));
+    m_clipboard_buffer_file.close();
+    emit updateMsg(tr("Copied Logic %1, including its patrol and look points.")
+        .arg(logicSlot));
+    return true;
+}
+
+static void translateLogicSlotJson(QJsonObject& data, const QVector3D& offset)
+{
+    auto translatePosition = [&offset](QJsonObject& object, const QString& key)
+    {
+        QJsonArray point = object.value(key).toArray();
+        if(point.size() != 3)
+            return;
+        point[0] = point[0].toDouble() + offset.x();
+        point[1] = point[1].toDouble() + offset.y();
+        point[2] = point[2].toDouble() + offset.z();
+        object.insert(key, point);
+    };
+    translatePosition(data, QStringLiteral("Guard placement"));
+    QJsonArray patrols = data.value(QStringLiteral("Patrol Points")).toArray();
+    for(int patrolIndex = 0; patrolIndex < patrols.size(); ++patrolIndex)
+    {
+        QJsonObject patrol = patrols[patrolIndex].toObject();
+        translatePosition(patrol, QStringLiteral("Position"));
+        QJsonArray looks = patrol.value(QStringLiteral("Looking points")).toArray();
+        for(int lookIndex = 0; lookIndex < looks.size(); ++lookIndex)
+        {
+            QJsonObject look = looks[lookIndex].toObject();
+            translatePosition(look, QStringLiteral("Position"));
+            looks[lookIndex] = look;
+        }
+        patrol.insert(QStringLiteral("Looking points"), looks);
+        patrols[patrolIndex] = patrol;
+    }
+    data.insert(QStringLiteral("Patrol Points"), patrols);
+}
+
+bool CView::pasteLogicSlot(const QJsonObject& clipboard,
+                           bool preserveWorldPositions)
+{
+    if(!m_activeMob || CScene::getInstance()->getMode() != eEditModeLogic
+       || clipboard.value("Content").toString() != QStringLiteral("Behavior logic slot"))
+        return false;
+    const QJsonObject sourceData = clipboard.value("Data").toObject();
+    if(sourceData.isEmpty())
+        return false;
+    const int destinationSlot = m_pTree && m_pTree->focusedLogicSlot() >= 0
+        ? m_pTree->focusedLogicSlot() : m_logicSlotIndex;
+    QSet<uint> destinationIds;
+    for(CNode* node : selectionSnapshot())
+        if(CUnit* unit = dynamic_cast<CUnit*>(node))
+            destinationIds.insert(unit->mapId());
+    if(destinationIds.isEmpty() && m_pTree && m_pTree->focusedLogicUnit())
+        destinationIds.insert(m_pTree->focusedLogicUnit()->mapId());
+    if(destinationIds.isEmpty())
+    {
+        emit updateMsg(tr("Select one or more units as Logic-slot destinations."));
+        return false;
+    }
+    QVector3D sourcePosition;
+    const QJsonArray sourcePositionJson = clipboard.value(
+        "Source unit position").toArray();
+    if(sourcePositionJson.size() == 3)
+        sourcePosition = QVector3D(sourcePositionJson[0].toDouble(),
+                                   sourcePositionJson[1].toDouble(),
+                                   sourcePositionJson[2].toDouble());
+    QVector<SLogicSlotReplacement> replacements;
+    for(uint unitId : destinationIds)
+    {
+        CUnit* unit = dynamic_cast<CUnit*>(m_activeMob->nodeByMapId(unitId));
+        CLogic* logic = unit ? unit->logicAt(destinationSlot) : nullptr;
+        if(!logic)
+            continue;
+        SLogicSlotReplacement replacement;
+        replacement.unitId = unitId;
+        replacement.logicSlot = destinationSlot;
+        replacement.after = sourceData;
+        if(!preserveWorldPositions)
+            translateLogicSlotJson(replacement.after,
+                                   unit->position() - sourcePosition);
+        replacements.append(replacement);
+    }
+    if(replacements.isEmpty())
+        return false;
+    const uint focusedId = m_pTree && m_pTree->focusedLogicUnit()
+        ? m_pTree->focusedLogicUnit()->mapId() : replacements.front().unitId;
+    m_pUndoStack->push(new CReplaceLogicSlotsCommand(
+        this, m_activeMob, replacements, focusedId, destinationSlot));
+    emit updateMsg(preserveWorldPositions
+        ? tr("Pasted Logic %1 to %2 unit(s) at original world positions.")
+              .arg(destinationSlot).arg(replacements.size())
+        : tr("Pasted Logic %1 to %2 unit(s), relative to each unit.")
+              .arg(destinationSlot).arg(replacements.size()));
+    emit loadedMapStateChanged();
+    return true;
+}
+
+bool CView::pasteLogicSlotFromClipboard(bool preserveWorldPositions)
+{
+    if(!m_clipboard_buffer_file.open(QIODevice::ReadOnly))
+        return false;
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(
+        m_clipboard_buffer_file.readAll(), &error);
+    m_clipboard_buffer_file.close();
+    if(error.error != QJsonParseError::NoError || !document.isObject())
+        return false;
+    const QJsonObject clipboard = document.object();
+    return pasteLogicSlot(clipboard, preserveWorldPositions);
+}
+
 void CView::selectedObjectToClipboardBuffer()
 {
     if(nullptr == m_activeMob)
         return;
+
+    if(CScene::getInstance()->getMode() == eEditModeLogic && m_pTree
+       && m_pTree->focusedLogicUnit())
+    {
+        copyLogicSlot(m_pTree->focusedLogicUnit(), m_pTree->focusedLogicSlot());
+        return;
+    }
 
     if(CScene::getInstance()->getMode() == eEditModeLogic)
     {
@@ -12830,6 +12969,11 @@ void CView::clipboradObjectsToScene()
     m_clipboard_buffer_file.close();
     //todo: check if has no error
     QJsonObject obj = doc.object();
+    if(obj["Content"].toString() == QStringLiteral("Behavior logic slot"))
+    {
+        pasteLogicSlot(obj, false);
+        return;
+    }
     if(obj["Content"].toString() == QStringLiteral("Behavior points"))
     {
         pasteBehaviorPoints(obj);

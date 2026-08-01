@@ -167,6 +167,25 @@ def main() -> int:
     require(apply_logic, "createLogicLines();",
             "Guard-position visualization refresh after property edits")
 
+    require(tree, "focusedLogicUnit()",
+            "persistent virtual Logic-row focus")
+    require(tree, "focusLogicSlot(owner, logicSlot",
+            "direct Logic-row click focus before tree rebuild")
+    require(tree, "Paste Logic slot at original world positions",
+            "explicit world-position Logic-slot paste action")
+    require(view, 'obj.insert("Content", "Behavior logic slot");',
+            "typed complete Logic-slot clipboard payload")
+    require(view, "pasteLogicSlot(clipboard, preserveWorldPositions)",
+            "Logic-slot paste dispatch")
+    require(unit_h, "void replaceFromJson(const QJsonObject& data);",
+            "complete slot replacement API")
+    require(undo_h, "class CReplaceLogicSlotsCommand",
+            "atomic multi-unit Logic-slot undo command")
+    require(undo, "Paste Logic slot",
+            "Logic-slot paste undo label")
+    require(unit, "if(pp->isMarkDeleted())",
+            "deleted patrol points excluded from slot clipboard data")
+
     print("behavior authoring contract: PASS")
     return 0
 
