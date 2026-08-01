@@ -341,6 +341,7 @@ private:
     QMap<EObjParam, QMap<uint, QString>> m_comboMap;
     QMap<int, QSharedPointer<IPropertyBase>> m_rowValues;
     bool m_readOnly{false};
+    bool m_torchPropertyContext{false};
 };
 
 #endif // CTABLEMANAGER_H

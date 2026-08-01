@@ -2564,10 +2564,15 @@ void CView::releaseShadowFramebuffers()
     m_farShadowFbo = nullptr;
     delete m_farDynamicShadowFbo;
     m_farDynamicShadowFbo = nullptr;
+    delete m_localShadowFbo;
+    m_localShadowFbo = nullptr;
     m_shadowResolution = 0;
     m_shadowInitialized = false;
     m_staticShadowFingerprint.clear();
     m_farStaticShadowFingerprint.clear();
+    m_localShadowMatrices.clear();
+    m_localShadowAtlasRects.clear();
+    m_localShadowOwners.clear();
 }
 
 bool CView::ensureShadowFramebuffers(int quality)
@@ -2586,9 +2591,10 @@ bool CView::ensureShadowFramebuffers(int quality)
         return false;
     }
     if(m_shadowResolution == resolution && m_shadowFbo && m_dynamicShadowFbo
-            && m_farShadowFbo && m_farDynamicShadowFbo
+            && m_farShadowFbo && m_farDynamicShadowFbo && m_localShadowFbo
             && m_shadowFbo->isValid() && m_dynamicShadowFbo->isValid()
-            && m_farShadowFbo->isValid() && m_farDynamicShadowFbo->isValid())
+            && m_farShadowFbo->isValid() && m_farDynamicShadowFbo->isValid()
+            && m_localShadowFbo->isValid())
         return true;
 
     releaseShadowFramebuffers();
@@ -2599,8 +2605,10 @@ bool CView::ensureShadowFramebuffers(int quality)
     m_dynamicShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
     m_farShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
     m_farDynamicShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
+    m_localShadowFbo = new QOpenGLFramebufferObject(resolution, resolution, shadowFormat);
     if(!m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
-            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
+            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid()
+            || !m_localShadowFbo->isValid())
     {
         ei::log(eLogWarning, "Shadow framebuffer is unavailable; shadow rendering disabled");
         releaseShadowFramebuffers();
@@ -2611,7 +2619,8 @@ bool CView::ensureShadowFramebuffers(int quality)
     // Packed RGBA depth must never be interpolated channel-by-channel. The
     // receiver performs its own 3x3 PCF over nearest depth samples.
     for(QOpenGLFramebufferObject* target : {m_shadowFbo, m_dynamicShadowFbo,
-                                            m_farShadowFbo, m_farDynamicShadowFbo})
+                                            m_farShadowFbo, m_farDynamicShadowFbo,
+                                            m_localShadowFbo})
     {
         ei::gl::BindTexture(GL_TEXTURE_2D, target->texture());
         ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -2620,7 +2629,7 @@ bool CView::ensureShadowFramebuffers(int quality)
         ei::gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
     ei::gl::BindTexture(GL_TEXTURE_2D, 0);
-    ei::log(eLogInfo, QString("Shadow atlases initialized: 4 x %1x%1 (quality %2, GL max %3)")
+    ei::log(eLogInfo, QString("Shadow atlases initialized: 5 x %1x%1 (quality %2, GL max %3)")
             .arg(resolution).arg(qBound(0, quality, 2)).arg(maximumTextureSize));
     return true;
 }
@@ -2628,13 +2637,16 @@ bool CView::ensureShadowFramebuffers(int quality)
 bool CView::renderShadowMap(const QVector3D& cameraPosition,
                             const QVector3D& shadowFocus,
                             const ei::SRenderEnvironment& environment,
+                            const QVector<ei::SScenePointLight>& sceneLights,
                             RenderQueueContext& queue,
                             float maximumDistance)
 {
     Q_UNUSED(cameraPosition)
     if(!m_shadowFbo || !m_dynamicShadowFbo || !m_farShadowFbo || !m_farDynamicShadowFbo
+            || !m_localShadowFbo
             || !m_shadowFbo->isValid() || !m_dynamicShadowFbo->isValid()
-            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid())
+            || !m_farShadowFbo->isValid() || !m_farDynamicShadowFbo->isValid()
+            || !m_localShadowFbo->isValid())
         return false;
 
     const float safeMaximumDistance = qBound(1.0f, maximumDistance, 1024.0f);
@@ -2643,10 +2655,12 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     // views, reducing the closest actor and tree shadows to a handful of
     // texels. Keep its world-space budget fixed; the far cascade owns reach.
     m_nearShadowSplit = qMin(safeMaximumDistance, 48.0f);
+    const QVector3D lightDirection = ei::shadowProjectionDirection(
+        environment.sunDirection, environment.sunColor, environment.sunStrength,
+        {}, shadowFocus);
     QVector3D up(0.0f, 0.0f, 1.0f);
-    if(qAbs(QVector3D::dotProduct(environment.sunDirection.normalized(), up)) > 0.96f)
+    if(qAbs(QVector3D::dotProduct(lightDirection, up)) > 0.96f)
         up = QVector3D(0.0f, 1.0f, 0.0f);
-    const QVector3D lightDirection = environment.sunDirection.normalized();
     const QVector3D lightRight = QVector3D::crossProduct(lightDirection, up).normalized();
     const QVector3D lightUp = QVector3D::crossProduct(lightRight, lightDirection).normalized();
     const QMatrix4x4 cameraView = m_cam->viewMatrix();
@@ -2754,15 +2768,82 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
                                               m_farDynamicShadowFbo->width(),
                                               4.0f);
 
+    struct SLocalCascade
+    {
+        quintptr owner{0};
+        QMatrix4x4 view;
+        QMatrix4x4 projection;
+        QMatrix4x4 matrix;
+        QVector4D atlasRect;
+    };
+    QVector<SLocalCascade> localCascades;
+    const QVector<SShadowCasterGroup> casterGroups
+        = queue.shadowCasterGroups(safeMaximumDistance);
+    const int localColumns = 4;
+    const int localRows = 4;
+    const int tileWidth = m_localShadowFbo->width() / localColumns;
+    const int tileHeight = m_localShadowFbo->height() / localRows;
+    for(const SShadowCasterGroup& group : casterGroups)
+    {
+        if(localCascades.size() >= ei::kMaxLocalShadowCasters)
+            break;
+        bool pointInfluenced = false;
+        const QVector3D direction = ei::shadowProjectionDirection(
+            environment.sunDirection, environment.sunColor, environment.sunStrength,
+            sceneLights, group.center, &pointInfluenced);
+        if(!pointInfluenced)
+            continue;
+        QVector3D localUp(0.0f, 0.0f, 1.0f);
+        if(qAbs(QVector3D::dotProduct(direction, localUp)) > 0.96f)
+            localUp = QVector3D(0.0f, 1.0f, 0.0f);
+        const float vertical = qMax(0.01f, qAbs(direction.z()));
+        const float horizontal = qSqrt(direction.x() * direction.x()
+                                      + direction.y() * direction.y());
+        const float projectedLength = 2.0f * group.radius * horizontal / vertical;
+        const float extent = qBound(4.0f,
+            group.radius + projectedLength + 2.0f, 64.0f);
+        const float depthHalf = qMax(32.0f, group.radius * 4.0f + 8.0f);
+        SLocalCascade local;
+        local.owner = group.owner;
+        local.view.lookAt(group.center - direction * depthHalf,
+                          group.center, localUp);
+        local.projection.ortho(-extent, extent, -extent, extent,
+                               1.0f, depthHalf * 2.0f + 1.0f);
+        local.matrix = local.projection * local.view;
+        const int index = localCascades.size();
+        const int column = index % localColumns;
+        const int row = index / localColumns;
+        local.atlasRect = QVector4D(float(column) / float(localColumns),
+                                   float(row) / float(localRows),
+                                   1.0f / float(localColumns),
+                                   1.0f / float(localRows));
+        localCascades.append(local);
+    }
+    QSet<quintptr> localOwners;
+    QVector<quintptr> nextLocalOwners;
+    QVector<QMatrix4x4> nextLocalMatrices;
+    QVector<QVector4D> nextLocalRects;
+    for(const SLocalCascade& local : localCascades)
+    {
+        localOwners.insert(local.owner);
+        nextLocalOwners.append(local.owner);
+        nextLocalMatrices.append(local.matrix);
+        nextLocalRects.append(local.atlasRect);
+    }
+
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
     staticHash.addData(queue.staticShadowFingerprint());
     staticHash.addData(sceneSourceFingerprint().toUtf8());
+    for(quintptr owner : nextLocalOwners)
+        staticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     staticHash.addData(reinterpret_cast<const char*>(nearCascade.staticMatrix.constData()),
                        16 * int(sizeof(float)));
     const QByteArray staticFingerprint = staticHash.result();
     QCryptographicHash farStaticHash(QCryptographicHash::Sha256);
     farStaticHash.addData(queue.staticShadowFingerprint());
     farStaticHash.addData(sceneSourceFingerprint().toUtf8());
+    for(quintptr owner : nextLocalOwners)
+        farStaticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     farStaticHash.addData(reinterpret_cast<const char*>(farCascade.staticMatrix.constData()),
                           16 * int(sizeof(float)));
     farStaticHash.addData(reinterpret_cast<const char*>(&safeMaximumDistance),
@@ -2771,7 +2852,10 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     const bool rebuildStatic = staticFingerprint != m_staticShadowFingerprint;
     const bool rebuildFarStatic = farStaticFingerprint != m_farStaticShadowFingerprint;
     const bool rebuildDynamic = !m_shadowInitialized || m_shadowUpdateTimer.elapsed() >= 66;
-    if(!rebuildStatic && !rebuildFarStatic && !rebuildDynamic)
+    const bool localChanged = nextLocalOwners != m_localShadowOwners
+        || nextLocalMatrices != m_localShadowMatrices;
+    const bool rebuildLocal = localChanged || rebuildDynamic;
+    if(!rebuildStatic && !rebuildFarStatic && !rebuildDynamic && !rebuildLocal)
         return true;
 
     RenderPerformanceContext& shadowPerformance = RenderPerformanceContext::instance();
@@ -2780,7 +2864,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         shadowPerformance.counters().shadowStaticRebuilds
             += quint64(rebuildStatic) + quint64(rebuildFarStatic);
         shadowPerformance.counters().shadowDynamicRebuilds
-            += rebuildDynamic ? 2 : 0;
+            += (rebuildDynamic ? 2 : 0) + (rebuildLocal ? 1 : 0);
     }
 
     ei::gl::Disable(GL_BLEND);
@@ -2832,7 +2916,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         queue.flushShadow(&m_shadowProgram,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
                           nearCascade.staticMatrix,
-                          false, true);
+                          false, true, &localOwners);
         endTarget(m_shadowFbo);
         m_staticShadowFingerprint = staticFingerprint;
     }
@@ -2841,7 +2925,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_farStaticLightSpaceMatrix = farCascade.staticMatrix;
         beginTarget(m_farShadowFbo, farCascade.projection, farCascade.staticView);
         queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
-                          farCascade.staticMatrix, false, true);
+                          farCascade.staticMatrix, false, true, &localOwners);
         endTarget(m_farShadowFbo);
         m_farStaticShadowFingerprint = farStaticFingerprint;
     }
@@ -2855,16 +2939,43 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         queue.flushShadow(&m_shadowProgram,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
                           nearCascade.dynamicMatrix,
-                          true, false);
+                          true, false, &localOwners);
         endTarget(m_dynamicShadowFbo);
         m_farDynamicLightSpaceMatrix = farCascade.dynamicMatrix;
         beginTarget(m_farDynamicShadowFbo, farCascade.projection, farCascade.dynamicView);
         queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
-                          farCascade.dynamicMatrix, true, false);
+                          farCascade.dynamicMatrix, true, false, &localOwners);
         endTarget(m_farDynamicShadowFbo);
         m_shadowUpdateTimer.restart();
     }
+    if(rebuildLocal)
+    {
+        m_localShadowFbo->bind();
+        ei::gl::Viewport(0, 0, m_localShadowFbo->width(), m_localShadowFbo->height());
+        ei::gl::ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        m_shadowProgram.bind();
+        m_shadowProgram.setUniformValue("u_instanced", false);
+        for(int index = 0; index < localCascades.size(); ++index)
+        {
+            const SLocalCascade& local = localCascades.at(index);
+            const int column = index % localColumns;
+            const int row = index / localColumns;
+            ei::gl::Viewport(column * tileWidth, row * tileHeight,
+                             tileWidth, tileHeight);
+            m_shadowProgram.setUniformValue("u_projMmatrix", local.projection);
+            m_shadowProgram.setUniformValue("u_viewMmatrix", local.view);
+            queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
+                              local.matrix, false, false, nullptr, local.owner);
+        }
+        m_localShadowFbo->release();
+        QOpenGLFramebufferObject::bindDefault();
+        m_localShadowOwners = nextLocalOwners;
+        m_localShadowMatrices = nextLocalMatrices;
+        m_localShadowAtlasRects = nextLocalRects;
+    }
     m_shadowInitialized = true;
+    queue.setLocalShadowOwners(m_localShadowOwners);
     ei::gl::Viewport(0, 0, m_width, m_height);
 #ifdef GL_FRAMEBUFFER_SRGB
     if(restoreFramebufferSrgb)
@@ -3115,9 +3226,10 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
                                 bool receiveStatic, bool receiveDynamic)
 {
     const bool available = enabled && m_shadowFbo && m_dynamicShadowFbo
-        && m_farShadowFbo && m_farDynamicShadowFbo
+        && m_farShadowFbo && m_farDynamicShadowFbo && m_localShadowFbo
         && m_shadowFbo->isValid() && m_dynamicShadowFbo->isValid()
         && m_farShadowFbo->isValid() && m_farDynamicShadowFbo->isValid()
+        && m_localShadowFbo->isValid()
         && m_shadowInitialized;
     program.setUniformValue("u_shadowsEnabled", available);
     program.setUniformValue("u_staticLightSpaceMatrix", m_staticLightSpaceMatrix);
@@ -3132,6 +3244,22 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
     program.setUniformValue("u_dynamicShadowMap", 2);
     program.setUniformValue("u_farStaticShadowMap", 3);
     program.setUniformValue("u_farDynamicShadowMap", 4);
+    program.setUniformValue("u_localShadowMap", 5);
+    const int localCount = available
+        ? qMin(ei::kMaxLocalShadowCasters, m_localShadowMatrices.size()) : 0;
+    program.setUniformValue("u_localShadowCount", localCount);
+    program.setUniformValue("u_localShadowSkipIndex", -1);
+    if(localCount > 0)
+    {
+        program.setUniformValueArray("u_localShadowMatrices",
+                                     m_localShadowMatrices.constData(), localCount);
+        program.setUniformValueArray("u_localShadowAtlasRects",
+                                     m_localShadowAtlasRects.constData(), localCount);
+    }
+    const float localTexel = m_localShadowFbo
+        ? 1.0f / float(m_localShadowFbo->width()) : 0.0f;
+    program.setUniformValue("u_localShadowTexelSize",
+                            QVector2D(localTexel, localTexel));
     const float staticTexel = m_shadowFbo
         ? 1.0f / float(m_shadowFbo->width()) : 0.0f;
     const float dynamicTexel = m_dynamicShadowFbo
@@ -3159,6 +3287,8 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
         ei::gl::BindTexture(GL_TEXTURE_2D, m_farShadowFbo->texture());
         functions->glActiveTexture(GL_TEXTURE4);
         ei::gl::BindTexture(GL_TEXTURE_2D, m_farDynamicShadowFbo->texture());
+        functions->glActiveTexture(GL_TEXTURE5);
+        ei::gl::BindTexture(GL_TEXTURE_2D, m_localShadowFbo->texture());
         functions->glActiveTexture(GL_TEXTURE0);
     }
 }
@@ -5253,6 +5383,7 @@ void CView::draw()
     ei::gl::Clear(GL_COLOR_BUFFER_BIT);
 
     QVector<ei::SScenePointLight> sceneLights;
+    QVector<ei::SScenePointLight> shadowLights;
     if(environmentEnabled && sceneLightsEnabled)
     {
         for(CMob* mob : m_aMob)
@@ -5268,28 +5399,40 @@ void CView::draw()
                     // coordinate before the light is registered. Torch lights
                     // use their particle pivot directly and do not get this lift.
                     const QVector3D runtimePosition = position + QVector3D(0.0f, 0.0f, 2.0f);
-                    if(light->range() > 0.0f && (!cullingEnabled
-                            || frustum.intersectsSphere(runtimePosition, light->range())))
+                    if(light->range() > 0.0f)
                     {
                         ei::SScenePointLight sceneLight;
                         sceneLight.position = runtimePosition;
                         sceneLight.color = light->lightColor();
                         sceneLight.range = light->range();
-                        sceneLights.append(sceneLight);
+                        sceneLight.castsShadow = light->shadowEnabled();
+                        if(sceneLight.castsShadow)
+                            shadowLights.append(sceneLight);
+                        if(!cullingEnabled
+                                || frustum.intersectsSphere(runtimePosition,
+                                                            sceneLight.range))
+                            sceneLights.append(sceneLight);
                     }
                 }
                 else if(CTorch* torch = dynamic_cast<CTorch*>(node))
                 {
                     const float range = torch->power() * 10.0f;
                     const QVector3D position = torch->particleWorldPosition();
-                    if(range > 0.0f && (!cullingEnabled
-                            || frustum.intersectsSphere(position, range)))
+                    if(range > 0.0f)
                     {
                         ei::SScenePointLight sceneLight;
                         sceneLight.position = position;
                         sceneLight.color = QVector3D(0.8f, 0.8f, 0.8f);
                         sceneLight.range = range;
-                        sceneLights.append(sceneLight);
+                        // Native TORCH records have no LIGHT_SHADOW field.
+                        // Their inherited OBJ_IS_SHADOW controls only the
+                        // torch mesh; the generated point light remains an
+                        // ordinary shadow-producing light.
+                        sceneLight.castsShadow = true;
+                        shadowLights.append(sceneLight);
+                        if(!cullingEnabled
+                                || frustum.intersectsSphere(position, range))
+                            sceneLights.append(sceneLight);
                     }
                 }
             }
@@ -5490,7 +5633,9 @@ void CView::draw()
             // A caster outside the color frustum can still project a visible
             // shadow. Collect that geometry for the shadow pass only.
             renderQueue.setShadowOnlyCollection(true);
-            const QVector3D shadowSweep = environment.sunDirection.normalized()
+            const QVector3D shadowSweep = ei::shadowProjectionDirection(
+                environment.sunDirection, environment.sunColor,
+                environment.sunStrength, {}, cameraPivot)
                 * maximumShadowDistance;
             for(CMob* mob : m_aMob)
             {
@@ -5536,7 +5681,7 @@ void CView::draw()
             renderQueue.setShadowOnlyCollection(false);
         }
         const bool shadowReady = environmentEnabled && shadowsEnabled
-            && renderShadowMap(cameraPosition, cameraPivot, environment,
+            && renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,
                                renderQueue, maximumShadowDistance);
         drawTerrainColor(shadowReady);
         renderQueue.flush();

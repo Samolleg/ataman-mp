@@ -1,0 +1,100 @@
+from pathlib import Path
+import re
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class PointLightShadowContractTests(unittest.TestCase):
+    """Focused regression for LIGHT_SHADOW being dropped by the renderer."""
+
+    def test_authored_shadow_flags_reach_shadow_light_collection(self):
+        environment = (ROOT / "source/render/render_environment.h").read_text(
+            encoding="utf-8"
+        )
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("bool castsShadow", environment)
+        self.assertIn("sceneLight.castsShadow = light->shadowEnabled();", view)
+        self.assertIn("sceneLight.castsShadow = true;", view)
+        self.assertIn("shadowLights.append(sceneLight);", view)
+
+    def test_shadow_light_membership_is_not_camera_frustum_dependent(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+
+        collection_start = view.index("QVector<ei::SScenePointLight> sceneLights;")
+        collection_end = view.index("RenderPerformanceContext& performance", collection_start)
+        collection = view[collection_start:collection_end]
+        self.assertIn("QVector<ei::SScenePointLight> shadowLights;", collection)
+        self.assertIn("shadowLights.append(sceneLight);", collection)
+        self.assertIn("frustum.intersectsSphere", collection)
+        self.assertRegex(collection, re.compile(
+            r"sceneLight\.castsShadow = light->shadowEnabled\(\);\s*"
+            r"if\(sceneLight\.castsShadow\)\s*"
+            r"shadowLights\.append\(sceneLight\);\s*"
+            r"if\(!cullingEnabled\s*\|\|\s*frustum\.intersectsSphere",
+            re.DOTALL,
+        ))
+        self.assertRegex(collection, re.compile(
+            r"sceneLight\.castsShadow = true;\s*"
+            r"shadowLights\.append\(sceneLight\);\s*"
+            r"if\(!cullingEnabled\s*\|\|\s*frustum\.intersectsSphere",
+            re.DOTALL,
+        ))
+        self.assertNotIn("shadowLights.resize", collection)
+
+        self.assertIn(
+            "renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,",
+            view,
+        )
+
+    def test_point_light_direction_is_evaluated_per_caster_not_camera_pivot(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("queue.shadowCasterGroups", view)
+        self.assertIn("sceneLights, group.center, &pointInfluenced", view)
+        self.assertNotIn("sceneLights, shadowFocus", view)
+        self.assertIn("environment.sunStrength, {}, cameraPivot", view)
+        self.assertIn("&localOwners", view)
+
+    def test_shadow_enabled_point_lights_drive_the_shadow_projection(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        environment = (ROOT / "source/render/render_environment.h").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("shadowProjectionDirection", environment)
+        self.assertIn("shadowProjectionDirection", view)
+        self.assertIn("sceneLights", view)
+
+    def test_receivers_sample_sun_cascades_and_caster_local_atlas(self):
+        for shader_name in ("fshader.fsh", "landshader.fsh"):
+            shader = (ROOT / "assets/shaders" / shader_name).read_text(
+                encoding="utf-8"
+            )
+            with self.subTest(shader=shader_name):
+                self.assertIn("u_shadowsEnabled", shader)
+                self.assertIn("cascadeVisibility", shader)
+                self.assertIn("localShadowVisibility", shader)
+                self.assertIn("u_localShadowMatrices", shader)
+
+    def test_angle_compatibility_keeps_the_atlas_path_disabled(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("!m_openGlesCompatibility", view)
+        self.assertIn("!shadowContext->isOpenGLES()", view)
+
+    def test_torch_shadow_tooltip_distinguishes_object_and_embedded_light(self):
+        table = (ROOT / "source/layout_components/tablemanager.cpp").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("m_torchPropertyContext", table)
+        self.assertIn("torch/campfire model casts its own silhouette", table)
+        self.assertIn("embedded point light", table)
+        self.assertIn("no separate shadow flag", table)
+
+
+if __name__ == "__main__":
+    unittest.main()

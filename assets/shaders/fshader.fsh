@@ -31,6 +31,12 @@ uniform sampler2D u_staticShadowMap;
 uniform sampler2D u_dynamicShadowMap;
 uniform sampler2D u_farStaticShadowMap;
 uniform sampler2D u_farDynamicShadowMap;
+uniform sampler2D u_localShadowMap;
+uniform int u_localShadowCount;
+uniform int u_localShadowSkipIndex;
+uniform mat4 u_localShadowMatrices[16];
+uniform vec4 u_localShadowAtlasRects[16];
+uniform vec2 u_localShadowTexelSize;
 uniform mat4 u_staticLightSpaceMatrix;
 uniform mat4 u_dynamicLightSpaceMatrix;
 uniform mat4 u_farStaticLightSpaceMatrix;
@@ -86,6 +92,32 @@ float cascadeVisibility(vec3 staticProjected, vec3 dynamicProjected,
       visibility += (staticOccluded || dynamicOccluded) ? 0.0 : 1.0;
     }
   visibility /= 9.0;
+  return visibility;
+}
+
+float localShadowVisibility(vec3 world)
+{
+  float visibility = 1.0;
+  for (int caster = 0; caster < 16; ++caster)
+  {
+    if (caster >= u_localShadowCount)
+      break;
+    if (caster == u_localShadowSkipIndex)
+      continue;
+    vec4 clip = u_localShadowMatrices[caster] * vec4(world, 1.0);
+    vec3 projected = clip.xyz / clip.w * 0.5 + 0.5;
+    if (projected.x < 0.0 || projected.x > 1.0 ||
+        projected.y < 0.0 || projected.y > 1.0 ||
+        projected.z < 0.0 || projected.z > 1.0)
+      continue;
+    vec4 rect = u_localShadowAtlasRects[caster];
+    vec2 atlas = rect.xy + projected.xy * rect.zw;
+    atlas = clamp(atlas, rect.xy + u_localShadowTexelSize,
+                         rect.xy + rect.zw - u_localShadowTexelSize);
+    float depth = unpackShadowDepth(texture2D(u_localShadowMap, atlas));
+    visibility = min(visibility,
+        projected.z - 0.000002 > depth ? 0.0 : 1.0);
+  }
   return visibility;
 }
 
@@ -172,6 +204,7 @@ void main(void)
             shadow = mix(nearVisibility, farVisibility, cascadeBlend);
           }
         }
+        shadow = min(shadow, localShadowVisibility(v_worldPosition));
       }
       // Stock shadows are an 80/255-alpha projected silhouette over the
       // saturated environment result. Point lights are compared afterwards.

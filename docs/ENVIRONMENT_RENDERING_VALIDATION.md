@@ -24,6 +24,9 @@ fingerprinted executable evidence.
   truncation. Point-light attenuation follows the native distance/range curve.
 - Geometry casts directional shadows only when its existing `Is shadow` value
   permits it. Static and animated casters use separate cached maps.
+- Map lights with `LIGHT_SHADOW` enabled contribute their attenuated luminance
+  and caster-relative direction to the projected-shadow direction. Disabled
+  map lights still illuminate but do not steer the shadow projection.
 - Terrain receives directional shadows but is never submitted as a caster.
 - Stock shadows are per-caster projected silhouettes over selected receivers.
   The editor approximates this with a broad cached static projection used by
@@ -71,7 +74,9 @@ fingerprinted executable evidence.
    terrain; the ridge itself must not cast into the directional shadow map.
 7. Inspect a map light from outside and inside its range. Illumination must
    attenuate continuously and disappear when the light is hidden or map-light
-   rendering is disabled.
+   rendering is disabled. Beside a visible caster, toggle **Cast shadows**:
+   illumination must remain, while the projected silhouette stops/starts
+   following the point light.
 8. Toggle fog, sky, map lights, and shadows independently, then repeat unit
    selection and picking checks.
 9. Switch Unlit, Simple shading, and Full environment in the Lighting Mode
@@ -96,10 +101,9 @@ fingerprinted executable evidence.
 
 ## Known evidence boundary
 
-The MOB schema proves omnidirectional map-light inputs but does not yet prove
-the runtime meaning of `LIGHT_SHADOW`. Per-light shadow maps remain pending
-executable/corpus evidence; the checkbox is preserved and not silently assigned
-a guessed meaning. Non-Tendri particle families and the special native local-
-light flag also remain explicitly outside the confirmed model; see
+`LIGHT_SHADOW` controls participation in the combined projected silhouette; it
+does not introduce a cone or a separate per-light shadow map. Non-Tendri
+particle families and the special native local-light flag remain explicitly
+outside the confirmed model; see
 [particle reconstruction coverage](PARTICLE_RENDERING_STATUS.md) and the
 [runtime evidence ledger](investigations/2026-07-23-particle-runtime.md).

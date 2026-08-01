@@ -12,6 +12,7 @@
 #include <QVector3D>
 #include <QVector4D>
 #include <QByteArray>
+#include <QSet>
 
 #include <algorithm>
 #include <cmath>
@@ -38,12 +39,22 @@ struct SRenderItem
     QVector3D shadowBoundsCenter;
     float shadowBoundsRadius{0.0f};
     QVector3D materialEmission;
+    quintptr shadowOwner{0};
 };
 
 struct SShadowCasterBounds
 {
     QVector3D center;
     float radius{0.0f};
+};
+
+struct SShadowCasterGroup
+{
+    quintptr owner{0};
+    QVector3D center;
+    float radius{0.0f};
+    float cameraDistanceSquared{0.0f};
+    bool dynamic{false};
 };
 
 inline void sortRenderItems(QVector<SRenderItem>& items)
@@ -95,6 +106,7 @@ inline bool shareInstanceBatch(const SRenderItem& left, const SRenderItem& right
         && left.materialClass != ERenderMaterialClass::Conservative
         && left.materialClass == right.materialClass
         && left.dynamicShadow == right.dynamicShadow
+        && left.shadowOwner == right.shadowOwner
         && left.texture == right.texture
         && left.meshIdentity == right.meshIdentity
         && left.textureUvScale == right.textureUvScale
@@ -164,19 +176,25 @@ public:
     bool collecting() const { return m_collecting; }
     bool collectingSelection() const { return m_collecting && m_selectionPass; }
     void setShadowOnlyCollection(bool enabled) { m_shadowOnlyCollection = enabled; }
+    void setLocalShadowOwners(const QVector<quintptr>& owners)
+        { m_localShadowOwners = owners; }
     void submit(CPart* part, QOpenGLTexture* texture, const QMatrix4x4& modelMatrix,
                 ERenderMaterialClass materialClass, bool highlighted,
                 bool castsShadow = false, bool dynamicShadow = false,
-                const QVector3D& materialEmission = QVector3D());
+                const QVector3D& materialEmission = QVector3D(),
+                quintptr shadowOwner = 0);
     void submitSelection(CPart* part, const QMatrix4x4& modelMatrix,
                          const QVector4D& pickingColor);
     void flush();
     void flushShadow(QOpenGLShaderProgram* shadowProgram,
                      float maximumDistance,
                      const QMatrix4x4& lightSpaceMatrix,
-                     bool dynamicOnly = false, bool staticOnly = false);
+                     bool dynamicOnly = false, bool staticOnly = false,
+                     const QSet<quintptr>* excludedOwners = nullptr,
+                     quintptr onlyOwner = 0);
     QByteArray staticShadowFingerprint() const;
     QVector<SShadowCasterBounds> shadowCasterBounds(float maximumDistance) const;
+    QVector<SShadowCasterGroup> shadowCasterGroups(float maximumDistance) const;
 
 private:
     int reserveInstanceBytes(int bytes);
@@ -201,6 +219,7 @@ private:
     int m_partAnimatedLocation{-1};
     int m_highlightLocation{-1};
     int m_materialEmissionLocation{-1};
+    QVector<quintptr> m_localShadowOwners;
 };
 
 #endif // RENDER_QUEUE_H

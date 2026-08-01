@@ -406,6 +406,7 @@ private:
     bool renderShadowMap(const QVector3D& cameraPosition,
                          const QVector3D& shadowFocus,
                          const ei::SRenderEnvironment& environment,
+                         const QVector<ei::SScenePointLight>& sceneLights,
                          RenderQueueContext& queue,
                          float maximumDistance);
     bool ensureShadowFramebuffers(int quality);
@@ -525,11 +526,15 @@ private:
     QOpenGLFramebufferObject* m_dynamicShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_farShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_farDynamicShadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_localShadowFbo{nullptr};
     int m_shadowResolution{0};
     QMatrix4x4 m_staticLightSpaceMatrix;
     QMatrix4x4 m_dynamicLightSpaceMatrix;
     QMatrix4x4 m_farStaticLightSpaceMatrix;
     QMatrix4x4 m_farDynamicLightSpaceMatrix;
+    QVector<QMatrix4x4> m_localShadowMatrices;
+    QVector<QVector4D> m_localShadowAtlasRects;
+    QVector<quintptr> m_localShadowOwners;
     float m_nearShadowSplit{64.0f};
     bool m_shadowCascadeDiagnostic{false};
     QElapsedTimer m_shadowUpdateTimer;

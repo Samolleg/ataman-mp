@@ -367,7 +367,8 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
                          CTextureList::getInstance()->materialClass(texture),
                          m_state == ENodeState::eSelect,
                          castsRenderShadow(), nodeType() == ENodeType::eUnit,
-                         m_partEmissions.value(part->name().toLower()));
+                         m_partEmissions.value(part->name().toLower()),
+                         quintptr(this));
             continue;
         }
         program->setUniformValue("u_materialEmission",
