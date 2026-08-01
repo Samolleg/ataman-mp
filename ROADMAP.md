@@ -218,10 +218,12 @@ foundation as one coherent `0.3.0` release.
 
 ## Release gate
 
-- [ ] Runtime-confirm Test Current Map and hot reload begin at the selected
-  editor time while the game clock continues normally.
-- [ ] Confirm splash/taskbar/setup focus on an existing profile, clean first
-  run, and multi-display setup.
+- [x] Runtime-confirm Test Current Map and hot reload begin at the selected
+  editor time while the game clock continues normally
+  ([`7401874`](https://github.com/Ilufus/ei-mapper-endurance/commit/7401874)).
+- [x] Confirm splash/taskbar/setup focus on an existing profile, clean first
+  run, and multi-display setup
+  ([`3af2099`](https://github.com/Ilufus/ei-mapper-endurance/commit/3af2099)).
 - [ ] Run the final representative Base/JMV editor corpus matrix: open,
   no-op/changed saves, undo/redo, autosave/recovery, validation, and shutdown.
 - [ ] Run the final JMV runtime matrix: gameplay/dungeon/briefing maps,
@@ -231,8 +233,12 @@ foundation as one coherent `0.3.0` release.
   chains load exactly once when a deterministic fixture exists.
 - [ ] Runtime-confirm World Object to Lever conversion with both previously
   shared and previously unused models.
-- [ ] Determine the native Vulcansmoke runtime crash mechanism; retain the
-  non-blocking Critical validation warning meanwhile.
+- [x] Complete the native Vulcansmoke runtime-failure investigation and retain
+  the non-blocking Critical validation warning; the controlled A/B identifies
+  the hazardous record while the absent `Vulkan.mmp` remains the leading, not
+  proven, mechanism
+  ([investigation](docs/investigations/2026-07-23-particle-runtime.md#full-catalog-editor-freeze-and-vulcansmoke-runtime-control),
+  [status](docs/PARTICLE_RENDERING_STATUS.md#runtime-safety-and-performance)).
 - [ ] Runtime-confirm the complete synthetic map identity used by unmapped
   MPR/MOB testing.
 - [ ] Reconfirm the distribution contract, resolve concrete closed-group
