@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import unittest
 
 
@@ -8,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class PointLightShadowContractTests(unittest.TestCase):
     """Focused regression for LIGHT_SHADOW being dropped by the renderer."""
 
-    def test_authored_shadow_flag_reaches_scene_light(self):
+    def test_authored_shadow_flags_reach_shadow_light_collection(self):
         environment = (ROOT / "source/render/render_environment.h").read_text(
             encoding="utf-8"
         )
@@ -16,6 +17,40 @@ class PointLightShadowContractTests(unittest.TestCase):
 
         self.assertIn("bool castsShadow", environment)
         self.assertIn("sceneLight.castsShadow = light->shadowEnabled();", view)
+        self.assertIn("sceneLight.castsShadow = true;", view)
+        self.assertIn("shadowLights.append(sceneLight);", view)
+
+    def test_shadow_light_membership_is_not_camera_frustum_dependent(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+
+        collection_start = view.index("QVector<ei::SScenePointLight> sceneLights;")
+        collection_end = view.index("RenderPerformanceContext& performance", collection_start)
+        collection = view[collection_start:collection_end]
+        self.assertIn("QVector<ei::SScenePointLight> shadowLights;", collection)
+        self.assertIn("shadowLights.append(sceneLight);", collection)
+        self.assertIn("frustum.intersectsSphere", collection)
+        self.assertRegex(collection, re.compile(
+            r"sceneLight\.castsShadow = light->shadowEnabled\(\);\s*"
+            r"if\(sceneLight\.castsShadow\)\s*"
+            r"shadowLights\.append\(sceneLight\);\s*"
+            r"if\(!cullingEnabled\s*\|\|\s*frustum\.intersectsSphere",
+            re.DOTALL,
+        ))
+        self.assertRegex(collection, re.compile(
+            r"sceneLight\.castsShadow = true;\s*"
+            r"shadowLights\.append\(sceneLight\);\s*"
+            r"if\(!cullingEnabled\s*\|\|\s*frustum\.intersectsSphere",
+            re.DOTALL,
+        ))
+        self.assertNotIn("shadowLights.resize", collection)
+
+        self.assertIn(
+            "environment.sunStrength, shadowLights, cameraPivot)", view
+        )
+        self.assertIn(
+            "renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,",
+            view,
+        )
 
     def test_shadow_enabled_point_lights_drive_the_shadow_projection(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")

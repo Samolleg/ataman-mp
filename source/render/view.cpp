@@ -5256,6 +5256,7 @@ void CView::draw()
     ei::gl::Clear(GL_COLOR_BUFFER_BIT);
 
     QVector<ei::SScenePointLight> sceneLights;
+    QVector<ei::SScenePointLight> shadowLights;
     if(environmentEnabled && sceneLightsEnabled)
     {
         for(CMob* mob : m_aMob)
@@ -5271,29 +5272,38 @@ void CView::draw()
                     // coordinate before the light is registered. Torch lights
                     // use their particle pivot directly and do not get this lift.
                     const QVector3D runtimePosition = position + QVector3D(0.0f, 0.0f, 2.0f);
-                    if(light->range() > 0.0f && (!cullingEnabled
-                            || frustum.intersectsSphere(runtimePosition, light->range())))
+                    if(light->range() > 0.0f)
                     {
                         ei::SScenePointLight sceneLight;
                         sceneLight.position = runtimePosition;
                         sceneLight.color = light->lightColor();
                         sceneLight.range = light->range();
                         sceneLight.castsShadow = light->shadowEnabled();
-                        sceneLights.append(sceneLight);
+                        if(sceneLight.castsShadow)
+                            shadowLights.append(sceneLight);
+                        if(!cullingEnabled
+                                || frustum.intersectsSphere(runtimePosition,
+                                                            sceneLight.range))
+                            sceneLights.append(sceneLight);
                     }
                 }
                 else if(CTorch* torch = dynamic_cast<CTorch*>(node))
                 {
                     const float range = torch->power() * 10.0f;
                     const QVector3D position = torch->particleWorldPosition();
-                    if(range > 0.0f && (!cullingEnabled
-                            || frustum.intersectsSphere(position, range)))
+                    if(range > 0.0f)
                     {
                         ei::SScenePointLight sceneLight;
                         sceneLight.position = position;
                         sceneLight.color = QVector3D(0.8f, 0.8f, 0.8f);
                         sceneLight.range = range;
-                        sceneLights.append(sceneLight);
+                        // Native torches register an ordinary point light and
+                        // do not opt out of projected-shadow participation.
+                        sceneLight.castsShadow = true;
+                        shadowLights.append(sceneLight);
+                        if(!cullingEnabled
+                                || frustum.intersectsSphere(position, range))
+                            sceneLights.append(sceneLight);
                     }
                 }
             }
@@ -5496,7 +5506,7 @@ void CView::draw()
             renderQueue.setShadowOnlyCollection(true);
             const QVector3D shadowSweep = ei::shadowProjectionDirection(
                 environment.sunDirection, environment.sunColor,
-                environment.sunStrength, sceneLights, cameraPivot)
+                environment.sunStrength, shadowLights, cameraPivot)
                 * maximumShadowDistance;
             for(CMob* mob : m_aMob)
             {
@@ -5542,7 +5552,7 @@ void CView::draw()
             renderQueue.setShadowOnlyCollection(false);
         }
         const bool shadowReady = environmentEnabled && shadowsEnabled
-            && renderShadowMap(cameraPosition, cameraPivot, environment, sceneLights,
+            && renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,
                                renderQueue, maximumShadowDistance);
         drawTerrainColor(shadowReady);
         renderQueue.flush();

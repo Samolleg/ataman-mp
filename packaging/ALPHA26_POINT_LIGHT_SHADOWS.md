@@ -1,4 +1,4 @@
-# Alpha 26 point-light shadows test
+# Alpha 26 point-light shadows revision 2 test
 
 ## What changed
 
@@ -6,6 +6,11 @@
   attenuation, and direction to the projected scene shadow.
 - Turning **Cast shadows** off leaves that light's illumination visible but
   removes its influence from the shadow direction.
+- Torch-generated point lights now participate in the combined projected
+  shadow by default.
+- Shadow-producing lights remain eligible when the camera rotates away from
+  the light itself; color-light frustum culling no longer changes shadow
+  ownership.
 - Off-screen caster collection follows the same combined light direction.
 
 The existing sun cascades, static/dynamic cache cadence, NVIDIA overlay guard,
@@ -25,7 +30,13 @@ traversal.
    remains but the point light no longer steers the silhouette.
 5. Toggle it on again, move the light to the opposite side, and confirm the
    silhouette changes direction without disappearing or flickering.
-6. Check an ordinary outdoor scene to confirm sun shadows still render, then
+6. In Zone 11, inspect ordinary torches beside visible casters and confirm
+   their projected shadows respond without adding a **Cast shadows** property
+   to the torch record.
+7. With light 121 influencing nearby shadows, orbit the camera through a full
+   rotation without moving the pivot. Confirm the shadow direction does not
+   snap back to the sun when the light leaves the viewport.
+8. Check an ordinary outdoor scene to confirm sun shadows still render, then
    start the ANGLE compatibility launcher and confirm Unlit/Simple shading
    remain usable without shadow-atlas warnings or a white viewport.
 
