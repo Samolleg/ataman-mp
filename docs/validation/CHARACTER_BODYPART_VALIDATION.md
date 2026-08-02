@@ -102,7 +102,8 @@ model, hair variant, or helmet geometry warns when it reaches the same runtime
 fallback. Across all 157 audited JMV MOBs, 179 hairless omissions are now
 excluded, two Import-local omissions remain unclassified, and all 105
 hair-bearing candidates have the required native-hair and helmet members with
-no helmet-specific hair replacement. Those 105 reach the same unsafe fallback.
+no helmet-specific hair replacement. Those 105 reach the same missing-base
+fallback that retains native hair.
 Geometry checks found intersections at every morph extreme for the current
 human and orc candidate pairs. Most current skeleton pairs also intersect at
 every extreme; two helmet pairs are complexion-dependent, so the finding says
