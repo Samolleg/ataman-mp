@@ -521,7 +521,7 @@ void CLandscape::applyTerrainShadowUniforms(QOpenGLShaderProgram* program,
 }
 
 void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
-                                               bool enabled)
+                                               bool enabled, bool allowRebuild)
 {
     const int gridWidth = int(widthInWorldUnits()) + 1;
     const int gridHeight = int(heightInWorldUnits()) + 1;
@@ -549,7 +549,7 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
     {
         const STerrainShadowFieldResult result = m_terrainShadowFuture.result();
         m_terrainShadowFutureActive = false;
-        const bool stillDesired = m_terrainShadowDesiredEnabled
+        const bool stillDesired = allowRebuild && m_terrainShadowDesiredEnabled
             && m_terrainShadowFutureGeneration == m_terrainShadowDesiredGeneration
             && m_terrainShadowFutureGeneration == m_shadowGeneration
             && QVector3D::dotProduct(m_terrainShadowFutureDirection,
@@ -580,6 +580,12 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
     if(m_terrainShadowFieldEnabled
             && m_terrainShadowFieldGeneration == m_shadowGeneration
             && QVector3D::dotProduct(normalized, m_terrainShadowSunDirection) > 0.99999f)
+        return;
+
+    // A stroke can advance the terrain generation dozens of times per second.
+    // Keep sampling the pre-stroke snapshot and calculate only the final field;
+    // publishing every complete intermediate field looks like a full-scene flash.
+    if(!allowRebuild)
         return;
 
     // Slider changes coalesce behind the one immutable worker. The last complete

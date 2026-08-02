@@ -1270,7 +1270,10 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
             selectionOnly = dynamic_cast<const CSelectionCommand*>(
                 m_pUndoStack->command(commandIndex)) != nullptr;
         if(!selectionOnly)
+        {
             refreshMobDirtyStates();
+            m_spatialIndexDirty = true;
+        }
         bool navigationChange = false;
         for(int commandIndex = first; !navigationChange && commandIndex < last;
             ++commandIndex)
@@ -1282,11 +1285,6 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
         if(navigationChange)
             scheduleAiGraphPreviewRegeneration();
         m_lastUndoStackIndex = index;
-        m_spatialIndexDirty = true;
-    });
-    connect(this, &CView::selectionChanged, this, [this]()
-    {
-        m_spatialIndexDirty = true;
     });
 
     m_pProgress = pProgress;
@@ -2309,7 +2307,6 @@ void CView::rebuildSpatialIndices()
         {
             if(!node || node->isMarkDeleted() || node->nodeState() == ENodeState::eHidden)
                 continue;
-            const bool selected = node->nodeState() == ENodeState::eSelect;
             CBox bounds = node->getBBox();
             const QVector3D center = bounds.center() + node->drawPosition();
             const float radius = bounds.radius();
@@ -2326,7 +2323,7 @@ void CView::rebuildSpatialIndices()
             }
             if(invalid || oversized)
                 overflow.append(node);
-            if(selected || invalid)
+            if(invalid)
                 grid->insert(node, node->drawPosition(), 0.0f, true);
             else
                 grid->insert(node, center, radius);
@@ -5594,7 +5591,8 @@ void CView::draw()
         m_weatherRegion);
     if(m_pLand && m_pLand->isMprLoad())
         m_pLand->updateTerrainShadowVisibility(
-            environment.sunDirection, terrainShadowsEnabled);
+            environment.sunDirection, terrainShadowsEnabled,
+            !m_sculptStrokeActive);
     syncEnvironmentPreviewWidget(environment.timeHours);
     // Fill the open lower edge of the stock sky cylinder with the same color
     // that distant geometry converges to. This removes the editor-only black

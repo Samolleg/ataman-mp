@@ -115,7 +115,8 @@ public:
     const QString& mapName() const {return m_innerMapName;}
     quint64 shadowGeneration() const { return m_shadowGeneration; }
     void invalidateTerrainShadowField();
-    void updateTerrainShadowVisibility(const QVector3D& sunDirection, bool enabled);
+    void updateTerrainShadowVisibility(const QVector3D& sunDirection, bool enabled,
+                                       bool allowRebuild = true);
     void applyTerrainShadowUniforms(QOpenGLShaderProgram* program, bool enabled);
 
 private:

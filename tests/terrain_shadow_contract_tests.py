@@ -48,6 +48,20 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("m_terrainShadowFuture.isFinished()", landscape_cpp)
         self.assertIn("uploadTerrainShadowTexture", landscape_cpp)
 
+    def test_sculpt_stroke_retains_one_complete_shadow_snapshot(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+
+        update_call = view.split("updateTerrainShadowVisibility(", 1)[1].split(");", 1)[0]
+        self.assertIn("!m_sculptStrokeActive", update_call)
+        update = landscape.split(
+            "void CLandscape::updateTerrainShadowVisibility", 1)[1].split(
+                "void CLandscape::drawWater", 1)[0]
+        self.assertIn("if(!allowRebuild)", update)
+        self.assertLess(update.index("if(!allowRebuild)"),
+                        update.index("QtConcurrent::run"))
+        self.assertIn("allowRebuild && m_terrainShadowDesiredEnabled", update)
+
     def test_terrain_generation_and_toggle_invalidate_visibility_field(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
         landscape = (ROOT / "source/render/landscape.h").read_text(encoding="utf-8")
@@ -114,6 +128,22 @@ class TerrainShadowContractTests(unittest.TestCase):
                 "void RenderQueueContext::flushShadow", 1)[0]
         self.assertIn("QVector<QByteArray> casterRecords", fingerprint)
         self.assertIn("std::sort(casterRecords.begin(), casterRecords.end())", fingerprint)
+
+    def test_selection_never_rewrites_shadow_spatial_bounds(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+
+        rebuild = view.split("void CView::rebuildSpatialIndices()", 1)[1].split(
+            "QVector<CNode*> CView::spatiallyVisibleNodes", 1)[0]
+        self.assertIn("grid->insert(node, center, radius)", rebuild)
+        self.assertNotIn("const bool selected", rebuild)
+        self.assertNotIn("if(selected", rebuild)
+
+        self.assertNotIn("connect(this, &CView::selectionChanged", view)
+        undo_hook = view.split("connect(m_pUndoStack", 1)[1].split(
+            "m_pProgress = pProgress", 1)[0]
+        selection_undo = undo_hook.split(
+            "if(!selectionOnly)", 1)[1].split("}", 1)[0]
+        self.assertIn("m_spatialIndexDirty = true", selection_undo)
 
     def test_sector_geometry_never_owns_terrain_shadow_visibility(self):
         landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
