@@ -2010,6 +2010,104 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     }
     corrections.update(r69_corrections.get(namespace, {}))
 
+    # R70 follow-up review.  Only explicit corner identities are recorded
+    # here.  The reviewer's deliberately uncertain ground/soil corners and the
+    # contradictory bz11k slot 480 SE answer remain unchanged for the next
+    # visual questionnaire.  Byte-identical atlas owners receive the same
+    # corrections; visually related but byte-distinct atlases do not.
+    r70_corrections = {
+        "bz11k": {
+            (246, 0): 16, (346, 2): 1, (450, 1): 6,
+            (281, 0): 8,
+            (377, 0): 1, (377, 1): 16, (377, 2): 16, (377, 3): 16,
+            (480, 0): 16, (480, 1): 1, (480, 3): 10,
+            (491, 2): 1, (491, 3): 10,
+        },
+        "zone14": {
+            (246, 0): 16, (346, 2): 1, (450, 1): 6,
+            (281, 0): 8,
+            (377, 0): 1, (377, 1): 16, (377, 2): 16, (377, 3): 16,
+            (480, 0): 16, (480, 1): 1, (480, 3): 10,
+            (491, 2): 1, (491, 3): 10,
+        },
+        "bz13h": {
+            (12, 0): 4, (12, 1): 2, (12, 2): 2, (12, 3): 2,
+            (408, 0): 3, (408, 1): 11, (408, 2): 3, (408, 3): 11,
+        },
+        "zone15": {
+            (12, 0): 4, (12, 1): 2, (12, 2): 2, (12, 3): 2,
+            (408, 0): 3, (408, 1): 11, (408, 2): 3, (408, 3): 11,
+        },
+        "bz4g": {
+            (204, 0): 18, (204, 1): 18, (204, 2): 18, (204, 3): 18,
+        },
+        "zone4": {
+            (204, 0): 18, (204, 1): 18, (204, 2): 18, (204, 3): 18,
+        },
+        "bz16h": {
+            (480, 1): 8, (480, 2): 8,
+        },
+        "bz5g": {
+            (212, 3): 2, (229, 0): 1,
+        },
+        "zone8": {
+            (212, 3): 2, (229, 0): 1,
+        },
+        "zone10": {(439, 0): 1},
+        "zone18": {
+            (480, 1): 8, (480, 2): 8,
+        },
+        "zone19": {
+            (46, 0): 1, (46, 1): 1, (46, 2): 5, (46, 3): 5,
+            (59, 0): 1, (59, 1): 1, (59, 2): 1, (59, 3): 5,
+        },
+    }
+    corrections.update(r70_corrections.get(namespace, {}))
+
+    # The R70 reviewer identified this Zone18 visual identity as the existing
+    # Paving / Sand ruins material.  Other similarly named atlases are
+    # byte-distinct and remain unchanged pending direct comparison.
+    if namespace == "zone18":
+        family_renames[7] = "Paving / Sand ruins"
+
+    # R71 anchor review.  Mixed/false-uniform families are not globally
+    # propagated from a single corner choice: only the explicitly named
+    # quarters and byte-identical atlas owners are changed here.  The next
+    # questionnaire expands the remaining Stone / Grayish ownership and the
+    # purported Ground / Mountainous and Rock / Black uniform anchors.
+    r71_corrections = {
+        "bz11k": {
+            (182, 3): 16,
+            (431, 0): 1,
+            (470, 0): 1,
+            (480, 2): 8,
+        },
+        "zone14": {
+            (182, 3): 16,
+            (431, 0): 1,
+            (470, 0): 1,
+            (480, 2): 8,
+        },
+        "bz4g": {
+            (169, 3): 18, (185, 3): 18, (195, 3): 18,
+        },
+        "zone4": {
+            (169, 3): 18, (185, 3): 18, (195, 3): 18,
+        },
+        "bz16h": {(480, 3): 2},
+        "zone18": {(480, 0): 4, (480, 3): 2},
+    }
+    corrections.update(r71_corrections.get(namespace, {}))
+
+    r71_renames = {
+        "bz11k": {10: "Rock / Black"},
+        "zone14": {10: "Rock / Black"},
+        "bz13h": {7: "Sand / Yellow"},
+        "zone15": {7: "Sand / Yellow"},
+        "zone19": {5: "Sand / Yellow"},
+    }
+    family_renames.update(r71_renames.get(namespace, {}))
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)

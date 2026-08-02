@@ -5791,7 +5791,7 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     // Keep this count pinned to the reviewed semantic-atlas catalog. A change
     // means a family crossed the paint-brush/transition-support boundary and
     // must be visually audited before the palette consumes it.
-    QCOMPARE(transitionSupportFamilies, 45);
+    QCOMPARE(transitionSupportFamilies, 43);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -5872,10 +5872,10 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    // Keep this pinned to the reviewed R67 global palette. The name-only
-    // cross-atlas consolidations reduce three global identities without
-    // changing signatures, bindings, layers, or per-map underwater roles.
-    QCOMPARE(landFamilyCount, 70);
+    // Keep this pinned to the reviewed R71 global palette. Exact-corner review
+    // promoted two additional land identities to structurally proven uniform
+    // paint sources without changing the catalog's total family count.
+    QCOMPARE(landFamilyCount, 72);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
