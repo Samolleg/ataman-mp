@@ -391,6 +391,8 @@ struct SBodyPartContext
 {
     QString model;
     QStringList armor;
+    int hairIndex = -1;
+    QSet<int> helmetGeometry;
     bool wearable = false;
 };
 
@@ -409,6 +411,7 @@ SBodyPartContext bodyPartContext(
         if(monster != database->monsters.constEnd())
         {
             context.armor = monster->wears;
+            context.hairIndex = monster->hairIndex;
             const auto race = database->raceModels.constFind(monster->baseRace.trimmed().toLower());
             if(race != database->raceModels.constEnd())
             {
@@ -425,6 +428,29 @@ SBodyPartContext bodyPartContext(
                          && !standardWearableAssembly(databaseModel)))
                         context.model = databaseModel;
                 }
+            }
+        }
+    }
+    if(!database.isNull())
+    {
+        for(const QString& reference : context.armor)
+        {
+            const QString folded = reference.toCaseFolded();
+            const auto direct = database->items.constFind(itemPrototype(reference));
+            if(direct != database->items.constEnd()
+               && direct->category.compare("armor", Qt::CaseInsensitive) == 0
+               && direct->type.compare("helm", Qt::CaseInsensitive) == 0
+               && direct->textureType1 >= 0)
+                context.helmetGeometry.insert(direct->textureType1);
+            for(auto item = database->items.constBegin(); item != database->items.constEnd(); ++item)
+            {
+                if(item->category.compare("armor", Qt::CaseInsensitive) != 0
+                   || item->type.compare("helm", Qt::CaseInsensitive) != 0)
+                    continue;
+                const QString marker = item.key().toCaseFolded() + ".";
+                if((folded.startsWith(marker) || folded.contains("." + marker))
+                   && item->textureType1 >= 0)
+                    context.helmetGeometry.insert(item->textureType1);
             }
         }
     }
@@ -483,69 +509,22 @@ bool hasHairSelection(const SMobObjectSnapshot& object)
         [](const QString& part) { return isHairPart(part); });
 }
 
-QStringList canonicalStrings(const QStringList& values, bool omitHair = false)
-{
-    QStringList result;
-    for(const QString& value : values)
-    {
-        if(omitHair && isHairPart(value))
-            continue;
-        result.append(value.trimmed().toCaseFolded());
-    }
-    std::sort(result.begin(), result.end());
-    return result;
-}
-
-bool confirmedZone3MissingHairFingerprint(
-    const SMobObjectSnapshot& object, const SBodyPartContext& context,
-    const QString& profileId)
+bool confirmedMissingHairDependency(const SMobObjectSnapshot& object,
+                                    const SBodyPartContext& context,
+                                    const QString& profileId)
 {
     const bool jmv = profileId.contains("jamais", Qt::CaseInsensitive)
         || profileId.compare("jmv", Qt::CaseInsensitive) == 0;
-    if(!jmv || object.importMode
-       || object.prototype.compare("Human Gipath NPC Boss F5",
-                                   Qt::CaseInsensitive) != 0
-       || context.model.compare("unhuma", Qt::CaseInsensitive) != 0)
-        return false;
-    static const QStringList confirmedMask = canonicalStrings({
-        "bd", "hd", "hp", "lh1", "lh2", "lh3", "ll1", "ll2", "ll3",
-        "rh1", "rh2", "rh3", "rl1", "rl2", "rl3"
-    });
-    return canonicalStrings(object.bodyParts) == confirmedMask;
-}
-
-bool hasMatchingHairControl(
-    const SMobObjectSnapshot& object, const SBodyPartContext& context,
-    const SMobFamilyMember& owningMember,
-    const QVector<SMobFamilyMember>& familyMembers,
-    const SMobFamilyValidationRequest& request)
-{
-    if(object.prototype.trimmed().isEmpty())
-        return false;
-    const QStringList targetParts = canonicalStrings(object.bodyParts, true);
-    const QStringList targetArmor = canonicalStrings(context.armor);
-    for(const SMobFamilyMember& member : familyMembers)
-    {
-        if(member.missing || !member.error.isEmpty()
-           || member.activeRuntimeFamily != owningMember.activeRuntimeFamily)
-            continue;
-        for(const SMobObjectSnapshot& peer : member.objects)
-        {
-            if(!peer.unit || !peer.hasBodyParts || peer.bodyParts.isEmpty()
-               || !peer.bodyParts.contains("hr", Qt::CaseInsensitive)
-               || peer.prototype.compare(object.prototype, Qt::CaseInsensitive) != 0
-               || peer.importMode != object.importMode)
-                continue;
-            const SBodyPartContext peerContext = bodyPartContext(
-                peer, request.database, request.profileId);
-            if(peerContext.model.compare(context.model, Qt::CaseInsensitive) != 0
-               || canonicalStrings(peerContext.armor) != targetArmor
-               || canonicalStrings(peer.bodyParts, true) != targetParts)
-                continue;
-            return true;
-        }
-    }
-    return false;
+    // The confirmed failure is tied to the resolved visual request, not a map,
+    // prototype, NID, or neighboring control object.  The fingerprinted JMV
+    // runtime combines unhuma hair 01 with helmet geometry 06; the shipped
+    // assembly leaves that hair visibly participating in the helmeted head.
+    // Keep other hair/helmet tuples diagnostic-only until independently
+    // controlled, because shipped masks prove that missing hr is often benign.
+    return jmv && !object.importMode
+        && context.model.compare("unhuma", Qt::CaseInsensitive) == 0
+        && context.hairIndex == 1
+        && context.helmetGeometry.contains(6);
 }
 
 void appendBodyPartFinding(CMobFamilyValidationReport* report,
@@ -569,7 +548,6 @@ void appendBodyPartFinding(CMobFamilyValidationReport* report,
 
 void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
                             const SMobFamilyMember& member,
-                            const QVector<SMobFamilyMember>& familyMembers,
                             CMobFamilyValidationReport* report)
 {
     static const QStringList coreParts = {
@@ -652,12 +630,10 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
 
         if(!hasHairSelection(object)
            && hasHelmet(context.armor, request.database)
-           && confirmedZone3MissingHairFingerprint(
-                object, context, request.profileId)
-           && hasMatchingHairControl(object, context, member, familyMembers, request))
+           && confirmedMissingHairDependency(object, context, request.profileId))
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
                 "mob.semantic.missing_hair_selection",
-                subject + ": missing 'hr' in the confirmed zone3 helmet mask; this can clip in-game.");
+                subject + ": missing 'hr' for hair 01 with helmet 06.");
     }
 }
 }
@@ -1113,7 +1089,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     {
         if(member.missing || !member.error.isEmpty())
             continue;
-        appendBodyPartFindings(request, member, report.members, &report);
+        appendBodyPartFindings(request, member, &report);
         if(member.activeRuntimeFamily && member.magicTrapCount > 0
            && !member.hasDiplomacyTable)
         {

@@ -83,7 +83,8 @@ QByteArray mobWithUnits(const QList<QByteArray>& units)
 
 QSharedPointer<const ei::SProfileDatabaseSnapshot> wearableDatabase(
     const QString& prototype, const QString& model, const QStringList& wears,
-    int hairIndex = -1)
+    int hairIndex = -1, const QString& helmetPrototype = "helmet",
+    int helmetGeometry = -1)
 {
     QSharedPointer<ei::SProfileDatabaseSnapshot> database(new ei::SProfileDatabaseSnapshot);
     database->profileId = "test";
@@ -100,9 +101,10 @@ QSharedPointer<const ei::SProfileDatabaseSnapshot> wearableDatabase(
     race.model = model;
     database->raceModels.insert(monster.baseRace.toLower(), race);
     ei::SItemDatabaseRecord helmet;
-    helmet.name = "helmet";
+    helmet.name = helmetPrototype;
     helmet.category = "armor";
     helmet.type = "helm";
+    helmet.textureType1 = helmetGeometry;
     database->items.insert(helmet.name.toLower(), helmet);
     return database;
 }
@@ -179,6 +181,8 @@ private slots:
     void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
     void magicTrapRequiresContainingMobDiplomacy();
     void zone3HelmetMissingHairSelectionIsReported();
+    void sameHairHelmetCombinationOutsideZone3IsReported();
+    void otherHelmetGeometryDoesNotReportMissingHair();
     void hairlessHelmetedTemplateDoesNotReportMissingHair();
     void unconfirmedAuthoredHairPeerDoesNotReportMissingHair();
     void wearableAllPartsMasksAreCriticalButCreatureMasksAreIgnored();
@@ -427,10 +431,10 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
     QVERIFY(directory.isValid());
     const QByteArray goodBytes = mobWithUnits({unitObject(
         3470, "Boss", "Human Gipath NPC Boss F5", "unhuma", false,
-        wearableParts(true), {"gipat brigand helm.tiger hide"})});
+        wearableParts(true), {"mhh.troll green"})});
     const QByteArray badBytes = mobWithUnits({unitObject(
         800004, "Boss-1000000004", "Human Gipath NPC Boss F5", "unhuma", false,
-        wearableParts(false), {"gipat brigand helm.tiger hide"})});
+        wearableParts(false), {"mhh.troll green"})});
     const QString good = writeMob(directory.path(), "zone3obr.mob", goodBytes);
     const QString bad = writeMob(directory.path(), "Autozone3obradd.mob", badBytes);
     QVERIFY(!good.isEmpty() && !bad.isEmpty());
@@ -442,7 +446,7 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
     request.explicitComposition = true;
     request.includeProfileWideMobs = false;
     request.database = wearableDatabase(
-        "Human Gipath NPC Boss F5", "unhuma", {"helmet.iron"}, 1);
+        "Human Gipath NPC Boss F5", "unhuma", {"mhh.troll green"}, 1, "mhh", 6);
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
 
     QVector<SMobFamilyFinding> matches;
@@ -454,7 +458,7 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
     QVERIFY(matches.first().hasNid);
     QCOMPARE(matches.first().nid, quint32(800004));
     QCOMPARE(matches.first().message,
-             QString("NID 800004: missing 'hr' in the confirmed zone3 helmet mask; this can clip in-game."));
+             QString("NID 800004: missing 'hr' for hair 01 with helmet 06."));
     QVERIFY(!matches.first().message.contains("Boss-1000000004"));
     QVERIFY(!matches.first().message.contains("Human Gipath NPC Boss F5"));
     QVERIFY(!matches.first().message.contains("serialized parts"));
@@ -466,6 +470,64 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
     QVERIFY(badFile.open(QIODevice::ReadOnly));
     QCOMPARE(goodFile.readAll(), goodBytes);
     QCOMPARE(badFile.readAll(), badBytes);
+}
+
+void MobFamilyValidationTests::sameHairHelmetCombinationOutsideZone3IsReported()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray bytes = mobWithUnits({unitObject(
+        44001, "later-map actor", "Human Open Helmet F1", "unhuma", false,
+        wearableParts(false), {"mhh.troll green"})});
+    const QString path = writeMob(directory.path(), "zone4.mob", bytes);
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "same-resolved-head-combination";
+    request.profileId = "jamais-vu";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase(
+        "Human Open Helmet F1", "unhuma", {"mhh.troll green"}, 1, "mhh", 6);
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "mob.semantic.missing_hair_selection"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
+    QCOMPARE(finding->message,
+             QString("NID 44001: missing 'hr' for hair 01 with helmet 06."));
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), bytes);
+}
+
+void MobFamilyValidationTests::otherHelmetGeometryDoesNotReportMissingHair()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray bytes = mobWithUnits({unitObject(
+        44002, "closed helmet actor", "Human Closed Helmet F1", "unhuma", false,
+        wearableParts(false), {"llh.troll green"})});
+    const QString path = writeMob(directory.path(), "helmet12.mob", bytes);
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "different-head-combination";
+    request.profileId = "jamais-vu";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase(
+        "Human Closed Helmet F1", "unhuma", {"llh.troll green"}, 1, "llh", 12);
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.missing_hair_selection"; }));
 }
 
 void MobFamilyValidationTests::hairlessHelmetedTemplateDoesNotReportMissingHair()

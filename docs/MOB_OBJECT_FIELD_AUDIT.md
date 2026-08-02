@@ -115,8 +115,8 @@ The validator also reports, without blocking load or save:
   `mob.semantic.wearable_all_parts_enabled` as Critical, report-only findings
   for standard wearable assemblies, while creature/integral empty masks remain
   accepted;
-- `mob.semantic.missing_hair_selection` only for the confirmed JMV zone3
-  profile/prototype/model/mask fingerprint with a matching `hr` control;
+- `mob.semantic.missing_hair_selection` only for the confirmed JMV resolved
+  `unhuma` hair-01/helmet-06 dependency, independent of map or prototype;
 - `mob.semantic.missing_core_bodyparts` for omitted standard non-hair anatomy;
   and
 - `mob.semantic.duplicate_bodypart_token` as Info while retaining exact order

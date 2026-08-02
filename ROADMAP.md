@@ -48,7 +48,8 @@ history. The permanent safety and compatibility rules are in
 ## Validation and recovery policy
 
 - [x] Add profile/family-aware, non-blocking character-mask diagnostics for
-  the fingerprinted zone3 helmet/hair clipping case, dangerous wearable empty/missing masks,
+  the verified JMV `unhuma` hair-01/helmet-06 dependency in any map,
+  dangerous wearable empty/missing masks,
   missing core anatomy, dotted alternative overlap, and duplicates while
   preserving unknown tokens and creature conventions
   ([validation](docs/validation/CHARACTER_BODYPART_VALIDATION.md)).

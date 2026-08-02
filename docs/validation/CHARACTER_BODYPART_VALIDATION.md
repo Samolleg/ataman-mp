@@ -10,6 +10,8 @@ Endurance's final-appearance preview as engine truth. The evidence set is:
 - a read-only correlation with the active Base/JMV Monster, RaceModels, and
   item records through Endurance's profile database providers;
 - the matched JMV `zone3obr.mob` / `Autozone3obradd.mob` control;
+- the fingerprinted executable's explicit-mask and database head-selection
+  behavior, independently checked against the shipped character assemblies;
 - the shipped JMV `zone12.mob` overlapping-alternative case; and
 - controlled runtime A/B fixtures for wearable empty masks.
 
@@ -63,6 +65,13 @@ same-template peer that includes `hr`. These shipped combinations show that
 neither a helmet, database hair index, nor a matching peer is enough to call an
 omission defective. Base has no candidates under the same audit.
 
+For a non-empty serialized mask, the audited runtime uses that explicit
+selection instead of regenerating the prototype's ordinary parts. Automatic
+database head selection distinguishes hairless prototypes (`hairIndex=-1`)
+from authored hair and combines authored hair with the selected helmet geometry.
+That makes the resolved model/hair/helmet tuple the relevant contract; the map,
+NID, prototype name, and presence of a peer are not runtime conditions.
+
 ## Matched controls
 
 The JMV files are fingerprinted as:
@@ -75,10 +84,19 @@ The JMV files are fingerprinted as:
 NID 3470 in the first file and NID 800004 in the second share the prototype
 `Human Gipath NPC Boss F5`. NID 3470 selects all 16 ordinary roots including
 `hr`; NID 800004 selects the same ordered set without `hr`. The latter equips a
-helmet and clips in the game. Endurance's normal-unit renderer can hide the
-defect because it rebuilds database anatomy before applying equipment. The
-validator therefore inspects serialized parts and actual equipment ownership,
-not the final preview.
+helmet and clips in the game. The active database resolves this actor to the
+JMV `unhuma` assembly, hair variant 01, and helmet geometry 06. The shipped
+assembly contains the corresponding `hr.01` and `hd.armor06` members, and a
+read-only mesh inspection confirms that hair participates visibly in this
+helmeted head. Endurance's normal-unit renderer can hide the defect because it
+rebuilds database anatomy before applying equipment. The validator therefore
+inspects serialized parts and the resolved database head combination, not the
+final preview.
+
+The rule is not tied to zone3: a unit with the same JMV `unhuma` / hair 01 /
+helmet 06 combination warns in zone4 or any other map. Across all 157 audited
+JMV MOBs, this resolved dependency selects exactly NID 800004; the other 285
+helmeted missing-hair masks remain unreported.
 
 JMV `zone12.mob` SHA-256
 `8C1A8AB373FD50EC915AB26C7308C012EE88EFC61F57733FDACF311A7461F2A8`
@@ -93,8 +111,8 @@ plus one dotted attachment for an overlap.
 |---|---|---|
 | Missing `OBJBODYPARTS` on a standard wearable assembly | Critical | Missing and explicit-empty masks enable all assembly members, including optional alternatives. Suggest comparison with a matched working unit; never repair automatically. |
 | Explicit empty mask on a standard wearable assembly | Critical | A controlled wearable A/B produced a runtime failure with the empty mask and ran after an authored explicit selection. Creature and legacy integral masks are excluded. |
-| Confirmed JMV zone3 missing-`hr` fingerprint | Warning | The unit must match the proven normal-unit profile, prototype, model, 15-root mask, helmet ownership, and otherwise identical same-template `hr` control. This keeps the observed clipping visible without generalizing to the many working missing-`hr` combinations. |
-| Any other helmeted unit without `hr`/`hr.NN` | No finding | The Base/JMV corpus and runtime observations do not support a general missing-hair warning. Keep the state lossless and require a controlled broken/working pair before adding another fingerprint. |
+| Confirmed JMV resolved head dependency without `hr` | Warning | A normal database unit resolves to `unhuma`, hair 01, and helmet geometry 06. This is independent of map/prototype/NID and follows the verified runtime request plus shipped mesh combination. |
+| Any other helmeted unit without `hr`/`hr.NN` | No finding | The Base/JMV corpus and runtime observations do not support a general missing-hair warning. Hairless prototypes and other resolved head combinations stay lossless and unreported until separately verified. |
 | Missing one of the 15 non-hair standard anatomy roots | Warning | Suspicious gap/clipping risk. This is corpus-backed anatomy, not a proven universal crash condition. |
 | Two distinct dotted alternatives in one logical equipment/anatomy slot | Warning | The zone12 case proves the state exists and is logically overlapping. Base roots plus one attachment are not competing alternatives. |
 | Duplicate token | Info | Suspicious redundancy only; order and duplicates remain exact. |
@@ -126,8 +144,9 @@ block Save, block Test Current Map, or open a body-part preflight popup.
 
 Automated and corpus checks:
 
-- `mob_family_validation_tests`: 17 passed, including the exact zone3 pair,
-  hairless and otherwise matched unconfirmed missing-`hr` exclusions,
+- `mob_family_validation_tests`: 19 passed, including the exact zone3 pair,
+  the same resolved dependency in a zone4 fixture, a different-helmet control,
+  hairless and otherwise unconfirmed missing-`hr` exclusions,
   empty/missing wearable masks, creature exclusion, Import/database equipment
   ownership, missing core anatomy, overlaps, duplicates, unknown-token
   visibility, severity, location, and input-byte preservation;
@@ -139,8 +158,8 @@ Automated and corpus checks:
 - installed zone12 probe required
   `mob.semantic.overlapping_unit_parts:6257` and passed.
 
-No automatic normalization is justified. The zone3 hair warning is an explicit
-evidence fingerprint, not a general anatomy rule. Missing-core severity and the
-danger of particular dotted pairs beyond the matched cases remain
-evidence-labeled diagnostics until controlled runtime comparisons establish a
-narrower contract.
+No automatic normalization is justified. The hair warning is a verified
+resolved visual dependency, not a zone rule or general anatomy rule.
+Missing-core severity and the danger of particular dotted pairs beyond the
+matched cases remain evidence-labeled diagnostics until controlled runtime
+comparisons establish a narrower contract.

@@ -90,6 +90,35 @@ bool hasHelmet(const QStringList& armor,
     return false;
 }
 
+QSet<int> helmetGeometry(const QStringList& armor,
+                         const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database)
+{
+    QSet<int> result;
+    if(database.isNull())
+        return result;
+    for(const QString& reference : armor)
+    {
+        const QString folded = reference.toCaseFolded();
+        const auto direct = database->items.constFind(itemPrototype(reference));
+        if(direct != database->items.constEnd()
+           && direct->category.compare("armor", Qt::CaseInsensitive) == 0
+           && direct->type.compare("helm", Qt::CaseInsensitive) == 0
+           && direct->textureType1 >= 0)
+            result.insert(direct->textureType1);
+        for(auto item = database->items.constBegin(); item != database->items.constEnd(); ++item)
+        {
+            if(item->category.compare("armor", Qt::CaseInsensitive) != 0
+               || item->type.compare("helm", Qt::CaseInsensitive) != 0
+               || item->textureType1 < 0)
+                continue;
+            const QString marker = item.key().toCaseFolded() + ".";
+            if(folded.startsWith(marker) || folded.contains("." + marker))
+                result.insert(item->textureType1);
+        }
+    }
+    return result;
+}
+
 QString canonicalList(QStringList values, bool omitHair = false)
 {
     QStringList folded;
@@ -133,11 +162,7 @@ void printMissingHairTemplateStats(
     int hairless = 0;
     int unknown = 0;
     int matchingControls = 0;
-    int confirmedFingerprints = 0;
-    const QString confirmedMask = canonicalList({
-        "bd", "hd", "hp", "lh1", "lh2", "lh3", "ll1", "ll2", "ll3",
-        "rh1", "rh2", "rh3", "rl1", "rl2", "rl3"
-    });
+    int confirmedDependencies = 0;
     QSet<QString> hairControls;
     for(const SMobFamilyMember& member : members)
         for(const SMobObjectSnapshot& object : member.objects)
@@ -170,6 +195,21 @@ void printMissingHairTemplateStats(
             if(!hasHelmet(armor, database))
                 continue;
 
+            QString resolvedModel = object.model.trimmed().toLower();
+            if(monster && !database.isNull())
+            {
+                const auto race = database->raceModels.constFind(
+                    monster->baseRace.trimmed().toLower());
+                if(race != database->raceModels.constEnd())
+                    resolvedModel = race->model.trimmed().toLower();
+            }
+            const QSet<int> helmetTtis = helmetGeometry(armor, database);
+            QList<int> sortedHelmetTtis = helmetTtis.values();
+            std::sort(sortedHelmetTtis.begin(), sortedHelmetTtis.end());
+            QStringList helmetTtiText;
+            for(int tti : sortedHelmetTtis)
+                helmetTtiText.append(QString::number(tti));
+
             const QString hair = monster ? QString::number(monster->hairIndex)
                                          : QString("unknown");
             if(!monster) ++unknown;
@@ -178,29 +218,28 @@ void printMissingHairTemplateStats(
             const bool matchingControl =
                 hairControls.contains(hairPeerKey(object, database));
             matchingControls += matchingControl ? 1 : 0;
-            const bool confirmedFingerprint = matchingControl
-                && !object.importMode
-                && object.prototype.compare("Human Gipath NPC Boss F5",
-                                            Qt::CaseInsensitive) == 0
-                && object.model.compare("unhuma", Qt::CaseInsensitive) == 0
-                && canonicalList(object.bodyParts) == confirmedMask;
-            confirmedFingerprints += confirmedFingerprint ? 1 : 0;
+            const bool confirmedDependency = !object.importMode && monster
+                && resolvedModel == "unhuma" && monster->hairIndex == 1
+                && helmetTtis.contains(6);
+            confirmedDependencies += confirmedDependency ? 1 : 0;
             out << "MISSING_HAIR_TEMPLATE file=" << member.fileName
                 << " nid=" << (object.hasNid ? QString::number(object.nid)
                                               : QString("missing"))
                 << " prototype=" << object.prototype
                 << " import=" << (object.importMode ? "true" : "false")
+                << " resolvedModel=" << resolvedModel
                 << " hairIndex=" << hair
+                << " helmetGeometry=" << helmetTtiText.join(',')
                 << " matchingControl=" << (matchingControl ? "true" : "false")
-                << " confirmedFingerprint="
-                << (confirmedFingerprint ? "true" : "false")
+                << " confirmedDependency="
+                << (confirmedDependency ? "true" : "false")
                 << "\n";
         }
     }
     out << "MISSING_HAIR_TEMPLATE_STATS authoredHair=" << authoredHair
         << " hairless=" << hairless << " unknown=" << unknown
         << " matchingControls=" << matchingControls
-        << " confirmedFingerprints=" << confirmedFingerprints << "\n";
+        << " confirmedDependencies=" << confirmedDependencies << "\n";
 }
 
 QSharedPointer<const ei::SProfileDatabaseSnapshot> loadDatabase(
