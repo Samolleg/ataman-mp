@@ -19,6 +19,9 @@ bool usesUnlayeredHumanoidTexture(const QString& partName);
 // resource-refresh path instead of being restatted for every map object.
 QString cachedResourceSourceFingerprint(const QVector<QString>& sources);
 void invalidateResourceSourceFingerprintCache();
+// Expands configured resource directories in the same first-match order as
+// the active mod's [RES] routing table, then appends unlisted archives.
+QVector<QString> orderedResourceSources(const QVector<QString>& explicitSources);
 
 }
 

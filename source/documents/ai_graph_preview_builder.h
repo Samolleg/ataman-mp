@@ -22,6 +22,7 @@ struct SAiGraphCollisionProxy
 {
     QVector<QVector2D> footprint;
     QVector<QVector3D> boxCorners;
+    quint8 upperFaceMask{0};
     float minimumZ{0.0f};
     float maximumZ{0.0f};
     EAiGraphObjectPassability passability{EAiGraphObjectPassability::Blocking};
@@ -65,6 +66,7 @@ struct SAiGraphPreviewBuildResult
     qint64 collisionRasterMilliseconds{0};
     qint64 routeBuildMilliseconds{0};
     QVector<float> navigationSurfaceHeights;
+    QVector<QVector<quint8>> layerPassability;
     QVector<quint8> humanPassability;
     QVector<quint8> bridgeMask;
     QStringList warnings;
@@ -73,6 +75,16 @@ struct SAiGraphPreviewBuildResult
                               float maximumDistance = 8.0f) const;
 };
 
+namespace ai_graph_internal {
+QVector<bool> graphCellCrossingCandidates(
+    const QVector<quint8>& quality, const QVector<int>& traversalEdgeCosts,
+    int aiWidth, int aiHeight, int graphX, int graphY);
+int elevationMultiplier(int heightDelta, float maximumTerrainHeight, bool flying);
+bool collisionSampleTakesOwnership(
+    bool hadPending, EAiGraphObjectPassability current,
+    bool candidateHasMaximum, EAiGraphObjectPassability candidate);
+}
+
 class CAiGraphPreviewBuilder
 {
 public:
@@ -80,6 +92,7 @@ public:
     static constexpr float AiTileWorldSize = 0.5f;
 
     static SAiGraphPreviewBuildResult build(const SAiGraphPreviewBuildInput& input);
+    static int quantizedWaterDepth(float worldDepth, float maximumTerrainHeight);
     static QVector<SAiTerrainTraversal> parseTerrainTraversalRegistry(
         const QByteArray& registry, QString* error = nullptr);
 };

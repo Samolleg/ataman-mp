@@ -1,11 +1,15 @@
 #include "resource_name.h"
 
 #include <QFileInfo>
+#include <QDir>
+#include <QFile>
 #include <QDateTime>
 #include <QHash>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QRegularExpression>
+#include <QSet>
+#include <QTextCodec>
 
 namespace {
 
@@ -83,6 +87,85 @@ void invalidateResourceSourceFingerprintCache()
 {
     QMutexLocker locker(&resourceFingerprintMutex());
     resourceFingerprintCache().clear();
+}
+
+QVector<QString> orderedResourceSources(const QVector<QString>& explicitSources)
+{
+    QVector<QString> directoryOrder;
+    QMap<QString, QVector<QString>> explicitByDirectory;
+    for(const QString& source : explicitSources)
+    {
+        const QFileInfo info(source);
+        const QString directory = info.isDir() ? info.absoluteFilePath()
+                                               : info.absolutePath();
+        const QString key = QDir::cleanPath(directory).toLower();
+        if(!explicitByDirectory.contains(key))
+            directoryOrder.append(directory);
+        if(info.isFile())
+            explicitByDirectory[key].append(info.absoluteFilePath());
+    }
+
+    QVector<QString> result;
+    QSet<QString> seen;
+    const auto appendUnique = [&result, &seen](const QString& path)
+    {
+        const QString absolute = QFileInfo(path).absoluteFilePath();
+        const QString key = QDir::cleanPath(absolute).toLower();
+        if(seen.contains(key))
+            return;
+        seen.insert(key);
+        result.append(absolute);
+    };
+
+    for(const QString& directory : directoryOrder)
+    {
+        const QString key = QDir::cleanPath(directory).toLower();
+        for(const QString& source : explicitByDirectory.value(key))
+            appendUnique(source);
+
+        // Mod resource overrides are first-match. Preserve duplicate-key order
+        // from config.ini instead of alphabetizing the directory and silently
+        // selecting a lower-priority archive with the same member name.
+        const QString configPath = QDir(directory).absoluteFilePath("../config.ini");
+        QFile config(configPath);
+        if(config.open(QIODevice::ReadOnly))
+        {
+            QTextCodec* codec = QTextCodec::codecForName("CP1251");
+            const QByteArray bytes = config.readAll();
+            const QString text = codec ? codec->toUnicode(bytes)
+                                       : QString::fromLocal8Bit(bytes);
+            bool resources = false;
+            for(const QString& rawLine : text.split(QRegularExpression("[\\r\\n]+")))
+            {
+                const QString line = rawLine.trimmed();
+                if(line.startsWith('[') && line.endsWith(']'))
+                {
+                    resources = line.mid(1, line.size() - 2)
+                        .compare("RES", Qt::CaseInsensitive) == 0;
+                    continue;
+                }
+                if(!resources || line.isEmpty() || line.startsWith(';')
+                   || line.startsWith('#'))
+                    continue;
+                const int equals = line.indexOf('=');
+                if(equals < 0)
+                    continue;
+                const QString relative = QDir::fromNativeSeparators(
+                    line.mid(equals + 1).trimmed());
+                const QString routed = QDir(QFileInfo(configPath).absolutePath())
+                    .absoluteFilePath(relative);
+                if(routed.endsWith(".res", Qt::CaseInsensitive)
+                   && QFileInfo(routed).isFile())
+                    appendUnique(routed);
+            }
+        }
+
+        const QDir resourceDirectory(directory);
+        for(const QFileInfo& archive : resourceDirectory.entryInfoList(
+                {"*.res"}, QDir::Files, QDir::Name | QDir::IgnoreCase))
+            appendUnique(archive.absoluteFilePath());
+    }
+    return result;
 }
 
 float textureUvScale(const QString& textureName)

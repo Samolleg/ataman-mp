@@ -415,6 +415,7 @@ private slots:
     void mobGraphOwnershipReplacementClosesRaceCheckBeforeCommit();
     void aiGraphPersistenceUsesExactMprBasenameAndReportsShadowing();
     void aiGraphPersistenceConfirmationNamesSourceAndNonUndoableSave();
+    void aiGraphPreviewSelectionNamesActualSource();
     void aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt();
     void aiGraphFileCommitIsValidatedBackedUpAndAtomic();
     void aiGraphOwnershipSwitchValidationNeverRewritesExternalFile();
@@ -719,6 +720,19 @@ void EnduranceDocumentTests::aiGraphPersistenceConfirmationNamesSourceAndNonUndo
     QVERIFY(notice.contains(QStringLiteral("create a backup")));
     QVERIFY(notice.contains(QStringLiteral("cannot be reversed")));
     QVERIFY(notice.contains(QStringLiteral("Edit > Undo")));
+}
+
+void EnduranceDocumentTests::aiGraphPreviewSelectionNamesActualSource()
+{
+    QCOMPARE(aiGraphPreviewSelectionLabel(
+                 true, QStringLiteral("Embedded: zone1.mob")),
+             QStringLiteral("Preview graph: Embedded"));
+    QCOMPARE(aiGraphPreviewSelectionLabel(
+                 true, QStringLiteral("External: zone1.grp")),
+             QStringLiteral("Preview graph: External"));
+    QCOMPARE(aiGraphPreviewSelectionLabel(
+                 false, QStringLiteral("Embedded: zone1.mob")),
+             QStringLiteral("Preview graph: Generated"));
 }
 
 void EnduranceDocumentTests::aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt()
@@ -3255,6 +3269,51 @@ void EnduranceDocumentTests::terrainSurfaceSamplingMatchesRuntimeCellSelection()
                              twoSectorTerrain(32767).mid(0, 1)));
     bool available = false;
     QCOMPARE(flat.terrainSurfaceHeight(4.25f, 7.75f, &available), 50.0f);
+    QVERIFY(available);
+    const float navigationHeight = flat.navigationHeightSample(
+        0, 0, ETerrainTileLayer::Land, &available);
+    QVERIFY(available);
+    QVERIFY(qAbs(navigationHeight - 32767.0f * 100.0f / 65534.0f) < 0.0001f);
+
+    // Runtime graph generation scales each source vertex first, combines the
+    // two quarter-weighted terms, and adds the half-weighted term last. These
+    // captured boundary cases round in opposite directions if interpolation
+    // is performed in raw-height space or in a different addition order.
+    const float runtimeMaximum = 50.00000762939453f;
+    const auto quantizedNavigationHeight = [runtimeMaximum](float world) {
+        const float scaled = world * 511.0f / runtimeMaximum;
+        return int(std::nearbyint(double(scaled)));
+    };
+    QByteArray roundsUpSector = syntheticLandSector(0);
+    setSyntheticLandVertex(&roundsUpSector, 0, 0, 0, 0, 14163);
+    setSyntheticLandVertex(&roundsUpSector, 1, 0, 0, 0, 13617);
+    setSyntheticLandVertex(&roundsUpSector, 0, 1, 0, 0, 14229);
+    STerrainSectorSource roundsUpSource;
+    roundsUpSource.sectorX = 0;
+    roundsUpSource.sectorY = 0;
+    roundsUpSource.memberName = "rounds-up.SEC";
+    roundsUpSource.payload = roundsUpSector;
+    CTerrainEditModel roundsUp;
+    QVERIFY(roundsUp.loadSources(1, 1, runtimeMaximum,
+                                 QVector<STerrainSectorSource>() << roundsUpSource));
+    QCOMPARE(quantizedNavigationHeight(roundsUp.navigationHeightSample(
+                 0, 0, ETerrainTileLayer::Land, &available)), 110);
+    QVERIFY(available);
+
+    QByteArray roundsDownSector = syntheticLandSector(0);
+    setSyntheticLandVertex(&roundsDownSector, 0, 0, 0, 0, 14090);
+    setSyntheticLandVertex(&roundsDownSector, 1, 0, 0, 0, 14136);
+    setSyntheticLandVertex(&roundsDownSector, 1, 1, 0, 0, 13810);
+    STerrainSectorSource roundsDownSource;
+    roundsDownSource.sectorX = 0;
+    roundsDownSource.sectorY = 0;
+    roundsDownSource.memberName = "rounds-down.SEC";
+    roundsDownSource.payload = roundsDownSector;
+    CTerrainEditModel roundsDown;
+    QVERIFY(roundsDown.loadSources(1, 1, runtimeMaximum,
+                                   QVector<STerrainSectorSource>() << roundsDownSource));
+    QCOMPARE(quantizedNavigationHeight(roundsDown.navigationHeightSample(
+                 1, 0, ETerrainTileLayer::Land, &available)), 109);
     QVERIFY(available);
 
     QByteArray triangleSector = syntheticLandSector(0);

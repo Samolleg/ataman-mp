@@ -44,6 +44,7 @@ struct SNavigationCollisionProxy
 {
     QVector<QVector2D> footprint;
     QVector<QVector3D> boxCorners;
+    quint8 upperFaceMask{0};
     float minimumZ{0.0f};
     float maximumZ{0.0f};
     ENavigationVolumeKind kind{ENavigationVolumeKind::Blocking};

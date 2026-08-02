@@ -48,6 +48,7 @@ public:
     QList<ei::CFigure*>& children() {return m_aChild; }
     void setName (const QString& name) {m_name = name; }
     QString& name() {return m_name;}
+    void setAssemblySourceOrder(int order) { m_assemblySourceOrder = order; }
     void setOffset(QVector<QVector3D>& offset) {m_offset = offset; }
     QVector<QVector3D>& offset() {return m_offset; }
     void getPartNames(QStringList& arrBodyParts);
@@ -90,6 +91,7 @@ private:
     int m_textureNumber{0};
     QString m_name;
     QString m_parentName;
+    int m_assemblySourceOrder{-1};
     QList<ei::CFigure*> m_aChild;
 
 };

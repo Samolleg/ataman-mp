@@ -1,4 +1,5 @@
 #include "ai_graph_preview_builder.h"
+#include "../core/map_object_placement_policy.h"
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -6,6 +7,7 @@
 #include <QtEndian>
 #include <QtMath>
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <queue>
 
@@ -41,6 +43,15 @@ const QPoint Star7[] = {
     QPoint(0, 1), QPoint(0, 2), QPoint(0, 3), QPoint(1, -2), QPoint(1, -1),
     QPoint(1, 0), QPoint(1, 1), QPoint(1, 2), QPoint(2, -2), QPoint(2, -1),
     QPoint(2, 0), QPoint(2, 1), QPoint(2, 2), QPoint(3, 0)};
+
+// Ordered exactly as the runtime gradient pass consumes them. Wide layers use
+// one selected offset; the largest layer consumes offsets 4 through 16.
+const QPoint RuntimeGradientOffsets[] = {
+    QPoint(1, 0), QPoint(-1, 0), QPoint(0, 1), QPoint(0, -1),
+    QPoint(2, 0), QPoint(1, -1), QPoint(1, 0), QPoint(1, 1),
+    QPoint(0, -2), QPoint(0, -1), QPoint(0, 0), QPoint(0, 1),
+    QPoint(0, 2), QPoint(-1, -1), QPoint(-1, 0), QPoint(-1, 1),
+    QPoint(-2, 0)};
 
 int tileIndex(int x, int y, int width) { return y * width + x; }
 
@@ -210,6 +221,15 @@ struct SIndexedCollisionTile
     int maximumHeight{0};
 };
 
+struct SPendingObjectCollision
+{
+    float minimumHeight{std::numeric_limits<float>::max()};
+    float maximumHeight{-std::numeric_limits<float>::max()};
+    bool hasMinimum{false};
+    bool hasMaximum{false};
+    int proxyIndex{-1};
+};
+
 struct SSampledCollisionInterval
 {
     float minimumHeight{std::numeric_limits<float>::max()};
@@ -217,6 +237,14 @@ struct SSampledCollisionInterval
     bool hasMinimum{false};
     bool hasMaximum{false};
 };
+
+bool collisionSampleTakesOwnership(
+    bool hadPending, EAiGraphObjectPassability current,
+    bool candidateHasMaximum, EAiGraphObjectPassability candidate)
+{
+    return !hadPending
+        || (candidateHasMaximum && int(candidate) < int(current));
+}
 
 QHash<int, SSampledCollisionInterval> sampleCollisionBoxFaces(
     const SAiGraphCollisionProxy& volume, int aiWidth, int aiHeight)
@@ -239,26 +267,32 @@ QHash<int, SSampledCollisionInterval> sampleCollisionBoxFaces(
         // walkable/top height; downward and side-facing samples establish the
         // lower height. Keeping those streams separate is especially important
         // at bridge ends, where a side-face-only cell is not a valid deck cell.
-        QVector3D normal = QVector3D::crossProduct(axisA, axisB);
-        if((face & 1) != 0)
-            normal = -normal;
-        const bool upperFace = normal.z() > 0.0f;
+        bool upperFace = (volume.upperFaceMask & quint8(1u << (face - 1))) != 0;
+        if(volume.upperFaceMask == 0)
+        {
+            QVector3D normal = QVector3D::crossProduct(axisA, axisB);
+            if((face & 1) != 0)
+                normal = -normal;
+            upperFace = normal.z() > 0.0f;
+        }
         const float projectedA = qSqrt(axisA.x() * axisA.x() + axisA.y() * axisA.y());
         const float projectedB = qSqrt(axisB.x() * axisB.x() + axisB.y() * axisB.y());
-        const int stepsA = qMax(2, qRound(projectedA / CAiGraphPreviewBuilder::AiTileWorldSize
-                                         * 1.5f) + 2);
-        const int stepsB = qMax(2, qRound(projectedB / CAiGraphPreviewBuilder::AiTileWorldSize
-                                         * 1.5f) + 2);
+        const int stepsA = qMax(2, int(std::nearbyint(double(projectedA
+            / CAiGraphPreviewBuilder::AiTileWorldSize * 1.5f))) + 2);
+        const int stepsB = qMax(2, int(std::nearbyint(double(projectedB
+            / CAiGraphPreviewBuilder::AiTileWorldSize * 1.5f))) + 2);
+        const QVector3D offsetA = axisA / float(stepsA);
+        const QVector3D offsetB = axisB / float(stepsB);
         for(int a = 0; a < stepsA; ++a)
             for(int b = 0; b < stepsB; ++b)
             {
                 const QVector3D point = center
-                    + axisA * ((float(a) + 0.5f) / float(stepsA))
-                    + axisB * ((float(b) + 0.5f) / float(stepsB));
-                const int x = int(std::floor(point.x()
-                    / CAiGraphPreviewBuilder::AiTileWorldSize));
-                const int y = int(std::floor(point.y()
-                    / CAiGraphPreviewBuilder::AiTileWorldSize));
+                    + float(a + 0.5f) * offsetA
+                    + float(b + 0.5f) * offsetB;
+                const int x = ei::runtimeAiTileCoordinate(
+                    point.x(), CAiGraphPreviewBuilder::AiTileWorldSize);
+                const int y = ei::runtimeAiTileCoordinate(
+                    point.y(), CAiGraphPreviewBuilder::AiTileWorldSize);
                 if(x < 0 || y < 0 || x >= aiWidth || y >= aiHeight)
                     continue;
                 SSampledCollisionInterval& interval = intervals[tileIndex(x, y, aiWidth)];
@@ -283,8 +317,19 @@ int quantizedHeight(float worldHeight, float maximumTerrainHeight,
     if(!qIsFinite(worldHeight) || !qIsFinite(maximumTerrainHeight)
        || maximumTerrainHeight <= 0.0f)
         return 0;
-    return qBound(0, qRound(worldHeight * float(MaximumAiHeight)
-                            / maximumTerrainHeight), maximumValue);
+    const float scaled = worldHeight * float(MaximumAiHeight)
+        / maximumTerrainHeight;
+    return qBound(0, int(std::nearbyint(double(scaled))), maximumValue);
+}
+
+int quantizedBridgeHeight(float worldHeight, float maximumTerrainHeight)
+{
+    if(!qIsFinite(worldHeight) || !qIsFinite(maximumTerrainHeight)
+       || maximumTerrainHeight <= 0.0f)
+        return 0;
+    const float scaled = worldHeight * float(MaximumAiHeight)
+        / maximumTerrainHeight;
+    return qBound(0, int(std::nearbyint(double(scaled))), MaximumObjectHeight);
 }
 
 int quantizedDepth(float worldDepth, float maximumTerrainHeight)
@@ -301,19 +346,24 @@ float dequantizedHeight(int height, float maximumTerrainHeight)
 
 int elevationMultiplier(int heightDelta, float maximumTerrainHeight, bool flying)
 {
-    const float worldDifference = qAbs(float(heightDelta))
-        * maximumTerrainHeight / float(MaximumAiHeight);
-    const float angle = qRadiansToDegrees(qAtan2(worldDifference,
-                                                  CAiGraphPreviewBuilder::AiTileWorldSize));
-    if(angle > (flying ? FlySlopeLimitDegrees : WalkSlopeLimitDegrees))
+    constexpr double Pi = 3.141592653589793238462;
+    const float zMultiplier = float(MaximumAiHeight) / maximumTerrainHeight;
+    const float worldDifference = std::fabs(float(heightDelta) / zMultiplier);
+    const float angleRadians = float(std::atan2(double(worldDifference),
+        double(CAiGraphPreviewBuilder::AiTileWorldSize)));
+    const float angleDegrees = std::fabs(float(double(angleRadians)
+        * (180.0f / Pi)));
+    if(angleDegrees > (flying ? FlySlopeLimitDegrees : WalkSlopeLimitDegrees))
         return -1;
     if(flying)
         return 1024;
-    const float sine = qSin(qDegreesToRadians(angle));
-    const float uphill = 1.0f + sine * sine;
-    const float multiplier = heightDelta < 0 ? 1.0f / uphill
-                                              : uphill * uphill;
-    return qRound(multiplier * 1024.0f);
+    const float radians = float(double(angleDegrees) * (Pi / 180.0f));
+    const double sine = std::sin(double(radians));
+    float multiplier = float((1.0 + sine * sine) * (1.0 + sine * sine));
+    if(heightDelta < 0)
+        multiplier = float(1.0 / std::sqrt(double(multiplier)));
+    const float scaled = multiplier * float(1 << 10);
+    return int(std::nearbyint(double(scaled)));
 }
 
 struct STilePassability
@@ -368,9 +418,10 @@ void applyObstacle(STilePassability* tile,
         ? 0 : 1;
     static const int hardCosts[2] = {290, 20};
     static const int speedCosts[2] = {7, 2};
-    tile->cost += qRound(float(hardCosts[passabilityIndex]) * fraction);
-    tile->speed = qRound(float(tile->speed)
-        * qExp(qLn(0.6f) * fraction * float(speedCosts[passabilityIndex])));
+    tile->cost += int(std::nearbyint(double(
+        float(hardCosts[passabilityIndex]) * fraction)));
+    tile->speed = int(std::nearbyint(double(float(tile->speed)
+        * qExp(qLn(0.6f) * fraction * float(speedCosts[passabilityIndex])))));
 }
 
 quint8 terrainClass(const STilePassability& tile)
@@ -450,6 +501,7 @@ void assignComponents(SAiGraphLayer* layer, int width, int height)
 }
 
 QVector<bool> graphCellCrossingCandidates(const QVector<quint8>& quality,
+                                          const QVector<int>& traversalEdgeCosts,
                                           int aiWidth, int aiHeight,
                                           int graphX, int graphY)
 {
@@ -486,7 +538,7 @@ QVector<bool> graphCellCrossingCandidates(const QVector<quint8>& quality,
                     const QPoint delta = CAiGraphDocument::directionDelta(direction);
                     const int nx = x + delta.x(), ny = y + delta.y();
                     if(nx < lowX || nx > highX || ny < lowY || ny > highY
-                       || !quality.at(tileIndex(nx, ny, aiWidth)))
+                       || traversalEdgeCosts.at(current * DirectionCount + direction) < 0)
                         continue;
                     const int local = localIndex(nx, ny);
                     if(components.at(local) < 0)
@@ -545,6 +597,34 @@ quint32 readU32(const QByteArray& data, int offset)
 {
     return qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(data.constData() + offset));
 }
+}
+
+QVector<bool> ai_graph_internal::graphCellCrossingCandidates(
+    const QVector<quint8>& quality, const QVector<int>& traversalEdgeCosts,
+    int aiWidth, int aiHeight, int graphX, int graphY)
+{
+    return ::graphCellCrossingCandidates(
+        quality, traversalEdgeCosts, aiWidth, aiHeight, graphX, graphY);
+}
+
+int ai_graph_internal::elevationMultiplier(
+    int heightDelta, float maximumTerrainHeight, bool flying)
+{
+    return ::elevationMultiplier(heightDelta, maximumTerrainHeight, flying);
+}
+
+bool ai_graph_internal::collisionSampleTakesOwnership(
+    bool hadPending, EAiGraphObjectPassability current,
+    bool candidateHasMaximum, EAiGraphObjectPassability candidate)
+{
+    return ::collisionSampleTakesOwnership(
+        hadPending, current, candidateHasMaximum, candidate);
+}
+
+int CAiGraphPreviewBuilder::quantizedWaterDepth(
+    float worldDepth, float maximumTerrainHeight)
+{
+    return quantizedDepth(qMax(0.0f, worldDepth), maximumTerrainHeight);
 }
 
 bool SAiGraphPreviewBuildResult::projectHumanPosition(
@@ -704,14 +784,65 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
     QVector<int> collisionHead(aiCount, -1);
     QVector<SIndexedCollisionTile> collisionTiles;
     collisionTiles.reserve(input.collisionProxies.size() * 8);
+    QHash<quint64, SPendingObjectCollision> pendingCollisions;
+    QHash<quint64, SPendingObjectCollision> pendingBridges;
+    const auto collisionKey = [&input](int proxyIndex, int index) {
+        const quint32 objectId = input.collisionProxies.at(proxyIndex).objectId;
+        const quint32 group = objectId != 0
+            ? objectId : (quint32(0x80000000u) | quint32(proxyIndex));
+        return (quint64(group) << 32) | quint32(index);
+    };
+    const auto mergeCollision = [&input, &pendingCollisions, &collisionKey](
+        int proxyIndex, int index, const SSampledCollisionInterval& interval) {
+        const quint64 key = collisionKey(proxyIndex, index);
+        const bool hadPending = pendingCollisions.contains(key);
+        SPendingObjectCollision& pending = pendingCollisions[key];
+        if(interval.hasMinimum)
+        {
+            pending.minimumHeight = qMin(pending.minimumHeight,
+                                          interval.minimumHeight);
+            pending.hasMinimum = true;
+        }
+        if(interval.hasMaximum)
+        {
+            pending.maximumHeight = qMax(pending.maximumHeight,
+                                          interval.maximumHeight);
+            pending.hasMaximum = true;
+        }
+        const EAiGraphObjectPassability current = pending.proxyIndex >= 0
+            ? input.collisionProxies.at(pending.proxyIndex).passability
+            : input.collisionProxies.at(proxyIndex).passability;
+        if(collisionSampleTakesOwnership(
+               hadPending, current, interval.hasMaximum,
+               input.collisionProxies.at(proxyIndex).passability))
+            pending.proxyIndex = proxyIndex;
+    };
+    const auto mergeBridge = [&pendingBridges, &collisionKey](
+        int proxyIndex, int index, const SSampledCollisionInterval& interval) {
+        const quint64 key = collisionKey(proxyIndex, index);
+        const bool hadPending = pendingBridges.contains(key);
+        SPendingObjectCollision& pending = pendingBridges[key];
+        if(interval.hasMinimum)
+        {
+            pending.minimumHeight = qMin(pending.minimumHeight,
+                                         interval.minimumHeight);
+            pending.hasMinimum = true;
+        }
+        if(interval.hasMaximum)
+        {
+            pending.maximumHeight = qMax(pending.maximumHeight,
+                                         interval.maximumHeight);
+            pending.hasMaximum = true;
+        }
+        if(!hadPending)
+            pending.proxyIndex = proxyIndex;
+    };
     for(int proxyIndex = 0; proxyIndex < input.collisionProxies.size(); ++proxyIndex)
     {
         const SAiGraphCollisionProxy& volume = input.collisionProxies.at(proxyIndex);
         if(volume.authored)
             ++result.authoredCollisionProxyCount;
-        if(volume.footprint.size() < 3
-           || volume.passability == EAiGraphObjectPassability::Ignored
-           || volume.passability == EAiGraphObjectPassability::Easy)
+        if(volume.passability == EAiGraphObjectPassability::Ignored)
             continue;
         const QHash<int, SSampledCollisionInterval> sampledIntervals =
             sampleCollisionBoxFaces(volume, aiWidth, aiHeight);
@@ -722,40 +853,16 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 sample != sampledIntervals.constEnd(); ++sample)
             {
                 const int index = sample.key();
-                if(!sample.value().hasMinimum || !sample.value().hasMaximum
-                   || sample.value().minimumHeight >= sample.value().maximumHeight)
-                    continue;
-                const float localMinimumZ = sample.value().minimumHeight;
-                const float localMaximumZ = sample.value().maximumHeight;
                 if(volume.passability != EAiGraphObjectPassability::Bridge)
-                {
-                    SIndexedCollisionTile tile;
-                    tile.proxyIndex = proxyIndex;
-                    tile.next = collisionHead.at(index);
-                    tile.minimumHeight = quantizedHeight(
-                        localMinimumZ, input.maximumTerrainHeight,
-                        MaximumObjectHeight);
-                    tile.maximumHeight = quantizedHeight(
-                        localMaximumZ, input.maximumTerrainHeight,
-                        MaximumObjectHeight);
-                    collisionHead[index] = collisionTiles.size();
-                    collisionTiles.append(tile);
-                }
+                    mergeCollision(proxyIndex, index, sample.value());
                 else
-                {
-                    navigationHeights[index] = qMax(navigationHeights.at(index),
-                        quantizedHeight(localMaximumZ,
-                                        input.maximumTerrainHeight,
-                                        MaximumObjectHeight));
-                    navigationWater[index] = 0;
-                    navigationTypes[index] = 7;
-                    if(!bridgeTiles.at(index))
-                        ++result.bridgeAiTiles;
-                    bridgeTiles[index] = true;
-                }
+                    mergeBridge(proxyIndex, index, sample.value());
             }
             continue;
         }
+
+        if(volume.footprint.size() < 3)
+            continue;
 
         // Legacy/fallback proxies without transformed box corners retain the
         // older conservative footprint path. Authored object geometry should
@@ -796,31 +903,67 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                                            &localMinimumZ, &localMaximumZ);
                 if(volume.passability != EAiGraphObjectPassability::Bridge)
                 {
-                    SIndexedCollisionTile tile;
-                    tile.proxyIndex = proxyIndex;
-                    tile.next = collisionHead.at(index);
-                    tile.minimumHeight = quantizedHeight(
-                        localMinimumZ, input.maximumTerrainHeight,
-                        MaximumObjectHeight);
-                    tile.maximumHeight = quantizedHeight(
-                        localMaximumZ, input.maximumTerrainHeight,
-                        MaximumObjectHeight);
-                    collisionHead[index] = collisionTiles.size();
-                    collisionTiles.append(tile);
+                    SSampledCollisionInterval interval;
+                    interval.minimumHeight = localMinimumZ;
+                    interval.maximumHeight = localMaximumZ;
+                    interval.hasMinimum = true;
+                    interval.hasMaximum = true;
+                    mergeCollision(proxyIndex, index, interval);
                 }
                 else
                 {
-                    navigationHeights[index] = qMax(navigationHeights.at(index),
-                        quantizedHeight(localMaximumZ,
-                                        input.maximumTerrainHeight,
-                                        MaximumObjectHeight));
-                    navigationWater[index] = 0;
-                    navigationTypes[index] = 7;
-                    if(!bridgeTiles.at(index))
-                        ++result.bridgeAiTiles;
-                    bridgeTiles[index] = true;
+                    SSampledCollisionInterval interval;
+                    interval.minimumHeight = localMinimumZ;
+                    interval.maximumHeight = localMaximumZ;
+                    interval.hasMinimum = true;
+                    interval.hasMaximum = true;
+                    mergeBridge(proxyIndex, index, interval);
                 }
             }
+    }
+    // Bridge body parts contribute to one authored placement interval per map
+    // object and AI tile. Validate only after all sibling face streams merge.
+    for(auto pending = pendingBridges.constBegin();
+        pending != pendingBridges.constEnd(); ++pending)
+    {
+        if(!pending->hasMinimum || !pending->hasMaximum
+           || pending->proxyIndex < 0)
+            continue;
+        const int minimumHeight = quantizedBridgeHeight(
+            pending->minimumHeight, input.maximumTerrainHeight);
+        const int maximumHeight = quantizedBridgeHeight(
+            pending->maximumHeight, input.maximumTerrainHeight);
+        if(minimumHeight >= maximumHeight)
+            continue;
+        const int index = int(quint32(pending.key()));
+        navigationHeights[index] = qMax(navigationHeights.at(index), maximumHeight);
+        navigationWater[index] = 0;
+        navigationTypes[index] = 7;
+        if(!bridgeTiles.at(index))
+            ++result.bridgeAiTiles;
+        bridgeTiles[index] = true;
+    }
+    // Body-part face streams belonging to one map object form one obstacle
+    // interval per AI tile. Keep anonymous synthetic/fallback proxies separate.
+    for(auto pending = pendingCollisions.constBegin();
+        pending != pendingCollisions.constEnd(); ++pending)
+    {
+        if(!pending->hasMinimum || !pending->hasMaximum
+           || pending->minimumHeight >= pending->maximumHeight
+           || pending->proxyIndex < 0)
+            continue;
+        const int index = int(quint32(pending.key()));
+        SIndexedCollisionTile tile;
+        tile.proxyIndex = pending->proxyIndex;
+        tile.minimumHeight = quantizedHeight(
+            pending->minimumHeight, input.maximumTerrainHeight,
+            MaximumObjectHeight);
+        tile.maximumHeight = quantizedHeight(
+            pending->maximumHeight, input.maximumTerrainHeight,
+            MaximumObjectHeight);
+        tile.next = collisionHead.at(index);
+        collisionHead[index] = collisionTiles.size();
+        collisionTiles.append(tile);
     }
     result.collisionRasterMilliseconds = collisionTimer.elapsed();
     result.navigationSurfaceHeights.resize(aiCount);
@@ -832,25 +975,51 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
         result.bridgeMask[index] = bridgeTiles.at(index) ? quint8(1) : quint8(0);
     }
 
-    QVector<bool> walkSlopeBlocked(aiCount, false);
-    QVector<bool> flySlopeBlocked(aiCount, false);
-    for(int y = 1; y < aiHeight - 1; ++y)
-        for(int x = 1; x < aiWidth - 1; ++x)
+    QVector<QVector<bool>> slopeBlocked(
+        LayerCount, QVector<bool>(aiCount, false));
+    for(int y = 2; y < aiHeight - 2; ++y)
+        for(int x = 2; x < aiWidth - 2; ++x)
         {
             const int index = tileIndex(x, y, aiWidth);
             const int ground = navigationHeights.at(index);
             int difference = 0;
-            const QPoint cardinal[] = {QPoint(-1,0), QPoint(1,0), QPoint(0,-1), QPoint(0,1)};
-            for(const QPoint& delta : cardinal)
-                difference = qMax(difference, qAbs(navigationHeights.at(
-                    tileIndex(x + delta.x(), y + delta.y(), aiWidth)) - ground));
-            walkSlopeBlocked[index] = elevationMultiplier(
-                difference, input.maximumTerrainHeight, false) < 0;
-            flySlopeBlocked[index] = elevationMultiplier(
+            int selectedOffset = 4;
+            for(selectedOffset = 0; selectedOffset < 4; ++selectedOffset)
+            {
+                const QPoint delta = RuntimeGradientOffsets[selectedOffset];
+                const int test = qAbs(navigationHeights.at(tileIndex(
+                    x + delta.x(), y + delta.y(), aiWidth)) - ground);
+                if(test > difference)
+                {
+                    difference = test;
+                    if(elevationMultiplier(test, input.maximumTerrainHeight, true) < 0)
+                        break;
+                }
+            }
+            if(elevationMultiplier(difference, input.maximumTerrainHeight, false) >= 0)
+                continue;
+
+            const bool flyingBlocked = elevationMultiplier(
                 difference, input.maximumTerrainHeight, true) < 0;
+            for(int layer = flyingBlocked ? 0 : 1; layer < LayerCount; ++layer)
+                slopeBlocked[layer][index] = true;
+
+            // The runtime repeats this same selected write four times. Its
+            // observable result is one shifted blocked tile in layers 5-6.
+            const QPoint wideOffset = RuntimeGradientOffsets[selectedOffset];
+            const int wideIndex = tileIndex(x + wideOffset.x(),
+                                            y + wideOffset.y(), aiWidth);
+            slopeBlocked[5][wideIndex] = true;
+            slopeBlocked[6][wideIndex] = true;
+            for(int offsetIndex = 4; offsetIndex < 17; ++offsetIndex)
+            {
+                const QPoint offset = RuntimeGradientOffsets[offsetIndex];
+                slopeBlocked[7][tileIndex(x + offset.x(), y + offset.y(), aiWidth)] = true;
+            }
         }
 
     QVector<SAiGraphLayer> layers(LayerCount);
+    result.layerPassability.resize(LayerCount);
     QElapsedTimer routeTimer;
     routeTimer.start();
     for(int layerIndex = 0; layerIndex < LayerCount; ++layerIndex)
@@ -870,7 +1039,11 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
                 tile.minimumHeight = navigationHeights.at(index)
                     + (layerIndex == 0 ? navigationWater.at(index) : 0);
                 tile.maximumHeight = tile.minimumHeight + unitHeight;
-                tile.speed = layerIndex == 0 ? 1024 : policy.speed;
+                // Graph passability classification starts from neutral speed.
+                // Terrain Speed is a movement-speed input elsewhere; feeding it
+                // into this terrain-class reduction changes both topology and
+                // graph weights from the runtime generator.
+                tile.speed = 1024;
                 tile.cost = layerIndex == 0 ? 1 : policy.cost;
                 tile.waterUnitHeight = layerIndex == 0
                     ? MaximumObjectHeight * 2 : (layerIndex == 1 ? 0 : unitHeight);
@@ -900,35 +1073,11 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
             for(int x = 0; x < aiWidth; ++x)
             {
                 const int index = tileIndex(x, y, aiWidth);
-                bool slopeBlocked = layerIndex == 0
-                    ? flySlopeBlocked.at(index) : walkSlopeBlocked.at(index);
-                if(!slopeBlocked && layerIndex >= 5)
-                {
-                    if(layerIndex <= 6)
-                    {
-                        for(const QPoint& offset : Star3)
-                        {
-                            const int sx = x + offset.x(), sy = y + offset.y();
-                            if(sx >= 0 && sy >= 0 && sx < aiWidth && sy < aiHeight
-                               && walkSlopeBlocked.at(tileIndex(sx, sy, aiWidth)))
-                            { slopeBlocked = true; break; }
-                        }
-                    }
-                    else
-                    {
-                        for(const QPoint& offset : Star5)
-                        {
-                            const int sx = x + offset.x(), sy = y + offset.y();
-                            if(sx >= 0 && sy >= 0 && sx < aiWidth && sy < aiHeight
-                               && walkSlopeBlocked.at(tileIndex(sx, sy, aiWidth)))
-                            { slopeBlocked = true; break; }
-                        }
-                    }
-                }
                 if(x < 3 || y < 3 || x >= aiWidth - 3 || y >= aiHeight - 3
-                   || slopeBlocked)
+                   || slopeBlocked.at(layerIndex).at(index))
                     quality[index] = 0;
             }
+        result.layerPassability[layerIndex] = quality;
 
         // Edge costs depend only on the current layer's tile qualities and
         // terrain heights. Precompute them once instead of recalculating slope,
@@ -970,8 +1119,8 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
             for(int gx = 0; gx < input.graphWidth; ++gx)
             {
                 const QVector<bool> crossingCandidates =
-                    graphCellCrossingCandidates(
-                        quality, aiWidth, aiHeight, gx, gy);
+                    ai_graph_internal::graphCellCrossingCandidates(
+                        quality, traversalEdgeCosts, aiWidth, aiHeight, gx, gy);
                 int best = tileIndex(gx * 8 + 3, gy * 8 + 3, aiWidth);
                 int bestQuality = 0;
                 bool foundCrossing = false;

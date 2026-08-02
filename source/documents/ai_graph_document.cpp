@@ -4,6 +4,9 @@
 #include <QQueue>
 #include <QtEndian>
 
+constexpr int CAiGraphDocument::LayerCount;
+constexpr int CAiGraphDocument::DirectionCount;
+
 namespace {
 constexpr quint64 HeaderSize = 8;
 constexpr quint64 WeightBytesPerCell = 16;
@@ -420,6 +423,84 @@ quint16 CAiGraphDocument::component(int layer, int x, int y) const
     if(!validCell(layer, x, y))
         return 0;
     return m_layers[layer].components.at(index(x, y));
+}
+
+bool SAiGraphDifference::identical() const
+{
+    if(!comparable || layers.size() != CAiGraphDocument::LayerCount)
+        return false;
+    for(const SAiGraphLayerDifference& layer : layers)
+        if(!layer.identical())
+            return false;
+    return true;
+}
+
+SAiGraphLayerDifference SAiGraphDifference::total() const
+{
+    SAiGraphLayerDifference result;
+    for(const SAiGraphLayerDifference& layer : layers)
+    {
+        result.loadedOpenLinks += layer.loadedOpenLinks;
+        result.regeneratedOpenLinks += layer.regeneratedOpenLinks;
+        result.missingLinks += layer.missingLinks;
+        result.extraLinks += layer.extraLinks;
+        result.changedWeights += layer.changedWeights;
+        result.changedPositions += layer.changedPositions;
+    }
+    return result;
+}
+
+SAiGraphDifference CAiGraphDocument::compareNavigation(
+    const CAiGraphDocument& regenerated) const
+{
+    SAiGraphDifference difference;
+    if(!isValid() || !regenerated.isValid())
+    {
+        difference.error = QStringLiteral(
+            "Both loaded and regenerated AI graphs must be valid before comparison.");
+        return difference;
+    }
+    if(width() != regenerated.width() || height() != regenerated.height())
+    {
+        difference.error = QStringLiteral(
+            "AI graph dimensions differ: loaded %1 x %2, regenerated %3 x %4.")
+            .arg(width()).arg(height())
+            .arg(regenerated.width()).arg(regenerated.height());
+        return difference;
+    }
+
+    difference.layers.resize(LayerCount);
+    for(int layer = 0; layer < LayerCount; ++layer)
+    {
+        SAiGraphLayerDifference& result = difference.layers[layer];
+        for(int y = 0; y < height(); ++y)
+            for(int x = 0; x < width(); ++x)
+            {
+                if(packedPosition(layer, x, y)
+                   != regenerated.packedPosition(layer, x, y))
+                    ++result.changedPositions;
+                for(int direction = 0; direction < DirectionCount; ++direction)
+                {
+                    const qint16 loadedWeight = weight(layer, x, y, direction);
+                    const qint16 regeneratedWeight =
+                        regenerated.weight(layer, x, y, direction);
+                    const bool loadedOpen = loadedWeight >= 0;
+                    const bool regeneratedOpen = regeneratedWeight >= 0;
+                    if(loadedOpen)
+                        ++result.loadedOpenLinks;
+                    if(regeneratedOpen)
+                        ++result.regeneratedOpenLinks;
+                    if(loadedOpen && !regeneratedOpen)
+                        ++result.missingLinks;
+                    else if(!loadedOpen && regeneratedOpen)
+                        ++result.extraLinks;
+                    else if(loadedOpen && loadedWeight != regeneratedWeight)
+                        ++result.changedWeights;
+                }
+            }
+    }
+    difference.comparable = true;
+    return difference;
 }
 
 QPoint CAiGraphDocument::directionDelta(int direction)

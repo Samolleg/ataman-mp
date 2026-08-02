@@ -9,6 +9,7 @@
 #include "landscape.h"
 #include "view.h"
 #include "log.h"
+#include "map_object_placement_policy.h"
 #include "resourcemanager.h"
 #include "resource_name.h"
 #include "render_performance.h"
@@ -459,9 +460,36 @@ QVector<SNavigationCollisionProxy> CObjectBase::navigationCollisionProxies() con
 {
     QVector<SNavigationCollisionProxy> result;
     const float scale = editorVisualScale();
+    QVector<const CPart*> navigationParts;
+    navigationParts.reserve(m_aPart.size());
     for(const CPart* part : m_aPart)
+        navigationParts.append(part);
+    QHash<QString, int> activePartOrder;
+    for(int index = 0; index < m_bodyParts.size(); ++index)
+        activePartOrder.insert(m_bodyParts.at(index).toLower(), index);
+    std::stable_sort(navigationParts.begin(), navigationParts.end(),
+        [&activePartOrder](const CPart* left, const CPart* right) {
+            if(!left || !right)
+                return left && !right;
+            if(!activePartOrder.isEmpty())
+            {
+                const int leftOrder = activePartOrder.value(
+                    left->name().toLower(), std::numeric_limits<int>::max());
+                const int rightOrder = activePartOrder.value(
+                    right->name().toLower(), std::numeric_limits<int>::max());
+                if(leftOrder != rightOrder)
+                    return leftOrder < rightOrder;
+            }
+            const int leftOrder = left->assemblySourceOrder();
+            const int rightOrder = right->assemblySourceOrder();
+            if(leftOrder < 0 || rightOrder < 0)
+                return leftOrder >= 0 && rightOrder < 0;
+            return leftOrder < rightOrder;
+        });
+    for(const CPart* part : navigationParts)
     {
-        if(!part || !part->isDrawable())
+        if(!part || (!part->isDrawable()
+                     && !part->hasAuthoredNavigationBounds()))
             continue;
 
         QVector3D localMinimum;
@@ -502,7 +530,9 @@ QVector<SNavigationCollisionProxy> CObjectBase::navigationCollisionProxies() con
                                     y ? localMaximum.y() : localMinimum.y(),
                                     z ? localMaximum.z() : localMinimum.z());
                     local = part->poseMatrix().map(local * scale);
-                    const QVector3D world = m_rotation.rotatedVector(local) + m_drawPosition;
+                    const QVector3D oriented =
+                        ei::runtimeNavigationRotateVector(m_rotation, local);
+                    const QVector3D world = oriented + m_drawPosition;
                     projected.append(world.toVector2D());
                     boxCorners.append(world);
                     minimumZ = qMin(minimumZ, world.z());
@@ -511,13 +541,16 @@ QVector<SNavigationCollisionProxy> CObjectBase::navigationCollisionProxies() con
         SNavigationCollisionProxy proxy;
         proxy.footprint = navigationConvexHull(projected);
         proxy.boxCorners = boxCorners;
+        proxy.upperFaceMask = ei::runtimeNavigationUpperFaceMask(m_rotation);
         proxy.minimumZ = minimumZ;
         proxy.maximumZ = maximumZ;
         proxy.kind = navigationKindForPart(part->name());
         proxy.authored = authored;
         proxy.objectId = m_mapID;
         proxy.partName = part->name();
-        if(proxy.footprint.size() >= 3 && proxy.maximumZ > proxy.minimumZ)
+        if(proxy.maximumZ > proxy.minimumZ
+           && (proxy.footprint.size() >= 3
+               || (authored && proxy.boxCorners.size() == 8)))
             result.append(proxy);
     }
     return result;

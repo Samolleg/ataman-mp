@@ -14,6 +14,32 @@ struct SAiGraphLayer
     QVector<quint16> components;
 };
 
+struct SAiGraphLayerDifference
+{
+    qint64 loadedOpenLinks{0};
+    qint64 regeneratedOpenLinks{0};
+    qint64 missingLinks{0};
+    qint64 extraLinks{0};
+    qint64 changedWeights{0};
+    qint64 changedPositions{0};
+
+    bool identical() const
+    {
+        return missingLinks == 0 && extraLinks == 0
+            && changedWeights == 0 && changedPositions == 0;
+    }
+};
+
+struct SAiGraphDifference
+{
+    bool comparable{false};
+    QString error;
+    QVector<SAiGraphLayerDifference> layers;
+
+    bool identical() const;
+    SAiGraphLayerDifference total() const;
+};
+
 class CAiGraphDocument
 {
 public:
@@ -45,6 +71,7 @@ public:
     int localX(int layer, int x, int y) const;
     int localY(int layer, int x, int y) const;
     quint16 component(int layer, int x, int y) const;
+    SAiGraphDifference compareNavigation(const CAiGraphDocument& regenerated) const;
 
     static QPoint directionDelta(int direction);
     static QString layerLabel(int layer);

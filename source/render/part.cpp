@@ -194,6 +194,7 @@ CPart::CPart(const CPart &part)
 {
     m_name = part.m_name;
     m_parentName = part.m_parentName;
+    m_assemblySourceOrder = part.m_assemblySourceOrder;
     m_restOffset = part.m_restOffset;
     m_textureNumber = part.m_textureNumber;
     m_textureUvScale = part.m_textureUvScale;

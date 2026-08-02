@@ -77,6 +77,20 @@ QString aiGraphPersistenceActionNotice(const QString& selectedSource)
         .arg(selectedSource);
 }
 
+QString aiGraphPreviewSelectionLabel(bool usesLoadedSource,
+                                     const QString& loadedSourceLabel)
+{
+    if(!usesLoadedSource)
+        return QStringLiteral("Preview graph: Generated");
+    if(loadedSourceLabel.startsWith(QStringLiteral("Embedded:"),
+                                    Qt::CaseInsensitive))
+        return QStringLiteral("Preview graph: Embedded");
+    if(loadedSourceLabel.startsWith(QStringLiteral("External:"),
+                                    Qt::CaseInsensitive))
+        return QStringLiteral("Preview graph: External");
+    return QStringLiteral("Preview graph: Loaded");
+}
+
 SAiGraphPreviewSource selectAiGraphPreviewSource(
     const QByteArray& primaryEmbeddedGraph,
     const QString& primaryMobFileName,
