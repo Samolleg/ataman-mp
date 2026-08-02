@@ -505,6 +505,7 @@ CTableManager::CTableManager(QTableWidget* pTable):
     initRowName();
     m_pTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_pTable->setSelectionBehavior(QAbstractItemView::SelectItems);
+    m_pTable->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_pTable->installEventFilter(this);
     m_pTable->viewport()->installEventFilter(this);
     connect(m_pTable, &QTableWidget::itemSelectionChanged, this, [this]()
@@ -523,6 +524,7 @@ CTableManager::CTableManager(QTableWidget* pTable):
 
 void CTableManager::reset()
 {
+    m_collectionRow = -1;
     m_rowValues.clear();
     m_pTable->clear();
     m_pTable->setColumnCount(2);
@@ -611,7 +613,9 @@ void CTableManager::setBehaviorCollection(CUnit* unit, int logicSlot)
     m_pTable->setCellWidget(row, 0, editor);
     editor->setMinimumHeight(190);
     editor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_pTable->verticalHeader()->setSectionResizeMode(row, QHeaderView::Stretch);
+    m_collectionRow = row;
+    m_pTable->verticalHeader()->setSectionResizeMode(row, QHeaderView::Interactive);
+    syncCollectionRowHeight();
     restoreScrollPosition();
 }
 
@@ -640,8 +644,21 @@ void CTableManager::setTrapCollection(CMagicTrap* trap)
     m_pTable->setCellWidget(row, 0, editor);
     editor->setMinimumHeight(190);
     editor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_pTable->verticalHeader()->setSectionResizeMode(row, QHeaderView::Stretch);
+    m_collectionRow = row;
+    m_pTable->verticalHeader()->setSectionResizeMode(row, QHeaderView::Interactive);
+    syncCollectionRowHeight();
     restoreScrollPosition();
+}
+
+void CTableManager::syncCollectionRowHeight()
+{
+    if(m_collectionRow < 0 || m_collectionRow >= m_pTable->rowCount())
+        return;
+    // Give the collection one viewport of content, but keep it as a concrete
+    // row so the outer per-pixel scrollbar can reach every part of it.
+    const int desired = qMax(190, m_pTable->viewport()->height());
+    if(m_pTable->rowHeight(m_collectionRow) != desired)
+        m_pTable->setRowHeight(m_collectionRow, desired);
 }
 
 void CTableManager::setLogicZeroContext(bool logicZero)
@@ -936,6 +953,10 @@ void CTableManager::showPropertyContextMenu(const QList<int>& rows, const QPoint
 
 bool CTableManager::eventFilter(QObject* watched, QEvent* event)
 {
+    if(event->type() == QEvent::Resize
+       && (watched == m_pTable || watched == m_pTable->viewport()))
+        syncCollectionRowHeight();
+
     const QVariant rowProperty = watched ? watched->property("propertyRow") : QVariant();
     const int widgetRow = rowProperty.isValid() ? rowProperty.toInt() : -1;
     if(event->type() == QEvent::ContextMenu)

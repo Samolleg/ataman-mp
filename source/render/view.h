@@ -247,6 +247,7 @@ public:
     void setCameraSpeedMultiplier(double multiplier);
     bool overridesWorldTime() const;
     double effectiveWorldTimeHours() const;
+    void refreshSelectContextHelp();
     SMinimapSceneCaptureResult captureMinimapScene(
         bool includeLoadedStaticGeometry, int targetTextureSize = 256);
     void addLogicPoint(bool bLookPoint = false);

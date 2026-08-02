@@ -1,4 +1,5 @@
 #include <QLineEdit>
+#include <QTimer>
 
 #include <cmath>
 
@@ -1096,10 +1097,7 @@ CSelect::CSelect(CView *pView):
     CState(pView)
 {
     qDebug()<< "CSelect init";
-    if(CScene::getInstance()->getMode()==eEditModeLogic)
-        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, P-Add Patrol(trap zone), L-Add look(cast point), CTLR+Tab-change mode");
-    else
-        CStatusConnector::getInstance()->updateStatus("select.ico", "LMB-Select object, Shift+LMB-Add to select, MMB-camera rotation, G-Move, T-Scale, R-Rotate, L-Landscape Tools, CTRL+Tab-change mode");
+    QTimer::singleShot(0, pView, &CView::refreshSelectContextHelp);
     CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
 }
 

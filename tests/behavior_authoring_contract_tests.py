@@ -251,12 +251,26 @@ def main() -> int:
     table = source("source/layout_components/tablemanager.cpp")
     require(table, "restoreScrollPosition();",
             "property scroll restoration after adding the collection row")
-    require(table, "setSectionResizeMode(row, QHeaderView::Stretch)",
-            "collection filling the remaining Object Properties height")
+    require(table, "syncCollectionRowHeight();",
+            "collection row height participating in the outer scroll range")
+    require(table, "setSectionResizeMode(row, QHeaderView::Interactive)",
+            "collection row using a concrete scrollable height")
+    require(table, "setVerticalScrollMode(QAbstractItemView::ScrollPerPixel)",
+            "outer table scrolling within a viewport-height collection row")
+    require(table, "m_collectionRow = row;",
+            "active collection row tracked across panel resizes")
     require(view, "m_pendingLogicPlacementOriginalSelection",
             "pre-creation selection retained for Esc cancellation")
     require(view, "restoreSelection(logicPlacementOriginalSelection)",
             "Esc restoring selection after cancelling point creation")
+    require(undo_h, "const QList<CNode*>& originalSelection",
+            "point creation commands retaining their source selection")
+    require(undo, "m_pView->restoreSelection(m_originalSelection);",
+            "Undo restoring the selection from before P/L creation")
+    require(view, "CPatrolPoint* lastVisiblePatrol = nullptr;",
+            "unit L shortcut resolving the active slot's last patrol")
+    require(view, "if(createdForTarget)",
+            "unsupported P/L shortcuts preserving the current selection")
     patrol_add = view[view.index("onBehaviorPatrolAdd"):
                       view.index("onBehaviorLookAdd")]
     look_add = view[view.index("onBehaviorLookAdd"):
@@ -308,8 +322,8 @@ def main() -> int:
             "trap-child selection resolving its owner collection")
     require(view, "setTrapCollection(trap)",
             "magic-trap collection integration")
-    require(table, "setSectionResizeMode(row, QHeaderView::Stretch)",
-            "trap collection filling remaining Object Properties height")
+    require(table, "syncCollectionRowHeight();",
+            "trap collection participating in the outer scroll range")
     require(view, "onTrapActivationAreaAdd",
             "activation-area add action integration")
     require(view, "onTrapCastTargetAdd",

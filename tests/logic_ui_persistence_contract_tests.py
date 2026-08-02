@@ -64,6 +64,27 @@ def main() -> int:
     require(main_window, "m_behaviorModeButton->setText(target);",
             "bottom mode help names the mode Ctrl+Tab will switch to")
 
+    view = source("source/render/view.cpp")
+    view_h = source("source/render/view.h")
+    operation_manager = source("source/app/operationmanager.cpp")
+    scene = source("source/render/scene.cpp")
+    require(view_h, "void refreshSelectContextHelp();",
+            "selection-aware viewport context help entry point")
+    require(view, 'tr("Ctrl+Tab: Switch to Object mode")',
+            "Behavior-mode footer naming its Ctrl+Tab target")
+    require(view, 'tr("Ctrl+Tab: Switch to Behavior mode")',
+            "Object-mode footer naming its Ctrl+Tab target")
+    require(view, 'tr("P: Add activation area")',
+            "trap activation shortcut help")
+    require(view, 'tr("L: Add cast target")',
+            "trap cast shortcut help")
+    require(view, 'tr("L: Add look to last patrol")',
+            "unit look shortcut help when a patrol exists")
+    if "CTLR+Tab" in operation_manager or "CTLR+Tab" in scene:
+        raise AssertionError("stale misspelled generic Ctrl+Tab footer remains")
+    if "Add Patrol(trap zone)" in operation_manager or "Add Patrol(trap zone)" in scene:
+        raise AssertionError("stale non-contextual P/L footer remains")
+
     require(table_manager,
             "QString staticChoiceToolTip(EObjParam type, uint value)",
             "per-value dropdown explanations")

@@ -207,7 +207,9 @@ class CCreatePatrolCommand: public QUndoCommand
 public:
     enum { Id = 108 };
     CCreatePatrolCommand() = delete;
-    CCreatePatrolCommand(CView* pView, QString pointHash, QUndoCommand *parent = nullptr);
+    CCreatePatrolCommand(CView* pView, QString pointHash,
+                         const QList<CNode*>& originalSelection,
+                         QUndoCommand *parent = nullptr);
 
     void undo() override;
     void redo() override;
@@ -222,6 +224,7 @@ private:
     CUnit* m_firstPointUnit;
     uint m_previousBehaviour;
     bool m_switchesToPath;
+    QList<CNode*> m_originalSelection;
 };
 
 class CAppendBehaviorPointCommand: public QUndoCommand
@@ -339,7 +342,9 @@ class CCreateTrapPointCommand: public QUndoCommand
 public:
     enum { Id = 109 };
     CCreateTrapPointCommand() = delete;
-    CCreateTrapPointCommand(CView* pView, uint trapId, bool bActZone, QUndoCommand *parent = nullptr);
+    CCreateTrapPointCommand(CView* pView, uint trapId, bool bActZone,
+                            const QList<CNode*>& originalSelection,
+                            QUndoCommand *parent = nullptr);
 
     void undo() override;
     void redo() override;
@@ -350,6 +355,7 @@ private:
     CView* m_pView;
     uint m_trapId;
     bool m_bActZone;
+    QList<CNode*> m_originalSelection;
 };
 
 class CRoundMobCommand: public QUndoCommand

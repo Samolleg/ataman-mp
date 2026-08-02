@@ -421,7 +421,9 @@ void CChangeMobScriptCommand::redo()
     apply(m_after);
 }
 
-CCreatePatrolCommand::CCreatePatrolCommand(CView* pView, QString pointHash, QUndoCommand *parent):
+CCreatePatrolCommand::CCreatePatrolCommand(
+    CView* pView, QString pointHash, const QList<CNode*>& originalSelection,
+    QUndoCommand *parent):
     QUndoCommand(parent)
   ,m_pView(pView)
   ,m_mob(pView ? pView->currentMob() : nullptr)
@@ -430,6 +432,7 @@ CCreatePatrolCommand::CCreatePatrolCommand(CView* pView, QString pointHash, QUnd
   ,m_firstPointUnit(nullptr)
   ,m_previousBehaviour(0)
   ,m_switchesToPath(false)
+  ,m_originalSelection(originalSelection)
 {
     const QStringList parts = pointHash.split(".");
     if(m_mob && parts.size() == 2 && parts[1].toInt() == -1)
@@ -461,13 +464,16 @@ void CCreatePatrolCommand::undo()
         m_firstPointUnit->applyLogicParamAt(m_logicSlot, behaviour);
     }
     m_pView->collectObjectTreeData();
-    m_pView->viewParameters();
+    m_pView->restoreSelection(m_originalSelection);
     m_pView->setDurty(m_mob);
     m_pView->update();
 }
 
 void CCreatePatrolCommand::redo()
 {
+    for(CNode* node : m_originalSelection)
+        if(node)
+            node->setState(ENodeState::eDraw);
     if(m_switchesToPath && m_firstPointUnit)
     {
         QSharedPointer<IPropertyBase> behaviour(
@@ -485,11 +491,14 @@ void CCreatePatrolCommand::redo()
     m_pView->update();
 }
 
-CCreateTrapPointCommand::CCreateTrapPointCommand(CView *pView, uint trapId, bool bActZone, QUndoCommand *parent):
+CCreateTrapPointCommand::CCreateTrapPointCommand(
+    CView *pView, uint trapId, bool bActZone,
+    const QList<CNode*>& originalSelection, QUndoCommand *parent):
     QUndoCommand(parent)
   ,m_pView(pView)
   ,m_trapId(trapId)
   ,m_bActZone(bActZone)
+  ,m_originalSelection(originalSelection)
 {
 }
 
@@ -506,7 +515,7 @@ void CCreateTrapPointCommand::undo()
         pTrap->deleteLastCastPoint();
     mob->logicNodesUpdate();
     m_pView->collectObjectTreeData();
-    m_pView->viewParameters();
+    m_pView->restoreSelection(m_originalSelection);
     m_pView->setDurty(mob);
     m_pView->update();
 }
@@ -518,6 +527,9 @@ void CCreateTrapPointCommand::redo()
         ? dynamic_cast<CMagicTrap*>(mob->nodeByMapId(m_trapId)) : nullptr;
     if(!pTrap)
         return;
+    for(CNode* node : m_originalSelection)
+        if(node)
+            node->setState(ENodeState::eDraw);
     if(m_bActZone)
     {
         auto pZone = pTrap->createActZone();

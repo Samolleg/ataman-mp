@@ -348,6 +348,7 @@ private:
     void pasteRows(const QList<int>& rows);
     void showPropertyContextMenu(const QList<int>& rows, const QPoint& globalPos);
     void restoreScrollPosition();
+    void syncCollectionRowHeight();
 
 signals:
     void onUpdateProperty(const QSharedPointer<IPropertyBase>); //retranslate value changing from ui to view class
@@ -377,6 +378,7 @@ private:
     bool m_logicZeroContext{false};
     int m_savedVerticalScroll{0};
     int m_savedHorizontalScroll{0};
+    int m_collectionRow{-1};
 };
 
 #endif // CTABLEMANAGER_H

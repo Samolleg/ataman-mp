@@ -10929,6 +10929,7 @@ void CView::updateParameter(EObjParam propType)
 
 void CView::viewParameters()
 {
+    refreshSelectContextHelp();
     if(m_aMob.isEmpty())
     {
         m_tableManager->reset(); //clear table data if empty current mob
@@ -11422,6 +11423,67 @@ void CView::collectObjectTreeData()
     const QList<CNode*> selected = selectionSnapshot();
     if(!selected.isEmpty())
         m_pTree->markNode(selected.back(), false);
+}
+
+void CView::refreshSelectContextHelp()
+{
+    if(m_pOp && m_pOp->operationMethod() != eOperationMethodSelect)
+        return;
+
+    QStringList actions;
+    actions << tr("LMB: Select") << tr("Shift+LMB: Add selection")
+            << tr("MMB: Rotate camera") << tr("G: Move");
+    if(CScene::getInstance()->getMode() != eEditModeLogic)
+    {
+        actions << tr("T: Scale") << tr("R: Rotate")
+                << tr("Ctrl+L: Landscape Tools")
+                << tr("Ctrl+Tab: Switch to Behavior mode");
+        CStatusConnector::getInstance()->updateStatus(
+            "select.ico", actions.join(QStringLiteral("  ·  ")));
+        return;
+    }
+
+    const QList<CNode*> selection = selectionSnapshot();
+    bool allUnits = !selection.isEmpty();
+    bool allPatrols = !selection.isEmpty();
+    bool allLooks = !selection.isEmpty();
+    bool allTrapFamily = !selection.isEmpty();
+    bool allUnitsHavePatrol = !selection.isEmpty();
+    for(CNode* node : selection)
+    {
+        const ENodeType type = node ? node->nodeType() : eUnknown;
+        allUnits = allUnits && type == eUnit;
+        allPatrols = allPatrols && type == ePatrolPoint;
+        allLooks = allLooks && type == eLookPoint;
+        allTrapFamily = allTrapFamily
+            && (type == eMagicTrap || type == eTrapActZone || type == eTrapCastPoint);
+        if(CUnit* unit = dynamic_cast<CUnit*>(node))
+        {
+            CLogic* logic = unit->logicAt(m_logicSlotIndex);
+            bool unitHasPatrol = false;
+            if(logic)
+                for(CPatrolPoint* patrol : logic->patrolPoints())
+                    if(patrol && !patrol->isMarkDeleted())
+                        unitHasPatrol = true;
+            allUnitsHavePatrol = allUnitsHavePatrol && unitHasPatrol;
+        }
+    }
+
+    if(allUnits)
+    {
+        actions << tr("P: Add patrol");
+        if(allUnitsHavePatrol)
+            actions << tr("L: Add look to last patrol");
+    }
+    else if(allPatrols)
+        actions << tr("P: Add patrol after selected") << tr("L: Add look");
+    else if(allLooks)
+        actions << tr("L: Add look after selected");
+    else if(allTrapFamily)
+        actions << tr("P: Add activation area") << tr("L: Add cast target");
+    actions << tr("Ctrl+Tab: Switch to Object mode");
+    CStatusConnector::getInstance()->updateStatus(
+        "select.ico", actions.join(QStringLiteral("  ·  ")));
 }
 
 void CView::refreshBehaviorOrder(CNode* owner, int logicSlot)
@@ -14496,6 +14558,7 @@ void CView::addLogicPoint(bool bLookPoint)
     CNode* pNode = nullptr;
     foreach(pNode, targets)
     {
+        bool createdForTarget = false;
         ENodeType type = pNode->nodeType();
         switch(type)
         {
@@ -14511,9 +14574,10 @@ void CView::addLogicPoint(bool bLookPoint)
             m_activeMob->getViewHash(unitId, patrolId, viewId, pLook);
             QString hash = QString("%1.%2.%3").arg(unitId).arg(patrolId).arg(viewId);
             beginPlacement();
-            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash);
+            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash, targets);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
+            createdForTarget = true;
             break;
         }
         case ePatrolPoint:
@@ -14530,62 +14594,96 @@ void CView::addLogicPoint(bool bLookPoint)
                 hash = QString("%1.%2").arg(unitId).arg(patrolId); // for creating patrol point
 
             beginPlacement();
-            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash);
+            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash, targets);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
+            createdForTarget = true;
             break;
         }
         case eUnit:
         {
             if(bLookPoint)
-                break; //dont create look point for unit
+            {
+                CUnit* unit = dynamic_cast<CUnit*>(pNode);
+                CPatrolPoint* lastVisiblePatrol = nullptr;
+                CLogic* logic = unit ? unit->logicAt(m_logicSlotIndex) : nullptr;
+                if(logic)
+                    for(CPatrolPoint* patrol : logic->patrolPoints())
+                        if(patrol && !patrol->isMarkDeleted())
+                            lastVisiblePatrol = patrol;
+                if(!lastVisiblePatrol)
+                    break;
+                int unitId = -1;
+                int patrolId = -1;
+                m_activeMob->getPatrolHash(unitId, patrolId, lastVisiblePatrol);
+                const QString hash = QString("%1.%2.%3")
+                    .arg(unitId).arg(patrolId).arg(-1);
+                beginPlacement();
+                m_pUndoStack->push(new CCreatePatrolCommand(this, hash, targets));
+                bChangeToMove = true;
+                createdForTarget = true;
+                break;
+            }
 
             QString hash = QString("%1.%2").arg(pNode->mapId()).arg(-1);
             beginPlacement();
-            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash);
+            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash, targets);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
+            createdForTarget = true;
             break;
         }
         case eMagicTrap:
         {
             beginPlacement();
-            CCreateTrapPointCommand* pUndo = new CCreateTrapPointCommand(this, pNode->mapId(), !bLookPoint);
+            CCreateTrapPointCommand* pUndo = new CCreateTrapPointCommand(
+                this, pNode->mapId(), !bLookPoint, targets);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
+            createdForTarget = true;
             break;
         }
         case eTrapActZone:
         {
             uint trapId = m_activeMob->trapIdByPoint(dynamic_cast<CActivationZone*>(pNode));
             beginPlacement();
-            CCreateTrapPointCommand* pUndo = new CCreateTrapPointCommand(this, trapId, !bLookPoint);
+            CCreateTrapPointCommand* pUndo = new CCreateTrapPointCommand(
+                this, trapId, !bLookPoint, targets);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
+            createdForTarget = true;
             break;
         }
         case eTrapCastPoint:
         {
             uint trapId = m_activeMob->trapIdByPoint(dynamic_cast<CTrapCastPoint*>(pNode));
             beginPlacement();
-            CCreateTrapPointCommand* pUndo = new CCreateTrapPointCommand(this, trapId, !bLookPoint);
+            CCreateTrapPointCommand* pUndo = new CCreateTrapPointCommand(
+                this, trapId, !bLookPoint, targets);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
+            createdForTarget = true;
             break;
         }
         default:
             break;
         }
 
-        pNode->setState(ENodeState::eDraw);
+        if(createdForTarget)
+            pNode->setState(ENodeState::eDraw);
 
     }
 
     if(bChangeToMove)
     {
-        // Creation commands rebuild while their source points are still
-        // selected. Rebuild once more after clearing those sources so the
-        // outliner highlight follows the newly created placement targets.
+        // A partially applicable multi-selection must not carry unsupported
+        // source units into the placement move. A complete no-op never enters
+        // this block, so its selection remains untouched.
+        for(CNode* target : targets)
+            if(target)
+                target->setState(ENodeState::eDraw);
+        // Rebuild after clearing every source so the outliner highlight
+        // follows only the newly created placement targets.
         collectObjectTreeData();
         m_pendingLogicPlacementMacro = true;
         m_pendingLogicPlacementOriginalSelection = targets;
