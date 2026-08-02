@@ -418,10 +418,9 @@ void applyObstacle(STilePassability* tile,
         ? 0 : 1;
     static const int hardCosts[2] = {290, 20};
     static const int speedCosts[2] = {7, 2};
-    tile->cost += int(std::nearbyint(double(
-        float(hardCosts[passabilityIndex]) * fraction)));
-    tile->speed = int(std::nearbyint(double(float(tile->speed)
-        * qExp(qLn(0.6f) * fraction * float(speedCosts[passabilityIndex])))));
+    tile->cost += qRound(float(hardCosts[passabilityIndex]) * fraction);
+    tile->speed = qRound(float(tile->speed)
+        * qExp(qLn(0.6f) * fraction * float(speedCosts[passabilityIndex])));
 }
 
 quint8 terrainClass(const STilePassability& tile)
