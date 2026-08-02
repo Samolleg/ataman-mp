@@ -85,6 +85,8 @@ struct SMobFamilyValidationRequest
     QMap<QString, QByteArray> inMemoryMobData;
     QSharedPointer<const ei::SProfileDatabaseSnapshot> database;
     QMap<QString, QStringList> assemblyPartsByModel;
+    QStringList assemblyResourceSources;
+    QString assemblyResourceFingerprint;
 };
 
 class CMobFamilyValidationReport

@@ -166,6 +166,61 @@ QString writeMob(const QString& directory, const QString& name, const QByteArray
         return QString();
     return QFileInfo(path).absoluteFilePath();
 }
+
+QByteArray resArchive(const QMap<QString, QByteArray>& members)
+{
+    struct Entry
+    {
+        quint32 size = 0;
+        quint32 offset = 0;
+        quint16 nameLength = 0;
+        quint32 nameOffset = 0;
+    };
+    QVector<Entry> entries;
+    QByteArray names;
+    QByteArray data(16, '\0');
+    for(auto member = members.constBegin(); member != members.constEnd(); ++member)
+    {
+        Entry entry;
+        entry.size = quint32(member.value().size());
+        entry.offset = quint32(data.size());
+        const QByteArray encodedName = member.key().toLatin1();
+        entry.nameLength = quint16(encodedName.size());
+        entry.nameOffset = quint32(names.size());
+        entries.append(entry);
+        names.append(encodedName);
+        data.append(member.value());
+        data.append(QByteArray((16 - data.size() % 16) % 16, '\0'));
+    }
+    const quint32 tableOffset = quint32(data.size());
+    QDataStream tableStream(&data, QIODevice::Append);
+    tableStream.setByteOrder(QDataStream::LittleEndian);
+    for(const Entry& entry : entries)
+        tableStream << quint32(0xffffffffu) << entry.size << entry.offset
+                    << quint32(0) << entry.nameLength << entry.nameOffset;
+    data.append(names);
+    QDataStream headerStream(&data, QIODevice::ReadWrite);
+    headerStream.setByteOrder(QDataStream::LittleEndian);
+    headerStream << quint32(0x019CE23C) << quint32(entries.size())
+                 << tableOffset << quint32(names.size());
+    return data;
+}
+
+QByteArray assemblyLink(const QStringList& components)
+{
+    QByteArray data;
+    QDataStream stream(&data, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << qint32(components.size());
+    for(const QString& component : components)
+    {
+        const QByteArray encoded = component.toLatin1();
+        stream << qint32(encoded.size());
+        stream.writeRawData(encoded.constData(), encoded.size());
+        stream << qint32(0);
+    }
+    return data;
+}
 }
 
 class MobFamilyValidationTests : public QObject
@@ -184,6 +239,7 @@ private slots:
     void missingHairRootUsesHelmetFallbackAcrossProfilesAndTuples();
     void helmetHairReplacementAvoidsMissingRootFallback();
     void unavailableNativeHairAvoidsMissingRootFallback();
+    void resourceBackedAssemblyEvidenceCoversUnloadedFamilyModel();
     void hairlessHelmetedTemplateDoesNotReportMissingHair();
     void missingAssemblyEvidenceDoesNotReportMissingHair();
     void wearableAllPartsMasksAreCriticalButCreatureMasksAreIgnored();
@@ -560,6 +616,45 @@ void MobFamilyValidationTests::unavailableNativeHairAvoidsMissingRootFallback()
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
 
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.missing_hair_selection"; }));
+}
+
+void MobFamilyValidationTests::resourceBackedAssemblyEvidenceCoversUnloadedFamilyModel()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray bytes = mobWithUnits({unitObject(
+        44004, "unloaded family actor", "Human Resource Hair F2", "unhufe", false,
+        wearableParts(false), {"llh.troll green"})});
+    const QString mobPath = writeMob(directory.path(), "unloaded-family.mob", bytes);
+    QVERIFY(!mobPath.isEmpty());
+
+    const QStringList components = {"hd", "hr.02", "hd.armor12"};
+    QMap<QString, QByteArray> nestedMembers;
+    nestedMembers.insert("unhufe", assemblyLink(components));
+    for(const QString& component : components)
+        nestedMembers.insert(component, QByteArray("component"));
+    const QByteArray sourceBytes = resArchive({{"unhufe.mod", resArchive(nestedMembers)}});
+    const QString resourcePath = QDir(directory.path()).filePath("figures.res");
+    QFile resourceFile(resourcePath);
+    QVERIFY(resourceFile.open(QIODevice::WriteOnly));
+    QCOMPARE(resourceFile.write(sourceBytes), qint64(sourceBytes.size()));
+    resourceFile.close();
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "unloaded-family-resource-evidence";
+    request.profileId = "base";
+    request.seedMobPaths << mobPath;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase(
+        "Human Resource Hair F2", "unhufe", {"llh.troll green"}, 2, "llh", 12);
+    request.assemblyResourceSources << resourcePath;
+    request.assemblyResourceFingerprint = "fixture-profile";
+
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+    QVERIFY(std::any_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
         { return finding.code == "mob.semantic.missing_hair_selection"; }));
 }

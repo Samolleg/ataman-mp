@@ -49,6 +49,9 @@ never enter that runtime branch. Integral creatures and legacy
 skeleton assemblies retain their corpus-normal empty-mask behavior. Unknown
 tokens are never normalized or rejected. See
 [`validation/CHARACTER_BODYPART_VALIDATION.md`](validation/CHARACTER_BODYPART_VALIDATION.md).
+For family MOBs discovered on disk, the validator reads only the required
+assembly indexes/link table from ordered active-profile resources on its worker;
+the decision is not gated by viewport load order.
 
 ## Assemblies, geometry, morph vertices, and complexion
 

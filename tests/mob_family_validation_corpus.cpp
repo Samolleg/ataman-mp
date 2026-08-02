@@ -15,6 +15,7 @@
 #include "mob_family_validation.h"
 #include "base_profile_database_provider.h"
 #include "jmv_profile_database_provider.h"
+#include "assembly_inventory.h"
 
 namespace {
 int printBodyPartStats(const QVector<SMobFamilyMember>& members, QTextStream& out)
@@ -196,6 +197,8 @@ void printMissingHairTemplateStats(
     const QVector<SMobFamilyMember>& members,
     const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
     const QMap<QString, QStringList>& assemblyPartsByModel,
+    const QStringList& assemblyResourceSources,
+    const QString& assemblyResourceFingerprint,
     QTextStream& out)
 {
     int authoredHair = 0;
@@ -264,7 +267,12 @@ void printMissingHairTemplateStats(
             bool runtimeFallbackRisk = false;
             if(!object.importMode && monster && monster->hairIndex >= 0)
             {
-                const QStringList assembly = assemblyPartsByModel.value(resolvedModel);
+                QStringList assembly = assemblyPartsByModel.value(resolvedModel);
+                if(assembly.isEmpty())
+                    assembly = ei::assemblyPartNamesFromResourceSources(
+                        assemblyResourceSources,
+                        assemblyResourceFingerprint,
+                        resolvedModel);
                 const QString nativeHair = QString("hr.%1").arg(
                     monster->hairIndex, 2, 10, QChar('0'));
                 hasNativeHair = assembly.contains(nativeHair, Qt::CaseInsensitive);
@@ -349,16 +357,22 @@ int main(int argc, char* argv[])
         "Print helmeted missing-hr units classified by database hair index");
     QCommandLineOption assemblyInventory("assembly-inventory",
         "JSON object mapping model names to authored assembly members", "path");
+    QCommandLineOption assemblyResource("assembly-resource",
+        "Ordered RES archive used for assembly evidence (repeatable)", "path");
     parser.addOptions({seed, primary, root, workspaceRoot, preferred,
                        profile, expectNid, expectMember,
                        expectFinding, suggestFor, expectSuggestions,
                        bodyPartStats, statsOnly, auditRoot, databaseResource,
-                       missingHairTemplateStats, assemblyInventory});
+                       missingHairTemplateStats, assemblyInventory,
+                       assemblyResource});
     parser.process(app);
 
     QString inventoryError;
     const QMap<QString, QStringList> assemblyPartsByModel =
         loadAssemblyInventory(parser.value(assemblyInventory), &inventoryError);
+    const QStringList assemblyResourceSources = parser.values(assemblyResource);
+    const QString assemblyResourceFingerprint =
+        assemblyResourceSources.join(QChar(0x1f)).toCaseFolded();
     if(parser.isSet(assemblyInventory) && !inventoryError.isEmpty())
     {
         QTextStream(stderr) << "Cannot read assembly inventory: " << inventoryError << "\n";
@@ -389,7 +403,9 @@ int main(int argc, char* argv[])
         QTextStream out(stdout);
         const int unreadable = printBodyPartStats(members, out);
         if(parser.isSet(missingHairTemplateStats))
-            printMissingHairTemplateStats(members, database, assemblyPartsByModel, out);
+            printMissingHairTemplateStats(
+                members, database, assemblyPartsByModel,
+                assemblyResourceSources, assemblyResourceFingerprint, out);
         return unreadable == 0 ? 0 : 1;
     }
 
@@ -403,6 +419,8 @@ int main(int argc, char* argv[])
     request.preferredMobPath = parser.value(preferred);
     request.database = database;
     request.assemblyPartsByModel = assemblyPartsByModel;
+    request.assemblyResourceSources = assemblyResourceSources;
+    request.assemblyResourceFingerprint = assemblyResourceFingerprint;
     if(request.seedMobPaths.isEmpty() && request.mappedPrimaryMobPath.isEmpty())
     {
         QTextStream(stderr) << "At least one --seed or --primary is required.\n";
@@ -415,7 +433,8 @@ int main(int argc, char* argv[])
         printBodyPartStats(report.members, out);
     if(parser.isSet(missingHairTemplateStats))
         printMissingHairTemplateStats(
-            report.members, database, assemblyPartsByModel, out);
+            report.members, database, assemblyPartsByModel,
+            assemblyResourceSources, assemblyResourceFingerprint, out);
     if(!parser.isSet(statsOnly))
         out << report.toText() << "\n";
     bool passed = true;

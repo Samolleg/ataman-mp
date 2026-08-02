@@ -10,6 +10,7 @@ SOURCES += mob_family_validation_corpus.cpp \
            ../source/documents/mob_family_validation.cpp \
            ../source/documents/endurance_document.cpp \
            ../source/documents/script_reference_analyzer.cpp \
+           ../source/resources/assembly_inventory.cpp \
            ../source/resources/profile_database.cpp \
            ../source/runtime/providers/profile_database_provider_support.cpp \
            ../source/runtime/providers/base_profile_database_provider.cpp \
@@ -17,6 +18,7 @@ SOURCES += mob_family_validation_corpus.cpp \
 HEADERS += ../source/documents/mob_family_validation.h \
            ../source/documents/endurance_document.h \
            ../source/documents/script_reference_analyzer.h \
+           ../source/resources/assembly_inventory.h \
            ../source/resources/profile_database.h \
            ../source/runtime/providers/profile_database_provider_support.h \
            ../source/runtime/providers/base_profile_database_provider.h \

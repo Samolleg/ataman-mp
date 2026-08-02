@@ -2244,6 +2244,9 @@ QByteArray mobFamilyRequestDigest(const SMobFamilyValidationRequest& request)
         for(const QString& part : model.value())
             addString(part);
     }
+    addString(request.assemblyResourceFingerprint);
+    for(const QString& source : request.assemblyResourceSources)
+        addString(QDir::cleanPath(source).toCaseFolded());
     return hash.result();
 }
 
@@ -4469,6 +4472,8 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
     const SResourceProfileEvaluation profile = activeResourceProfile();
     request.profileId = profile.profileId;
     request.database = ei::ProfileDatabaseContext::instance().current();
+    request.assemblyResourceSources = configuredResourceSourcePaths(m_settings.get());
+    request.assemblyResourceFingerprint = configuredResourceFingerprint(m_settings.get());
     request.mapRoots = activeMapRoots().toList();
     request.explicitComposition = !m_currentCollectionPath.isEmpty();
     if(!request.explicitComposition && !m_mapTestEntry.mobPath.isEmpty())
@@ -4482,10 +4487,6 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
         return request;
     if(m_pView->currentMob())
         request.preferredMobPath = m_pView->currentMob()->filePath().absoluteFilePath();
-    QSet<QString> activeWearableModels;
-    const QSet<QString> standardWearableModels = {
-        "unhuma", "unhufe", "unorma", "unorfe", "unhusk", "unhuzm", "unhuzf"
-    };
     for(CMob* mob : m_pView->mobs())
     {
         if(!mob)
@@ -4510,24 +4511,6 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
                 ei::log(eLogWarning, QString("Family validation used the on-disk MOB because the current in-memory candidate could not be mapped safely: %1\n%2")
                     .arg(path, candidateReport.toText()));
         }
-        for(CNode* node : mob->nodes())
-        {
-            CUnit* unit = dynamic_cast<CUnit*>(node);
-            if(!unit)
-                continue;
-            for(const QString& candidate : {unit->modelName(), unit->renderedModelName()})
-            {
-                const QString model = candidate.trimmed().toLower();
-                if(standardWearableModels.contains(model))
-                    activeWearableModels.insert(model);
-            }
-        }
-    }
-    for(const QString& model : activeWearableModels)
-    {
-        const QStringList parts = CObjectList::getInstance()->assemblyPartNames(model);
-        if(!parts.isEmpty())
-            request.assemblyPartsByModel.insert(model, parts);
     }
     request.seedMobPaths.removeDuplicates();
     return request;

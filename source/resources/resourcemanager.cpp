@@ -211,48 +211,6 @@ QMap<QString, QByteArray> normalizedResourceMap(const QMap<QString, QByteArray>&
     return result;
 }
 
-bool nestedResourceEntries(const QByteArray& data, QMap<QString, SResFileEntry>* entries)
-{
-    if(!entries)
-        return false;
-    entries->clear();
-    QDataStream stream(data);
-    util::formatStream(stream);
-    SResFileHeader header;
-    stream >> header;
-    if(stream.status() != QDataStream::Ok || header.Signature != 0x019CE23C
-       || header.TableSize > 100000 || header.TableOffset > uint(data.size()))
-        return false;
-
-    const quint64 tableBytes = quint64(header.TableSize) * sizeof(SResHashTable);
-    if(quint64(header.TableOffset) + tableBytes + header.NamesLenght > quint64(data.size()))
-        return false;
-    stream.device()->seek(header.TableOffset);
-    QVector<SResHashTable> table;
-    table.resize(int(header.TableSize));
-    for(auto& entry : table)
-        stream >> entry;
-    const QByteArray names = stream.device()->read(header.NamesLenght);
-    if(stream.status() != QDataStream::Ok || names.size() != int(header.NamesLenght))
-        return false;
-
-    QTextCodec* codec = QTextCodec::codecForName("CP1251");
-    for(const SResHashTable& raw : table)
-    {
-        if(quint64(raw.NameOffset) + raw.NameLength > quint64(names.size())
-           || quint64(raw.DataOffset) + raw.DataSize > quint64(data.size()))
-            continue;
-        SResFileEntry entry;
-        entry.FileName = codec->toUnicode(
-            names.mid(int(raw.NameOffset), int(raw.NameLength))).toLower();
-        entry.Position = int(raw.DataOffset);
-        entry.Size = int(raw.DataSize);
-        entry.LastWriteTime = QDateTime::fromTime_t(raw.LastWriteTime);
-        entries->insert(entry.FileName, entry);
-    }
-    return !entries->isEmpty();
-}
-
 bool readPreferredUnitDatabase(const QVector<QString>& sources, QByteArray& unitsDatabase,
                                QString* sourcePath)
 {
@@ -353,6 +311,11 @@ int dxtLevelSize(int width, int height, int blockBytes)
 QString configuredResourceFingerprint(CSettings* settings)
 {
     return ei::cachedResourceSourceFingerprint(configuredResourceSources(settings));
+}
+
+QStringList configuredResourceSourcePaths(CSettings* settings)
+{
+    return configuredResourceSources(settings).toList();
 }
 
 namespace ei {
@@ -649,7 +612,6 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
 void CObjectList::loadFigures(QSet<QString>& aFigure)
 {
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
-    const QString sourceFingerprint = ei::cachedResourceSourceFingerprint(sources);
     if(sources.isEmpty())
     {
         ei::log(eLogWarning, "No figure resources configured. Use Settings > Game and Mod Setup, or the advanced legacy resource settings.");
@@ -686,8 +648,6 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
             if(readIndexedResource(sources, bonName, bonData))
                 assemblyFiles.insert(bonName, bonData);
             readAssembly(assemblyFiles, fig);
-            if(m_aFigure.contains(fig))
-                m_figureSourceFingerprints.insert(fig, sourceFingerprint);
         }
         else if(fig.endsWith(".fig"))
             readFigure(figureData, fig);
@@ -715,85 +675,6 @@ QStringList CObjectList::figurePartNames(const QString& name)
     ei::CFigure* figure = getFigure(name);
     if(figure)
         figure->getPartNames(result);
-    return result;
-}
-
-QStringList CObjectList::assemblyPartNames(const QString& name)
-{
-    QString model = name.trimmed().toLower();
-    if(model.endsWith(".mod"))
-        model.chop(4);
-    if(model.isEmpty())
-        return {};
-
-    const QString sourceFingerprint = configuredResourceFingerprint(m_pSettings);
-    const QString cacheKey = sourceFingerprint + '|' + model;
-    const auto cached = m_assemblyPartNameCache.constFind(cacheKey);
-    if(cached != m_assemblyPartNameCache.constEnd())
-        return cached.value();
-
-    QStringList result;
-    const QString archiveName = model + ".mod";
-    if(m_figureSourceFingerprints.value(archiveName) == sourceFingerprint
-       && m_aFigure.contains(archiveName))
-    {
-        ei::CFigure* loaded = m_aFigure.value(archiveName, nullptr);
-        loaded->getPartNames(result);
-    }
-    else
-    {
-        QByteArray archiveData;
-        if(readIndexedResource(configuredResourceSources(m_pSettings), archiveName, archiveData))
-        {
-            QMap<QString, SResFileEntry> entries;
-            if(nestedResourceEntries(archiveData, &entries))
-            {
-                const SResFileEntry linkEntry = entries.value(model);
-                if(linkEntry.Size > 0)
-                {
-                    const QByteArray linkData = archiveData.mid(linkEntry.Position, linkEntry.Size);
-                    QDataStream linkStream(linkData);
-                    util::formatStream(linkStream);
-                    int linkCount = 0;
-                    linkStream >> linkCount;
-                    auto readLinkName = [&linkStream](QString* value, bool allowEmpty) -> bool
-                    {
-                        int length = 0;
-                        linkStream >> length;
-                        if(linkStream.status() != QDataStream::Ok || length < 0 || length > 4096
-                           || (!allowEmpty && length == 0))
-                            return false;
-                        QByteArray raw(length, Qt::Uninitialized);
-                        if(length > 0 && linkStream.readRawData(raw.data(), length) != length)
-                            return false;
-                        while(!raw.isEmpty() && raw.endsWith('\0'))
-                            raw.chop(1);
-                        *value = QString::fromLatin1(raw).toLower();
-                        return allowEmpty || !value->isEmpty();
-                    };
-                    QSet<QString> seen;
-                    if(linkStream.status() == QDataStream::Ok && linkCount > 0 && linkCount <= 10000)
-                    {
-                        for(int index = 0; index < linkCount; ++index)
-                        {
-                            QString component;
-                            QString parent;
-                            if(!readLinkName(&component, false) || !readLinkName(&parent, true))
-                                break;
-                            if(entries.contains(component) && !seen.contains(component))
-                            {
-                                seen.insert(component);
-                                result.append(component);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    result.removeDuplicates();
-    result.sort(Qt::CaseInsensitive);
-    m_assemblyPartNameCache.insert(cacheKey, result);
     return result;
 }
 
@@ -832,7 +713,6 @@ void CObjectList::refreshConfiguredSources()
     m_missingFigureNames.clear();
     m_animationArchives.clear();
     m_missingAnimationNames.clear();
-    m_assemblyPartNameCache.clear();
     QSet<QString> empty;
     loadFigures(empty);
 }

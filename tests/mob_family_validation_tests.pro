@@ -8,7 +8,9 @@ INCLUDEPATH += ../source/documents ../source/resources
 SOURCES += mob_family_validation_tests.cpp \
            ../source/documents/mob_family_validation.cpp \
            ../source/documents/endurance_document.cpp \
-           ../source/documents/script_reference_analyzer.cpp
+           ../source/documents/script_reference_analyzer.cpp \
+           ../source/resources/assembly_inventory.cpp
 HEADERS += ../source/documents/mob_family_validation.h \
            ../source/documents/endurance_document.h \
-           ../source/documents/script_reference_analyzer.h
+           ../source/documents/script_reference_analyzer.h \
+           ../source/resources/assembly_inventory.h

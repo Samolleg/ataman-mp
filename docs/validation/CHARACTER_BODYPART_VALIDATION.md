@@ -154,12 +154,16 @@ object section for navigation. Messages do not paste the serialized parts,
 name, prototype, model, or Import mode. Findings appear in MOB Family
 Validation and the Message Log. They do not mutate data, offer an Apply action,
 block Save, block Test Current Map, or open a body-part preflight popup.
+Assembly evidence for disk-discovered family members is resolved on the
+validation worker from ordered active-profile resources; it does not depend on
+which model the viewport happened to load first.
 
 Automated and corpus checks:
 
-- `mob_family_validation_tests`: 20 passed, including the exact zone3 pair,
+- `mob_family_validation_tests`: 21 passed, including the exact zone3 pair,
   the same runtime fallback across profile/model/hair/helmet values,
-  hairless, native-member, and helmet-hair-replacement exclusions,
+  hairless, native-member, and helmet-hair-replacement exclusions, plus a
+  resource-backed family model that was never loaded by the viewport,
   empty/missing wearable masks, creature exclusion, Import/database equipment
   ownership, missing core anatomy, overlaps, duplicates, unknown-token
   visibility, severity, location, and input-byte preservation;

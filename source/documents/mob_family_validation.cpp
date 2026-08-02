@@ -12,6 +12,7 @@
 #include <limits>
 
 #include "profile_database.h"
+#include "assembly_inventory.h"
 #include "script_reference_analyzer.h"
 
 namespace {
@@ -489,7 +490,12 @@ bool missingHairRootUsesHelmetFallback(const SMobObjectSnapshot& object,
         return false;
 
     const QString model = context.model.trimmed().toLower();
-    const QStringList assemblyParts = request.assemblyPartsByModel.value(model);
+    QStringList assemblyParts = request.assemblyPartsByModel.value(model);
+    if(assemblyParts.isEmpty())
+        assemblyParts = ei::assemblyPartNamesFromResourceSources(
+            request.assemblyResourceSources,
+            request.assemblyResourceFingerprint,
+            model);
     const QString nativeHair = QString("hr.%1").arg(
         context.hairIndex, 2, 10, QChar('0'));
     if(!assemblyContains(assemblyParts, nativeHair))
