@@ -186,6 +186,10 @@ struct SOverlaySurfaceCommand
     QString description;
     QVector<SOverlaySectorDelta> sectors;
     int heightClampedVertexCount{0};
+    // Only overlay coverage changes affect the terrain-shadow receiver field.
+    // Texture/material and overlay-height edits rebuild sector draw data but
+    // must not restart the heightfield visibility worker.
+    bool affectsTerrainShadowField{false};
     bool isEmpty() const { return sectors.isEmpty(); }
 };
 
@@ -393,7 +397,8 @@ public:
     SOverlaySurfaceCommand makeOverlaySurfaceCommand(
         const SOverlaySurfaceSnapshot& before,
         const QString& description,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        bool affectsTerrainShadowField = false) const;
 
     STerrainHeightCommand makeRaiseLower(const STerrainBrush& brush,
                                          float rawHeightDelta,

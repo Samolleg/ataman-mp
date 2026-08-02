@@ -730,6 +730,10 @@ void CLandscape::setTile(const QMap<STileLocation, STileInfo>& arrTileInfo)
 void CLandscape::updateSectorDrawData(int xSec, int ySec)
 {
     m_aSector[ySec][xSec]->updateDrawData();
+}
+
+void CLandscape::invalidateTerrainShadowField()
+{
     ++m_shadowGeneration;
 }
 
@@ -746,8 +750,6 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
         || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
         return false;
     const bool updated = m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
-    if(updated)
-        ++m_shadowGeneration;
     return updated;
 }
 
@@ -780,7 +782,7 @@ bool CLandscape::previewCanonicalMaxZ(float maxZ)
         for(CSector* sector : row)
             if(sector)
                 sector->setPreviewMaxZ(maxZ);
-    ++m_shadowGeneration;
+    invalidateTerrainShadowField();
     return true;
 }
 

@@ -97,6 +97,9 @@ public:
     bool updatePos(QVector3D& pos) override;
     void setDrawPosition(QVector3D pos) override final;
     bool isOperationAxisAllow(EOperationAxisType type) override final;
+    // The trap figure is an editor locator, not runtime world geometry. Its
+    // serialized shadow flag must never turn that helper into a caster.
+    bool castsRenderShadow() const override { return false; }
 
     void collectLogicNodes(QList<CNode*>& arrNode);
     void clearLogicSelect();

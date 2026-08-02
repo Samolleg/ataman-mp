@@ -55,6 +55,55 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("terrainShadowsEnabled", view)
         self.assertIn("m_terrainShadowFieldGeneration", landscape)
 
+    def test_only_height_and_overlay_coverage_edits_invalidate_terrain_field(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        landscape_h = (ROOT / "source/render/landscape.h").read_text(encoding="utf-8")
+        landscape_cpp = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+        terrain_model = (ROOT / "source/documents/terrain_edit_model.h").read_text(
+            encoding="utf-8")
+
+        sector_preview = landscape_cpp.split(
+            "bool CLandscape::previewCanonicalSector", 1)[1].split(
+                "bool CLandscape::previewCanonicalOverlaySector", 1)[0]
+        tile_preview = view.split(
+            "bool CView::applyTerrainTilePreview", 1)[1].split(
+                "bool CView::applyOverlaySurfacePreview", 1)[0]
+        overlay_preview = view.split(
+            "bool CView::applyOverlaySurfacePreview", 1)[1].split(
+                "void CView::beginTerrainPreviewBatch", 1)[0]
+        height_preview = view.split(
+            "bool CView::applyTerrainHeightPreview", 1)[1].split(
+                "bool CView::applyTerrainVerticalScalePreview", 1)[0]
+
+        self.assertIn("invalidateTerrainShadowField", landscape_h)
+        self.assertNotIn("++m_shadowGeneration", sector_preview)
+        self.assertNotIn("invalidateTerrainShadowField", tile_preview)
+        self.assertIn("invalidateTerrainShadowField", height_preview)
+        self.assertIn("affectsTerrainShadowField", terrain_model)
+        self.assertIn("command.affectsTerrainShadowField", overlay_preview)
+        self.assertIn("invalidateTerrainShadowField", overlay_preview)
+
+    def test_editor_only_trap_and_helper_visuals_never_enter_shadow_queue(self):
+        magictrap = (ROOT / "source/objects/magictrap.h").read_text(encoding="utf-8")
+        node = (ROOT / "source/core/node.h").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "bool castsRenderShadow() const override { return false; }", magictrap)
+        self.assertIn("virtual bool castsRenderShadow() const { return false; }", node)
+
+    def test_static_shadow_cache_depends_only_on_actual_casters(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        render_queue = (ROOT / "source/render/render_queue.cpp").read_text(
+            encoding="utf-8")
+
+        static_hash = view.split("QCryptographicHash staticHash", 1)[1].split(
+            "const bool rebuildStatic", 1)[0]
+        self.assertNotIn("sceneSourceFingerprint", static_hash)
+        self.assertIn("queue.staticShadowFingerprint()", view)
+        self.assertIn("staticHash.addData(staticCasterFingerprint)", static_hash)
+        self.assertIn("farStaticHash.addData(staticCasterFingerprint)", static_hash)
+        self.assertIn("item.instanceMatrix.constData()", render_queue)
+
     def test_disabling_toggle_immediately_uploads_fully_visible_terrain(self):
         landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
 

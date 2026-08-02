@@ -2997,17 +2997,16 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         nextLocalRects.append(local.atlasRect);
     }
 
+    const QByteArray staticCasterFingerprint = queue.staticShadowFingerprint();
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
-    staticHash.addData(queue.staticShadowFingerprint());
-    staticHash.addData(sceneSourceFingerprint().toUtf8());
+    staticHash.addData(staticCasterFingerprint);
     for(quintptr owner : nextLocalOwners)
         staticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     staticHash.addData(reinterpret_cast<const char*>(nearCascade.staticMatrix.constData()),
                        16 * int(sizeof(float)));
     const QByteArray staticFingerprint = staticHash.result();
     QCryptographicHash farStaticHash(QCryptographicHash::Sha256);
-    farStaticHash.addData(queue.staticShadowFingerprint());
-    farStaticHash.addData(sceneSourceFingerprint().toUtf8());
+    farStaticHash.addData(staticCasterFingerprint);
     for(quintptr owner : nextLocalOwners)
         farStaticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     farStaticHash.addData(reinterpret_cast<const char*>(farCascade.staticMatrix.constData()),
@@ -10500,7 +10499,8 @@ void CView::endTileBrushGroup()
             const SOverlaySurfaceCommand exactCommand =
                 m_terrainEdit.makeOverlaySurfaceCommand(
                     m_overlaySurfaceStrokeBaseline,
-                    m_overlaySurfaceStrokeCommand.description, &report);
+                    m_overlaySurfaceStrokeCommand.description, &report,
+                    m_overlaySurfaceStrokeCommand.affectsTerrainShadowField);
             if(report.hasErrors())
             {
                 ei::log(eLogWarning, "Overlay stroke snapshot reconciliation failed:\n"
@@ -10664,6 +10664,8 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
                 "Overlay model changed but preview renderer rejected sector %1,%2")
                     .arg(delta.sectorX).arg(delta.sectorY));
     }
+    if(command.affectsTerrainShadowField)
+        m_pLand->invalidateTerrainShadowField();
     if(!m_terrainPreviewBatchActive)
     {
         m_overlayRenderNsecs += phaseTimer.nsecsElapsed();
@@ -11636,6 +11638,7 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
                     .arg(sector.first).arg(sector.second));
             }
         }
+    m_pLand->invalidateTerrainShadowField();
     if(m_sculptStrokeActive)
     {
         m_sculptStrokeChanged = true;
@@ -13901,7 +13904,8 @@ void CView::finishSculptStroke()
         const SOverlaySurfaceCommand exactCommand =
             m_terrainEdit.makeOverlaySurfaceCommand(
                 m_overlaySurfaceStrokeBaseline,
-                m_overlaySurfaceStrokeCommand.description, &report);
+                m_overlaySurfaceStrokeCommand.description, &report,
+                m_overlaySurfaceStrokeCommand.affectsTerrainShadowField);
         if(report.hasErrors())
         {
             ei::log(eLogWarning, "Overlay sculpt snapshot reconciliation failed:\n"

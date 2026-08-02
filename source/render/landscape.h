@@ -114,6 +114,7 @@ public:
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
     const QString& mapName() const {return m_innerMapName;}
     quint64 shadowGeneration() const { return m_shadowGeneration; }
+    void invalidateTerrainShadowField();
     void updateTerrainShadowVisibility(const QVector3D& sunDirection, bool enabled);
 
 private:
