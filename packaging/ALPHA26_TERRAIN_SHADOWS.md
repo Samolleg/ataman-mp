@@ -12,6 +12,9 @@
 - Corrected the outdoor sun ray by half a turn. At the same authored time,
   projected shadows now follow the game's map-space direction while retaining
   the established elevation curve and shadow-length ratio.
+- Replaced driver-dependent terrain polygon offset with an explicit
+  terrain-only depth separation, removing triangle-aligned striped self-shadow
+  artifacts on steep slopes while preserving object contact depth.
 - Point-light shadow atlases, torch semantics, animated-shadow cadence, the
   NVIDIA overlay guard, minimap capture, and ANGLE fallback are unchanged.
 
@@ -37,6 +40,6 @@
 - Terrain shadows use the editor's existing finite near/far directional
   coverage. Very distant terrain outside those cascades does not cast into the
   viewport.
-- The terrain depth pass uses a conservative slope offset. Please report any
-  visible self-shadow speckling or detached ridge contact so it can be tuned
-  against the affected map and camera angle.
+- The terrain depth pass uses a small fixed clip-space separation. Please
+  report any remaining self-shadow speckling or detached ridge contact so it
+  can be tuned against the affected map and camera angle.

@@ -3005,6 +3005,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_shadowProgram.setUniformValue("u_projMmatrix", projection);
         m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
         m_shadowProgram.setUniformValue("u_instanced", false);
+        m_shadowProgram.setUniformValue("u_shadowDepthBias", 0.0f);
     };
     const auto endTarget = [&](QOpenGLFramebufferObject* target)
     {
@@ -3027,13 +3028,15 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_shadowProgram.setUniformValue("u_instanced", false);
         m_shadowProgram.setUniformValue("u_shadowAlphaTest", false);
         m_shadowProgram.setUniformValue("u_textureUvScale", 1.0f);
-        // Terrain is both caster and receiver. Offset only its depth-writing
-        // pass so equal surfaces do not self-occlude; real hills remain in
-        // front of lower receivers in the same atlas.
-        ei::gl::Enable(GL_POLYGON_OFFSET_FILL);
-        glPolygonOffset(2.0f, 4.0f);
+        // Terrain is both caster and receiver. Give only its depth-writing
+        // vertices a deterministic clip-depth separation; glPolygonOffset's
+        // implementation-dependent slope term left steep heightfield
+        // triangles alternating across their own packed depth on Zone 11.
+        m_shadowProgram.setUniformValue("u_shadowDepthBias", 0.0002f);
         m_pLand->drawShadow(&m_shadowProgram, &lightFrustum);
-        ei::gl::Disable(GL_POLYGON_OFFSET_FILL);
+        // Object casters share this atlas and must keep their established
+        // contact depth.
+        m_shadowProgram.setUniformValue("u_shadowDepthBias", 0.0f);
         if(shadowPerformance.collecting())
         {
             const quint64 elapsed = quint64(timer.nsecsElapsed());

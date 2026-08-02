@@ -44,6 +44,21 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("!m_minimapCaptureActive", view)
         self.assertIn("terrainShadowsEnabled", view)
 
+    def test_terrain_uses_explicit_depth_bias_and_objects_do_not_inherit_it(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        vertex = (ROOT / "assets/shaders/vshader.vsh").read_text(encoding="utf-8")
+
+        self.assertIn("u_shadowDepthBias", vertex)
+        self.assertIn("gl_Position.z += u_shadowDepthBias * gl_Position.w", vertex)
+        terrain_draw = view.index("m_pLand->drawShadow")
+        terrain_bias = view.rfind('setUniformValue("u_shadowDepthBias"', 0, terrain_draw)
+        object_reset = view.find('setUniformValue("u_shadowDepthBias", 0.0f)', terrain_draw)
+        object_draw = view.find("queue.flushShadow", terrain_draw)
+        self.assertGreaterEqual(terrain_bias, 0)
+        self.assertGreater(object_reset, terrain_draw)
+        self.assertGreater(object_draw, object_reset)
+        self.assertNotIn("GL_POLYGON_OFFSET_FILL", view)
+
 
 if __name__ == "__main__":
     unittest.main()
