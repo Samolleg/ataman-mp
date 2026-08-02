@@ -497,6 +497,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptBool("drawSkybox", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderFog", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderSceneLights", true)));
+    aOpt.append(QSharedPointer<COpt>(new COptBool("renderTerrainShadows", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("renderTextureMipmapping", true)));
     aOpt.append(QSharedPointer<COpt>(new COptBool("overrideWorldTime", false)));
 

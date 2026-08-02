@@ -27,7 +27,11 @@ fingerprinted executable evidence.
 - Map lights with `LIGHT_SHADOW` enabled contribute their attenuated luminance
   and caster-relative direction to the projected-shadow direction. Disabled
   map lights still illuminate but do not steer the shadow projection.
-- Terrain receives directional shadows but is never submitted as a caster.
+- Terrain always receives directional shadows. When **Terrain casts directional
+  shadows** is enabled, visible hills and cliffs are also submitted to the
+  existing near/far static sun atlases. Terrain and object blockers therefore
+  share one nearest-depth result; the option does not create a second shadow
+  mask or affect point-light atlases.
 - Stock shadows are per-caster projected silhouettes over selected receivers.
   The editor approximates this with a broad cached static projection used by
   terrain and a tight, pivot-centred animated projection. Ordinary static
@@ -71,7 +75,9 @@ fingerprinted executable evidence.
    produce a legible silhouette near the viewport pivot while the static shadow
    cache remains reusable.
 6. Put a tall static object beside a terrain ridge. The object must cast onto
-   terrain; the ridge itself must not cast into the directional shadow map.
+   terrain. Toggle **Terrain casts directional shadows**: the ridge silhouette
+   must disappear/reappear while object shadows remain. Terrain edits must
+   invalidate the cached static sun atlases without rotating the camera.
 7. Inspect a map light from outside and inside its range. Illumination must
    attenuate continuously and disappear when the light is hidden or map-light
    rendering is disabled. Beside a visible caster, toggle **Cast shadows**:
@@ -97,7 +103,14 @@ fingerprinted executable evidence.
 14. Load `gz5g`, `gz10g`, `bz7g`, or `gz20g` through a profile whose
     `map.txt` marks it `#sky cave`. Confirm there is no outdoor sky, the map
     fades into a black boundary, and moving the preview time does not rotate or
-    recolor shadows. Confirm an ordinary `#sky normal` map remains outdoor.
+   recolor shadows. Confirm an ordinary `#sky normal` map remains outdoor.
+15. On an outdoor map, hold the camera fixed and inspect 06:00, 12:00, and
+    18:00. The sun-shadow ray must point approximately -Y, +X, and +Y in map
+    space respectively; noon shadows must be shorter than morning/evening
+    shadows. Orbiting the camera must not rotate those world-space directions.
+16. Repeat startup through the ANGLE compatibility launcher. Full environment
+    remains unavailable and no directional or terrain shadow atlas may be
+    allocated; Unlit and Simple shading must remain usable.
 
 ## Known evidence boundary
 

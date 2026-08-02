@@ -1211,6 +1211,50 @@ void CSector::draw(QOpenGLShaderProgram* program)
 
 }
 
+void CSector::drawShadow(QOpenGLShaderProgram* program)
+{
+    if(!program || m_arrLandVrtData.isEmpty())
+        return;
+
+    program->setUniformValue("u_modelMmatrix", m_modelMatrix);
+    program->setUniformValue("u_partAnimated", false);
+    program->setUniformValue("u_instanced", false);
+    program->setUniformValue("u_shadowAlphaTest", false);
+
+    m_vertexBuf.bind();
+    const int stride = int(sizeof(STerrainVertexData));
+    const int positionLocation = program->attributeLocation("a_position");
+    if(positionLocation < 0)
+        return;
+    program->enableAttributeArray(positionLocation);
+    program->setAttributeBuffer(positionLocation, GL_FLOAT, 0, 3, stride);
+
+    const int normalLocation = program->attributeLocation("a_normal");
+    if(normalLocation >= 0)
+    {
+        program->enableAttributeArray(normalLocation);
+        program->setAttributeBuffer(normalLocation, GL_FLOAT,
+            int(sizeof(QVector3D)), 3, stride);
+    }
+    const int textureLocation = program->attributeLocation("a_texture");
+    if(textureLocation >= 0)
+    {
+        program->disableAttributeArray(textureLocation);
+        program->setAttributeValue(textureLocation, QVector2D());
+    }
+
+    m_indexBuf.bind();
+    constexpr int indexNum = 256 * 24;
+    ei::gl::DrawElements(GL_TRIANGLES, indexNum, GL_UNSIGNED_SHORT, nullptr);
+    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+    if(performance.collecting())
+    {
+        ++performance.counters().drawCalls;
+        ++performance.counters().terrainShadowDrawCalls;
+        performance.counters().triangles += quint64(indexNum / 3);
+    }
+}
+
 void CSector::drawWater(QOpenGLShaderProgram *program)
 {
     if (m_arrWaterVrtData.count() == 0 || m_waterIndexCount == 0)

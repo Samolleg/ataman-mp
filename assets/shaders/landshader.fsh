@@ -168,8 +168,9 @@ void main(void)
       bool farValid = farStaticInside || farDynamicInside;
       if (nearValid || farValid)
       {
-        // Terrain never writes either shadow map, so receiver bias can remain
-        // small without terrain self-acne. Larger values detach contact points.
+        // Terrain caster depth is slope-offset while it is written to the
+        // static maps. Keep receiver bias small so hill silhouettes and object
+        // contact points do not detach.
         float staticBias = max(0.000012 * (1.0 - sunDiffuse), 0.000002);
         float dynamicBias = 0.000001;
         float blendStart = u_nearShadowSplit * 0.78;

@@ -148,7 +148,11 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
     else
         elevationDegrees = 30.0f + (4.0f - result.timeHours) * 11.25f;
     const float elevation = qDegreesToRadians(elevationDegrees);
-    const float azimuth = result.timeHours * (2.0f * float(M_PI) / 24.0f);
+    // This is the direction travelled by the light ray, not the vector from
+    // the receiver toward the sun. Shipped terrain sun-state captures place
+    // the ray half a turn beyond the clock angle (noon points +X).
+    const float azimuth = result.timeHours * (2.0f * float(M_PI) / 24.0f)
+        + float(M_PI);
     const float horizontal = qCos(elevation);
     result.sunDirection = QVector3D(qCos(azimuth) * horizontal,
                                     qSin(azimuth) * horizontal,

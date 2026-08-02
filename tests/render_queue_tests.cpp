@@ -18,6 +18,7 @@ private slots:
     void selectsModernAndFallbackCapabilities();
     void appliesRenderSchedulingOptions();
     void derivesEnvironmentFromWorldValues();
+    void matchesNativeSunRayDirectionAndLength();
     void combinesShadowCastingPointLights();
     void pointLightInfluenceIsCasterLocalAndFallsWithDistance();
 };
@@ -171,7 +172,7 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QCOMPARE(noon.skyColor, QVector3D(46.0f, 181.0f, 217.0f) / 255.0f);
     QVERIFY(noon.fogStart < noon.fogEnd);
     QCOMPARE(noon.fogEnd, 620.0f);
-    QVERIFY(qAbs(noon.sunDirection.x() + 0.5f) < 0.00001f);
+    QVERIFY(qAbs(noon.sunDirection.x() - 0.5f) < 0.00001f);
     QVERIFY(qAbs(noon.sunDirection.y()) < 0.00001f);
     QVERIFY(qAbs(noon.sunDirection.z() + 0.8660254f) < 0.00001f);
 
@@ -183,7 +184,7 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QCOMPARE(midnight.sunColor, QVector3D(63.0f, 93.0f, 157.0f) / 255.0f);
     QCOMPARE(midnight.ambientColor, QVector3D(54.0f, 83.0f, 147.0f) / 255.0f);
     QVERIFY(midnight.sunColor.z() > midnight.sunColor.x());
-    QVERIFY(qAbs(midnight.sunDirection.x() - 0.2588190f) < 0.00001f);
+    QVERIFY(qAbs(midnight.sunDirection.x() + 0.2588190f) < 0.00001f);
     QVERIFY(qAbs(midnight.sunDirection.y()) < 0.00001f);
     QVERIFY(qAbs(midnight.sunDirection.z() + 0.9659258f) < 0.00001f);
 
@@ -213,6 +214,34 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QCOMPARE(ei::clockValueToHours(1230), 12.5f);
     QCOMPARE(ei::clockValueToHours(2360), 23.0f + 59.0f / 60.0f);
     QCOMPARE(ei::clockValueToHours(2400), 23.0f + 59.0f / 60.0f);
+}
+
+void RenderQueueTests::matchesNativeSunRayDirectionAndLength()
+{
+    const ei::SRenderEnvironment six =
+        ei::renderEnvironmentForValues(6.0f, 1.0f, 1.0f);
+    const ei::SRenderEnvironment noon =
+        ei::renderEnvironmentForValues(12.0f, 1.0f, 1.0f);
+    const ei::SRenderEnvironment eighteen =
+        ei::renderEnvironmentForValues(18.0f, 1.0f, 1.0f);
+
+    // The shipped light ray completes one clockwise XY cycle with the noon
+    // ray pointing +X. Elevation is 60 degrees at noon and 37.5 degrees at
+    // 06:00/18:00, so horizontal shadow length per unit height is cot(elevation).
+    QVERIFY(qAbs(six.sunDirection.x()) < 0.00001f);
+    QVERIFY(six.sunDirection.y() < -0.79334f);
+    QVERIFY(noon.sunDirection.x() > 0.49999f);
+    QVERIFY(qAbs(noon.sunDirection.y()) < 0.00001f);
+    QVERIFY(qAbs(eighteen.sunDirection.x()) < 0.00001f);
+    QVERIFY(eighteen.sunDirection.y() > 0.79334f);
+
+    const auto shadowLengthPerHeight = [](const QVector3D& ray)
+    {
+        return qSqrt(ray.x() * ray.x() + ray.y() * ray.y()) / qAbs(ray.z());
+    };
+    QVERIFY(qAbs(shadowLengthPerHeight(noon.sunDirection) - 0.5773503f) < 0.00001f);
+    QVERIFY(qAbs(shadowLengthPerHeight(six.sunDirection) - 1.3032254f) < 0.00001f);
+    QVERIFY(qAbs(shadowLengthPerHeight(eighteen.sunDirection) - 1.3032254f) < 0.00001f);
 }
 
 void RenderQueueTests::combinesShadowCastingPointLights()

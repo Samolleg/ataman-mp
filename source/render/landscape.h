@@ -66,6 +66,8 @@ public:
     bool save(const SaveProgress& progress = SaveProgress());
     bool saveMapAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     void draw(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
+    void drawShadow(QOpenGLShaderProgram* program,
+                    const class CViewFrustum* frustum = nullptr);
     void drawTileGrid(QOpenGLShaderProgram* program);
     void drawWater(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
     void drawTilePreview(QOpenGLShaderProgram* program);
@@ -101,6 +103,7 @@ public:
     bool isDirty() const {return m_bDirty;}
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
     const QString& mapName() const {return m_innerMapName;}
+    quint64 shadowGeneration() const { return m_shadowGeneration; }
 
 private:
     CLandscape();
@@ -122,6 +125,7 @@ private:
     QVector<int> m_arrIncorectTiles;
     bool m_bDirty;
     const CTerrainEditModel* m_canonicalTerrain;
+    quint64 m_shadowGeneration{0};
 };
 
 

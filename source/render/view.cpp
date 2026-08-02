@@ -2734,7 +2734,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
                             const ei::SRenderEnvironment& environment,
                             const QVector<ei::SScenePointLight>& sceneLights,
                             RenderQueueContext& queue,
-                            float maximumDistance)
+                            float maximumDistance,
+                            bool terrainShadowsEnabled)
 {
     Q_UNUSED(cameraPosition)
     if(!m_shadowFbo || !m_dynamicShadowFbo || !m_farShadowFbo || !m_farDynamicShadowFbo
@@ -2745,6 +2746,10 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         return false;
 
     const float safeMaximumDistance = qBound(1.0f, maximumDistance, 1024.0f);
+    const bool terrainCasterAvailable = terrainShadowsEnabled
+        && m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand;
+    const quint64 terrainShadowGeneration = terrainCasterAvailable
+        ? m_pLand->shadowGeneration() : 0;
     // The near cascade is the high-density contact-shadow region. Making its
     // reach follow camera altitude expanded it to 92-128 units in overview
     // views, reducing the closest actor and tree shadows to a handful of
@@ -2929,6 +2934,10 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
     staticHash.addData(queue.staticShadowFingerprint());
     staticHash.addData(sceneSourceFingerprint().toUtf8());
+    const char terrainShadowState = terrainCasterAvailable ? 1 : 0;
+    staticHash.addData(&terrainShadowState, 1);
+    staticHash.addData(reinterpret_cast<const char*>(&terrainShadowGeneration),
+                       int(sizeof(terrainShadowGeneration)));
     for(quintptr owner : nextLocalOwners)
         staticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     staticHash.addData(reinterpret_cast<const char*>(nearCascade.staticMatrix.constData()),
@@ -2937,6 +2946,9 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     QCryptographicHash farStaticHash(QCryptographicHash::Sha256);
     farStaticHash.addData(queue.staticShadowFingerprint());
     farStaticHash.addData(sceneSourceFingerprint().toUtf8());
+    farStaticHash.addData(&terrainShadowState, 1);
+    farStaticHash.addData(reinterpret_cast<const char*>(&terrainShadowGeneration),
+                          int(sizeof(terrainShadowGeneration)));
     for(quintptr owner : nextLocalOwners)
         farStaticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     farStaticHash.addData(reinterpret_cast<const char*>(farCascade.staticMatrix.constData()),
@@ -3004,10 +3016,36 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         // Bind Qt's actual default target explicitly after every shadow pass.
         QOpenGLFramebufferObject::bindDefault();
     };
+    const auto drawTerrainShadow = [&](const QMatrix4x4& lightSpaceMatrix)
+    {
+        if(!terrainCasterAvailable)
+            return;
+        QElapsedTimer timer;
+        timer.start();
+        const CViewFrustum lightFrustum(lightSpaceMatrix);
+        m_shadowProgram.setUniformValue("u_partAnimated", false);
+        m_shadowProgram.setUniformValue("u_instanced", false);
+        m_shadowProgram.setUniformValue("u_shadowAlphaTest", false);
+        m_shadowProgram.setUniformValue("u_textureUvScale", 1.0f);
+        // Terrain is both caster and receiver. Offset only its depth-writing
+        // pass so equal surfaces do not self-occlude; real hills remain in
+        // front of lower receivers in the same atlas.
+        ei::gl::Enable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(2.0f, 4.0f);
+        m_pLand->drawShadow(&m_shadowProgram, &lightFrustum);
+        ei::gl::Disable(GL_POLYGON_OFFSET_FILL);
+        if(shadowPerformance.collecting())
+        {
+            const quint64 elapsed = quint64(timer.nsecsElapsed());
+            shadowPerformance.counters().terrainShadowNanoseconds += elapsed;
+            shadowPerformance.counters().shadowNanoseconds += elapsed;
+        }
+    };
     if(rebuildStatic)
     {
         m_staticLightSpaceMatrix = nearCascade.staticMatrix;
         beginTarget(m_shadowFbo, nearCascade.projection, nearCascade.staticView);
+        drawTerrainShadow(nearCascade.staticMatrix);
         queue.flushShadow(&m_shadowProgram,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
                           nearCascade.staticMatrix,
@@ -3019,6 +3057,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     {
         m_farStaticLightSpaceMatrix = farCascade.staticMatrix;
         beginTarget(m_farShadowFbo, farCascade.projection, farCascade.staticView);
+        drawTerrainShadow(farCascade.staticMatrix);
         queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
                           farCascade.staticMatrix, false, true, &localOwners);
         endTarget(m_farShadowFbo);
@@ -3199,6 +3238,9 @@ QString CView::captureShadowDiagnostics(QString* error)
         {"configuredMaximumDistance", intOption("renderShadowDistance", 320)},
         {"quality", intOption("renderShadowQuality", 2)},
         {"enabled", intOption("renderShadowQuality", 2) > 0},
+        {"terrainCasterEnabled", boolOption("renderTerrainShadows", true)},
+        {"terrainShadowGeneration", m_pLand ? QString::number(
+             m_pLand->shadowGeneration()) : QStringLiteral("0")},
         {"atlasResolution", m_shadowResolution},
         {"packedDepthDitheringDisabled", true},
         {"packedDepthFramebufferSrgbDisabled", true},
@@ -5449,6 +5491,9 @@ void CView::draw()
         && environmentEnabled && !m_openGlesCompatibility
         && shadowQuality > 0
         && ensureShadowFramebuffers(shadowQuality);
+    const bool terrainShadowsEnabled = shadowsEnabled
+        && renderBool("renderTerrainShadows", true)
+        && m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand;
     const COptInt* shadowDistanceOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowDistance")) : nullptr;
     // The old adaptive map stopped at 160 world units. Keep twice that reach
@@ -5570,6 +5615,7 @@ void CView::draw()
         metadata.frustumCullingEnabled = cullingEnabled;
         metadata.shadowQuality = shadowQuality;
         metadata.shadowAtlasResolution = m_shadowResolution;
+        metadata.terrainShadowsEnabled = terrainShadowsEnabled;
         performance.setFrameMetadata(metadata);
     }
 
@@ -5777,7 +5823,8 @@ void CView::draw()
         }
         const bool shadowReady = environmentEnabled && shadowsEnabled
             && renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,
-                               renderQueue, maximumShadowDistance);
+                               renderQueue, maximumShadowDistance,
+                               terrainShadowsEnabled);
         drawTerrainColor(shadowReady);
         renderQueue.flush();
         logOpenGlErrors(QStringLiteral("draw/object-queue"));

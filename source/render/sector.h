@@ -44,6 +44,7 @@ public:
     ~CSector();
     QByteArray serializeSector();
     void draw(QOpenGLShaderProgram* program);
+    void drawShadow(QOpenGLShaderProgram* program);
     void drawTileGrid(QOpenGLShaderProgram* program);
     void drawWater(QOpenGLShaderProgram* program);
     bool intersectsFrustum(const class CViewFrustum& frustum) const;

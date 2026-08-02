@@ -43,6 +43,7 @@ void CLandscape::unloadMpr()
     m_aTileTypes.clear();
     m_aAnimTile.clear();
     m_bDirty = false;
+    ++m_shadowGeneration;
 }
 
 CLandscape::CLandscape():
@@ -245,6 +246,7 @@ void CLandscape::readMap(const QFileInfo& path)
     }
 
     ei::log(eLogInfo, "End read terrain");
+    ++m_shadowGeneration;
     ei::setCrashContext("idle");
 }
 
@@ -373,6 +375,35 @@ void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum
             if(performance.collecting())
                 ++performance.counters().terrainSectorsVisible;
             ySec->draw(program);
+        }
+}
+
+void CLandscape::drawShadow(QOpenGLShaderProgram* program,
+                            const CViewFrustum* frustum)
+{
+    for(auto& row : m_aSector)
+        for(CSector* sector : row)
+        {
+            if(!sector)
+                continue;
+            RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+            if(performance.collecting())
+            {
+                ++performance.counters().terrainShadowSectorsTested;
+                ++performance.counters().shadowCandidates;
+            }
+            if(frustum && !sector->intersectsFrustum(*frustum))
+            {
+                if(performance.collecting())
+                    ++performance.counters().terrainShadowSectorsCulled;
+                continue;
+            }
+            if(performance.collecting())
+            {
+                ++performance.counters().terrainShadowSectorsVisible;
+                ++performance.counters().shadowItems;
+            }
+            sector->drawShadow(program);
         }
 }
 
@@ -526,6 +557,7 @@ void CLandscape::setTile(const QMap<STileLocation, STileInfo>& arrTileInfo)
 void CLandscape::updateSectorDrawData(int xSec, int ySec)
 {
     m_aSector[ySec][xSec]->updateDrawData();
+    ++m_shadowGeneration;
 }
 
 void CLandscape::drawTileGrid(QOpenGLShaderProgram* program)
@@ -540,7 +572,10 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
     if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
         || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
         return false;
-    return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
+    const bool updated = m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
+    if(updated)
+        ++m_shadowGeneration;
+    return updated;
 }
 
 bool CLandscape::previewCanonicalOverlaySector(
@@ -572,6 +607,7 @@ bool CLandscape::previewCanonicalMaxZ(float maxZ)
         for(CSector* sector : row)
             if(sector)
                 sector->setPreviewMaxZ(maxZ);
+    ++m_shadowGeneration;
     return true;
 }
 
