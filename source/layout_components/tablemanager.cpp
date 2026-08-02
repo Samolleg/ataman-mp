@@ -32,6 +32,8 @@
 #include "bodypartedit_form.h"
 #include "profile_database.h"
 #include "behavior_collection_widget.h"
+#include "trap_collection_widget.h"
+#include "objects/magictrap.h"
 #include "objects/unit.h"
 
 namespace {
@@ -603,6 +605,35 @@ void CTableManager::setBehaviorCollection(CUnit* unit, int logicSlot)
                 CPatrolPoint* point = unit->patrolByIndex(logicSlot, patrol);
                 if(point) emit onBehaviorLookAdd(point);
             });
+    m_pTable->setCellWidget(row, 0, editor);
+    editor->setMinimumHeight(190);
+    editor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_pTable->verticalHeader()->setSectionResizeMode(row, QHeaderView::Stretch);
+    restoreScrollPosition();
+}
+
+void CTableManager::setTrapCollection(CMagicTrap* trap)
+{
+    if(!trap)
+        return;
+    const int row = m_pTable->rowCount();
+    m_pTable->insertRow(row);
+    m_pTable->setSpan(row, 0, 1, 2);
+    CTrapCollectionWidget* editor = new CTrapCollectionWidget(trap, m_pTable);
+    editor->setEnabled(!m_readOnly);
+    editor->setProperty("enduranceReadOnly", m_readOnly);
+    connect(editor, &CTrapCollectionWidget::selectPoint,
+            this, &CTableManager::onBehaviorPointSelected);
+    connect(editor, &CTrapCollectionWidget::moveActivationArea, this,
+            [this, trap](int from, int to)
+            { emit onTrapActivationAreaMove(trap, from, to); });
+    connect(editor, &CTrapCollectionWidget::moveCastTarget, this,
+            [this, trap](int from, int to)
+            { emit onTrapCastTargetMove(trap, from, to); });
+    connect(editor, &CTrapCollectionWidget::addActivationArea, this,
+            [this, trap]() { emit onTrapActivationAreaAdd(trap); });
+    connect(editor, &CTrapCollectionWidget::addCastTarget, this,
+            [this, trap]() { emit onTrapCastTargetAdd(trap); });
     m_pTable->setCellWidget(row, 0, editor);
     editor->setMinimumHeight(190);
     editor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);

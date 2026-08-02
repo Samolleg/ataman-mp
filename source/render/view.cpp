@@ -1265,6 +1265,62 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
                 addLogicPoint(true);
         });
     });
+    connect(m_tableManager.get(), &CTableManager::onTrapActivationAreaMove,
+            this, [this](CMagicTrap* trap, int from, int to)
+    {
+        CMob* mob = ownerMob(trap);
+        const uint trapId = trap ? trap->mapId() : 0;
+        QTimer::singleShot(0, this, [this, mob, trapId, from, to]()
+        {
+            if(!m_pUndoStack || !mob || !m_aMob.contains(mob)
+               || !mob->nodeByMapId(trapId))
+                return;
+            m_pUndoStack->push(new CMoveTrapPointCommand(
+                this, mob, trapId, from, to, false));
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onTrapCastTargetMove,
+            this, [this](CMagicTrap* trap, int from, int to)
+    {
+        CMob* mob = ownerMob(trap);
+        const uint trapId = trap ? trap->mapId() : 0;
+        QTimer::singleShot(0, this, [this, mob, trapId, from, to]()
+        {
+            if(!m_pUndoStack || !mob || !m_aMob.contains(mob)
+               || !mob->nodeByMapId(trapId))
+                return;
+            m_pUndoStack->push(new CMoveTrapPointCommand(
+                this, mob, trapId, from, to, true));
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onTrapActivationAreaAdd,
+            this, [this](CMagicTrap* trap)
+    {
+        CMob* mob = ownerMob(trap);
+        const uint trapId = trap ? trap->mapId() : 0;
+        QTimer::singleShot(0, this, [this, mob, trapId]()
+        {
+            cancelPendingOperation();
+            CMagicTrap* owner = mob && m_aMob.contains(mob)
+                ? dynamic_cast<CMagicTrap*>(mob->nodeByMapId(trapId)) : nullptr;
+            if(owner && selectNode(owner, false))
+                addLogicPoint(false);
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onTrapCastTargetAdd,
+            this, [this](CMagicTrap* trap)
+    {
+        CMob* mob = ownerMob(trap);
+        const uint trapId = trap ? trap->mapId() : 0;
+        QTimer::singleShot(0, this, [this, mob, trapId]()
+        {
+            cancelPendingOperation();
+            CMagicTrap* owner = mob && m_aMob.contains(mob)
+                ? dynamic_cast<CMagicTrap*>(mob->nodeByMapId(trapId)) : nullptr;
+            if(owner && selectNode(owner, false))
+                addLogicPoint(true);
+        });
+    });
     m_pUndoStack = pStack;
     m_lastUndoStackIndex = m_pUndoStack ? m_pUndoStack->index() : -1;
     connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int index)
@@ -7077,6 +7133,43 @@ CUnit* CView::behaviorCollectionOwner(const QList<CNode*>& selection) const
     return commonOwner;
 }
 
+CMagicTrap* CView::trapCollectionOwner(const QList<CNode*>& selection) const
+{
+    if(selection.isEmpty())
+        return nullptr;
+    CMagicTrap* commonOwner = nullptr;
+    for(CNode* selected : selection)
+    {
+        CMagicTrap* owner = dynamic_cast<CMagicTrap*>(selected);
+        if(!owner)
+        {
+            CMob* mob = ownerMob(selected);
+            if(!mob)
+                return nullptr;
+            for(CNode* node : mob->nodes())
+            {
+                CMagicTrap* candidate = dynamic_cast<CMagicTrap*>(node);
+                if(!candidate)
+                    continue;
+                if(CActivationZone* area = dynamic_cast<CActivationZone*>(selected))
+                {
+                    if(candidate->actZones().contains(area)) owner = candidate;
+                }
+                else if(CTrapCastPoint* target = dynamic_cast<CTrapCastPoint*>(selected))
+                {
+                    if(candidate->castPoints().contains(target)) owner = candidate;
+                }
+                if(owner)
+                    break;
+            }
+        }
+        if(!owner || (commonOwner && commonOwner != owner))
+            return nullptr;
+        commonOwner = owner;
+    }
+    return commonOwner;
+}
+
 void CView::setMobVisible(CMob* mob, bool visible)
 {
     if(!mob || !m_aMob.contains(mob) || isMobVisible(mob) == visible)
@@ -10889,6 +10982,8 @@ void CView::viewParameters()
     {
         if(CUnit* unit = behaviorCollectionOwner(selected))
             m_tableManager->setBehaviorCollection(unit, m_logicSlotIndex);
+        else if(CMagicTrap* trap = trapCollectionOwner(selected))
+            m_tableManager->setTrapCollection(trap);
         m_tableManager->setLogicZeroContext(m_logicSlotIndex == 0);
     }
     m_tableManager->setReadOnly(!hasEditableSelection());

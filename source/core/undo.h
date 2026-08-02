@@ -287,6 +287,25 @@ private:
     bool m_lookPoint;
 };
 
+class CMoveTrapPointCommand : public QUndoCommand
+{
+public:
+    CMoveTrapPointCommand(CView* view, CMob* mob, uint trapId,
+                          int from, int to, bool castTarget,
+                          QUndoCommand* parent = nullptr);
+    void undo() override;
+    void redo() override;
+
+private:
+    void apply(int from, int to);
+    CView* m_view;
+    CMob* m_mob;
+    uint m_trapId;
+    int m_from;
+    int m_to;
+    bool m_castTarget;
+};
+
 struct SLogicSlotReplacement
 {
     uint unitId{0};

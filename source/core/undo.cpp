@@ -699,6 +699,41 @@ void CMoveBehaviorPointCommand::redo()
     apply(m_from, m_to);
 }
 
+CMoveTrapPointCommand::CMoveTrapPointCommand(
+        CView* view, CMob* mob, uint trapId, int from, int to,
+        bool castTarget, QUndoCommand* parent)
+    : QUndoCommand(parent), m_view(view), m_mob(mob), m_trapId(trapId),
+      m_from(from), m_to(to), m_castTarget(castTarget)
+{
+    setText(m_castTarget ? "Reorder cast target" : "Reorder activation area");
+}
+
+void CMoveTrapPointCommand::apply(int from, int to)
+{
+    CMagicTrap* trap = m_mob
+        ? dynamic_cast<CMagicTrap*>(m_mob->nodeByMapId(m_trapId)) : nullptr;
+    const bool changed = trap && (m_castTarget
+        ? trap->moveCastTarget(from, to)
+        : trap->moveActivationArea(from, to));
+    if(!changed || !m_view || !m_mob)
+        return;
+    m_mob->logicNodesUpdate();
+    m_view->collectObjectTreeData();
+    m_view->viewParameters();
+    m_view->setDurty(m_mob);
+    m_view->update();
+}
+
+void CMoveTrapPointCommand::undo()
+{
+    apply(m_to, m_from);
+}
+
+void CMoveTrapPointCommand::redo()
+{
+    apply(m_from, m_to);
+}
+
 CReplaceLogicSlotsCommand::CReplaceLogicSlotsCommand(
         CView* view, CMob* mob,
         const QVector<SLogicSlotReplacement>& replacements,

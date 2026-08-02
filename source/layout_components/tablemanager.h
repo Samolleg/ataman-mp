@@ -21,6 +21,7 @@ class CMultiLineEditForm;
 class CUnitStatForm;
 class CBodyPartEditForm;
 class QContextMenuEvent;
+class CMagicTrap;
 
 ///
 /// \brief The CValueItem class supports any type of property that can be displayed with a single line.
@@ -309,6 +310,7 @@ public:
     void reset();
     void setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp);
     void setBehaviorCollection(CUnit* unit, int logicSlot);
+    void setTrapCollection(CMagicTrap* trap);
     void setLogicZeroContext(bool logicZero);
     void setReadOnly(bool readOnly);
 
@@ -337,6 +339,10 @@ signals:
     void onBehaviorLookMove(CUnit* unit, int logicSlot, int patrol, int from, int to);
     void onBehaviorPatrolAdd(CUnit* unit);
     void onBehaviorLookAdd(CPatrolPoint* patrol);
+    void onTrapActivationAreaMove(CMagicTrap* trap, int from, int to);
+    void onTrapCastTargetMove(CMagicTrap* trap, int from, int to);
+    void onTrapActivationAreaAdd(CMagicTrap* trap);
+    void onTrapCastTargetAdd(CMagicTrap* trap);
 
 public slots:
     void onParamChange(const QSharedPointer<IPropertyBase>& pProp); //get value for translating it to view class

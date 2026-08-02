@@ -32,6 +32,8 @@ def main() -> int:
     undo = source("source/core/undo.cpp")
     collection_h = source("source/ui/behavior_collection_widget.h")
     collection = source("source/ui/behavior_collection_widget.cpp")
+    trap_collection_h = source("source/ui/trap_collection_widget.h")
+    trap_collection = source("source/ui/trap_collection_widget.cpp")
 
     require(settings, '{"shortcutHistory", "Ctrl+H"}',
             "Undo History default shortcut")
@@ -256,6 +258,39 @@ def main() -> int:
             "Add look cancelling an unfinished placement first")
     require(main_window, "Dirty MOB validation deferred until explicit refresh",
             "no repeated dirty-candidate serialization during normal editing")
+
+    require(trap_collection_h, "class CTrapCollectionWidget",
+            "embedded magic-trap collection editor")
+    require(trap_collection_h, "void moveActivationArea(int from, int to);",
+            "activation-area reorder request")
+    require(trap_collection_h, "void moveCastTarget(int from, int to);",
+            "cast-target reorder request")
+    require(trap_collection, 'tr("Activation areas")',
+            "independent activation-area collection")
+    require(trap_collection, 'tr("Cast targets")',
+            "independent cast-target collection")
+    require(trap_collection, "source->parent() != target->parent()",
+            "drag reorder constrained to one trap array")
+    require(trap_collection, "worldSelectionBackground",
+            "viewport-selected trap child highlight")
+    require(magic_trap, "bool CMagicTrap::moveActivationArea(int from, int to)",
+            "ordered activation-area mutation API")
+    require(magic_trap, "bool CMagicTrap::moveCastTarget(int from, int to)",
+            "ordered cast-target mutation API")
+    require(undo_h, "class CMoveTrapPointCommand",
+            "atomic trap-child reorder undo command")
+    require(undo, 'm_castTarget ? "Reorder cast target" : "Reorder activation area"',
+            "specific trap reorder undo labels")
+    require(view, "trapCollectionOwner(selected)",
+            "trap-child selection resolving its owner collection")
+    require(view, "setTrapCollection(trap)",
+            "magic-trap collection integration")
+    require(table, "setSectionResizeMode(row, QHeaderView::Stretch)",
+            "trap collection filling remaining Object Properties height")
+    require(view, "onTrapActivationAreaAdd",
+            "activation-area add action integration")
+    require(view, "onTrapCastTargetAdd",
+            "cast-target add action integration")
 
     print("behavior authoring contract: PASS")
     return 0

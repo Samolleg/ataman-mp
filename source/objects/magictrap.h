@@ -28,6 +28,7 @@ public:
     bool updatePos(QVector3D& pos) override;
     void markAsDeleted(bool bDeleted = true) override;
     bool isOperationAxisAllow(EOperationAxisType type) override final;
+    float radius() const { return m_radius; }
 
 signals:
     void changeActZone();
@@ -108,6 +109,8 @@ public:
     void deleteLastActZone();
     CTrapCastPoint* createCastPoint();
     void deleteLastCastPoint();
+    bool moveActivationArea(int from, int to);
+    bool moveCastTarget(int from, int to);
     const QVector<CActivationZone*>& actZones(){return m_aActZone;}
     const QVector<CTrapCastPoint*>& castPoints() {return m_aCastPoint;}
 

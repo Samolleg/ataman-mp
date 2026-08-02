@@ -49,6 +49,7 @@ class CMob;
 class CCamera;
 class CNode;
 class CUnit;
+class CMagicTrap;
 class CKeyManager;
 class CSettings;
 class CStringItem;
@@ -330,6 +331,7 @@ protected:
 
 private:
     CUnit* behaviorCollectionOwner(const QList<CNode*>& selection) const;
+    CMagicTrap* trapCollectionOwner(const QList<CNode*>& selection) const;
     void closeMprSettingsDock();
     void refreshMprSettingsDock();
     bool saveLandscapeDocument(const QFileInfo& destination);

@@ -593,6 +593,26 @@ void CMagicTrap::deleteLastCastPoint()
     update();
 }
 
+bool CMagicTrap::moveActivationArea(int from, int to)
+{
+    if(from < 0 || to < 0 || from >= m_aActZone.size()
+       || to >= m_aActZone.size() || from == to)
+        return false;
+    m_aActZone.move(from, to);
+    update();
+    return true;
+}
+
+bool CMagicTrap::moveCastTarget(int from, int to)
+{
+    if(from < 0 || to < 0 || from >= m_aCastPoint.size()
+       || to >= m_aCastPoint.size() || from == to)
+        return false;
+    m_aCastPoint.move(from, to);
+    update();
+    return true;
+}
+
 bool CMagicTrap::isOperationAxisAllow(EOperationAxisType type)
 {
     return type == EOperationAxisType::eMove;
