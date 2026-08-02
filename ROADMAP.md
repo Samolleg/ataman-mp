@@ -48,7 +48,7 @@ history. The permanent safety and compatibility rules are in
 ## Validation and recovery policy
 
 - [x] Add profile/family-aware, non-blocking character-mask diagnostics for
-  the verified JMV `unhuma` hair-01/helmet-06 dependency in any map,
+  the verified runtime helmet fallback for hair-bearing wearable assemblies,
   dangerous wearable empty/missing masks,
   missing core anatomy, dotted alternative overlap, and duplicates while
   preserving unknown tokens and creature conventions

@@ -1,7 +1,12 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QMap>
 #include <QTextStream>
 
@@ -90,6 +95,40 @@ bool hasHelmet(const QStringList& armor,
     return false;
 }
 
+QMap<QString, QStringList> loadAssemblyInventory(const QString& path, QString* error)
+{
+    QMap<QString, QStringList> result;
+    if(path.isEmpty())
+        return result;
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))
+    {
+        if(error) *error = file.errorString();
+        return result;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if(parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        if(error) *error = parseError.errorString();
+        return result;
+    }
+    const QJsonObject root = document.object();
+    for(auto model = root.constBegin(); model != root.constEnd(); ++model)
+    {
+        if(!model.value().isArray())
+            continue;
+        QStringList parts;
+        for(const QJsonValue& value : model.value().toArray())
+            if(value.isString())
+                parts.append(value.toString().trimmed().toLower());
+        parts.removeAll(QString());
+        parts.removeDuplicates();
+        result.insert(model.key().trimmed().toLower(), parts);
+    }
+    return result;
+}
+
 QSet<int> helmetGeometry(const QStringList& armor,
                          const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database)
 {
@@ -156,13 +195,15 @@ QString hairPeerKey(
 void printMissingHairTemplateStats(
     const QVector<SMobFamilyMember>& members,
     const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
+    const QMap<QString, QStringList>& assemblyPartsByModel,
     QTextStream& out)
 {
     int authoredHair = 0;
     int hairless = 0;
     int unknown = 0;
     int matchingControls = 0;
-    int confirmedDependencies = 0;
+    int runtimeFallbackRisks = 0;
+    int missingAssemblyEvidence = 0;
     QSet<QString> hairControls;
     for(const SMobFamilyMember& member : members)
         for(const SMobObjectSnapshot& object : member.objects)
@@ -218,10 +259,30 @@ void printMissingHairTemplateStats(
             const bool matchingControl =
                 hairControls.contains(hairPeerKey(object, database));
             matchingControls += matchingControl ? 1 : 0;
-            const bool confirmedDependency = !object.importMode && monster
-                && resolvedModel == "unhuma" && monster->hairIndex == 1
-                && helmetTtis.contains(6);
-            confirmedDependencies += confirmedDependency ? 1 : 0;
+            bool hasNativeHair = false;
+            bool hasRealHelmet = false;
+            bool runtimeFallbackRisk = false;
+            if(!object.importMode && monster && monster->hairIndex >= 0)
+            {
+                const QStringList assembly = assemblyPartsByModel.value(resolvedModel);
+                const QString nativeHair = QString("hr.%1").arg(
+                    monster->hairIndex, 2, 10, QChar('0'));
+                hasNativeHair = assembly.contains(nativeHair, Qt::CaseInsensitive);
+                for(const int tti : helmetTtis)
+                {
+                    const QString suffix = QString(".armor%1").arg(
+                        tti, 2, 10, QChar('0'));
+                    if(!assembly.contains("hd" + suffix, Qt::CaseInsensitive))
+                        continue;
+                    hasRealHelmet = true;
+                    runtimeFallbackRisk = runtimeFallbackRisk
+                        || !assembly.contains(nativeHair + suffix, Qt::CaseInsensitive);
+                }
+                runtimeFallbackRisk = runtimeFallbackRisk && hasNativeHair;
+                missingAssemblyEvidence += (!runtimeFallbackRisk
+                    && (!hasNativeHair || !hasRealHelmet)) ? 1 : 0;
+            }
+            runtimeFallbackRisks += runtimeFallbackRisk ? 1 : 0;
             out << "MISSING_HAIR_TEMPLATE file=" << member.fileName
                 << " nid=" << (object.hasNid ? QString::number(object.nid)
                                               : QString("missing"))
@@ -231,15 +292,16 @@ void printMissingHairTemplateStats(
                 << " hairIndex=" << hair
                 << " helmetGeometry=" << helmetTtiText.join(',')
                 << " matchingControl=" << (matchingControl ? "true" : "false")
-                << " confirmedDependency="
-                << (confirmedDependency ? "true" : "false")
+                << " runtimeFallbackRisk="
+                << (runtimeFallbackRisk ? "true" : "false")
                 << "\n";
         }
     }
     out << "MISSING_HAIR_TEMPLATE_STATS authoredHair=" << authoredHair
         << " hairless=" << hairless << " unknown=" << unknown
         << " matchingControls=" << matchingControls
-        << " confirmedDependencies=" << confirmedDependencies << "\n";
+        << " runtimeFallbackRisks=" << runtimeFallbackRisks
+        << " missingAssemblyEvidence=" << missingAssemblyEvidence << "\n";
 }
 
 QSharedPointer<const ei::SProfileDatabaseSnapshot> loadDatabase(
@@ -285,12 +347,23 @@ int main(int argc, char* argv[])
         "Read-only profile database resource directory", "directory");
     QCommandLineOption missingHairTemplateStats("missing-hair-template-stats",
         "Print helmeted missing-hr units classified by database hair index");
+    QCommandLineOption assemblyInventory("assembly-inventory",
+        "JSON object mapping model names to authored assembly members", "path");
     parser.addOptions({seed, primary, root, workspaceRoot, preferred,
                        profile, expectNid, expectMember,
                        expectFinding, suggestFor, expectSuggestions,
                        bodyPartStats, statsOnly, auditRoot, databaseResource,
-                       missingHairTemplateStats});
+                       missingHairTemplateStats, assemblyInventory});
     parser.process(app);
+
+    QString inventoryError;
+    const QMap<QString, QStringList> assemblyPartsByModel =
+        loadAssemblyInventory(parser.value(assemblyInventory), &inventoryError);
+    if(parser.isSet(assemblyInventory) && !inventoryError.isEmpty())
+    {
+        QTextStream(stderr) << "Cannot read assembly inventory: " << inventoryError << "\n";
+        return 2;
+    }
 
     const QSharedPointer<const ei::SProfileDatabaseSnapshot> database =
         loadDatabase(parser.value(profile), parser.values(databaseResource));
@@ -316,7 +389,7 @@ int main(int argc, char* argv[])
         QTextStream out(stdout);
         const int unreadable = printBodyPartStats(members, out);
         if(parser.isSet(missingHairTemplateStats))
-            printMissingHairTemplateStats(members, database, out);
+            printMissingHairTemplateStats(members, database, assemblyPartsByModel, out);
         return unreadable == 0 ? 0 : 1;
     }
 
@@ -329,6 +402,7 @@ int main(int argc, char* argv[])
     request.workspaceRoots = parser.values(workspaceRoot);
     request.preferredMobPath = parser.value(preferred);
     request.database = database;
+    request.assemblyPartsByModel = assemblyPartsByModel;
     if(request.seedMobPaths.isEmpty() && request.mappedPrimaryMobPath.isEmpty())
     {
         QTextStream(stderr) << "At least one --seed or --primary is required.\n";
@@ -340,7 +414,8 @@ int main(int argc, char* argv[])
     if(parser.isSet(bodyPartStats))
         printBodyPartStats(report.members, out);
     if(parser.isSet(missingHairTemplateStats))
-        printMissingHairTemplateStats(report.members, database, out);
+        printMissingHairTemplateStats(
+            report.members, database, assemblyPartsByModel, out);
     if(!parser.isSet(statsOnly))
         out << report.toText() << "\n";
     bool passed = true;

@@ -458,39 +458,6 @@ SBodyPartContext bodyPartContext(
     return context;
 }
 
-bool hasHelmet(const QStringList& armor,
-               const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database)
-{
-    for(const QString& reference : armor)
-    {
-        if(!database.isNull())
-        {
-            const auto direct = database->items.constFind(itemPrototype(reference));
-            if(direct != database->items.constEnd()
-               && direct->category.compare("armor", Qt::CaseInsensitive) == 0
-               && direct->type.compare("helm", Qt::CaseInsensitive) == 0)
-                return true;
-
-            // Some shipped JMV fields concatenate otherwise valid armor
-            // references. Recognize a known helm prototype at a dot boundary
-            // without rewriting or splitting the serialized value.
-            const QString folded = reference.toCaseFolded();
-            for(auto item = database->items.constBegin(); item != database->items.constEnd(); ++item)
-            {
-                if(item->category.compare("armor", Qt::CaseInsensitive) != 0
-                   || item->type.compare("helm", Qt::CaseInsensitive) != 0)
-                    continue;
-                const QString marker = item.key().toCaseFolded() + ".";
-                if(folded.startsWith(marker) || folded.contains("." + marker))
-                    return true;
-            }
-        }
-        if(reference.contains("helm", Qt::CaseInsensitive))
-            return true;
-    }
-    return false;
-}
-
 QString findingSubject(const SMobObjectSnapshot& object)
 {
     return QString("NID %1").arg(object.hasNid
@@ -509,22 +476,39 @@ bool hasHairSelection(const SMobObjectSnapshot& object)
         [](const QString& part) { return isHairPart(part); });
 }
 
-bool confirmedMissingHairDependency(const SMobObjectSnapshot& object,
-                                    const SBodyPartContext& context,
-                                    const QString& profileId)
+bool assemblyContains(const QStringList& parts, const QString& part)
 {
-    const bool jmv = profileId.contains("jamais", Qt::CaseInsensitive)
-        || profileId.compare("jmv", Qt::CaseInsensitive) == 0;
-    // The confirmed failure is tied to the resolved visual request, not a map,
-    // prototype, NID, or neighboring control object.  The fingerprinted JMV
-    // runtime combines unhuma hair 01 with helmet geometry 06; the shipped
-    // assembly leaves that hair visibly participating in the helmeted head.
-    // Keep other hair/helmet tuples diagnostic-only until independently
-    // controlled, because shipped masks prove that missing hr is often benign.
-    return jmv && !object.importMode
-        && context.model.compare("unhuma", Qt::CaseInsensitive) == 0
-        && context.hairIndex == 1
-        && context.helmetGeometry.contains(6);
+    return parts.contains(part, Qt::CaseInsensitive);
+}
+
+bool missingHairRootUsesHelmetFallback(const SMobObjectSnapshot& object,
+                                       const SBodyPartContext& context,
+                                       const SMobFamilyValidationRequest& request)
+{
+    if(object.importMode || context.hairIndex < 0 || context.helmetGeometry.isEmpty())
+        return false;
+
+    const QString model = context.model.trimmed().toLower();
+    const QStringList assemblyParts = request.assemblyPartsByModel.value(model);
+    const QString nativeHair = QString("hr.%1").arg(
+        context.hairIndex, 2, 10, QChar('0'));
+    if(!assemblyContains(assemblyParts, nativeHair))
+        return false;
+
+    // The runtime's helmet path treats hr as a replaceable base part. When an
+    // explicit mask omits that root, a hair-bearing database template can take
+    // the missing-base fallback instead of the normal remove/replace path. The
+    // risk exists only when the selected helmet member is real and no explicit
+    // helmet-specific hair member can satisfy that fallback.
+    for(const int helmetGeometry : context.helmetGeometry)
+    {
+        const QString suffix = QString(".armor%1").arg(
+            helmetGeometry, 2, 10, QChar('0'));
+        if(assemblyContains(assemblyParts, "hd" + suffix)
+           && !assemblyContains(assemblyParts, nativeHair + suffix))
+            return true;
+    }
+    return false;
 }
 
 void appendBodyPartFinding(CMobFamilyValidationReport* report,
@@ -629,11 +613,10 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
                     .arg(subject, missingCore.join(", ")));
 
         if(!hasHairSelection(object)
-           && hasHelmet(context.armor, request.database)
-           && confirmedMissingHairDependency(object, context, request.profileId))
+           && missingHairRootUsesHelmetFallback(object, context, request))
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
                 "mob.semantic.missing_hair_selection",
-                subject + ": missing 'hr' for hair 01 with helmet 06.");
+                subject + ": missing 'hr' keeps native hair under the helmet.");
     }
 }
 }

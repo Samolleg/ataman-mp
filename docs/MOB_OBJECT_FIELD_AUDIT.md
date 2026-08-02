@@ -115,8 +115,9 @@ The validator also reports, without blocking load or save:
   `mob.semantic.wearable_all_parts_enabled` as Critical, report-only findings
   for standard wearable assemblies, while creature/integral empty masks remain
   accepted;
-- `mob.semantic.missing_hair_selection` only for the confirmed JMV resolved
-  `unhuma` hair-01/helmet-06 dependency, independent of map or prototype;
+- `mob.semantic.missing_hair_selection` when a normal database template has
+  authored hair, the native hair and selected helmet members exist, an explicit
+  mask omits `hr`, and no helmet-specific hair replacement exists;
 - `mob.semantic.missing_core_bodyparts` for omitted standard non-hair anatomy;
   and
 - `mob.semantic.duplicate_bodypart_token` as Info while retaining exact order
@@ -124,8 +125,9 @@ The validator also reports, without blocking load or save:
 
 These warnings preserve the source data. They identify game-tolerated but suspicious authoring
 states and are emitted to both validation output and the workflow log. Missing
-`hr` by itself is intentionally ignored because the shipped corpus contains
-many working helmeted omissions. Import units use embedded model/equipment;
+`hr` by itself is intentionally ignored. Hairless database templates skip the
+runtime hair path, while missing assembly evidence and Import-local appearance
+remain unclassified. Import units use embedded model/equipment;
 normal units use the active profile database.
 Unknown/model-specific tokens remain visible and lossless and do not receive a
 vocabulary-only warning. See

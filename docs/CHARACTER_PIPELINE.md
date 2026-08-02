@@ -42,8 +42,10 @@ mask, not only the resolved preview. This is necessary because database-driven
 anatomy reconstruction can visually hide an omitted serialized root. Standard
 wearables receive non-blocking empty/missing-mask, core-anatomy, overlap, and
 duplicate diagnostics. Missing hair is reported only for a verified resolved
-model/hair/helmet dependency such as JMV `unhuma` hair 01 with helmet geometry
-06, not from helmet or hair-index presence alone. Integral creatures and legacy
+runtime fallback: a database template has authored hair, the model contains
+that native hair member and the equipped helmet member, the explicit mask
+omits `hr`, and no helmet-specific hair replacement exists. Hairless templates
+never enter that runtime branch. Integral creatures and legacy
 skeleton assemblies retain their corpus-normal empty-mask behavior. Unknown
 tokens are never normalized or rejected. See
 [`validation/CHARACTER_BODYPART_VALIDATION.md`](validation/CHARACTER_BODYPART_VALIDATION.md).

@@ -38,6 +38,9 @@ public:
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     QList<QString>& figureList() {return m_arrFigureForComboBox;}
     QStringList figurePartNames(const QString& name);
+    // Returns authored members without decoding every FIG component. A loaded
+    // assembly is reused only when it belongs to the active resource profile.
+    QStringList assemblyPartNames(const QString& name);
     QByteArray modelAnimation(const QString& name);
     QByteArray resourceData(const QString& name, QString* sourcePath = nullptr) const;
 
@@ -52,9 +55,11 @@ private:
     static CObjectList* m_pObjectContainer;
     CSettings* m_pSettings;
     QMap<QString, ei::CFigure*> m_aFigure;
+    QMap<QString, QString> m_figureSourceFingerprints;
     QSet<QString> m_missingFigureNames;
     QMap<QString, QByteArray> m_animationArchives;
     QSet<QString> m_missingAnimationNames;
+    QMap<QString, QStringList> m_assemblyPartNameCache;
     QList<QString> m_arrFigureForComboBox; //optimization for cell widget
 };
 
