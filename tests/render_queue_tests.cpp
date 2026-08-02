@@ -18,6 +18,8 @@ private slots:
     void selectsModernAndFallbackCapabilities();
     void appliesRenderSchedulingOptions();
     void derivesEnvironmentFromWorldValues();
+    void matchesNativeSunRayDirectionAndLength();
+    void usesFixedNativeCaveSunRay();
     void combinesShadowCastingPointLights();
     void pointLightInfluenceIsCasterLocalAndFallsWithDistance();
 };
@@ -213,6 +215,50 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QCOMPARE(ei::clockValueToHours(1230), 12.5f);
     QCOMPARE(ei::clockValueToHours(2360), 23.0f + 59.0f / 60.0f);
     QCOMPARE(ei::clockValueToHours(2400), 23.0f + 59.0f / 60.0f);
+}
+
+void RenderQueueTests::matchesNativeSunRayDirectionAndLength()
+{
+    const ei::SRenderEnvironment six =
+        ei::renderEnvironmentForValues(6.0f, 1.0f, 1.0f);
+    const ei::SRenderEnvironment noon =
+        ei::renderEnvironmentForValues(12.0f, 1.0f, 1.0f);
+    const ei::SRenderEnvironment eighteen =
+        ei::renderEnvironmentForValues(18.0f, 1.0f, 1.0f);
+
+    // The shipped light ray completes one clockwise XY cycle with the noon
+    // ray pointing -X. Elevation is 60 degrees at noon and 37.5 degrees at
+    // 06:00/18:00, so horizontal shadow length per unit height is cot(elevation).
+    QVERIFY(qAbs(six.sunDirection.x()) < 0.00001f);
+    QVERIFY(six.sunDirection.y() > 0.79334f);
+    QVERIFY(noon.sunDirection.x() < -0.49999f);
+    QVERIFY(qAbs(noon.sunDirection.y()) < 0.00001f);
+    QVERIFY(qAbs(eighteen.sunDirection.x()) < 0.00001f);
+    QVERIFY(eighteen.sunDirection.y() < -0.79334f);
+
+    const auto shadowLengthPerHeight = [](const QVector3D& ray)
+    {
+        return qSqrt(ray.x() * ray.x() + ray.y() * ray.y()) / qAbs(ray.z());
+    };
+    QVERIFY(qAbs(shadowLengthPerHeight(noon.sunDirection) - 0.5773503f) < 0.00001f);
+    QVERIFY(qAbs(shadowLengthPerHeight(six.sunDirection) - 1.3032254f) < 0.00001f);
+    QVERIFY(qAbs(shadowLengthPerHeight(eighteen.sunDirection) - 1.3032254f) < 0.00001f);
+}
+
+void RenderQueueTests::usesFixedNativeCaveSunRay()
+{
+    const QVector3D nativeCaveRay(0.5f, 0.5f, -0.707106f);
+    const ei::SRenderEnvironment morning =
+        ei::renderEnvironmentForValues(4.0f, 1.0f, 1.0f, true);
+    const ei::SRenderEnvironment evening =
+        ei::renderEnvironmentForValues(18.0f, 1.0f, 1.0f, true);
+
+    // Cave zones bypass the outdoor clock track. Their directional light ray
+    // is fixed, normalized, and identical at every authored WS_TIME value.
+    QVERIFY((morning.sunDirection - nativeCaveRay).length() < 0.000001f);
+    QVERIFY((evening.sunDirection - nativeCaveRay).length() < 0.000001f);
+    QVERIFY((morning.sunDirection - evening.sunDirection).length() < 0.000001f);
+    QVERIFY(qAbs(morning.sunDirection.length() - 1.0f) < 0.000001f);
 }
 
 void RenderQueueTests::combinesShadowCastingPointLights()

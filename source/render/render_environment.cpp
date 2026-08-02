@@ -148,6 +148,8 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
     else
         elevationDegrees = 30.0f + (4.0f - result.timeHours) * 11.25f;
     const float elevation = qDegreesToRadians(elevationDegrees);
+    // This is the direction travelled by the light ray, not the vector from
+    // the receiver toward the sun. The native clock angle places noon at -X.
     const float azimuth = result.timeHours * (2.0f * float(M_PI) / 24.0f);
     const float horizontal = qCos(elevation);
     result.sunDirection = QVector3D(qCos(azimuth) * horizontal,
@@ -158,8 +160,9 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
     {
         // texts.res/map.txt selects this path with "#sky cave". The stock
         // cave-light files for all three allods contain these same RGB values
-        // at every hour, so only the MOB-authored WS_TIME selects the fixed
-        // shadow direction; preview time must not alter cave illumination.
+        // at every hour. The native cave path also replaces the outdoor sun
+        // track with one fixed normalized ray, independent of WS_TIME.
+        result.sunDirection = QVector3D(0.5f, 0.5f, -0.707106f);
         result.sunColor = QVector3D(161.0f, 179.0f, 170.0f) / 255.0f;
         result.ambientColor = QVector3D(75.0f, 75.0f, 89.0f) / 255.0f;
         result.skyColor = QVector3D();

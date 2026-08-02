@@ -31,6 +31,9 @@ void main(void)
   mat4 worldMatrix = modelMatrix * partMatrix;
   mat4 mvMatrix = u_viewMmatrix * worldMatrix;
   gl_Position = u_projMmatrix * mvMatrix * a_position;
+  // The shadow pass sets this only for terrain and resets it before drawing
+  // object casters. Clip-space bias is deterministic across desktop drivers;
+  // ordinary color/selection programs retain the linked default of zero.
 
   v_position = mvMatrix * a_position;
   vec4 worldPosition = worldMatrix * a_position;

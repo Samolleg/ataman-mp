@@ -488,6 +488,13 @@
             </layout>
            </item>
            <item>
+            <widget class="QCheckBox" name="renderTerrainShadows">
+             <property name="text"><string>Terrain casts directional shadows</string></property>
+             <property name="toolTip"><string>Applies the game's heightfield-based hill and cliff self-shadowing to terrain. This is separate from object and point-light shadows, updates after Apply or Save/Close, and is unavailable on the ANGLE compatibility renderer.</string></property>
+             <property name="checked"><bool>true</bool></property>
+            </widget>
+           </item>
+           <item>
             <widget class="QCheckBox" name="renderTextureMipmapping">
              <property name="text"><string>Texture mipmapping</string></property>
              <property name="toolTip"><string>Uses authored terrain mip levels with trilinear filtering to reduce distant landscape shimmer. Character and equipment atlases keep their compatibility sampling.</string></property>

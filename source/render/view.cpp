@@ -3261,6 +3261,9 @@ QString CView::captureShadowDiagnostics(QString* error)
         {"configuredMaximumDistance", intOption("renderShadowDistance", 320)},
         {"quality", intOption("renderShadowQuality", 2)},
         {"enabled", intOption("renderShadowQuality", 2) > 0},
+        {"terrainCasterEnabled", boolOption("renderTerrainShadows", true)},
+        {"terrainShadowGeneration", m_pLand ? QString::number(
+             m_pLand->shadowGeneration()) : QStringLiteral("0")},
         {"atlasResolution", m_shadowResolution},
         {"packedDepthDitheringDisabled", true},
         {"packedDepthFramebufferSrgbDisabled", true},
@@ -5511,6 +5514,10 @@ void CView::draw()
         && environmentEnabled && !m_openGlesCompatibility
         && shadowQuality > 0
         && ensureShadowFramebuffers(shadowQuality);
+    const bool terrainShadowsEnabled = !m_minimapCaptureActive
+        && environmentEnabled && !m_openGlesCompatibility
+        && renderBool("renderTerrainShadows", true)
+        && m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand;
     const COptInt* shadowDistanceOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowDistance")) : nullptr;
     // The old adaptive map stopped at 160 world units. Keep twice that reach
@@ -5528,6 +5535,9 @@ void CView::draw()
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
         worldSet, overrideWorldTime, previewTime, m_caveEnvironment,
         m_weatherRegion);
+    if(m_pLand && m_pLand->isMprLoad())
+        m_pLand->updateTerrainShadowVisibility(
+            environment.sunDirection, terrainShadowsEnabled);
     syncEnvironmentPreviewWidget(environment.timeHours);
     // Fill the open lower edge of the stock sky cylinder with the same color
     // that distant geometry converges to. This removes the editor-only black
@@ -5632,6 +5642,7 @@ void CView::draw()
         metadata.frustumCullingEnabled = cullingEnabled;
         metadata.shadowQuality = shadowQuality;
         metadata.shadowAtlasResolution = m_shadowResolution;
+        metadata.terrainShadowsEnabled = terrainShadowsEnabled;
         performance.setFrameMetadata(metadata);
     }
 

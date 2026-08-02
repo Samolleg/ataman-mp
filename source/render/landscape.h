@@ -10,6 +10,8 @@
 #include <QFile>
 #include <QDataStream>
 #include <QVector>
+#include <QVector3D>
+#include <QFuture>
 #include <functional>
 
 //#include "sector.h"
@@ -20,6 +22,16 @@
 class CSector;
 class CTile;
 class CTerrainEditModel;
+
+struct STerrainShadowFieldResult
+{
+    QVector<float> visibility;
+    int gridWidth{0};
+    int gridHeight{0};
+    quint64 nodes{0};
+    quint64 samples{0};
+    quint64 nanoseconds{0};
+};
 
 struct SMapHeader
 {
@@ -101,6 +113,8 @@ public:
     bool isDirty() const {return m_bDirty;}
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
     const QString& mapName() const {return m_innerMapName;}
+    quint64 shadowGeneration() const { return m_shadowGeneration; }
+    void updateTerrainShadowVisibility(const QVector3D& sunDirection, bool enabled);
 
 private:
     CLandscape();
@@ -122,6 +136,18 @@ private:
     QVector<int> m_arrIncorectTiles;
     bool m_bDirty;
     const CTerrainEditModel* m_canonicalTerrain;
+    quint64 m_shadowGeneration{0};
+    quint64 m_terrainShadowFieldGeneration{0};
+    QVector3D m_terrainShadowSunDirection;
+    bool m_terrainShadowFieldEnabled{false};
+    QVector<float> m_terrainShadowVisibility;
+    QFuture<STerrainShadowFieldResult> m_terrainShadowFuture;
+    bool m_terrainShadowFutureActive{false};
+    bool m_terrainShadowDesiredEnabled{false};
+    quint64 m_terrainShadowDesiredGeneration{0};
+    QVector3D m_terrainShadowDesiredDirection;
+    quint64 m_terrainShadowFutureGeneration{0};
+    QVector3D m_terrainShadowFutureDirection;
 };
 
 

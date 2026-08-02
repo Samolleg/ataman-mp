@@ -59,6 +59,7 @@ varying highp vec2 v_texture;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
 varying highp vec3 v_materialEmission;
+varying highp float v_terrainSunVisibility;
 
 float unpackShadowDepth(vec4 encodedDepth)
 {
@@ -168,8 +169,6 @@ void main(void)
       bool farValid = farStaticInside || farDynamicInside;
       if (nearValid || farValid)
       {
-        // Terrain never writes either shadow map, so receiver bias can remain
-        // small without terrain self-acne. Larger values detach contact points.
         float staticBias = max(0.000012 * (1.0 - sunDiffuse), 0.000002);
         float dynamicBias = 0.000001;
         float blendStart = u_nearShadowSplit * 0.78;
@@ -216,7 +215,12 @@ void main(void)
     vec3 directLight = min(u_sunColor * sunDiffuse + v_materialEmission,
                            vec3(1.0));
     vec3 environmentLight = max(u_ambientColor, directLight);
-    float projectedShadowVisibility = mix(1.0, shadow, 80.0 / 255.0);
+    // Terrain and object blockers are one strongest-blocker silhouette. Their
+    // overlap must not apply the stock projected-shadow opacity twice.
+    float combinedShadowVisibility = min(shadow,
+        clamp(v_terrainSunVisibility, 0.0, 1.0));
+    float projectedShadowVisibility = mix(1.0, combinedShadowVisibility,
+                                          80.0 / 255.0);
     light = environmentLight * projectedShadowVisibility;
     for (int i = 0; i < 64; ++i)
     {

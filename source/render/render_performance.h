@@ -44,6 +44,10 @@ struct SRenderFrameCounters
     quint64 shadowStaticRebuilds{0};
     quint64 shadowDynamicRebuilds{0};
     quint64 shadowNanoseconds{0};
+    quint64 terrainShadowFieldRebuilds{0};
+    quint64 terrainShadowFieldNodes{0};
+    quint64 terrainShadowFieldSamples{0};
+    quint64 terrainShadowNanoseconds{0};
 };
 
 struct SRenderFrameMetadata
@@ -67,6 +71,7 @@ struct SRenderFrameMetadata
     bool frustumCullingEnabled{true};
     int shadowQuality{0};
     int shadowAtlasResolution{0};
+    bool terrainShadowsEnabled{false};
 };
 
 class RenderPerformanceContext

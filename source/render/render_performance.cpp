@@ -52,6 +52,10 @@ void addCounters(SRenderFrameCounters& target, const SRenderFrameCounters& value
     target.shadowStaticRebuilds += value.shadowStaticRebuilds;
     target.shadowDynamicRebuilds += value.shadowDynamicRebuilds;
     target.shadowNanoseconds += value.shadowNanoseconds;
+    target.terrainShadowFieldRebuilds += value.terrainShadowFieldRebuilds;
+    target.terrainShadowFieldNodes += value.terrainShadowFieldNodes;
+    target.terrainShadowFieldSamples += value.terrainShadowFieldSamples;
+    target.terrainShadowNanoseconds += value.terrainShadowNanoseconds;
 }
 
 double percentileMilliseconds(QVector<quint64> samples, double percentile)
@@ -169,14 +173,19 @@ void RenderPerformanceContext::endFrame()
         .arg(double(m_total.queueCollectNanoseconds) / frames / 1000000.0, 0, 'f', 2)
         .arg(double(m_total.queueSortNanoseconds) / frames / 1000000.0, 0, 'f', 2)
         .arg(double(m_total.queueDrawNanoseconds) / frames / 1000000.0, 0, 'f', 2)
-        + QString(" shadows:q%1/%2 candidates/items:%3/%4 passes:%5 rebuilds-static/dynamic:%6/%7 shadow-submit:%8 ms")
+        + QString(" shadows:q%1/%2 candidates/items:%3/%4 passes:%5 rebuilds-static/dynamic:%6/%7 shadow-submit:%8 ms terrain:%9 field-rebuilds:%10 nodes:%11 samples:%12 field-build:%13 ms")
           .arg(m_metadata.shadowQuality).arg(m_metadata.shadowAtlasResolution)
           .arg(double(m_total.shadowCandidates) / frames, 0, 'f', 1)
           .arg(double(m_total.shadowItems) / frames, 0, 'f', 1)
           .arg(double(m_total.shadowPasses) / frames, 0, 'f', 2)
           .arg(double(m_total.shadowStaticRebuilds) / frames, 0, 'f', 2)
           .arg(double(m_total.shadowDynamicRebuilds) / frames, 0, 'f', 2)
-          .arg(double(m_total.shadowNanoseconds) / frames / 1000000.0, 0, 'f', 2);
+          .arg(double(m_total.shadowNanoseconds) / frames / 1000000.0, 0, 'f', 2)
+          .arg(m_metadata.terrainShadowsEnabled ? "on" : "off")
+          .arg(double(m_total.terrainShadowFieldRebuilds) / frames, 0, 'f', 2)
+          .arg(double(m_total.terrainShadowFieldNodes) / frames, 0, 'f', 1)
+          .arg(double(m_total.terrainShadowFieldSamples) / frames, 0, 'f', 1)
+          .arg(double(m_total.terrainShadowNanoseconds) / frames / 1000000.0, 0, 'f', 2);
     ei::log(eLogInfo, report);
 
     // Performance captures need to survive ordinary workflow-log filtering so
@@ -229,6 +238,10 @@ void RenderPerformanceContext::endFrame()
         averages.insert("shadowStaticRebuilds", double(m_total.shadowStaticRebuilds) / frames);
         averages.insert("shadowDynamicRebuilds", double(m_total.shadowDynamicRebuilds) / frames);
         averages.insert("shadowSubmitMs", double(m_total.shadowNanoseconds) / frames / 1000000.0);
+        averages.insert("terrainShadowFieldRebuilds", double(m_total.terrainShadowFieldRebuilds) / frames);
+        averages.insert("terrainShadowFieldNodes", double(m_total.terrainShadowFieldNodes) / frames);
+        averages.insert("terrainShadowFieldSamples", double(m_total.terrainShadowFieldSamples) / frames);
+        averages.insert("terrainShadowFieldBuildMs", double(m_total.terrainShadowNanoseconds) / frames / 1000000.0);
         definition.insert("averages", averages);
         QJsonObject toggles;
         toggles.insert("animation", m_metadata.animationEnabled);
@@ -241,6 +254,7 @@ void RenderPerformanceContext::endFrame()
         toggles.insert("frameRateCap", m_metadata.frameRateCap);
         toggles.insert("shadowQuality", m_metadata.shadowQuality);
         toggles.insert("shadowAtlasResolution", m_metadata.shadowAtlasResolution);
+        toggles.insert("terrainShadows", m_metadata.terrainShadowsEnabled);
         definition.insert("renderToggles", toggles);
         definition.insert("fps", fps);
         definition.insert("cpuAverageMs", cpuMs);
