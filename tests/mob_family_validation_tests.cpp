@@ -221,6 +221,43 @@ QByteArray assemblyLink(const QStringList& components)
     }
     return data;
 }
+
+QByteArray figureWithCrown(float crown)
+{
+    QByteArray data;
+    QDataStream stream(&data, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream << quint32(0x38474946)
+           << quint32(1) << quint32(1) << quint32(1)
+           << quint32(3) << quint32(3) << quint32(0)
+           << quint32(0) << quint32(0) << quint32(0);
+    for(int group = 0; group < 3; ++group)
+        for(int morph = 0; morph < 8; ++morph)
+            stream << float(0.0f) << float(0.0f)
+                   << float(group == 2 ? crown : 0.0f);
+    for(int morph = 0; morph < 8; ++morph)
+        stream << float(1.0f);
+    for(int axis = 0; axis < 3; ++axis)
+        for(int morph = 0; morph < 8; ++morph)
+            for(int lane = 0; lane < 4; ++lane)
+                stream << float(axis == 2 && lane < 3 ? crown : 0.0f);
+    for(int value = 0; value < 16; ++value)
+        stream << float(value % 4 == 2 ? 1.0f : 0.0f);
+    stream << float(0.0f) << float(0.0f);
+    stream << quint16(0) << quint16(1) << quint16(2);
+    for(quint16 vertex = 0; vertex < 3; ++vertex)
+        stream << vertex << quint16(0) << quint16(0);
+    return data;
+}
+
+void setHairGeometry(SMobFamilyValidationRequest* request,
+                     const QString& model, const QString& hair,
+                     ei::EHairCrownGeometry geometry)
+{
+    request->assemblyHairGeometryByPart.insert(
+        ei::assemblyHairGeometryKey(model, hair), geometry);
+}
 }
 
 class MobFamilyValidationTests : public QObject
@@ -237,6 +274,8 @@ private slots:
     void magicTrapRequiresContainingMobDiplomacy();
     void zone3HelmetHairFallbackIsReported();
     void orcHairRootDoesNotSelectDatabaseHair();
+    void coveredDatabaseHairDoesNotReportFallback();
+    void coveredSkeletonHairDoesNotReportFallback();
     void databaseEquippedLegacyAssemblyUsesSameHairRule();
     void helmetHairReplacementAvoidsMissingRootFallback();
     void unavailableNativeHairAvoidsMissingRootFallback();
@@ -507,6 +546,8 @@ void MobFamilyValidationTests::zone3HelmetHairFallbackIsReported()
         "Human Gipath NPC Boss F5", "unhuma", {"mhh.troll green"}, 1, "mhh", 6);
     request.assemblyPartsByModel.insert(
         "unhuma", {"hd", "hr.01", "hd.armor06"});
+    setHairGeometry(&request, "unhuma", "hr.01",
+                    ei::EHairCrownGeometry::AboveHeadCrown);
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
 
     QVector<SMobFamilyFinding> matches;
@@ -518,7 +559,7 @@ void MobFamilyValidationTests::zone3HelmetHairFallbackIsReported()
     QVERIFY(matches.first().hasNid);
     QCOMPARE(matches.first().nid, quint32(800004));
     QCOMPARE(matches.first().message,
-             QString("NID 800004: helmet 06 leaves hair enabled; enable 'hr' so the game hides it."));
+             QString("NID 800004: missing 'hr' may show hair with helmet 06."));
     QVERIFY(!matches.first().message.contains("Boss-1000000004"));
     QVERIFY(!matches.first().message.contains("Human Gipath NPC Boss F5"));
     QVERIFY(!matches.first().message.contains("serialized parts"));
@@ -560,6 +601,8 @@ void MobFamilyValidationTests::orcHairRootDoesNotSelectDatabaseHair()
             test.prototype, "unorfe", {"helmet.iron"}, test.hair, "helmet", 4);
         request.assemblyPartsByModel.insert(
             "unorfe", {"hd", test.exactHair, "hd.armor04"});
+        setHairGeometry(&request, "unorfe", test.exactHair,
+                        ei::EHairCrownGeometry::AboveHeadCrown);
         CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
 
         auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
@@ -568,7 +611,7 @@ void MobFamilyValidationTests::orcHairRootDoesNotSelectDatabaseHair()
         QVERIFY(finding != report.findings.cend());
         QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
         QCOMPARE(finding->message,
-                 QString("NID %1: helmet 04 leaves hair enabled; enable '%2' so the game hides it.")
+                 QString("NID %1: missing '%2' may show hair with helmet 04.")
                     .arg(test.nid).arg(test.exactHair));
 
         QStringList exactParts = wearableParts(false);
@@ -593,6 +636,84 @@ void MobFamilyValidationTests::orcHairRootDoesNotSelectDatabaseHair()
     }
 }
 
+void MobFamilyValidationTests::coveredDatabaseHairDoesNotReportFallback()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray bytes = mobWithUnits({unitObject(
+        294, "covered human hair", "Human Gipath Brigand CB F5", "unhuma", false,
+        {"bd", "hd", "hp", "hr.01", "lh1", "lh2", "lh3", "ll1", "ll2",
+         "ll3", "rh1", "rh2", "rh3", "rl1", "rl2", "rl3"},
+        {"helmet.iron"})});
+    const QString path = writeMob(directory.path(), "zone3obr.mob", bytes);
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "covered-human-hair-control";
+    request.profileId = "jamais-vu";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase(
+        "Human Gipath Brigand CB F5", "unhuma", {"helmet.iron"}, 2, "helmet", 5);
+    request.assemblyPartsByModel.insert(
+        "unhuma", {"hd", "hr.01", "hr.02", "hd.armor05"});
+    setHairGeometry(&request, "unhuma", "hr.02",
+                    ei::EHairCrownGeometry::AtOrBelowHeadCrown);
+
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.helmet_hair_fallback"; }));
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), bytes);
+}
+
+void MobFamilyValidationTests::coveredSkeletonHairDoesNotReportFallback()
+{
+    struct Case { quint32 nid; const char* file; QStringList parts; int helmet; };
+    const Case cases[] = {
+        {46, "zone11.mob", wearableParts(true), 1},
+        {1504, "zone9.mob", wearableParts(false), 9}
+    };
+    for(const Case& test : cases)
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QByteArray bytes = mobWithUnits({unitObject(
+            test.nid, "covered skeleton hair", "Skeleton control", "unhusk", false,
+            test.parts, {"helmet.iron"})});
+        const QString path = writeMob(directory.path(), test.file, bytes);
+        QVERIFY(!path.isEmpty());
+
+        SMobFamilyValidationRequest request;
+        request.familyLabel = "covered-skeleton-hair-control";
+        request.profileId = "jamais-vu";
+        request.seedMobPaths << path;
+        request.explicitComposition = true;
+        request.includeProfileWideMobs = false;
+        request.database = wearableDatabase(
+            "Skeleton control", "unhusk", {"helmet.iron"}, 2,
+            "helmet", test.helmet);
+        request.assemblyPartsByModel.insert(
+            "unhusk", {"hd", "hr.02",
+                        QString("hd.armor%1").arg(test.helmet, 2, 10, QChar('0'))});
+        setHairGeometry(&request, "unhusk", "hr.02",
+                        ei::EHairCrownGeometry::AtOrBelowHeadCrown);
+
+        const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+        QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+            [](const SMobFamilyFinding& finding)
+            { return finding.code == "mob.semantic.helmet_hair_fallback"; }));
+
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), bytes);
+    }
+}
+
 void MobFamilyValidationTests::databaseEquippedLegacyAssemblyUsesSameHairRule()
 {
     QTemporaryDir directory;
@@ -613,6 +734,8 @@ void MobFamilyValidationTests::databaseEquippedLegacyAssemblyUsesSameHairRule()
         "Equipped Undead", "unmoud", {"helmet.iron"}, 3, "helmet", 2);
     request.assemblyPartsByModel.insert(
         "unmoud", {"hd", "hr.03", "hd.armor02"});
+    setHairGeometry(&request, "unmoud", "hr.03",
+                    ei::EHairCrownGeometry::AboveHeadCrown);
 
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
     const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
@@ -621,7 +744,7 @@ void MobFamilyValidationTests::databaseEquippedLegacyAssemblyUsesSameHairRule()
     QVERIFY(finding != report.findings.cend());
     QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
     QCOMPARE(finding->message,
-             QString("NID 55123: helmet 02 leaves hair enabled; enable 'hr.03' so the game hides it."));
+             QString("NID 55123: missing 'hr.03' may show hair with helmet 02."));
 
     QFile file(path);
     QVERIFY(file.open(QIODevice::ReadOnly));
@@ -695,8 +818,9 @@ void MobFamilyValidationTests::resourceBackedAssemblyEvidenceCoversUnloadedFamil
     const QStringList components = {"hd", "hr.02", "hd.armor12"};
     QMap<QString, QByteArray> nestedMembers;
     nestedMembers.insert("unhufe", assemblyLink(components));
-    for(const QString& component : components)
-        nestedMembers.insert(component, QByteArray("component"));
+    nestedMembers.insert("hd", figureWithCrown(1.0f));
+    nestedMembers.insert("hr.02", figureWithCrown(1.2f));
+    nestedMembers.insert("hd.armor12", QByteArray("component"));
     const QByteArray sourceBytes = resArchive({{"unhufe.mod", resArchive(nestedMembers)}});
     const QString resourcePath = QDir(directory.path()).filePath("figures.res");
     QFile resourceFile(resourcePath);
@@ -714,6 +838,12 @@ void MobFamilyValidationTests::resourceBackedAssemblyEvidenceCoversUnloadedFamil
         "Human Resource Hair F2", "unhufe", {"llh.troll green"}, 2, "llh", 12);
     request.assemblyResourceSources << resourcePath;
     request.assemblyResourceFingerprint = "fixture-profile";
+
+    QCOMPARE(int(ei::assemblyHairCrownGeometryFromResourceSources(
+                     request.assemblyResourceSources,
+                     request.assemblyResourceFingerprint,
+                     "unhufe", "hr.02", 1.0f, 1.0f, 1.0f)),
+             int(ei::EHairCrownGeometry::AboveHeadCrown));
 
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
     QVERIFY(std::any_of(report.findings.cbegin(), report.findings.cend(),

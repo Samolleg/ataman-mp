@@ -278,6 +278,17 @@ SMobObjectSnapshot snapshotObject(const SMobSection& section)
         object.bodyPartsSectionPath = bodyParts->path;
         object.hasBodyParts = decodeStringArray(*bodyParts, &object.bodyParts);
     }
+    if(const SMobSection* complection = findSection(section, 0xB00C))
+    {
+        const QByteArray data = payload(*complection);
+        if(data.size() == 12)
+        {
+            object.hasComplection = true;
+            object.complectionX = readFloat32(data, 0);
+            object.complectionY = readFloat32(data, 4);
+            object.complectionZ = readFloat32(data, 8);
+        }
+    }
     const SMobSection* unit = findSection(section, 0xBBBB0000);
     object.unit = unit != nullptr;
     if(unit)
@@ -1265,6 +1276,14 @@ QJsonObject SMobObjectSnapshot::toJson() const
     }
     result.insert("armor", QJsonArray::fromStringList(armor));
     result.insert("weapons", QJsonArray::fromStringList(weapons));
+    if(hasComplection)
+    {
+        QJsonArray values;
+        values.append(complectionX);
+        values.append(complectionY);
+        values.append(complectionZ);
+        result.insert("complection", values);
+    }
     if(hasPosition)
     {
         QJsonArray position;

@@ -21,6 +21,8 @@ struct SHelmetHairRuntimeDecision
 
 QString databaseHairPart(int hairIndex);
 bool legacyHairRootAlias(const QString& model);
+QStringList serializedAssemblyHairParts(const QStringList& serializedParts,
+                                        const QStringList& assemblyParts);
 bool serializedPartsLoadDatabaseHair(const QString& model,
                                      const QStringList& serializedParts,
                                      const QStringList& assemblyParts,

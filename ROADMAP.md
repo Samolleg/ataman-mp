@@ -48,7 +48,8 @@ history. The permanent safety and compatibility rules are in
 ## Validation and recovery policy
 
 - [x] Add profile/assembly-aware, non-blocking character-mask diagnostics for
-  the verified helmet-hair algorithm on every database-equipped character,
+  the verified helmet-hair algorithm plus model-local FIG/BON crown evidence
+  on every database-equipped character,
   dangerous wearable empty/missing masks,
   missing core anatomy, dotted alternative overlap, and duplicates while
   preserving unknown tokens and creature conventions

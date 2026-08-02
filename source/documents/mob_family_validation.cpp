@@ -468,11 +468,11 @@ QString findingSubject(const SMobObjectSnapshot& object)
         ? QString::number(object.nid) : QString("missing"));
 }
 
-bool helmetFallsBackToVisibleHair(const SMobObjectSnapshot& object,
-                                  const SBodyPartContext& context,
-                                  const SMobFamilyValidationRequest& request,
-                                  int* helmetGeometry,
-                                  QString* requiredPart)
+bool helmetCanExposeCranialHair(const SMobObjectSnapshot& object,
+                               const SBodyPartContext& context,
+                               const SMobFamilyValidationRequest& request,
+                               int* helmetGeometry,
+                               QString* requiredPart)
 {
     if(object.importMode || !context.databaseEquipment || context.hairIndex < 0
        || context.helmetGeometry.isEmpty())
@@ -494,6 +494,22 @@ bool helmetFallsBackToVisibleHair(const SMobObjectSnapshot& object,
                 assemblyParts, context.hairIndex, geometry);
         if(decision.helmetPartAvailable && decision.fallbackLoadsNativeHair)
         {
+            const QString geometryKey = ei::assemblyHairGeometryKey(
+                model, decision.nativeHairPart);
+            ei::EHairCrownGeometry hairGeometry =
+                request.assemblyHairGeometryByPart.value(
+                    geometryKey, ei::EHairCrownGeometry::Unavailable);
+            if(hairGeometry == ei::EHairCrownGeometry::Unavailable)
+                hairGeometry = ei::assemblyHairCrownGeometryFromResourceSources(
+                    request.assemblyResourceSources,
+                    request.assemblyResourceFingerprint,
+                    model,
+                    decision.nativeHairPart,
+                    object.complectionX,
+                    object.complectionY,
+                    object.complectionZ);
+            if(hairGeometry != ei::EHairCrownGeometry::AboveHeadCrown)
+                continue;
             if(helmetGeometry) *helmetGeometry = geometry;
             if(requiredPart) *requiredPart = decision.requiredSerializedPart;
             return true;
@@ -576,12 +592,12 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
         {
             int fallbackHelmetGeometry = -1;
             QString requiredHairPart;
-            if(helmetFallsBackToVisibleHair(object, context, request,
-                                            &fallbackHelmetGeometry, &requiredHairPart))
+            if(helmetCanExposeCranialHair(object, context, request,
+                                         &fallbackHelmetGeometry, &requiredHairPart))
                 appendBodyPartFinding(report, member, object,
                     EMobFamilyFindingSeverity::Warning,
                     "mob.semantic.helmet_hair_fallback",
-                    QString("%1: helmet %2 leaves hair enabled; enable '%3' so the game hides it.")
+                    QString("%1: missing '%3' may show hair with helmet %2.")
                         .arg(subject)
                         .arg(fallbackHelmetGeometry, 2, 10, QChar('0'))
                         .arg(requiredHairPart));

@@ -19,6 +19,33 @@ bool ei::legacyHairRootAlias(const QString& model)
     return normalized == "unhuma" || normalized == "unhufe";
 }
 
+QStringList ei::serializedAssemblyHairParts(const QStringList& serializedParts,
+                                            const QStringList& assemblyParts)
+{
+    QStringList result;
+    const auto appendHair = [&result](const QString& part)
+    {
+        if((part.compare("hr", Qt::CaseInsensitive) == 0
+            || part.startsWith("hr.", Qt::CaseInsensitive))
+           && !result.contains(part, Qt::CaseInsensitive))
+            result.append(part);
+    };
+    if(serializedParts.isEmpty())
+    {
+        for(const QString& part : assemblyParts)
+            appendHair(part);
+        return result;
+    }
+    for(const QString& selected : serializedParts)
+        for(const QString& part : assemblyParts)
+            if(part.compare(selected, Qt::CaseInsensitive) == 0)
+            {
+                appendHair(part);
+                break;
+            }
+    return result;
+}
+
 bool ei::serializedPartsLoadDatabaseHair(const QString& model,
                                          const QStringList& serializedParts,
                                          const QStringList& assemblyParts,

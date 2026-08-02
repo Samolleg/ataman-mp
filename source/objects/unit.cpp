@@ -434,10 +434,16 @@ bool CUnit::refreshTransientVisual(bool force)
         // actor's actual body shape. Monster database values are prototype
         // defaults, not a reason to overwrite an already placed unit.
         const int hair = appearance.value("hairIndex").toInt(-1);
+        for(const QString& selectedHair : ei::serializedAssemblyHairParts(
+                m_bodyParts, assemblyParts))
+            if(!visibleParts.contains(selectedHair, Qt::CaseInsensitive))
+                visibleParts.append(selectedHair);
         if(hair >= 0 && ei::serializedPartsLoadDatabaseHair(
                 model, m_bodyParts, assemblyParts, hair))
         {
-            visibleParts.append(ei::databaseHairPart(hair));
+            const QString databaseHair = ei::databaseHairPart(hair);
+            if(!visibleParts.contains(databaseHair, Qt::CaseInsensitive))
+                visibleParts.append(databaseHair);
         }
     }
 

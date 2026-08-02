@@ -9,6 +9,7 @@
 #include <QVector>
 
 #include "endurance_document.h"
+#include "assembly_inventory.h"
 
 namespace ei { struct SProfileDatabaseSnapshot; }
 
@@ -85,6 +86,9 @@ struct SMobFamilyValidationRequest
     QMap<QString, QByteArray> inMemoryMobData;
     QSharedPointer<const ei::SProfileDatabaseSnapshot> database;
     QMap<QString, QStringList> assemblyPartsByModel;
+    // Optional precomputed model|part evidence; production normally reads the
+    // same evidence from assemblyResourceSources on the validation worker.
+    QMap<QString, ei::EHairCrownGeometry> assemblyHairGeometryByPart;
     QStringList assemblyResourceSources;
     QString assemblyResourceFingerprint;
 };

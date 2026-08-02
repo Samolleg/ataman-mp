@@ -45,14 +45,18 @@ duplicate diagnostics. Helmet hair is reported for a verified resolved runtime
 fallback on any database-equipped character: the database selects hair, the
 assembly contains that native hair and the equipped helmet member, the
 serialized mask does not load the selected hair, and no helmet-specific hair
-replacement exists. The suggested token is the effective plain `hr` legacy
-alias or exact `hr.NN`. Hairless templates never enter that runtime branch.
+replacement exists. Because an `hr.NN` slot can contain facial/beard geometry,
+the finding additionally requires its referenced FIG vertices to extend above
+the model's `hd` crown after the unit's FIG/BON complexion interpolation. The
+suggested token is the effective plain `hr` legacy alias or exact `hr.NN`.
+Hairless templates never enter that runtime branch.
 Integral creatures and legacy skeleton assemblies retain their separate
 corpus-normal empty-mask behavior. Unknown
 tokens are never normalized or rejected. See
 [`validation/CHARACTER_BODYPART_VALIDATION.md`](validation/CHARACTER_BODYPART_VALIDATION.md).
 For family MOBs discovered on disk, the validator reads only the required
-assembly indexes/link table from ordered active-profile resources on its worker;
+assembly indexes/link table and the two required FIG/BON members from ordered
+active-profile resources on its worker;
 the decision is not gated by viewport load order.
 
 ## Assemblies, geometry, morph vertices, and complexion
@@ -119,7 +123,9 @@ replaces hair; otherwise an initially loaded database hair member is removed;
 if that exact hair was not initially loaded, the equipment path loads it. Plain
 `hr` selects database hair only for `unhuma`/`unhufe`; other database-equipped
 assemblies require exact `hr.NN`. Removing the helmet restores the unmodified
-body selection.
+body selection. Explicitly serialized non-database `hr.*` variants remain in
+the render plan; the helmet branch removes only the exact database-selected
+member, matching the runtime part lookup rather than collapsing the whole slot.
 
 Base preserves one one-handed or ranged weapon and diagnoses extras. JMV has
 layouts for ordinary, one-hand+shield, dual one-hand, single two-hand, requested

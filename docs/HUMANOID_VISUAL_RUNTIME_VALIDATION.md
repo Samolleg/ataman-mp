@@ -93,7 +93,12 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
     exact `hr.NN` must be removed by the helmet, while an omitted exact member
     must remain enabled through the fallback. Plain `hr` must behave as the
     database-hair alias only on `unhuma`/`unhufe`; use exact `hr.NN` for orcs,
-    equipped undead, skeletons, and other database-equipped assemblies.
+    equipped undead, skeletons, and other database-equipped assemblies. Verify
+    that `zone3obr` NID 294, `zone11` NID 46, and the `zone9` `unhusk/hr.02`
+    controls render their below-crown facial geometry without a validation
+    warning, while NIDs 800004, 4500, and 4634 retain the warning. Explicitly
+    selected alternate `hr.*` members must remain visible unless the equipment
+    path removes that exact member.
 13. Validate an explicit JMV cross-family material suffix, such as the Metal
     `hmsh`/`hmgl`/`hmpt`/`hmbt` prototypes equipped with the Hide-family
     `dragon red` material by `Human Kania NPC Sorceress M10` (`bz8k` ID

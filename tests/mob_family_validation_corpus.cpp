@@ -170,6 +170,9 @@ void printMissingHairTemplateStats(
 {
     int evaluated = 0;
     int runtimeFallbackRisks = 0;
+    int cranialFallbackRisks = 0;
+    int belowCrownFallbacks = 0;
+    int unavailableCrownEvidence = 0;
     int resolvedByInitialHair = 0;
     int resolvedByReplacement = 0;
     int missingAssemblyEvidence = 0;
@@ -223,6 +226,18 @@ void printMissingHairTemplateStats(
                 if(!decision.helmetPartAvailable || !decision.fallbackLoadsNativeHair)
                     continue;
                 ++runtimeFallbackRisks;
+                const ei::EHairCrownGeometry crown =
+                    ei::assemblyHairCrownGeometryFromResourceSources(
+                        assemblyResourceSources, assemblyResourceFingerprint,
+                        resolvedModel, decision.nativeHairPart,
+                        object.complectionX, object.complectionY, object.complectionZ);
+                const QString crownName = crown == ei::EHairCrownGeometry::AboveHeadCrown
+                    ? QString("above")
+                    : (crown == ei::EHairCrownGeometry::AtOrBelowHeadCrown
+                        ? QString("at-or-below") : QString("unavailable"));
+                cranialFallbackRisks += crown == ei::EHairCrownGeometry::AboveHeadCrown ? 1 : 0;
+                belowCrownFallbacks += crown == ei::EHairCrownGeometry::AtOrBelowHeadCrown ? 1 : 0;
+                unavailableCrownEvidence += crown == ei::EHairCrownGeometry::Unavailable ? 1 : 0;
                 out << "HELMET_HAIR_FALLBACK file=" << member.fileName
                     << " nid=" << (object.hasNid ? QString::number(object.nid)
                                                   : QString("missing"))
@@ -230,12 +245,16 @@ void printMissingHairTemplateStats(
                     << " model=" << resolvedModel
                     << " hair=" << decision.nativeHairPart
                     << " helmet=" << QString::number(tti).rightJustified(2, '0')
-                    << " required=" << decision.requiredSerializedPart << "\n";
+                    << " required=" << decision.requiredSerializedPart
+                    << " crown=" << crownName << "\n";
             }
         }
     }
     out << "HELMET_HAIR_FALLBACK_STATS evaluated=" << evaluated
         << " runtimeFallbackRisks=" << runtimeFallbackRisks
+        << " cranialFallbackRisks=" << cranialFallbackRisks
+        << " belowCrownFallbacks=" << belowCrownFallbacks
+        << " unavailableCrownEvidence=" << unavailableCrownEvidence
         << " resolvedByInitialHair=" << resolvedByInitialHair
         << " resolvedByReplacement=" << resolvedByReplacement
         << " missingAssemblyEvidence=" << missingAssemblyEvidence
@@ -289,12 +308,14 @@ int main(int argc, char* argv[])
         "JSON object mapping model names to authored assembly members", "path");
     QCommandLineOption assemblyResource("assembly-resource",
         "Ordered RES archive used for assembly evidence (repeatable)", "path");
+    QCommandLineOption hairCrown("hair-crown",
+        "Print FIG/BON head-crown classification for model:part", "model:part");
     parser.addOptions({seed, primary, root, workspaceRoot, preferred,
                        profile, expectNid, expectMember,
                        expectFinding, suggestFor, expectSuggestions,
                        bodyPartStats, statsOnly, auditRoot, databaseResource,
                        missingHairTemplateStats, assemblyInventory,
-                       assemblyResource});
+                       assemblyResource, hairCrown});
     parser.process(app);
 
     QString inventoryError;
@@ -307,6 +328,27 @@ int main(int argc, char* argv[])
     {
         QTextStream(stderr) << "Cannot read assembly inventory: " << inventoryError << "\n";
         return 2;
+    }
+
+    if(parser.isSet(hairCrown))
+    {
+        const QString value = parser.value(hairCrown);
+        const int separator = value.indexOf(':');
+        if(separator <= 0 || separator + 1 >= value.size())
+        {
+            QTextStream(stderr) << "--hair-crown requires model:part\n";
+            return 2;
+        }
+        const ei::EHairCrownGeometry role =
+            ei::assemblyHairCrownGeometryFromResourceSources(
+                assemblyResourceSources, assemblyResourceFingerprint,
+                value.left(separator), value.mid(separator + 1),
+                1.0f, 1.0f, 1.0f);
+        QTextStream(stdout) << "HAIR_CROWN " << value << "="
+            << (role == ei::EHairCrownGeometry::AboveHeadCrown ? "above"
+                : (role == ei::EHairCrownGeometry::AtOrBelowHeadCrown
+                    ? "at-or-below" : "unavailable")) << "\n";
+        return role == ei::EHairCrownGeometry::Unavailable ? 1 : 0;
     }
 
     const QSharedPointer<const ei::SProfileDatabaseSnapshot> database =

@@ -114,6 +114,10 @@ struct SMobObjectSnapshot
     QStringList bodyParts;
     QStringList armor;
     QStringList weapons;
+    bool hasComplection = false;
+    float complectionX = 1.0f;
+    float complectionY = 1.0f;
+    float complectionZ = 1.0f;
     bool hasPosition = false;
     float positionX = 0.0f;
     float positionY = 0.0f;

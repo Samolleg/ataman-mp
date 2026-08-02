@@ -2244,6 +2244,12 @@ QByteArray mobFamilyRequestDigest(const SMobFamilyValidationRequest& request)
         for(const QString& part : model.value())
             addString(part);
     }
+    for(auto geometry = request.assemblyHairGeometryByPart.constBegin();
+        geometry != request.assemblyHairGeometryByPart.constEnd(); ++geometry)
+    {
+        addString(geometry.key());
+        addString(QString::number(int(geometry.value())));
+    }
     addString(request.assemblyResourceFingerprint);
     for(const QString& source : request.assemblyResourceSources)
         addString(QDir::cleanPath(source).toCaseFolded());

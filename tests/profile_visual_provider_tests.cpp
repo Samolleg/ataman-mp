@@ -2,6 +2,7 @@
 #include <QJsonArray>
 
 #include "profile_visual_provider.h"
+#include "character_bodypart_runtime.h"
 
 namespace {
 
@@ -117,6 +118,7 @@ private slots:
     void zombieEquipmentUsesSharedHumanoidAtlas();
     void helmetAddsDatabaseGeometryAndAtlas();
     void helmetHairFallbackMatchesSerializedSelection();
+    void serializedHairVariantsRemainLoadedThroughFallback();
     void jmvRecoversUnambiguousConcatenatedHelmetAndPlate();
     void weaponAtlasesUseLiteralTtiAndEstablishedFamilies();
     void weaponGeometryDoesNotReplaceHandsOrGloves();
@@ -837,6 +839,19 @@ void ProfileVisualProviderTests::helmetHairFallbackMatchesSerializedSelection()
              QStringList({"hd.armor08", "hr.01.armor08"}));
     QCOMPARE(jsonStrings(replacementOutput, "replacedParts"),
              QStringList({"hr.01"}));
+}
+
+void ProfileVisualProviderTests::serializedHairVariantsRemainLoadedThroughFallback()
+{
+    const QStringList assembly = {"hd", "hr.01", "hr.02", "hd.armor05"};
+    QCOMPARE(ei::serializedAssemblyHairParts({"hd", "hr.01"}, assembly),
+             QStringList({"hr.01"}));
+    const ei::SHelmetHairRuntimeDecision fallback = ei::helmetHairRuntimeDecision(
+        "unhuma", {"hd", "hr.01"}, assembly, 2, 5);
+    QVERIFY(fallback.fallbackLoadsNativeHair);
+    QCOMPARE(fallback.nativeHairPart, QString("hr.02"));
+    QCOMPARE(ei::serializedAssemblyHairParts({}, assembly),
+             QStringList({"hr.01", "hr.02"}));
 }
 
 void ProfileVisualProviderTests::jmvRecoversUnambiguousConcatenatedHelmetAndPlate()
