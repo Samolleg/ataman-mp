@@ -825,7 +825,6 @@ void CSector::generateWaterVertexData()
                         && sharedMaterialIndex < m_materials->size()
                     ? &m_materials->at(sharedMaterialIndex) : nullptr;
                 target.emission = QVector3D();
-                target.shadowVisibility = 1.0f;
                 if(sharedMaterial && hasWater)
                 {
                     const QVector3D overlayEmission =
@@ -1187,13 +1186,6 @@ void CSector::draw(QOpenGLShaderProgram* program)
                                     int(sizeof(STerrainVertexData)));
     }
     offset += int(sizeof(QVector3D));
-    const int terrainShadowLocation = program->attributeLocation("a_terrainSunVisibility");
-    if(terrainShadowLocation >= 0)
-    {
-        program->enableAttributeArray(terrainShadowLocation);
-        program->setAttributeBuffer(terrainShadowLocation, GL_FLOAT, offset, 1,
-                                    int(sizeof(STerrainVertexData)));
-    }
     const int animationLocation = program->attributeLocation("a_overlayAnimation");
     if(animationLocation >= 0)
     {
@@ -1236,26 +1228,6 @@ void CSector::collectTerrainHeights(QVector<float>& heights,
         heights[index] = vertex.position.z();
         present[index] = 1;
     }
-}
-
-void CSector::applyTerrainShadowVisibility(const QVector<float>& visibility,
-                                           int gridWidth, int gridHeight)
-{
-    const float offsetX = float(m_index.x) * 32.0f;
-    const float offsetY = float(m_index.y) * 32.0f;
-    for(int i = 0; i < m_arrLitLandVrtData.size(); ++i)
-    {
-        STerrainVertexData& vertex = m_arrLitLandVrtData[i];
-        const int x = qRound(vertex.position.x() + offsetX);
-        const int y = qRound(vertex.position.y() + offsetY);
-        vertex.shadowVisibility = x >= 0 && y >= 0
-                && x < gridWidth && y < gridHeight
-            ? visibility.value(y * gridWidth + x, 1.0f) : 1.0f;
-    }
-    m_vertexBuf.bind();
-    m_vertexBuf.allocate(m_arrLitLandVrtData.constData(),
-        m_arrLitLandVrtData.size() * int(sizeof(STerrainVertexData)));
-    m_vertexBuf.release();
 }
 
 void CSector::drawWater(QOpenGLShaderProgram *program)
@@ -1305,13 +1277,6 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
         program->setAttributeBuffer(emissionLocation, GL_FLOAT, offset, 3,
                                     int(sizeof(SWaterVertexData)));
     }
-    const int terrainShadowLocation = program->attributeLocation("a_terrainSunVisibility");
-    if(terrainShadowLocation >= 0)
-    {
-        program->disableAttributeArray(terrainShadowLocation);
-        program->setAttributeValue(terrainShadowLocation, 1.0f);
-    }
-
     m_waterIndexBuf.bind();
     ei::gl::DrawElements(GL_TRIANGLES, m_waterIndexCount, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();

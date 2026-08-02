@@ -5644,6 +5644,7 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     const SOverlaySurfaceCommand activation = terrain.makeOverlayActivation(
         point, 1, 0, 1, 2, &activationReport);
     QVERIFY2(!activation.isEmpty(), qPrintable(activationReport.toText()));
+    QVERIFY(activation.affectsTerrainShadowField);
     QCOMPARE(activation.sectors.size(), 1);
     QCOMPARE(activation.sectors.front().beforePayload, landSector);
     QCOMPARE(activation.sectors.front().afterPayload.size(),
@@ -5672,6 +5673,7 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     const SOverlaySurfaceCommand materialChange = terrain.makeOverlayActivation(
         point, 0, 0, 1, 2);
     QVERIFY(!materialChange.isEmpty());
+    QVERIFY(!materialChange.affectsTerrainShadowField);
     QVERIFY(terrain.apply(materialChange, true));
     QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(0));
     QVERIFY(available);
@@ -5703,6 +5705,7 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
 
     const SOverlaySurfaceCommand deactivation = terrain.makeOverlayDeactivation(point);
     QVERIFY(!deactivation.isEmpty());
+    QVERIFY(deactivation.affectsTerrainShadowField);
     QVERIFY(history.execute(&terrain, deactivation));
     QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(-1));
     QVERIFY(!available);
@@ -5901,6 +5904,7 @@ void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()
     const SOverlaySurfaceCommand sculpt = terrain.makeOverlayRaiseLower(
         brush, 100.0f, &report);
     QVERIFY2(!sculpt.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(!sculpt.affectsTerrainShadowField);
     QCOMPARE(sculpt.sectors.size(), 1);
     const QByteArray sculpted = sculpt.sectors.front().afterPayload;
     const int landVertexEnd = 5 + 33 * 33 * 8;

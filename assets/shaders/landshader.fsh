@@ -52,6 +52,9 @@ uniform float u_nearShadowSplit;
 uniform bool u_shadowCascadeDebug;
 uniform bool u_receiveStaticShadow;
 uniform bool u_receiveDynamicShadow;
+uniform bool u_terrainShadowEnabled;
+uniform sampler2D u_terrainShadowMap;
+uniform vec2 u_terrainShadowTextureSize;
 
 varying highp vec4 v_position;
 varying highp vec3 v_normal;
@@ -59,7 +62,16 @@ varying highp vec2 v_texture;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
 varying highp vec3 v_materialEmission;
-varying highp float v_terrainSunVisibility;
+
+float terrainShadowVisibility()
+{
+  if (!u_terrainShadowEnabled)
+    return 1.0;
+  vec2 halfTexel = vec2(0.5) / u_terrainShadowTextureSize;
+  vec2 uv = (v_worldPosition.xy + vec2(0.5)) / u_terrainShadowTextureSize;
+  uv = clamp(uv, halfTexel, vec2(1.0) - halfTexel);
+  return texture2D(u_terrainShadowMap, uv).r;
+}
 
 float unpackShadowDepth(vec4 encodedDepth)
 {
@@ -218,7 +230,7 @@ void main(void)
     // Terrain and object blockers are one strongest-blocker silhouette. Their
     // overlap must not apply the stock projected-shadow opacity twice.
     float combinedShadowVisibility = min(shadow,
-        clamp(v_terrainSunVisibility, 0.0, 1.0));
+        clamp(terrainShadowVisibility(), 0.0, 1.0));
     float projectedShadowVisibility = mix(1.0, combinedShadowVisibility,
                                           80.0 / 255.0);
     light = environmentLight * projectedShadowVisibility;

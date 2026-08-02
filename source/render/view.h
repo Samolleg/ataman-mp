@@ -35,6 +35,7 @@
 #include "unit_visual_preparation.h"
 #include "minimap_bake.h"
 #include "tile_brush_stroke_policy.h"
+#include "shadow_cascade.h"
 
 class QLineEdit;
 class QFrame;
@@ -417,6 +418,8 @@ private:
                          float maximumDistance);
     bool ensureShadowFramebuffers(int quality);
     void releaseShadowFramebuffers();
+    bool beginEditorQueryFramebuffer();
+    void endEditorQueryFramebuffer();
     void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
                              bool receiveStatic = true,
                              bool receiveDynamic = true);
@@ -534,6 +537,8 @@ private:
     QOpenGLFramebufferObject* m_farShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_farDynamicShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_localShadowFbo{nullptr};
+    QOpenGLFramebufferObject* m_editorQueryFbo{nullptr};
+    bool m_editorQueryFramebufferFailureLogged{false};
     int m_shadowResolution{0};
     QMatrix4x4 m_staticLightSpaceMatrix;
     QMatrix4x4 m_dynamicLightSpaceMatrix;

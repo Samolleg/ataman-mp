@@ -243,6 +243,8 @@ void appendOverlaySurfaceCommand(SOverlaySurfaceCommand* stroke,
     if(stroke->description.isEmpty())
         stroke->description = stamp.description;
     stroke->heightClampedVertexCount += stamp.heightClampedVertexCount;
+    stroke->affectsTerrainShadowField = stroke->affectsTerrainShadowField
+        || stamp.affectsTerrainShadowField;
     for(const SOverlaySectorDelta& delta : stamp.sectors)
     {
         bool merged = false;
@@ -1420,6 +1422,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
             EValidationSeverity::Warning,
             QString("%1 new overlay vertex/vertices were clamped to the current MPR maxZ; lower the land or increase maxZ if the surface overlaps it")
                 .arg(command.heightClampedVertexCount));
+    command.affectsTerrainShadowField = !activatedCells.isEmpty();
     return command;
 }
 
@@ -1479,6 +1482,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayDeactivation(
         delta.afterPayload = it.value();
         command.sectors.append(delta);
     }
+    command.affectsTerrainShadowField = !command.sectors.isEmpty();
     return command;
 }
 
@@ -1526,10 +1530,11 @@ SOverlaySurfaceSnapshot CTerrainEditModel::overlaySurfaceSnapshot() const
 
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySurfaceCommand(
     const SOverlaySurfaceSnapshot& before, const QString& description,
-    CValidationReport* report) const
+    CValidationReport* report, bool affectsTerrainShadowField) const
 {
     SOverlaySurfaceCommand command;
     command.description = description;
+    command.affectsTerrainShadowField = affectsTerrainShadowField;
     QSet<QPair<int, int>> seen;
     for(const SOverlaySectorSnapshot& state : before.sectors)
     {

@@ -114,13 +114,17 @@ public:
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
     const QString& mapName() const {return m_innerMapName;}
     quint64 shadowGeneration() const { return m_shadowGeneration; }
-    void updateTerrainShadowVisibility(const QVector3D& sunDirection, bool enabled);
+    void invalidateTerrainShadowField();
+    void updateTerrainShadowVisibility(const QVector3D& sunDirection,
+                                       bool allowRebuild = true);
+    void applyTerrainShadowUniforms(QOpenGLShaderProgram* program, bool enabled);
 
 private:
     CLandscape();
     ~CLandscape();
     bool readHeader(QDataStream& stream);
     bool serializeMpr(const QString& zoneName, CResFile& mprFile);
+    bool uploadTerrainShadowTexture(const STerrainShadowFieldResult& result);
 
 private:
     static CLandscape* m_pLand;
@@ -139,11 +143,11 @@ private:
     quint64 m_shadowGeneration{0};
     quint64 m_terrainShadowFieldGeneration{0};
     QVector3D m_terrainShadowSunDirection;
-    bool m_terrainShadowFieldEnabled{false};
-    QVector<float> m_terrainShadowVisibility;
+    QOpenGLTexture* m_terrainShadowTexture{nullptr};
+    int m_terrainShadowTextureWidth{0};
+    int m_terrainShadowTextureHeight{0};
     QFuture<STerrainShadowFieldResult> m_terrainShadowFuture;
     bool m_terrainShadowFutureActive{false};
-    bool m_terrainShadowDesiredEnabled{false};
     quint64 m_terrainShadowDesiredGeneration{0};
     QVector3D m_terrainShadowDesiredDirection;
     quint64 m_terrainShadowFutureGeneration{0};

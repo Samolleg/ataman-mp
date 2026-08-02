@@ -15,6 +15,20 @@
 - Terrain edits and sun-direction changes rebuild the cached visibility field.
   Disabling the option uploads full terrain visibility immediately after Apply
   or Save/Close, without requiring camera movement.
+- Terrain-shadow invalidation now follows semantic geometry ownership. Land
+  height sculpting and overlay coverage add/remove rebuild the field; moving
+  MOB objects, painting atlas/material data, and sculpting overlay height do not.
+- Static shadow atlases now fingerprint actual casters only. Editor-only trap,
+  patrol, look, light, particle, and sound helpers remain visible/selectable but
+  cannot cast shadows or invalidate the static caster cache when moved.
+- Selecting or deselecting a real caster no longer rebuilds the static shadow
+  atlases merely because its render submission order changed.
+- A sculpted sector keeps the last completed terrain-shadow field while its
+  replacement is calculated. Terrain shadows no longer blink fully lit between
+  the geometry update and asynchronous field publication.
+- Object picking and landscape cursor projection now render into a persistent
+  offscreen editor-query target. These hit tests no longer clear the visible
+  scene to an unshadowed ID/depth pass before the next normal frame.
 - Corrected the Render option registry so **Terrain casts directional shadows**
   is actually applied and persisted. The earlier checkbox was visible but its
   value was omitted from the live Render option set, which forced shadows on.
@@ -47,20 +61,29 @@
    last complete terrain field may remain briefly, then settle to the final
    slider position after release.
 5. Sculpt or preview a terrain height change near a visible ridge. Confirm its
-   terrain shadow refreshes without moving or rotating the camera.
-6. Hold the camera fixed and scrub to 06:00, 12:00, and 18:00. Shadows should
+   terrain shadow stays continuously visible, then updates without moving or
+   rotating the camera. Both the shadow and the rest of the presented scene must
+   remain continuously visible while moving and stamping the landscape cursor.
+6. Move a trap marker and a non-shadow-casting object, then paint only terrain
+   or overlay textures. Confirm the terrain visibility field and static shadow
+   atlases do not rebuild. Add/remove overlay coverage and confirm the terrain
+   field does rebuild. Trap/helper markers must never produce silhouettes.
+7. Repeatedly select and deselect several static trees or structures. Confirm
+   their object shadows and the full terrain scene remain continuously visible;
+   no picking-ID, blank, or unshadowed frame may reach the viewport.
+8. Hold the camera fixed and scrub to 06:00, 12:00, and 18:00. Shadows should
    follow the game screenshots' map-space direction, with noon shadows shorter
    than morning/evening shadows. Orbit the camera and confirm direction is stable.
-7. In Zone 11 near 04:35, compare shaded snow and the sky to the game reference.
+9. In Zone 11 near 04:35, compare shaded snow and the sky to the game reference.
    They should use the authored Ingos ambient/sky tables rather than silently
    falling back to Gipat; direct sunrise light remains intentionally warm.
-8. In Zone 11, confirm campfire/torch point-light shadows still respond to
+10. In Zone 11, confirm campfire/torch point-light shadows still respond to
    distance and radius, independently of the terrain-shadow toggle.
-9. Load a map whose catalog sky type is `cave` (for example Zone 12 Dungeon 2).
+11. Load a map whose catalog sky type is `cave` (for example Zone 12 Dungeon 2).
    Confirm the directional shadows run diagonally along the fixed cave vector,
    remain stable while changing the preview time, and do not inherit the outdoor
    sun angle.
-10. Start the ANGLE compatibility launcher and confirm Unlit/Simple shading
+12. Start the ANGLE compatibility launcher and confirm Unlit/Simple shading
    remain usable without shadow-atlas warnings or a white viewport.
 
 ## Known limitations

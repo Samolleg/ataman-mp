@@ -46,13 +46,15 @@ void CLandscape::unloadMpr()
     m_aTileTypes.clear();
     m_aAnimTile.clear();
     m_bDirty = false;
-    m_terrainShadowVisibility.clear();
-    m_terrainShadowFieldEnabled = false;
+    delete m_terrainShadowTexture;
+    m_terrainShadowTexture = nullptr;
+    m_terrainShadowTextureWidth = 0;
+    m_terrainShadowTextureHeight = 0;
     m_terrainShadowFieldGeneration = 0;
     m_terrainShadowSunDirection = QVector3D();
-    m_terrainShadowDesiredEnabled = false;
     m_terrainShadowDesiredGeneration = 0;
     m_terrainShadowDesiredDirection = QVector3D();
+    m_terrainShadowFutureActive = false;
     ++m_shadowGeneration;
 }
 
@@ -456,36 +458,76 @@ float traceTerrainSunVisibility(const QVector<float>& heights,
 }
 }
 
+bool CLandscape::uploadTerrainShadowTexture(const STerrainShadowFieldResult& result)
+{
+    if(result.gridWidth < 2 || result.gridHeight < 2
+            || result.visibility.size() != result.gridWidth * result.gridHeight)
+        return false;
+
+    QByteArray pixels(result.gridWidth * result.gridHeight * 4, Qt::Uninitialized);
+    uchar* destination = reinterpret_cast<uchar*>(pixels.data());
+    for(int index = 0; index < result.visibility.size(); ++index)
+    {
+        const uchar value = uchar(qRound(qBound(0.0f,
+            result.visibility.at(index), 1.0f) * 255.0f));
+        destination[index * 4 + 0] = value;
+        destination[index * 4 + 1] = value;
+        destination[index * 4 + 2] = value;
+        destination[index * 4 + 3] = 255;
+    }
+
+    // Build a complete immutable snapshot before publishing it. Terrain VBOs,
+    // sculpt previews, and picking passes never own or rewrite this texture.
+    QOpenGLTexture* candidate = new QOpenGLTexture(QOpenGLTexture::Target2D);
+    if(!candidate->create())
+    {
+        delete candidate;
+        ei::log(eLogWarning, "Terrain shadow texture creation failed; retaining prior snapshot");
+        return false;
+    }
+    candidate->setSize(result.gridWidth, result.gridHeight);
+    candidate->setFormat(QOpenGLTexture::RGBA8_UNorm);
+    candidate->setMipLevels(1);
+    candidate->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
+    candidate->setMinificationFilter(QOpenGLTexture::Linear);
+    candidate->setMagnificationFilter(QOpenGLTexture::Linear);
+    candidate->setWrapMode(QOpenGLTexture::ClampToEdge);
+    candidate->setData(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8,
+                       pixels.constData());
+
+    QOpenGLTexture* previous = m_terrainShadowTexture;
+    m_terrainShadowTexture = candidate;
+    m_terrainShadowTextureWidth = result.gridWidth;
+    m_terrainShadowTextureHeight = result.gridHeight;
+    delete previous;
+    return true;
+}
+
+void CLandscape::applyTerrainShadowUniforms(QOpenGLShaderProgram* program,
+                                            bool enabled)
+{
+    const bool available = enabled
+        && m_terrainShadowTexture && m_terrainShadowTexture->isCreated()
+        && m_terrainShadowTextureWidth > 1 && m_terrainShadowTextureHeight > 1;
+    program->setUniformValue("u_terrainShadowEnabled", available);
+    program->setUniformValue("u_terrainShadowMap", 6);
+    program->setUniformValue("u_terrainShadowTextureSize",
+        QVector2D(float(qMax(1, m_terrainShadowTextureWidth)),
+                  float(qMax(1, m_terrainShadowTextureHeight))));
+    if(available)
+        m_terrainShadowTexture->bind(6);
+}
+
 void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
-                                               bool enabled)
+                                               bool allowRebuild)
 {
     const int gridWidth = int(widthInWorldUnits()) + 1;
     const int gridHeight = int(heightInWorldUnits()) + 1;
     if(gridWidth < 2 || gridHeight < 2 || m_aSector.isEmpty())
         return;
 
-    if(!enabled)
-    {
-        m_terrainShadowDesiredEnabled = false;
-        m_terrainShadowDesiredGeneration = m_shadowGeneration;
-        m_terrainShadowDesiredDirection = QVector3D();
-        if(!m_terrainShadowFieldEnabled)
-            return;
-        m_terrainShadowVisibility.fill(1.0f, gridWidth * gridHeight);
-        for(auto& row : m_aSector)
-            for(CSector* sector : row)
-                if(sector)
-                    sector->applyTerrainShadowVisibility(
-                        m_terrainShadowVisibility, gridWidth, gridHeight);
-        m_terrainShadowFieldEnabled = false;
-        m_terrainShadowFieldGeneration = 0;
-        m_terrainShadowSunDirection = QVector3D();
-        return;
-    }
-
     const QVector3D normalized = sunDirection.lengthSquared() > 0.000001f
         ? sunDirection.normalized() : QVector3D(0.0f, 0.0f, -1.0f);
-    m_terrainShadowDesiredEnabled = true;
     m_terrainShadowDesiredGeneration = m_shadowGeneration;
     m_terrainShadowDesiredDirection = normalized;
 
@@ -493,7 +535,7 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
     {
         const STerrainShadowFieldResult result = m_terrainShadowFuture.result();
         m_terrainShadowFutureActive = false;
-        const bool stillDesired = m_terrainShadowDesiredEnabled
+        const bool stillDesired = allowRebuild
             && m_terrainShadowFutureGeneration == m_terrainShadowDesiredGeneration
             && m_terrainShadowFutureGeneration == m_shadowGeneration
             && QVector3D::dotProduct(m_terrainShadowFutureDirection,
@@ -501,15 +543,10 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
             && result.gridWidth == gridWidth && result.gridHeight == gridHeight;
         if(stillDesired)
         {
-            m_terrainShadowVisibility = result.visibility;
-            for(auto& row : m_aSector)
-                for(CSector* sector : row)
-                    if(sector)
-                        sector->applyTerrainShadowVisibility(
-                            m_terrainShadowVisibility, gridWidth, gridHeight);
+            if(!uploadTerrainShadowTexture(result))
+                return;
             m_terrainShadowFieldGeneration = m_terrainShadowFutureGeneration;
             m_terrainShadowSunDirection = m_terrainShadowFutureDirection;
-            m_terrainShadowFieldEnabled = true;
             RenderPerformanceContext& performance = RenderPerformanceContext::instance();
             if(performance.collecting())
             {
@@ -525,9 +562,15 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
         }
     }
 
-    if(m_terrainShadowFieldEnabled
+    if(m_terrainShadowTexture
             && m_terrainShadowFieldGeneration == m_shadowGeneration
             && QVector3D::dotProduct(normalized, m_terrainShadowSunDirection) > 0.99999f)
+        return;
+
+    // A stroke can advance the terrain generation dozens of times per second.
+    // Keep sampling the pre-stroke snapshot and calculate only the final field;
+    // publishing every complete intermediate field looks like a full-scene flash.
+    if(!allowRebuild)
         return;
 
     // Slider changes coalesce behind the one immutable worker. The last complete
@@ -730,6 +773,10 @@ void CLandscape::setTile(const QMap<STileLocation, STileInfo>& arrTileInfo)
 void CLandscape::updateSectorDrawData(int xSec, int ySec)
 {
     m_aSector[ySec][xSec]->updateDrawData();
+}
+
+void CLandscape::invalidateTerrainShadowField()
+{
     ++m_shadowGeneration;
 }
 
@@ -745,10 +792,7 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
     if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
         || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
         return false;
-    const bool updated = m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
-    if(updated)
-        ++m_shadowGeneration;
-    return updated;
+    return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
 }
 
 bool CLandscape::previewCanonicalOverlaySector(
@@ -780,7 +824,7 @@ bool CLandscape::previewCanonicalMaxZ(float maxZ)
         for(CSector* sector : row)
             if(sector)
                 sector->setPreviewMaxZ(maxZ);
-    ++m_shadowGeneration;
+    invalidateTerrainShadowField();
     return true;
 }
 

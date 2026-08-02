@@ -1127,6 +1127,8 @@ CView::~CView()
         m_skyBuffer.destroy();
     if(m_particleBuffer.isCreated())
         m_particleBuffer.destroy();
+    delete m_editorQueryFbo;
+    m_editorQueryFbo = nullptr;
     releaseShadowFramebuffers();
     ei::setCrashContext("shutdown/view-mobs");
 
@@ -1335,7 +1337,10 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
             selectionOnly = dynamic_cast<const CSelectionCommand*>(
                 m_pUndoStack->command(commandIndex)) != nullptr;
         if(!selectionOnly)
+        {
             refreshMobDirtyStates();
+            m_spatialIndexDirty = true;
+        }
         bool navigationChange = false;
         for(int commandIndex = first; !navigationChange && commandIndex < last;
             ++commandIndex)
@@ -1347,11 +1352,6 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
         if(navigationChange)
             scheduleAiGraphPreviewRegeneration();
         m_lastUndoStackIndex = index;
-        m_spatialIndexDirty = true;
-    });
-    connect(this, &CView::selectionChanged, this, [this]()
-    {
-        m_spatialIndexDirty = true;
     });
 
     m_pProgress = pProgress;
@@ -2374,7 +2374,6 @@ void CView::rebuildSpatialIndices()
         {
             if(!node || node->isMarkDeleted() || node->nodeState() == ENodeState::eHidden)
                 continue;
-            const bool selected = node->nodeState() == ENodeState::eSelect;
             CBox bounds = node->getBBox();
             const QVector3D center = bounds.center() + node->drawPosition();
             const float radius = bounds.radius();
@@ -2391,7 +2390,7 @@ void CView::rebuildSpatialIndices()
             }
             if(invalid || oversized)
                 overflow.append(node);
-            if(selected || invalid)
+            if(invalid)
                 grid->insert(node, node->drawPosition(), 0.0f, true);
             else
                 grid->insert(node, center, radius);
@@ -2808,6 +2807,51 @@ void CView::releaseShadowFramebuffers()
     m_localShadowOwners.clear();
 }
 
+bool CView::beginEditorQueryFramebuffer()
+{
+    if(m_width <= 0 || m_height <= 0 || !isValid())
+        return false;
+    makeCurrent();
+    const QSize requiredSize(m_width, m_height);
+    if(!m_editorQueryFbo || m_editorQueryFbo->size() != requiredSize
+            || !m_editorQueryFbo->isValid())
+    {
+        delete m_editorQueryFbo;
+        QOpenGLFramebufferObjectFormat format;
+        format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+        format.setSamples(0);
+        m_editorQueryFbo = new QOpenGLFramebufferObject(requiredSize, format);
+    }
+    if(!m_editorQueryFbo || !m_editorQueryFbo->isValid()
+            || !m_editorQueryFbo->bind())
+    {
+        QOpenGLFramebufferObject::bindDefault();
+        ei::gl::Viewport(0, 0, m_width, m_height);
+        if(!m_editorQueryFramebufferFailureLogged)
+        {
+            ei::log(eLogWarning,
+                "Editor query framebuffer unavailable; hit test skipped without touching the viewport");
+            m_editorQueryFramebufferFailureLogged = true;
+        }
+        return false;
+    }
+    m_editorQueryFramebufferFailureLogged = false;
+    ei::gl::Viewport(0, 0, m_width, m_height);
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_TRUE);
+    ei::gl::ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    return true;
+}
+
+void CView::endEditorQueryFramebuffer()
+{
+    if(m_editorQueryFbo)
+        m_editorQueryFbo->release();
+    QOpenGLFramebufferObject::bindDefault();
+    ei::gl::Viewport(0, 0, m_width, m_height);
+}
+
 bool CView::ensureShadowFramebuffers(int quality)
 {
     GLint maximumTextureSize = 0;
@@ -3064,17 +3108,16 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         nextLocalRects.append(local.atlasRect);
     }
 
+    const QByteArray staticCasterFingerprint = queue.staticShadowFingerprint();
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
-    staticHash.addData(queue.staticShadowFingerprint());
-    staticHash.addData(sceneSourceFingerprint().toUtf8());
+    staticHash.addData(staticCasterFingerprint);
     for(quintptr owner : nextLocalOwners)
         staticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     staticHash.addData(reinterpret_cast<const char*>(nearCascade.staticMatrix.constData()),
                        16 * int(sizeof(float)));
     const QByteArray staticFingerprint = staticHash.result();
     QCryptographicHash farStaticHash(QCryptographicHash::Sha256);
-    farStaticHash.addData(queue.staticShadowFingerprint());
-    farStaticHash.addData(sceneSourceFingerprint().toUtf8());
+    farStaticHash.addData(staticCasterFingerprint);
     for(quintptr owner : nextLocalOwners)
         farStaticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     farStaticHash.addData(reinterpret_cast<const char*>(farCascade.staticMatrix.constData()),
@@ -3082,8 +3125,10 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     farStaticHash.addData(reinterpret_cast<const char*>(&safeMaximumDistance),
                           int(sizeof(safeMaximumDistance)));
     const QByteArray farStaticFingerprint = farStaticHash.result();
-    const bool rebuildStatic = staticFingerprint != m_staticShadowFingerprint;
-    const bool rebuildFarStatic = farStaticFingerprint != m_farStaticShadowFingerprint;
+    const bool rebuildStatic = !m_shadowInitialized
+        || staticFingerprint != m_staticShadowFingerprint;
+    const bool rebuildFarStatic = !m_shadowInitialized
+        || farStaticFingerprint != m_farStaticShadowFingerprint;
     const bool rebuildDynamic = !m_shadowInitialized || m_shadowUpdateTimer.elapsed() >= 66;
     const bool localChanged = nextLocalOwners != m_localShadowOwners
         || nextLocalMatrices != m_localShadowMatrices;
@@ -5611,9 +5656,14 @@ void CView::draw()
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
         worldSet, overrideWorldTime, previewTime, m_caveEnvironment,
         m_weatherRegion);
-    if(m_pLand && m_pLand->isMprLoad())
+    // Offscreen minimap/query draws are consumers of renderer state, never
+    // owners of the persistent terrain-shadow snapshot. Only the visible
+    // viewport may request a replacement, and disabling a draw pass merely
+    // stops sampling; it cannot retire the last complete texture.
+    if(!m_minimapCaptureActive && terrainShadowsEnabled
+            && m_pLand && m_pLand->isMprLoad())
         m_pLand->updateTerrainShadowVisibility(
-            environment.sunDirection, terrainShadowsEnabled);
+            environment.sunDirection, !m_sculptStrokeActive);
     syncEnvironmentPreviewWidget(environment.timeHours);
     // Fill the open lower edge of the stock sky cylinder with the same color
     // that distant geometry converges to. This removes the editor-only black
@@ -5795,6 +5845,9 @@ void CView::draw()
         applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                                  lightingMode, fogEnabled);
         applyShadowUniforms(m_landProgram, withShadows, true, true);
+        if(m_pLand)
+            m_pLand->applyTerrainShadowUniforms(
+                &m_landProgram, terrainShadowsEnabled);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
             m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
@@ -6802,7 +6855,6 @@ int CView::select(const SSelect &selectParam, bool bAddToSelect)
     }
     recordSelectionChange(selectionBefore);
     viewParameters();
-    emit loadedMapStateChanged();
     return nSelectedNodes();
 }
 
@@ -7313,7 +7365,6 @@ bool CView::selectNodes(const QList<CNode*>& nodes, bool addToSelection)
     }
     viewParameters();
     update();
-    emit loadedMapStateChanged();
     return true;
 }
 
@@ -7992,9 +8043,15 @@ void CView::drawSelectFrame(QRect &rect)
 
 void CView::pickObject(const QRect &rect, bool bAddToSelect)
 {
-    //TODO: use different buffer => save picking in image
-    // Bind shader pipeline for use
     if(nullptr == m_activeMob)
+    {
+        m_selectFrame->reset();
+        return;
+    }
+
+    // Hit testing is an editor-only render pass. Never clear or replace the
+    // presented scene while producing picking IDs.
+    if(!beginEditorQueryFramebuffer())
     {
         m_selectFrame->reset();
         return;
@@ -8003,7 +8060,11 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     const QList<CNode*> selectionBefore = selectionSnapshot();
 
     if (!m_selectProgram.bind())
+    {
+        endEditorQueryFramebuffer();
         close();
+        return;
+    }
 
     const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
@@ -8055,6 +8116,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
 
     QVector<SColor> aColor;
     getColorFromRect(rect, aColor);
+    endEditorQueryFramebuffer();
 
     //if(m_operationType == EOperationTypeObjects)
 
@@ -8107,7 +8169,6 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
                 m_pTree->revealNode(selected.back());
         }
     }
-    emit loadedMapStateChanged();
 }
 
 QVector3D CView::getTerrainPos(bool bLand)
@@ -9075,7 +9136,6 @@ void CView::restoreSelection(const QList<CNode*>& selection)
     }
     viewParameters();
     update();
-    emit loadedMapStateChanged();
     emit selectionChanged();
 }
 
@@ -9136,7 +9196,6 @@ void CView::clearObjectSelection()
         m_pTree->clearViewportSelectionMarker();
     viewParameters();
     update();
-    emit loadedMapStateChanged();
 }
 
 void CView::recordSelectionChange(const QList<CNode*>& before, const QString& text)
@@ -10604,7 +10663,8 @@ void CView::endTileBrushGroup()
             const SOverlaySurfaceCommand exactCommand =
                 m_terrainEdit.makeOverlaySurfaceCommand(
                     m_overlaySurfaceStrokeBaseline,
-                    m_overlaySurfaceStrokeCommand.description, &report);
+                    m_overlaySurfaceStrokeCommand.description, &report,
+                    m_overlaySurfaceStrokeCommand.affectsTerrainShadowField);
             if(report.hasErrors())
             {
                 ei::log(eLogWarning, "Overlay stroke snapshot reconciliation failed:\n"
@@ -10768,6 +10828,8 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
                 "Overlay model changed but preview renderer rejected sector %1,%2")
                     .arg(delta.sectorX).arg(delta.sectorY));
     }
+    if(command.affectsTerrainShadowField)
+        m_pLand->invalidateTerrainShadowField();
     if(!m_terrainPreviewBatchActive)
     {
         m_overlayRenderNsecs += phaseTimer.nsecsElapsed();
@@ -11925,6 +11987,7 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
                     .arg(sector.first).arg(sector.second));
             }
         }
+    m_pLand->invalidateTerrainShadowField();
     if(m_sculptStrokeActive)
     {
         m_sculptStrokeChanged = true;
@@ -12585,9 +12648,14 @@ void CView::focusOutEvent(QFocusEvent *event)
 // x,y - mouse position
 CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 {
-    // Bind shader pipeline for use
+    if(!beginEditorQueryFramebuffer())
+        return nullptr;
     if (!m_selectProgram.bind())
+    {
+        endEditorQueryFramebuffer();
         close();
+        return nullptr;
+    }
 
     const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
@@ -12618,6 +12686,7 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 
     GLubyte pixel[3];
     ei::gl::ReadPixels(x, m_height-y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, pixel);
+    endEditorQueryFramebuffer();
     SColor pickedColor(pixel[0], pixel[1], pixel[2]);
 
     for (auto& node: aNode)
@@ -12639,12 +12708,19 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     if(!m_pLand || !m_pLand->isMprLoad())
         return point;
 
+    if(!beginEditorQueryFramebuffer())
+        return point;
+
     QMatrix4x4 camMatrix = m_cam->viewMatrix();
     // Set modelview-projection matrix
 
     // Bind shader pipeline for use
     if (!m_landProgram.bind())
+    {
+        endEditorQueryFramebuffer();
         close();
+        return point;
+    }
 
     // Set modelview-projection matrix
     m_landProgram.setUniformValue("u_projMmatrix", m_projection);
@@ -12671,6 +12747,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     GLint viewPort[4];
     ei::gl::GetIntegerv(GL_VIEWPORT, viewPort);
     QRect viewPortRect(viewPort[0], viewPort[1], viewPort[2], viewPort[3]);
+    endEditorQueryFramebuffer();
     return point.unproject(view, m_projection, viewPortRect); //return Vector3D here
 }
 
@@ -14195,7 +14272,8 @@ void CView::finishSculptStroke()
         const SOverlaySurfaceCommand exactCommand =
             m_terrainEdit.makeOverlaySurfaceCommand(
                 m_overlaySurfaceStrokeBaseline,
-                m_overlaySurfaceStrokeCommand.description, &report);
+                m_overlaySurfaceStrokeCommand.description, &report,
+                m_overlaySurfaceStrokeCommand.affectsTerrainShadowField);
         if(report.hasErrors())
         {
             ei::log(eLogWarning, "Overlay sculpt snapshot reconciliation failed:\n"

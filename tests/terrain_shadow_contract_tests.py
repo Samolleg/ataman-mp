@@ -26,13 +26,14 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("terrainShadowsEnabled", view)
         self.assertIn("updateTerrainShadowVisibility", view)
         self.assertIn("traceTerrainSunVisibility", landscape)
-        self.assertIn("v_terrainSunVisibility", shader)
+        self.assertIn("u_terrainShadowMap", shader)
+        self.assertIn("texture2D(u_terrainShadowMap", shader)
 
     def test_terrain_and_object_shadows_form_one_strongest_blocker_silhouette(self):
         shader = (ROOT / "assets/shaders/landshader.fsh").read_text(encoding="utf-8")
 
         self.assertIn("float combinedShadowVisibility = min(shadow,", shader)
-        self.assertIn("clamp(v_terrainSunVisibility, 0.0, 1.0)", shader)
+        self.assertIn("clamp(terrainShadowVisibility(), 0.0, 1.0)", shader)
         self.assertNotIn("sunDiffuse\n                           * clamp(v_terrainSunVisibility", shader)
         self.assertEqual(shader.count("80.0 / 255.0"), 1)
 
@@ -45,7 +46,21 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("m_terrainShadowDesiredGeneration", landscape_h)
         self.assertIn("m_terrainShadowFutureGeneration", landscape_h)
         self.assertIn("m_terrainShadowFuture.isFinished()", landscape_cpp)
-        self.assertIn("applyTerrainShadowVisibility", landscape_cpp)
+        self.assertIn("uploadTerrainShadowTexture", landscape_cpp)
+
+    def test_sculpt_stroke_retains_one_complete_shadow_snapshot(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+
+        update_call = view.split("updateTerrainShadowVisibility(", 1)[1].split(");", 1)[0]
+        self.assertIn("!m_sculptStrokeActive", update_call)
+        update = landscape.split(
+            "void CLandscape::updateTerrainShadowVisibility", 1)[1].split(
+                "void CLandscape::drawWater", 1)[0]
+        self.assertIn("if(!allowRebuild)", update)
+        self.assertLess(update.index("if(!allowRebuild)"),
+                        update.index("QtConcurrent::run"))
+        self.assertIn("const bool stillDesired = allowRebuild", update)
 
     def test_terrain_generation_and_toggle_invalidate_visibility_field(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
@@ -55,14 +70,199 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("terrainShadowsEnabled", view)
         self.assertIn("m_terrainShadowFieldGeneration", landscape)
 
-    def test_disabling_toggle_immediately_uploads_fully_visible_terrain(self):
+    def test_only_height_and_overlay_coverage_edits_invalidate_terrain_field(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        landscape_h = (ROOT / "source/render/landscape.h").read_text(encoding="utf-8")
+        landscape_cpp = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+        terrain_model = (ROOT / "source/documents/terrain_edit_model.h").read_text(
+            encoding="utf-8")
+
+        sector_preview = landscape_cpp.split(
+            "bool CLandscape::previewCanonicalSector", 1)[1].split(
+                "bool CLandscape::previewCanonicalOverlaySector", 1)[0]
+        tile_preview = view.split(
+            "bool CView::applyTerrainTilePreview", 1)[1].split(
+                "bool CView::applyOverlaySurfacePreview", 1)[0]
+        overlay_preview = view.split(
+            "bool CView::applyOverlaySurfacePreview", 1)[1].split(
+                "void CView::beginTerrainPreviewBatch", 1)[0]
+        height_preview = view.split(
+            "bool CView::applyTerrainHeightPreview", 1)[1].split(
+                "bool CView::applyTerrainVerticalScalePreview", 1)[0]
+
+        self.assertIn("invalidateTerrainShadowField", landscape_h)
+        self.assertNotIn("++m_shadowGeneration", sector_preview)
+        self.assertNotIn("invalidateTerrainShadowField", tile_preview)
+        self.assertIn("invalidateTerrainShadowField", height_preview)
+        self.assertIn("affectsTerrainShadowField", terrain_model)
+        self.assertIn("command.affectsTerrainShadowField", overlay_preview)
+        self.assertIn("invalidateTerrainShadowField", overlay_preview)
+
+    def test_editor_only_trap_and_helper_visuals_never_enter_shadow_queue(self):
+        magictrap = (ROOT / "source/objects/magictrap.h").read_text(encoding="utf-8")
+        node = (ROOT / "source/core/node.h").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "bool castsRenderShadow() const override { return false; }", magictrap)
+        self.assertIn("virtual bool castsRenderShadow() const { return false; }", node)
+
+    def test_static_shadow_cache_depends_only_on_actual_casters(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        render_queue = (ROOT / "source/render/render_queue.cpp").read_text(
+            encoding="utf-8")
+
+        static_hash = view.split("QCryptographicHash staticHash", 1)[1].split(
+            "bool rebuildStatic", 1)[0]
+        self.assertNotIn("sceneSourceFingerprint", static_hash)
+        self.assertIn("queue.staticShadowFingerprint()", view)
+        self.assertIn("staticHash.addData(staticCasterFingerprint)", static_hash)
+        self.assertIn("farStaticHash.addData(staticCasterFingerprint)", static_hash)
+        self.assertIn("item.instanceMatrix.constData()", render_queue)
+
+    def test_static_shadow_fingerprint_is_independent_of_submission_order(self):
+        render_queue = (ROOT / "source/render/render_queue.cpp").read_text(
+            encoding="utf-8")
+
+        fingerprint = render_queue.split(
+            "QByteArray RenderQueueContext::staticShadowFingerprint() const", 1)[1].split(
+                "void RenderQueueContext::flushShadow", 1)[0]
+        self.assertIn("QVector<QByteArray> casterRecords", fingerprint)
+        self.assertIn("std::sort(casterRecords.begin(), casterRecords.end())", fingerprint)
+
+    def test_selection_never_rewrites_shadow_spatial_bounds(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+
+        rebuild = view.split("void CView::rebuildSpatialIndices()", 1)[1].split(
+            "QVector<CNode*> CView::spatiallyVisibleNodes", 1)[0]
+        self.assertIn("grid->insert(node, center, radius)", rebuild)
+        self.assertNotIn("const bool selected", rebuild)
+        self.assertNotIn("if(selected", rebuild)
+
+        self.assertNotIn("connect(this, &CView::selectionChanged", view)
+        undo_hook = view.split("connect(m_pUndoStack", 1)[1].split(
+            "m_pProgress = pProgress", 1)[0]
+        selection_undo = undo_hook.split(
+            "if(!selectionOnly)", 1)[1].split("}", 1)[0]
+        self.assertIn("m_spatialIndexDirty = true", selection_undo)
+
+    def test_sector_geometry_never_owns_terrain_shadow_visibility(self):
+        landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+        sector_h = (ROOT / "source/render/sector.h").read_text(encoding="utf-8")
+        sector_cpp = (ROOT / "source/render/sector.cpp").read_text(encoding="utf-8")
+        vertex = (ROOT / "assets/shaders/landshader.vsh").read_text(encoding="utf-8")
+
+        preview = landscape.split(
+            "bool CLandscape::previewCanonicalSector", 1)[1].split(
+                "bool CLandscape::previewCanonicalOverlaySector", 1)[0]
+        self.assertNotIn("m_terrainShadowFieldEnabled", preview)
+        self.assertNotIn("applyTerrainShadowVisibility", preview)
+        self.assertNotIn("shadowVisibility", sector_h)
+        self.assertNotIn("applyTerrainShadowVisibility", sector_cpp)
+        self.assertNotIn("a_terrainSunVisibility", vertex)
+
+    def test_terrain_shadow_publication_is_an_atomic_texture_swap(self):
+        landscape_h = (ROOT / "source/render/landscape.h").read_text(encoding="utf-8")
+        landscape_cpp = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("QOpenGLTexture* m_terrainShadowTexture", landscape_h)
+        upload = landscape_cpp.split(
+            "bool CLandscape::uploadTerrainShadowTexture", 1)[1].split(
+                "void CLandscape::updateTerrainShadowVisibility", 1)[0]
+        self.assertIn("QOpenGLTexture* candidate", upload)
+        self.assertLess(upload.index("candidate->setData"),
+                        upload.index("m_terrainShadowTexture = candidate"))
+
+    def test_selection_cannot_request_scene_content_regeneration(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+
+        selection_regions = (
+            view.split("int CView::select(const SSelect", 1)[1].split(
+                "CMob *CView::mob", 1)[0],
+            view.split("bool CView::selectNodes", 1)[1].split(
+                "void CView::drawTilePreview", 1)[0],
+            view.split("void CView::pickObject(const QRect &rect", 1)[1].split(
+                "QVector3D CView::getTerrainPos(bool", 1)[0],
+            view.split("void CView::restoreSelection", 1)[1].split(
+                "bool CView::selectObjectByProvenance", 1)[0],
+            view.split("void CView::clearObjectSelection", 1)[1].split(
+                "void CView::recordSelectionChange", 1)[0],
+        )
+        for region in selection_regions:
+            self.assertNotIn("emit loadedMapStateChanged()", region)
+
+    def test_offscreen_draw_cannot_mutate_persistent_terrain_shadow_snapshot(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        landscape_h = (ROOT / "source/render/landscape.h").read_text(encoding="utf-8")
+        landscape_cpp = (ROOT / "source/render/landscape.cpp").read_text(
+            encoding="utf-8")
+
+        update_call = view.split("updateTerrainShadowVisibility(", 1)[0]
+        guard_start = update_call.rfind("if(")
+        self.assertIn("!m_minimapCaptureActive", update_call[guard_start:])
+        self.assertNotIn("bool enabled", landscape_h.split(
+            "updateTerrainShadowVisibility", 1)[1].split(";", 1)[0])
+        update = landscape_cpp.split(
+            "void CLandscape::updateTerrainShadowVisibility", 1)[1].split(
+                "void CLandscape::drawWater", 1)[0]
+        self.assertNotIn("m_terrainShadowFieldEnabled = false", update)
+        self.assertNotIn("delete m_terrainShadowTexture", update)
+
+    def test_replacement_generation_keeps_last_complete_snapshot_renderable(self):
+        landscape_h = (ROOT / "source/render/landscape.h").read_text(encoding="utf-8")
+        landscape_cpp = (ROOT / "source/render/landscape.cpp").read_text(
+            encoding="utf-8")
+
+        self.assertNotIn("m_terrainShadowFieldEnabled", landscape_h)
+        update = landscape_cpp.split(
+            "void CLandscape::updateTerrainShadowVisibility", 1)[1].split(
+                "void CLandscape::drawWater", 1)[0]
+        self.assertNotIn("m_terrainShadowTexture = nullptr", update)
+        self.assertNotIn("m_terrainShadowFieldGeneration = 0", update)
+
+    def test_static_shadow_atlas_has_no_unproven_publication_debounce(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        cascade = (ROOT / "source/render/shadow_cascade.h").read_text(encoding="utf-8")
+
+        self.assertNotIn("ShadowCachePublicationGate", cascade)
+        self.assertNotIn("kStaticShadowSettleMs", view)
+        self.assertNotIn("m_staticShadowPublicationGate", view)
+
+    def test_editor_query_passes_never_clear_the_visible_framebuffer(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        view_h = (ROOT / "source/render/view.h").read_text(encoding="utf-8")
+
+        rectangle_pick = view.split(
+            "void CView::pickObject(const QRect &rect", 1)[1].split(
+                "QVector3D CView::getTerrainPos(bool", 1)[0]
+        point_pick = view.split(
+            "CNode* CView::pickObject(QList<CNode*>& aNode", 1)[1].split(
+                "QVector3D CView::getTerrainPos(const int", 1)[0]
+        terrain_pick = view.split(
+            "QVector3D CView::getTerrainPos(const int", 1)[1].split(
+                "void CView::changeOperation", 1)[0]
+
+        self.assertIn("m_editorQueryFbo", view_h)
+        for query_pass, read_marker in (
+                (rectangle_pick, "getColorFromRect"),
+                (point_pick, "ReadPixels"),
+                (terrain_pick, "ReadPixels")):
+            self.assertIn("beginEditorQueryFramebuffer", query_pass)
+            self.assertIn("endEditorQueryFramebuffer", query_pass)
+            self.assertLess(query_pass.index("beginEditorQueryFramebuffer"),
+                            query_pass.index("Clear(GL_COLOR_BUFFER_BIT"))
+            self.assertLess(query_pass.index(read_marker),
+                            query_pass.rindex("endEditorQueryFramebuffer"))
+
+    def test_disabling_toggle_immediately_stops_sampling_terrain_texture(self):
         landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
 
-        disabled = landscape.index("if(!enabled)")
-        enabled = landscape.index("traceTerrainSunVisibility", disabled)
-        transition = landscape[disabled:enabled]
-        self.assertIn("fill(1.0f", transition)
-        self.assertIn("applyTerrainShadowVisibility", transition)
+        apply = landscape.split(
+            "void CLandscape::applyTerrainShadowUniforms", 1)[1].split(
+                "void CLandscape::updateTerrainShadowVisibility", 1)[0]
+        self.assertIn("const bool available = enabled", apply)
+        self.assertIn('setUniformValue("u_terrainShadowEnabled", available)', apply)
+        self.assertNotIn("m_terrainShadowTexture = nullptr", apply)
+        self.assertNotIn("m_terrainShadowFieldGeneration = 0", apply)
 
     def test_angle_and_minimap_safeguards_remain_fail_closed(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
