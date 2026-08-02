@@ -1183,6 +1183,68 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperty(const QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(const QSharedPointer<IPropertyBase>&)));
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>&)),
                      this, SLOT(onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>&)));
+    connect(m_tableManager.get(), &CTableManager::onBehaviorPointSelected,
+            this, [this](CNode* point)
+    {
+        CMob* mob = ownerMob(point);
+        QTimer::singleShot(0, this, [this, mob, point]()
+        {
+            if(mob && m_aMob.contains(mob))
+                selectNode(point, false);
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onBehaviorPatrolMove,
+            this, [this](CUnit* unit, int logicSlot, int from, int to)
+    {
+        CMob* mob = ownerMob(unit);
+        const uint unitId = unit ? unit->mapId() : 0;
+        QTimer::singleShot(0, this, [this, mob, unitId, logicSlot, from, to]()
+        {
+            if(!m_pUndoStack || !mob || !m_aMob.contains(mob)
+               || !mob->nodeByMapId(unitId))
+                return;
+            m_pUndoStack->push(new CMoveBehaviorPointCommand(
+                this, mob, unitId, logicSlot, -1, from, to, false));
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onBehaviorLookMove,
+            this, [this](CUnit* unit, int logicSlot, int patrol, int from, int to)
+    {
+        CMob* mob = ownerMob(unit);
+        const uint unitId = unit ? unit->mapId() : 0;
+        QTimer::singleShot(0, this,
+            [this, mob, unitId, logicSlot, patrol, from, to]()
+        {
+            if(!m_pUndoStack || !mob || !m_aMob.contains(mob)
+               || !mob->nodeByMapId(unitId))
+                return;
+            m_pUndoStack->push(new CMoveBehaviorPointCommand(
+                this, mob, unitId, logicSlot, patrol, from, to, true));
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onBehaviorPatrolAdd,
+            this, [this](CUnit* unit)
+    {
+        CMob* mob = ownerMob(unit);
+        const uint unitId = unit ? unit->mapId() : 0;
+        QTimer::singleShot(0, this, [this, mob, unitId]()
+        {
+            CNode* owner = mob && m_aMob.contains(mob)
+                ? mob->nodeByMapId(unitId) : nullptr;
+            if(owner && selectNode(owner, false))
+                addLogicPoint(false);
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onBehaviorLookAdd,
+            this, [this](CPatrolPoint* patrol)
+    {
+        CMob* mob = ownerMob(patrol);
+        QTimer::singleShot(0, this, [this, mob, patrol]()
+        {
+            if(mob && m_aMob.contains(mob) && selectNode(patrol, false))
+                addLogicPoint(true);
+        });
+    });
     m_pUndoStack = pStack;
     m_lastUndoStackIndex = m_pUndoStack ? m_pUndoStack->index() : -1;
     connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int index)
@@ -10751,6 +10813,10 @@ void CView::viewParameters()
     }
 
     m_tableManager->setNewData(aProp);
+    if(CScene::getInstance()->getMode() == eEditModeLogic
+       && selected.size() == 1)
+        if(CUnit* unit = dynamic_cast<CUnit*>(selected.first()))
+            m_tableManager->setBehaviorCollection(unit, m_logicSlotIndex);
     m_tableManager->setReadOnly(!hasEditableSelection());
     emit selectionStateChanged(true);
 }

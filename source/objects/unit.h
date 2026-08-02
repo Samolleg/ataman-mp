@@ -72,6 +72,7 @@ public:
     void createViewByIndex(int index);
     void undo_createViewByIndex(int index);
     CLookPoint* viewByIndex(int index);
+    bool moveLookPoint(int from, int to);
 
 signals:
     void patrolChanges();
@@ -139,6 +140,7 @@ public:
     bool owns(const CLookPoint* point, int* patrolIndex = nullptr,
               int* lookIndex = nullptr) const;
     const QVector<CPatrolPoint*>& patrolPoints() const { return m_aPatrolPt; }
+    bool movePatrolPoint(int from, int to);
 
 
 public slots:

@@ -2030,6 +2030,16 @@ bool CLogic::owns(const CLookPoint* point, int* patrolIndex, int* lookIndex) con
     return false;
 }
 
+bool CLogic::movePatrolPoint(int from, int to)
+{
+    if(from < 0 || to < 0 || from >= m_aPatrolPt.size()
+       || to >= m_aPatrolPt.size() || from == to)
+        return false;
+    m_aPatrolPt.move(from, to);
+    createLogicLines();
+    return true;
+}
+
 void CLogic::addFirstPoint(QVector3D& pos)
 {
     CPatrolPoint* pPoint = new CPatrolPoint();
@@ -2958,6 +2968,16 @@ void CLookPoint::collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp,
     util::addParam(aProp, &speed);
     propChar flags(eObjParam_VIEW_FLAGS, m_flag);
     util::addParam(aProp, &flags);
+}
+
+bool CPatrolPoint::moveLookPoint(int from, int to)
+{
+    if(from < 0 || to < 0 || from >= m_aLookPt.size()
+       || to >= m_aLookPt.size() || from == to)
+        return false;
+    m_aLookPt.move(from, to);
+    update();
+    return true;
 }
 
 uint CLookPoint::deserialize(util::CMobParser& parser)

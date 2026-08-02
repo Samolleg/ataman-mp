@@ -656,6 +656,49 @@ void CBehaviorPasteCommand::redo()
     refresh(m_pastedNodes);
 }
 
+CMoveBehaviorPointCommand::CMoveBehaviorPointCommand(
+        CView* view, CMob* mob, uint unitId, int logicSlot, int patrol,
+        int from, int to, bool lookPoint, QUndoCommand* parent)
+    : QUndoCommand(parent), m_view(view), m_mob(mob), m_unitId(unitId),
+      m_logicSlot(logicSlot), m_patrol(patrol), m_from(from), m_to(to),
+      m_lookPoint(lookPoint)
+{
+    setText(m_lookPoint ? "Reorder look point" : "Reorder patrol point");
+}
+
+void CMoveBehaviorPointCommand::apply(int from, int to)
+{
+    CUnit* unit = m_mob
+        ? dynamic_cast<CUnit*>(m_mob->nodeByMapId(m_unitId)) : nullptr;
+    CLogic* logic = unit ? unit->logicAt(m_logicSlot) : nullptr;
+    bool changed = false;
+    if(logic && m_lookPoint)
+    {
+        CPatrolPoint* patrol = logic->patrolByIndex(m_patrol);
+        changed = patrol && patrol->moveLookPoint(from, to);
+    }
+    else if(logic)
+        changed = logic->movePatrolPoint(from, to);
+    if(!changed || !m_view || !m_mob)
+        return;
+    unit->refreshLogicProjection();
+    m_mob->logicNodesUpdate();
+    m_view->collectObjectTreeData();
+    m_view->viewParameters();
+    m_view->setDurty(m_mob);
+    m_view->update();
+}
+
+void CMoveBehaviorPointCommand::undo()
+{
+    apply(m_to, m_from);
+}
+
+void CMoveBehaviorPointCommand::redo()
+{
+    apply(m_from, m_to);
+}
+
 CReplaceLogicSlotsCommand::CReplaceLogicSlotsCommand(
         CView* view, CMob* mob,
         const QVector<SLogicSlotReplacement>& replacements,

@@ -266,6 +266,27 @@ private:
     bool m_firstRedo;
 };
 
+class CMoveBehaviorPointCommand : public QUndoCommand
+{
+public:
+    CMoveBehaviorPointCommand(CView* view, CMob* mob, uint unitId,
+                              int logicSlot, int patrol, int from, int to,
+                              bool lookPoint, QUndoCommand* parent = nullptr);
+    void undo() override;
+    void redo() override;
+
+private:
+    void apply(int from, int to);
+    CView* m_view;
+    CMob* m_mob;
+    uint m_unitId;
+    int m_logicSlot;
+    int m_patrol;
+    int m_from;
+    int m_to;
+    bool m_lookPoint;
+};
+
 struct SLogicSlotReplacement
 {
     uint unitId{0};
