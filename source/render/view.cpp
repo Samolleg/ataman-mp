@@ -2565,7 +2565,6 @@ void CView::initializeGL()
     // black. Explicitly restore Qt's context-owned presentation target.
     QOpenGLFramebufferObject::bindDefault();
     m_shadowUpdateTimer.start();
-    m_staticShadowStabilityTimer.start();
     logOpenGlDiagnosticState(QStringLiteral("initialize/shadow-framebuffers"));
 
     CTextureList::getInstance()->initResource();
@@ -2739,7 +2738,6 @@ void CView::releaseShadowFramebuffers()
     m_shadowInitialized = false;
     m_staticShadowFingerprint.clear();
     m_farStaticShadowFingerprint.clear();
-    m_staticShadowPublicationGate.reset();
     m_localShadowMatrices.clear();
     m_localShadowAtlasRects.clear();
     m_localShadowOwners.clear();
@@ -3063,24 +3061,10 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     farStaticHash.addData(reinterpret_cast<const char*>(&safeMaximumDistance),
                           int(sizeof(safeMaximumDistance)));
     const QByteArray farStaticFingerprint = farStaticHash.result();
-    bool rebuildStatic = !m_shadowInitialized;
-    bool rebuildFarStatic = !m_shadowInitialized;
-    if(m_shadowInitialized)
-    {
-        // Picking and terrain sculpting can expose a transient caster queue for
-        // one or more paints. Keep sampling the last complete atlas until the
-        // replacement queue has remained unchanged; publishing the transient
-        // atlas is the visible full-scene shadow blink.
-        constexpr qint64 kStaticShadowSettleMs = 100;
-        const bool replacementReady = m_staticShadowPublicationGate.replacementReady(
-            m_staticShadowFingerprint, m_farStaticShadowFingerprint,
-            staticFingerprint, farStaticFingerprint,
-            m_staticShadowStabilityTimer.elapsed(), kStaticShadowSettleMs);
-        rebuildStatic = replacementReady
-            && staticFingerprint != m_staticShadowFingerprint;
-        rebuildFarStatic = replacementReady
-            && farStaticFingerprint != m_farStaticShadowFingerprint;
-    }
+    const bool rebuildStatic = !m_shadowInitialized
+        || staticFingerprint != m_staticShadowFingerprint;
+    const bool rebuildFarStatic = !m_shadowInitialized
+        || farStaticFingerprint != m_farStaticShadowFingerprint;
     const bool rebuildDynamic = !m_shadowInitialized || m_shadowUpdateTimer.elapsed() >= 66;
     const bool localChanged = nextLocalOwners != m_localShadowOwners
         || nextLocalMatrices != m_localShadowMatrices;
@@ -5792,6 +5776,9 @@ void CView::draw()
         applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                                  lightingMode, fogEnabled);
         applyShadowUniforms(m_landProgram, withShadows, true, true);
+        if(m_pLand)
+            m_pLand->applyTerrainShadowUniforms(
+                &m_landProgram, terrainShadowsEnabled);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
             m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)

@@ -26,13 +26,14 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("terrainShadowsEnabled", view)
         self.assertIn("updateTerrainShadowVisibility", view)
         self.assertIn("traceTerrainSunVisibility", landscape)
-        self.assertIn("v_terrainSunVisibility", shader)
+        self.assertIn("u_terrainShadowMap", shader)
+        self.assertIn("texture2D(u_terrainShadowMap", shader)
 
     def test_terrain_and_object_shadows_form_one_strongest_blocker_silhouette(self):
         shader = (ROOT / "assets/shaders/landshader.fsh").read_text(encoding="utf-8")
 
         self.assertIn("float combinedShadowVisibility = min(shadow,", shader)
-        self.assertIn("clamp(v_terrainSunVisibility, 0.0, 1.0)", shader)
+        self.assertIn("clamp(terrainShadowVisibility(), 0.0, 1.0)", shader)
         self.assertNotIn("sunDiffuse\n                           * clamp(v_terrainSunVisibility", shader)
         self.assertEqual(shader.count("80.0 / 255.0"), 1)
 
@@ -45,7 +46,7 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("m_terrainShadowDesiredGeneration", landscape_h)
         self.assertIn("m_terrainShadowFutureGeneration", landscape_h)
         self.assertIn("m_terrainShadowFuture.isFinished()", landscape_cpp)
-        self.assertIn("applyTerrainShadowVisibility", landscape_cpp)
+        self.assertIn("uploadTerrainShadowTexture", landscape_cpp)
 
     def test_terrain_generation_and_toggle_invalidate_visibility_field(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
@@ -114,24 +115,40 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("QVector<QByteArray> casterRecords", fingerprint)
         self.assertIn("std::sort(casterRecords.begin(), casterRecords.end())", fingerprint)
 
-    def test_sector_rebuild_keeps_last_completed_terrain_shadow_visible(self):
+    def test_sector_geometry_never_owns_terrain_shadow_visibility(self):
         landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+        sector_h = (ROOT / "source/render/sector.h").read_text(encoding="utf-8")
+        sector_cpp = (ROOT / "source/render/sector.cpp").read_text(encoding="utf-8")
+        vertex = (ROOT / "assets/shaders/landshader.vsh").read_text(encoding="utf-8")
 
         preview = landscape.split(
             "bool CLandscape::previewCanonicalSector", 1)[1].split(
                 "bool CLandscape::previewCanonicalOverlaySector", 1)[0]
-        self.assertIn("m_terrainShadowFieldEnabled", preview)
-        self.assertIn("applyTerrainShadowVisibility", preview)
+        self.assertNotIn("m_terrainShadowFieldEnabled", preview)
+        self.assertNotIn("applyTerrainShadowVisibility", preview)
+        self.assertNotIn("shadowVisibility", sector_h)
+        self.assertNotIn("applyTerrainShadowVisibility", sector_cpp)
+        self.assertNotIn("a_terrainSunVisibility", vertex)
 
-    def test_transient_caster_states_do_not_replace_complete_shadow_atlases(self):
+    def test_terrain_shadow_publication_is_an_atomic_texture_swap(self):
+        landscape_h = (ROOT / "source/render/landscape.h").read_text(encoding="utf-8")
+        landscape_cpp = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("QOpenGLTexture* m_terrainShadowTexture", landscape_h)
+        upload = landscape_cpp.split(
+            "bool CLandscape::uploadTerrainShadowTexture", 1)[1].split(
+                "void CLandscape::updateTerrainShadowVisibility", 1)[0]
+        self.assertIn("QOpenGLTexture* candidate", upload)
+        self.assertLess(upload.index("candidate->setData"),
+                        upload.index("m_terrainShadowTexture = candidate"))
+
+    def test_static_shadow_atlas_has_no_unproven_publication_debounce(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
         cascade = (ROOT / "source/render/shadow_cascade.h").read_text(encoding="utf-8")
 
-        self.assertIn("ShadowCachePublicationGate", cascade)
-        self.assertIn("candidateNear == currentNear", cascade)
-        self.assertIn("m_pendingSinceMs", cascade)
-        self.assertIn("kStaticShadowSettleMs", view)
-        self.assertIn("m_staticShadowPublicationGate.replacementReady", view)
+        self.assertNotIn("ShadowCachePublicationGate", cascade)
+        self.assertNotIn("kStaticShadowSettleMs", view)
+        self.assertNotIn("m_staticShadowPublicationGate", view)
 
     def test_editor_query_passes_never_clear_the_visible_framebuffer(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
@@ -159,14 +176,15 @@ class TerrainShadowContractTests(unittest.TestCase):
             self.assertLess(query_pass.index(read_marker),
                             query_pass.rindex("endEditorQueryFramebuffer"))
 
-    def test_disabling_toggle_immediately_uploads_fully_visible_terrain(self):
+    def test_disabling_toggle_immediately_stops_sampling_terrain_texture(self):
         landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
 
         disabled = landscape.index("if(!enabled)")
-        enabled = landscape.index("traceTerrainSunVisibility", disabled)
+        enabled = landscape.index("const QVector3D normalized", disabled)
         transition = landscape[disabled:enabled]
-        self.assertIn("fill(1.0f", transition)
-        self.assertIn("applyTerrainShadowVisibility", transition)
+        self.assertIn("m_terrainShadowFieldEnabled = false", transition)
+        self.assertNotIn("fill(1.0f", transition)
+        self.assertNotIn("applyTerrainShadowVisibility", transition)
 
     def test_angle_and_minimap_safeguards_remain_fail_closed(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
