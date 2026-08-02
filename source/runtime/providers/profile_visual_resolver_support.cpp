@@ -1,4 +1,5 @@
 #include "profile_visual_resolver_support.h"
+#include "../character_bodypart_runtime.h"
 
 #include <QJsonArray>
 #include <QRegularExpression>
@@ -70,7 +71,7 @@ bool numberedZombieSkin(const QString& model)
     return models.contains(model.trimmed().toLower());
 }
 
-bool databaseEquippedHumanoid(const QString& model)
+bool databaseEquippedCharacter(const QString& model)
 {
     // Corpus-backed wearable/equipped actor assemblies. Creature actors keep
     // their already-resolved MOB assembly, texture, and integral parts.
@@ -645,7 +646,7 @@ SRuntimeProviderResult resolveDatabaseAppearance(
     // Normal non-humanoids are not imports, but their MOB graphical fields are
     // authoritative. Applying JMV RaceModels here loses creature textures and
     // integral weapons when a prototype points at a different model variant.
-    if(!databaseEquippedHumanoid(race->model))
+    if(!databaseEquippedCharacter(race->model))
     {
         if(request.model.trimmed().isEmpty() || request.primaryTexture.trimmed().isEmpty())
             return failure("appearance.creature.incomplete",
@@ -675,7 +676,7 @@ SRuntimeProviderResult resolveDatabaseAppearance(
     // is independently established as wearable; the database remains
     // authoritative for skin, complexion, armor, and weapons.
     const bool databaseHasStandardAssembly = standardWearableAssembly(race->model);
-    const QString resolvedModel = jmv && databaseEquippedHumanoid(request.model)
+    const QString resolvedModel = jmv && databaseEquippedCharacter(request.model)
             && !databaseHasStandardAssembly
         ? request.model.trimmed() : race->model;
     const QStringList primary = expandedList(race->primaryTextures);
@@ -721,7 +722,6 @@ SRuntimeProviderResult resolveEquipmentLayout(
     QJsonObject componentTextures;
     QJsonArray bodyTextureLayers;
     QJsonArray replacedParts;
-    bool hidesHair = false;
     if(database.isNull())
         return failure("equipment.database.unavailable", "Item-name interpretation requires the active profile database.");
 
@@ -777,8 +777,8 @@ SRuntimeProviderResult resolveEquipmentLayout(
             diagnostics.append(reference + ": armor prototype is absent from the active database");
             continue;
         }
-        const QStringList matched = appendArmorComponents(item.value(), jmv, request, &components,
-                                                          &placeholders, &diagnostics);
+        QStringList matched = appendArmorComponents(item.value(), jmv, request, &components,
+                                                     &placeholders, &diagnostics);
         // The stable layer ordering puts JMV top armor last. Replace any
         // already-selected lower-layer component in the same anatomical slot,
         // while retaining the lower layer when the top TTI has no geometry.
@@ -802,8 +802,29 @@ SRuntimeProviderResult resolveEquipmentLayout(
                     }
                 }
             }
-        if(item->type.compare("helm", Qt::CaseInsensitive) == 0 && !matched.isEmpty())
-            hidesHair = true;
+        if(item->type.compare("helm", Qt::CaseInsensitive) == 0)
+        {
+            const ei::SHelmetHairRuntimeDecision hair = ei::helmetHairRuntimeDecision(
+                request.model, request.bodyParts, request.assemblyParts,
+                request.hairIndex, item->textureType1);
+            if(hair.replacementAvailable)
+            {
+                if(!jsonArrayContains(components, hair.replacementPart))
+                    components.append(hair.replacementPart);
+                if(!matched.contains(hair.replacementPart, Qt::CaseInsensitive))
+                    matched.append(hair.replacementPart);
+                if(!jsonArrayContains(replacedParts, hair.nativeHairPart))
+                    replacedParts.append(hair.nativeHairPart);
+            }
+            else if(hair.nativeHairInitiallyLoaded)
+            {
+                if(!jsonArrayContains(replacedParts, hair.nativeHairPart))
+                    replacedParts.append(hair.nativeHairPart);
+            }
+            else if(hair.fallbackLoadsNativeHair
+                    && !jsonArrayContains(components, hair.nativeHairPart))
+                components.append(hair.nativeHairPart);
+        }
         const QString materialName = itemMaterial(reference);
         const auto material = database->materialRecords.constFind(materialName);
         if(materialName.isEmpty() || material == database->materialRecords.constEnd()
@@ -1002,7 +1023,6 @@ SRuntimeProviderResult resolveEquipmentLayout(
     equipmentLayout->insert("componentTextures", componentTextures);
     equipmentLayout->insert("bodyTextureLayers", bodyTextureLayers);
     equipmentLayout->insert("replacedParts", replacedParts);
-    equipmentLayout->insert("hidesHair", hidesHair);
     equipmentLayout->insert("placeholders", placeholders);
     equipmentLayout->insert("diagnostics", diagnostics);
     equipmentLayout->insert("emissiveParts", emissiveParts);

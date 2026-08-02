@@ -15,7 +15,7 @@ may record hashes and structural summaries but not redistribute game data.
 | `.x2` equipment transform, stored `.x4` body UV | JMV | viewer commits + UV tests/probes | zone1 203/205/221 | Verified JMV controls |
 | Exact PNT3 block grammar | JMV | fingerprinted `2dintmmx.dll` SHA-256 `7FBBF9452520CC1A8F11E4C955B6DC1988AA24A624298B130E291C4368423B7A`, routine `0x100018AF`; 1,068-member audit | `UnhumaPL_05.bl.0.x4`, `UnhumaPL_24.bl.0.x4` | Verified binary/corpus/renderer |
 | Material suffix exact; incompatibility fails closed | JMV | resolver tests and corpus | bz8k 1000292348; bz16h 382 | Verified provider; visible runtime diagnostic control |
-| Hair hidden by helmet; quick items invisible | Base/JMV | focused provider tests | helmet toggle; quick→equipped move | Verified renderer/provider |
+| Helmet hair follows DB selection, exact assembly replacement/removal/fallback; quick items invisible | Base/JMV | shared runtime decision + focused provider/validator tests | legacy `hr`, exact `hr.NN`, replacement and equipped-undead controls | Verified algorithm/renderer/provider |
 | Base one weapon; JMV first pair/layouts | Base/JMV | provider tests | ordinary, 1H+shield, dual 1H, 2H | Verified renderer/provider |
 | Standalone item, family, and hand geometry are independent | JMV | clean nested FIG replacements plus controlled game screenshots | `InitWeapons.res/initwedg8weapon.fig`; `unhuma.mod/rh3.dagger08`; negative `lh3.dagger08` control | Verified JMV male runtime control; other families/hands require their own control |
 | TitanGrip requires StrongMan ownership | JMV | JMV Lua branch analysis + safe fallback | zone17 47533 | Ownership interpretation supported; parser/render layouts deferred |

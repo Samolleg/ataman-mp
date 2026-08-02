@@ -8,6 +8,8 @@ SOURCES += \
     profile_visual_provider_tests.cpp \
     ../source/resources/profile_database.cpp \
     ../source/runtime/unit_animation.cpp \
+    ../source/runtime/character_bodypart_runtime.cpp \
+    ../source/runtime/persistent_visual_cache.cpp \
     ../source/runtime/profile_visual_provider.cpp \
     ../source/runtime/providers/profile_visual_resolver_support.cpp \
     ../source/runtime/providers/base_profile_visual_provider.cpp \
@@ -19,6 +21,8 @@ SOURCES += \
 HEADERS += \
     ../source/resources/profile_database.h \
     ../source/runtime/runtime_providers.h \
+    ../source/runtime/character_bodypart_runtime.h \
+    ../source/runtime/persistent_visual_cache.h \
     ../source/runtime/profile_visual_provider.h \
     ../source/runtime/providers/profile_visual_resolver_support.h \
     ../source/runtime/providers/base_profile_visual_provider.h \

@@ -54,11 +54,12 @@ extensions and must remain inspectable and lossless.
 Profile/family-aware diagnostics now inspect that exact serialized array without
 normalizing it. Empty/missing masks are Critical only after the Import/database
 appearance path resolves to a standard wearable assembly; shipped creature and
-legacy skeleton empty masks remain accepted. Missing hair is reported only when
-a hair-bearing database template reaches the verified helmet fallback and the
-active assembly proves that the native hair and selected helmet members exist
-without a helmet-specific hair replacement. Hairless, Import-local, and
-assembly-unproven omissions remain lossless and unreported. Missing core anatomy,
+legacy skeleton empty masks remain accepted. Helmet hair is evaluated
+separately for every database-equipped character. A finding requires a
+database-selected hair member, a selected helmet member, no matching serialized
+hair selection, and no helmet-specific replacement; its suggestion is the
+effective legacy `hr` alias or exact `hr.NN`. Hairless, Import-local, and
+assembly-unproven cases remain lossless and unreported. Missing core anatomy,
 distinct dotted alternatives, and duplicates receive non-blocking findings. The
 complete evidence and severity matrix is in
 [`CHARACTER_BODYPART_VALIDATION.md`](CHARACTER_BODYPART_VALIDATION.md).
@@ -71,7 +72,7 @@ complete evidence and severity matrix is in
   exact property-paste,
   order-sensitive equality, duplicate-token, and delta-preservation checks.
 - `mob_family_validation_tests`: passes the exact NID 3470/NID 800004 zone3
-  control, the same runtime fallback across another profile/model combination,
+  control, orc exact-hair controls, a database-equipped legacy undead assembly,
   hairless/native-member/replacement exclusions, Import/database ownership,
   wearable/creature classification, concise messages, severity, overlap,
   duplicate, unknown-token, and byte-preservation cases.

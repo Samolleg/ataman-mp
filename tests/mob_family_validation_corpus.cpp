@@ -16,6 +16,7 @@
 #include "base_profile_database_provider.h"
 #include "jmv_profile_database_provider.h"
 #include "assembly_inventory.h"
+#include "character_bodypart_runtime.h"
 
 namespace {
 int printBodyPartStats(const QVector<SMobFamilyMember>& members, QTextStream& out)
@@ -159,40 +160,6 @@ QSet<int> helmetGeometry(const QStringList& armor,
     return result;
 }
 
-QString canonicalList(QStringList values, bool omitHair = false)
-{
-    QStringList folded;
-    for(const QString& value : values)
-    {
-        if(omitHair && (value.compare("hr", Qt::CaseInsensitive) == 0
-                        || value.startsWith("hr.", Qt::CaseInsensitive)))
-            continue;
-        folded.append(value.trimmed().toCaseFolded());
-    }
-    std::sort(folded.begin(), folded.end());
-    return folded.join(QChar(0x1f));
-}
-
-QString hairPeerKey(
-    const SMobObjectSnapshot& object,
-    const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database)
-{
-    QStringList armor = object.armor;
-    if(!object.importMode && !database.isNull())
-    {
-        const auto monster = database->monsters.constFind(
-            object.prototype.trimmed().toLower());
-        if(monster != database->monsters.constEnd())
-            armor = monster->wears;
-    }
-    return QStringList({object.prototype.trimmed().toCaseFolded(),
-                        object.model.trimmed().toCaseFolded(),
-                        object.importMode ? QString("import") : QString("database"),
-                        canonicalList(armor),
-                        canonicalList(object.bodyParts, true)})
-        .join(QChar(0x1e));
-}
-
 void printMissingHairTemplateStats(
     const QVector<SMobFamilyMember>& members,
     const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
@@ -201,115 +168,78 @@ void printMissingHairTemplateStats(
     const QString& assemblyResourceFingerprint,
     QTextStream& out)
 {
-    int authoredHair = 0;
-    int hairless = 0;
-    int unknown = 0;
-    int matchingControls = 0;
+    int evaluated = 0;
     int runtimeFallbackRisks = 0;
+    int resolvedByInitialHair = 0;
+    int resolvedByReplacement = 0;
     int missingAssemblyEvidence = 0;
-    QSet<QString> hairControls;
-    for(const SMobFamilyMember& member : members)
-        for(const SMobObjectSnapshot& object : member.objects)
-            if(object.unit && object.hasBodyParts && !object.bodyParts.isEmpty()
-               && object.bodyParts.contains("hr", Qt::CaseInsensitive))
-                hairControls.insert(hairPeerKey(object, database));
+    int unavailableRuntimeMembers = 0;
     for(const SMobFamilyMember& member : members)
     {
         for(const SMobObjectSnapshot& object : member.objects)
         {
-            if(!object.unit || object.bodyParts.contains("hr", Qt::CaseInsensitive))
+            if(!object.unit || object.importMode || database.isNull())
                 continue;
-            bool hasDottedHair = false;
-            for(const QString& part : object.bodyParts)
-                hasDottedHair = hasDottedHair
-                    || part.startsWith("hr.", Qt::CaseInsensitive);
-            if(hasDottedHair)
-                continue;
-
-            const ei::SMonsterDatabaseRecord* monster = nullptr;
-            if(!object.importMode && !database.isNull())
-            {
-                const auto found = database->monsters.constFind(
-                    object.prototype.trimmed().toLower());
-                if(found != database->monsters.constEnd())
-                    monster = &found.value();
-            }
-            const QStringList armor = object.importMode || !monster
-                ? object.armor : monster->wears;
-            if(!hasHelmet(armor, database))
+            const auto monster = database->monsters.constFind(
+                object.prototype.trimmed().toLower());
+            if(monster == database->monsters.constEnd() || monster->hairIndex < 0
+               || !hasHelmet(monster->wears, database))
                 continue;
 
             QString resolvedModel = object.model.trimmed().toLower();
-            if(monster && !database.isNull())
+            const auto race = database->raceModels.constFind(
+                monster->baseRace.trimmed().toLower());
+            if(race != database->raceModels.constEnd())
+                resolvedModel = race->model.trimmed().toLower();
+            QStringList assembly = assemblyPartsByModel.value(resolvedModel);
+            if(assembly.isEmpty())
+                assembly = ei::assemblyPartNamesFromResourceSources(
+                    assemblyResourceSources, assemblyResourceFingerprint, resolvedModel);
+            if(assembly.isEmpty())
             {
-                const auto race = database->raceModels.constFind(
-                    monster->baseRace.trimmed().toLower());
-                if(race != database->raceModels.constEnd())
-                    resolvedModel = race->model.trimmed().toLower();
+                ++missingAssemblyEvidence;
+                continue;
             }
-            const QSet<int> helmetTtis = helmetGeometry(armor, database);
+            ++evaluated;
+            const QSet<int> helmetTtis = helmetGeometry(monster->wears, database);
             QList<int> sortedHelmetTtis = helmetTtis.values();
             std::sort(sortedHelmetTtis.begin(), sortedHelmetTtis.end());
-            QStringList helmetTtiText;
-            for(int tti : sortedHelmetTtis)
-                helmetTtiText.append(QString::number(tti));
-
-            const QString hair = monster ? QString::number(monster->hairIndex)
-                                         : QString("unknown");
-            if(!monster) ++unknown;
-            else if(monster->hairIndex >= 0) ++authoredHair;
-            else ++hairless;
-            const bool matchingControl =
-                hairControls.contains(hairPeerKey(object, database));
-            matchingControls += matchingControl ? 1 : 0;
-            bool hasNativeHair = false;
-            bool hasRealHelmet = false;
-            bool runtimeFallbackRisk = false;
-            if(!object.importMode && monster && monster->hairIndex >= 0)
+            for(const int tti : sortedHelmetTtis)
             {
-                QStringList assembly = assemblyPartsByModel.value(resolvedModel);
-                if(assembly.isEmpty())
-                    assembly = ei::assemblyPartNamesFromResourceSources(
-                        assemblyResourceSources,
-                        assemblyResourceFingerprint,
-                        resolvedModel);
-                const QString nativeHair = QString("hr.%1").arg(
-                    monster->hairIndex, 2, 10, QChar('0'));
-                hasNativeHair = assembly.contains(nativeHair, Qt::CaseInsensitive);
-                for(const int tti : helmetTtis)
+                const ei::SHelmetHairRuntimeDecision decision =
+                    ei::helmetHairRuntimeDecision(resolvedModel, object.bodyParts,
+                        assembly, monster->hairIndex, tti);
+                if(!decision.helmetPartAvailable
+                   || (!decision.nativeHairAvailable && !decision.replacementAvailable))
                 {
-                    const QString suffix = QString(".armor%1").arg(
-                        tti, 2, 10, QChar('0'));
-                    if(!assembly.contains("hd" + suffix, Qt::CaseInsensitive))
-                        continue;
-                    hasRealHelmet = true;
-                    runtimeFallbackRisk = runtimeFallbackRisk
-                        || !assembly.contains(nativeHair + suffix, Qt::CaseInsensitive);
+                    ++unavailableRuntimeMembers;
+                    continue;
                 }
-                runtimeFallbackRisk = runtimeFallbackRisk && hasNativeHair;
-                missingAssemblyEvidence += (!runtimeFallbackRisk
-                    && (!hasNativeHair || !hasRealHelmet)) ? 1 : 0;
+                resolvedByInitialHair += decision.helmetPartAvailable
+                    && !decision.replacementAvailable
+                    && decision.nativeHairInitiallyLoaded ? 1 : 0;
+                resolvedByReplacement += decision.helmetPartAvailable
+                    && decision.replacementAvailable ? 1 : 0;
+                if(!decision.helmetPartAvailable || !decision.fallbackLoadsNativeHair)
+                    continue;
+                ++runtimeFallbackRisks;
+                out << "HELMET_HAIR_FALLBACK file=" << member.fileName
+                    << " nid=" << (object.hasNid ? QString::number(object.nid)
+                                                  : QString("missing"))
+                    << " prototype=" << object.prototype
+                    << " model=" << resolvedModel
+                    << " hair=" << decision.nativeHairPart
+                    << " helmet=" << QString::number(tti).rightJustified(2, '0')
+                    << " required=" << decision.requiredSerializedPart << "\n";
             }
-            runtimeFallbackRisks += runtimeFallbackRisk ? 1 : 0;
-            out << "MISSING_HAIR_TEMPLATE file=" << member.fileName
-                << " nid=" << (object.hasNid ? QString::number(object.nid)
-                                              : QString("missing"))
-                << " prototype=" << object.prototype
-                << " import=" << (object.importMode ? "true" : "false")
-                << " resolvedModel=" << resolvedModel
-                << " hairIndex=" << hair
-                << " helmetGeometry=" << helmetTtiText.join(',')
-                << " matchingControl=" << (matchingControl ? "true" : "false")
-                << " runtimeFallbackRisk="
-                << (runtimeFallbackRisk ? "true" : "false")
-                << "\n";
         }
     }
-    out << "MISSING_HAIR_TEMPLATE_STATS authoredHair=" << authoredHair
-        << " hairless=" << hairless << " unknown=" << unknown
-        << " matchingControls=" << matchingControls
+    out << "HELMET_HAIR_FALLBACK_STATS evaluated=" << evaluated
         << " runtimeFallbackRisks=" << runtimeFallbackRisks
-        << " missingAssemblyEvidence=" << missingAssemblyEvidence << "\n";
+        << " resolvedByInitialHair=" << resolvedByInitialHair
+        << " resolvedByReplacement=" << resolvedByReplacement
+        << " missingAssemblyEvidence=" << missingAssemblyEvidence
+        << " unavailableRuntimeMembers=" << unavailableRuntimeMembers << "\n";
 }
 
 QSharedPointer<const ei::SProfileDatabaseSnapshot> loadDatabase(
@@ -354,7 +284,7 @@ int main(int argc, char* argv[])
     QCommandLineOption databaseResource("database-resource",
         "Read-only profile database resource directory", "directory");
     QCommandLineOption missingHairTemplateStats("missing-hair-template-stats",
-        "Print helmeted missing-hr units classified by database hair index");
+        "Print database-equipped helmet/hair runtime decisions");
     QCommandLineOption assemblyInventory("assembly-inventory",
         "JSON object mapping model names to authored assembly members", "path");
     QCommandLineOption assemblyResource("assembly-resource",

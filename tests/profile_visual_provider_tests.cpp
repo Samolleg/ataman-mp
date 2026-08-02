@@ -116,6 +116,7 @@ private slots:
     void missingArmorGeometryPreservesBaseParts();
     void zombieEquipmentUsesSharedHumanoidAtlas();
     void helmetAddsDatabaseGeometryAndAtlas();
+    void helmetHairFallbackMatchesSerializedSelection();
     void jmvRecoversUnambiguousConcatenatedHelmetAndPlate();
     void weaponAtlasesUseLiteralTtiAndEstablishedFamilies();
     void weaponGeometryDoesNotReplaceHandsOrGloves();
@@ -770,9 +771,72 @@ void ProfileVisualProviderTests::helmetAddsDatabaseGeometryAndAtlas()
     QVERIFY(resolver->resolve(request, &output).success);
     QCOMPARE(jsonStrings(output, "components"), QStringList({"hd.armor08"}));
     QVERIFY(jsonStrings(output, "replacedParts").isEmpty());
-    QVERIFY(output.value("hidesHair").toBool());
+    QVERIFY(!output.contains("hidesHair"));
     QCOMPARE(output.value("componentTextures").toObject().value("hd.armor08").toString(),
              QString("unhumahl_08.ir.0.x2.mmp"));
+}
+
+void ProfileVisualProviderTests::helmetHairFallbackMatchesSerializedSelection()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", database());
+
+    SEquipmentLayoutRequest rootOnly;
+    rootOnly.model = "unorfe";
+    rootOnly.armor << "helmet.iron";
+    rootOnly.assemblyParts << "hd" << "hr.01" << "hd.armor08";
+    rootOnly.bodyParts << "hd" << "hr";
+    rootOnly.hairIndex = 1;
+    QJsonObject rootOnlyOutput;
+    QVERIFY(resolver->resolve(rootOnly, &rootOnlyOutput).success);
+    QCOMPARE(jsonStrings(rootOnlyOutput, "components"),
+             QStringList({"hd.armor08", "hr.01"}));
+    QVERIFY(jsonStrings(rootOnlyOutput, "replacedParts").isEmpty());
+
+    SEquipmentLayoutRequest exactHair = rootOnly;
+    exactHair.bodyParts = QStringList() << "hd" << "hr.01";
+    QJsonObject exactHairOutput;
+    QVERIFY(resolver->resolve(exactHair, &exactHairOutput).success);
+    QCOMPARE(jsonStrings(exactHairOutput, "components"),
+             QStringList({"hd.armor08"}));
+    QCOMPARE(jsonStrings(exactHairOutput, "replacedParts"),
+             QStringList({"hr.01"}));
+
+    SEquipmentLayoutRequest allPartsEnabled = rootOnly;
+    allPartsEnabled.bodyParts.clear();
+    QJsonObject allPartsEnabledOutput;
+    QVERIFY(resolver->resolve(allPartsEnabled, &allPartsEnabledOutput).success);
+    QCOMPARE(jsonStrings(allPartsEnabledOutput, "components"),
+             QStringList({"hd.armor08"}));
+    QCOMPARE(jsonStrings(allPartsEnabledOutput, "replacedParts"),
+             QStringList({"hr.01"}));
+
+    SEquipmentLayoutRequest legacyHuman = rootOnly;
+    legacyHuman.model = "unhuma";
+    QJsonObject legacyHumanOutput;
+    QVERIFY(resolver->resolve(legacyHuman, &legacyHumanOutput).success);
+    QCOMPARE(jsonStrings(legacyHumanOutput, "components"),
+             QStringList({"hd.armor08"}));
+    QCOMPARE(jsonStrings(legacyHumanOutput, "replacedParts"),
+             QStringList({"hr.01"}));
+
+    SEquipmentLayoutRequest equippedUndead = rootOnly;
+    equippedUndead.model = "unmoud";
+    equippedUndead.bodyParts = QStringList() << "hd";
+    QJsonObject equippedUndeadOutput;
+    QVERIFY(resolver->resolve(equippedUndead, &equippedUndeadOutput).success);
+    QCOMPARE(jsonStrings(equippedUndeadOutput, "components"),
+             QStringList({"hd.armor08", "hr.01"}));
+    QVERIFY(jsonStrings(equippedUndeadOutput, "replacedParts").isEmpty());
+
+    SEquipmentLayoutRequest authoredReplacement = rootOnly;
+    authoredReplacement.assemblyParts << "hr.01.armor08";
+    QJsonObject replacementOutput;
+    QVERIFY(resolver->resolve(authoredReplacement, &replacementOutput).success);
+    QCOMPARE(jsonStrings(replacementOutput, "components"),
+             QStringList({"hd.armor08", "hr.01.armor08"}));
+    QCOMPARE(jsonStrings(replacementOutput, "replacedParts"),
+             QStringList({"hr.01"}));
 }
 
 void ProfileVisualProviderTests::jmvRecoversUnambiguousConcatenatedHelmetAndPlate()

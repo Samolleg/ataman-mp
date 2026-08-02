@@ -105,6 +105,9 @@ struct SEquipmentLayoutRequest
     QStringList perks;
     QString model;
     QStringList assemblyParts;
+    // Needed to reproduce the client's conditional helmet/hair substitution.
+    QStringList bodyParts;
+    int hairIndex{-1};
     // Lower-case child -> parent links from the selected ANHUM assembly.
     // Providers use these to include authored equipment sub-meshes without
     // inferring ownership from a shared numeric armor suffix.

@@ -88,9 +88,12 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
     4x coordinate multiplier. In particular, check the back half of helmets,
     weapon blades, and shield faces without reintroducing stripes on torsos or
     limbs.
-12. Equip a helmet on a unit with database hair. Confirm the helmet component
-    is visible and the `hr.NN` component is omitted; removing the helmet must
-    restore the selected hair.
+12. Exercise all helmet-hair branches on database-equipped characters. An
+    authored `hr.NN.armorTT` must replace native hair. Without one, a selected
+    exact `hr.NN` must be removed by the helmet, while an omitted exact member
+    must remain enabled through the fallback. Plain `hr` must behave as the
+    database-hair alias only on `unhuma`/`unhufe`; use exact `hr.NN` for orcs,
+    equipped undead, skeletons, and other database-equipped assemblies.
 13. Validate an explicit JMV cross-family material suffix, such as the Metal
     `hmsh`/`hmgl`/`hmpt`/`hmbt` prototypes equipped with the Hide-family
     `dragon red` material by `Human Kania NPC Sorceress M10` (`bz8k` ID

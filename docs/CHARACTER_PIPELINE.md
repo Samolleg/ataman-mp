@@ -41,12 +41,14 @@ Validation follows the same ownership boundary but inspects the serialized
 mask, not only the resolved preview. This is necessary because database-driven
 anatomy reconstruction can visually hide an omitted serialized root. Standard
 wearables receive non-blocking empty/missing-mask, core-anatomy, overlap, and
-duplicate diagnostics. Missing hair is reported only for a verified resolved
-runtime fallback: a database template has authored hair, the model contains
-that native hair member and the equipped helmet member, the explicit mask
-omits `hr`, and no helmet-specific hair replacement exists. Hairless templates
-never enter that runtime branch. Integral creatures and legacy
-skeleton assemblies retain their corpus-normal empty-mask behavior. Unknown
+duplicate diagnostics. Helmet hair is reported for a verified resolved runtime
+fallback on any database-equipped character: the database selects hair, the
+assembly contains that native hair and the equipped helmet member, the
+serialized mask does not load the selected hair, and no helmet-specific hair
+replacement exists. The suggested token is the effective plain `hr` legacy
+alias or exact `hr.NN`. Hairless templates never enter that runtime branch.
+Integral creatures and legacy skeleton assemblies retain their separate
+corpus-normal empty-mask behavior. Unknown
 tokens are never normalized or rejected. See
 [`validation/CHARACTER_BODYPART_VALIDATION.md`](validation/CHARACTER_BODYPART_VALIDATION.md).
 For family MOBs discovered on disk, the validator reads only the required
@@ -111,8 +113,13 @@ UVs, preserves an upright atlas/labels, and exposes provenance through toggles.
 ## Equipment and attachments
 
 Lower armor is always resolved before upper armor regardless of loot/equipment
-array order. Quick, quest, and loot items never become avatar parts. Equipping a
-helmet hides database hair; removal restores it.
+array order. Quick, quest, and loot items never become avatar parts. Helmet
+hair uses the shared database/assembly decision: an authored `hr.NN.armorTT`
+replaces hair; otherwise an initially loaded database hair member is removed;
+if that exact hair was not initially loaded, the equipment path loads it. Plain
+`hr` selects database hair only for `unhuma`/`unhufe`; other database-equipped
+assemblies require exact `hr.NN`. Removing the helmet restores the unmodified
+body selection.
 
 Base preserves one one-handed or ranged weapon and diagnoses extras. JMV has
 layouts for ordinary, one-hand+shield, dual one-hand, single two-hand, requested

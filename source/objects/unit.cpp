@@ -12,6 +12,7 @@
 #include "property.h"
 #include "profile_database.h"
 #include "profile_visual_provider.h"
+#include "character_bodypart_runtime.h"
 #include "persistent_visual_cache.h"
 #include "render_queue.h"
 
@@ -433,11 +434,10 @@ bool CUnit::refreshTransientVisual(bool force)
         // actor's actual body shape. Monster database values are prototype
         // defaults, not a reason to overwrite an already placed unit.
         const int hair = appearance.value("hairIndex").toInt(-1);
-        if(hair >= 0)
+        if(hair >= 0 && ei::serializedPartsLoadDatabaseHair(
+                model, m_bodyParts, assemblyParts, hair))
         {
-            const QString hairPart = QString("hr.%1").arg(hair, 2, 10, QChar('0'));
-            if(assemblyParts.contains(hairPart, Qt::CaseInsensitive))
-                visibleParts.append(hairPart);
+            visibleParts.append(ei::databaseHairPart(hair));
         }
     }
 
@@ -447,6 +447,8 @@ bool CUnit::refreshTransientVisual(bool force)
     equipmentRequest.prototype = m_prototypeName;
     equipmentRequest.model = model;
     equipmentRequest.assemblyParts = assemblyParts;
+    equipmentRequest.bodyParts = m_bodyParts;
+    equipmentRequest.hairIndex = appearance.value("hairIndex").toInt(-1);
     if(ei::CFigure* assemblyFigure = CObjectList::getInstance()->getFigure(model))
     {
         QMap<QString, QVector3D> ignoredRestOffsets;
@@ -466,10 +468,6 @@ bool CUnit::refreshTransientVisual(bool force)
     for(const QString& replaced : jsonStringList(equipment, "replacedParts"))
         for(int index = visibleParts.size() - 1; index >= 0; --index)
             if(visibleParts.at(index).compare(replaced, Qt::CaseInsensitive) == 0)
-                visibleParts.removeAt(index);
-    if(equipment.value("hidesHair").toBool(false))
-        for(int index = visibleParts.size() - 1; index >= 0; --index)
-            if(visibleParts.at(index).startsWith("hr.", Qt::CaseInsensitive))
                 visibleParts.removeAt(index);
     for(const QString& component : jsonStringList(equipment, "components"))
         if(!visibleParts.contains(component, Qt::CaseInsensitive))

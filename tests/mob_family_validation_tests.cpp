@@ -235,8 +235,9 @@ private slots:
     void multipleLoadedPrimaryMobsAreReported();
     void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
     void magicTrapRequiresContainingMobDiplomacy();
-    void zone3HelmetMissingHairSelectionIsReported();
-    void missingHairRootUsesHelmetFallbackAcrossProfilesAndTuples();
+    void zone3HelmetHairFallbackIsReported();
+    void orcHairRootDoesNotSelectDatabaseHair();
+    void databaseEquippedLegacyAssemblyUsesSameHairRule();
     void helmetHairReplacementAvoidsMissingRootFallback();
     void unavailableNativeHairAvoidsMissingRootFallback();
     void resourceBackedAssemblyEvidenceCoversUnloadedFamilyModel();
@@ -482,7 +483,7 @@ void MobFamilyValidationTests::multipleLoadedPrimaryMobsAreReported()
     QVERIFY(finding->locations.contains(second));
 }
 
-void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
+void MobFamilyValidationTests::zone3HelmetHairFallbackIsReported()
 {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
@@ -510,15 +511,14 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
 
     QVector<SMobFamilyFinding> matches;
     for(const SMobFamilyFinding& finding : report.findings)
-        if(finding.code == "mob.semantic.missing_hair_selection")
+        if(finding.code == "mob.semantic.helmet_hair_fallback")
             matches.append(finding);
     QCOMPARE(matches.size(), 1);
     QCOMPARE(matches.first().severity, EMobFamilyFindingSeverity::Warning);
     QVERIFY(matches.first().hasNid);
     QCOMPARE(matches.first().nid, quint32(800004));
     QCOMPARE(matches.first().message,
-             QString("NID 800004: missing 'hr' part may cause hair to be visible "
-                     "with an active helmet."));
+             QString("NID 800004: helmet 06 leaves hair enabled; enable 'hr' so the game hides it."));
     QVERIFY(!matches.first().message.contains("Boss-1000000004"));
     QVERIFY(!matches.first().message.contains("Human Gipath NPC Boss F5"));
     QVERIFY(!matches.first().message.contains("serialized parts"));
@@ -532,36 +532,96 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
     QCOMPARE(badFile.readAll(), badBytes);
 }
 
-void MobFamilyValidationTests::missingHairRootUsesHelmetFallbackAcrossProfilesAndTuples()
+void MobFamilyValidationTests::orcHairRootDoesNotSelectDatabaseHair()
+{
+    struct Case { quint32 nid; const char* prototype; int hair; const char* exactHair; };
+    const Case cases[] = {
+        {4500, "GZOrcFemaleF11", 1, "hr.01"},
+        {4634, "OrcFemaleRuneEM3", 0, "hr.00"}
+    };
+    for(const Case& test : cases)
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QByteArray rootOnlyBytes = mobWithUnits({unitObject(
+            test.nid, "helmeted orc", test.prototype, "unorfe", false,
+            wearableParts(true), {"helmet.iron"})});
+        const QString rootOnlyPath = writeMob(
+            directory.path(), QString("%1-root.mob").arg(test.nid), rootOnlyBytes);
+        QVERIFY(!rootOnlyPath.isEmpty());
+
+        SMobFamilyValidationRequest request;
+        request.familyLabel = "orc-runtime-hair-fallback";
+        request.profileId = "jamais-vu";
+        request.seedMobPaths << rootOnlyPath;
+        request.explicitComposition = true;
+        request.includeProfileWideMobs = false;
+        request.database = wearableDatabase(
+            test.prototype, "unorfe", {"helmet.iron"}, test.hair, "helmet", 4);
+        request.assemblyPartsByModel.insert(
+            "unorfe", {"hd", test.exactHair, "hd.armor04"});
+        CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+        auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+            [](const SMobFamilyFinding& item)
+            { return item.code == "mob.semantic.helmet_hair_fallback"; });
+        QVERIFY(finding != report.findings.cend());
+        QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
+        QCOMPARE(finding->message,
+                 QString("NID %1: helmet 04 leaves hair enabled; enable '%2' so the game hides it.")
+                    .arg(test.nid).arg(test.exactHair));
+
+        QStringList exactParts = wearableParts(false);
+        exactParts.insert(3, test.exactHair);
+        const QByteArray exactBytes = mobWithUnits({unitObject(
+            test.nid, "helmeted orc", test.prototype, "unorfe", false,
+            exactParts, {"helmet.iron"})});
+        const QString exactPath = writeMob(
+            directory.path(), QString("%1-exact.mob").arg(test.nid), exactBytes);
+        QVERIFY(!exactPath.isEmpty());
+        request.seedMobPaths = QStringList() << exactPath;
+        report = CMobFamilyValidator::validate(request);
+        QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+            [](const SMobFamilyFinding& item)
+            { return item.code == "mob.semantic.helmet_hair_fallback"; }));
+
+        QFile rootOnlyFile(rootOnlyPath), exactFile(exactPath);
+        QVERIFY(rootOnlyFile.open(QIODevice::ReadOnly));
+        QVERIFY(exactFile.open(QIODevice::ReadOnly));
+        QCOMPARE(rootOnlyFile.readAll(), rootOnlyBytes);
+        QCOMPARE(exactFile.readAll(), exactBytes);
+    }
+}
+
+void MobFamilyValidationTests::databaseEquippedLegacyAssemblyUsesSameHairRule()
 {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QByteArray bytes = mobWithUnits({unitObject(
-        44001, "later-map actor", "Human Open Helmet F2", "unhufe", false,
-        wearableParts(false), {"llh.troll green"})});
-    const QString path = writeMob(directory.path(), "zone4.mob", bytes);
+        55123, "equipped undead", "Equipped Undead", "unmoud", false,
+        wearableParts(false), {"helmet.iron"})});
+    const QString path = writeMob(directory.path(), "equipped-undead.mob", bytes);
     QVERIFY(!path.isEmpty());
 
     SMobFamilyValidationRequest request;
-    request.familyLabel = "runtime-hair-fallback";
-    request.profileId = "base";
+    request.familyLabel = "database-equipped-legacy-assembly";
+    request.profileId = "jamais-vu";
     request.seedMobPaths << path;
     request.explicitComposition = true;
     request.includeProfileWideMobs = false;
     request.database = wearableDatabase(
-        "Human Open Helmet F2", "unhufe", {"llh.troll green"}, 2, "llh", 12);
+        "Equipped Undead", "unmoud", {"helmet.iron"}, 3, "helmet", 2);
     request.assemblyPartsByModel.insert(
-        "unhufe", {"hd", "hr.02", "hd.armor12"});
-    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+        "unmoud", {"hd", "hr.03", "hd.armor02"});
 
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
     const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& item)
-        { return item.code == "mob.semantic.missing_hair_selection"; });
+        { return item.code == "mob.semantic.helmet_hair_fallback"; });
     QVERIFY(finding != report.findings.cend());
     QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
     QCOMPARE(finding->message,
-             QString("NID 44001: missing 'hr' part may cause hair to be visible "
-                     "with an active helmet."));
+             QString("NID 55123: helmet 02 leaves hair enabled; enable 'hr.03' so the game hides it."));
 
     QFile file(path);
     QVERIFY(file.open(QIODevice::ReadOnly));
@@ -592,7 +652,7 @@ void MobFamilyValidationTests::helmetHairReplacementAvoidsMissingRootFallback()
 
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
-        { return finding.code == "mob.semantic.missing_hair_selection"; }));
+        { return finding.code == "mob.semantic.helmet_hair_fallback"; }));
 }
 
 void MobFamilyValidationTests::unavailableNativeHairAvoidsMissingRootFallback()
@@ -619,7 +679,7 @@ void MobFamilyValidationTests::unavailableNativeHairAvoidsMissingRootFallback()
 
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
-        { return finding.code == "mob.semantic.missing_hair_selection"; }));
+        { return finding.code == "mob.semantic.helmet_hair_fallback"; }));
 }
 
 void MobFamilyValidationTests::resourceBackedAssemblyEvidenceCoversUnloadedFamilyModel()
@@ -658,7 +718,7 @@ void MobFamilyValidationTests::resourceBackedAssemblyEvidenceCoversUnloadedFamil
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
     QVERIFY(std::any_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
-        { return finding.code == "mob.semantic.missing_hair_selection"; }));
+        { return finding.code == "mob.semantic.helmet_hair_fallback"; }));
 }
 
 void MobFamilyValidationTests::hairlessHelmetedTemplateDoesNotReportMissingHair()
@@ -688,7 +748,7 @@ void MobFamilyValidationTests::hairlessHelmetedTemplateDoesNotReportMissingHair(
 
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
-        { return finding.code == "mob.semantic.missing_hair_selection"; }));
+        { return finding.code == "mob.semantic.helmet_hair_fallback"; }));
 
     QFile file(path);
     QVERIFY(file.open(QIODevice::ReadOnly));
@@ -720,7 +780,7 @@ void MobFamilyValidationTests::missingAssemblyEvidenceDoesNotReportMissingHair()
 
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
-        { return finding.code == "mob.semantic.missing_hair_selection"; }));
+        { return finding.code == "mob.semantic.helmet_hair_fallback"; }));
 }
 
 void MobFamilyValidationTests::wearableAllPartsMasksAreCriticalButCreatureMasksAreIgnored()
@@ -841,7 +901,7 @@ void MobFamilyValidationTests::importWithoutTemplateHairEvidenceDoesNotReportMis
 
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
-        { return finding.code == "mob.semantic.missing_hair_selection"; }));
+        { return finding.code == "mob.semantic.helmet_hair_fallback"; }));
 }
 
 void MobFamilyValidationTests::databaseCreatureResolutionSuppressesWearableMaskRules()

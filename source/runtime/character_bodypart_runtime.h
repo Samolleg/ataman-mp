@@ -1,0 +1,37 @@
+#ifndef CHARACTER_BODYPART_RUNTIME_H
+#define CHARACTER_BODYPART_RUNTIME_H
+
+#include <QString>
+#include <QStringList>
+
+namespace ei {
+
+struct SHelmetHairRuntimeDecision
+{
+    QString nativeHairPart;
+    QString helmetPart;
+    QString replacementPart;
+    QString requiredSerializedPart;
+    bool nativeHairAvailable{false};
+    bool helmetPartAvailable{false};
+    bool replacementAvailable{false};
+    bool nativeHairInitiallyLoaded{false};
+    bool fallbackLoadsNativeHair{false};
+};
+
+QString databaseHairPart(int hairIndex);
+bool legacyHairRootAlias(const QString& model);
+bool serializedPartsLoadDatabaseHair(const QString& model,
+                                     const QStringList& serializedParts,
+                                     const QStringList& assemblyParts,
+                                     int hairIndex);
+SHelmetHairRuntimeDecision helmetHairRuntimeDecision(
+    const QString& model,
+    const QStringList& serializedParts,
+    const QStringList& assemblyParts,
+    int hairIndex,
+    int helmetGeometry);
+
+}
+
+#endif

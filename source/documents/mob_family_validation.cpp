@@ -13,6 +13,7 @@
 
 #include "profile_database.h"
 #include "assembly_inventory.h"
+#include "character_bodypart_runtime.h"
 #include "script_reference_analyzer.h"
 
 namespace {
@@ -350,7 +351,7 @@ QString ownerText(const SMobNidOwner& owner)
              owner.prototype.isEmpty() ? QString("-") : owner.prototype);
 }
 
-bool databaseEquippedHumanoid(const QString& model)
+bool databaseEquippedCharacter(const QString& model)
 {
     static const QSet<QString> models = {
         "unhuma", "unhufe", "unorma", "unorfe", "unhusk", "unhuzm", "unhuzf",
@@ -394,6 +395,7 @@ struct SBodyPartContext
     QStringList armor;
     int hairIndex = -1;
     QSet<int> helmetGeometry;
+    bool databaseEquipment = false;
     bool wearable = false;
 };
 
@@ -421,11 +423,12 @@ SBodyPartContext bodyPartContext(
                 // keeps the embedded MOB assembly. A DB-equipped actor uses
                 // RaceModels, except that JMV may retain a compatible embedded
                 // humanoid assembly for a legacy equipped-undead mask.
-                if(databaseEquippedHumanoid(databaseModel))
+                if(databaseEquippedCharacter(databaseModel))
                 {
+                    context.databaseEquipment = true;
                     const bool jmv = profileId.contains("jamais", Qt::CaseInsensitive)
                         || profileId.compare("jmv", Qt::CaseInsensitive) == 0;
-                    if(!(jmv && databaseEquippedHumanoid(context.model)
+                    if(!(jmv && databaseEquippedCharacter(context.model)
                          && !standardWearableAssembly(databaseModel)))
                         context.model = databaseModel;
                 }
@@ -465,28 +468,14 @@ QString findingSubject(const SMobObjectSnapshot& object)
         ? QString::number(object.nid) : QString("missing"));
 }
 
-bool isHairPart(const QString& part)
+bool helmetFallsBackToVisibleHair(const SMobObjectSnapshot& object,
+                                  const SBodyPartContext& context,
+                                  const SMobFamilyValidationRequest& request,
+                                  int* helmetGeometry,
+                                  QString* requiredPart)
 {
-    return part.compare("hr", Qt::CaseInsensitive) == 0
-        || part.startsWith("hr.", Qt::CaseInsensitive);
-}
-
-bool hasHairSelection(const SMobObjectSnapshot& object)
-{
-    return std::any_of(object.bodyParts.cbegin(), object.bodyParts.cend(),
-        [](const QString& part) { return isHairPart(part); });
-}
-
-bool assemblyContains(const QStringList& parts, const QString& part)
-{
-    return parts.contains(part, Qt::CaseInsensitive);
-}
-
-bool missingHairRootUsesHelmetFallback(const SMobObjectSnapshot& object,
-                                       const SBodyPartContext& context,
-                                       const SMobFamilyValidationRequest& request)
-{
-    if(object.importMode || context.hairIndex < 0 || context.helmetGeometry.isEmpty())
+    if(object.importMode || !context.databaseEquipment || context.hairIndex < 0
+       || context.helmetGeometry.isEmpty())
         return false;
 
     const QString model = context.model.trimmed().toLower();
@@ -496,23 +485,19 @@ bool missingHairRootUsesHelmetFallback(const SMobObjectSnapshot& object,
             request.assemblyResourceSources,
             request.assemblyResourceFingerprint,
             model);
-    const QString nativeHair = QString("hr.%1").arg(
-        context.hairIndex, 2, 10, QChar('0'));
-    if(!assemblyContains(assemblyParts, nativeHair))
-        return false;
-
-    // The runtime's helmet path treats hr as a replaceable base part. When an
-    // explicit mask omits that root, a hair-bearing database template can take
-    // the missing-base fallback instead of the normal remove/replace path. The
-    // risk exists only when the selected helmet member is real and no explicit
-    // helmet-specific hair member can satisfy that fallback.
-    for(const int helmetGeometry : context.helmetGeometry)
+    QList<int> geometries = context.helmetGeometry.values();
+    std::sort(geometries.begin(), geometries.end());
+    for(const int geometry : geometries)
     {
-        const QString suffix = QString(".armor%1").arg(
-            helmetGeometry, 2, 10, QChar('0'));
-        if(assemblyContains(assemblyParts, "hd" + suffix)
-           && !assemblyContains(assemblyParts, nativeHair + suffix))
+        const ei::SHelmetHairRuntimeDecision decision =
+            ei::helmetHairRuntimeDecision(context.model, object.bodyParts,
+                assemblyParts, context.hairIndex, geometry);
+        if(decision.helmetPartAvailable && decision.fallbackLoadsNativeHair)
+        {
+            if(helmetGeometry) *helmetGeometry = geometry;
+            if(requiredPart) *requiredPart = decision.requiredSerializedPart;
             return true;
+        }
     }
     return false;
 }
@@ -581,9 +566,30 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
                     .arg(subject, slot.key(), slot.value().join(", ")));
         }
 
+        // Helmet hair follows the database equipment/assembly algorithm for
+        // every equipped actor. It is independent of the narrower standard-
+        // anatomy classification used by the core-limb checks below. Missing,
+        // malformed, and empty masks have separate whole-mask semantics and
+        // must not be treated as an explicit omission here.
+        if(!object.bodyPartsSectionPath.isEmpty() && object.hasBodyParts
+           && !object.bodyParts.isEmpty())
+        {
+            int fallbackHelmetGeometry = -1;
+            QString requiredHairPart;
+            if(helmetFallsBackToVisibleHair(object, context, request,
+                                            &fallbackHelmetGeometry, &requiredHairPart))
+                appendBodyPartFinding(report, member, object,
+                    EMobFamilyFindingSeverity::Warning,
+                    "mob.semantic.helmet_hair_fallback",
+                    QString("%1: helmet %2 leaves hair enabled; enable '%3' so the game hides it.")
+                        .arg(subject)
+                        .arg(fallbackHelmetGeometry, 2, 10, QChar('0'))
+                        .arg(requiredHairPart));
+        }
+
         // Empty masks are the shipped norm for integral creatures and legacy
-        // skeleton assemblies. Apply anatomy requirements only after the
-        // Import/DB-aware appearance model resolves to a standard wearable.
+        // skeleton assemblies. Apply standard anatomy requirements only after
+        // the Import/DB-aware appearance model resolves to a standard wearable.
         if(!context.wearable)
             continue;
         if(object.bodyPartsSectionPath.isEmpty())
@@ -618,12 +624,6 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
                 QString("%1: missing standard anatomy part(s): %2.")
                     .arg(subject, missingCore.join(", ")));
 
-        if(!hasHairSelection(object)
-           && missingHairRootUsesHelmetFallback(object, context, request))
-            appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
-                "mob.semantic.missing_hair_selection",
-                subject + ": missing 'hr' part may cause hair to be visible "
-                          "with an active helmet.");
     }
 }
 }

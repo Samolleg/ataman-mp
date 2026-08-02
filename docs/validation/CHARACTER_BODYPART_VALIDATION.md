@@ -58,23 +58,32 @@ imports split into two 16-part humans and two 15-part orcs; imported equipment
 must therefore be interpreted from the MOB, not from a normal-unit database
 fallback.
 
-The first helmet rule was too broad. The JMV audit found 286 helmeted units
-without serialized `hr`: 179 resolve to database `hairIndex=-1`, 105 have a
-non-negative hair index, and two are Import units without a database hair
-owner. Forty-two also have an otherwise identical same-template peer that
-includes `hr`. Hairless templates account for most false positives: the
-runtime skips its hair branch when `hairIndex=-1`. Base has no candidates under
-the same audit.
+The first helmet rule was too broad because plain `hr` is not a universal
+hair switch. The audited client path is:
 
-For a non-empty serialized mask, the audited runtime uses that explicit
-selection instead of regenerating the prototype's ordinary parts. Automatic
-database head selection creates `hr.NN` only for authored hair. When a helmet
-is equipped, the runtime handles native hair through the `hr` base root while
-selecting `hd.armorTT`; it may instead use `hr.NN.armorTT` when that authored
-replacement exists. If a non-empty explicit mask omits `hr`, a hair-bearing
-template can take the missing-base fallback and keep native hair selected under
-the helmet. Map, zone, NID, prototype text, and a peer object are not runtime
-conditions.
+1. A missing/empty mask enables the complete assembly. Otherwise load the
+   serialized part names literally.
+2. Only the legacy `unhuma` and `unhufe` templates translate plain `hr` to the
+   database-selected `hr.NN` member.
+3. Equipping helmet geometry `TT` looks for `hr.NN.armorTT`.
+4. If that replacement exists, it replaces native hair. If it does not exist,
+   already-loaded `hr.NN` is removed; when no matching hair was loaded, the
+   helmet path falls back by loading native `hr.NN`.
+
+This explains why adding plain `hr` repairs the legacy-human zone3 control but
+does nothing for the `unorfe` controls. Orcs require the exact database-selected
+member (`hr.00`, `hr.01`, and so on). Hairless templates skip the branch.
+Import-local units and assemblies without the required members remain outside
+the rule.
+
+Of 1,022 JMV database-haired helmeted actors with assembly inventory, 204 take
+that fallback across 24 model/hair/helmet combinations; 769 load matching hair
+before equipment, and 49 lack the required native-hair/helmet member
+combination. The validator reports every proven fallback. This is not a
+zone, NID, race, or reproduced-tuple allowlist: the same decision applies to
+any database-equipped character assembly. The finding states the precise
+runtime defect--hair remains enabled--without claiming that every hair/helmet
+mesh pair visibly intersects.
 
 ## Matched controls
 
@@ -90,25 +99,25 @@ NID 3470 in the first file and NID 800004 in the second share the prototype
 `hr`; NID 800004 selects the same ordered set without `hr`. The latter equips a
 helmet and clips in the game. The active database resolves this actor to the
 JMV `unhuma` assembly, hair variant 01, and helmet geometry 06. The shipped
-assembly contains the corresponding `hr.01` and `hd.armor06` members, and a
-read-only mesh inspection confirms that the two meshes intersect. Endurance's
-normal-unit renderer can hide the defect because it rebuilds database anatomy
-and removes hair after resolving a helmet. The validator therefore follows the
-serialized-mask runtime branch and authored assembly members, not only the
-final preview.
+assembly contains `hr.01` and `hd.armor06`, but no `hr.01.armor06`. The exact
+runtime branch above explains why the omission loads visible native hair.
 
-The rule is not tied to zone3 or to that head tuple. A different profile,
-model, hair variant, or helmet geometry warns when it reaches the same runtime
-fallback. Across all 157 audited JMV MOBs, 179 hairless omissions are now
-excluded, two Import-local omissions remain unclassified, and all 105
-hair-bearing candidates have the required native-hair and helmet members with
-no helmet-specific hair replacement. Those 105 reach the same missing-base
-fallback that retains native hair.
-Geometry checks found intersections at every morph extreme for the current
-human and orc candidate pairs. Most current skeleton pairs also intersect at
-every extreme; two helmet pairs are complexion-dependent, so the finding says
-that native hair is retained rather than claiming that every silhouette must
-visibly clip.
+NIDs 4500 (`GZOrcFemaleF11`) and 4634 (`OrcFemaleRuneEM3`) provide the orc
+counter-controls. Both use `unorfe` helmet 04 and visibly retain unwanted hair.
+Adding plain `hr` does not change either result because `unorfe` has no legacy
+root translation. Their exact database selections are `hr.01` and `hr.00`;
+loading that exact member gives the helmet path a figure to remove when the
+helmet-specific replacement is absent. NID 260 reaches the same `unorfe` /
+`hr.01` / helmet-04 path.
+
+The suggestion is derived from the same decision. `unhuma` and `unhufe` need
+plain `hr`, because those are the only templates with the legacy root-to-
+database-hair translation. Every other database-equipped assembly needs the
+exact database hair member, such as `hr.00` or `hr.01`. If the assembly has an
+authored `hr.NN.armorTT` replacement, the editor shows it and no finding is
+emitted. If the exact native hair was initially selected, the helmet removes
+it and no finding is emitted. Geometry bounds are not used to guess whether an
+otherwise proven enabled-hair state is acceptable.
 
 JMV `zone12.mob` SHA-256
 `8C1A8AB373FD50EC915AB26C7308C012EE88EFC61F57733FDACF311A7461F2A8`
@@ -123,9 +132,9 @@ plus one dotted attachment for an overlap.
 |---|---|---|
 | Missing `OBJBODYPARTS` on a standard wearable assembly | Critical | Missing and explicit-empty masks enable all assembly members, including optional alternatives. Suggest comparison with a matched working unit; never repair automatically. |
 | Explicit empty mask on a standard wearable assembly | Critical | A controlled wearable A/B produced a runtime failure with the empty mask and ran after an authored explicit selection. Creature and legacy integral masks are excluded. |
-| Verified helmet fallback without `hr` | Warning | A normal database template has authored hair, its `hr.NN` and selected `hd.armorTT` members exist, the explicit mask omits all `hr` selections, and no `hr.NN.armorTT` replacement exists. The runtime then retains native hair under the helmet. |
-| Hairless template without `hr` | No finding | `hairIndex=-1` skips the runtime hair branch. |
-| Import-local or assembly-unproven omission | No finding | The database contract is not authoritative for Import, and unavailable native-hair/helmet evidence is not guessed. |
+| Database helmet leaves hair enabled | Warning | A database-equipped character has authored hair, its `hr.NN` and selected `hd.armorTT` members exist, the serialized mask does not load that exact hair, and no `hr.NN.armorTT` replacement exists. Enable the suggested effective token: `hr` only for `unhuma`/`unhufe`, otherwise exact `hr.NN`. |
+| Hairless database character | No finding | `hairIndex=-1` skips the runtime hair branch. |
+| Import-local or assembly-unproven character | No finding | Import equipment is MOB-local rather than database-owned, and unavailable native-hair/helmet evidence is not guessed. |
 | Authored helmet-specific hair replacement | No finding | `hr.NN.armorTT` satisfies the replacement path, so the missing-base fallback is not used. |
 | Missing one of the 15 non-hair standard anatomy roots | Warning | Suspicious gap/clipping risk. This is corpus-backed anatomy, not a proven universal crash condition. |
 | Two distinct dotted alternatives in one logical equipment/anatomy slot | Warning | The zone12 case proves the state exists and is logically overlapping. Base roots plus one attachment are not competing alternatives. |
@@ -140,12 +149,13 @@ presence selects a token and absence does not. An explicit empty array is
 therefore different from a UI list of unchecked known options, even though both
 can look empty in a projection.
 
-The standard wearable classification is intentionally bounded to `unhuma`,
-`unhufe`, `unorma`, `unorfe`, `unhusk`, `unhuzm`, and `unhuzf`. Normal units
-resolve model family and equipment from the active database. Import units use
-their embedded model and equipment. Integral creatures and legacy assemblies
-such as `unmosk`/`unmozo0` remain separate because their shipped empty-mask
-behavior contradicts a universal humanoid rule.
+The standard-anatomy classification remains intentionally bounded to
+`unhuma`, `unhufe`, `unorma`, `unorfe`, `unhusk`, `unhuzm`, and `unhuzf` for
+empty-mask and core-limb checks. It does not gate helmet hair. Helmet hair is
+evaluated for every database-equipped character, including equipped legacy
+undead/skeleton assemblies, using the resolved database row and actual assembly
+members. Import units use embedded equipment and remain outside that database
+rule.
 
 ## Product behavior and verification
 
@@ -161,27 +171,32 @@ which model the viewport happened to load first.
 
 Automated and corpus checks:
 
-- `mob_family_validation_tests`: 21 passed, including the exact zone3 pair,
-  the same runtime fallback across profile/model/hair/helmet values,
+- `mob_family_validation_tests`: 22 passed, including the exact zone3 pair,
+  orc exact-hair controls and a database-equipped legacy undead assembly,
   hairless, native-member, and helmet-hair-replacement exclusions, plus a
   resource-backed family model that was never loaded by the viewport,
   empty/missing wearable masks, creature exclusion, Import/database equipment
   ownership, missing core anatomy, overlaps, duplicates, unknown-token
   visibility, severity, location, and input-byte preservation;
+- `profile_visual_provider_tests`: 38 passed, including empty/all-parts hair,
+  legacy `hr`, exact `hr.NN`, equipped-undead, and authored replacement paths;
 - `endurance_document_tests semanticAnomaliesAreWarningsOnly`: exact duplicate,
   overlap, future-token array and byte-identical serialization passed;
 - corpus probe: all 99 Base and 157 JMV MOBs parsed with zero unreadable files;
+  Base resolved 241/241 database-haired helmeted actors by initially loaded
+  hair and found zero fallbacks; JMV found 204 fallbacks, 769 initially loaded
+  hair paths, and 49 unavailable member combinations among 1,022 actors;
 - installed zone3 probe required
-  `mob.semantic.missing_hair_selection:800004` and passed;
+  `mob.semantic.helmet_hair_fallback:800004` and passed;
 - installed zone12 probe required
   `mob.semantic.overlapping_unit_parts:6257` and passed.
 
-No automatic normalization is justified. The hair warning uses the concise
-message `NID ...: missing 'hr' part may cause hair to be visible with an active
-helmet.` The conditional wording is intentional: the fallback and assembly
-members are verified, while visible clipping still depends on the authored
-hair, helmet, and complexion geometry. This remains a runtime fallback with
-assembly evidence, not a zone rule, tuple list, or general anatomy rule.
+No automatic normalization is justified. The concise hair message is
+`NID ...: helmet TT leaves hair enabled; enable 'PART' so the game hides it.`
+`PART` is computed from the resolved model and database hair, not hard-coded.
+The message reports the final part-selection state and exact suggestion; it
+does not paste the parts array or claim visible mesh intersection. This is an
+assembly-backed runtime rule, not a zone, family, or reproduced-tuple list.
 Missing-core severity and the danger of particular dotted pairs beyond the
 matched cases remain evidence-labeled diagnostics until controlled runtime
 comparisons establish a narrower contract.

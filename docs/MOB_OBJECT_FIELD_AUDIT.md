@@ -115,9 +115,11 @@ The validator also reports, without blocking load or save:
   `mob.semantic.wearable_all_parts_enabled` as Critical, report-only findings
   for standard wearable assemblies, while creature/integral empty masks remain
   accepted;
-- `mob.semantic.missing_hair_selection` when a normal database template has
-  authored hair, the native hair and selected helmet members exist, an explicit
-  mask omits `hr`, and no helmet-specific hair replacement exists;
+- `mob.semantic.helmet_hair_fallback` when any database-equipped character has
+  authored hair, the native hair and selected helmet members exist, its
+  explicit mask does not load the database-selected hair, and no helmet-specific
+  hair replacement exists; the suggestion is `hr` for the two legacy aliases
+  and exact `hr.NN` for every other assembly;
 - `mob.semantic.missing_core_bodyparts` for omitted standard non-hair anatomy;
   and
 - `mob.semantic.duplicate_bodypart_token` as Info while retaining exact order
@@ -127,8 +129,9 @@ These warnings preserve the source data. They identify game-tolerated but suspic
 states and are emitted to both validation output and the workflow log. Missing
 `hr` by itself is intentionally ignored. Hairless database templates skip the
 runtime hair path, while missing assembly evidence and Import-local appearance
-remain unclassified. Import units use embedded model/equipment;
-normal units use the active profile database.
+produce no hair finding. The helmet rule is not limited to standard humanoid
+anatomy: every character on the database equipment path uses the same
+assembly-backed decision. Import units use embedded model/equipment.
 Unknown/model-specific tokens remain visible and lossless and do not receive a
 vocabulary-only warning. See
 [`validation/CHARACTER_BODYPART_VALIDATION.md`](validation/CHARACTER_BODYPART_VALIDATION.md).
