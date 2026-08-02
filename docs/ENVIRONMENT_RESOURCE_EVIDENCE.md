@@ -38,9 +38,10 @@ until a manifest or corpus field establishes it.
 The stock `lightscavegipat.ini`, `lightscaveingos.ini`, and
 `lightscavesuslanger.ini` tables are identical at every hour: sunlight is
 `161,179,170`, ambient is `75,75,89`, and sky is black. Cave MOBs nevertheless
-store distinct `WS_TIME` values. Cave color is therefore time-invariant while
-the authored MOB time fixes that map's shadow direction; the editor time
-preview cannot rotate cave shadows.
+store distinct `WS_TIME` values, but the native cave lighting path bypasses the
+outdoor clock track and supplies the same fixed normalized directional-light
+ray for every cave. Cave color and shadow direction are both time-invariant;
+the editor time preview cannot rotate cave shadows.
 
 The fingerprinted JMV lighting investigations also establish that the light
 vector remains slanted and rotates around the map. It does not cross a horizon

@@ -160,8 +160,9 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
     {
         // texts.res/map.txt selects this path with "#sky cave". The stock
         // cave-light files for all three allods contain these same RGB values
-        // at every hour, so only the MOB-authored WS_TIME selects the fixed
-        // shadow direction; preview time must not alter cave illumination.
+        // at every hour. The native cave path also replaces the outdoor sun
+        // track with one fixed normalized ray, independent of WS_TIME.
+        result.sunDirection = QVector3D(0.5f, 0.5f, -0.707106f);
         result.sunColor = QVector3D(161.0f, 179.0f, 170.0f) / 255.0f;
         result.ambientColor = QVector3D(75.0f, 75.0f, 89.0f) / 255.0f;
         result.skyColor = QVector3D();

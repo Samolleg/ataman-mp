@@ -18,6 +18,9 @@
 - Restored the native outdoor clock angle after the first terrain-shadow pass
   had reversed it by half a turn. Terrain self-shadows use the accepted proxy's
   three-times reach while object projections retain the native elevation curve.
+- Cave and dungeon maps now use the game's fixed normalized diagonal sun ray.
+  Their directional shadows no longer inherit the MOB time or the outdoor clock
+  track.
 - Weather colors now select their table from the map's authored allod ID rather
   than its unrelated zone-type field, so Ingos maps such as Zone 11 no longer
   fall back to Gipat colors.
@@ -50,7 +53,11 @@
    falling back to Gipat; direct sunrise light remains intentionally warm.
 8. In Zone 11, confirm campfire/torch point-light shadows still respond to
    distance and radius, independently of the terrain-shadow toggle.
-9. Start the ANGLE compatibility launcher and confirm Unlit/Simple shading
+9. Load a map whose catalog sky type is `cave` (for example Zone 12 Dungeon 2).
+   Confirm the directional shadows run diagonally along the fixed cave vector,
+   remain stable while changing the preview time, and do not inherit the outdoor
+   sun angle.
+10. Start the ANGLE compatibility launcher and confirm Unlit/Simple shading
    remain usable without shadow-atlas warnings or a white viewport.
 
 ## Known limitations
