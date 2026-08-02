@@ -2273,13 +2273,11 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
         self.assertNotIn(
             "Stone / Gray", family_ids,
             "R73 resolves both remaining local Stone / Gray corners")
+        self.assertNotIn(
+            "Ground / Mountainous", family_ids,
+            "R75 reassigns the sole remaining corner to Ground / Trampled")
         self.assertEqual(
-            [(70, 3)],
-            [(slot, corner)
-             for slot in range(bz11k["slotCount"])
-             for corner in range(4)
-             if bz_payload[slot * 4 + corner]
-             == family_ids["Ground / Mountainous"]])
+            family_ids["Ground / Trampled"], signature(70)[3])
         self.assertEqual(
             (family_ids["Stone / Dark"], family_ids["Ice / Common"],
              family_ids["Stone / Dark"], family_ids["Stone / Black"]),

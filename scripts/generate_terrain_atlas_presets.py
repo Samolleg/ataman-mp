@@ -2187,6 +2187,12 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     if namespace in ("bz11k", "zone14"):
         corrections.update(r73_snow_corrections)
 
+    # R75 confirms the four surviving Stone / Grayish transition corners and
+    # reassigns the sole remaining Ground / Mountainous corner.  With no
+    # remaining references, Ground / Mountainous is removed from both owners.
+    if namespace in ("bz11k", "zone14"):
+        corrections[(70, 3)] = 16
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)
