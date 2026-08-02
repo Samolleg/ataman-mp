@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QDataStream>
 #include <QVector>
+#include <QVector3D>
 #include <functional>
 
 //#include "sector.h"
@@ -66,8 +67,6 @@ public:
     bool save(const SaveProgress& progress = SaveProgress());
     bool saveMapAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     void draw(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
-    void drawShadow(QOpenGLShaderProgram* program,
-                    const class CViewFrustum* frustum = nullptr);
     void drawTileGrid(QOpenGLShaderProgram* program);
     void drawWater(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
     void drawTilePreview(QOpenGLShaderProgram* program);
@@ -104,6 +103,7 @@ public:
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
     const QString& mapName() const {return m_innerMapName;}
     quint64 shadowGeneration() const { return m_shadowGeneration; }
+    void updateTerrainShadowVisibility(const QVector3D& sunDirection, bool enabled);
 
 private:
     CLandscape();
@@ -126,6 +126,10 @@ private:
     bool m_bDirty;
     const CTerrainEditModel* m_canonicalTerrain;
     quint64 m_shadowGeneration{0};
+    quint64 m_terrainShadowFieldGeneration{0};
+    QVector3D m_terrainShadowSunDirection;
+    bool m_terrainShadowFieldEnabled{false};
+    QVector<float> m_terrainShadowVisibility;
 };
 
 

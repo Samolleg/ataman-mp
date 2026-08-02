@@ -409,8 +409,7 @@ private:
                          const ei::SRenderEnvironment& environment,
                          const QVector<ei::SScenePointLight>& sceneLights,
                          RenderQueueContext& queue,
-                         float maximumDistance,
-                         bool terrainShadowsEnabled);
+                         float maximumDistance);
     bool ensureShadowFramebuffers(int quality);
     void releaseShadowFramebuffers();
     void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,

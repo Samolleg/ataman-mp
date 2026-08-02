@@ -294,6 +294,12 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
         program->disableAttributeArray(emissionLocation);
         program->setAttributeValue(emissionLocation, QVector3D());
     }
+    const int terrainShadowLocation = program->attributeLocation("a_terrainSunVisibility");
+    if(terrainShadowLocation >= 0)
+    {
+        program->disableAttributeArray(terrainShadowLocation);
+        program->setAttributeValue(terrainShadowLocation, 1.0f);
+    }
     m_indexBuf.bind();
     ei::gl::DrawElements(GL_TRIANGLES, 24, GL_UNSIGNED_SHORT, nullptr);
 }

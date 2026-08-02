@@ -490,7 +490,7 @@
            <item>
             <widget class="QCheckBox" name="renderTerrainShadows">
              <property name="text"><string>Terrain casts directional shadows</string></property>
-             <property name="toolTip"><string>Lets hills and cliffs cast sun shadows onto terrain and objects. Uses the existing static directional shadow atlases, remains separate from point-light shadows, and is unavailable on the ANGLE compatibility renderer.</string></property>
+             <property name="toolTip"><string>Applies the game's heightfield-based hill and cliff self-shadowing to terrain. This is separate from object and point-light shadows, updates after Apply or Save/Close, and is unavailable on the ANGLE compatibility renderer.</string></property>
              <property name="checked"><bool>true</bool></property>
             </widget>
            </item>

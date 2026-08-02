@@ -2734,8 +2734,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
                             const ei::SRenderEnvironment& environment,
                             const QVector<ei::SScenePointLight>& sceneLights,
                             RenderQueueContext& queue,
-                            float maximumDistance,
-                            bool terrainShadowsEnabled)
+                            float maximumDistance)
 {
     Q_UNUSED(cameraPosition)
     if(!m_shadowFbo || !m_dynamicShadowFbo || !m_farShadowFbo || !m_farDynamicShadowFbo
@@ -2746,10 +2745,6 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         return false;
 
     const float safeMaximumDistance = qBound(1.0f, maximumDistance, 1024.0f);
-    const bool terrainCasterAvailable = terrainShadowsEnabled
-        && m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand;
-    const quint64 terrainShadowGeneration = terrainCasterAvailable
-        ? m_pLand->shadowGeneration() : 0;
     // The near cascade is the high-density contact-shadow region. Making its
     // reach follow camera altitude expanded it to 92-128 units in overview
     // views, reducing the closest actor and tree shadows to a handful of
@@ -2934,10 +2929,6 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     QCryptographicHash staticHash(QCryptographicHash::Sha256);
     staticHash.addData(queue.staticShadowFingerprint());
     staticHash.addData(sceneSourceFingerprint().toUtf8());
-    const char terrainShadowState = terrainCasterAvailable ? 1 : 0;
-    staticHash.addData(&terrainShadowState, 1);
-    staticHash.addData(reinterpret_cast<const char*>(&terrainShadowGeneration),
-                       int(sizeof(terrainShadowGeneration)));
     for(quintptr owner : nextLocalOwners)
         staticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     staticHash.addData(reinterpret_cast<const char*>(nearCascade.staticMatrix.constData()),
@@ -2946,9 +2937,6 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     QCryptographicHash farStaticHash(QCryptographicHash::Sha256);
     farStaticHash.addData(queue.staticShadowFingerprint());
     farStaticHash.addData(sceneSourceFingerprint().toUtf8());
-    farStaticHash.addData(&terrainShadowState, 1);
-    farStaticHash.addData(reinterpret_cast<const char*>(&terrainShadowGeneration),
-                          int(sizeof(terrainShadowGeneration)));
     for(quintptr owner : nextLocalOwners)
         farStaticHash.addData(reinterpret_cast<const char*>(&owner), sizeof(owner));
     farStaticHash.addData(reinterpret_cast<const char*>(farCascade.staticMatrix.constData()),
@@ -3005,7 +2993,6 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_shadowProgram.setUniformValue("u_projMmatrix", projection);
         m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
         m_shadowProgram.setUniformValue("u_instanced", false);
-        m_shadowProgram.setUniformValue("u_shadowDepthBias", 0.0f);
     };
     const auto endTarget = [&](QOpenGLFramebufferObject* target)
     {
@@ -3017,38 +3004,10 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         // Bind Qt's actual default target explicitly after every shadow pass.
         QOpenGLFramebufferObject::bindDefault();
     };
-    const auto drawTerrainShadow = [&](const QMatrix4x4& lightSpaceMatrix)
-    {
-        if(!terrainCasterAvailable)
-            return;
-        QElapsedTimer timer;
-        timer.start();
-        const CViewFrustum lightFrustum(lightSpaceMatrix);
-        m_shadowProgram.setUniformValue("u_partAnimated", false);
-        m_shadowProgram.setUniformValue("u_instanced", false);
-        m_shadowProgram.setUniformValue("u_shadowAlphaTest", false);
-        m_shadowProgram.setUniformValue("u_textureUvScale", 1.0f);
-        // Terrain is both caster and receiver. Give only its depth-writing
-        // vertices a deterministic clip-depth separation; glPolygonOffset's
-        // implementation-dependent slope term left steep heightfield
-        // triangles alternating across their own packed depth on Zone 11.
-        m_shadowProgram.setUniformValue("u_shadowDepthBias", 0.0002f);
-        m_pLand->drawShadow(&m_shadowProgram, &lightFrustum);
-        // Object casters share this atlas and must keep their established
-        // contact depth.
-        m_shadowProgram.setUniformValue("u_shadowDepthBias", 0.0f);
-        if(shadowPerformance.collecting())
-        {
-            const quint64 elapsed = quint64(timer.nsecsElapsed());
-            shadowPerformance.counters().terrainShadowNanoseconds += elapsed;
-            shadowPerformance.counters().shadowNanoseconds += elapsed;
-        }
-    };
     if(rebuildStatic)
     {
         m_staticLightSpaceMatrix = nearCascade.staticMatrix;
         beginTarget(m_shadowFbo, nearCascade.projection, nearCascade.staticView);
-        drawTerrainShadow(nearCascade.staticMatrix);
         queue.flushShadow(&m_shadowProgram,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
                           nearCascade.staticMatrix,
@@ -3060,7 +3019,6 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     {
         m_farStaticLightSpaceMatrix = farCascade.staticMatrix;
         beginTarget(m_farShadowFbo, farCascade.projection, farCascade.staticView);
-        drawTerrainShadow(farCascade.staticMatrix);
         queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
                           farCascade.staticMatrix, false, true, &localOwners);
         endTarget(m_farShadowFbo);
@@ -5494,7 +5452,8 @@ void CView::draw()
         && environmentEnabled && !m_openGlesCompatibility
         && shadowQuality > 0
         && ensureShadowFramebuffers(shadowQuality);
-    const bool terrainShadowsEnabled = shadowsEnabled
+    const bool terrainShadowsEnabled = !m_minimapCaptureActive
+        && environmentEnabled && !m_openGlesCompatibility
         && renderBool("renderTerrainShadows", true)
         && m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand;
     const COptInt* shadowDistanceOption = m_pSettings
@@ -5514,6 +5473,9 @@ void CView::draw()
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
         worldSet, overrideWorldTime, previewTime, m_caveEnvironment,
         m_weatherRegion);
+    if(m_pLand && m_pLand->isMprLoad())
+        m_pLand->updateTerrainShadowVisibility(
+            environment.sunDirection, terrainShadowsEnabled);
     syncEnvironmentPreviewWidget(environment.timeHours);
     // Fill the open lower edge of the stock sky cylinder with the same color
     // that distant geometry converges to. This removes the editor-only black
@@ -5826,8 +5788,7 @@ void CView::draw()
         }
         const bool shadowReady = environmentEnabled && shadowsEnabled
             && renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,
-                               renderQueue, maximumShadowDistance,
-                               terrainShadowsEnabled);
+                               renderQueue, maximumShadowDistance);
         drawTerrainColor(shadowReady);
         renderQueue.flush();
         logOpenGlErrors(QStringLiteral("draw/object-queue"));

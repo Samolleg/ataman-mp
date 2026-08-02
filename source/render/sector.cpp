@@ -825,6 +825,7 @@ void CSector::generateWaterVertexData()
                         && sharedMaterialIndex < m_materials->size()
                     ? &m_materials->at(sharedMaterialIndex) : nullptr;
                 target.emission = QVector3D();
+                target.shadowVisibility = 1.0f;
                 if(sharedMaterial && hasWater)
                 {
                     const QVector3D overlayEmission =
@@ -1185,6 +1186,14 @@ void CSector::draw(QOpenGLShaderProgram* program)
         program->setAttributeBuffer(emissionLocation, GL_FLOAT, offset, 3,
                                     int(sizeof(STerrainVertexData)));
     }
+    offset += int(sizeof(QVector3D));
+    const int terrainShadowLocation = program->attributeLocation("a_terrainSunVisibility");
+    if(terrainShadowLocation >= 0)
+    {
+        program->enableAttributeArray(terrainShadowLocation);
+        program->setAttributeBuffer(terrainShadowLocation, GL_FLOAT, offset, 1,
+                                    int(sizeof(STerrainVertexData)));
+    }
     const int animationLocation = program->attributeLocation("a_overlayAnimation");
     if(animationLocation >= 0)
     {
@@ -1211,48 +1220,42 @@ void CSector::draw(QOpenGLShaderProgram* program)
 
 }
 
-void CSector::drawShadow(QOpenGLShaderProgram* program)
+void CSector::collectTerrainHeights(QVector<float>& heights,
+                                    QVector<quint8>& present,
+                                    int gridWidth, int gridHeight) const
 {
-    if(!program || m_arrLandVrtData.isEmpty())
-        return;
+    const float offsetX = float(m_index.x) * 32.0f;
+    const float offsetY = float(m_index.y) * 32.0f;
+    for(const SVertexData& vertex : m_arrLandVrtData)
+    {
+        const int x = qRound(vertex.position.x() + offsetX);
+        const int y = qRound(vertex.position.y() + offsetY);
+        if(x < 0 || y < 0 || x >= gridWidth || y >= gridHeight)
+            continue;
+        const int index = y * gridWidth + x;
+        heights[index] = vertex.position.z();
+        present[index] = 1;
+    }
+}
 
-    program->setUniformValue("u_modelMmatrix", m_modelMatrix);
-    program->setUniformValue("u_partAnimated", false);
-    program->setUniformValue("u_instanced", false);
-    program->setUniformValue("u_shadowAlphaTest", false);
-
+void CSector::applyTerrainShadowVisibility(const QVector<float>& visibility,
+                                           int gridWidth, int gridHeight)
+{
+    const float offsetX = float(m_index.x) * 32.0f;
+    const float offsetY = float(m_index.y) * 32.0f;
+    for(int i = 0; i < m_arrLitLandVrtData.size(); ++i)
+    {
+        STerrainVertexData& vertex = m_arrLitLandVrtData[i];
+        const int x = qRound(vertex.position.x() + offsetX);
+        const int y = qRound(vertex.position.y() + offsetY);
+        vertex.shadowVisibility = x >= 0 && y >= 0
+                && x < gridWidth && y < gridHeight
+            ? visibility.value(y * gridWidth + x, 1.0f) : 1.0f;
+    }
     m_vertexBuf.bind();
-    const int stride = int(sizeof(STerrainVertexData));
-    const int positionLocation = program->attributeLocation("a_position");
-    if(positionLocation < 0)
-        return;
-    program->enableAttributeArray(positionLocation);
-    program->setAttributeBuffer(positionLocation, GL_FLOAT, 0, 3, stride);
-
-    const int normalLocation = program->attributeLocation("a_normal");
-    if(normalLocation >= 0)
-    {
-        program->enableAttributeArray(normalLocation);
-        program->setAttributeBuffer(normalLocation, GL_FLOAT,
-            int(sizeof(QVector3D)), 3, stride);
-    }
-    const int textureLocation = program->attributeLocation("a_texture");
-    if(textureLocation >= 0)
-    {
-        program->disableAttributeArray(textureLocation);
-        program->setAttributeValue(textureLocation, QVector2D());
-    }
-
-    m_indexBuf.bind();
-    constexpr int indexNum = 256 * 24;
-    ei::gl::DrawElements(GL_TRIANGLES, indexNum, GL_UNSIGNED_SHORT, nullptr);
-    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
-    if(performance.collecting())
-    {
-        ++performance.counters().drawCalls;
-        ++performance.counters().terrainShadowDrawCalls;
-        performance.counters().triangles += quint64(indexNum / 3);
-    }
+    m_vertexBuf.allocate(m_arrLitLandVrtData.constData(),
+        m_arrLitLandVrtData.size() * int(sizeof(STerrainVertexData)));
+    m_vertexBuf.release();
 }
 
 void CSector::drawWater(QOpenGLShaderProgram *program)
@@ -1301,6 +1304,12 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
         program->enableAttributeArray(emissionLocation);
         program->setAttributeBuffer(emissionLocation, GL_FLOAT, offset, 3,
                                     int(sizeof(SWaterVertexData)));
+    }
+    const int terrainShadowLocation = program->attributeLocation("a_terrainSunVisibility");
+    if(terrainShadowLocation >= 0)
+    {
+        program->disableAttributeArray(terrainShadowLocation);
+        program->setAttributeValue(terrainShadowLocation, 1.0f);
     }
 
     m_waterIndexBuf.bind();

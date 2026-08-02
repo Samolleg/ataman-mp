@@ -44,9 +44,12 @@ public:
     ~CSector();
     QByteArray serializeSector();
     void draw(QOpenGLShaderProgram* program);
-    void drawShadow(QOpenGLShaderProgram* program);
     void drawTileGrid(QOpenGLShaderProgram* program);
     void drawWater(QOpenGLShaderProgram* program);
+    void collectTerrainHeights(QVector<float>& heights, QVector<quint8>& present,
+                               int gridWidth, int gridHeight) const;
+    void applyTerrainShadowVisibility(const QVector<float>& visibility,
+                                      int gridWidth, int gridHeight);
     bool intersectsFrustum(const class CViewFrustum& frustum) const;
     void setIndex(UI2& index) {m_index = index; updatePosition(); }
     const UI2& index() {return m_index;}
@@ -84,6 +87,7 @@ private:
         QVector3D normal;
         QVector2D texCoord;
         QVector3D emission;
+        float shadowVisibility{1.0f};
     };
 
     struct SWaterVertexData

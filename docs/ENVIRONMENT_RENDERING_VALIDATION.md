@@ -27,11 +27,10 @@ fingerprinted executable evidence.
 - Map lights with `LIGHT_SHADOW` enabled contribute their attenuated luminance
   and caster-relative direction to the projected-shadow direction. Disabled
   map lights still illuminate but do not steer the shadow projection.
-- Terrain always receives directional shadows. When **Terrain casts directional
-  shadows** is enabled, visible hills and cliffs are also submitted to the
-  existing near/far static sun atlases. Terrain and object blockers therefore
-  share one nearest-depth result; the option does not create a second shadow
-  mask or affect point-light atlases.
+- Terrain always receives object directional shadows. When **Terrain casts
+  directional shadows** is enabled, terrain direct-sun lighting is also
+  modulated by a cached heightfield-to-sun visibility field. This game-faithful
+  self-shadow term is separate from object and point-light atlases.
 - Stock shadows are per-caster projected silhouettes over selected receivers.
   The editor approximates this with a broad cached static projection used by
   terrain and a tight, pivot-centred animated projection. Ordinary static
@@ -75,9 +74,10 @@ fingerprinted executable evidence.
    produce a legible silhouette near the viewport pivot while the static shadow
    cache remains reusable.
 6. Put a tall static object beside a terrain ridge. The object must cast onto
-   terrain. Toggle **Terrain casts directional shadows**: the ridge silhouette
-   must disappear/reappear while object shadows remain. Terrain edits must
-   invalidate the cached static sun atlases without rotating the camera.
+   terrain. Toggle **Terrain casts directional shadows**, then press Apply: hill
+   self-shadow must disappear/reappear immediately while object shadows remain.
+   Terrain edits must rebuild the cached visibility field without rotating the
+   camera.
 7. Inspect a map light from outside and inside its range. Illumination must
    attenuate continuously and disappear when the light is hidden or map-light
    rendering is disabled. Beside a visible caster, toggle **Cast shadows**:

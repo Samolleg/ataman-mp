@@ -44,10 +44,9 @@ struct SRenderFrameCounters
     quint64 shadowStaticRebuilds{0};
     quint64 shadowDynamicRebuilds{0};
     quint64 shadowNanoseconds{0};
-    quint64 terrainShadowDrawCalls{0};
-    quint64 terrainShadowSectorsTested{0};
-    quint64 terrainShadowSectorsCulled{0};
-    quint64 terrainShadowSectorsVisible{0};
+    quint64 terrainShadowFieldRebuilds{0};
+    quint64 terrainShadowFieldNodes{0};
+    quint64 terrainShadowFieldSamples{0};
     quint64 terrainShadowNanoseconds{0};
 };
 

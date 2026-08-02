@@ -3,28 +3,30 @@
 ## What changed
 
 - Added **Settings > Render > Terrain casts directional shadows**. When
-  enabled, hills and cliffs cast sun shadows onto terrain and scene objects.
-- Terrain and ordinary object blockers share the existing near/far directional
-  depth atlases, producing one strongest-blocker result without a second
-  shadow mask or another full-scene object traversal.
-- Terrain edits and the toggle invalidate the cached static sun atlases so the
-  result updates without requiring camera movement.
+  enabled, hills and cliffs apply the game's heightfield-based sun visibility
+  to terrain lighting.
+- Terrain self-shadowing is cached independently of the existing object and
+  point-light shadow atlases. It does not add a scene-object traversal.
+- Terrain edits and sun-direction changes rebuild the cached visibility field.
+  Disabling the option uploads full terrain visibility immediately after Apply
+  or Save/Close, without requiring camera movement.
 - Corrected the outdoor sun ray by half a turn. At the same authored time,
   projected shadows now follow the game's map-space direction while retaining
   the established elevation curve and shadow-length ratio.
-- Replaced driver-dependent terrain polygon offset with an explicit
-  terrain-only depth separation, removing triangle-aligned striped self-shadow
-  artifacts on steep slopes while preserving object contact depth.
+- Removed terrain's packed-depth self-comparison, eliminating the
+  triangle-aligned bias stripes on steep slopes while preserving the existing
+  object contact-shadow path.
 - Point-light shadow atlases, torch semantics, animated-shadow cadence, the
   NVIDIA overlay guard, minimap capture, and ANGLE fallback are unchanged.
 
 ## Focused manual test
 
 1. Start the desktop OpenGL launcher, load an outdoor MOB/MPR, choose **Full
-   environment**, and use a nonzero shadow quality.
-2. Open **Settings > Render**. With a fixed camera, toggle **Terrain casts
-   directional shadows** off and on. Ridge/cliff silhouettes should disappear
-   and return; ordinary object shadows should remain in both states.
+   environment**.
+2. Open **Settings > Render**. With a fixed camera, disable **Terrain casts
+   directional shadows**, press **Apply**, and confirm ridge/cliff self-shadow
+   disappears immediately while object shadows remain. Re-enable it and use
+   **Save/Close**; the terrain self-shadow should return without camera motion.
 3. Sculpt or preview a terrain height change near a visible ridge. Confirm its
    terrain shadow refreshes without moving or rotating the camera.
 4. Hold the camera fixed and scrub to 06:00, 12:00, and 18:00. Shadows should
@@ -37,9 +39,6 @@
 
 ## Known limitations
 
-- Terrain shadows use the editor's existing finite near/far directional
-  coverage. Very distant terrain outside those cascades does not cast into the
-  viewport.
-- The terrain depth pass uses a small fixed clip-space separation. Please
-  report any remaining self-shadow speckling or detached ridge contact so it
-  can be tuned against the affected map and camera angle.
+- Terrain self-shadow visibility is sampled at the one-world-unit heightfield
+  grid and interpolated by the terrain mesh. Object receivers continue to use
+  the existing directional shadow atlases.

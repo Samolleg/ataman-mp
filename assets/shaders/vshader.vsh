@@ -5,7 +5,6 @@ uniform mat4 u_partMmatrix;
 uniform bool u_partAnimated;
 uniform bool u_instanced;
 uniform float u_textureUvScale;
-uniform float u_shadowDepthBias;
 attribute vec4 a_position;
 attribute vec3 a_normal;
 attribute vec2 a_texture;
@@ -35,7 +34,6 @@ void main(void)
   // The shadow pass sets this only for terrain and resets it before drawing
   // object casters. Clip-space bias is deterministic across desktop drivers;
   // ordinary color/selection programs retain the linked default of zero.
-  gl_Position.z += u_shadowDepthBias * gl_Position.w;
 
   v_position = mvMatrix * a_position;
   vec4 worldPosition = worldMatrix * a_position;

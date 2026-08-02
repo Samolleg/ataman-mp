@@ -52,10 +52,9 @@ void addCounters(SRenderFrameCounters& target, const SRenderFrameCounters& value
     target.shadowStaticRebuilds += value.shadowStaticRebuilds;
     target.shadowDynamicRebuilds += value.shadowDynamicRebuilds;
     target.shadowNanoseconds += value.shadowNanoseconds;
-    target.terrainShadowDrawCalls += value.terrainShadowDrawCalls;
-    target.terrainShadowSectorsTested += value.terrainShadowSectorsTested;
-    target.terrainShadowSectorsCulled += value.terrainShadowSectorsCulled;
-    target.terrainShadowSectorsVisible += value.terrainShadowSectorsVisible;
+    target.terrainShadowFieldRebuilds += value.terrainShadowFieldRebuilds;
+    target.terrainShadowFieldNodes += value.terrainShadowFieldNodes;
+    target.terrainShadowFieldSamples += value.terrainShadowFieldSamples;
     target.terrainShadowNanoseconds += value.terrainShadowNanoseconds;
 }
 
@@ -174,7 +173,7 @@ void RenderPerformanceContext::endFrame()
         .arg(double(m_total.queueCollectNanoseconds) / frames / 1000000.0, 0, 'f', 2)
         .arg(double(m_total.queueSortNanoseconds) / frames / 1000000.0, 0, 'f', 2)
         .arg(double(m_total.queueDrawNanoseconds) / frames / 1000000.0, 0, 'f', 2)
-        + QString(" shadows:q%1/%2 candidates/items:%3/%4 passes:%5 rebuilds-static/dynamic:%6/%7 shadow-submit:%8 ms terrain:%9 draws:%10 sectors:%11/%12/%13 terrain-submit:%14 ms")
+        + QString(" shadows:q%1/%2 candidates/items:%3/%4 passes:%5 rebuilds-static/dynamic:%6/%7 shadow-submit:%8 ms terrain:%9 field-rebuilds:%10 nodes:%11 samples:%12 field-build:%13 ms")
           .arg(m_metadata.shadowQuality).arg(m_metadata.shadowAtlasResolution)
           .arg(double(m_total.shadowCandidates) / frames, 0, 'f', 1)
           .arg(double(m_total.shadowItems) / frames, 0, 'f', 1)
@@ -183,10 +182,9 @@ void RenderPerformanceContext::endFrame()
           .arg(double(m_total.shadowDynamicRebuilds) / frames, 0, 'f', 2)
           .arg(double(m_total.shadowNanoseconds) / frames / 1000000.0, 0, 'f', 2)
           .arg(m_metadata.terrainShadowsEnabled ? "on" : "off")
-          .arg(double(m_total.terrainShadowDrawCalls) / frames, 0, 'f', 1)
-          .arg(double(m_total.terrainShadowSectorsVisible) / frames, 0, 'f', 1)
-          .arg(double(m_total.terrainShadowSectorsCulled) / frames, 0, 'f', 1)
-          .arg(double(m_total.terrainShadowSectorsTested) / frames, 0, 'f', 1)
+          .arg(double(m_total.terrainShadowFieldRebuilds) / frames, 0, 'f', 2)
+          .arg(double(m_total.terrainShadowFieldNodes) / frames, 0, 'f', 1)
+          .arg(double(m_total.terrainShadowFieldSamples) / frames, 0, 'f', 1)
           .arg(double(m_total.terrainShadowNanoseconds) / frames / 1000000.0, 0, 'f', 2);
     ei::log(eLogInfo, report);
 
@@ -240,11 +238,10 @@ void RenderPerformanceContext::endFrame()
         averages.insert("shadowStaticRebuilds", double(m_total.shadowStaticRebuilds) / frames);
         averages.insert("shadowDynamicRebuilds", double(m_total.shadowDynamicRebuilds) / frames);
         averages.insert("shadowSubmitMs", double(m_total.shadowNanoseconds) / frames / 1000000.0);
-        averages.insert("terrainShadowDrawCalls", double(m_total.terrainShadowDrawCalls) / frames);
-        averages.insert("terrainShadowSectorsVisible", double(m_total.terrainShadowSectorsVisible) / frames);
-        averages.insert("terrainShadowSectorsCulled", double(m_total.terrainShadowSectorsCulled) / frames);
-        averages.insert("terrainShadowSectorsTested", double(m_total.terrainShadowSectorsTested) / frames);
-        averages.insert("terrainShadowSubmitMs", double(m_total.terrainShadowNanoseconds) / frames / 1000000.0);
+        averages.insert("terrainShadowFieldRebuilds", double(m_total.terrainShadowFieldRebuilds) / frames);
+        averages.insert("terrainShadowFieldNodes", double(m_total.terrainShadowFieldNodes) / frames);
+        averages.insert("terrainShadowFieldSamples", double(m_total.terrainShadowFieldSamples) / frames);
+        averages.insert("terrainShadowFieldBuildMs", double(m_total.terrainShadowNanoseconds) / frames / 1000000.0);
         definition.insert("averages", averages);
         QJsonObject toggles;
         toggles.insert("animation", m_metadata.animationEnabled);

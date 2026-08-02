@@ -59,6 +59,7 @@ varying highp vec2 v_texture;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
 varying highp vec3 v_materialEmission;
+varying highp float v_terrainSunVisibility;
 
 float unpackShadowDepth(vec4 encodedDepth)
 {
@@ -168,9 +169,6 @@ void main(void)
       bool farValid = farStaticInside || farDynamicInside;
       if (nearValid || farValid)
       {
-        // Terrain caster depth receives a terrain-only clip-space separation
-        // while the static map is written. Keep receiver bias small so hill
-        // silhouettes and object contact points do not detach.
         float staticBias = max(0.000012 * (1.0 - sunDiffuse), 0.000002);
         float dynamicBias = 0.000001;
         float blendStart = u_nearShadowSplit * 0.78;
@@ -214,7 +212,9 @@ void main(void)
     }
     // Stock shadows are an 80/255-alpha projected silhouette over the
     // saturated environment result. Point lights are compared afterwards.
-    vec3 directLight = min(u_sunColor * sunDiffuse + v_materialEmission,
+    vec3 directLight = min(u_sunColor * sunDiffuse
+                           * clamp(v_terrainSunVisibility, 0.0, 1.0)
+                           + v_materialEmission,
                            vec3(1.0));
     vec3 environmentLight = max(u_ambientColor, directLight);
     float projectedShadowVisibility = mix(1.0, shadow, 80.0 / 255.0);
