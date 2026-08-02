@@ -212,12 +212,15 @@ void main(void)
     }
     // Stock shadows are an 80/255-alpha projected silhouette over the
     // saturated environment result. Point lights are compared afterwards.
-    vec3 directLight = min(u_sunColor * sunDiffuse
-                           * clamp(v_terrainSunVisibility, 0.0, 1.0)
-                           + v_materialEmission,
+    vec3 directLight = min(u_sunColor * sunDiffuse + v_materialEmission,
                            vec3(1.0));
     vec3 environmentLight = max(u_ambientColor, directLight);
-    float projectedShadowVisibility = mix(1.0, shadow, 80.0 / 255.0);
+    // Terrain and object blockers are one strongest-blocker silhouette. Their
+    // overlap must not apply the stock projected-shadow opacity twice.
+    float combinedShadowVisibility = min(shadow,
+        clamp(v_terrainSunVisibility, 0.0, 1.0));
+    float projectedShadowVisibility = mix(1.0, combinedShadowVisibility,
+                                          80.0 / 255.0);
     light = environmentLight * projectedShadowVisibility;
     for (int i = 0; i < 64; ++i)
     {

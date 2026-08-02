@@ -172,7 +172,7 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QCOMPARE(noon.skyColor, QVector3D(46.0f, 181.0f, 217.0f) / 255.0f);
     QVERIFY(noon.fogStart < noon.fogEnd);
     QCOMPARE(noon.fogEnd, 620.0f);
-    QVERIFY(qAbs(noon.sunDirection.x() - 0.5f) < 0.00001f);
+    QVERIFY(qAbs(noon.sunDirection.x() + 0.5f) < 0.00001f);
     QVERIFY(qAbs(noon.sunDirection.y()) < 0.00001f);
     QVERIFY(qAbs(noon.sunDirection.z() + 0.8660254f) < 0.00001f);
 
@@ -184,7 +184,7 @@ void RenderQueueTests::derivesEnvironmentFromWorldValues()
     QCOMPARE(midnight.sunColor, QVector3D(63.0f, 93.0f, 157.0f) / 255.0f);
     QCOMPARE(midnight.ambientColor, QVector3D(54.0f, 83.0f, 147.0f) / 255.0f);
     QVERIFY(midnight.sunColor.z() > midnight.sunColor.x());
-    QVERIFY(qAbs(midnight.sunDirection.x() + 0.2588190f) < 0.00001f);
+    QVERIFY(qAbs(midnight.sunDirection.x() - 0.2588190f) < 0.00001f);
     QVERIFY(qAbs(midnight.sunDirection.y()) < 0.00001f);
     QVERIFY(qAbs(midnight.sunDirection.z() + 0.9659258f) < 0.00001f);
 
@@ -226,14 +226,14 @@ void RenderQueueTests::matchesNativeSunRayDirectionAndLength()
         ei::renderEnvironmentForValues(18.0f, 1.0f, 1.0f);
 
     // The shipped light ray completes one clockwise XY cycle with the noon
-    // ray pointing +X. Elevation is 60 degrees at noon and 37.5 degrees at
+    // ray pointing -X. Elevation is 60 degrees at noon and 37.5 degrees at
     // 06:00/18:00, so horizontal shadow length per unit height is cot(elevation).
     QVERIFY(qAbs(six.sunDirection.x()) < 0.00001f);
-    QVERIFY(six.sunDirection.y() < -0.79334f);
-    QVERIFY(noon.sunDirection.x() > 0.49999f);
+    QVERIFY(six.sunDirection.y() > 0.79334f);
+    QVERIFY(noon.sunDirection.x() < -0.49999f);
     QVERIFY(qAbs(noon.sunDirection.y()) < 0.00001f);
     QVERIFY(qAbs(eighteen.sunDirection.x()) < 0.00001f);
-    QVERIFY(eighteen.sunDirection.y() > 0.79334f);
+    QVERIFY(eighteen.sunDirection.y() < -0.79334f);
 
     const auto shadowLengthPerHeight = [](const QVector3D& ray)
     {

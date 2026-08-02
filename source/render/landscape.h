@@ -11,6 +11,7 @@
 #include <QDataStream>
 #include <QVector>
 #include <QVector3D>
+#include <QFuture>
 #include <functional>
 
 //#include "sector.h"
@@ -21,6 +22,16 @@
 class CSector;
 class CTile;
 class CTerrainEditModel;
+
+struct STerrainShadowFieldResult
+{
+    QVector<float> visibility;
+    int gridWidth{0};
+    int gridHeight{0};
+    quint64 nodes{0};
+    quint64 samples{0};
+    quint64 nanoseconds{0};
+};
 
 struct SMapHeader
 {
@@ -130,6 +141,13 @@ private:
     QVector3D m_terrainShadowSunDirection;
     bool m_terrainShadowFieldEnabled{false};
     QVector<float> m_terrainShadowVisibility;
+    QFuture<STerrainShadowFieldResult> m_terrainShadowFuture;
+    bool m_terrainShadowFutureActive{false};
+    bool m_terrainShadowDesiredEnabled{false};
+    quint64 m_terrainShadowDesiredGeneration{0};
+    QVector3D m_terrainShadowDesiredDirection;
+    quint64 m_terrainShadowFutureGeneration{0};
+    QVector3D m_terrainShadowFutureDirection;
 };
 
 

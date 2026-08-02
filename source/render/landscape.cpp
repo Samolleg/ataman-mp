@@ -5,6 +5,7 @@
 #include <QMessageBox>
 #include <QElapsedTimer>
 #include <QVector2D>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include "landscape.h"
 #include "map_object_placement_policy.h"
@@ -49,6 +50,9 @@ void CLandscape::unloadMpr()
     m_terrainShadowFieldEnabled = false;
     m_terrainShadowFieldGeneration = 0;
     m_terrainShadowSunDirection = QVector3D();
+    m_terrainShadowDesiredEnabled = false;
+    m_terrainShadowDesiredGeneration = 0;
+    m_terrainShadowDesiredDirection = QVector3D();
     ++m_shadowGeneration;
 }
 
@@ -386,6 +390,8 @@ void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum
 
 namespace
 {
+constexpr float kTerrainShadowLengthScale = 3.0f;
+
 bool sampleTerrainHeight(const QVector<float>& heights,
                          const QVector<quint8>& present,
                          int width, int height, float x, float y, float& result)
@@ -460,6 +466,9 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
 
     if(!enabled)
     {
+        m_terrainShadowDesiredEnabled = false;
+        m_terrainShadowDesiredGeneration = m_shadowGeneration;
+        m_terrainShadowDesiredDirection = QVector3D();
         if(!m_terrainShadowFieldEnabled)
             return;
         m_terrainShadowVisibility.fill(1.0f, gridWidth * gridHeight);
@@ -469,18 +478,63 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
                     sector->applyTerrainShadowVisibility(
                         m_terrainShadowVisibility, gridWidth, gridHeight);
         m_terrainShadowFieldEnabled = false;
+        m_terrainShadowFieldGeneration = 0;
+        m_terrainShadowSunDirection = QVector3D();
         return;
     }
 
     const QVector3D normalized = sunDirection.lengthSquared() > 0.000001f
         ? sunDirection.normalized() : QVector3D(0.0f, 0.0f, -1.0f);
+    m_terrainShadowDesiredEnabled = true;
+    m_terrainShadowDesiredGeneration = m_shadowGeneration;
+    m_terrainShadowDesiredDirection = normalized;
+
+    if(m_terrainShadowFutureActive && m_terrainShadowFuture.isFinished())
+    {
+        const STerrainShadowFieldResult result = m_terrainShadowFuture.result();
+        m_terrainShadowFutureActive = false;
+        const bool stillDesired = m_terrainShadowDesiredEnabled
+            && m_terrainShadowFutureGeneration == m_terrainShadowDesiredGeneration
+            && m_terrainShadowFutureGeneration == m_shadowGeneration
+            && QVector3D::dotProduct(m_terrainShadowFutureDirection,
+                                     m_terrainShadowDesiredDirection) > 0.99999f
+            && result.gridWidth == gridWidth && result.gridHeight == gridHeight;
+        if(stillDesired)
+        {
+            m_terrainShadowVisibility = result.visibility;
+            for(auto& row : m_aSector)
+                for(CSector* sector : row)
+                    if(sector)
+                        sector->applyTerrainShadowVisibility(
+                            m_terrainShadowVisibility, gridWidth, gridHeight);
+            m_terrainShadowFieldGeneration = m_terrainShadowFutureGeneration;
+            m_terrainShadowSunDirection = m_terrainShadowFutureDirection;
+            m_terrainShadowFieldEnabled = true;
+            RenderPerformanceContext& performance = RenderPerformanceContext::instance();
+            if(performance.collecting())
+            {
+                ++performance.counters().terrainShadowFieldRebuilds;
+                performance.counters().terrainShadowFieldNodes += result.nodes;
+                performance.counters().terrainShadowFieldSamples += result.samples;
+                performance.counters().terrainShadowNanoseconds += result.nanoseconds;
+            }
+            ei::log(eLogInfo,
+                QString("Terrain sun visibility published nodes:%1 samples:%2 worker:%3 ms")
+                    .arg(result.nodes).arg(result.samples)
+                    .arg(double(result.nanoseconds) / 1000000.0, 0, 'f', 2));
+        }
+    }
+
     if(m_terrainShadowFieldEnabled
             && m_terrainShadowFieldGeneration == m_shadowGeneration
             && QVector3D::dotProduct(normalized, m_terrainShadowSunDirection) > 0.99999f)
         return;
 
-    QElapsedTimer timer;
-    timer.start();
+    // Slider changes coalesce behind the one immutable worker. The last complete
+    // field remains displayed until the newest requested direction is ready.
+    if(m_terrainShadowFutureActive)
+        return;
+
     QVector<float> heights(gridWidth * gridHeight, 0.0f);
     QVector<quint8> present(gridWidth * gridHeight, 0);
     for(auto& row : m_aSector)
@@ -488,47 +542,42 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
             if(sector)
                 sector->collectTerrainHeights(heights, present, gridWidth, gridHeight);
 
-    m_terrainShadowVisibility.fill(1.0f, gridWidth * gridHeight);
-    const QVector2D horizontal(-normalized.x(), -normalized.y());
-    const float horizontalLength = horizontal.length();
-    quint64 nodes = 0;
-    quint64 samples = 0;
-    if(horizontalLength > 0.0001f && normalized.z() < -0.0001f)
-    {
-        const QVector2D towardSun = horizontal / horizontalLength;
-        const float risePerUnit = -normalized.z() / horizontalLength;
-        for(int y = 0; y < gridHeight; ++y)
-            for(int x = 0; x < gridWidth; ++x)
+    m_terrainShadowFutureGeneration = m_shadowGeneration;
+    m_terrainShadowFutureDirection = normalized;
+    m_terrainShadowFutureActive = true;
+    m_terrainShadowFuture = QtConcurrent::run(
+        [heights, present, gridWidth, gridHeight, normalized]()
+        {
+            QElapsedTimer timer;
+            timer.start();
+            STerrainShadowFieldResult result;
+            result.gridWidth = gridWidth;
+            result.gridHeight = gridHeight;
+            result.visibility.fill(1.0f, gridWidth * gridHeight);
+            const QVector2D horizontal(-normalized.x(), -normalized.y());
+            const float horizontalLength = horizontal.length();
+            if(horizontalLength > 0.0001f && normalized.z() < -0.0001f)
             {
-                const int index = y * gridWidth + x;
-                if(!present[index])
-                    continue;
-                ++nodes;
-                m_terrainShadowVisibility[index] = traceTerrainSunVisibility(
-                    heights, present, gridWidth, gridHeight, x, y,
-                    towardSun, risePerUnit, samples);
+                const QVector2D towardSun = horizontal / horizontalLength;
+                // The accepted game proxy stretches terrain self-shadows by
+                // three without changing object projection geometry.
+                const float risePerUnit = (-normalized.z() / horizontalLength)
+                    / kTerrainShadowLengthScale;
+                for(int y = 0; y < gridHeight; ++y)
+                    for(int x = 0; x < gridWidth; ++x)
+                    {
+                        const int index = y * gridWidth + x;
+                        if(!present[index])
+                            continue;
+                        ++result.nodes;
+                        result.visibility[index] = traceTerrainSunVisibility(
+                            heights, present, gridWidth, gridHeight, x, y,
+                            towardSun, risePerUnit, result.samples);
+                    }
             }
-    }
-    for(auto& row : m_aSector)
-        for(CSector* sector : row)
-            if(sector)
-                sector->applyTerrainShadowVisibility(
-                    m_terrainShadowVisibility, gridWidth, gridHeight);
-
-    m_terrainShadowFieldGeneration = m_shadowGeneration;
-    m_terrainShadowSunDirection = normalized;
-    m_terrainShadowFieldEnabled = true;
-    const quint64 elapsed = quint64(timer.nsecsElapsed());
-    RenderPerformanceContext& performance = RenderPerformanceContext::instance();
-    if(performance.collecting())
-    {
-        ++performance.counters().terrainShadowFieldRebuilds;
-        performance.counters().terrainShadowFieldNodes += nodes;
-        performance.counters().terrainShadowFieldSamples += samples;
-        performance.counters().terrainShadowNanoseconds += elapsed;
-    }
-    ei::log(eLogInfo, QString("Terrain sun visibility rebuilt nodes:%1 samples:%2 time:%3 ms")
-        .arg(nodes).arg(samples).arg(double(elapsed) / 1000000.0, 0, 'f', 2));
+            result.nanoseconds = quint64(timer.nsecsElapsed());
+            return result;
+        });
 }
 
 void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* frustum)

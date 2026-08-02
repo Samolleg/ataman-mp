@@ -26,6 +26,25 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("traceTerrainSunVisibility", landscape)
         self.assertIn("v_terrainSunVisibility", shader)
 
+    def test_terrain_and_object_shadows_form_one_strongest_blocker_silhouette(self):
+        shader = (ROOT / "assets/shaders/landshader.fsh").read_text(encoding="utf-8")
+
+        self.assertIn("float combinedShadowVisibility = min(shadow,", shader)
+        self.assertIn("clamp(v_terrainSunVisibility, 0.0, 1.0)", shader)
+        self.assertNotIn("sunDiffuse\n                           * clamp(v_terrainSunVisibility", shader)
+        self.assertEqual(shader.count("80.0 / 255.0"), 1)
+
+    def test_terrain_field_rebuild_is_coalesced_off_the_render_thread(self):
+        landscape_h = (ROOT / "source/render/landscape.h").read_text(encoding="utf-8")
+        landscape_cpp = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("QFuture<STerrainShadowFieldResult>", landscape_h)
+        self.assertIn("QtConcurrent::run", landscape_cpp)
+        self.assertIn("m_terrainShadowDesiredGeneration", landscape_h)
+        self.assertIn("m_terrainShadowFutureGeneration", landscape_h)
+        self.assertIn("m_terrainShadowFuture.isFinished()", landscape_cpp)
+        self.assertIn("applyTerrainShadowVisibility", landscape_cpp)
+
     def test_terrain_generation_and_toggle_invalidate_visibility_field(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
         landscape = (ROOT / "source/render/landscape.h").read_text(encoding="utf-8")
@@ -56,6 +75,22 @@ class TerrainShadowContractTests(unittest.TestCase):
 
         self.assertNotIn("u_shadowDepthBias", vertex)
         self.assertNotIn("GL_POLYGON_OFFSET_FILL", view)
+
+    def test_map_weather_palette_uses_authored_allod_not_zone_type(self):
+        main_window = (ROOT / "source/app/main_window.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.allodId)",
+                      main_window)
+
+    def test_sun_rotation_and_terrain_length_match_game_proxy_contract(self):
+        environment = (ROOT / "source/render/render_environment.cpp").read_text(encoding="utf-8")
+        landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+
+        azimuth_start = environment.index("const float azimuth")
+        azimuth_end = environment.index(";", azimuth_start)
+        self.assertNotIn("+ float(M_PI)", environment[azimuth_start:azimuth_end])
+        self.assertIn("kTerrainShadowLengthScale", landscape)
+        self.assertIn("/ kTerrainShadowLengthScale", landscape)
 
 
 if __name__ == "__main__":
