@@ -32,7 +32,7 @@ with one decision per shared mask selection class.
 
 ## Focused manual checks
 
-1. Open `questionnaire/blend-mask-r41-mask-questionnaire.html` in a browser.
+1. Open `collections/questionnaire/blend-mask-r41-mask-questionnaire.html` in a browser.
    Confirm a question names the style and corner assignment, shows one shared
    mask/source pair, and shows several different material-pair outcomes.
 2. Continue the three prefilled rejected decisions, then submit or export the
