@@ -1127,6 +1127,8 @@ CView::~CView()
         m_skyBuffer.destroy();
     if(m_particleBuffer.isCreated())
         m_particleBuffer.destroy();
+    delete m_editorQueryFbo;
+    m_editorQueryFbo = nullptr;
     releaseShadowFramebuffers();
     ei::setCrashContext("shutdown/view-mobs");
 
@@ -2739,6 +2741,51 @@ void CView::releaseShadowFramebuffers()
     m_localShadowMatrices.clear();
     m_localShadowAtlasRects.clear();
     m_localShadowOwners.clear();
+}
+
+bool CView::beginEditorQueryFramebuffer()
+{
+    if(m_width <= 0 || m_height <= 0 || !isValid())
+        return false;
+    makeCurrent();
+    const QSize requiredSize(m_width, m_height);
+    if(!m_editorQueryFbo || m_editorQueryFbo->size() != requiredSize
+            || !m_editorQueryFbo->isValid())
+    {
+        delete m_editorQueryFbo;
+        QOpenGLFramebufferObjectFormat format;
+        format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+        format.setSamples(0);
+        m_editorQueryFbo = new QOpenGLFramebufferObject(requiredSize, format);
+    }
+    if(!m_editorQueryFbo || !m_editorQueryFbo->isValid()
+            || !m_editorQueryFbo->bind())
+    {
+        QOpenGLFramebufferObject::bindDefault();
+        ei::gl::Viewport(0, 0, m_width, m_height);
+        if(!m_editorQueryFramebufferFailureLogged)
+        {
+            ei::log(eLogWarning,
+                "Editor query framebuffer unavailable; hit test skipped without touching the viewport");
+            m_editorQueryFramebufferFailureLogged = true;
+        }
+        return false;
+    }
+    m_editorQueryFramebufferFailureLogged = false;
+    ei::gl::Viewport(0, 0, m_width, m_height);
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_TRUE);
+    ei::gl::ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    return true;
+}
+
+void CView::endEditorQueryFramebuffer()
+{
+    if(m_editorQueryFbo)
+        m_editorQueryFbo->release();
+    QOpenGLFramebufferObject::bindDefault();
+    ei::gl::Viewport(0, 0, m_width, m_height);
 }
 
 bool CView::ensureShadowFramebuffers(int quality)
@@ -7887,9 +7934,15 @@ void CView::drawSelectFrame(QRect &rect)
 
 void CView::pickObject(const QRect &rect, bool bAddToSelect)
 {
-    //TODO: use different buffer => save picking in image
-    // Bind shader pipeline for use
     if(nullptr == m_activeMob)
+    {
+        m_selectFrame->reset();
+        return;
+    }
+
+    // Hit testing is an editor-only render pass. Never clear or replace the
+    // presented scene while producing picking IDs.
+    if(!beginEditorQueryFramebuffer())
     {
         m_selectFrame->reset();
         return;
@@ -7898,7 +7951,11 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     const QList<CNode*> selectionBefore = selectionSnapshot();
 
     if (!m_selectProgram.bind())
+    {
+        endEditorQueryFramebuffer();
         close();
+        return;
+    }
 
     const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
@@ -7950,6 +8007,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
 
     QVector<SColor> aColor;
     getColorFromRect(rect, aColor);
+    endEditorQueryFramebuffer();
 
     //if(m_operationType == EOperationTypeObjects)
 
@@ -12299,9 +12357,14 @@ void CView::focusOutEvent(QFocusEvent *event)
 // x,y - mouse position
 CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 {
-    // Bind shader pipeline for use
+    if(!beginEditorQueryFramebuffer())
+        return nullptr;
     if (!m_selectProgram.bind())
+    {
+        endEditorQueryFramebuffer();
         close();
+        return nullptr;
+    }
 
     const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
@@ -12332,6 +12395,7 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 
     GLubyte pixel[3];
     ei::gl::ReadPixels(x, m_height-y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, pixel);
+    endEditorQueryFramebuffer();
     SColor pickedColor(pixel[0], pixel[1], pixel[2]);
 
     for (auto& node: aNode)
@@ -12353,12 +12417,19 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     if(!m_pLand || !m_pLand->isMprLoad())
         return point;
 
+    if(!beginEditorQueryFramebuffer())
+        return point;
+
     QMatrix4x4 camMatrix = m_cam->viewMatrix();
     // Set modelview-projection matrix
 
     // Bind shader pipeline for use
     if (!m_landProgram.bind())
+    {
+        endEditorQueryFramebuffer();
         close();
+        return point;
+    }
 
     // Set modelview-projection matrix
     m_landProgram.setUniformValue("u_projMmatrix", m_projection);
@@ -12385,6 +12456,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     GLint viewPort[4];
     ei::gl::GetIntegerv(GL_VIEWPORT, viewPort);
     QRect viewPortRect(viewPort[0], viewPort[1], viewPort[2], viewPort[3]);
+    endEditorQueryFramebuffer();
     return point.unproject(view, m_projection, viewPortRect); //return Vector3D here
 }
 

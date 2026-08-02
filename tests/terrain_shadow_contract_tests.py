@@ -123,6 +123,32 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("m_terrainShadowFieldEnabled", preview)
         self.assertIn("applyTerrainShadowVisibility", preview)
 
+    def test_editor_query_passes_never_clear_the_visible_framebuffer(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        view_h = (ROOT / "source/render/view.h").read_text(encoding="utf-8")
+
+        rectangle_pick = view.split(
+            "void CView::pickObject(const QRect &rect", 1)[1].split(
+                "QVector3D CView::getTerrainPos(bool", 1)[0]
+        point_pick = view.split(
+            "CNode* CView::pickObject(QList<CNode*>& aNode", 1)[1].split(
+                "QVector3D CView::getTerrainPos(const int", 1)[0]
+        terrain_pick = view.split(
+            "QVector3D CView::getTerrainPos(const int", 1)[1].split(
+                "void CView::changeOperation", 1)[0]
+
+        self.assertIn("m_editorQueryFbo", view_h)
+        for query_pass, read_marker in (
+                (rectangle_pick, "getColorFromRect"),
+                (point_pick, "ReadPixels"),
+                (terrain_pick, "ReadPixels")):
+            self.assertIn("beginEditorQueryFramebuffer", query_pass)
+            self.assertIn("endEditorQueryFramebuffer", query_pass)
+            self.assertLess(query_pass.index("beginEditorQueryFramebuffer"),
+                            query_pass.index("Clear(GL_COLOR_BUFFER_BIT"))
+            self.assertLess(query_pass.index(read_marker),
+                            query_pass.rindex("endEditorQueryFramebuffer"))
+
     def test_disabling_toggle_immediately_uploads_fully_visible_terrain(self):
         landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
 

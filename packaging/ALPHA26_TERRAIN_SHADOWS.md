@@ -26,6 +26,9 @@
 - A sculpted sector keeps the last completed terrain-shadow field while its
   replacement is calculated. Terrain shadows no longer blink fully lit between
   the geometry update and asynchronous field publication.
+- Object picking and landscape cursor projection now render into a persistent
+  offscreen editor-query target. These hit tests no longer clear the visible
+  scene to an unshadowed ID/depth pass before the next normal frame.
 - Corrected the Render option registry so **Terrain casts directional shadows**
   is actually applied and persisted. The earlier checkbox was visible but its
   value was omitted from the live Render option set, which forced shadows on.
@@ -59,14 +62,15 @@
    slider position after release.
 5. Sculpt or preview a terrain height change near a visible ridge. Confirm its
    terrain shadow stays continuously visible, then updates without moving or
-   rotating the camera; it must never blink fully lit.
+   rotating the camera. Both the shadow and the rest of the presented scene must
+   remain continuously visible while moving and stamping the landscape cursor.
 6. Move a trap marker and a non-shadow-casting object, then paint only terrain
    or overlay textures. Confirm the terrain visibility field and static shadow
    atlases do not rebuild. Add/remove overlay coverage and confirm the terrain
    field does rebuild. Trap/helper markers must never produce silhouettes.
 7. Repeatedly select and deselect several static trees or structures. Confirm
-   their object shadows remain continuously visible and the terrain field does
-   not blink or disappear.
+   their object shadows and the full terrain scene remain continuously visible;
+   no picking-ID, blank, or unshadowed frame may reach the viewport.
 8. Hold the camera fixed and scrub to 06:00, 12:00, and 18:00. Shadows should
    follow the game screenshots' map-space direction, with noon shadows shorter
    than morning/evening shadows. Orbit the camera and confirm direction is stable.
