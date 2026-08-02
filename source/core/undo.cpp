@@ -317,6 +317,9 @@ void CChangeLogicParam::undo()
         m_pNode->applyLogicParam(m_oldValue);
 
     emit updateParam();
+    if(m_newValue && (m_newValue->type() == eObjParam_LOGIC_USE
+                      || m_newValue->type() == eObjParam_LOGIC_BEHAVIOUR))
+        m_pView->refreshLogicSlotOutliner();
     m_pView->setDurty(m_pMob);
 }
 
@@ -342,6 +345,9 @@ void CChangeLogicParam::redo()
         m_pNode->applyLogicParam(m_newValue);
 
     emit updateParam();
+    if(m_newValue && (m_newValue->type() == eObjParam_LOGIC_USE
+                      || m_newValue->type() == eObjParam_LOGIC_BEHAVIOUR))
+        m_pView->refreshLogicSlotOutliner();
     m_pView->setDurty(m_pMob);
     setText("Change value to " + m_newValue->toString());
 }

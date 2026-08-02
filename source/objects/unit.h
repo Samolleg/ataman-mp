@@ -112,7 +112,8 @@ public:
     void deSerializeJson(QJsonObject data);
     void replaceFromJson(const QJsonObject& data);
     uint serialize(util::CMobParser& parser);
-    bool isUse() {return m_use;}
+    bool isUse() const {return m_use;}
+    EBehaviourType behaviorType() const {return m_behaviour;}
     void updatePos(QVector3D& offset);
     void appendMovementState(QVector<QVector3D>& state) const;
     bool restoreMovementState(const QVector<QVector3D>& state, int& index);

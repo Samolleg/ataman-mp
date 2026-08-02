@@ -78,7 +78,14 @@ def main() -> int:
             "selection hierarchy that preserves the selected leaf when narrow")
     require(view, "appendBehaviorTreeChildren",
             "Behavior-mode outliner hierarchy builder")
-    require(view, 'tr("Logic %1%2")', "five logic-slot hierarchy labels")
+    require(view, 'tr("Logic %1%2 — %3 — %4")',
+            "Logic-slot hierarchy labels with behavior and status")
+    require(view, "logicIndex == 0 || logic->isUse()",
+            "Logic 0 effective enabled-state display")
+    require(unit_h, "EBehaviourType behaviorType() const",
+            "read-only behavior label source")
+    require(undo, "refreshLogicSlotOutliner",
+            "immediate Logic-row refresh after edit and Undo/Redo")
     require(view, 'tr("Activation areas (%1)")', "trap activation hierarchy")
     require(view, 'tr("Cast targets (%1)")', "trap cast-target hierarchy")
     require(unit_h, "const QVector<CPatrolPoint*>& patrolPoints() const",

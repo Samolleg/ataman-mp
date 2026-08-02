@@ -10981,6 +10981,9 @@ void CView::collectObjectTreeData()
             return;
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
         {
+            QMap<uint, QString> behaviorNames;
+            CResourceStringList::getInstance()->getPropList(
+                behaviorNames, eObjParam_LOGIC_BEHAVIOUR);
             for(int logicIndex = 0; logicIndex < unit->logicCount(); ++logicIndex)
             {
                 CLogic* logic = unit->logicAt(logicIndex);
@@ -10991,17 +10994,32 @@ void CView::collectObjectTreeData()
                     [](CPatrolPoint* patrol)
                     { return patrol && !patrol->isMarkDeleted(); });
                 const QString suffix = logicIndex == 0 ? tr(" (default)") : QString();
+                const uint behaviorValue = uint(logic->behaviorType());
+                const QString behaviorName = behaviorNames.value(
+                    behaviorValue,
+                    tr("Unknown behavior (%1)").arg(behaviorValue));
+                const bool effectivelyEnabled = logicIndex == 0 || logic->isUse();
+                const QString enabledStatus = effectivelyEnabled
+                    ? tr("enabled") : tr("disabled");
                 auto slotItem = new QTreeWidgetItem(ownerItem);
-                slotItem->setText(0, tr("Logic %1%2").arg(logicIndex).arg(suffix));
+                const QString slotLabel = tr("Logic %1%2 — %3 — %4")
+                    .arg(logicIndex).arg(suffix)
+                    .arg(behaviorName).arg(enabledStatus);
+                slotItem->setText(0, slotLabel);
                 slotItem->setData(0, CTreeView::BehaviorItemRole, true);
                 slotItem->setData(0, CTreeView::FilterTextRole,
-                    tr("Logic %1 behavior setup").arg(logicIndex));
+                    tr("Logic %1 behavior setup %2 %3")
+                        .arg(logicIndex).arg(behaviorName).arg(enabledStatus));
                 slotItem->setText(1, QString::number(patrolCount));
                 slotItem->setData(0, Qt::UserRole + 10, logicIndex);
                 slotItem->setData(0, Qt::UserRole + 11,
                     QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(unit)));
-                slotItem->setToolTip(0, tr("Behavior setup %1; %2 patrol points")
-                    .arg(logicIndex).arg(patrolCount));
+                slotItem->setToolTip(0, logicIndex == 0
+                    ? tr("Behavior setup %1: %2; default enabled; %3 patrol points. Logic 0 ignores its stored enabled setting.")
+                        .arg(logicIndex).arg(behaviorName).arg(patrolCount)
+                    : tr("Behavior setup %1: %2; %3; %4 patrol points")
+                        .arg(logicIndex).arg(behaviorName)
+                        .arg(enabledStatus).arg(patrolCount));
                 slotItem->setExpanded(logicIndex == m_logicSlotIndex);
                 int patrolNumber = 0;
                 for(CPatrolPoint* patrol : logic->patrolPoints())
@@ -11167,6 +11185,12 @@ void CView::collectObjectTreeData()
     const QList<CNode*> selected = selectionSnapshot();
     if(!selected.isEmpty())
         m_pTree->markNode(selected.back(), false);
+}
+
+void CView::refreshLogicSlotOutliner()
+{
+    if(CScene::getInstance()->getMode() == eEditModeLogic)
+        collectObjectTreeData();
 }
 
 void CView::onRestoreCursor()

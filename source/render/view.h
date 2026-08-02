@@ -426,6 +426,7 @@ public slots:
     void onParamChange(const QSharedPointer<IPropertyBase>& prop);
     void onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& properties);
     void collectObjectTreeData();
+    void refreshLogicSlotOutliner();
     void onRestoreCursor();
     void onChangeCursorTile(QPixmap ico);
     void onMapMaterialUpdate();
