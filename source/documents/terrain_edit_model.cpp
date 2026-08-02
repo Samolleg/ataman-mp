@@ -28,20 +28,10 @@ const int kOverlaySectorSize = kLandVertexOffset + 2 * kVertexBlockSize
 const quint32 kSectorSignature = 0xCF4BF774;
 const double kNewOverlayClearanceWorld = 0.02;
 
-quint8 uniformInteriorRotation(quint32 distributionSeed, int cellX, int cellY)
+quint32 terrainPaintLayerSeed(quint32 strokeSeed, ETerrainTileLayer layer)
 {
-    quint32 hash = 2166136261u;
-    const auto mix = [&hash](quint32 value) {
-        for(int byte = 0; byte < 4; ++byte)
-        {
-            hash ^= (value >> (byte * 8)) & 0xffu;
-            hash *= 16777619u;
-        }
-    };
-    mix(distributionSeed);
-    mix(quint32(cellX));
-    mix(quint32(cellY));
-    return quint8(hash & 3u);
+    return strokeSeed ^ (layer == ETerrainTileLayer::Land
+        ? 0x6c616e64u : 0x6f766572u);
 }
 
 quint16 selectUniformInteriorTile(
@@ -57,10 +47,10 @@ quint16 selectUniformInteriorTile(
         *found = selected;
     if(!selected)
         return 0;
-    SMprPackedTile packed = SMprPackedTile::decode(value);
-    packed.rotation = randomizeRotation
-        ? uniformInteriorRotation(distributionSeed, cellX, cellY) : 0;
-    return packed.encode();
+    if(randomizeRotation)
+        return value;
+    return catalog.lowestPaintRotationForSlot(
+        uniformSignature, value, found);
 }
 
 quint16 readHeight(const QByteArray& payload, int localX, int localY)
@@ -388,6 +378,23 @@ bool CTerrainTransitionCatalog::addVariant(const STerrainTransitionVariant& vari
                         "Transition catalog assigns the same packed tile more than once");
         return false;
     }
+    const int physicalSlot = SMprPackedTile::decode(
+        variant.packedTile).atlasSlot();
+    const QVector<int> sameSignature = m_signatureLookup.value(
+        signatureKey(variant.signature));
+    for(int existingIndex : sameSignature)
+    {
+        const STerrainTransitionVariant& existing = m_variants.at(existingIndex);
+        if(SMprPackedTile::decode(existing.packedTile).atlasSlot() == physicalSlot
+           && existing.distributionWeight != variant.distributionWeight)
+        {
+            if(report)
+                report->add("terrain.transition_physical_weight",
+                    EValidationSeverity::Error,
+                    "Every valid rotation of one physical terrain tile must use the same distribution weight");
+            return false;
+        }
+    }
     const int index = m_variants.size();
     m_variants.append(variant);
     m_packedLookup.insert(variant.packedTile, index);
@@ -418,10 +425,30 @@ quint16 CTerrainTransitionCatalog::select(
     const STerrainTransitionSignature& signature, int globalX, int globalY,
     quint32 distributionSeed, bool* found) const
 {
-    const QVector<int> candidates = m_signatureLookup.value(signatureKey(signature));
+    return selectCandidates(signature, globalX, globalY, distributionSeed,
+                            false, found);
+}
+
+quint16 CTerrainTransitionCatalog::selectCandidates(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, bool paintOnly, bool* found) const
+{
+    const QVector<int> indexed = m_signatureLookup.value(signatureKey(signature));
+    QMap<int, QVector<int>> byPhysicalSlot;
+    for(int index : indexed)
+    {
+        const STerrainTransitionVariant& variant = m_variants.at(index);
+        if(paintOnly && !variant.paintSelectable)
+            continue;
+        byPhysicalSlot[SMprPackedTile::decode(
+            variant.packedTile).atlasSlot()].append(index);
+    }
     quint64 totalWeight = 0;
-    for(int index : candidates)
-        totalWeight += quint64(m_variants.at(index).distributionWeight);
+    for(auto group = byPhysicalSlot.constBegin();
+        group != byPhysicalSlot.constEnd(); ++group)
+        if(!group.value().isEmpty())
+            totalWeight += quint64(m_variants.at(
+                group.value().front()).distributionWeight);
     if(totalWeight == 0)
     {
         if(found)
@@ -445,16 +472,32 @@ quint16 CTerrainTransitionCatalog::select(
     mix(quint32(signature.southEast));
     mix(quint32(signature.southWest));
     quint64 selection = quint64(hash) % totalWeight;
-    for(int index : candidates)
+    QVector<int> selectedRotations;
+    for(auto group = byPhysicalSlot.constBegin();
+        group != byPhysicalSlot.constEnd(); ++group)
     {
-        const STerrainTransitionVariant& variant = m_variants.at(index);
-        if(selection < quint64(variant.distributionWeight))
+        const int weight = m_variants.at(
+            group.value().front()).distributionWeight;
+        if(selection < quint64(weight))
         {
-            if(found)
-                *found = true;
-            return variant.packedTile;
+            selectedRotations = group.value();
+            break;
         }
-        selection -= quint64(variant.distributionWeight);
+        selection -= quint64(weight);
+    }
+    if(!selectedRotations.isEmpty())
+    {
+        // Rotation is a separate deterministic choice. A physical slot with
+        // fewer explicitly valid rotations must not become less likely.
+        quint32 rotationHash = hash ^ 0x9e3779b9u;
+        rotationHash ^= rotationHash >> 16;
+        rotationHash *= 0x85ebca6bu;
+        rotationHash ^= rotationHash >> 13;
+        const int index = selectedRotations.at(
+            int(rotationHash % quint32(selectedRotations.size())));
+        if(found)
+            *found = true;
+        return m_variants.at(index).packedTile;
     }
     if(found)
         *found = false;
@@ -467,7 +510,66 @@ quint16 CTerrainTransitionCatalog::selectForPaint(
 {
     const STerrainTransitionSignature lookup = m_mirrorPaintGridY
         ? mirroredGridY(signature) : signature;
-    return select(lookup, globalX, globalY, distributionSeed, found);
+    return selectCandidates(lookup, globalX, globalY, distributionSeed,
+                            true, found);
+}
+
+quint16 CTerrainTransitionCatalog::lowestPaintRotationForSlot(
+    const STerrainTransitionSignature& signature, quint16 selectedPacked,
+    bool* found) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    const int physicalSlot = SMprPackedTile::decode(
+        selectedPacked).atlasSlot();
+    int bestRotation = 4;
+    quint16 best = 0;
+    for(int index : m_signatureLookup.value(signatureKey(lookup)))
+    {
+        const STerrainTransitionVariant& variant = m_variants.at(index);
+        const SMprPackedTile packed = SMprPackedTile::decode(variant.packedTile);
+        if(variant.paintSelectable && packed.atlasSlot() == physicalSlot
+           && packed.rotation < bestRotation)
+        {
+            bestRotation = packed.rotation;
+            best = variant.packedTile;
+        }
+    }
+    if(found)
+        *found = bestRotation < 4;
+    return best;
+}
+
+STerrainTransitionVariant CTerrainTransitionCatalog::variantForPacked(
+    quint16 packedTile, bool* found) const
+{
+    const auto existing = m_packedLookup.constFind(packedTile);
+    if(existing != m_packedLookup.constEnd())
+    {
+        if(found)
+            *found = true;
+        return m_variants.at(existing.value());
+    }
+    if(found)
+        *found = false;
+    return STerrainTransitionVariant();
+}
+
+QVector<STerrainTransitionVariant> CTerrainTransitionCatalog::paintVariants(
+    const STerrainTransitionSignature& signature) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    QVector<STerrainTransitionVariant> result;
+    for(int index : m_signatureLookup.value(signatureKey(lookup)))
+        if(m_variants.at(index).paintSelectable)
+            result.append(m_variants.at(index));
+    std::sort(result.begin(), result.end(), [](
+        const STerrainTransitionVariant& left,
+        const STerrainTransitionVariant& right) {
+        return left.packedTile < right.packedTile;
+    });
+    return result;
 }
 
 STerrainTransitionSignature CTerrainTransitionCatalog::signatureForPacked(
@@ -4274,6 +4376,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
         else m_originalVirtualOverlayMaterials=active;
     }
     QVector<qint32> desired=active;
+    const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
     const int minX=qMax(0,int(std::ceil(brush.centerX-brush.radius)));
     const int maxX=qMin(tileCountX(),int(std::floor(brush.centerX+brush.radius)));
     const int minY=qMax(0,int(std::ceil(brush.centerY-brush.radius)));
@@ -4297,21 +4400,21 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
             }
         if(!incidentAvailable)continue;
         const int key=y*vertexWidth+x;
+        for(int cellY:{y-1,y})for(int cellX:{x-1,x})
+            if(cellX>=0&&cellX<tileCountX()&&cellY>=0&&cellY<tileCountY())
+                affected.insert(cellY*tileCountX()+cellX);
         if(desired.at(key)==materialId)continue;
         STerrainTileCommand::SVirtualVertexDelta delta;
         delta.globalX=x;delta.globalY=y;delta.layer=layer;
         delta.before=desired.at(key);delta.after=materialId;
         command.virtualVertices.append(delta);desired[key]=materialId;
         command.semanticAudit.paintedVertices.append(QPoint(x,y));
-        for(int cellY:{y-1,y})for(int cellX:{x-1,x})
-            if(cellX>=0&&cellX<tileCountX()&&cellY>=0&&cellY<tileCountY())
-                affected.insert(cellY*tileCountX()+cellX);
     }
-    if(command.virtualVertices.isEmpty())return command;
+    if(affected.isEmpty())return command;
     STerrainTransitionSignature pure;
     pure.northWest=pure.northEast=pure.southEast=pure.southWest=materialId;
     bool pureFound=false;
-    catalog.selectForPaint(pure,0,0,distributionSeed,&pureFound);
+    catalog.selectForPaint(pure,0,0,paintSeed,&pureFound);
     QVector<int> cells=affected.values().toVector();std::sort(cells.begin(),cells.end());
     for(int cell:cells)
     {
@@ -4336,11 +4439,21 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
                 "This material has no uniform authored tile for an honest unblended preview");
             command.deltas.clear();command.virtualVertices.clear();return command;
         }
-        bool uniformFound = false;
-        const quint16 after = selectUniformInteriorTile(
-            catalog, pure, x, y, distributionSeed,
-            randomizeUniformRotation, &uniformFound);
-        if(!uniformFound)
+        bool selected = false;
+        const bool exactUniform = exact.northWest == exact.northEast
+            && exact.northWest == exact.southEast
+            && exact.northWest == exact.southWest;
+        // A stroke that changes semantic vertices uses a uniform live preview
+        // until release. Repainting an already identical semantic field is a
+        // deliberate reroll and must select the exact existing signature now.
+        const quint16 after = command.virtualVertices.isEmpty()
+            ? (exactUniform
+                ? selectUniformInteriorTile(catalog, exact, x, y, paintSeed,
+                    randomizeUniformRotation, &selected)
+                : catalog.selectForPaint(exact, x, y, paintSeed, &selected))
+            : selectUniformInteriorTile(catalog, pure, x, y, paintSeed,
+                randomizeUniformRotation, &selected);
+        if(!selected)
         {
             if(report)report->add("terrain.virtual_paint_preview",
                 EValidationSeverity::Error,
@@ -4374,6 +4487,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
     command.semanticAudit.solverMode=QStringLiteral("virtual-release-exact");
     if(stroke.virtualVertices.isEmpty())return command;
     const ETerrainTileLayer layer=stroke.virtualVertices.front().layer;
+    const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
     const QVector<qint32>& values=layer==ETerrainTileLayer::Land
         ?m_virtualLandMaterials:m_virtualOverlayMaterials;
     const int vertexWidth=tileCountX()+1;
@@ -4409,8 +4523,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
             && exact.northWest == exact.southWest;
         const quint16 after = uniform
             ? selectUniformInteriorTile(catalog, exact, x, y,
-                distributionSeed, randomizeUniformRotation, &found)
-            : catalog.selectForPaint(exact, x, y, distributionSeed, &found);
+                paintSeed, randomizeUniformRotation, &found)
+            : catalog.selectForPaint(exact, x, y, paintSeed, &found);
         if(!found){++unresolved;continue;}
         command.semanticAudit.affectedCells.append(QPoint(x,y));
         if(after==before)continue;

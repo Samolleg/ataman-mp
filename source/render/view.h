@@ -344,6 +344,7 @@ private:
     void refreshTerrainFamilyUsage();
     QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
     QMap<int, quint64> workingTerrainAtlasUsage() const;
+    bool terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const;
     bool realizeWorkingTerrainSignature(
         const STerrainTransitionSignature& signature, int cellX, int cellY,
         QMap<int, quint64>* usage, CValidationReport* report,
@@ -577,7 +578,7 @@ private:
     QMap<QString, QByteArray> m_terrainGlobalTransitionEncodedPageCache;
     QSet<QString> m_terrainGlobalTransitionMissingPages;
     QMap<QString, QImage> m_terrainGlobalTransitionTileCache;
-    QMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
+    QMultiMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
         m_importedTerrainTransitions;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;

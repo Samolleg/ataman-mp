@@ -129,7 +129,8 @@ public:
         const QVector<qint32>& sourceTileTypes = {},
         CValidationReport* report = nullptr,
         const QVector<quint16>& pinnedPackedTiles = {},
-        const QVector<qint32>& preferredCellTypes = {})
+        const QVector<qint32>& preferredCellTypes = {},
+        const QVector<quint16>& preferredPackedCells = {})
     {
         QVector<qint32> cellTypes = preferredCellTypes;
         if(cellTypes.isEmpty())
@@ -145,7 +146,7 @@ public:
         return CTerrainVirtualAtlas::finalize(
             field, sourceNamespace, capacityLimit,
             sourceTileTypes.isEmpty() ? m_testSourceTypes : sourceTileTypes,
-            report, pinnedPackedTiles, cellTypes);
+            report, pinnedPackedTiles, cellTypes, preferredPackedCells);
     }
 
 private:
@@ -1753,6 +1754,49 @@ void TerrainVirtualAtlasTests::rotationsDeduplicateButSemanticAliasesRemainDisti
     QCOMPARE(importedBase.generatedRotation, quint8(0));
     QCOMPARE(importedRotated.generatedRotation, quint8(1));
 
+    // A second physical authored tile with the same exact corners is another
+    // legitimate visual variant, not a duplicate to collapse. Fixed inputs
+    // remain deterministic while a sufficiently wide grid reaches both.
+    QVERIFY(importedAtlas.addAuthoredLibraryTransition(
+        authoredBase, solid(qRgba(130, 75, 45, 255)),
+        QStringLiteral("second-authored-fixture"), &importedReport));
+    QSet<int> importedPhysicalVariants;
+    for(int x = 0; x < 64; ++x)
+    {
+        const STerrainVirtualTile selected = importedAtlas.resolve(
+            authoredBase, x, 7, &importedReport, 1);
+        QVERIFY(selected.importedAuthored);
+        importedPhysicalVariants.insert(selected.generatedIndex);
+        QCOMPARE(selected.generatedIndex, importedAtlas.resolve(
+            authoredBase, x, 7, &importedReport, 1).generatedIndex);
+    }
+    QCOMPARE(importedPhysicalVariants.size(), 2);
+
+    CTestTerrainWorkingAtlas importedWorking(
+        fixture.catalog, fixture.images, 0x31415926u, 16);
+    QVERIFY(importedWorking.addAuthoredLibraryTransition(
+        authoredBase, solid(qRgba(80, 100, 120, 255)),
+        QStringLiteral("working-authored-a"), &importedReport));
+    QVERIFY(importedWorking.addAuthoredLibraryTransition(
+        authoredBase, solid(qRgba(130, 75, 45, 255)),
+        QStringLiteral("working-authored-b"), &importedReport));
+    QMap<int, quint64> importedUsage;
+    for(int slot = 0; slot < importedWorking.capacityLimit(); ++slot)
+        importedUsage.insert(slot, 0);
+    QVERIFY(importedWorking.realizeAuthoredLibraryVariants(
+        authoredBase, &importedUsage, {}, &importedReport, 1));
+    QSet<int> realizedPhysicalVariants;
+    for(int x = 0; x < 64; ++x)
+    {
+        bool found = false;
+        const quint16 packed = importedWorking.catalog().selectForPaint(
+            authoredBase, x, 9, 0x31415926u, &found);
+        QVERIFY(found);
+        realizedPhysicalVariants.insert(
+            SMprPackedTile::decode(packed).atlasSlot());
+    }
+    QCOMPARE(realizedPhysicalVariants.size(), 2);
+
     Fixture duplicate(true);
     const QVector<qint32> duplicateTypes = {0, 1, 2, 2};
     const QMap<qint32, qint32> duplicateMaterialTypes = {
@@ -2407,6 +2451,7 @@ void TerrainVirtualAtlasTests::uniformStrokeDistributesPureVariantsAndRotationsD
     // binary edge/corner tuple exact so release is testing distribution rather
     // than generation availability.
     const int secondUniformSlot = nextSlot++;
+    fixture.images.append(solid(qRgba(75, 145, 215, 255)));
     for(int slot : {1, secondUniformSlot})
         for(int rotation = slot == 1 ? 1 : 0; rotation < 4; ++rotation)
         {
@@ -2427,7 +2472,48 @@ void TerrainVirtualAtlasTests::uniformStrokeDistributesPureVariantsAndRotationsD
         packed.tileIndex = quint8(nextSlot++);
         variant.packedTile = packed.encode();
         fixture.catalog.addVariant(variant);
+        fixture.images.append(solid(qRgba(
+            30 + (bits * 11) % 190,
+            45 + (bits * 17) % 180,
+            60 + (bits * 23) % 170, 255)));
     }
+    const int decodeOnlyUniformSlot = nextSlot++;
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        STerrainTransitionVariant excluded;
+        excluded.signature = signature(2, 2, 2, 2);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(decodeOnlyUniformSlot);
+        packed.rotation = quint8(rotation);
+        excluded.packedTile = packed.encode();
+        excluded.paintSelectable = false;
+        QVERIFY(fixture.catalog.addVariant(excluded));
+    }
+    QMap<int, int> balancedSlots;
+    QSet<int> balancedRotations;
+    for(int y = 0; y < 32; ++y)
+        for(int x = 0; x < 32; ++x)
+        {
+            bool found = false;
+            const SMprPackedTile selected = SMprPackedTile::decode(
+                fixture.catalog.selectForPaint(
+                    signature(2, 2, 2, 2), x, y, 0x11223344u, &found));
+            QVERIFY(found);
+            QVERIFY(selected.atlasSlot() != decodeOnlyUniformSlot);
+            ++balancedSlots[selected.atlasSlot()];
+            balancedRotations.insert(selected.rotation);
+        }
+    QCOMPARE(balancedSlots.size(), 2);
+    QVERIFY(qAbs(balancedSlots.value(1)
+                 - balancedSlots.value(secondUniformSlot)) <= 32);
+    QCOMPARE(balancedRotations.size(), 4);
+    bool decodeOnlyFound = false;
+    SMprPackedTile decodeOnlyPacked;
+    decodeOnlyPacked.tileIndex = quint8(decodeOnlyUniformSlot);
+    QCOMPARE(fixture.catalog.gridSignatureForPacked(
+                 decodeOnlyPacked.encode(), &decodeOnlyFound),
+             signature(2, 2, 2, 2));
+    QVERIFY(decodeOnlyFound);
 
     QByteArray payload;
     QDataStream sec(&payload, QIODevice::WriteOnly);
@@ -2548,6 +2634,56 @@ void TerrainVirtualAtlasTests::uniformStrokeDistributesPureVariantsAndRotationsD
                 QCOMPARE(finalPacked.at(y * 16 + x), fixedPacked.at(y * 16 + x));
         }
 
+    // A later user-initiated stroke over the same semantic material is a
+    // deliberate reroll. It captures new exact packed values without changing
+    // the virtual corner field; undo/redo replays those values byte-for-byte.
+    const quint32 rerollSeed = 0x13572468u;
+    const STerrainTileCommand reroll = model.makeVirtualMaterialPaint(
+        8, 8, brush, ETerrainTileLayer::Land, 2,
+        fixture.catalog, rerollSeed, &report, true);
+    QVERIFY(reroll.virtualVertices.isEmpty());
+    QVERIFY2(!reroll.deltas.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(model.apply(reroll, true, &report));
+    const QVector<quint16> rerolledPacked = packedField(model);
+    QVERIFY(rerolledPacked != finalPacked);
+    for(int y = 0; y < field.tileHeight(); ++y)
+        for(int x = 0; x < field.tileWidth(); ++x)
+        {
+            bool available = false;
+            const quint16 value = model.packedTile(
+                x, y, ETerrainTileLayer::Land, &available);
+            QVERIFY(available);
+            bool decoded = false;
+            QCOMPARE(fixture.catalog.gridSignatureForPacked(value, &decoded),
+                     field.cellSignature(x, y));
+            QVERIFY(decoded);
+        }
+    QVERIFY(model.apply(reroll, false, &report));
+    QCOMPARE(packedField(model), finalPacked);
+    QVERIFY(model.apply(reroll, true, &report));
+    QCOMPARE(packedField(model), rerolledPacked);
+
+    // Final atlas compaction must preserve the chosen physical artwork and
+    // rotation, even though output slot numbers are remapped densely.
+    CTestTerrainVirtualAtlas preservingAtlas(
+        fixture.catalog, fixture.images, 0x24681357u);
+    const STerrainAtlasFinalization preserved = preservingAtlas.finalize(
+        field, QStringLiteral("UniformReroll"), 64, {}, &report, {}, {},
+        rerolledPacked);
+    QVERIFY2(preserved.success,
+             qPrintable(preserved.error + QStringLiteral("\n") + report.toText()));
+    QCOMPARE(preserved.packedCells.size(), rerolledPacked.size());
+    for(int index = 0; index < rerolledPacked.size(); ++index)
+    {
+        const SMprPackedTile before = SMprPackedTile::decode(
+            rerolledPacked.at(index));
+        const SMprPackedTile after = SMprPackedTile::decode(
+            preserved.packedCells.at(index));
+        QCOMPARE(after.rotation, before.rotation);
+        QCOMPARE(preserved.tiles.at(after.atlasSlot()).sourceSlot,
+                 before.atlasSlot());
+    }
+
     // Reopening the serialized sector payload preserves every packed bit.
     STerrainSectorSource reopenedSource = source;
     reopenedSource.payload = model.sectorPayload(0, 0);
@@ -2557,7 +2693,7 @@ void TerrainVirtualAtlasTests::uniformStrokeDistributesPureVariantsAndRotationsD
     QVERIFY(reopened.loadSources(1, 1, 100.0f, {reopenedSource}, &reopenReport, 1,
                                  QVector<qint32>(64, 1), 0));
     QVERIFY2(!reopenReport.hasErrors(), qPrintable(reopenReport.toText()));
-    QCOMPARE(packedField(reopened), finalPacked);
+    QCOMPARE(packedField(reopened), rerolledPacked);
     QCOMPARE(reopened.sectorPayload(0, 0), reopenedSource.payload);
 }
 

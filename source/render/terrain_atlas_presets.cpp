@@ -142,19 +142,21 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                 QStringLiteral("thumbnailSlot")).toInt(-1);
             const qint32 runtimeTerrainType = familyObject.value(
                 QStringLiteral("tileType")).toInt(-1);
-            // A brush may only come from the reviewed pure anchor selected for
-            // the family. Falling back to any tuple merely labelled uniform
-            // allowed visually mixed transition imagery to leak into the
-            // palette when an old corner classification was wrong.
-            if(thumbnailSlot < 0 || thumbnailSlot >= slotCount)
+            QVector<int> uniformSlots;
+            for(int slot = 0; slot < slotCount; ++slot)
+            {
+                const int offset = slot * 4;
+                if(quint8(signatures.at(offset)) == localId
+                   && quint8(signatures.at(offset + 1)) == localId
+                   && quint8(signatures.at(offset + 2)) == localId
+                   && quint8(signatures.at(offset + 3)) == localId)
+                    uniformSlots.append(slot);
+            }
+            // The audited semantic corner table is paint authority. A family
+            // with no genuine four-corner-uniform tile remains contextual;
+            // thumbnailSlot is display metadata and never grants authority.
+            if(uniformSlots.isEmpty())
                 continue;
-            const int anchorOffset = thumbnailSlot * 4;
-            if(quint8(signatures.at(anchorOffset)) != localId
-               || quint8(signatures.at(anchorOffset + 1)) != localId
-               || quint8(signatures.at(anchorOffset + 2)) != localId
-               || quint8(signatures.at(anchorOffset + 3)) != localId)
-                continue; // transition evidence is not a paint family
-            const int uniformSlot = thumbnailSlot;
             const QString theme = materialTheme(variantName);
             if(theme.isEmpty() || variantName.trimmed().isEmpty())
                 continue;
@@ -199,26 +201,39 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                             .arg(global.runtimeTerrainType)
                             .arg(runtimeTerrainType)
                             .arg(mprNamespace)
-                            .arg(uniformSlot));
+                            .arg(uniformSlots.front()));
                     // A brush has one reviewed gameplay identity. Retaining a
                     // visually similar source with a different MP class would
                     // make traversal/ambience vary randomly between strokes.
                     continue;
                 }
-                bool duplicate = false;
-                for(const STerrainGlobalMaterialSource& source : global.sources)
-                    duplicate |= source.mprNamespace.compare(
-                        mprNamespace, Qt::CaseInsensitive) == 0
-                        && source.uniformSlot == uniformSlot;
-                if(duplicate)
-                    continue;
-                STerrainGlobalMaterialSource source;
-                source.mprNamespace = mprNamespace;
-                source.atlasIdentity = atlasIdentity;
-                source.textureCount = (slotCount + 63) / 64;
-                source.uniformSlot = uniformSlot;
-                source.variantName = variantName;
-                global.sources.append(source);
+                const auto appendSource = [&](int slot,
+                                              QVector<STerrainGlobalMaterialSource>* target) {
+                    for(const STerrainGlobalMaterialSource& existing : *target)
+                        if(existing.mprNamespace.compare(
+                               mprNamespace, Qt::CaseInsensitive) == 0
+                           && existing.uniformSlot == slot)
+                            return;
+                    STerrainGlobalMaterialSource source;
+                    source.mprNamespace = mprNamespace;
+                    source.atlasIdentity = atlasIdentity;
+                    source.textureCount = (slotCount + 63) / 64;
+                    source.uniformSlot = slot;
+                    source.variantName = variantName;
+                    target->append(source);
+                };
+                for(int uniformSlot : uniformSlots)
+                    appendSource(uniformSlot, &global.sources);
+                if(thumbnailSlot >= 0 && thumbnailSlot < slotCount)
+                {
+                    const int offset = thumbnailSlot * 4;
+                    bool containsFamily = false;
+                    for(int corner = 0; corner < 4; ++corner)
+                        containsFamily |= quint8(signatures.at(offset + corner))
+                            == localId;
+                    if(containsFamily)
+                        appendSource(thumbnailSlot, &global.thumbnailSources);
+                }
             }
         }
     }
@@ -299,6 +314,7 @@ CTerrainAtlasPresetCatalog::globalAuthoredTransitions(CValidationReport* report)
                     previewSignature);
                 source.layer = layer;
                 source.mprNamespace = mprNamespace;
+                source.atlasIdentity = atlasIdentity;
                 source.textureCount = (slotCount + 63) / 64;
                 source.slot = slot;
                 result.append(source);
@@ -354,9 +370,10 @@ CTerrainTransitionCatalog CTerrainAtlasPresetCatalog::globalizedCatalog(
             packed.atlasIndex = quint8(slot / 64);
             packed.rotation = quint8(rotation);
             bool found = false;
-            STerrainTransitionSignature signature = source.signatureForPacked(
-                packed.encode(), &found);
+            const STerrainTransitionVariant sourceVariant =
+                source.variantForPacked(packed.encode(), &found);
             if(!found) continue;
+            STerrainTransitionSignature signature = sourceVariant.signature;
             qint32* values[4] = {&signature.northWest, &signature.northEast,
                                 &signature.southEast, &signature.southWest};
             bool mapped = true;
@@ -371,7 +388,7 @@ CTerrainTransitionCatalog CTerrainAtlasPresetCatalog::globalizedCatalog(
                 *value = replacement.value();
             }
             if(!mapped) continue;
-            STerrainTransitionVariant variant;
+            STerrainTransitionVariant variant = sourceVariant;
             variant.signature = signature;
             variant.packedTile = packed.encode();
             result.addVariant(variant);

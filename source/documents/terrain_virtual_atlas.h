@@ -159,6 +159,7 @@ public:
 
     bool isValid() const { return m_valid; }
     QString error() const { return m_error; }
+    void setDistributionSeed(quint32 seed) { m_distributionSeed = seed; }
     STerrainVirtualTile resolve(const STerrainTransitionSignature& signature,
                                 int cellX, int cellY,
                                 CValidationReport* report = nullptr,
@@ -167,6 +168,10 @@ public:
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
+        CValidationReport* report = nullptr);
+    QVector<STerrainVirtualTile> authoredLibraryVariants(
+        const STerrainTransitionSignature& signature,
+        qint32 preferredPaintMaterial = 0,
         CValidationReport* report = nullptr);
     bool addStockBlendMaskTemplate(
         const STerrainTransitionSignature& signature, const QImage& pixels,
@@ -206,7 +211,8 @@ public:
                                        const QVector<qint32>& sourceTileTypes = {},
                                        CValidationReport* report = nullptr,
                                        const QVector<quint16>& pinnedPackedTiles = {},
-                                       const QVector<qint32>& preferredCellTypes = {});
+                                       const QVector<qint32>& preferredCellTypes = {},
+                                       const QVector<quint16>& preferredPackedCells = {});
 
     static QImage composePage(const QVector<QImage>& tiles, int firstTile,
                               int tileSize);
@@ -297,6 +303,8 @@ public:
     int capacityLimit() const { return m_capacityLimit; }
     int generatedTileCount() const;
     int activeTextureCount() const;
+    void setDistributionSeed(quint32 seed)
+    { if(m_resolver) m_resolver->setDistributionSeed(seed); }
     QSet<int> takeChangedSlots();
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,
@@ -308,6 +316,12 @@ public:
         CValidationReport* report = nullptr);
     int stockBlendMaskCountFor(
         const STerrainTransitionSignature& signature) const;
+    bool realizeAuthoredLibraryVariants(
+        const STerrainTransitionSignature& signature,
+        QMap<int, quint64>* workingUsage,
+        const QSet<int>& protectedSlots,
+        CValidationReport* report = nullptr,
+        qint32 preferredPaintMaterial = 0);
 
     quint16 resolve(const STerrainTransitionSignature& signature,
                     int cellX, int cellY,

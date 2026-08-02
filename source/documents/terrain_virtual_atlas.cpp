@@ -1704,11 +1704,6 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
         return false;
     }
     registerBlendMaskTemplate(signature, pixels, sourceLabel, report);
-    bool alreadyPresent = false;
-    m_authoredLibraryCatalog.selectForPaint(
-        signature, 0, 0, m_distributionSeed, &alreadyPresent);
-    if(alreadyPresent)
-        return true;
     const int libraryIndex = m_authoredLibraryGeneratedIndices.size();
     if(libraryIndex >= 16384)
         return false;
@@ -1740,6 +1735,39 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
             return false;
     }
     return true;
+}
+
+QVector<STerrainVirtualTile> CTerrainVirtualAtlas::authoredLibraryVariants(
+    const STerrainTransitionSignature& signature,
+    qint32 preferredPaintMaterial, CValidationReport* report)
+{
+    QVector<STerrainVirtualTile> result;
+    const qint32 runtimeType = resolvedRuntimeType(
+        signature, preferredPaintMaterial, -1, report);
+    if(runtimeType < 0)
+        return result;
+    QSet<int> seen;
+    for(const STerrainTransitionVariant& variant :
+        m_authoredLibraryCatalog.paintVariants(signature))
+    {
+        const int libraryIndex = SMprPackedTile::decode(
+            variant.packedTile).atlasSlot();
+        if(libraryIndex < 0
+           || libraryIndex >= m_authoredLibraryGeneratedIndices.size())
+            continue;
+        const int generatedIndex = typedTileVariant(
+            m_authoredLibraryGeneratedIndices.at(libraryIndex), runtimeType);
+        if(generatedIndex < 0 || seen.contains(generatedIndex))
+            continue;
+        seen.insert(generatedIndex);
+        STerrainVirtualTile tile;
+        tile.signature = signature;
+        tile.importedAuthored = true;
+        tile.generatedIndex = generatedIndex;
+        tile.runtimeTerrainType = runtimeType;
+        result.append(tile);
+    }
+    return result;
 }
 
 qint32 CTerrainVirtualAtlas::resolvedRuntimeType(
@@ -1968,12 +1996,16 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     const CTerrainVirtualMaterialField& field, const QString& sourceNamespace,
     int capacityLimit, const QVector<qint32>& sourceTileTypes,
     CValidationReport* report,const QVector<quint16>& pinnedPackedTiles,
-    const QVector<qint32>& preferredCellTypes)
+    const QVector<qint32>& preferredCellTypes,
+    const QVector<quint16>& preferredPackedCells)
 {
     STerrainAtlasFinalization result;
     result.capacityLimit = capacityLimit;
     if(!m_valid || field.tileWidth() <= 0 || field.tileHeight() <= 0
-       || capacityLimit <= 0 || capacityLimit > 16384)
+       || capacityLimit <= 0 || capacityLimit > 16384
+       || (!preferredPackedCells.isEmpty()
+           && preferredPackedCells.size()
+                != field.tileWidth() * field.tileHeight()))
     {
         result.error = !m_valid ? m_error
             : QStringLiteral("The material field or atlas capacity is invalid.");
@@ -1993,8 +2025,32 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             const int cellIndex = y * field.tileWidth() + x;
             const qint32 preferredType = cellIndex < preferredCellTypes.size()
                 ? preferredCellTypes.at(cellIndex) : -1;
-            const STerrainVirtualTile tile = resolve(
-                field.cellSignature(x, y), x, y, report, 0, preferredType);
+            const STerrainTransitionSignature desired =
+                field.cellSignature(x, y);
+            STerrainVirtualTile tile;
+            bool preserved = false;
+            if(!preferredPackedCells.isEmpty())
+            {
+                const quint16 preferredPacked = preferredPackedCells.at(cellIndex);
+                bool decoded = false;
+                const STerrainTransitionSignature existing =
+                    m_catalog.gridSignatureForPacked(preferredPacked, &decoded);
+                const int preferredSlot = SMprPackedTile::decode(
+                    preferredPacked).atlasSlot();
+                if(decoded && existing == desired && preferredSlot >= 0
+                   && preferredSlot < m_authoredTiles.size())
+                {
+                    tile.signature = desired;
+                    tile.authored = true;
+                    tile.authoredPacked = preferredPacked;
+                    tile.runtimeTerrainType = preferredSlot
+                        < sourceTileTypes.size()
+                        ? sourceTileTypes.at(preferredSlot) : -1;
+                    preserved = true;
+                }
+            }
+            if(!preserved)
+                tile = resolve(desired, x, y, report, 0, preferredType);
             if(!tile.authored && tile.generatedIndex < 0)
             {
                 result.error = QStringLiteral(
@@ -2586,6 +2642,30 @@ int CTerrainWorkingAtlas::stockBlendMaskCountFor(
     return m_resolver ? m_resolver->stockBlendMaskCountFor(signature) : 0;
 }
 
+bool CTerrainWorkingAtlas::realizeAuthoredLibraryVariants(
+    const STerrainTransitionSignature& signature,
+    QMap<int, quint64>* workingUsage, const QSet<int>& protectedSlots,
+    CValidationReport* report, qint32 preferredPaintMaterial)
+{
+    if(!m_resolver || !workingUsage)
+        return false;
+    const QVector<STerrainVirtualTile> variants =
+        m_resolver->authoredLibraryVariants(
+            signature, preferredPaintMaterial, report);
+    if(variants.isEmpty())
+        return false;
+    QSet<int> reserved = protectedSlots;
+    for(const STerrainVirtualTile& variant : variants)
+    {
+        const int workingSlot = realize(
+            true, variant.generatedIndex, workingUsage, reserved, report);
+        if(workingSlot < 0)
+            return false;
+        reserved.insert(workingSlot);
+    }
+    return true;
+}
+
 int CTerrainWorkingAtlas::activeTextureCount() const
 {
     const int highest = m_workingToVirtual.isEmpty()
@@ -2715,16 +2795,15 @@ void CTerrainWorkingAtlas::installCatalogVariants(
         source.atlasIndex = quint8(sourceIndex / 64);
         source.rotation = quint8(rotation);
         bool found = false;
-        const STerrainTransitionSignature catalogSignature =
-            m_authoredCatalog.signatureForPacked(source.encode(), &found);
+        const STerrainTransitionVariant sourceVariant =
+            m_authoredCatalog.variantForPacked(source.encode(), &found);
         if(!found)
             continue;
         SMprPackedTile packed;
         packed.tileIndex = quint8(workingSlot % 64);
         packed.atlasIndex = quint8(workingSlot / 64);
         packed.rotation = quint8(rotation);
-        STerrainTransitionVariant variant;
-        variant.signature = catalogSignature;
+        STerrainTransitionVariant variant = sourceVariant;
         variant.packedTile = packed.encode();
         m_workingCatalog.addVariant(variant);
     }

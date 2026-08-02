@@ -5806,6 +5806,10 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     qint32 commonGrassId = 0;
     qint32 freshGrassId = 0;
     int darkGrassSources = 0;
+    QSet<int> bz11kIceSlots;
+    QSet<int> zone14IceSlots;
+    bool sawBz11kIceThumbnail = false;
+    bool sawZone14IceThumbnail = false;
     int grassVariantCount = 0;
     int landFamilyCount = 0;
     QSet<int> blendStyles;
@@ -5842,7 +5846,21 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
                       && (source.mprNamespace == QStringLiteral("bz5g")
                           || source.mprNamespace == QStringLiteral("bz6g")
                           || source.mprNamespace == QStringLiteral("Zone8"))));
+            if(source.variantName == QStringLiteral("Ice / Common")
+               && source.mprNamespace == QStringLiteral("bz11k"))
+                bz11kIceSlots.insert(source.uniformSlot);
+            if(source.variantName == QStringLiteral("Ice / Common")
+               && source.mprNamespace == QStringLiteral("Zone14"))
+                zone14IceSlots.insert(source.uniformSlot);
         }
+        if(family.name == QStringLiteral("Ice / Common"))
+            for(const STerrainGlobalMaterialSource& source : family.thumbnailSources)
+            {
+                sawBz11kIceThumbnail |= source.mprNamespace
+                    == QStringLiteral("bz11k") && source.uniformSlot == 4;
+                sawZone14IceThumbnail |= source.mprNamespace
+                    == QStringLiteral("Zone14") && source.uniformSlot == 4;
+            }
         if(family.layer == ETerrainAtlasLayer::Land
            && family.theme == QStringLiteral("Grass")) ++grassVariantCount;
         if(family.layer == ETerrainAtlasLayer::Land
@@ -5867,6 +5885,14 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     QVERIFY(darkGrassId != commonGrassId);
     QVERIFY(darkGrassId != freshGrassId);
     QVERIFY(commonGrassId != freshGrassId);
+    QCOMPARE(bz11kIceSlots.size(), 23);
+    QCOMPARE(zone14IceSlots.size(), 23);
+    QVERIFY(bz11kIceSlots.contains(3));
+    QVERIFY(bz11kIceSlots.contains(4));
+    QVERIFY(bz11kIceSlots.contains(342));
+    QCOMPARE(bz11kIceSlots, zone14IceSlots);
+    QVERIFY(sawBz11kIceThumbnail);
+    QVERIFY(sawZone14IceThumbnail);
     // This is the reviewed Family/Subfamily palette, after collapsing atlas
     // variants and excluding transition-only/mixed imagery.
     // Two remaining reviewed names currently have no visually verified pure

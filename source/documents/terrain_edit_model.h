@@ -121,7 +121,12 @@ struct STerrainTransitionVariant
 {
     STerrainTransitionSignature signature;
     quint16 packedTile{0};
+    // Weight belongs to the physical artwork, not to each packed rotation.
+    // All rotations of one atlas slot/signature must use the same value.
     int distributionWeight{1};
+    // Decode-only entries remain available to signatureForPacked(), while
+    // automatic painting considers only reviewed semantic catalog entries.
+    bool paintSelectable{true};
 };
 
 class CTerrainTransitionCatalog
@@ -139,6 +144,13 @@ public:
     quint16 selectForPaint(const STerrainTransitionSignature& signature,
                            int globalX, int globalY, quint32 distributionSeed,
                            bool* found = nullptr) const;
+    quint16 lowestPaintRotationForSlot(
+        const STerrainTransitionSignature& signature, quint16 selectedPacked,
+        bool* found = nullptr) const;
+    STerrainTransitionVariant variantForPacked(
+        quint16 packedTile, bool* found = nullptr) const;
+    QVector<STerrainTransitionVariant> paintVariants(
+        const STerrainTransitionSignature& signature) const;
     void setMirrorPaintGridY(bool enabled) { m_mirrorPaintGridY = enabled; }
     STerrainTransitionSignature signatureForPacked(
         quint16 packedTile, bool* found = nullptr) const;
@@ -157,6 +169,10 @@ public:
 
 private:
     static QByteArray signatureKey(const STerrainTransitionSignature& signature);
+    quint16 selectCandidates(const STerrainTransitionSignature& signature,
+                             int globalX, int globalY,
+                             quint32 distributionSeed, bool paintOnly,
+                             bool* found) const;
     QVector<STerrainTransitionVariant> m_variants;
     QHash<quint16, int> m_packedLookup;
     QHash<QByteArray, QVector<int>> m_signatureLookup;

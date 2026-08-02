@@ -61,7 +61,11 @@ struct STerrainGlobalMaterialFamily
     QString theme;
     ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
     qint32 runtimeTerrainType{-1};
+    // Automatic painting authority: every audited four-corner-uniform slot.
     QVector<STerrainGlobalMaterialSource> sources;
+    // Display authority is independent and may intentionally choose a
+    // different authored tile than the uniform paint pool.
+    QVector<STerrainGlobalMaterialSource> thumbnailSources;
 };
 
 struct STerrainGlobalTransitionSource
@@ -69,6 +73,7 @@ struct STerrainGlobalTransitionSource
     STerrainTransitionSignature signature;
     ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
     QString mprNamespace;
+    QByteArray atlasIdentity;
     int textureCount{0};
     int slot{-1};
 };

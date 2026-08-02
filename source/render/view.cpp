@@ -113,9 +113,12 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
                                const QSize& requiredSize,
                                QMap<QString, QByteArray>* encodedPageCache,
                                QSet<QString>* missingPageCache,
-                               QMap<QString, QImage>* decodedTileCache)
+                               QMap<QString, QImage>* decodedTileCache,
+                               bool thumbnail = false)
 {
-    QVector<STerrainGlobalMaterialSource> sources = family.sources;
+    QVector<STerrainGlobalMaterialSource> sources = thumbnail
+        && !family.thumbnailSources.isEmpty()
+        ? family.thumbnailSources : family.sources;
     std::stable_sort(sources.begin(), sources.end(),
         [&preferredNamespace](const STerrainGlobalMaterialSource& left,
                               const STerrainGlobalMaterialSource& right) {
@@ -5791,6 +5794,16 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
 
     finishSculptStroke();
     endTileBrushGroup();
+    if(terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
+       || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay))
+    {
+        QMessageBox::information(this, tr("Finalize terrain atlas required"),
+            tr("This terrain edit uses exact tiles from the working atlas extension. "
+               "Use Finalize map atlas so the MPR, physical textures, runtime tile types, "
+               "and the exact painted variant arrangement are saved together. "
+               "The ordinary MPR save was not written."));
+        return false;
+    }
     const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
     const QString destinationPath = QDir::cleanPath(destination.absoluteFilePath());
     CMprEditTransaction transaction(adoptAsOpenBaseline
@@ -6760,6 +6773,15 @@ void CView::rebuildTerrainAutoCatalog()
     const int slotCount = m_pTileForm->tileImages().size();
     const QByteArray atlasHash = CTerrainAtlasProfileInference::pixelSha256(
         m_pTileForm->tileImages());
+    // Stable map/profile identity participates in every deterministic
+    // per-cell choice. Namespace alone is insufficient when different atlas
+    // pixels are bound under the same resource name.
+    for(char byte : atlasHash)
+    {
+        seed ^= quint8(byte);
+        seed *= 16777619u;
+    }
+    m_terrainSemanticSeed = seed;
     const QString profilePath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
     bool reviewedProfileActive = false;
     bool provisionalProfileActive = false;
@@ -6948,7 +6970,11 @@ void CView::rebuildTerrainAutoCatalog()
             choice.id = family.id;
             choice.name = family.name;
             choice.familyName = family.theme;
-            choice.thumbnail = source;
+            const QImage thumbnail = loadGlobalUniformSource(
+                family, mprNamespace, requiredSize,
+                &encodedGlobalPages, &missingGlobalPages,
+                &m_terrainGlobalUniformTileCache, true);
+            choice.thumbnail = thumbnail.isNull() ? source : thumbnail;
             choice.assignedSlots = family.sources.size();
             if(family.layer == ETerrainAtlasLayer::Land)
             {
@@ -7135,7 +7161,9 @@ void CView::reviewTerrainAtlasProfile()
         return;
     }
     if(m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
-       || m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay))
+       || m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay)
+       || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
+       || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay))
     {
         QMessageBox::information(this, tr("Material atlas is in use"),
             tr("Finalize or undo the current semantic terrain edits before changing the Material atlas profile. "
@@ -7504,6 +7532,24 @@ QMap<int, quint64> CView::workingTerrainAtlasUsage() const
     return result;
 }
 
+bool CView::terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const
+{
+    const int authoredSlots = m_authoredTerrainTileImages.size();
+    if(!m_workingTerrainAtlas || authoredSlots <= 0)
+        return false;
+    for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
+        for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 value = m_terrainEdit.packedTile(
+                x, y, layer, &available);
+            if(available && SMprPackedTile::decode(value).atlasSlot()
+                    >= authoredSlots)
+                return true;
+        }
+    return false;
+}
+
 bool CView::realizeWorkingTerrainSignature(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     QMap<int, quint64>* usage, CValidationReport* report, bool* generated,
@@ -7525,12 +7571,31 @@ bool CView::realizeWorkingTerrainSignature(
         signature, cellX, cellY, m_terrainSemanticSeed, &alreadyExact);
     if(!alreadyExact)
     {
-        const QList<STerrainGlobalTransitionSource> candidates =
+        QList<STerrainGlobalTransitionSource> candidates =
             m_terrainGlobalTransitionSources.values(globalTransitionKey(signature));
+        std::sort(candidates.begin(), candidates.end(), [](
+            const STerrainGlobalTransitionSource& left,
+            const STerrainGlobalTransitionSource& right) {
+            if(left.atlasIdentity != right.atlasIdentity)
+                return left.atlasIdentity < right.atlasIdentity;
+            if(left.slot != right.slot)
+                return left.slot < right.slot;
+            return left.mprNamespace.toCaseFolded()
+                < right.mprNamespace.toCaseFolded();
+        });
         const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
             ? QSize() : m_authoredTerrainTileImages.front().size();
+        QSet<QByteArray> importedPhysical;
+        CValidationReport libraryReport;
+        bool importedAny = false;
         for(const STerrainGlobalTransitionSource& source : candidates)
         {
+            QByteArray physicalKey = source.atlasIdentity;
+            physicalKey.append('|');
+            physicalKey.append(QByteArray::number(source.slot));
+            if(importedPhysical.contains(physicalKey))
+                continue;
+            importedPhysical.insert(physicalKey);
             const QImage pixels = loadGlobalTransitionTile(
                 source, requiredSize,
                 &m_terrainGlobalTransitionEncodedPageCache,
@@ -7540,18 +7605,35 @@ bool CView::realizeWorkingTerrainSignature(
                 continue;
             const QString label = QStringLiteral("%1 slot %2")
                 .arg(source.mprNamespace).arg(source.slot);
-            CValidationReport importReport;
             if(m_workingTerrainAtlas->addAuthoredLibraryTransition(
-                   source.signature, pixels, label, &importReport))
+                   source.signature, pixels, label, &libraryReport))
             {
+                importedAny = true;
                 m_importedTerrainTransitions.insert(
                     globalTransitionKey(source.signature),
                     qMakePair(source.signature, pixels));
                 ei::log(eLogInfo, QString(
                     "Terrain exact transition source: authored global %1")
                     .arg(label));
-                break;
             }
+        }
+        if(importedAny && !m_workingTerrainAtlas->realizeAuthoredLibraryVariants(
+               signature, usage, m_workingAtlasProtectedSlots,
+               &libraryReport, preferredPaintMaterial))
+        {
+            if(report)
+                for(const SValidationFinding& finding : libraryReport.findings())
+                    report->add(finding.code, finding.severity,
+                                finding.message, finding.location);
+            return false;
+        }
+        if(libraryReport.hasErrors())
+        {
+            if(report)
+                for(const SValidationFinding& finding : libraryReport.findings())
+                    report->add(finding.code, finding.severity,
+                                finding.message, finding.location);
+            return false;
         }
     }
     const auto appendFindings = [report](const CValidationReport& source) {
@@ -7691,8 +7773,10 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
 
 void CView::finalizeVirtualTerrainAtlas()
 {
-    const bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land);
-    const bool overlayActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay);
+    const bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
+        ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land);
+    const bool overlayActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay)
+        ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay);
     if(!m_terrainEditAvailable||!m_pTileForm||m_pTileForm->tileImages().isEmpty()
        ||(!landActive&&!overlayActive))
     {
@@ -7724,8 +7808,10 @@ void CView::finalizeVirtualTerrainAtlas()
             tr("The virtual material field is incomplete; no package was written."));
         return;
     }
-    const CTerrainTransitionCatalog& catalog=layer==ETerrainTileLayer::Land
-        ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog;
+    const CTerrainTransitionCatalog& catalog=m_workingTerrainAtlas
+        ?m_workingTerrainAtlas->catalog()
+        :(layer==ETerrainTileLayer::Land
+            ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog);
     QVector<quint16> pinned;
     const ETerrainTileLayer preserved=layer==ETerrainTileLayer::Land
         ?ETerrainTileLayer::Overlay:ETerrainTileLayer::Land;
@@ -7754,13 +7840,18 @@ void CView::finalizeVirtualTerrainAtlas()
                 pinned.append(packed);
         }
     CValidationReport report;
-    const QVector<QImage>& authoredImages=m_authoredTerrainTileImages.isEmpty()
-        ?m_pTileForm->tileImages():m_authoredTerrainTileImages;
+    const QVector<QImage> authoredImages=m_workingTerrainAtlas
+        ?m_workingTerrainAtlas->activeTileImages()
+        :(m_authoredTerrainTileImages.isEmpty()
+            ?m_pTileForm->tileImages():m_authoredTerrainTileImages);
+    const QVector<qint32> authoredTypes=m_workingTerrainAtlas
+        ?m_workingTerrainAtlas->activeTileTypes()
+        :m_mprDocument.mapInfo().tileTypes;
     CTerrainVirtualAtlas atlas(catalog, authoredImages, m_terrainSemanticSeed,
                                m_terrainGlobalMaterialSources,
                                globalMaterialBlendStyles(m_terrainGlobalFamilies),
                                layer == ETerrainTileLayer::Land,
-                               m_mprDocument.mapInfo().tileTypes,
+                               authoredTypes,
                                materialRuntimeTypes(m_terrainAtlasProfile,
                                                     m_terrainGlobalFamilies));
     finalizeProgress.setLabelText(tr(
@@ -7781,7 +7872,9 @@ void CView::finalizeVirtualTerrainAtlas()
         "Resolving, evicting unused tiles, and rebuilding physical pages..."));
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QVector<qint32> placedCellTypes;
+    QVector<quint16> placedPackedCells;
     placedCellTypes.reserve(field.tileWidth()*field.tileHeight());
+    placedPackedCells.reserve(field.tileWidth()*field.tileHeight());
     for(int y=0;y<field.tileHeight();++y)
         for(int x=0;x<field.tileWidth();++x)
         {
@@ -7791,11 +7884,12 @@ void CView::finalizeVirtualTerrainAtlas()
             const qint32 type=available
                 ?m_terrainEdit.tileType(packed,&typeFound):-1;
             placedCellTypes.append(typeFound?type:-1);
+            placedPackedCells.append(available?packed:quint16(0));
         }
     const STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,
         kMprPackedTerrainAtlasSlotLimit,
-        m_mprDocument.mapInfo().tileTypes,&report,pinned,placedCellTypes);
+        authoredTypes,&report,pinned,placedCellTypes,placedPackedCells);
     if(!finalized.success)
     {
         const QString findings=report.findings().isEmpty()
@@ -10329,11 +10423,16 @@ void CView::beginTileBrushGroup()
     if(m_tilePaintStrokeActive || !m_pUndoStack)
         return;
     m_tilePaintStrokeActive = true;
-    // Uniform authored variations are chosen once per stroke. The seed is
-    // deterministic for undo/replay while adjacent strokes need not repeat the
-    // same texture variation.
+    // Draw one nonce only when a new committed stroke begins. Every preview
+    // recomputation within that stroke keeps this immutable seed; undo/redo
+    // later replays captured packed values and never consults randomness.
+    const quint32 strokeNonce = QRandomGenerator::global()->generate();
     m_tileStrokeDistributionSeed = m_terrainSemanticSeed
+        ^ strokeNonce
         ^ (quint32(m_tileBrushCommandId + 1) * 0x9e3779b9u);
+    if(m_workingTerrainAtlas)
+        m_workingTerrainAtlas->setDistributionSeed(
+            m_tileStrokeDistributionSeed);
     m_tileStrokeCommand = STerrainTileCommand();
     m_tileStrokeCommand.description = tr("Paint terrain tiles");
     m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
