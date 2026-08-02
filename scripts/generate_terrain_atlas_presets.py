@@ -2149,6 +2149,44 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     if namespace in ("bz11k", "zone14"):
         corrections.update(r72_snow_corrections)
 
+    # R73 resolves the remaining local Stone / Gray corners and all but one
+    # quarter of the false-anchor Ground / Mountainous family.  The four
+    # reviewed Stone / Grayish quarters in slots 437/446 remain a valid
+    # transition-only Stone / Grayish identity; slot 70 SW remains the sole
+    # explicitly retained Ground / Mountainous quarter.  As above, bz11k and
+    # Zone14 own the same byte-identical atlas table.
+    r73_snow_corrections = {
+        (57, 3): 1, (59, 3): 1,
+        (288, 0): 1, (288, 2): 1,
+        (314, 1): 1, (315, 1): 1,
+        (358, 2): 1, (373, 1): 1, (373, 3): 1,
+        (402, 0): 1, (403, 0): 1,
+        (32, 1): 8, (32, 2): 8, (32, 3): 8,
+        (62, 0): 8, (63, 2): 8, (288, 3): 8,
+        (298, 0): 8, (298, 2): 8, (298, 3): 8,
+        (314, 2): 8, (314, 3): 8,
+        (315, 2): 8, (315, 3): 8,
+        (361, 1): 8,
+        (402, 2): 8, (402, 3): 8,
+        (403, 2): 8, (403, 3): 8,
+        (416, 1): 8, (419, 0): 8,
+        (430, 2): 8,
+        (498, 0): 8, (498, 2): 8,
+        (358, 3): 10, (453, 3): 10, (483, 3): 10,
+        (62, 3): 16,
+        (71, 3): 16, (72, 3): 16, (73, 3): 16, (74, 3): 16,
+        (228, 0): 16, (229, 0): 16, (230, 0): 16,
+        (237, 0): 16, (238, 0): 16, (239, 0): 16,
+        (244, 0): 16, (319, 1): 16, (361, 3): 16,
+        (416, 0): 16, (417, 0): 16,
+        (419, 1): 16, (419, 2): 16,
+        (430, 3): 16, (453, 2): 16,
+        (483, 0): 16, (485, 0): 16, (485, 1): 16,
+        (498, 3): 6,
+    }
+    if namespace in ("bz11k", "zone14"):
+        corrections.update(r73_snow_corrections)
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)

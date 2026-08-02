@@ -983,7 +983,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
                 240: (3, (3, 3, 3, 8)),
                 401: (3, (3, 3, 3, 8)),
             },
-            "Zone14": {32: (13, (1, 13, 13, 13))},
+            "Zone14": {32: (13, (1, 8, 8, 8))},
             "Zone15": {
                 131: (5, (1, 5, 5, 5)),
                 219: (11, (3, 11, 11, 11)),
@@ -2224,7 +2224,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             next(family for family in zone19["families"]
                  if family["id"] == 7)["suggestedName"])
 
-    def test_r72_shipped_snow_atlas_replays_full_corner_review(self) -> None:
+    def test_r73_shipped_snow_atlas_replays_full_corner_review(self) -> None:
         root = Path(__file__).resolve().parent.parent
         catalog = json.loads((
             root / "assets" / "resources" / "terrain_atlas_presets.json"
@@ -2248,10 +2248,9 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             == family_ids["Stone / Grayish"]
         ]
         self.assertEqual(
-            [(373, 1), (373, 3), (437, 0), (437, 1),
-             (446, 1), (446, 2)],
+            [(437, 0), (437, 1), (446, 1), (446, 2)],
             remaining_grayish,
-            "only the six explicitly deferred Stone / Grayish corners remain")
+            "only the four explicitly retained Stone / Grayish corners remain")
 
         def signature(slot: int) -> tuple[int, int, int, int]:
             start = slot * 4
@@ -2271,6 +2270,24 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             (family_ids["Stone / Black"], family_ids["Ground / Light"],
              family_ids["Rock / Black"], family_ids["Rock / Black"]),
             signature(495))
+        self.assertNotIn(
+            "Stone / Gray", family_ids,
+            "R73 resolves both remaining local Stone / Gray corners")
+        self.assertEqual(
+            [(70, 3)],
+            [(slot, corner)
+             for slot in range(bz11k["slotCount"])
+             for corner in range(4)
+             if bz_payload[slot * 4 + corner]
+             == family_ids["Ground / Mountainous"]])
+        self.assertEqual(
+            (family_ids["Stone / Dark"], family_ids["Ice / Common"],
+             family_ids["Stone / Dark"], family_ids["Stone / Black"]),
+            signature(288))
+        self.assertEqual(
+            (family_ids["Stone / Black"], family_ids["Ice / Common"],
+             family_ids["Stone / Black"], family_ids["Ground / Light"]),
+            signature(498))
 
     def test_family_catalog_mixed_thumbnail_corners_are_explicit(self) -> None:
         cases = {
