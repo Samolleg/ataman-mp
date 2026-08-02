@@ -1938,18 +1938,22 @@ float CTerrainEditModel::navigationHeightSample(int aiTileX, int aiTileY,
 
     const bool right = (aiTileX & 1) != 0;
     const bool bottom = (aiTileY & 1) != 0;
-    float raw = 0.0f;
+    const float z00 = float(h00) * m_maxZ / 65534.0f;
+    const float z10 = float(h10) * m_maxZ / 65534.0f;
+    const float z01 = float(h01) * m_maxZ / 65534.0f;
+    const float z11 = float(h11) * m_maxZ / 65534.0f;
+    float world = 0.0f;
     if(!right && !bottom)
-        raw = 0.5f * h00 + 0.25f * h10 + 0.25f * h01;
+        world = z01 / 4.0f + z10 / 4.0f + z00 / 2.0f;
     else if(right && !bottom)
-        raw = 0.5f * h10 + 0.25f * h00 + 0.25f * h11;
+        world = z00 / 4.0f + z11 / 4.0f + z10 / 2.0f;
     else if(!right && bottom)
-        raw = 0.5f * h01 + 0.25f * h00 + 0.25f * h11;
+        world = z00 / 4.0f + z11 / 4.0f + z01 / 2.0f;
     else
-        raw = 0.5f * h11 + 0.25f * h10 + 0.25f * h01;
+        world = z01 / 4.0f + z10 / 4.0f + z11 / 2.0f;
     if(available)
         *available = true;
-    return raw * m_maxZ / 65535.0f;
+    return world;
 }
 
 float CTerrainEditModel::terrainSurfaceHeight(float worldX, float worldY,

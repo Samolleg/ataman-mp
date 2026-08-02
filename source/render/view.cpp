@@ -8,6 +8,7 @@
 #include <QPair>
 #include <QRandomGenerator>
 #include <QMessageBox>
+#include <QGridLayout>
 #include <QCryptographicHash>
 #include <QOpenGLFramebufferObject>
 #include <QFrame>
@@ -1446,25 +1447,39 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphSourceLabel->setMinimumWidth(480);
     body->addWidget(m_aiGraphSourceLabel);
 
-    QHBoxLayout* actions = new QHBoxLayout;
+    QGridLayout* actions = new QGridLayout;
+    actions->setHorizontalSpacing(8);
+    actions->setVerticalSpacing(4);
+    actions->setColumnStretch(0, 1);
+    actions->setColumnStretch(1, 1);
     m_aiGraphRegenerateButton = new QToolButton(m_aiGraphPreviewBody);
     m_aiGraphRegenerateButton->setText(tr("Regenerate preview"));
     m_aiGraphRegenerateButton->setToolTip(tr(
         "Build a non-saving diagnostic graph from current terrain and static-object collision proxies."));
-    m_aiGraphUseLoadedButton = new QToolButton(m_aiGraphPreviewBody);
-    m_aiGraphUseLoadedButton->setCheckable(true);
-    m_aiGraphUseLoadedButton->setText(tr("Loaded preview override: OFF"));
-    m_aiGraphUseLoadedButton->setToolTip(tr(
-        "Toggle between the graph loaded from the map and the regenerated preview. "
-        "Test Current Map and Hot Reload stage the selected graph."));
+    m_aiGraphCompareButton = new QToolButton(m_aiGraphPreviewBody);
+    m_aiGraphCompareButton->setText(tr("Diff loaded / regenerated"));
+    m_aiGraphCompareButton->setToolTip(tr(
+        "Compare loaded and regenerated connectivity, link weights, and node positions without changing either graph."));
+    m_aiGraphSourceSelectorButton = new QToolButton(m_aiGraphPreviewBody);
+    m_aiGraphSourceSelectorButton->setCheckable(true);
+    m_aiGraphSourceSelectorButton->setText(tr("Preview graph: Loaded"));
+    m_aiGraphSourceSelectorButton->setToolTip(tr(
+        "Switch between the graph loaded from the map and the generated graph. "
+        "Test Current Map and Hot Reload stage the graph named on this button."));
     m_aiGraphPersistButton = new QToolButton(m_aiGraphPreviewBody);
     m_aiGraphPersistButton->setText(tr("Bake / Export..."));
     m_aiGraphPersistButton->setToolTip(tr(
         "Persist the selected loaded or regenerated graph as an exact runtime .grp, "
         "embed it into the primary MOB, or switch the primary MOB to external graph ownership."));
-    actions->addWidget(m_aiGraphUseLoadedButton);
-    actions->addWidget(m_aiGraphRegenerateButton);
-    actions->addWidget(m_aiGraphPersistButton);
+    for(QToolButton* button : {m_aiGraphSourceSelectorButton,
+                               m_aiGraphRegenerateButton,
+                               m_aiGraphCompareButton,
+                               m_aiGraphPersistButton})
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    actions->addWidget(m_aiGraphSourceSelectorButton, 0, 0);
+    actions->addWidget(m_aiGraphRegenerateButton, 0, 1);
+    actions->addWidget(m_aiGraphCompareButton, 1, 0);
+    actions->addWidget(m_aiGraphPersistButton, 1, 1);
     body->addLayout(actions);
     layout->addWidget(m_aiGraphPreviewBody);
 
@@ -1501,37 +1516,78 @@ void CView::initAiGraphPreviewWidget()
     });
     connect(m_aiGraphRegenerateButton, &QToolButton::clicked,
             this, [this]() { startAiGraphPreviewRegeneration(); });
+    connect(m_aiGraphCompareButton, &QToolButton::clicked, this, [this]()
+    {
+        const SAiGraphDifference difference =
+            m_aiGraphLoadedDocument.compareNavigation(m_aiGraphRegeneratedDocument);
+        if(!difference.comparable)
+        {
+            QMessageBox::warning(this, tr("AI graph difference"), difference.error);
+            return;
+        }
+        QString rows;
+        for(int layer = 0; layer < difference.layers.size(); ++layer)
+        {
+            const SAiGraphLayerDifference& value = difference.layers.at(layer);
+            rows += QStringLiteral(
+                "<tr><td>%1 - %2</td><td align='right'>%3</td>"
+                "<td align='right'>%4</td><td align='right'>%5</td>"
+                "<td align='right'>%6</td></tr>")
+                .arg(layer).arg(CAiGraphDocument::layerLabel(layer).toHtmlEscaped())
+                .arg(value.missingLinks).arg(value.extraLinks)
+                .arg(value.changedWeights).arg(value.changedPositions);
+        }
+        const SAiGraphLayerDifference total = difference.total();
+        rows += QStringLiteral(
+            "<tr><th align='left'>Total</th><th align='right'>%1</th>"
+            "<th align='right'>%2</th><th align='right'>%3</th>"
+            "<th align='right'>%4</th></tr>")
+            .arg(total.missingLinks).arg(total.extraLinks)
+            .arg(total.changedWeights).arg(total.changedPositions);
+        QMessageBox report(QMessageBox::Information, tr("AI graph difference"),
+            difference.identical()
+                ? tr("The loaded and regenerated navigation planes are identical.")
+                : tr("The loaded and regenerated navigation planes differ."),
+            QMessageBox::Ok, this);
+        report.setInformativeText(QStringLiteral(
+            "<p><b>Loaded:</b> %1<br><b>Regenerated:</b> %2</p>"
+            "<table cellspacing='8'><tr><th align='left'>Layer</th>"
+            "<th>Missing links</th><th>Extra links</th>"
+            "<th>Changed weights</th><th>Changed positions</th></tr>%3</table>"
+            "<p>Counts are directional link records. Component labels are intentionally ignored.</p>")
+            .arg(m_aiGraphLoadedSource.toHtmlEscaped(),
+                 m_aiGraphRegeneratedSource.toHtmlEscaped(), rows));
+        report.setTextFormat(Qt::RichText);
+        report.setTextInteractionFlags(Qt::TextSelectableByMouse);
+        report.exec();
+    });
     connect(m_aiGraphPersistButton, &QToolButton::clicked,
             this, &CView::aiGraphPersistenceRequested);
-    connect(m_aiGraphUseLoadedButton, &QToolButton::clicked, this, [this](bool loaded)
+    connect(m_aiGraphSourceSelectorButton, &QToolButton::clicked,
+            this, [this](bool generated)
     {
-        if(!loaded)
+        if(generated)
         {
-            m_aiGraphLoadedOverride = false;
-            if(m_aiGraphRegeneratedDocument.isValid())
+            if(!m_aiGraphRegeneratedDocument.isValid())
             {
-                m_aiGraphDocument = m_aiGraphRegeneratedDocument;
-                m_aiGraphSource = m_aiGraphRegeneratedSource;
-                m_aiGraphOverlayDirty = true;
+                m_aiGraphSourceSelectorButton->setChecked(false);
+                return;
             }
-            if(!m_aiGraphRegeneratedFresh
-               && (!m_aiGraphBuildWatcher || !m_aiGraphBuildWatcher->isRunning()))
-                beginAiGraphPreviewRegeneration(false);
-            else
-            {
-                syncAiGraphPreviewWidget();
-                update();
-            }
-            return;
+            m_aiGraphPreviewUsesLoadedSource = false;
+            m_aiGraphDocument = m_aiGraphRegeneratedDocument;
+            m_aiGraphSource = m_aiGraphRegeneratedSource;
         }
-        if(!m_aiGraphLoadedDocument.isValid())
+        else
         {
-            m_aiGraphUseLoadedButton->setChecked(false);
-            return;
+            if(!m_aiGraphLoadedDocument.isValid())
+            {
+                m_aiGraphSourceSelectorButton->setChecked(true);
+                return;
+            }
+            m_aiGraphPreviewUsesLoadedSource = true;
+            m_aiGraphDocument = m_aiGraphLoadedDocument;
+            m_aiGraphSource = m_aiGraphLoadedSource;
         }
-        m_aiGraphLoadedOverride = true;
-        m_aiGraphDocument = m_aiGraphLoadedDocument;
-        m_aiGraphSource = m_aiGraphLoadedSource;
         m_aiGraphOverlayDirty = true;
         if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
             m_aiGraphPreviewToggle->setChecked(true);
@@ -1585,19 +1641,30 @@ void CView::syncAiGraphPreviewWidget()
                                             : tr("Regenerate again"))
             : tr("Regenerate preview"));
     }
-    if(m_aiGraphUseLoadedButton)
+    if(m_aiGraphSourceSelectorButton)
     {
-        const QSignalBlocker blocker(m_aiGraphUseLoadedButton);
-        m_aiGraphUseLoadedButton->setChecked(m_aiGraphLoadedOverride);
-        m_aiGraphUseLoadedButton->setText(m_aiGraphLoadedOverride
-            ? tr("Loaded preview override: ON")
-            : tr("Loaded preview override: OFF"));
-        m_aiGraphUseLoadedButton->setEnabled(m_aiGraphLoadedDocument.isValid());
+        const QSignalBlocker blocker(m_aiGraphSourceSelectorButton);
+        m_aiGraphSourceSelectorButton->setChecked(
+            !m_aiGraphPreviewUsesLoadedSource);
+        m_aiGraphSourceSelectorButton->setText(
+            aiGraphPreviewSelectionLabel(m_aiGraphPreviewUsesLoadedSource,
+                                         m_aiGraphLoadedSource));
+        m_aiGraphSourceSelectorButton->setEnabled(
+            m_aiGraphLoadedDocument.isValid()
+            && m_aiGraphRegeneratedDocument.isValid());
+        m_aiGraphSourceSelectorButton->setToolTip(
+            m_aiGraphPreviewUsesLoadedSource
+                ? tr("Showing the graph loaded from the map. Click to show the generated graph. Test Current Map and Hot Reload stage the graph named here.")
+                : tr("Showing the generated graph. Click to show the graph loaded from the map. Test Current Map and Hot Reload stage the graph named here."));
     }
     if(m_aiGraphPersistButton)
         m_aiGraphPersistButton->setEnabled(
             m_terrainEditAvailable && (m_aiGraphLoadedDocument.isValid()
                                        || m_aiGraphRegeneratedDocument.isValid()));
+    if(m_aiGraphCompareButton)
+        m_aiGraphCompareButton->setEnabled(
+            m_aiGraphLoadedDocument.isValid()
+            && m_aiGraphRegeneratedDocument.isValid());
     if(m_aiGraphPreviewBody->layout())
         m_aiGraphPreviewBody->layout()->activate();
     m_aiGraphPreviewWidget->adjustSize();
@@ -1621,7 +1688,7 @@ void CView::refreshAiGraphPreviewSource()
     m_aiGraphLoadedSource.clear();
     m_aiGraphRegeneratedSource.clear();
     m_aiGraphRegeneratedFresh = false;
-    m_aiGraphLoadedOverride = false;
+    m_aiGraphPreviewUsesLoadedSource = true;
     m_aiGraphOpenLinks.clear();
     m_aiGraphNodes.clear();
     m_aiGraphIsolatedNodes.clear();
@@ -1725,7 +1792,8 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                 input->waterDepths[index] = qMax(
                     0.0f, overlayHeight - input->terrainHeights.at(index));
 
-            if(input->waterDepths.at(index) > 0.0f
+            if(CAiGraphPreviewBuilder::quantizedWaterDepth(
+                   input->waterDepths.at(index), input->maximumTerrainHeight) > 0
                && overlayAvailable && materialIndex >= 0
                && materialIndex < materials.size()
                && materials.at(materialIndex).type == eTerrainWater)
@@ -1762,13 +1830,31 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                 CObjectBase* object = dynamic_cast<CObjectBase*>(node);
                 if(!object)
                     continue;
+                float navigationAnchorShift = 0.0f;
+                const int anchorX = ei::runtimeAiTileCoordinate(
+                    node->position().x(), CAiGraphPreviewBuilder::AiTileWorldSize);
+                const int anchorY = ei::runtimeAiTileCoordinate(
+                    node->position().y(), CAiGraphPreviewBuilder::AiTileWorldSize);
+                if(anchorX >= 0 && anchorY >= 0
+                   && anchorX < aiWidth && anchorY < aiHeight)
+                {
+                    navigationAnchorShift = ei::runtimeNavigationObjectAnchorShift(
+                        node->position().z(), node->drawPosition().z(),
+                        input->terrainHeights.at(anchorY * aiWidth + anchorX),
+                        input->maximumTerrainHeight);
+                }
                 for(const SNavigationCollisionProxy& source : object->navigationCollisionProxies())
                 {
                     SAiGraphCollisionProxy proxy;
                     proxy.footprint = source.footprint;
                     proxy.boxCorners = source.boxCorners;
+                    proxy.upperFaceMask = source.upperFaceMask;
                     proxy.minimumZ = source.minimumZ;
                     proxy.maximumZ = source.maximumZ;
+                    for(QVector3D& corner : proxy.boxCorners)
+                        corner.setZ(corner.z() + navigationAnchorShift);
+                    proxy.minimumZ += navigationAnchorShift;
+                    proxy.maximumZ += navigationAnchorShift;
                     switch(source.kind)
                     {
                     case ENavigationVolumeKind::Hard:
@@ -1795,7 +1881,8 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
 }
 
 bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error,
-                                           QString* sourceDescription)
+                                           QString* sourceDescription,
+                                           bool forceRegeneration)
 {
     if(data)
         data->clear();
@@ -1818,7 +1905,8 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error,
     const int expectedHeight = (m_terrainEdit.vertexCountY() - 1) / 4;
     CAiGraphDocument generated;
     QByteArray candidate;
-    const bool preserveLoadedGraph = m_aiGraphLoadedOverride
+    const bool preserveLoadedGraph = !forceRegeneration
+        && m_aiGraphPreviewUsesLoadedSource
         && m_aiGraphLoadedDocument.isValid()
         && !m_aiGraphLoadedBytes.isEmpty();
     if(preserveLoadedGraph
@@ -1919,7 +2007,7 @@ void CView::startAiGraphPreviewRegeneration()
         ++m_aiGraphBuildRequest;
         m_aiGraphRegeneratedFresh = false;
         m_aiGraphRegenerationPending = true;
-        m_aiGraphLoadedOverride = false;
+        m_aiGraphPreviewUsesLoadedSource = false;
         if(m_aiGraphRegeneratedDocument.isValid())
         {
             m_aiGraphDocument = m_aiGraphRegeneratedDocument;
@@ -1947,8 +2035,6 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
         syncAiGraphPreviewWidget();
         return;
     }
-    if(selectRegenerated)
-        m_aiGraphLoadedOverride = false;
     m_aiGraphRegenerationPending = false;
     if(m_aiGraphRegenerationTimer)
         m_aiGraphRegenerationTimer->stop();
@@ -1959,6 +2045,8 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
         emit updateMsg(error);
         return;
     }
+    if(selectRegenerated)
+        m_aiGraphPreviewUsesLoadedSource = false;
     m_aiGraphAutoRegenerationEnabled = true;
 
     if(!m_aiGraphBuildWatcher)
@@ -1990,7 +2078,7 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
                 .arg(result.authoredCollisionProxyCount).arg(result.collisionProxyCount)
                 .arg(result.bridgeAiTiles).arg(result.waterAiTiles);
             m_aiGraphRegeneratedFresh = true;
-            if(!m_aiGraphLoadedOverride)
+            if(!m_aiGraphPreviewUsesLoadedSource)
             {
                 m_aiGraphDocument = m_aiGraphRegeneratedDocument;
                 m_aiGraphSource = m_aiGraphRegeneratedSource;
@@ -2032,6 +2120,13 @@ void CView::scheduleAiGraphPreviewRegeneration()
        || !m_aiGraphRegenerationTimer)
         return;
     ++m_aiGraphBuildRequest;
+    m_aiGraphPreviewUsesLoadedSource = false;
+    if(m_aiGraphRegeneratedDocument.isValid())
+    {
+        m_aiGraphDocument = m_aiGraphRegeneratedDocument;
+        m_aiGraphSource = m_aiGraphRegeneratedSource;
+        m_aiGraphOverlayDirty = true;
+    }
     m_aiGraphRegeneratedFresh = false;
     m_aiGraphRegenerationPending = true;
     m_aiGraphRegenerationTimer->start();
@@ -3414,7 +3509,7 @@ void CView::rebuildAiGraphOverlayGeometry()
                 continue;
             QVector3D position((x * 8 + localX + 0.5f) * 0.5f,
                                (y * 8 + localY + 0.5f) * 0.5f, 0.0f);
-            const bool regenerated = !m_aiGraphLoadedOverride
+            const bool regenerated = !m_aiGraphPreviewUsesLoadedSource
                 && m_aiGraphRegeneratedFresh && m_aiGraphRegeneratedResult.valid;
             if(regenerated)
             {
@@ -8090,7 +8185,15 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
                 ei::log(eLogInfo, "Workspace visual smoke complete");
                 emit unitVisualPreparationComplete();
                 if(!qApp->property("workspaceVisualSequence").isValid())
-                    QTimer::singleShot(500, qApp, &QCoreApplication::quit);
+                {
+                    QTimer::singleShot(500, this, [this]()
+                    {
+                        if(QWidget* primaryWindow = window())
+                            primaryWindow->close();
+                        else
+                            qApp->quit();
+                    });
+                }
             }
         }
         return;

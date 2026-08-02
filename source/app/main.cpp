@@ -268,6 +268,16 @@ bool renderBenchmarkRequested(int argc, char* argv[])
     return false;
 }
 
+bool automatedWorkspaceSmokeRequested(int argc, char* argv[])
+{
+    for(int i = 1; i < argc; ++i)
+        if(std::strcmp(argv[i], "--workspace-load-smoke") == 0
+           || std::strcmp(argv[i], "--workspace-visual-smoke") == 0
+           || std::strcmp(argv[i], "--workspace-visual-sequence") == 0)
+            return true;
+    return false;
+}
+
 bool persistedRenderVsync()
 {
     QFile options("endurance-options.json");
@@ -2406,6 +2416,13 @@ int runHeadlessCommand(QApplication& app)
 
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_WIN
+    // Automated smoke runs must never leave a modal Windows crash dialog on
+    // the operator's desktop. The normal unhandled-exception logger still
+    // records the failure and writes its private minidump.
+    if(automatedWorkspaceSmokeRequested(argc, argv))
+        SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
+#endif
     // The legacy OpenGL viewport and its embedded overlays use physical pixel
     // coordinates. Qt's global logical-coordinate conversion makes the GL
     // framebuffer render into only part of the widget on scaled displays.
@@ -2523,9 +2540,38 @@ int main(int argc, char *argv[])
         {
             if(*stageIndex >= stages.size())
             {
+                const QString graphOutput = qEnvironmentVariable(
+                    "EI_ENDURANCE_GRAPH_CAPTURE");
+                if(!graphOutput.isEmpty())
+                {
+                    QByteArray graph;
+                    QString graphError;
+                    QString graphSource;
+                    if(!window.view()->buildGeneratedAiGraphCandidate(
+                            &graph, &graphError, &graphSource, true))
+                    {
+                        ei::log(eLogWarning,
+                                "AI graph capture failed: " + graphError);
+                        QCoreApplication::exit(4);
+                        return;
+                    }
+                    QFile output(graphOutput);
+                    if(!output.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                            || output.write(graph) != graph.size())
+                    {
+                        ei::log(eLogWarning,
+                                "AI graph capture could not write: " + graphOutput);
+                        QCoreApplication::exit(5);
+                        return;
+                    }
+                    output.close();
+                    ei::log(eLogInfo,
+                            QString("AI graph capture wrote:%1 bytes:%2 source:%3")
+                                .arg(graphOutput).arg(graph.size()).arg(graphSource));
+                }
                 ei::log(eLogInfo, QString("Workspace visual sequence complete stages:%1")
                         .arg(stages.size()));
-                QTimer::singleShot(500, qApp, &QCoreApplication::quit);
+                QTimer::singleShot(500, &window, &QWidget::close);
                 return;
             }
             const int current = (*stageIndex)++;
@@ -2547,6 +2593,37 @@ int main(int argc, char *argv[])
                 ei::log(eLogWarning, QString("Workspace visual sequence stage failed:%1")
                         .arg(current + 1));
                 QCoreApplication::exit(3);
+                return;
+            }
+            const QString earlyGraphOutput = qEnvironmentVariable(
+                "EI_ENDURANCE_GRAPH_CAPTURE_EARLY");
+            if(current == stages.size() - 1 && !earlyGraphOutput.isEmpty())
+            {
+                QByteArray graph;
+                QString graphError;
+                QString graphSource;
+                if(!window.view()->buildGeneratedAiGraphCandidate(
+                        &graph, &graphError, &graphSource, true))
+                {
+                    ei::log(eLogWarning,
+                            "Early AI graph capture failed: " + graphError);
+                    QCoreApplication::exit(4);
+                    return;
+                }
+                QFile output(earlyGraphOutput);
+                if(!output.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                        || output.write(graph) != graph.size())
+                {
+                    ei::log(eLogWarning,
+                            "Early AI graph capture could not write: "
+                                + earlyGraphOutput);
+                    QCoreApplication::exit(5);
+                    return;
+                }
+                output.close();
+                ei::log(eLogInfo,
+                        QString("Early AI graph capture wrote:%1 bytes:%2 source:%3")
+                            .arg(earlyGraphOutput).arg(graph.size()).arg(graphSource));
             }
         };
         QObject::connect(window.view(), &CView::unitVisualPreparationComplete,
@@ -2570,9 +2647,38 @@ int main(int argc, char *argv[])
                 window.openDocument(QFileInfo(path));
             if(qApp->property("workspaceLoadSmoke").toBool())
             {
+                const QString graphOutput = qEnvironmentVariable(
+                    "EI_ENDURANCE_GRAPH_CAPTURE");
+                if(!graphOutput.isEmpty())
+                {
+                    QByteArray graph;
+                    QString graphError;
+                    QString graphSource;
+                    if(!window.view()->buildGeneratedAiGraphCandidate(
+                            &graph, &graphError, &graphSource, true))
+                    {
+                        ei::log(eLogWarning,
+                                "AI graph capture failed: " + graphError);
+                        QCoreApplication::exit(4);
+                        return;
+                    }
+                    QFile output(graphOutput);
+                    if(!output.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                            || output.write(graph) != graph.size())
+                    {
+                        ei::log(eLogWarning,
+                                "AI graph capture could not write: " + graphOutput);
+                        QCoreApplication::exit(5);
+                        return;
+                    }
+                    output.close();
+                    ei::log(eLogInfo,
+                            QString("AI graph capture wrote:%1 bytes:%2 source:%3")
+                                .arg(graphOutput).arg(graph.size()).arg(graphSource));
+                }
                 ei::log(eLogInfo, QString("Workspace load smoke complete documents:%1")
                         .arg(startupDocuments.size()));
-                qApp->quit();
+                window.close();
             }
         });
     }

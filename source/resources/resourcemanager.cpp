@@ -294,41 +294,7 @@ QVector<QString> configuredResourceSources(CSettings* settings)
     if(cache.contains(cacheKey))
         return cache.value(cacheKey);
 
-    QVector<QString> directoryOrder;
-    QMap<QString, QVector<QString>> explicitByDirectory;
-    for(const QString& source : explicitSources)
-    {
-        const QFileInfo info(source);
-        const QString directory = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-        const QString directoryKey = QDir::cleanPath(directory).toLower();
-        if(!explicitByDirectory.contains(directoryKey))
-            directoryOrder.append(directory);
-        if(info.isFile())
-            explicitByDirectory[directoryKey].append(info.absoluteFilePath());
-    }
-
-    QVector<QString> result;
-    QSet<QString> seen;
-    auto appendUnique = [&result, &seen](const QString& path)
-    {
-        const QString absolute = QFileInfo(path).absoluteFilePath();
-        const QString key = QDir::cleanPath(absolute).toLower();
-        if(seen.contains(key))
-            return;
-        seen.insert(key);
-        result.append(absolute);
-    };
-
-    for(const QString& directory : directoryOrder)
-    {
-        const QString directoryKey = QDir::cleanPath(directory).toLower();
-        for(const QString& source : explicitByDirectory.value(directoryKey))
-            appendUnique(source);
-
-        const QDir dir(directory);
-        for(const QFileInfo& archive : dir.entryInfoList({"*.res"}, QDir::Files, QDir::Name | QDir::IgnoreCase))
-            appendUnique(archive.absoluteFilePath());
-    }
+    const QVector<QString> result = ei::orderedResourceSources(explicitSources);
 
     cache.insert(cacheKey, result);
     ei::log(eLogInfo, QString("Resource catalog expanded %1 configured archives to %2 generic sources")
@@ -577,6 +543,7 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
             continue;
         }
         link.figure->setName(link.componentName);
+        link.figure->setAssemblySourceOrder(i);
         aParent.insert(link.componentName, link.figure);
         links.append(link);
     }

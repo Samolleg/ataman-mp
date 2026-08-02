@@ -38,7 +38,45 @@ private slots:
     void compositesPremultipliedPnt3LikeTheGame();
     void keepsFaceAndHairOnSkinAtlas();
     void cachesResourceMetadataUntilExplicitRefresh();
+    void honorsConfigIniResourcePrecedence();
 };
+
+void ResourceNameTests::honorsConfigIniResourcePrecedence()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QDir root(directory.path());
+    QVERIFY(root.mkpath("mod/res"));
+    QVERIFY(root.mkpath("base/Res"));
+    const QString modRoot = root.filePath("mod");
+    const QString modResources = root.filePath("mod/res");
+    const QString baseResources = root.filePath("base/Res");
+    for(const QString& path : {
+            QDir(modResources).filePath("figures.res"),
+            QDir(modResources).filePath("HDPack_Mapobjects.res"),
+            QDir(modResources).filePath("unlisted.res"),
+            QDir(baseResources).filePath("figures.res")})
+    {
+        QFile archive(path);
+        QVERIFY(archive.open(QIODevice::WriteOnly));
+        archive.write("fixture");
+    }
+    QFile config(QDir(modRoot).filePath("config.ini"));
+    QVERIFY(config.open(QIODevice::WriteOnly));
+    config.write("[MOD]\r\nTitle=test\r\n[RES]\r\n"
+                 "figures.res=res\\HDPack_Mapobjects.res\r\n"
+                 "figures.res=res\\figures.res\r\n");
+    config.close();
+
+    const QVector<QString> sources = ei::orderedResourceSources(
+        {modResources, baseResources});
+    QCOMPARE(sources.size(), 4);
+    QCOMPARE(QFileInfo(sources.at(0)).fileName(), QString("HDPack_Mapobjects.res"));
+    QCOMPARE(QFileInfo(sources.at(1)).fileName(), QString("figures.res"));
+    QCOMPARE(QFileInfo(sources.at(2)).fileName(), QString("unlisted.res"));
+    QCOMPARE(QFileInfo(sources.at(3)).absoluteFilePath(),
+             QFileInfo(QDir(baseResources).filePath("figures.res")).absoluteFilePath());
+}
 
 void ResourceNameTests::cachesResourceMetadataUntilExplicitRefresh()
 {

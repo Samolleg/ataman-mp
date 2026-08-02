@@ -99,6 +99,8 @@ class AiGraphDocumentTests : public QObject
     Q_OBJECT
 private slots:
     void parsesKindMajorPlanesAndSignedValues();
+    void comparesLoadedAndRegeneratedNavigationPlanes();
+    void rejectsNavigationComparisonWithDifferentDimensions();
     void resolvesTerrainRelativeStaticObjectPlacement();
     void preservesNoOpBytesIncludingTrailingData();
     void rejectsMalformedDimensionsAndTruncation();
@@ -107,9 +109,23 @@ private slots:
     void generatedGraphMeetsRuntimeStagingContract();
     void regenerationRespectsFenceAndVerticalClearanceProfiles();
     void regenerationRejectsGameScaleTerrainCliffs();
+    void regenerationUsesRuntimeHeightRounding();
+    void regenerationUsesRuntimeBridgeHeightRounding();
+    void quantizesWaterBeforeOverlayTerrainSelection();
+    void usesRuntimeElevationMultiplierArithmetic();
+    void regenerationUsesRuntimeCrossingTraversal();
+    void regenerationRasterizesAuthoredDegenerateCollisionSlab();
+    void regenerationMergesRuntimeObjectBodyParts();
+    void regenerationMergesRuntimeBridgeBodyParts();
+    void regenerationKeepsEasyFacesForObjectMerge();
+    void regenerationKeepsBlockingLowerFacesForObjectMerge();
+    void collisionMergeKeepsMostRestrictiveContributingPart();
+    void classifiesNearHorizontalBridgeFaceBeforeWorldTranslation();
+    void regenerationMatchesRuntimeWideSlopeMask();
     void regenerationAppliesWaterClearanceToEveryProfile();
     void regenerationUsesBridgeSurfaceAndObjectSemantics();
     void regenerationRejectsSideOnlyBridgeFringeCells();
+    void regenerationRejectsBridgeIntervalsDegenerateAfterQuantization();
     void regenerationKeepsNarrowBridgeCorridorInCoarseGraph();
     void regeneratedHumanProjectionUsesPassableBridgeSurface();
     void regenerationPreservesAuthoredNarrowObjectOpening();
@@ -140,6 +156,24 @@ void AiGraphDocumentTests::resolvesTerrainRelativeStaticObjectPlacement()
     QVERIFY(ei::contributesStaticNavigationCollision(eLever));
     QVERIFY(!ei::contributesStaticNavigationCollision(eMagicTrap));
     QVERIFY(!ei::contributesStaticNavigationCollision(eUnit));
+    QCOMPARE(ei::runtimeAiTileCoordinate(82.0f), 164);
+    QCOMPARE(ei::runtimeAiTileCoordinate(82.5f), 164);
+    const QQuaternion nonUnitRotation(0.8f, 0.1f, 0.2f, -0.3f);
+    const QVector3D runtimeRotated = ei::runtimeNavigationRotateVector(
+        nonUnitRotation, QVector3D(2.0f, -1.0f, 0.5f));
+    QVERIFY(qAbs(runtimeRotated.x() - 1.09f) < 0.00001f);
+    QVERIFY(qAbs(runtimeRotated.y() + 1.82f) < 0.00001f);
+    QVERIFY(qAbs(runtimeRotated.z() + 0.35f) < 0.00001f);
+    QVERIFY((runtimeRotated
+             - nonUnitRotation.rotatedVector(QVector3D(2.0f, -1.0f, 0.5f)))
+            .length() > 0.01f);
+    const float maximumTerrainHeight = 36.70589f;
+    const float sampled = 151.4f * maximumTerrainHeight / 511.0f;
+    const float shift = ei::runtimeNavigationObjectAnchorShift(
+        0.25f, 11.0f, sampled, maximumTerrainHeight);
+    const float expected = 151.0f * maximumTerrainHeight / 511.0f
+        + 0.25f - 11.0f;
+    QVERIFY(qAbs(shift - expected) < 0.0001f);
 }
 
 void AiGraphDocumentTests::parsesKindMajorPlanesAndSignedValues()
@@ -329,8 +363,10 @@ void AiGraphDocumentTests::regenerationUsesBridgeSurfaceAndObjectSemantics()
     QVERIFY2(water.valid, qPrintable(water.error));
     QCOMPARE(water.document.weight(3, 1, 1, 6), qint16(-1));
 
+    // Runtime raster coordinates refer to half-metre tile centers. Extend the
+    // synthetic deck through the center of water tile 17 (x = 8.75 m).
     SAiGraphCollisionProxy bridge = boxVolume(
-        7.4f, 0.0f, -0.2f, 8.6f, 12.0f, 0.0f,
+        7.4f, 0.0f, 0.0f, 9.1f, 12.0f, 0.2f,
         EAiGraphObjectPassability::Bridge);
     input.collisionProxies.append(bridge);
     const SAiGraphPreviewBuildResult bridged = CAiGraphPreviewBuilder::build(input);
@@ -378,6 +414,74 @@ void AiGraphDocumentTests::regenerationRejectsSideOnlyBridgeFringeCells()
     // end faces land on the next raster coordinate, but they do not describe a
     // walkable deck and must not extend the bridge.
     QCOMPARE(result.bridgeAiTiles, 32);
+}
+
+void AiGraphDocumentTests::comparesLoadedAndRegeneratedNavigationPlanes()
+{
+    const QByteArray loadedBytes = syntheticGraph(1, 1);
+    QByteArray regeneratedBytes = loadedBytes;
+    putU16(&regeneratedBytes, 8, 9);          // loaded closed, regenerated open
+    putU16(&regeneratedBytes, 10, 0xffff);    // loaded open, regenerated closed
+    putU16(&regeneratedBytes, 12, 77);        // shared link, changed weight
+    regeneratedBytes[24] = char(quint8(regeneratedBytes.at(24)) ^ 0x01);
+
+    CAiGraphDocument loaded;
+    CAiGraphDocument regenerated;
+    QString error;
+    QVERIFY2(loaded.parse(loadedBytes, &error), qPrintable(error));
+    QVERIFY2(regenerated.parse(regeneratedBytes, &error), qPrintable(error));
+
+    const SAiGraphDifference difference = loaded.compareNavigation(regenerated);
+    QVERIFY2(difference.comparable, qPrintable(difference.error));
+    QCOMPARE(difference.layers.size(), CAiGraphDocument::LayerCount);
+    QCOMPARE(difference.layers.at(0).missingLinks, qint64(1));
+    QCOMPARE(difference.layers.at(0).extraLinks, qint64(1));
+    QCOMPARE(difference.layers.at(0).changedWeights, qint64(1));
+    QCOMPARE(difference.layers.at(0).changedPositions, qint64(1));
+    QVERIFY(!difference.identical());
+    const SAiGraphLayerDifference total = difference.total();
+    QCOMPARE(total.missingLinks, qint64(1));
+    QCOMPARE(total.extraLinks, qint64(1));
+    QCOMPARE(total.changedWeights, qint64(1));
+    QCOMPARE(total.changedPositions, qint64(1));
+
+    const SAiGraphDifference identical = loaded.compareNavigation(loaded);
+    QVERIFY(identical.comparable);
+    QVERIFY(identical.identical());
+}
+
+void AiGraphDocumentTests::rejectsNavigationComparisonWithDifferentDimensions()
+{
+    CAiGraphDocument loaded;
+    CAiGraphDocument regenerated;
+    QString error;
+    QVERIFY2(loaded.parse(syntheticGraph(1, 1), &error), qPrintable(error));
+    QVERIFY2(regenerated.parse(syntheticGraph(2, 1), &error), qPrintable(error));
+    const SAiGraphDifference difference = loaded.compareNavigation(regenerated);
+    QVERIFY(!difference.comparable);
+    QVERIFY(difference.error.contains(QStringLiteral("dimensions differ")));
+}
+
+void AiGraphDocumentTests::regenerationRejectsBridgeIntervalsDegenerateAfterQuantization()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 3;
+    input.graphHeight = 3;
+    input.maximumTerrainHeight = 20.0f;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.waterDepths.fill(6.0f, aiWidth * aiHeight);
+    // Both authored faces land at height unit 51. The runtime discards this
+    // zero-height placement record instead of turning it into a walkable deck.
+    input.collisionProxies.append(boxVolume(
+        4.0f, 4.0f, 2.000f, 8.0f, 8.0f, 2.010f,
+        EAiGraphObjectPassability::Bridge));
+
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QCOMPARE(result.bridgeAiTiles, 0);
+    QCOMPARE(result.document.weight(3, 1, 1, 6), qint16(-1));
 }
 
 void AiGraphDocumentTests::regenerationKeepsNarrowBridgeCorridorInCoarseGraph()
@@ -536,9 +640,333 @@ void AiGraphDocumentTests::regenerationHonorsConfiguredTerrainTraversal()
             input.terrainTypes[y * aiWidth + x] = 4;
     const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
     QVERIFY2(result.valid, qPrintable(result.error));
-    QVERIFY(result.document.weight(0, 1, 1, 6) >= 0);
+    for(int layer = 0; layer < CAiGraphDocument::LayerCount; ++layer)
+        QVERIFY2(result.document.weight(layer, 1, 1, 6) >= 0,
+                 qPrintable(QStringLiteral("layer=%1 weight=%2")
+                     .arg(layer).arg(result.document.weight(layer, 1, 1, 6))));
+
+    input.terrainTraversal[4].cost = 71;
+    const SAiGraphPreviewBuildResult blocked = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(blocked.valid, qPrintable(blocked.error));
+    QVERIFY(blocked.document.weight(0, 1, 1, 6) >= 0);
     for(int layer = 1; layer < CAiGraphDocument::LayerCount; ++layer)
-        QCOMPARE(result.document.weight(layer, 1, 1, 6), qint16(-1));
+        QCOMPARE(blocked.document.weight(layer, 1, 1, 6), qint16(-1));
+}
+
+void AiGraphDocumentTests::regenerationMatchesRuntimeWideSlopeMask()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 4;
+    input.graphHeight = 4;
+    const int aiWidth = input.graphWidth * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+
+    // A ground-only cliff at x=15/16 clears those slope tiles and one shifted
+    // tile to their right in the wide layers. It does not symmetrically dilate
+    // onto x=14.
+    for(int y = 0; y < aiHeight; ++y)
+        for(int x = 16; x < aiWidth; ++x)
+            input.terrainHeights[y * aiWidth + x] = 0.5f;
+
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QCOMPARE(result.layerPassability.size(), int(CAiGraphDocument::LayerCount));
+    for(int layer = 5; layer <= 6; ++layer)
+    {
+        QVERIFY(result.layerPassability.at(layer).at(8 * aiWidth + 14) > 0);
+        QCOMPARE(result.layerPassability.at(layer).at(8 * aiWidth + 15), quint8(0));
+        QCOMPARE(result.layerPassability.at(layer).at(8 * aiWidth + 17), quint8(0));
+    }
+}
+
+void AiGraphDocumentTests::regenerationUsesRuntimeHeightRounding()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 2;
+    input.graphHeight = 2;
+    const int aiCount = input.graphWidth * input.graphHeight
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const float halfStep = 2.5f * input.maximumTerrainHeight / 511.0f;
+    input.terrainHeights.fill(halfStep, aiCount);
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    const float expected = 2.0f * input.maximumTerrainHeight / 511.0f;
+    QVERIFY(qAbs(result.navigationSurfaceHeights.front() - expected) < 0.0001f);
+
+    // Preserve the runtime's float operation order. Reassociating this as
+    // (height * 511) / maximumTerrainHeight rounds this Zone 9 sample to 110
+    // instead of the runtime's 109 and changes coarse representatives/weights.
+    input.terrainHeights.fill(4.285714149475098f, aiCount);
+    const SAiGraphPreviewBuildResult zone9Sensitive =
+        CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(zone9Sensitive.valid, qPrintable(zone9Sensitive.error));
+    const float zone9Expected = 109.0f * input.maximumTerrainHeight / 511.0f;
+    QVERIFY(qAbs(zone9Sensitive.navigationSurfaceHeights.front()
+                 - zone9Expected) < 0.0001f);
+}
+
+void AiGraphDocumentTests::regenerationUsesRuntimeBridgeHeightRounding()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 2;
+    input.graphHeight = 2;
+    input.maximumTerrainHeight = 29.18197250366211f;
+    const int aiWidth = input.graphWidth
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.collisionProxies.append(boxVolume(
+        1.0f, 1.0f, 8.0f, 2.0f, 2.0f, 9.476203918457031f,
+        EAiGraphObjectPassability::Bridge));
+
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    const int index = 2 * aiWidth + 2;
+    const float expected = 166.0f * input.maximumTerrainHeight / 511.0f;
+    QVERIFY(qAbs(result.navigationSurfaceHeights.at(index) - expected) < 0.0001f);
+}
+
+void AiGraphDocumentTests::quantizesWaterBeforeOverlayTerrainSelection()
+{
+    const float maximumTerrainHeight = 29.18197250366211f;
+    const float oneStep = maximumTerrainHeight / 511.0f;
+    QVERIFY(oneStep * 0.25f > 0.0f);
+    QCOMPARE(CAiGraphPreviewBuilder::quantizedWaterDepth(
+        oneStep * 0.25f, maximumTerrainHeight), 0);
+    QCOMPARE(CAiGraphPreviewBuilder::quantizedWaterDepth(
+        oneStep * 0.75f, maximumTerrainHeight), 1);
+}
+
+void AiGraphDocumentTests::usesRuntimeElevationMultiplierArithmetic()
+{
+    const float maximumTerrainHeight = 36.70588684082031f;
+    const int expected[] = {
+        764, 820, 885, 951, 1004, 1024,
+        1066, 1186, 1370, 1596, 1840
+    };
+    for(int delta = -5; delta <= 5; ++delta)
+        QCOMPARE(ai_graph_internal::elevationMultiplier(
+            delta, maximumTerrainHeight, false), expected[delta + 5]);
+}
+
+void AiGraphDocumentTests::regenerationUsesRuntimeCrossingTraversal()
+{
+    const int aiWidth = 9, aiHeight = 9;
+    QVector<quint8> quality(aiWidth * aiHeight, 14);
+    QVector<int> edgeCosts(aiWidth * aiHeight
+                           * CAiGraphDocument::DirectionCount, -1);
+    QVector<bool> crossing = ai_graph_internal::graphCellCrossingCandidates(
+        quality, edgeCosts, aiWidth, aiHeight, 0, 0);
+    QVERIFY(!crossing.at(3 * 8 + 3));
+
+    int east = -1, west = -1;
+    for(int direction = 0; direction < CAiGraphDocument::DirectionCount; ++direction)
+    {
+        if(CAiGraphDocument::directionDelta(direction) == QPoint(1, 0)) east = direction;
+        if(CAiGraphDocument::directionDelta(direction) == QPoint(-1, 0)) west = direction;
+    }
+    QVERIFY(east >= 0 && west >= 0);
+    for(int x = 0; x < aiWidth - 1; ++x)
+    {
+        edgeCosts[(3 * aiWidth + x) * CAiGraphDocument::DirectionCount + east] = 1024;
+        edgeCosts[(3 * aiWidth + x + 1) * CAiGraphDocument::DirectionCount + west] = 1024;
+    }
+    crossing = ai_graph_internal::graphCellCrossingCandidates(
+        quality, edgeCosts, aiWidth, aiHeight, 0, 0);
+    QVERIFY(crossing.at(3 * 8 + 3));
+}
+
+void AiGraphDocumentTests::regenerationMergesRuntimeObjectBodyParts()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 2;
+    input.graphHeight = 2;
+    const int aiWidth = input.graphWidth
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    SAiGraphCollisionProxy lower = boxVolume(
+        1.0f, 1.0f, 0.0f, 3.0f, 3.0f, 1.0f,
+        EAiGraphObjectPassability::Hard);
+    lower.objectId = 42;
+    SAiGraphCollisionProxy upper = boxVolume(
+        1.0f, 1.0f, 0.5f, 3.0f, 3.0f, 1.5f,
+        EAiGraphObjectPassability::Hard);
+    upper.objectId = 42;
+    input.collisionProxies = {lower, upper};
+    const SAiGraphPreviewBuildResult merged = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(merged.valid, qPrintable(merged.error));
+
+    input.collisionProxies[1].objectId = 43;
+    const SAiGraphPreviewBuildResult separate = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(separate.valid, qPrintable(separate.error));
+    const int index = 3 * aiWidth + 3;
+    QVERIFY(merged.layerPassability.at(7).at(index)
+            > separate.layerPassability.at(7).at(index));
+}
+
+void AiGraphDocumentTests::regenerationMergesRuntimeBridgeBodyParts()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 2;
+    input.graphHeight = 2;
+    input.maximumTerrainHeight = 20.0f;
+    const int aiWidth = input.graphWidth
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+    input.waterDepths.fill(6.0f, aiWidth * aiHeight);
+
+    SAiGraphCollisionProxy complete = boxVolume(
+        2.0f, 2.0f, 1.0f, 6.0f, 6.0f, 2.0f,
+        EAiGraphObjectPassability::Bridge);
+    complete.objectId = 42;
+    SAiGraphCollisionProxy upperOnly = boxVolume(
+        2.0f, 2.0f, 1.0f, 6.0f, 6.0f, 3.0f,
+        EAiGraphObjectPassability::Bridge);
+    upperOnly.objectId = 42;
+    upperOnly.upperFaceMask = 0x3f;
+    input.collisionProxies = {complete, upperOnly};
+    const SAiGraphPreviewBuildResult merged = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(merged.valid, qPrintable(merged.error));
+
+    input.collisionProxies[1].objectId = 43;
+    const SAiGraphPreviewBuildResult separate = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(separate.valid, qPrintable(separate.error));
+    const int index = 6 * aiWidth + 6;
+    QVERIFY(merged.navigationSurfaceHeights.at(index)
+            > separate.navigationSurfaceHeights.at(index));
+}
+
+void AiGraphDocumentTests::regenerationRasterizesAuthoredDegenerateCollisionSlab()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 2;
+    input.graphHeight = 2;
+    const int aiWidth = input.graphWidth
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+
+    SAiGraphCollisionProxy slab = boxVolume(
+        1.0f, 1.0f, 0.0f, 3.0f, 1.0f, 2.0f,
+        EAiGraphObjectPassability::Blocking);
+    slab.footprint = {QVector2D(1.0f, 1.0f), QVector2D(3.0f, 1.0f)};
+    slab.objectId = 99;
+    input.collisionProxies.append(slab);
+
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QVERIFY(result.collisionCoverageTests > 0);
+    QCOMPARE(result.layerPassability.at(0).at(2 * aiWidth + 3), quint8(0));
+}
+
+void AiGraphDocumentTests::regenerationKeepsEasyFacesForObjectMerge()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 2;
+    input.graphHeight = 2;
+    const int aiWidth = input.graphWidth
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+
+    SAiGraphCollisionProxy trunk = boxVolume(
+        1.0f, 1.0f, 0.0f, 3.0f, 3.0f, 0.2f,
+        EAiGraphObjectPassability::Blocking);
+    trunk.objectId = 42;
+    SAiGraphCollisionProxy crown = boxVolume(
+        1.0f, 1.0f, 0.2f, 3.0f, 3.0f, 2.0f,
+        EAiGraphObjectPassability::Easy);
+    crown.objectId = 42;
+    input.collisionProxies = {trunk, crown};
+    const SAiGraphPreviewBuildResult merged = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(merged.valid, qPrintable(merged.error));
+
+    input.collisionProxies[1].objectId = 43;
+    const SAiGraphPreviewBuildResult separate = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(separate.valid, qPrintable(separate.error));
+    const int index = 3 * aiWidth + 3;
+    QCOMPARE(merged.layerPassability.at(3).at(index), quint8(0));
+    QVERIFY(separate.layerPassability.at(3).at(index) > 0);
+}
+
+void AiGraphDocumentTests::regenerationKeepsBlockingLowerFacesForObjectMerge()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 2;
+    input.graphHeight = 2;
+    input.maximumTerrainHeight = 20.0f;
+    const int aiWidth = input.graphWidth
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    const int aiHeight = input.graphHeight
+        * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
+    input.terrainHeights.fill(0.0f, aiWidth * aiHeight);
+
+    SAiGraphCollisionProxy hard = boxVolume(
+        2.0f, 2.0f, 1.0f, 6.0f, 6.0f, 3.0f,
+        EAiGraphObjectPassability::Hard);
+    hard.objectId = 42;
+    SAiGraphCollisionProxy blockingLower = boxVolume(
+        2.0f, 2.0f, 0.0f, 6.0f, 6.0f, 2.0f,
+        EAiGraphObjectPassability::Blocking);
+    blockingLower.objectId = 42;
+    // A nonzero mask with no authored face bits classifies every sampled face
+    // as a lower face, reproducing a sibling part that contributes only the
+    // lower half of the object's combined collision interval at this tile.
+    blockingLower.upperFaceMask = 0x40;
+    input.collisionProxies = {blockingLower, hard};
+
+    const SAiGraphPreviewBuildResult result = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(result.valid, qPrintable(result.error));
+    QCOMPARE(result.layerPassability.at(7).at(4 * aiWidth + 4), quint8(0));
+}
+
+void AiGraphDocumentTests::collisionMergeKeepsMostRestrictiveContributingPart()
+{
+    QVERIFY(ai_graph_internal::collisionSampleTakesOwnership(
+        false, EAiGraphObjectPassability::Blocking,
+        true, EAiGraphObjectPassability::Easy));
+    QVERIFY(!ai_graph_internal::collisionSampleTakesOwnership(
+        true, EAiGraphObjectPassability::Easy,
+        false, EAiGraphObjectPassability::Blocking));
+    QVERIFY(ai_graph_internal::collisionSampleTakesOwnership(
+        true, EAiGraphObjectPassability::Easy,
+        true, EAiGraphObjectPassability::Blocking));
+}
+
+void AiGraphDocumentTests::classifiesNearHorizontalBridgeFaceBeforeWorldTranslation()
+{
+    const QQuaternion rotation(0.437479198f, 0.238110855f,
+                               0.121323623f, -0.858601570f);
+    const quint8 upper = ei::runtimeNavigationUpperFaceMask(rotation);
+    QCOMPARE(upper, quint8((1u << 1) | (1u << 3) | (1u << 5)));
+
+    // This authored bridge is almost exactly edge-on. Corner-plane averages
+    // collapse its third and sixth faces to the same float, while the runtime's
+    // transformed canonical normal retains the small positive sign on face 3.
+    const QQuaternion edgeOn(-0.162391290f, 0.328814894f,
+                             0.057505954f, 0.928548813f);
+    QCOMPARE(ei::runtimeNavigationUpperFaceMask(edgeOn),
+             quint8((1u << 2) | (1u << 3) | (1u << 4)));
+
+    QVector3D first;
+    QVector3D opposite;
+    ei::runtimeNavigationBounds(
+        QVector3D(0.0f, 0.0f, 2.81452703f),
+        QVector3D(0.07852548f, 0.07852536f, -2.87352133f),
+        QVector3D(-0.07852548f, -0.07852536f, 2.87352133f),
+        QVector3D(), &first, &opposite);
+    QVERIFY(first.x() > opposite.x());
+    QVERIFY(first.y() > opposite.y());
+    QVERIFY(first.z() < opposite.z());
 }
 
 void AiGraphDocumentTests::regenerationUsesRuntimeRouteWeightScale()

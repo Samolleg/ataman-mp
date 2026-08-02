@@ -42,6 +42,8 @@ public:
     void drawSelect(QOpenGLShaderProgram* program);
     void setParentName(const QString& name) { m_parentName = name.toLower(); }
     const QString& parentName() const { return m_parentName; }
+    void setAssemblySourceOrder(int order) { m_assemblySourceOrder = order; }
+    int assemblySourceOrder() const { return m_assemblySourceOrder; }
     void setRestOffset(const QVector3D& offset) { m_restOffset = offset; }
     const QVector3D& restOffset() const { return m_restOffset; }
     void setTextureNumber(int textureNumber) { m_textureNumber = textureNumber; }
@@ -87,6 +89,7 @@ private:
 
     QString m_name;
     QString m_parentName;
+    int m_assemblySourceOrder{-1};
     QVector3D m_restOffset;
     int m_textureNumber{0};
     float m_textureUvScale{1.0f};

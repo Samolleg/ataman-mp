@@ -137,7 +137,8 @@ public:
                                           CValidationReport* report = nullptr);
     bool buildGeneratedAiGraphCandidate(QByteArray* data,
                                         QString* error = nullptr,
-                                        QString* sourceDescription = nullptr);
+                                        QString* sourceDescription = nullptr,
+                                        bool forceRegeneration = false);
     void refreshAiGraphOwnership();
     bool loadMob(QFileInfo& filePath);
     void saveMobAs();
@@ -701,7 +702,8 @@ private:
     QToolButton* m_aiGraphPreviewToggle{nullptr};
     QToolButton* m_aiGraphPreviewCollapse{nullptr};
     QToolButton* m_aiGraphRegenerateButton{nullptr};
-    QToolButton* m_aiGraphUseLoadedButton{nullptr};
+    QToolButton* m_aiGraphCompareButton{nullptr};
+    QToolButton* m_aiGraphSourceSelectorButton{nullptr};
     QToolButton* m_aiGraphPersistButton{nullptr};
     QSlider* m_aiGraphLayerSlider{nullptr};
     QLabel* m_aiGraphLayerLabel{nullptr};
@@ -730,7 +732,7 @@ private:
     bool m_aiGraphAutoRegenerationEnabled{false};
     bool m_aiGraphRegenerationPending{false};
     bool m_aiGraphRegeneratedFresh{false};
-    bool m_aiGraphLoadedOverride{false};
+    bool m_aiGraphPreviewUsesLoadedSource{true};
     bool m_aiGraphPreviewVisible{false};
     bool m_aiGraphOverlayDirty{true};
     QVector<QVector3D> m_aiGraphOpenLinks;

@@ -11,6 +11,8 @@ bool aiGraphEmbeddedSourceShadowsExternal(bool primaryMobHasEmbeddedGraph);
 QString aiGraphSharedMobWarning(const QString& mobFileName,
                                 const QStringList& mapOwners);
 QString aiGraphPersistenceActionNotice(const QString& selectedSource);
+QString aiGraphPreviewSelectionLabel(bool usesLoadedSource,
+                                     const QString& loadedSourceLabel);
 
 struct SAiGraphPreviewSource
 {

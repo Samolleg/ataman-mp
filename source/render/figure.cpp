@@ -1,6 +1,7 @@
 #include <QDebug>
 #include <QVector4D>
 #include "figure.h"
+#include "../core/map_object_placement_policy.h"
 #include "figure_vertex_component.h"
 
 void calcComplection(QVector3D& complexPoint, QVector<QVector3D>& data,
@@ -329,6 +330,7 @@ void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complectio
         CPart* part = new CPart();
         part->setName(m_name);
         part->setParentName(m_parentName);
+        part->setAssemblySourceOrder(m_assemblySourceOrder);
         QVector3D restOffset;
         calcComplection(restOffset, m_offset, complection);
         part->setRestOffset(restOffset);
@@ -341,11 +343,11 @@ void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complectio
             calcComplection(authoredCenter, m_morphCenter, complection);
             calcComplection(authoredMinimum, m_morphMin, complection);
             calcComplection(authoredMaximum, m_morphMax, complection);
-            QVector3D minimum = authoredCenter + authoredMinimum + restOffset;
-            QVector3D maximum = authoredCenter + authoredMaximum + restOffset;
-            for(int axis = 0; axis < 3; ++axis)
-                if(minimum[axis] > maximum[axis])
-                    qSwap(minimum[axis], maximum[axis]);
+            QVector3D minimum;
+            QVector3D maximum;
+            ei::runtimeNavigationBounds(
+                authoredCenter, authoredMinimum, authoredMaximum, restOffset,
+                &minimum, &maximum);
             part->setAuthoredNavigationBounds(minimum, maximum);
         }
         part->setTextureNumber(m_textureNumber);
