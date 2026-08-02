@@ -41,6 +41,7 @@ renderFog
 renderSceneLights
 renderShadowQuality
 renderShadowDistance
+renderTerrainShadows
 renderTextureMipmapping
 overrideWorldTime
 renderTimeOfDay

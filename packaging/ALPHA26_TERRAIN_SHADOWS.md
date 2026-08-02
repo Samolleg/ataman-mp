@@ -15,6 +15,9 @@
 - Terrain edits and sun-direction changes rebuild the cached visibility field.
   Disabling the option uploads full terrain visibility immediately after Apply
   or Save/Close, without requiring camera movement.
+- Corrected the Render option registry so **Terrain casts directional shadows**
+  is actually applied and persisted. The earlier checkbox was visible but its
+  value was omitted from the live Render option set, which forced shadows on.
 - Restored the native outdoor clock angle after the first terrain-shadow pass
   had reversed it by half a turn. Terrain self-shadows use the accepted proxy's
   three-times reach while object projections retain the native elevation curve.

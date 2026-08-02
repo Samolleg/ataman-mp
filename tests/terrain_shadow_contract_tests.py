@@ -11,9 +11,11 @@ class TerrainShadowContractTests(unittest.TestCase):
     def test_terrain_shadow_is_a_distinct_persisted_toggle(self):
         settings = (ROOT / "source/app/settings.cpp").read_text(encoding="utf-8")
         settings_ui = (ROOT / "source/app/settings.ui").read_text(encoding="utf-8")
+        option_sets = (ROOT / "assets/resources/optSet.txt").read_text(encoding="utf-8")
 
         self.assertIn('COptBool("renderTerrainShadows"', settings)
         self.assertIn('name="renderTerrainShadows"', settings_ui)
+        self.assertIn("renderTerrainShadows", option_sets)
 
     def test_terrain_uses_heightfield_visibility_not_shadow_atlas_self_comparison(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")

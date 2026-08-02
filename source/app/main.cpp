@@ -1542,6 +1542,7 @@ int runHeadlessCommand(QApplication& app)
         bool settingsButtonLayoutWorks = false;
         bool settingsApplySignal = false;
         bool renderOptionsRegistered = false;
+        bool terrainShadowToggleApplies = false;
         {
             const QString previousDirectory = QDir::currentPath();
             QTemporaryDir settingsDirectory;
@@ -1596,14 +1597,20 @@ int runHeadlessCommand(QApplication& app)
                     settingsWindow.opt(eOptSetRender, "renderLightingMode"));
                 COptBool* renderMipmapping = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "renderTextureMipmapping"));
+                COptBool* renderTerrainShadows = dynamic_cast<COptBool*>(
+                    settingsWindow.opt(eOptSetRender, "renderTerrainShadows"));
+                QCheckBox* renderTerrainShadowsCheck =
+                    settingsWindow.findChild<QCheckBox*>("renderTerrainShadows");
                 renderOptionsRegistered = animateUnits && animateUnits->value()
                         && performanceCounters && !performanceCounters->value()
                         && renderVsync && renderVsync->value()
                         && renderFpsCap && renderFpsCap->value() == 0
                         && renderLightingMode && renderLightingMode->value() == 2
                         && renderMipmapping && renderMipmapping->value()
+                        && renderTerrainShadows && renderTerrainShadows->value()
                         && settingsWindow.findChild<QCheckBox*>("renderVSync")
                         && settingsWindow.findChild<QCheckBox*>("renderTextureMipmapping")
+                        && renderTerrainShadowsCheck
                         && settingsWindow.findChild<QLineEdit*>("renderFpsCap");
                 if(historyShortcut && duplicateShortcut && stopTestShortcut)
                 {
@@ -1616,8 +1623,12 @@ int runHeadlessCommand(QApplication& app)
                         cameraWheelGesture->setCurrentIndex(2);
                     if(uiScale)
                         uiScale->setValue(150);
+                    if(renderTerrainShadowsCheck)
+                        renderTerrainShadowsCheck->setChecked(false);
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
                     settingsApplyKeepsOpen = settingsWindow.isVisible();
+                    terrainShadowToggleApplies = renderTerrainShadows
+                        && !renderTerrainShadows->value();
                     COptString* saved = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "shortcutHistory"));
                     settingsShortcutsPersist = saved && saved->value() == "Alt+L"
@@ -2011,6 +2022,7 @@ int runHeadlessCommand(QApplication& app)
                 && settingsButtonLayoutWorks
                 && sessionIdentityRoundTrip
                 && renderOptionsRegistered
+                && terrainShadowToggleApplies
                 && secondaryWindowsClosed
                 && deletingSecondaryWindowClosedSafely
                 && pasteSingleAction && pasteUndoAtomic && pasteRedoAtomic
@@ -2126,6 +2138,7 @@ int runHeadlessCommand(QApplication& app)
                << " sessionIdentityRoundTrip=" << sessionIdentityRoundTrip
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
+               << " terrainShadowToggleApplies=" << terrainShadowToggleApplies
                << " secondaryWindowsClosed=" << secondaryWindowsClosed
                << " deletingSecondaryWindowClosedSafely=" << deletingSecondaryWindowClosedSafely
                << " pasteSingleAction=" << pasteSingleAction
