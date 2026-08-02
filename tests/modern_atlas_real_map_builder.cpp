@@ -387,6 +387,7 @@ QByteArray reviewImageHash(const QImage& source)
 QJsonObject writeBlendMaskReview(
     const CTerrainVirtualAtlas& atlas, const QVector<qint32>& materialIds,
     const QMap<qint32, QString>& names,
+    const QMap<qint32, QImage>& externalSources,
     const QMap<QString, QImage>& stockBlendExamples,
     const QString& outputDirectory, QString* error)
 {
@@ -432,10 +433,39 @@ QJsonObject writeBlendMaskReview(
         if(error) *error = QStringLiteral("Could not create %1").arg(reviewDirectory);
         return {};
     }
+    const QString uniformDirectory = QDir(reviewDirectory).filePath(
+        QStringLiteral("uniform-materials"));
+    if(!QDir().mkpath(uniformDirectory))
+    {
+        if(error) *error = QStringLiteral("Could not create %1")
+            .arg(uniformDirectory);
+        return {};
+    }
+    QMap<qint32, QString> uniformFiles;
+    for(qint32 id : materialIds)
+    {
+        const QImage uniform = externalSources.value(id);
+        if(uniform.isNull())
+        {
+            if(error) *error = QStringLiteral(
+                "Missing proven four-corner uniform source for material %1")
+                .arg(id);
+            return {};
+        }
+        const QString relative = QStringLiteral("uniform-materials/%1.png")
+            .arg(id);
+        if(!uniform.save(QDir(reviewDirectory).filePath(relative), "PNG"))
+        {
+            if(error) *error = QStringLiteral("Could not write %1").arg(relative);
+            return {};
+        }
+        uniformFiles.insert(id, relative);
+    }
     QByteArray csv("sheet,row,column,owner_material_id,owner_material,owner_style,"
                    "support_scenario,support_material_id,support_material,topology,"
                    "variation,provenance,mask_sha256,missing,source_example_sheet,"
-                   "source_example_missing\n");
+                   "source_example_missing,result_example_sheet,"
+                   "result_example_missing,owner_uniform,support_uniform\n");
     const auto csvText = [](QString value) {
         value.replace('"', QStringLiteral("\"\""));
         return QByteArray("\"") + value.toUtf8() + QByteArray("\"");
@@ -460,14 +490,22 @@ QJsonObject writeBlendMaskReview(
             QImage examples(columns * tileSize, rowCount * tileSize,
                             QImage::Format_RGB888);
             examples.fill(QColor(36, 36, 36));
+            QImage results(columns * tileSize, rowCount * tileSize,
+                           QImage::Format_RGB888);
+            results.fill(QColor(36, 36, 36));
             QPainter painter(&sheet);
             QPainter examplePainter(&examples);
+            QPainter resultPainter(&results);
             painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
             examplePainter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+            resultPainter.setRenderHint(QPainter::SmoothPixmapTransform, false);
             const QString sheetName = QStringLiteral("%1-%2.png")
                 .arg(slug(CTerrainVirtualAtlas::blendStyleName(ownerStyle)))
                 .arg(page + 1, 2, 10, QLatin1Char('0'));
             const QString exampleSheetName = QStringLiteral("%1-%2-sources.png")
+                .arg(slug(CTerrainVirtualAtlas::blendStyleName(ownerStyle)))
+                .arg(page + 1, 2, 10, QLatin1Char('0'));
+            const QString resultSheetName = QStringLiteral("%1-%2-results.png")
                 .arg(slug(CTerrainVirtualAtlas::blendStyleName(ownerStyle)))
                 .arg(page + 1, 2, 10, QLatin1Char('0'));
             for(int localRow = 0; localRow < rowCount; ++localRow)
@@ -499,8 +537,16 @@ QJsonObject writeBlendMaskReview(
                             ? owner : (topology.ownerCorners >= 3 ? owner : support);
                         signature.southWest = support;
                         QString provenance;
+                        const qint32 canonicalMaskOwner = qMin(owner, support);
                         QImage mask = atlas.reviewBlendMask(
-                            signature, owner, topology.variation, &provenance);
+                            signature, canonicalMaskOwner,
+                            topology.variation, &provenance);
+                        // Generation deterministically chooses the smaller
+                        // material id as its first ownership channel. Review
+                        // cards consistently show white as the requested
+                        // material without reselecting a different source mask.
+                        if(!mask.isNull() && canonicalMaskOwner != owner)
+                            mask.invertPixels();
                         const int column = scenario * topologies.size()
                             + topologyIndex;
                         if(mask.isNull())
@@ -539,8 +585,30 @@ QJsonObject writeBlendMaskReview(
                                 localRow * tileSize,
                                 sourceExample.scaled(tileSize, tileSize,
                                     Qt::IgnoreAspectRatio, Qt::FastTransformation));
+                        CValidationReport blendReport;
+                        QString resultProvenance;
+                        const QImage generatedResult = atlas.reviewGeneratedBlend(
+                            signature, topology.variation, &resultProvenance,
+                            &blendReport);
+                        if(generatedResult.isNull())
+                            resultPainter.fillRect(column * tileSize,
+                                localRow * tileSize, tileSize, tileSize,
+                                QColor(180, 0, 180));
+                        else
+                            resultPainter.drawImage(column * tileSize,
+                                localRow * tileSize,
+                                generatedResult.scaled(tileSize, tileSize,
+                                    Qt::IgnoreAspectRatio, Qt::FastTransformation));
+                        if(!generatedResult.isNull()
+                            && resultProvenance != provenance)
+                        {
+                            if(error) *error = QStringLiteral(
+                                "Mask/result provenance mismatch for %1 %2")
+                                .arg(owner).arg(topology.name);
+                            return {};
+                        }
                         csv += csvText(sheetName) + ','
-                            + QByteArray::number(firstRow + localRow) + ','
+                            + QByteArray::number(localRow) + ','
                             + QByteArray::number(column) + ','
                             + QByteArray::number(owner) + ','
                             + csvText(names.value(owner)) + ','
@@ -555,11 +623,16 @@ QJsonObject writeBlendMaskReview(
                                 : QString::fromLatin1(reviewImageHash(mask))) + ','
                             + QByteArray::number(mask.isNull()) + ','
                             + csvText(exampleSheetName) + ','
-                            + QByteArray::number(sourceExample.isNull()) + '\n';
+                            + QByteArray::number(sourceExample.isNull()) + ','
+                            + csvText(resultSheetName) + ','
+                            + QByteArray::number(generatedResult.isNull()) + ','
+                            + csvText(uniformFiles.value(owner)) + ','
+                            + csvText(uniformFiles.value(support)) + '\n';
                     }
             }
             painter.end();
             examplePainter.end();
+            resultPainter.end();
             if(!sheet.save(QDir(reviewDirectory).filePath(sheetName), "PNG"))
             {
                 if(error) *error = QStringLiteral("Could not write mask sheet %1")
@@ -574,9 +647,18 @@ QJsonObject writeBlendMaskReview(
                     .arg(exampleSheetName);
                 return {};
             }
+            if(!results.save(QDir(reviewDirectory).filePath(resultSheetName),
+                             "PNG"))
+            {
+                if(error) *error = QStringLiteral(
+                    "Could not write generated result sheet %1")
+                    .arg(resultSheetName);
+                return {};
+            }
             QJsonObject sheetEntry;
             sheetEntry.insert(QStringLiteral("file"), sheetName);
             sheetEntry.insert(QStringLiteral("source_examples"), exampleSheetName);
+            sheetEntry.insert(QStringLiteral("generated_results"), resultSheetName);
             sheetEntry.insert(QStringLiteral("style"),
                 CTerrainVirtualAtlas::blendStyleName(ownerStyle));
             sheetEntry.insert(QStringLiteral("first_row"), firstRow);
@@ -589,10 +671,13 @@ QJsonObject writeBlendMaskReview(
                    csv, error)) return {};
     QJsonObject manifest;
     manifest.insert(QStringLiteral("schema"),
-                    QStringLiteral("ei-stock-derived-blend-mask-review-v1"));
+                    QStringLiteral("ei-stock-derived-blend-mask-review-v2"));
     manifest.insert(QStringLiteral("meaning"),
         QStringLiteral("White is the requested brush material; black is support. "
                        "Every cell is the exact stock-derived mask selected by generation."));
+    manifest.insert(QStringLiteral("comparison_assets"),
+        QStringLiteral("Each indexed cell includes full requested/support uniform tiles, "
+                       "the authored stock transition, and the exact generated result."));
     manifest.insert(QStringLiteral("material_count"), materialIds.size());
     manifest.insert(QStringLiteral("selected_masks"), totalMasks);
     manifest.insert(QStringLiteral("missing_masks"), missingMasks);
@@ -875,7 +960,7 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         return result;
     }
     const QJsonObject maskReview = writeBlendMaskReview(
-        atlas, stampIds, names, stockBlendExamples,
+        atlas, stampIds, names, externalSources, stockBlendExamples,
         outputDirectory, &result.error);
     if(maskReview.isEmpty()) return result;
     QByteArray materialIndex(

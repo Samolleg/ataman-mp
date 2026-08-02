@@ -407,6 +407,7 @@ private slots:
     void missingStockMaskNeverFallsBackToProceduralArtwork();
     void authoredMapMasksAreAvailableBeforeFirstStroke();
     void selectedStockMasksAreReviewableAndDeterministic();
+    void generatedReviewOutcomeUsesRuntimeBlendGenerator();
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
     void generatesFourFamilyTupleWithOrientation();
@@ -524,6 +525,39 @@ void TerrainVirtualAtlasTests::authoredGlobalBlendIsImportedBeforeGeneration()
         keptImportedPixels |= tile.authored && tile.sourceSlot < 0
             && tile.pixels == authoredBlend;
     QVERIFY(keptImportedPixels);
+}
+
+void TerrainVirtualAtlasTests::generatedReviewOutcomeUsesRuntimeBlendGenerator()
+{
+    Fixture fixture;
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x6248u);
+    seedReviewedStockMasks(atlas, fixture);
+    const STerrainTransitionSignature requested = signature(1, 2, 2, 2);
+    QVector<QImage> reviewed;
+    for(int variation = 0;
+        variation < CTerrainVirtualAtlas::blendVariationLimit(requested);
+        ++variation)
+    {
+        QString provenance;
+        CValidationReport report;
+        const QImage result = atlas.reviewGeneratedBlend(
+            requested, variation, &provenance, &report);
+        QVERIFY2(!result.isNull(), qPrintable(report.toText()));
+        QVERIFY(!provenance.isEmpty());
+        reviewed.append(result);
+    }
+    bool matchedRuntime = false;
+    for(int y = 0; y < 16 && !matchedRuntime; ++y)
+        for(int x = 0; x < 16 && !matchedRuntime; ++x)
+        {
+            CValidationReport report;
+            const STerrainVirtualTile tile = atlas.resolve(
+                requested, x, y, &report);
+            QVERIFY2(tile.generatedIndex >= 0, qPrintable(report.toText()));
+            matchedRuntime = reviewed.contains(
+                atlas.generatedTiles().at(tile.generatedIndex).pixels);
+        }
+    QVERIFY(matchedRuntime);
 }
 
 void TerrainVirtualAtlasTests::missingStockMaskNeverFallsBackToProceduralArtwork()

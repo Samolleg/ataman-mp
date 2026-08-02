@@ -181,6 +181,13 @@ public:
         const STerrainTransitionSignature& gridSignature,
         qint32 ownerMaterial, int variation = 0,
         QString* provenance = nullptr) const;
+    // Renders the exact generated pixels used for a missing transition while
+    // deliberately bypassing authored-tile lookup. Review tooling uses this to
+    // show the outcome of the selected stock-derived mask beside its sources.
+    QImage reviewGeneratedBlend(
+        const STerrainTransitionSignature& gridSignature,
+        int variation = 0, QString* provenance = nullptr,
+        CValidationReport* report = nullptr) const;
     const QVector<STerrainFinalizedTile>& generatedTiles() const
         { return m_generatedTiles; }
 

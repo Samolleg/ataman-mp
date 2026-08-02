@@ -1294,6 +1294,14 @@ QImage CTerrainVirtualAtlas::generateTile(
     return result;
 }
 
+QImage CTerrainVirtualAtlas::reviewGeneratedBlend(
+    const STerrainTransitionSignature& gridSignature, int variation,
+    QString* provenance, CValidationReport* report) const
+{
+    return generateTile(gridSignature, blendStyleForSignature(gridSignature),
+                        qMax(0, variation), provenance, report);
+}
+
 bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     const STerrainTransitionSignature& signature, const QImage& pixels,
     const QString& sourceLabel, CValidationReport* report)
