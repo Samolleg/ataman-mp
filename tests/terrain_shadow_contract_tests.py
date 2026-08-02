@@ -104,6 +104,25 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("farStaticHash.addData(staticCasterFingerprint)", static_hash)
         self.assertIn("item.instanceMatrix.constData()", render_queue)
 
+    def test_static_shadow_fingerprint_is_independent_of_submission_order(self):
+        render_queue = (ROOT / "source/render/render_queue.cpp").read_text(
+            encoding="utf-8")
+
+        fingerprint = render_queue.split(
+            "QByteArray RenderQueueContext::staticShadowFingerprint() const", 1)[1].split(
+                "void RenderQueueContext::flushShadow", 1)[0]
+        self.assertIn("QVector<QByteArray> casterRecords", fingerprint)
+        self.assertIn("std::sort(casterRecords.begin(), casterRecords.end())", fingerprint)
+
+    def test_sector_rebuild_keeps_last_completed_terrain_shadow_visible(self):
+        landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
+
+        preview = landscape.split(
+            "bool CLandscape::previewCanonicalSector", 1)[1].split(
+                "bool CLandscape::previewCanonicalOverlaySector", 1)[0]
+        self.assertIn("m_terrainShadowFieldEnabled", preview)
+        self.assertIn("applyTerrainShadowVisibility", preview)
+
     def test_disabling_toggle_immediately_uploads_fully_visible_terrain(self):
         landscape = (ROOT / "source/render/landscape.cpp").read_text(encoding="utf-8")
 

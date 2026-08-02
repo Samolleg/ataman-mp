@@ -215,7 +215,9 @@ QVector<SShadowCasterGroup> RenderQueueContext::shadowCasterGroups(
     std::sort(result.begin(), result.end(), [](const SShadowCasterGroup& left,
                                                const SShadowCasterGroup& right)
     {
-        return left.cameraDistanceSquared < right.cameraDistanceSquared;
+        if(left.cameraDistanceSquared != right.cameraDistanceSquared)
+            return left.cameraDistanceSquared < right.cameraDistanceSquared;
+        return left.owner < right.owner;
     });
     return result;
 }
@@ -240,19 +242,34 @@ QVector<SShadowCasterBounds> RenderQueueContext::shadowCasterBounds(
 
 QByteArray RenderQueueContext::staticShadowFingerprint() const
 {
-    QCryptographicHash hash(QCryptographicHash::Sha256);
+    QVector<QByteArray> casterRecords;
+    casterRecords.reserve(m_items.size());
     for(const SRenderItem& item : m_items)
     {
         if(!item.castsShadow || item.dynamicShadow)
             continue;
-        hash.addData(reinterpret_cast<const char*>(&item.meshIdentity), sizeof(item.meshIdentity));
+        QByteArray record;
+        record.reserve(int(sizeof(item.meshIdentity) + sizeof(quintptr)
+                           + sizeof(int) + 16 * sizeof(float)));
+        record.append(reinterpret_cast<const char*>(&item.meshIdentity),
+                      int(sizeof(item.meshIdentity)));
         const quintptr textureIdentity = quintptr(item.texture);
-        hash.addData(reinterpret_cast<const char*>(&textureIdentity), sizeof(textureIdentity));
+        record.append(reinterpret_cast<const char*>(&textureIdentity),
+                      int(sizeof(textureIdentity)));
         const int materialClass = int(item.materialClass);
-        hash.addData(reinterpret_cast<const char*>(&materialClass), sizeof(materialClass));
-        hash.addData(reinterpret_cast<const char*>(item.instanceMatrix.constData()),
-                     16 * int(sizeof(float)));
+        record.append(reinterpret_cast<const char*>(&materialClass),
+                      int(sizeof(materialClass)));
+        record.append(reinterpret_cast<const char*>(item.instanceMatrix.constData()),
+                      16 * int(sizeof(float)));
+        casterRecords.append(record);
     }
+    // Selection changes when a caster is submitted (normal color pass versus
+    // shadow-only collection), not what it is. Canonicalize records so that UI
+    // selection cannot invalidate and blank/rebuild the static atlases.
+    std::sort(casterRecords.begin(), casterRecords.end());
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(const QByteArray& record : casterRecords)
+        hash.addData(record);
     return hash.result();
 }
 

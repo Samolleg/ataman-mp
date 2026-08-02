@@ -750,6 +750,18 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
         || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
         return false;
     const bool updated = m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
+    // Rebuilding the sector recreates its lit vertex buffer with neutral
+    // visibility. Keep the last completed field on-screen while the newer
+    // generation is calculated asynchronously; otherwise every sculpt stamp
+    // flashes this sector fully lit before the worker publishes.
+    if(updated && m_terrainShadowFieldEnabled)
+    {
+        const int gridWidth = int(widthInWorldUnits()) + 1;
+        const int gridHeight = int(heightInWorldUnits()) + 1;
+        if(m_terrainShadowVisibility.size() == gridWidth * gridHeight)
+            m_aSector[ySec][xSec]->applyTerrainShadowVisibility(
+                m_terrainShadowVisibility, gridWidth, gridHeight);
+    }
     return updated;
 }
 
