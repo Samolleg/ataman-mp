@@ -60,20 +60,31 @@ async function main() {
       for (const item of items) {
         const card = document.querySelector(`[data-key="${item.key}"]`);
         if (!card) { errors.push(`missing ${item.key}`); continue; }
-        const expectedPosition = `${-item.column * 256}px ${-item.row * 256}px`;
-        const checks = [
-          [card.querySelector(".requested-uniform img")?.getAttribute("src"), `../blend-mask-review/${item.ownerUniform}`, "requested uniform"],
-          [card.querySelector(".support-uniform img")?.getAttribute("src"), `../blend-mask-review/${item.supportUniform}`, "support uniform"],
-          [card.querySelector(".ownership-mask .sprite")?.style.backgroundImage, item.maskSheet, "mask sheet"],
-          [card.querySelector(".resulting-blend .sprite")?.style.backgroundImage, item.resultSheet, "result sheet"],
-          [card.querySelector(".authored-source .sprite")?.style.backgroundImage, item.sourceSheet, "source sheet"],
-        ];
-        for (const [actual, expected, label] of checks)
+        const first = item.examples[0];
+        const sharedPosition = `${-first.column * 256}px ${-first.row * 256}px`;
+        for (const [actual, expected, label] of [
+          [card.querySelector(".ownership-mask .sprite")?.style.backgroundImage, first.maskSheet, "mask sheet"],
+          [card.querySelector(".authored-source .sprite")?.style.backgroundImage, first.sourceSheet, "source sheet"],
+        ])
           if (!actual || !actual.includes(expected))
             errors.push(`${item.key} ${label}: ${actual} != ${expected}`);
-        for (const sprite of card.querySelectorAll(".sprite"))
-          if (sprite.style.backgroundPosition !== expectedPosition)
-            errors.push(`${item.key} position: ${sprite.style.backgroundPosition} != ${expectedPosition}`);
+        for (const sprite of card.querySelectorAll(".shared-evidence .sprite"))
+          if (sprite.style.backgroundPosition !== sharedPosition)
+            errors.push(`${item.key} shared position: ${sprite.style.backgroundPosition} != ${sharedPosition}`);
+        for (const example of item.examples) {
+          const block = card.querySelector(`[data-application-key="${example.oldKey}"]`);
+          if (!block) { errors.push(`missing example ${example.oldKey}`); continue; }
+          for (const [actual, expected, label] of [
+            [block.querySelector(".requested-uniform img")?.getAttribute("src"), `/${example.ownerUniform}`, "requested uniform"],
+            [block.querySelector(".support-uniform img")?.getAttribute("src"), `/${example.supportUniform}`, "support uniform"],
+            [block.querySelector(".resulting-blend .sprite")?.style.backgroundImage, example.resultSheet, "result sheet"],
+          ])
+            if (!actual || !actual.includes(expected))
+              errors.push(`${example.oldKey} ${label}: ${actual} != ${expected}`);
+          const expectedPosition = `${-example.column * 256}px ${-example.row * 256}px`;
+          if (block.querySelector(".resulting-blend .sprite")?.style.backgroundPosition !== expectedPosition)
+            errors.push(`${example.oldKey} result position mismatch`);
+        }
         if (errors.length >= 20) break;
       }
       return errors;
@@ -87,7 +98,7 @@ async function main() {
       loadedImages: [...card.querySelectorAll("img")].every(image => image.complete && image.naturalWidth === 256 && image.naturalHeight === 256),
       backgrounds: [...card.querySelectorAll(".sprite")].every(sprite => getComputedStyle(sprite).backgroundImage !== "none")
     }));
-    if (imageState.figures !== 5 || !imageState.loadedImages || !imageState.backgrounds)
+    if (imageState.figures < 5 || !imageState.loadedImages || !imageState.backgrounds)
       throw new Error(`first-card visuals ${JSON.stringify(imageState)}`);
     const key = await first.getAttribute("data-key");
     await first.locator(".answer").selectOption({ label: "Reject: wrong orientation" });
@@ -105,7 +116,8 @@ async function main() {
     await page.locator("#style-filter").selectOption("");
     await page.locator("#show-answers").click();
     const exportText = await page.locator("#answer-export-text").inputValue();
-    if (!exportText.includes(`${key}: Reject: wrong orientation — browser persistence check`)
+    if (!exportText.includes(`${key}: Reject: wrong orientation`)
+        || !exportText.includes("browser persistence check")
         || !exportText.includes("Apply only explicit mask decisions"))
       throw new Error("export text contract failed");
     await page.locator("#submit-answers").click();
@@ -122,7 +134,8 @@ async function main() {
     }
     if (errors.length) throw new Error(`browser errors: ${errors.join(" | ")}`);
     console.log(JSON.stringify({ status: "PASS", questions,
-      allCardBindings: "PASS", firstCardFigures: 5,
+      applications: analysis.applicationCount,
+      allCardBindings: "PASS", firstCardFigures: imageState.figures,
       persistence: "PASS", styleFilterVisible: visible, export: "PASS",
       directSubmit: "PASS", consoleErrors: 0, screenshot: screenshotPath,
       fragment: fragmentPath }, null, 2));

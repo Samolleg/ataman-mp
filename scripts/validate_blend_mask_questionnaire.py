@@ -17,8 +17,10 @@ def validate(review: Path, questionnaire: Path) -> dict:
     with (review / "index.csv").open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     document = questionnaire.read_text(encoding="utf-8")
+    analysis = json.loads((questionnaire.parent / "blend-mask-analysis.json").read_text(
+        encoding="utf-8"))
     errors: list[str] = []
-    keys: set[str] = set()
+    application_keys: set[str] = set()
     uniform_files: set[str] = set()
     sheet_dimensions: dict[str, tuple[int, int]] = {}
     missing_fields = ("missing", "source_example_missing",
@@ -26,11 +28,9 @@ def validate(review: Path, questionnaire: Path) -> dict:
     for number, row in enumerate(rows, 1):
         key = (f'mask-{row["owner_material_id"]}-'
                f'{row["support_scenario"]}-{row["topology"]}')
-        if key in keys:
+        if key in application_keys:
             errors.append(f"duplicate key {key}")
-        keys.add(key)
-        if f'data-key="{key}"' not in document:
-            errors.append(f"HTML missing {key}")
+        application_keys.add(key)
         for field in missing_fields:
             if row.get(field) != "0":
                 errors.append(f"row {number} {field}={row.get(field)!r}")
@@ -64,15 +64,38 @@ def validate(review: Path, questionnaire: Path) -> dict:
             errors.append(f"HTML missing contract marker {needle}")
     if "Not answered" in document:
         errors.append("HTML contains forbidden Not answered option")
+    questions = analysis.get("questions", [])
+    grouped_keys = [question.get("key", "") for question in questions]
+    if len(grouped_keys) != len(set(grouped_keys)):
+        errors.append("analysis has duplicate grouped keys")
+    for key in grouped_keys:
+        if f'data-key="{key}"' not in document:
+            errors.append(f"HTML missing grouped question {key}")
+    analyzed_applications = {
+        application["oldKey"]
+        for question in questions
+        for application in question.get("applications", [])
+    }
+    if analyzed_applications != application_keys:
+        errors.append(
+            f"analysis application coverage differs: {len(analyzed_applications)} != {len(application_keys)}")
+    for question in questions:
+        applications = question.get("applications", [])
+        examples = question.get("examples", [])
+        if question.get("applicationCount") != len(applications):
+            errors.append(f'{question.get("key")} applicationCount mismatch')
+        if not examples or len(examples) > 4:
+            errors.append(f'{question.get("key")} has {len(examples)} examples')
     question_count = document.count('class="mask-question"')
-    if question_count != len(rows):
-        errors.append(f"question count {question_count} != index rows {len(rows)}")
+    if question_count != len(questions):
+        errors.append(f"question count {question_count} != analysis questions {len(questions)}")
     if errors:
         raise ValueError("\n".join(errors[:100]))
     return {
         "status": "PASS",
-        "questions": len(rows),
-        "keys": len(keys),
+        "questions": len(questions),
+        "applications": len(rows),
+        "keys": len(grouped_keys),
         "uniformTiles": len(uniform_files),
         "spriteSheets": len(sheet_dimensions),
         "missingVisuals": 0,
