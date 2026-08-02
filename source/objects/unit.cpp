@@ -950,7 +950,7 @@ void CUnit::collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENod
     if (comm != eUnit)
         return;
 
-    editorLogic()->collectlogicParams(aProp);
+    editorLogic()->collectlogicParams(aProp, m_editorLogicIndex == 0);
 }
 
 void CUnit::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
@@ -1369,10 +1369,11 @@ CLogic::~CLogic()
 
 void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
 {
-    const bool disabledAuthoringPreview = !m_use
+    const bool effectivelyEnabled = m_parent->editorLogicIndex() == 0 || m_use;
+    const bool disabledAuthoringPreview = !effectivelyEnabled
         && isActive
         && CScene::getInstance()->getMode() == eEditModeLogic;
-    if(!m_use && !disabledAuthoringPreview)
+    if(!effectivelyEnabled && !disabledAuthoringPreview)
         return;
 
     drawHelp(isActive, program);
@@ -1468,9 +1469,10 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
 
 void CLogic::drawSelect(QOpenGLShaderProgram* program)
 {
-    const bool disabledAuthoringPreview = !m_use
+    const bool effectivelyEnabled = m_parent->editorLogicIndex() == 0 || m_use;
+    const bool disabledAuthoringPreview = !effectivelyEnabled
         && CScene::getInstance()->getMode() == eEditModeLogic;
-    if(!m_use && !disabledAuthoringPreview)
+    if(!effectivelyEnabled && !disabledAuthoringPreview)
         return;
 
     COptBool* pOpt = dynamic_cast<COptBool*>(CObjectList::getInstance()->settings()->opt("drawLogic"));
@@ -1724,7 +1726,7 @@ void CLogic::generateVisibleLogicVBO()
 
 void CLogic::drawHelp(bool isActive, QOpenGLShaderProgram *program)
 {
-    if(!m_use || m_aHelpPoint.empty())
+    if((m_parent->editorLogicIndex() != 0 && !m_use) || m_aHelpPoint.empty())
         return;
 
     if(!isActive)
@@ -1834,9 +1836,10 @@ void CLogic::clearLogicPaths()
     m_aPatrolPt.clear();
 }
 
-void CLogic::collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp)
+void CLogic::collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp,
+                                bool effectivelyEnabled)
 {
-    propBool enabled(eObjParam_LOGIC_USE, m_use != 0);
+    propBool enabled(eObjParam_LOGIC_USE, effectivelyEnabled || m_use != 0);
     util::addParam(aProp, &enabled);
     propUint beh(eObjParam_LOGIC_BEHAVIOUR, m_behaviour);
     util::addParam(aProp, &beh);

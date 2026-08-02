@@ -219,6 +219,21 @@ def main() -> int:
             "single-unit active-Logic collection integration")
     require(view, "selectNode(point, false)",
             "aim action selecting the actual Behavior point")
+    require(unit, "m_parent->editorLogicIndex() == 0 || m_use",
+            "Logic 0 effective enabled state for helper rendering")
+    require(view, "prop->type() == eObjParam_LOGIC_USE && m_logicSlotIndex == 0",
+            "Logic 0 enabled-field mutation guard")
+    require(view, "setLogicZeroContext(m_logicSlotIndex == 0)",
+            "read-only Logic 0 enabled field presentation")
+    require(view, "lastVisiblePatrol",
+            "Object Properties Add patrol append target")
+    require(view, "behaviorCollectionOwner(selected)",
+            "patrol/look selection resolving its owner collection")
+    table = source("source/layout_components/tablemanager.cpp")
+    require(table, "restoreScrollPosition();",
+            "property scroll restoration after adding the collection row")
+    require(main_window, "Dirty MOB validation deferred until explicit refresh",
+            "no repeated dirty-candidate serialization during normal editing")
 
     print("behavior authoring contract: PASS")
     return 0

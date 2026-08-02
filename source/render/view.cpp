@@ -1229,9 +1229,18 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
         const uint unitId = unit ? unit->mapId() : 0;
         QTimer::singleShot(0, this, [this, mob, unitId]()
         {
-            CNode* owner = mob && m_aMob.contains(mob)
-                ? mob->nodeByMapId(unitId) : nullptr;
-            if(owner && selectNode(owner, false))
+            CUnit* owner = mob && m_aMob.contains(mob)
+                ? dynamic_cast<CUnit*>(mob->nodeByMapId(unitId)) : nullptr;
+            CPatrolPoint* lastVisiblePatrol = nullptr;
+            CLogic* logic = owner ? owner->logicAt(m_logicSlotIndex) : nullptr;
+            if(logic)
+                for(CPatrolPoint* patrol : logic->patrolPoints())
+                    if(patrol && !patrol->isMarkDeleted())
+                        lastVisiblePatrol = patrol;
+            CNode* appendAfter = lastVisiblePatrol
+                ? static_cast<CNode*>(lastVisiblePatrol)
+                : static_cast<CNode*>(owner);
+            if(appendAfter && selectNode(appendAfter, false))
                 addLogicPoint(false);
         });
     });
@@ -7016,6 +7025,47 @@ bool CView::isMobVisible(CMob* mob) const
     return mob && !m_hiddenMobs.contains(mob);
 }
 
+CUnit* CView::behaviorCollectionOwner(const QList<CNode*>& selection) const
+{
+    if(selection.isEmpty())
+        return nullptr;
+    CUnit* commonOwner = nullptr;
+    for(CNode* selected : selection)
+    {
+        CUnit* owner = dynamic_cast<CUnit*>(selected);
+        if(!owner)
+        {
+            CMob* mob = ownerMob(selected);
+            if(!mob)
+                return nullptr;
+            for(CNode* node : mob->nodes())
+            {
+                CUnit* candidate = dynamic_cast<CUnit*>(node);
+                CLogic* logic = candidate
+                    ? candidate->logicAt(m_logicSlotIndex) : nullptr;
+                if(!logic)
+                    continue;
+                if(CPatrolPoint* patrol = dynamic_cast<CPatrolPoint*>(selected))
+                {
+                    if(logic->owns(patrol))
+                        owner = candidate;
+                }
+                else if(CLookPoint* look = dynamic_cast<CLookPoint*>(selected))
+                {
+                    if(logic->owns(look))
+                        owner = candidate;
+                }
+                if(owner)
+                    break;
+            }
+        }
+        if(!owner || (commonOwner && commonOwner != owner))
+            return nullptr;
+        commonOwner = owner;
+    }
+    return commonOwner;
+}
+
 void CView::setMobVisible(CMob* mob, bool visible)
 {
     if(!mob || !m_aMob.contains(mob) || isMobVisible(mob) == visible)
@@ -10824,10 +10874,12 @@ void CView::viewParameters()
     }
 
     m_tableManager->setNewData(aProp);
-    if(CScene::getInstance()->getMode() == eEditModeLogic
-       && selected.size() == 1)
-        if(CUnit* unit = dynamic_cast<CUnit*>(selected.first()))
+    if(CScene::getInstance()->getMode() == eEditModeLogic)
+    {
+        if(CUnit* unit = behaviorCollectionOwner(selected))
             m_tableManager->setBehaviorCollection(unit, m_logicSlotIndex);
+        m_tableManager->setLogicZeroContext(m_logicSlotIndex == 0);
+    }
     m_tableManager->setReadOnly(!hasEditableSelection());
     emit selectionStateChanged(true);
 }
@@ -10862,6 +10914,8 @@ void CView::setLogicSlotIndex(int index)
 void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
 {
     if(nullptr == m_activeMob)
+        return;
+    if(prop && prop->type() == eObjParam_LOGIC_USE && m_logicSlotIndex == 0)
         return;
 
     QList<CNode*> targets;

@@ -309,6 +309,7 @@ public:
     void reset();
     void setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp);
     void setBehaviorCollection(CUnit* unit, int logicSlot);
+    void setLogicZeroContext(bool logicZero);
     void setReadOnly(bool readOnly);
 
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -326,6 +327,7 @@ private:
                           QString* error) const;
     void pasteRows(const QList<int>& rows);
     void showPropertyContextMenu(const QList<int>& rows, const QPoint& globalPos);
+    void restoreScrollPosition();
 
 signals:
     void onUpdateProperty(const QSharedPointer<IPropertyBase>); //retranslate value changing from ui to view class
@@ -348,6 +350,9 @@ private:
     QMap<int, QSharedPointer<IPropertyBase>> m_rowValues;
     bool m_readOnly{false};
     bool m_torchPropertyContext{false};
+    bool m_logicZeroContext{false};
+    int m_savedVerticalScroll{0};
+    int m_savedHorizontalScroll{0};
 };
 
 #endif // CTABLEMANAGER_H

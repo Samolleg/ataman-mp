@@ -531,6 +531,14 @@ void CTableManager::reset()
     //m_pTable->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents); //adjust whole table. now both columns fill qtablewidget but it occurs blink and offset for main window
 }
 
+void CTableManager::restoreScrollPosition()
+{
+    m_pTable->verticalScrollBar()->setValue(
+        qMin(m_savedVerticalScroll, m_pTable->verticalScrollBar()->maximum()));
+    m_pTable->horizontalScrollBar()->setValue(
+        qMin(m_savedHorizontalScroll, m_pTable->horizontalScrollBar()->maximum()));
+}
+
 void CTableManager::setReadOnly(bool readOnly)
 {
     m_readOnly = readOnly;
@@ -542,6 +550,9 @@ void CTableManager::setReadOnly(bool readOnly)
         if(!widget)
             continue;
         const bool compoundEditor = qobject_cast<C3DItem*>(widget) != nullptr;
+        const bool logicZeroEnabledField = m_logicZeroContext
+            && m_rowValues.contains(row)
+            && m_rowValues.value(row)->type() == eObjParam_LOGIC_USE;
         widget->setProperty("enduranceReadOnly", readOnly);
         if(QLineEdit* line = qobject_cast<QLineEdit*>(widget))
             line->setReadOnly(readOnly);
@@ -553,12 +564,14 @@ void CTableManager::setReadOnly(bool readOnly)
         // its popup.  Compound numeric editors remain enabled so their
         // read-only components can still be focused and copied.
         if(qobject_cast<QComboBox*>(widget))
-            widget->setEnabled(!readOnly);
+            widget->setEnabled(!readOnly && !logicZeroEnabledField);
         else if(!qobject_cast<QLineEdit*>(widget) && !compoundEditor)
             widget->setEnabled(!readOnly);
         widget->setToolTip(readOnly
             ? tr("This object belongs to a locked MOB. Activate its owner to edit it.")
-            : QString());
+            : logicZeroEnabledField
+                ? tr("Logic 0 is the default setup and is always enabled. Its stored flag is preserved but not editable.")
+                : QString());
     }
 }
 
@@ -591,6 +604,13 @@ void CTableManager::setBehaviorCollection(CUnit* unit, int logicSlot)
             });
     m_pTable->setCellWidget(row, 0, editor);
     m_pTable->setRowHeight(row, qBound(190, editor->sizeHint().height(), 390));
+    restoreScrollPosition();
+}
+
+void CTableManager::setLogicZeroContext(bool logicZero)
+{
+    m_logicZeroContext = logicZero;
+    setReadOnly(m_readOnly);
 }
 
 void CTableManager::installClipboardFilter(QWidget* widget, int row)
@@ -1205,9 +1225,10 @@ bool variantLessThan(const std::pair<QSharedPointer<IPropertyBase>, bool> &v1, c
 
 void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp)
 {
-    const int verticalScroll = m_pTable->verticalScrollBar()->value();
-    const int horizontalScroll = m_pTable->horizontalScrollBar()->value();
+    m_savedVerticalScroll = m_pTable->verticalScrollBar()->value();
+    m_savedHorizontalScroll = m_pTable->horizontalScrollBar()->value();
     reset();
+    m_logicZeroContext = false;
     m_torchPropertyContext = false;
     for(const QSharedPointer<IPropertyBase>& property : aProp)
         if(property && property->type() == eObjParam_TORCH_STRENGHT)
@@ -1514,10 +1535,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
         } //switch
     }
     m_pTable->blockSignals(false);
-    m_pTable->verticalScrollBar()->setValue(
-        qMin(verticalScroll, m_pTable->verticalScrollBar()->maximum()));
-    m_pTable->horizontalScrollBar()->setValue(
-        qMin(horizontalScroll, m_pTable->horizontalScrollBar()->maximum()));
+    restoreScrollPosition();
 }
 
 void CColorButtonItem::applyColor()

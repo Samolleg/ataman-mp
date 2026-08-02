@@ -1420,7 +1420,23 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_pView, &CView::mobStateChanged, this, [this]()
     {
         updateLoadedMapPanel();
-        scheduleMobFamilyValidation(2500);
+        bool hasDirtyMob = false;
+        for(CMob* mob : m_pView->mobs())
+            hasDirtyMob = hasDirtyMob || (mob && mob->isDirty());
+        if(!hasDirtyMob)
+            scheduleMobFamilyValidation(2500);
+        else
+        {
+            // Dirty MOB validation deferred until explicit refresh. Building
+            // a validated in-memory candidate is GUI-owned and used to pause
+            // large Behavior-editing sessions every time the debounce fired.
+            if(m_validationTimer)
+                m_validationTimer->stop();
+            m_lastValidationRequestDigest.clear();
+            if(m_validationSummary)
+                m_validationSummary->setText(tr(
+                    "Validation pending for edited MOB data. Open or refresh MOB Family Validation to run it."));
+        }
     });
     connect(m_pView, &CView::loadedMapStateChanged,
             this, &MainWindow::updateLoadedMapPanel);

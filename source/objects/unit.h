@@ -121,7 +121,8 @@ public:
     void collectPatrolNodes(QList<CNode*>& arrNode);
     void clearPatrolSelect();
     void clearLogicPaths();
-    void collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp);
+    void collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp,
+                            bool effectivelyEnabled = false);
     void getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType);
     void applyLogicParam(const QSharedPointer<IPropertyBase>& prop);
     bool isChild(CPatrolPoint* pPointIn);

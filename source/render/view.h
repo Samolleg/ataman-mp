@@ -329,6 +329,7 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+    CUnit* behaviorCollectionOwner(const QList<CNode*>& selection) const;
     void closeMprSettingsDock();
     void refreshMprSettingsDock();
     bool saveLandscapeDocument(const QFileInfo& destination);
