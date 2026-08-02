@@ -12,6 +12,7 @@
 #include <QSet>
 #include <QMouseEvent>
 #include <QItemSelectionModel>
+#include <QTimer>
 
 namespace {
 
@@ -50,6 +51,17 @@ int rowForCheckBox(QTableWidget* table, const QObject* checkBox)
     return -1;
 }
 
+QStringList selectedPartNames(QTableWidget* table)
+{
+    QStringList parts;
+    const QModelIndexList selectedRows =
+        table->selectionModel()->selectedRows(0);
+    for(const QModelIndex& selected : selectedRows)
+        if(QTableWidgetItem* item = table->item(selected.row(), 0))
+            parts.append(item->text());
+    return parts;
+}
+
 }
 
 CBodyPartEditForm::CBodyPartEditForm(QWidget *parent) :
@@ -64,6 +76,26 @@ CBodyPartEditForm::CBodyPartEditForm(QWidget *parent) :
     if(savedSize.isValid()) resize(savedSize);
     connect(ui->lineFilter, &QLineEdit::textChanged,
             this, &CBodyPartEditForm::applyFilter);
+    connect(ui->tablePart->selectionModel(),
+            &QItemSelectionModel::selectionChanged, this,
+            [this](const QItemSelection&, const QItemSelection&) {
+        const QStringList selected = selectedPartNames(ui->tablePart);
+        if(selected.size() > 1)
+        {
+            m_recentMultiSelectionParts = selected;
+            return;
+        }
+
+        // QTableWidget can collapse a row selection before an embedded
+        // checkbox receives the same mouse press. Retain the prior selection
+        // through that event dispatch, but do not leave it available for a
+        // later, unrelated click.
+        QTimer::singleShot(0, this, [this] {
+            if(m_pendingToggleParts.isEmpty()
+               && selectedPartNames(ui->tablePart).size() < 2)
+                m_recentMultiSelectionParts.clear();
+        });
+    });
 }
 
 CBodyPartEditForm::~CBodyPartEditForm()
@@ -128,6 +160,8 @@ void CBodyPartEditForm::populateTable()
 
 void CBodyPartEditForm::reset()
 {
+    m_pendingToggleParts.clear();
+    m_recentMultiSelectionParts.clear();
     ui->tablePart->clear();
     ui->tablePart->setColumnCount(3);
     ui->tablePart->setRowCount(0);
@@ -298,17 +332,14 @@ bool CBodyPartEditForm::eventFilter(QObject* watched, QEvent* event)
     if(event->type() == QEvent::MouseButtonPress
        || event->type() == QEvent::MouseButtonDblClick)
     {
-        m_pendingToggleParts.clear();
-        const QModelIndexList selectedRows =
-            ui->tablePart->selectionModel()->selectedRows(0);
-        bool clickedIsSelected = false;
-        for(const QModelIndex& selected : selectedRows)
-        {
-            const QString part = ui->tablePart->item(selected.row(), 0)->text();
-            m_pendingToggleParts.append(part);
-            clickedIsSelected = clickedIsSelected
-                || part.compare(clickedPart, Qt::CaseInsensitive) == 0;
-        }
+        m_pendingToggleParts = selectedPartNames(ui->tablePart);
+        if(m_pendingToggleParts.size() < 2
+           && m_recentMultiSelectionParts.size() > 1
+           && m_recentMultiSelectionParts.contains(
+               clickedPart, Qt::CaseInsensitive))
+            m_pendingToggleParts = m_recentMultiSelectionParts;
+        const bool clickedIsSelected = m_pendingToggleParts.contains(
+            clickedPart, Qt::CaseInsensitive);
         if(!clickedIsSelected || m_pendingToggleParts.size() < 2)
         {
             m_pendingToggleParts = QStringList(clickedPart);
@@ -347,6 +378,7 @@ bool CBodyPartEditForm::eventFilter(QObject* watched, QEvent* event)
                 ui->tablePart->model()->index(row, 0),
                 QItemSelectionModel::Select | QItemSelectionModel::Rows);
     }
+    m_recentMultiSelectionParts = m_pendingToggleParts;
     m_pendingToggleParts.clear();
     return true;
 }

@@ -1128,6 +1128,22 @@ int runHeadlessCommand(QApplication& app)
                     bodyPartTable->cellWidget(hairItem->row(), 1));
                 if(bodyCheck && hairCheck)
                 {
+                    const bool checkBoxesDistinct = bodyCheck != hairCheck;
+                    const bool selectionInitiallyMultiple =
+                        bodyPartTable->selectionModel()->selectedRows().size() == 2;
+                    const bool bothInitiallyChecked =
+                        bodyCheck->checkState() == Qt::Checked
+                        && hairCheck->checkState() == Qt::Checked;
+                    // A real table-cell click can update the view selection
+                    // before the embedded checkbox receives its mouse press.
+                    // Reproduce that ordering instead of dispatching only to
+                    // the checkbox, which used to hide the regression.
+                    bodyPartTable->selectionModel()->select(
+                        bodyPartTable->model()->index(bodyItem->row(), 0),
+                        QItemSelectionModel::ClearAndSelect
+                            | QItemSelectionModel::Rows);
+                    const bool selectionCollapsedBeforeCheckBox =
+                        bodyPartTable->selectionModel()->selectedRows().size() == 1;
                     const QPointF clickPoint(bodyCheck->rect().center());
                     QMouseEvent checkPress(QEvent::MouseButtonPress, clickPoint,
                                            Qt::LeftButton, Qt::LeftButton,
@@ -1138,11 +1154,46 @@ int runHeadlessCommand(QApplication& app)
                                              Qt::NoModifier);
                     QApplication::sendEvent(bodyCheck, &checkRelease);
                     bodyPartMultiSelectionToggle =
-                        bodyPartTable->selectionMode() == QAbstractItemView::ExtendedSelection
+                        checkBoxesDistinct
+                        && selectionInitiallyMultiple
+                        && bothInitiallyChecked
+                        && selectionCollapsedBeforeCheckBox
+                        && bodyPartTable->selectionMode() == QAbstractItemView::ExtendedSelection
                         && bodyPartTable->selectionBehavior() == QAbstractItemView::SelectRows
                         && bodyPartTable->selectionModel()->selectedRows().size() == 2
                         && bodyCheck->checkState() == Qt::Unchecked
                         && hairCheck->checkState() == Qt::Unchecked;
+                    QTableWidgetItem* optionalItem = bodyPartTable->findItems(
+                        "optional_part", Qt::MatchExactly).value(0, nullptr);
+                    QCheckBox* optionalCheck = optionalItem
+                        ? qobject_cast<QCheckBox*>(bodyPartTable->cellWidget(
+                              optionalItem->row(), 1))
+                        : nullptr;
+                    if(optionalItem && optionalCheck)
+                    {
+                        bodyPartTable->selectionModel()->select(
+                            bodyPartTable->model()->index(optionalItem->row(), 0),
+                            QItemSelectionModel::ClearAndSelect
+                                | QItemSelectionModel::Rows);
+                        const QPointF optionalPoint(optionalCheck->rect().center());
+                        QMouseEvent optionalPress(QEvent::MouseButtonPress,
+                                                  optionalPoint, Qt::LeftButton,
+                                                  Qt::LeftButton, Qt::NoModifier);
+                        QApplication::sendEvent(optionalCheck, &optionalPress);
+                        QMouseEvent optionalRelease(QEvent::MouseButtonRelease,
+                                                    optionalPoint, Qt::LeftButton,
+                                                    Qt::NoButton, Qt::NoModifier);
+                        QApplication::sendEvent(optionalCheck, &optionalRelease);
+                        bodyPartMultiSelectionToggle = bodyPartMultiSelectionToggle
+                            && bodyPartTable->selectionModel()->selectedRows().size() == 1
+                            && optionalCheck->checkState() == Qt::Checked
+                            && bodyCheck->checkState() == Qt::Unchecked
+                            && hairCheck->checkState() == Qt::Unchecked;
+                    }
+                    else
+                    {
+                        bodyPartMultiSelectionToggle = false;
+                    }
                 }
             }
         }

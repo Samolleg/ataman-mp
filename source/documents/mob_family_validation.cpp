@@ -622,7 +622,8 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
            && missingHairRootUsesHelmetFallback(object, context, request))
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
                 "mob.semantic.missing_hair_selection",
-                subject + ": missing 'hr' keeps native hair under the helmet.");
+                subject + ": missing 'hr' part may cause hair to be visible "
+                          "with an active helmet.");
     }
 }
 }

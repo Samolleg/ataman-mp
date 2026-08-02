@@ -176,9 +176,12 @@ Automated and corpus checks:
 - installed zone12 probe required
   `mob.semantic.overlapping_unit_parts:6257` and passed.
 
-No automatic normalization is justified. The hair warning is a verified
-runtime fallback with assembly evidence, not a zone rule, tuple list, or
-general anatomy rule.
+No automatic normalization is justified. The hair warning uses the concise
+message `NID ...: missing 'hr' part may cause hair to be visible with an active
+helmet.` The conditional wording is intentional: the fallback and assembly
+members are verified, while visible clipping still depends on the authored
+hair, helmet, and complexion geometry. This remains a runtime fallback with
+assembly evidence, not a zone rule, tuple list, or general anatomy rule.
 Missing-core severity and the danger of particular dotted pairs beyond the
 matched cases remain evidence-labeled diagnostics until controlled runtime
 comparisons establish a narrower contract.

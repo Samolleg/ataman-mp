@@ -517,7 +517,8 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
     QVERIFY(matches.first().hasNid);
     QCOMPARE(matches.first().nid, quint32(800004));
     QCOMPARE(matches.first().message,
-             QString("NID 800004: missing 'hr' keeps native hair under the helmet."));
+             QString("NID 800004: missing 'hr' part may cause hair to be visible "
+                     "with an active helmet."));
     QVERIFY(!matches.first().message.contains("Boss-1000000004"));
     QVERIFY(!matches.first().message.contains("Human Gipath NPC Boss F5"));
     QVERIFY(!matches.first().message.contains("serialized parts"));
@@ -559,7 +560,8 @@ void MobFamilyValidationTests::missingHairRootUsesHelmetFallbackAcrossProfilesAn
     QVERIFY(finding != report.findings.cend());
     QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
     QCOMPARE(finding->message,
-             QString("NID 44001: missing 'hr' keeps native hair under the helmet."));
+             QString("NID 44001: missing 'hr' part may cause hair to be visible "
+                     "with an active helmet."));
 
     QFile file(path);
     QVERIFY(file.open(QIODevice::ReadOnly));

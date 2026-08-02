@@ -45,6 +45,7 @@ private:
     QSharedPointer<IPropertyBase> m_prop;
     QFile m_clipboardFile;
     QStringList m_pendingToggleParts;
+    QStringList m_recentMultiSelectionParts;
 };
 
 #endif // BODYPARTEDIT_FORM_H
