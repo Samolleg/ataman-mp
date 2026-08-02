@@ -2,6 +2,7 @@
 #include <QToolButton>
 #include <QColorDialog>
 #include <QVBoxLayout>
+#include <QBoxLayout>
 #include <QFormLayout>
 #include <QLabel>
 #include <QGuiApplication>
@@ -19,6 +20,8 @@
 #include <QSet>
 #include <QScrollBar>
 #include <QItemSelectionModel>
+#include <QResizeEvent>
+#include <QTimer>
 #include <QtMath>
 #include <cmath>
 #include <functional>
@@ -1655,6 +1658,46 @@ void CValueItem::renewValue(QString value)
 
     m_filter.reset(new CLineEditEventFilter(this, text())); // create text backuper with old text
     this->installEventFilter(m_filter.get());
+    updateDisplayedText();
+}
+
+void CValueItem::setCompactDisplay(bool compact)
+{
+    if(m_compactDisplay == compact)
+        return;
+    m_compactDisplay = compact;
+    updateDisplayedText();
+}
+
+void CValueItem::updateDisplayedText()
+{
+    if(hasFocus())
+        return;
+    const QString fullValue = m_pValue->isInit() ? m_pValue->toString() : QString();
+    const int textWidth = qMax(0, contentsRect().width() - 8);
+    const QString visibleValue = m_compactDisplay
+        ? fontMetrics().elidedText(fullValue, Qt::ElideRight, textWidth)
+        : fullValue;
+    setText(visibleValue);
+}
+
+void CValueItem::focusInEvent(QFocusEvent* event)
+{
+    if(m_pValue->isInit())
+        setText(m_pValue->toString());
+    QLineEdit::focusInEvent(event);
+}
+
+void CValueItem::focusOutEvent(QFocusEvent* event)
+{
+    QLineEdit::focusOutEvent(event);
+    updateDisplayedText();
+}
+
+void CValueItem::resizeEvent(QResizeEvent* event)
+{
+    QLineEdit::resizeEvent(event);
+    updateDisplayedText();
 }
 
 void CValueItem::onTextChangeEnd()
@@ -2086,13 +2129,17 @@ C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer
     // editor remains selectable through its table row but must not acquire
     // focus behind a child component's context menu.
     setFocusPolicy(Qt::FocusPolicy::NoFocus);
-    auto* pLayout = new QFormLayout();
-    pLayout->setMargin(0);
-    pLayout->setHorizontalSpacing(0);
-    pLayout->setVerticalSpacing(0);
-    const auto setProp = [this, &pLayout](const QString& rowName,
-                                         const QSharedPointer<IPropertyBase>& prop)
+    m_componentLayout = new QBoxLayout(QBoxLayout::TopToBottom);
+    m_componentLayout->setContentsMargins(0, 0, 0, 0);
+    m_componentLayout->setSpacing(2);
+    int horizontalWidthHint = 0;
+    const auto setProp = [this, &horizontalWidthHint](
+            const QString& rowName, const QSharedPointer<IPropertyBase>& prop)
     {
+        QWidget* component = new QWidget(this);
+        QHBoxLayout* componentLayout = new QHBoxLayout(component);
+        componentLayout->setContentsMargins(0, 0, 0, 0);
+        componentLayout->setSpacing(0);
         auto* pLine = new CValueItem(prop);
         auto* plate = new CVectorComponentPlate(rowName, prop,
             [this, pLine](const QSharedPointer<IPropertyBase>& value)
@@ -2101,13 +2148,66 @@ C3DItem::C3DItem(const QSharedPointer<IPropertyBase>& propX,const QSharedPointer
                 _onParamChange(value);
             }, this);
         QObject::connect(pLine, SIGNAL(onParamChange(const QSharedPointer<IPropertyBase>&)), this, SLOT(_onParamChange(const QSharedPointer<IPropertyBase>&)));
-        pLayout->addRow(plate, pLine);
+        componentLayout->addWidget(plate);
+        componentLayout->addWidget(pLine, 1);
+        m_componentLayout->addWidget(component, 1);
+        m_componentEditors.append(pLine);
+        horizontalWidthHint += plate->sizeHint().width()
+            + pLine->fontMetrics().horizontalAdvance(QStringLiteral("-000…")) + 12;
     };
 
     setProp("X:", propX);
     setProp("Y:", propY);
     setProp("Z:", propZ);
-    setLayout(pLayout);
+    horizontalWidthHint += m_componentLayout->spacing() * 2;
+    m_horizontalWidthHint = horizontalWidthHint;
+    setLayout(m_componentLayout);
+    updateResponsiveLayout(width());
+    QTimer::singleShot(0, this, [this]()
+    {
+        updateResponsiveLayout(width());
+        syncTableRowHeight();
+    });
+}
+
+void C3DItem::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    updateResponsiveLayout(event->size().width());
+}
+
+void C3DItem::updateResponsiveLayout(int availableWidth)
+{
+    const bool horizontal = availableWidth >= m_horizontalWidthHint;
+    if(horizontal != m_horizontalLayout)
+    {
+        m_horizontalLayout = horizontal;
+        m_componentLayout->setDirection(horizontal
+            ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
+        updateGeometry();
+        QTimer::singleShot(0, this, [this]() { syncTableRowHeight(); });
+    }
+    for(CValueItem* editor : m_componentEditors)
+        editor->setCompactDisplay(horizontal);
+}
+
+void C3DItem::syncTableRowHeight()
+{
+    QWidget* ancestor = parentWidget();
+    while(ancestor && !qobject_cast<QTableWidget*>(ancestor))
+        ancestor = ancestor->parentWidget();
+    QTableWidget* table = qobject_cast<QTableWidget*>(ancestor);
+    if(!table)
+        return;
+    for(int row = 0; row < table->rowCount(); ++row)
+        if(table->cellWidget(row, 1) == this)
+        {
+            const int desired = qMax(table->verticalHeader()->minimumSectionSize(),
+                                     sizeHint().height() + 2);
+            if(table->rowHeight(row) != desired)
+                table->setRowHeight(row, desired);
+            return;
+        }
 }
 
 void C3DItem::keyPressEvent(QKeyEvent *event)

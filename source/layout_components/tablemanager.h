@@ -22,6 +22,8 @@ class CUnitStatForm;
 class CBodyPartEditForm;
 class QContextMenuEvent;
 class CMagicTrap;
+class QBoxLayout;
+class QResizeEvent;
 
 ///
 /// \brief The CValueItem class supports any type of property that can be displayed with a single line.
@@ -39,11 +41,17 @@ public:
     const QSharedPointer<IPropertyBase>& value() {return m_pValue;}
     void skipNextCheck() {bSkip = true;} //skip checking value for reverting (on lost focus)
     void renewValue(QString value);
+    void setCompactDisplay(bool compact);
     void keyPressEvent(QKeyEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
 
+protected:
+    void focusInEvent(QFocusEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
-    //void setValue()
+    void updateDisplayedText();
 
 signals:
     void onParamChange(const QSharedPointer<IPropertyBase>&);
@@ -55,6 +63,7 @@ private:
     QSharedPointer<IPropertyBase> m_pValue; //stored value;
     QSharedPointer<CLineEditEventFilter> m_filter;
     bool bSkip;
+    bool m_compactDisplay{false};
 };
 
 ///
@@ -183,6 +192,9 @@ public:
 
     void keyPressEvent(QKeyEvent *event) override;
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 signals:
     void onParamChange(const QSharedPointer<IPropertyBase>&);
 
@@ -190,9 +202,15 @@ public slots:
     void _onParamChange(const QSharedPointer<IPropertyBase>&); // slot for inner valueItem signal. re-translator
 
 private:
+    void updateResponsiveLayout(int availableWidth);
+    void syncTableRowHeight();
     QSharedPointer<IPropertyBase> m_xValue; //stored value;
     QSharedPointer<IPropertyBase> m_yValue; //stored value;
     QSharedPointer<IPropertyBase> m_zValue; //stored value;
+    QBoxLayout* m_componentLayout{nullptr};
+    QVector<CValueItem*> m_componentEditors;
+    int m_horizontalWidthHint{0};
+    bool m_horizontalLayout{false};
 };
 
 ///
