@@ -1229,6 +1229,7 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
         const uint unitId = unit ? unit->mapId() : 0;
         QTimer::singleShot(0, this, [this, mob, unitId]()
         {
+            cancelPendingOperation();
             CUnit* owner = mob && m_aMob.contains(mob)
                 ? dynamic_cast<CUnit*>(mob->nodeByMapId(unitId)) : nullptr;
             CPatrolPoint* lastVisiblePatrol = nullptr;
@@ -1248,9 +1249,19 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
             this, [this](CPatrolPoint* patrol)
     {
         CMob* mob = ownerMob(patrol);
-        QTimer::singleShot(0, this, [this, mob, patrol]()
+        int unitId = -1;
+        int patrolId = -1;
+        if(mob && patrol)
+            mob->getPatrolHash(unitId, patrolId, patrol);
+        const int logicSlot = m_logicSlotIndex;
+        QTimer::singleShot(0, this, [this, mob, unitId, patrolId, logicSlot]()
         {
-            if(mob && m_aMob.contains(mob) && selectNode(patrol, false))
+            cancelPendingOperation();
+            CUnit* unit = mob && m_aMob.contains(mob) && unitId >= 0
+                ? dynamic_cast<CUnit*>(mob->nodeByMapId(uint(unitId))) : nullptr;
+            CPatrolPoint* resolvedPatrol = unit && patrolId >= 0
+                ? unit->patrolByIndex(logicSlot, patrolId) : nullptr;
+            if(resolvedPatrol && selectNode(resolvedPatrol, false))
                 addLogicPoint(true);
         });
     });
@@ -12415,6 +12426,8 @@ bool CView::cancelPendingOperation()
     const EOperationMethod method = m_pOp->operationMethod();
     const bool cancelPastePreview = m_pendingOperationOwnsPaste;
     const bool cancelLogicPlacement = m_pendingLogicPlacementMacro;
+    const QList<CNode*> logicPlacementOriginalSelection =
+        m_pendingLogicPlacementOriginalSelection;
     const bool cancelBehaviorPaste = !m_pendingBehaviorPasteNodes.isEmpty();
     CMob* pasteMob = m_pendingPasteMob;
     const QList<CNode*> pasteNodes = m_pendingPasteNodes;
@@ -12453,6 +12466,7 @@ bool CView::cancelPendingOperation()
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
     m_pendingLogicPlacementMacro = false;
+    m_pendingLogicPlacementOriginalSelection.clear();
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();
     m_pendingPasteOriginalSelection.clear();
@@ -12478,6 +12492,7 @@ bool CView::cancelPendingOperation()
     {
         m_pUndoStack->endMacro();
         m_pUndoStack->undo();
+        restoreSelection(logicPlacementOriginalSelection);
     }
     if(cancelBehaviorPaste && m_activeMob)
     {
@@ -12855,6 +12870,7 @@ void CView::operationApply(EOperationAxisType operationType)
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
     m_pendingLogicPlacementMacro = false;
+    m_pendingLogicPlacementOriginalSelection.clear();
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();
     m_pendingPasteOriginalSelection.clear();
@@ -14356,6 +14372,7 @@ void CView::addLogicPoint(bool bLookPoint)
         // outliner highlight follows the newly created placement targets.
         collectObjectTreeData();
         m_pendingLogicPlacementMacro = true;
+        m_pendingLogicPlacementOriginalSelection = targets;
         m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
     }
 }

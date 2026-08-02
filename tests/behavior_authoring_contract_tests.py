@@ -207,6 +207,14 @@ def main() -> int:
             "active-Logic collection heading")
     require(collection, 'tr("Select in outliner and viewport")',
             "aim-button tooltip")
+    require(collection, "class CBehaviorCollectionTree",
+            "constrained patrol/look drag-reorder tree")
+    require(collection, "QAbstractItemView::InternalMove",
+            "collection internal drag-reorder mode")
+    require(collection, "requestDropMove",
+            "drag reorder dispatch without mutating the widget hierarchy")
+    require(collection, "worldSelectionBackground",
+            "distinct collection highlight for viewport-selected points")
     require(unit_h, "bool movePatrolPoint(int from, int to);",
             "ordered patrol mutation API")
     require(unit_h, "bool moveLookPoint(int from, int to);",
@@ -232,6 +240,20 @@ def main() -> int:
     table = source("source/layout_components/tablemanager.cpp")
     require(table, "restoreScrollPosition();",
             "property scroll restoration after adding the collection row")
+    require(table, "setSectionResizeMode(row, QHeaderView::Stretch)",
+            "collection filling the remaining Object Properties height")
+    require(view, "m_pendingLogicPlacementOriginalSelection",
+            "pre-creation selection retained for Esc cancellation")
+    require(view, "restoreSelection(logicPlacementOriginalSelection)",
+            "Esc restoring selection after cancelling point creation")
+    patrol_add = view[view.index("onBehaviorPatrolAdd"):
+                      view.index("onBehaviorLookAdd")]
+    look_add = view[view.index("onBehaviorLookAdd"):
+                    view.index("m_pUndoStack = pStack")]
+    require(patrol_add, "cancelPendingOperation();",
+            "Add patrol cancelling an unfinished placement first")
+    require(look_add, "cancelPendingOperation();",
+            "Add look cancelling an unfinished placement first")
     require(main_window, "Dirty MOB validation deferred until explicit refresh",
             "no repeated dirty-candidate serialization during normal editing")
 

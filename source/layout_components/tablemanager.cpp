@@ -527,6 +527,7 @@ void CTableManager::reset()
     header.append("Value");
     m_pTable->setHorizontalHeaderLabels(header);
     m_pTable->horizontalHeader()->setVisible(true);
+    m_pTable->verticalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     m_pTable->verticalHeader()->hide();
     //m_pTable->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents); //adjust whole table. now both columns fill qtablewidget but it occurs blink and offset for main window
 }
@@ -603,7 +604,9 @@ void CTableManager::setBehaviorCollection(CUnit* unit, int logicSlot)
                 if(point) emit onBehaviorLookAdd(point);
             });
     m_pTable->setCellWidget(row, 0, editor);
-    m_pTable->setRowHeight(row, qBound(190, editor->sizeHint().height(), 390));
+    editor->setMinimumHeight(190);
+    editor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_pTable->verticalHeader()->setSectionResizeMode(row, QHeaderView::Stretch);
     restoreScrollPosition();
 }
 

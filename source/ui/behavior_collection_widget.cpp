@@ -1,5 +1,10 @@
 #include "behavior_collection_widget.h"
 
+#include <functional>
+#include <QAbstractItemView>
+#include <QBrush>
+#include <QColor>
+#include <QDropEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -15,6 +20,108 @@
 namespace {
 QSet<const CPatrolPoint*> g_expandedPatrols;
 const int PointRole = Qt::UserRole;
+const int PatrolIndexRole = Qt::UserRole + 1;
+const int LookIndexRole = Qt::UserRole + 2;
+const int LookPointRole = Qt::UserRole + 3;
+
+QColor worldSelectionBackground()
+{
+    return QColor(82, 58, 18);
+}
+
+QColor worldSelectionForeground()
+{
+    return QColor(255, 220, 128);
+}
+
+void markWorldSelection(QTreeWidgetItem* item, CNode* point)
+{
+    if(!item || !point || point->nodeState() != ENodeState::eSelect)
+        return;
+    QFont selectedFont = item->font(0);
+    selectedFont.setBold(true);
+    for(int column = 0; column < item->columnCount(); ++column)
+    {
+        item->setBackground(column, QBrush(worldSelectionBackground()));
+        item->setForeground(column, QBrush(worldSelectionForeground()));
+        item->setFont(column, selectedFont);
+    }
+    item->setToolTip(0, QObject::tr(
+        "Gold indicates the point currently selected in the viewport and outliner."));
+}
+
+class CBehaviorCollectionTree final : public QTreeWidget
+{
+public:
+    using MoveRequest = std::function<void(bool, int, int, int)>;
+
+    explicit CBehaviorCollectionTree(QWidget* parent = nullptr)
+        : QTreeWidget(parent)
+    {
+    }
+
+    void setMoveRequest(const MoveRequest& request)
+    {
+        m_moveRequest = request;
+    }
+
+protected:
+    void dropEvent(QDropEvent* event) override
+    {
+        if(!requestDropMove(event))
+            event->ignore();
+    }
+
+private:
+    bool requestDropMove(QDropEvent* event)
+    {
+        QTreeWidgetItem* source = currentItem();
+        QTreeWidgetItem* target = event ? itemAt(event->pos()) : nullptr;
+        if(!source || !target || source == target || !m_moveRequest)
+            return false;
+
+        const bool lookPoint = source->data(0, LookPointRole).toBool();
+        if(!lookPoint && target->parent())
+            target = target->parent();
+        if(source == target || target->data(0, LookPointRole).toBool() != lookPoint)
+            return false;
+
+        const int patrol = source->data(0, PatrolIndexRole).toInt();
+        if(lookPoint && (source->parent() != target->parent()
+                         || patrol != target->data(0, PatrolIndexRole).toInt()))
+            return false;
+
+        const int from = lookPoint
+            ? source->data(0, LookIndexRole).toInt()
+            : patrol;
+        const int targetIndex = lookPoint
+            ? target->data(0, LookIndexRole).toInt()
+            : target->data(0, PatrolIndexRole).toInt();
+        bool below = dropIndicatorPosition() == QAbstractItemView::BelowItem;
+        if(dropIndicatorPosition() == QAbstractItemView::OnItem)
+            below = event->pos().y() >= visualItemRect(target).center().y();
+        if(dropIndicatorPosition() == QAbstractItemView::OnViewport)
+            return false;
+
+        int to = targetIndex;
+        if(below && from > targetIndex)
+            ++to;
+        else if(!below && from < targetIndex)
+            --to;
+        if(from == to)
+        {
+            event->acceptProposedAction();
+            return true;
+        }
+
+        m_moveRequest(lookPoint, patrol, from, to);
+        event->setDropAction(Qt::MoveAction);
+        event->accept();
+        return true;
+    }
+
+    MoveRequest m_moveRequest;
+};
 
 QString positionText(CNode* point)
 {
@@ -71,20 +178,33 @@ CBehaviorCollectionWidget::CBehaviorCollectionWidget(
     heading->addWidget(addPatrol);
     layout->addLayout(heading);
 
-    m_tree = new QTreeWidget(this);
+    CBehaviorCollectionTree* collectionTree = new CBehaviorCollectionTree(this);
+    m_tree = collectionTree;
     m_tree->setObjectName(QStringLiteral("behaviorCollectionTree"));
     m_tree->setColumnCount(5);
     m_tree->setHeaderLabels({tr("#"), tr("Point"), tr("Position"), tr("Children"), tr("Order / select")});
     m_tree->setRootIsDecorated(true);
     m_tree->setAlternatingRowColors(true);
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_tree->setDragDropMode(QAbstractItemView::InternalMove);
+    m_tree->setDefaultDropAction(Qt::MoveAction);
+    m_tree->setDragEnabled(true);
+    m_tree->setAcceptDrops(true);
+    m_tree->setDropIndicatorShown(true);
     m_tree->setUniformRowHeights(true);
     m_tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    m_tree->setToolTip(tr("Click a row to focus it here. Use the aim button to select the point in the outliner and viewport."));
+    m_tree->setToolTip(tr("Drag patrols to reorder the route, or drag look points within one patrol. "
+                          "Gold indicates the point selected in the viewport/outliner; clicking another row only focuses it here."));
+    collectionTree->setMoveRequest(
+        [this](bool lookPoint, int patrol, int from, int to)
+        {
+            if(lookPoint) emit moveLookPoint(patrol, from, to);
+            else emit movePatrolPoint(from, to);
+        });
     layout->addWidget(m_tree, 1);
 
     if(!logic)
@@ -117,6 +237,10 @@ CBehaviorCollectionWidget::CBehaviorCollectionWidget(
         patrolItem->setText(3, tr("%1 look(s)").arg(visibleLooks));
         patrolItem->setData(0, PointRole, QVariant::fromValue<qulonglong>(
                                 reinterpret_cast<quintptr>(patrol)));
+        patrolItem->setData(0, PatrolIndexRole, patrolIndex);
+        patrolItem->setData(0, LookIndexRole, -1);
+        patrolItem->setData(0, LookPointRole, false);
+        markWorldSelection(patrolItem, patrol);
         const int previousPatrol = visible > 0 ? visiblePatrols.at(visible - 1) : -1;
         const int nextPatrol = visible + 1 < visiblePatrols.size()
             ? visiblePatrols.at(visible + 1) : -1;
@@ -135,6 +259,10 @@ CBehaviorCollectionWidget::CBehaviorCollectionWidget(
             lookItem->setText(3, QStringLiteral("—"));
             lookItem->setData(0, PointRole, QVariant::fromValue<qulonglong>(
                                   reinterpret_cast<quintptr>(look)));
+            lookItem->setData(0, PatrolIndexRole, patrolIndex);
+            lookItem->setData(0, LookIndexRole, lookIndex);
+            lookItem->setData(0, LookPointRole, true);
+            markWorldSelection(lookItem, look);
             const int previousLook = lookVisible > 0 ? lookIndices.at(lookVisible - 1) : -1;
             const int nextLook = lookVisible + 1 < lookIndices.size()
                 ? lookIndices.at(lookVisible + 1) : -1;
