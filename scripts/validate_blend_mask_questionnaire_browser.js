@@ -55,6 +55,31 @@ async function main() {
     const questions = await page.locator(".mask-question").count();
     if (questions !== expectedQuestions)
       throw new Error(`question count ${questions} != ${expectedQuestions}`);
+    const bindingErrors = await page.evaluate(items => {
+      const errors = [];
+      for (const item of items) {
+        const card = document.querySelector(`[data-key="${item.key}"]`);
+        if (!card) { errors.push(`missing ${item.key}`); continue; }
+        const expectedPosition = `${-item.column * 256}px ${-item.row * 256}px`;
+        const checks = [
+          [card.querySelector(".requested-uniform img")?.getAttribute("src"), `../blend-mask-review/${item.ownerUniform}`, "requested uniform"],
+          [card.querySelector(".support-uniform img")?.getAttribute("src"), `../blend-mask-review/${item.supportUniform}`, "support uniform"],
+          [card.querySelector(".ownership-mask .sprite")?.style.backgroundImage, item.maskSheet, "mask sheet"],
+          [card.querySelector(".resulting-blend .sprite")?.style.backgroundImage, item.resultSheet, "result sheet"],
+          [card.querySelector(".authored-source .sprite")?.style.backgroundImage, item.sourceSheet, "source sheet"],
+        ];
+        for (const [actual, expected, label] of checks)
+          if (!actual || !actual.includes(expected))
+            errors.push(`${item.key} ${label}: ${actual} != ${expected}`);
+        for (const sprite of card.querySelectorAll(".sprite"))
+          if (sprite.style.backgroundPosition !== expectedPosition)
+            errors.push(`${item.key} position: ${sprite.style.backgroundPosition} != ${expectedPosition}`);
+        if (errors.length >= 20) break;
+      }
+      return errors;
+    }, analysis.questions);
+    if (bindingErrors.length)
+      throw new Error(`card binding errors: ${bindingErrors.join(" | ")}`);
     const first = page.locator(".mask-question").first();
     await first.scrollIntoViewIfNeeded();
     const imageState = await first.evaluate(card => ({
@@ -96,7 +121,8 @@ async function main() {
         "utf8");
     }
     if (errors.length) throw new Error(`browser errors: ${errors.join(" | ")}`);
-    console.log(JSON.stringify({ status: "PASS", questions, firstCardFigures: 5,
+    console.log(JSON.stringify({ status: "PASS", questions,
+      allCardBindings: "PASS", firstCardFigures: 5,
       persistence: "PASS", styleFilterVisible: visible, export: "PASS",
       directSubmit: "PASS", consoleErrors: 0, screenshot: screenshotPath,
       fragment: fragmentPath }, null, 2));

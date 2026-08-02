@@ -27,7 +27,7 @@ class BlendMaskQuestionnaireTests(unittest.TestCase):
             for name, color in (("masks.png", (255, 255, 255)),
                                 ("sources.png", (70, 90, 110)),
                                 ("results.png", (45, 120, 65))):
-                Image.new("RGB", (32, 16), color).save(review / name)
+                Image.new("RGB", (512, 512), color).save(review / name)
 
             fields = [
                 "sheet", "row", "column", "owner_material_id",
@@ -43,7 +43,7 @@ class BlendMaskQuestionnaireTests(unittest.TestCase):
                 writer.writeheader()
                 for column, topology in enumerate(("outer-1of4-v1", "edge-2of4-v1")):
                     writer.writerow({
-                        "sheet": "masks.png", "row": 0, "column": column,
+                        "sheet": "masks.png", "row": column, "column": column,
                         "owner_material_id": 101, "owner_material": "Grass / Test",
                         "owner_style": "grass-strands",
                         "support_scenario": "cross-style",
@@ -81,6 +81,7 @@ class BlendMaskQuestionnaireTests(unittest.TestCase):
             self.assertIn("localStorage.setItem", document)
             self.assertIn("rows().join('\\n')", document)
             self.assertIn("Apply only explicit mask decisions", document)
+            self.assertIn("background-position:-256px -256px", document)
 
 
 if __name__ == "__main__":

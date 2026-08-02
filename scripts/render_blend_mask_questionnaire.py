@@ -48,7 +48,11 @@ def _sprite(review: Path, output: Path, file_name: str,
     path = review / file_name
     with Image.open(path) as image:
         width, height = image.size
-    tile = height
+    tile = 256
+    if (width % tile or height % tile or
+            (column + 1) * tile > width or (row + 1) * tile > height):
+        raise ValueError(
+            f"invalid 256px sprite cell {file_name}:{row},{column} in {width}x{height}")
     return (f"background-image:url('{html.escape(_relative(path, output))}');"
             f"background-size:{width}px {height}px;"
             f"background-position:{-column * tile}px {-row * tile}px")
@@ -103,7 +107,7 @@ def render(review: Path, output: Path, checkpoint: str = "R37-MASK") -> dict:
             review, output, row["source_example_sheet"], image_row, column)
         result_style = _sprite(
             review, output, row["result_example_sheet"], image_row, column)
-        cards.append(f'''<article class="mask-question" data-key="{html.escape(key)}" data-style="{html.escape(row["owner_style"])}" data-material="{owner_id}">
+        cards.append(f'''<article class="mask-question" data-key="{html.escape(key)}" data-style="{html.escape(row["owner_style"])}" data-material="{owner_id}" data-sheet-row="{image_row}" data-sheet-column="{column}">
 <h2>{number}. {html.escape(row["owner_material"])} · {html.escape(topology)}</h2>
 <p class="muted">{html.escape(scenario)} support: {html.escape(row["support_material"])} · stock source {html.escape(provenance)}</p>
 <div class="visual-grid">
@@ -124,6 +128,12 @@ def render(review: Path, output: Path, checkpoint: str = "R37-MASK") -> dict:
             "scenario": scenario, "topology": topology,
             "variation": int(row["variation"]), "provenance": provenance,
             "maskSha256": row.get("mask_sha256", ""),
+            "row": image_row, "column": column,
+            "maskSheet": row["sheet"],
+            "sourceSheet": row["source_example_sheet"],
+            "resultSheet": row["result_example_sheet"],
+            "ownerUniform": row["owner_uniform"],
+            "supportUniform": row["support_uniform"],
         })
 
     styles = sorted({row["owner_style"] for row in rows})
