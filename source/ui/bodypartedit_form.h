@@ -35,6 +35,7 @@ private:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
     void onApplyChangesSignal(const QSharedPointer<IPropertyBase>&);
@@ -43,6 +44,7 @@ private:
     Ui::CBodyPartEditForm *ui;
     QSharedPointer<IPropertyBase> m_prop;
     QFile m_clipboardFile;
+    QStringList m_pendingToggleParts;
 };
 
 #endif // BODYPARTEDIT_FORM_H

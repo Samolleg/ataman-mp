@@ -82,7 +82,8 @@ QByteArray mobWithUnits(const QList<QByteArray>& units)
 }
 
 QSharedPointer<const ei::SProfileDatabaseSnapshot> wearableDatabase(
-    const QString& prototype, const QString& model, const QStringList& wears)
+    const QString& prototype, const QString& model, const QStringList& wears,
+    int hairIndex = -1)
 {
     QSharedPointer<ei::SProfileDatabaseSnapshot> database(new ei::SProfileDatabaseSnapshot);
     database->profileId = "test";
@@ -92,6 +93,7 @@ QSharedPointer<const ei::SProfileDatabaseSnapshot> wearableDatabase(
     monster.name = prototype;
     monster.baseRace = "Test race";
     monster.wears = wears;
+    monster.hairIndex = hairIndex;
     database->monsters.insert(prototype.toLower(), monster);
     ei::SRaceModelDatabaseRecord race;
     race.name = monster.baseRace;
@@ -177,9 +179,11 @@ private slots:
     void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
     void magicTrapRequiresContainingMobDiplomacy();
     void zone3HelmetMissingHairSelectionIsReported();
+    void hairlessHelmetedTemplateDoesNotReportMissingHair();
+    void unconfirmedAuthoredHairPeerDoesNotReportMissingHair();
     void wearableAllPartsMasksAreCriticalButCreatureMasksAreIgnored();
     void coreOverlapAndDuplicateFindingsPreserveExactParts();
-    void importEquipmentIsAuthoritativeOnlyForImportedUnits();
+    void importWithoutTemplateHairEvidenceDoesNotReportMissingHair();
     void databaseCreatureResolutionSuppressesWearableMaskRules();
 };
 
@@ -437,7 +441,8 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
     request.seedMobPaths << good << bad;
     request.explicitComposition = true;
     request.includeProfileWideMobs = false;
-    request.database = wearableDatabase("Human Gipath NPC Boss F5", "unhuma", {"helmet.iron"});
+    request.database = wearableDatabase(
+        "Human Gipath NPC Boss F5", "unhuma", {"helmet.iron"}, 1);
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
 
     QVector<SMobFamilyFinding> matches;
@@ -448,10 +453,11 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
     QCOMPARE(matches.first().severity, EMobFamilyFindingSeverity::Warning);
     QVERIFY(matches.first().hasNid);
     QCOMPARE(matches.first().nid, quint32(800004));
-    QVERIFY(matches.first().message.contains("Boss-1000000004"));
-    QVERIFY(matches.first().message.contains("Human Gipath NPC Boss F5"));
-    QVERIFY(matches.first().message.contains("Import=false"));
-    QVERIFY(matches.first().message.contains("serialized parts [bd, hd, hp"));
+    QCOMPARE(matches.first().message,
+             QString("NID 800004: missing 'hr' in the confirmed zone3 helmet mask; this can clip in-game."));
+    QVERIFY(!matches.first().message.contains("Boss-1000000004"));
+    QVERIFY(!matches.first().message.contains("Human Gipath NPC Boss F5"));
+    QVERIFY(!matches.first().message.contains("serialized parts"));
     QVERIFY(std::any_of(matches.first().locations.cbegin(), matches.first().locations.cend(),
         [&bad](const QString& location) { return location.startsWith(bad + ":"); }));
 
@@ -460,6 +466,66 @@ void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
     QVERIFY(badFile.open(QIODevice::ReadOnly));
     QCOMPARE(goodFile.readAll(), goodBytes);
     QCOMPARE(badFile.readAll(), badBytes);
+}
+
+void MobFamilyValidationTests::hairlessHelmetedTemplateDoesNotReportMissingHair()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray bytes = mobWithUnits({
+        unitObject(800004, "hairless control", "Human Hairless F0", "unhuma", false,
+                   wearableParts(true), {"helmet.iron"}),
+        unitObject(800005, "hairless helmeted actor", "Human Hairless F0", "unhuma", false,
+                   wearableParts(false), {"helmet.iron"})
+    });
+    const QString path = writeMob(directory.path(), "hairless-helmet.mob", bytes);
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "hairless-template-control";
+    request.profileId = "jamais-vu";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase(
+        "Human Hairless F0", "unhuma", {"helmet.iron"}, -1);
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.missing_hair_selection"; }));
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), bytes);
+}
+
+void MobFamilyValidationTests::unconfirmedAuthoredHairPeerDoesNotReportMissingHair()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray bytes = mobWithUnits({
+        unitObject(800005, "authored hair control", "Human Authored Hair F0", "unhuma", false,
+                   wearableParts(true), {"helmet.iron"}),
+        unitObject(800006, "helmeted actor", "Human Authored Hair F0", "unhuma", false,
+                   wearableParts(false), {"helmet.iron"})
+    });
+    const QString path = writeMob(directory.path(), "authored-hair-helmet.mob", bytes);
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "authored-hair-without-peer";
+    request.profileId = "jamais-vu";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase(
+        "Human Authored Hair F0", "unhuma", {"helmet.iron"}, 2);
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.missing_hair_selection"; }));
 }
 
 void MobFamilyValidationTests::wearableAllPartsMasksAreCriticalButCreatureMasksAreIgnored()
@@ -488,12 +554,16 @@ void MobFamilyValidationTests::wearableAllPartsMasksAreCriticalButCreatureMasksA
     QVERIFY(empty != report.findings.cend());
     QCOMPARE(empty->severity, EMobFamilyFindingSeverity::Critical);
     QCOMPARE(empty->nid, quint32(10));
+    QCOMPARE(empty->message,
+             QString("NID 10: empty body-part list enables every assembly member, including overlapping alternatives."));
     const auto missing = std::find_if(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
         { return finding.code == "mob.semantic.wearable_bodyparts_missing"; });
     QVERIFY(missing != report.findings.cend());
     QCOMPARE(missing->severity, EMobFamilyFindingSeverity::Critical);
     QCOMPARE(missing->nid, quint32(11));
+    QCOMPARE(missing->message,
+             QString("NID 11: OBJBODYPARTS is missing, so every assembly member is enabled."));
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
         { return finding.hasNid && finding.nid == 12
@@ -525,33 +595,34 @@ void MobFamilyValidationTests::coreOverlapAndDuplicateFindingsPreserveExactParts
         { return finding.code == "mob.semantic.missing_core_bodyparts"; });
     QVERIFY(core != report.findings.cend());
     QCOMPARE(core->severity, EMobFamilyFindingSeverity::Warning);
-    QVERIFY(core->message.contains("lh2"));
+    QCOMPARE(core->message, QString("NID 6257: missing standard anatomy part(s): lh2."));
 
     const auto overlap = std::find_if(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
         { return finding.code == "mob.semantic.overlapping_unit_parts"; });
     QVERIFY(overlap != report.findings.cend());
     QCOMPARE(overlap->severity, EMobFamilyFindingSeverity::Warning);
-    QVERIFY(overlap->message.contains("rh3.pike00"));
-    QVERIFY(overlap->message.contains("rh3.tube00"));
+    QCOMPARE(overlap->message,
+             QString("NID 6257: mutually overlapping parts are enabled for 'rh3': rh3.pike00, rh3.tube00."));
 
     const auto duplicate = std::find_if(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
         { return finding.code == "mob.semantic.duplicate_bodypart_token"; });
     QVERIFY(duplicate != report.findings.cend());
     QCOMPARE(duplicate->severity, EMobFamilyFindingSeverity::Info);
-    QVERIFY(duplicate->message.contains("hd"));
+    QCOMPARE(duplicate->message,
+             QString("NID 6257: body-part token 'hd' is duplicated 2 times."));
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& finding)
         { return finding.code.contains("unknown_bodypart"); }));
-    QVERIFY(overlap->message.contains("future.extension"));
+    QVERIFY(!overlap->message.contains("future.extension"));
 
     QFile file(path);
     QVERIFY(file.open(QIODevice::ReadOnly));
     QCOMPARE(file.readAll(), bytes);
 }
 
-void MobFamilyValidationTests::importEquipmentIsAuthoritativeOnlyForImportedUnits()
+void MobFamilyValidationTests::importWithoutTemplateHairEvidenceDoesNotReportMissingHair()
 {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
@@ -573,16 +644,9 @@ void MobFamilyValidationTests::importEquipmentIsAuthoritativeOnlyForImportedUnit
     request.database = wearableDatabase("OrcF3", "unorma", {});
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
 
-    QVector<quint32> missingHair;
-    for(const SMobFamilyFinding& finding : report.findings)
-        if(finding.code == "mob.semantic.missing_hair_selection" && finding.hasNid)
-            missingHair.append(finding.nid);
-    QCOMPARE(missingHair, QVector<quint32>({21}));
-    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
-        [](const SMobFamilyFinding& candidate)
-        { return candidate.code == "mob.semantic.missing_hair_selection"; });
-    QVERIFY(finding != report.findings.cend());
-    QVERIFY(finding->message.contains("embedded MOB equipment"));
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.missing_hair_selection"; }));
 }
 
 void MobFamilyValidationTests::databaseCreatureResolutionSuppressesWearableMaskRules()

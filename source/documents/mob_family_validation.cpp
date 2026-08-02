@@ -369,16 +369,6 @@ bool standardWearableAssembly(const QString& model)
     return models.contains(model.trimmed().toLower());
 }
 
-QString wearableFamily(const QString& model)
-{
-    const QString folded = model.trimmed().toLower();
-    if(folded == "unhuma" || folded == "unhufe") return "human";
-    if(folded == "unorma" || folded == "unorfe") return "orc";
-    if(folded == "unhusk") return "wearable skeleton";
-    if(folded == "unhuzm" || folded == "unhuzf") return "wearable undead";
-    return standardWearableAssembly(folded) ? "standard wearable" : "non-humanoid/integral";
-}
-
 QString bodyPartSlot(const QString& part)
 {
     const int dot = part.indexOf('.');
@@ -400,9 +390,7 @@ QString itemPrototype(const QString& reference)
 struct SBodyPartContext
 {
     QString model;
-    QString family;
     QStringList armor;
-    QString equipmentSource;
     bool wearable = false;
 };
 
@@ -414,8 +402,6 @@ SBodyPartContext bodyPartContext(
     SBodyPartContext context;
     context.model = object.model.trimmed();
     context.armor = object.armor;
-    context.equipmentSource = object.importMode
-        ? "embedded MOB equipment" : "serialized fallback equipment";
 
     if(!object.importMode && !database.isNull())
     {
@@ -423,7 +409,6 @@ SBodyPartContext bodyPartContext(
         if(monster != database->monsters.constEnd())
         {
             context.armor = monster->wears;
-            context.equipmentSource = "active profile database equipment";
             const auto race = database->raceModels.constFind(monster->baseRace.trimmed().toLower());
             if(race != database->raceModels.constEnd())
             {
@@ -444,7 +429,6 @@ SBodyPartContext bodyPartContext(
         }
     }
     context.wearable = standardWearableAssembly(context.model);
-    context.family = wearableFamily(context.model);
     return context;
 }
 
@@ -481,29 +465,87 @@ bool hasHelmet(const QStringList& armor,
     return false;
 }
 
-QString serializedPartsText(const SMobObjectSnapshot& object)
+QString findingSubject(const SMobObjectSnapshot& object)
 {
-    if(object.bodyPartsSectionPath.isEmpty())
-        return "record missing";
-    if(!object.hasBodyParts)
-        return "record malformed";
-    return object.bodyParts.isEmpty() ? "empty (all assembly members enabled)"
-                                      : object.bodyParts.join(", ");
+    return QString("NID %1").arg(object.hasNid
+        ? QString::number(object.nid) : QString("missing"));
 }
 
-QString unitContext(const SMobFamilyMember& member, const SMobObjectSnapshot& object,
-                    const SBodyPartContext& context)
+bool isHairPart(const QString& part)
 {
-    return QString("%1 NID %2, name \"%3\", prototype \"%4\", model \"%5\", family %6, Import=%7, serialized parts [%8]")
-        .arg(member.fileName,
-             object.hasNid ? QString::number(object.nid) : QString("missing"),
-             object.name.isEmpty() ? QString("-") : object.name,
-             object.prototype.isEmpty() ? QString("-") : object.prototype,
-             context.model.isEmpty() ? QString("-") : context.model,
-             context.family,
-             object.hasImportMode ? (object.importMode ? QString("true") : QString("false"))
-                                  : QString("missing"),
-             serializedPartsText(object));
+    return part.compare("hr", Qt::CaseInsensitive) == 0
+        || part.startsWith("hr.", Qt::CaseInsensitive);
+}
+
+bool hasHairSelection(const SMobObjectSnapshot& object)
+{
+    return std::any_of(object.bodyParts.cbegin(), object.bodyParts.cend(),
+        [](const QString& part) { return isHairPart(part); });
+}
+
+QStringList canonicalStrings(const QStringList& values, bool omitHair = false)
+{
+    QStringList result;
+    for(const QString& value : values)
+    {
+        if(omitHair && isHairPart(value))
+            continue;
+        result.append(value.trimmed().toCaseFolded());
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+bool confirmedZone3MissingHairFingerprint(
+    const SMobObjectSnapshot& object, const SBodyPartContext& context,
+    const QString& profileId)
+{
+    const bool jmv = profileId.contains("jamais", Qt::CaseInsensitive)
+        || profileId.compare("jmv", Qt::CaseInsensitive) == 0;
+    if(!jmv || object.importMode
+       || object.prototype.compare("Human Gipath NPC Boss F5",
+                                   Qt::CaseInsensitive) != 0
+       || context.model.compare("unhuma", Qt::CaseInsensitive) != 0)
+        return false;
+    static const QStringList confirmedMask = canonicalStrings({
+        "bd", "hd", "hp", "lh1", "lh2", "lh3", "ll1", "ll2", "ll3",
+        "rh1", "rh2", "rh3", "rl1", "rl2", "rl3"
+    });
+    return canonicalStrings(object.bodyParts) == confirmedMask;
+}
+
+bool hasMatchingHairControl(
+    const SMobObjectSnapshot& object, const SBodyPartContext& context,
+    const SMobFamilyMember& owningMember,
+    const QVector<SMobFamilyMember>& familyMembers,
+    const SMobFamilyValidationRequest& request)
+{
+    if(object.prototype.trimmed().isEmpty())
+        return false;
+    const QStringList targetParts = canonicalStrings(object.bodyParts, true);
+    const QStringList targetArmor = canonicalStrings(context.armor);
+    for(const SMobFamilyMember& member : familyMembers)
+    {
+        if(member.missing || !member.error.isEmpty()
+           || member.activeRuntimeFamily != owningMember.activeRuntimeFamily)
+            continue;
+        for(const SMobObjectSnapshot& peer : member.objects)
+        {
+            if(!peer.unit || !peer.hasBodyParts || peer.bodyParts.isEmpty()
+               || !peer.bodyParts.contains("hr", Qt::CaseInsensitive)
+               || peer.prototype.compare(object.prototype, Qt::CaseInsensitive) != 0
+               || peer.importMode != object.importMode)
+                continue;
+            const SBodyPartContext peerContext = bodyPartContext(
+                peer, request.database, request.profileId);
+            if(peerContext.model.compare(context.model, Qt::CaseInsensitive) != 0
+               || canonicalStrings(peerContext.armor) != targetArmor
+               || canonicalStrings(peer.bodyParts, true) != targetParts)
+                continue;
+            return true;
+        }
+    }
+    return false;
 }
 
 void appendBodyPartFinding(CMobFamilyValidationReport* report,
@@ -527,6 +569,7 @@ void appendBodyPartFinding(CMobFamilyValidationReport* report,
 
 void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
                             const SMobFamilyMember& member,
+                            const QVector<SMobFamilyMember>& familyMembers,
                             CMobFamilyValidationReport* report)
 {
     static const QStringList coreParts = {
@@ -539,7 +582,7 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
             continue;
         const SBodyPartContext context = bodyPartContext(
             object, request.database, request.profileId);
-        const QString prefix = unitContext(member, object, context);
+        const QString subject = findingSubject(object);
 
         QMap<QString, int> counts;
         QMap<QString, QStringList> alternativesBySlot;
@@ -557,8 +600,8 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
                 continue;
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Info,
                 "mob.semantic.duplicate_bodypart_token",
-                QString("%1 repeats token '%2' %3 times. The exact array remains visible and preserved; compare with an authored peer before changing it.")
-                    .arg(prefix, count.key()).arg(count.value()));
+                QString("%1: body-part token '%2' is duplicated %3 times.")
+                    .arg(subject, count.key()).arg(count.value()));
         }
         for(auto slot = alternativesBySlot.constBegin(); slot != alternativesBySlot.constEnd(); ++slot)
         {
@@ -566,8 +609,8 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
                 continue;
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
                 "mob.semantic.overlapping_unit_parts",
-                QString("%1 enables mutually overlapping alternatives for logical slot '%2': %3. Keep the intended alternative only if a matched working instance proves it; no data was changed.")
-                    .arg(prefix, slot.key(), slot.value().join(", ")));
+                QString("%1: mutually overlapping parts are enabled for '%2': %3.")
+                    .arg(subject, slot.key(), slot.value().join(", ")));
         }
 
         // Empty masks are the shipped norm for integral creatures and legacy
@@ -579,21 +622,21 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
         {
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Critical,
                 "mob.semantic.wearable_bodyparts_missing",
-                prefix + " has no OBJBODYPARTS record. For a standard wearable assembly this selects every assembly member, including optional alternatives; use a matched working mask as a repair suggestion only.");
+                subject + ": OBJBODYPARTS is missing, so every assembly member is enabled.");
             continue;
         }
         if(!object.hasBodyParts)
         {
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Critical,
                 "mob.semantic.wearable_bodyparts_malformed",
-                prefix + " has an unreadable OBJBODYPARTS payload. It cannot be classified safely and was not changed.");
+                subject + ": OBJBODYPARTS is unreadable and cannot be classified safely.");
             continue;
         }
         if(object.bodyParts.isEmpty())
         {
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Critical,
                 "mob.semantic.wearable_all_parts_enabled",
-                prefix + " has an explicit empty mask, which enables every assembly member including optional alternatives on a standard wearable. Replace it only from a matched working instance; no data was changed.");
+                subject + ": empty body-part list enables every assembly member, including overlapping alternatives.");
             continue;
         }
 
@@ -604,18 +647,17 @@ void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
         if(!missingCore.isEmpty())
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
                 "mob.semantic.missing_core_bodyparts",
-                QString("%1 omits standard anatomy root(s): %2. This can expose gaps or clipping; compare with a same-family working instance before proposing a repair.")
-                    .arg(prefix, missingCore.join(", ")));
+                QString("%1: missing standard anatomy part(s): %2.")
+                    .arg(subject, missingCore.join(", ")));
 
-        bool hasHairSelection = counts.contains("hr");
-        if(!hasHairSelection)
-            for(auto count = counts.constBegin(); count != counts.constEnd(); ++count)
-                hasHairSelection = hasHairSelection || count.key().startsWith("hr.");
-        if(!hasHairSelection && hasHelmet(context.armor, request.database))
+        if(!hasHairSelection(object)
+           && hasHelmet(context.armor, request.database)
+           && confirmedZone3MissingHairFingerprint(
+                object, context, request.profileId)
+           && hasMatchingHairControl(object, context, member, familyMembers, request))
             appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
                 "mob.semantic.missing_hair_selection",
-                QString("%1 equips a helmet through %2 but selects neither 'hr' nor an authored 'hr.NN' member. The matched zone3 control shows this omission can clip in-game even when Endurance's final-appearance preview masks it. Suggested review: compare with a same-prototype working unit and add only its proven hair selector; no data was changed.")
-                    .arg(prefix, context.equipmentSource));
+                subject + ": missing 'hr' in the confirmed zone3 helmet mask; this can clip in-game.");
     }
 }
 }
@@ -1071,7 +1113,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     {
         if(member.missing || !member.error.isEmpty())
             continue;
-        appendBodyPartFindings(request, member, &report);
+        appendBodyPartFindings(request, member, report.members, &report);
         if(member.activeRuntimeFamily && member.magicTrapCount > 0
            && !member.hasDiplomacyTable)
         {

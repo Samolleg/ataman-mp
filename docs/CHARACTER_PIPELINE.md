@@ -40,8 +40,10 @@ interpretation.
 Validation follows the same ownership boundary but inspects the serialized
 mask, not only the resolved preview. This is necessary because database-driven
 anatomy reconstruction can visually hide an omitted serialized root. Standard
-wearables receive non-blocking empty/missing-mask, core-anatomy, helmet/hair,
-overlap, and duplicate diagnostics. Integral creatures and legacy skeleton
+wearables receive non-blocking empty/missing-mask, core-anatomy, overlap, and
+duplicate diagnostics. Missing hair is reported only for a fingerprinted
+broken/working control such as the confirmed JMV zone3 pair, not from helmet or
+hair-index presence alone. Integral creatures and legacy skeleton
 assemblies retain their corpus-normal empty-mask behavior. Unknown tokens are
 never normalized or rejected. See
 [`validation/CHARACTER_BODYPART_VALIDATION.md`](validation/CHARACTER_BODYPART_VALIDATION.md).

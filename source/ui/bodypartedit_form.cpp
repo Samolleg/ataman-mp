@@ -10,6 +10,8 @@
 #include <QHeaderView>
 #include <QRegularExpression>
 #include <QSet>
+#include <QMouseEvent>
+#include <QItemSelectionModel>
 
 namespace {
 
@@ -29,6 +31,23 @@ QString stateSearchText(Qt::CheckState state)
     if(state == Qt::Unchecked)
         return QStringLiteral("unchecked false off disabled");
     return QStringLiteral("mixed partial undefined");
+}
+
+int rowForPart(QTableWidget* table, const QString& part)
+{
+    for(int row = 0; row < table->rowCount(); ++row)
+        if(table->item(row, 0)
+           && table->item(row, 0)->text().compare(part, Qt::CaseInsensitive) == 0)
+            return row;
+    return -1;
+}
+
+int rowForCheckBox(QTableWidget* table, const QObject* checkBox)
+{
+    for(int row = 0; row < table->rowCount(); ++row)
+        if(table->cellWidget(row, 1) == checkBox)
+            return row;
+    return -1;
 }
 
 }
@@ -76,6 +95,7 @@ void CBodyPartEditForm::populateTable()
             state = item.second->value() ? Qt::CheckState::Checked : Qt::CheckState::Unchecked;
         pCheck->setCheckState(state);
         ui->tablePart->setCellWidget(i, 1, pCheck);
+        pCheck->installEventFilter(this);
         QTableWidgetItem* checkSort = new CBodyPartStateItem;
         checkSort->setData(Qt::UserRole, int(state));
         checkSort->setFlags(checkSort->flags() & ~Qt::ItemIsEditable);
@@ -111,6 +131,8 @@ void CBodyPartEditForm::reset()
     ui->tablePart->clear();
     ui->tablePart->setColumnCount(3);
     ui->tablePart->setRowCount(0);
+    ui->tablePart->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tablePart->setSelectionMode(QAbstractItemView::ExtendedSelection);
     QStringList header;
     header.append("Part");
     header.append("Enabled");
@@ -254,5 +276,78 @@ void CBodyPartEditForm::closeEvent(QCloseEvent* event)
     settings.setValue("ui/bodyPartEditorHeader",
                       ui->tablePart->horizontalHeader()->saveState());
     QWidget::closeEvent(event);
+}
+
+bool CBodyPartEditForm::eventFilter(QObject* watched, QEvent* event)
+{
+    CBodyPartCheckBox* clicked = qobject_cast<CBodyPartCheckBox*>(watched);
+    if(!clicked || (event->type() != QEvent::MouseButtonPress
+                    && event->type() != QEvent::MouseButtonDblClick
+                    && event->type() != QEvent::MouseButtonRelease))
+        return QWidget::eventFilter(watched, event);
+
+    QMouseEvent* mouse = static_cast<QMouseEvent*>(event);
+    if(mouse->button() != Qt::LeftButton)
+        return QWidget::eventFilter(watched, event);
+
+    const int clickedRow = rowForCheckBox(ui->tablePart, clicked);
+    if(clickedRow < 0 || !ui->tablePart->item(clickedRow, 0))
+        return QWidget::eventFilter(watched, event);
+    const QString clickedPart = ui->tablePart->item(clickedRow, 0)->text();
+
+    if(event->type() == QEvent::MouseButtonPress
+       || event->type() == QEvent::MouseButtonDblClick)
+    {
+        m_pendingToggleParts.clear();
+        const QModelIndexList selectedRows =
+            ui->tablePart->selectionModel()->selectedRows(0);
+        bool clickedIsSelected = false;
+        for(const QModelIndex& selected : selectedRows)
+        {
+            const QString part = ui->tablePart->item(selected.row(), 0)->text();
+            m_pendingToggleParts.append(part);
+            clickedIsSelected = clickedIsSelected
+                || part.compare(clickedPart, Qt::CaseInsensitive) == 0;
+        }
+        if(!clickedIsSelected || m_pendingToggleParts.size() < 2)
+        {
+            m_pendingToggleParts = QStringList(clickedPart);
+            ui->tablePart->clearSelection();
+            ui->tablePart->selectionModel()->select(
+                ui->tablePart->model()->index(clickedRow, 0),
+                QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+        ui->tablePart->setCurrentItem(ui->tablePart->item(clickedRow, 0),
+                                      QItemSelectionModel::NoUpdate);
+        return true;
+    }
+
+    if(m_pendingToggleParts.isEmpty())
+        return true;
+    const Qt::CheckState targetState = clicked->checkState() == Qt::Checked
+        ? Qt::Unchecked : Qt::Checked;
+    QList<QCheckBox*> checkBoxes;
+    for(const QString& part : m_pendingToggleParts)
+    {
+        const int row = rowForPart(ui->tablePart, part);
+        if(row >= 0)
+            if(QCheckBox* checkBox = qobject_cast<QCheckBox*>(
+                    ui->tablePart->cellWidget(row, 1)))
+                checkBoxes.append(checkBox);
+    }
+    for(QCheckBox* checkBox : checkBoxes)
+        checkBox->setCheckState(targetState);
+
+    ui->tablePart->clearSelection();
+    for(const QString& part : m_pendingToggleParts)
+    {
+        const int row = rowForPart(ui->tablePart, part);
+        if(row >= 0)
+            ui->tablePart->selectionModel()->select(
+                ui->tablePart->model()->index(row, 0),
+                QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
+    m_pendingToggleParts.clear();
+    return true;
 }
 

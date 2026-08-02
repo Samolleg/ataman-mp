@@ -1106,6 +1106,46 @@ int runHeadlessCommand(QApplication& app)
         const bool bodyPartColumnSorting = bodyPartTable->isSortingEnabled()
             && bodyPartTable->horizontalHeader()->sectionsClickable()
             && bodyPartTable->item(0, 0)->text() == "optional_part";
+        bool bodyPartMultiSelectionToggle = false;
+        if(bodyPartTable)
+        {
+            QTableWidgetItem* bodyItem = bodyPartTable->findItems(
+                "bd", Qt::MatchExactly).value(0, nullptr);
+            QTableWidgetItem* hairItem = bodyPartTable->findItems(
+                "hr", Qt::MatchExactly).value(0, nullptr);
+            if(bodyItem && hairItem)
+            {
+                bodyPartTable->selectionModel()->clearSelection();
+                bodyPartTable->selectionModel()->select(
+                    bodyPartTable->model()->index(bodyItem->row(), 0),
+                    QItemSelectionModel::Select | QItemSelectionModel::Rows);
+                bodyPartTable->selectionModel()->select(
+                    bodyPartTable->model()->index(hairItem->row(), 0),
+                    QItemSelectionModel::Select | QItemSelectionModel::Rows);
+                QCheckBox* bodyCheck = qobject_cast<QCheckBox*>(
+                    bodyPartTable->cellWidget(bodyItem->row(), 1));
+                QCheckBox* hairCheck = qobject_cast<QCheckBox*>(
+                    bodyPartTable->cellWidget(hairItem->row(), 1));
+                if(bodyCheck && hairCheck)
+                {
+                    const QPointF clickPoint(bodyCheck->rect().center());
+                    QMouseEvent checkPress(QEvent::MouseButtonPress, clickPoint,
+                                           Qt::LeftButton, Qt::LeftButton,
+                                           Qt::NoModifier);
+                    QApplication::sendEvent(bodyCheck, &checkPress);
+                    QMouseEvent checkRelease(QEvent::MouseButtonRelease, clickPoint,
+                                             Qt::LeftButton, Qt::NoButton,
+                                             Qt::NoModifier);
+                    QApplication::sendEvent(bodyCheck, &checkRelease);
+                    bodyPartMultiSelectionToggle =
+                        bodyPartTable->selectionMode() == QAbstractItemView::ExtendedSelection
+                        && bodyPartTable->selectionBehavior() == QAbstractItemView::SelectRows
+                        && bodyPartTable->selectionModel()->selectedRows().size() == 2
+                        && bodyCheck->checkState() == Qt::Unchecked
+                        && hairCheck->checkState() == Qt::Unchecked;
+                }
+            }
+        }
         const bool humanoidHairOptionAvailable =
             util::knownBodyPartOptions("unhufe").contains("hr")
             && util::knownBodyPartOptions("unhuma.mod").contains("hr")
@@ -2036,6 +2076,7 @@ int runHeadlessCommand(QApplication& app)
                 && validationColumnsResizable
                 && bodyPartSourceFiltering
                 && bodyPartColumnSorting
+                && bodyPartMultiSelectionToggle
                 && humanoidHairOptionAvailable
                 && bodyPartWindowSizePersists
                 && bodyPartNoOpPreservesExactArray
@@ -2169,6 +2210,7 @@ int runHeadlessCommand(QApplication& app)
                << " validationColumnsResizable=" << validationColumnsResizable
                << " bodyPartSourceFiltering=" << bodyPartSourceFiltering
                << " bodyPartColumnSorting=" << bodyPartColumnSorting
+               << " bodyPartMultiSelectionToggle=" << bodyPartMultiSelectionToggle
                << " humanoidHairOptionAvailable=" << humanoidHairOptionAvailable
                << " bodyPartWindowSizePersists=" << bodyPartWindowSizePersists
                << " bodyPartNoOpPreservesExactArray=" << bodyPartNoOpPreservesExactArray

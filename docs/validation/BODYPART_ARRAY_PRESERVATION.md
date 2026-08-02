@@ -38,6 +38,8 @@ so NID 800004's missing `hr` predates Endurance.
   currently resolved assembly and from the malformed MOB object.
 - Column headers sort the table, and the Parts window retains its last size.
 - Every column is interactively resizable and its widths are retained.
+- Checking or unchecking a selected row applies the new state to every selected
+  part and preserves the multi-row selection.
 - No-op Apply retains the exact array byte semantics: order, duplicate tokens,
   unknown tokens, and the empty-list convention.
 - Checkbox edits are deltas against each selected object's original array.
@@ -52,9 +54,10 @@ extensions and must remain inspectable and lossless.
 Profile/family-aware diagnostics now inspect that exact serialized array without
 normalizing it. Empty/missing masks are Critical only after the Import/database
 appearance path resolves to a standard wearable assembly; shipped creature and
-legacy skeleton empty masks remain accepted. Helmeted wearables missing both
-`hr` and `hr.NN`, missing core anatomy, distinct dotted alternatives, and
-duplicates receive non-blocking findings. The complete evidence and severity
+legacy skeleton empty masks remain accepted. Missing hair is reported only for
+the confirmed JMV zone3 fingerprint; other missing-`hr` combinations remain
+lossless and unreported. Missing core anatomy, distinct dotted alternatives,
+and duplicates receive non-blocking findings. The complete evidence and severity
 matrix is in
 [`CHARACTER_BODYPART_VALIDATION.md`](CHARACTER_BODYPART_VALIDATION.md).
 
@@ -62,11 +65,13 @@ matrix is in
 
 - `EIMapperEndurance.exe --ui-widget-check`: passes exact-array, unknown-token,
   state/source-filter, column-sorting, canonical-hair-option, filter-only,
-  checkbox-only display, interactive-column, exact property-paste,
+  checkbox-only display, selected-row batch toggling, interactive-column,
+  exact property-paste,
   order-sensitive equality, duplicate-token, and delta-preservation checks.
 - `mob_family_validation_tests`: passes the exact NID 3470/NID 800004 zone3
-  control plus Import/database ownership, wearable/creature classification,
-  severity, overlap, duplicate, unknown-token, and byte-preservation cases.
+  control, matched hairless/unconfirmed exclusions, Import/database ownership,
+  wearable/creature classification, concise messages, severity, overlap,
+  duplicate, unknown-token, and byte-preservation cases.
 - The supplied `zone3obrtest2.mob` passes `--validate` and
   `--roundtrip-check`; neither command writes the input.
 - The supplied `zone3obrtest1.mob` is byte-identical to original

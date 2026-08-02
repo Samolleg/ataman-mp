@@ -5,7 +5,11 @@
 #include <QMap>
 #include <QTextStream>
 
+#include <algorithm>
+
 #include "mob_family_validation.h"
+#include "base_profile_database_provider.h"
+#include "jmv_profile_database_provider.h"
 
 namespace {
 int printBodyPartStats(const QVector<SMobFamilyMember>& members, QTextStream& out)
@@ -61,6 +65,157 @@ int printBodyPartStats(const QVector<SMobFamilyMember>& members, QTextStream& ou
             << " empty=" << modelEmptyCounts.value(it.key()) << "\n";
     return unreadable;
 }
+
+QString itemPrototype(const QString& reference)
+{
+    return reference.section('[', 0, 0).section('.', 0, 0).trimmed().toLower();
+}
+
+bool hasHelmet(const QStringList& armor,
+               const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database)
+{
+    for(const QString& reference : armor)
+    {
+        if(!database.isNull())
+        {
+            const auto direct = database->items.constFind(itemPrototype(reference));
+            if(direct != database->items.constEnd()
+               && direct->category.compare("armor", Qt::CaseInsensitive) == 0
+               && direct->type.compare("helm", Qt::CaseInsensitive) == 0)
+                return true;
+        }
+        if(reference.contains("helm", Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
+
+QString canonicalList(QStringList values, bool omitHair = false)
+{
+    QStringList folded;
+    for(const QString& value : values)
+    {
+        if(omitHair && (value.compare("hr", Qt::CaseInsensitive) == 0
+                        || value.startsWith("hr.", Qt::CaseInsensitive)))
+            continue;
+        folded.append(value.trimmed().toCaseFolded());
+    }
+    std::sort(folded.begin(), folded.end());
+    return folded.join(QChar(0x1f));
+}
+
+QString hairPeerKey(
+    const SMobObjectSnapshot& object,
+    const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database)
+{
+    QStringList armor = object.armor;
+    if(!object.importMode && !database.isNull())
+    {
+        const auto monster = database->monsters.constFind(
+            object.prototype.trimmed().toLower());
+        if(monster != database->monsters.constEnd())
+            armor = monster->wears;
+    }
+    return QStringList({object.prototype.trimmed().toCaseFolded(),
+                        object.model.trimmed().toCaseFolded(),
+                        object.importMode ? QString("import") : QString("database"),
+                        canonicalList(armor),
+                        canonicalList(object.bodyParts, true)})
+        .join(QChar(0x1e));
+}
+
+void printMissingHairTemplateStats(
+    const QVector<SMobFamilyMember>& members,
+    const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
+    QTextStream& out)
+{
+    int authoredHair = 0;
+    int hairless = 0;
+    int unknown = 0;
+    int matchingControls = 0;
+    int confirmedFingerprints = 0;
+    const QString confirmedMask = canonicalList({
+        "bd", "hd", "hp", "lh1", "lh2", "lh3", "ll1", "ll2", "ll3",
+        "rh1", "rh2", "rh3", "rl1", "rl2", "rl3"
+    });
+    QSet<QString> hairControls;
+    for(const SMobFamilyMember& member : members)
+        for(const SMobObjectSnapshot& object : member.objects)
+            if(object.unit && object.hasBodyParts && !object.bodyParts.isEmpty()
+               && object.bodyParts.contains("hr", Qt::CaseInsensitive))
+                hairControls.insert(hairPeerKey(object, database));
+    for(const SMobFamilyMember& member : members)
+    {
+        for(const SMobObjectSnapshot& object : member.objects)
+        {
+            if(!object.unit || object.bodyParts.contains("hr", Qt::CaseInsensitive))
+                continue;
+            bool hasDottedHair = false;
+            for(const QString& part : object.bodyParts)
+                hasDottedHair = hasDottedHair
+                    || part.startsWith("hr.", Qt::CaseInsensitive);
+            if(hasDottedHair)
+                continue;
+
+            const ei::SMonsterDatabaseRecord* monster = nullptr;
+            if(!object.importMode && !database.isNull())
+            {
+                const auto found = database->monsters.constFind(
+                    object.prototype.trimmed().toLower());
+                if(found != database->monsters.constEnd())
+                    monster = &found.value();
+            }
+            const QStringList armor = object.importMode || !monster
+                ? object.armor : monster->wears;
+            if(!hasHelmet(armor, database))
+                continue;
+
+            const QString hair = monster ? QString::number(monster->hairIndex)
+                                         : QString("unknown");
+            if(!monster) ++unknown;
+            else if(monster->hairIndex >= 0) ++authoredHair;
+            else ++hairless;
+            const bool matchingControl =
+                hairControls.contains(hairPeerKey(object, database));
+            matchingControls += matchingControl ? 1 : 0;
+            const bool confirmedFingerprint = matchingControl
+                && !object.importMode
+                && object.prototype.compare("Human Gipath NPC Boss F5",
+                                            Qt::CaseInsensitive) == 0
+                && object.model.compare("unhuma", Qt::CaseInsensitive) == 0
+                && canonicalList(object.bodyParts) == confirmedMask;
+            confirmedFingerprints += confirmedFingerprint ? 1 : 0;
+            out << "MISSING_HAIR_TEMPLATE file=" << member.fileName
+                << " nid=" << (object.hasNid ? QString::number(object.nid)
+                                              : QString("missing"))
+                << " prototype=" << object.prototype
+                << " import=" << (object.importMode ? "true" : "false")
+                << " hairIndex=" << hair
+                << " matchingControl=" << (matchingControl ? "true" : "false")
+                << " confirmedFingerprint="
+                << (confirmedFingerprint ? "true" : "false")
+                << "\n";
+        }
+    }
+    out << "MISSING_HAIR_TEMPLATE_STATS authoredHair=" << authoredHair
+        << " hairless=" << hairless << " unknown=" << unknown
+        << " matchingControls=" << matchingControls
+        << " confirmedFingerprints=" << confirmedFingerprints << "\n";
+}
+
+QSharedPointer<const ei::SProfileDatabaseSnapshot> loadDatabase(
+    const QString& profileId, const QStringList& resourceDirectories)
+{
+    if(resourceDirectories.isEmpty())
+        return {};
+    ei::SProfileDatabaseLoadRequest request;
+    request.profileId = profileId;
+    request.resourceDirectories = resourceDirectories;
+    if(profileId.contains("jamais", Qt::CaseInsensitive)
+       || profileId.compare("jmv", Qt::CaseInsensitive) == 0)
+        return ei::JmvProfileDatabaseProvider().load(request);
+    return ei::BaseProfileDatabaseProvider().load(request);
+}
 }
 
 int main(int argc, char* argv[])
@@ -87,11 +242,19 @@ int main(int argc, char* argv[])
         "Suppress the ordinary family report (use with --bodypart-stats)");
     QCommandLineOption auditRoot("audit-root",
         "Audit every readable *.mob in a directory independently", "directory");
+    QCommandLineOption databaseResource("database-resource",
+        "Read-only profile database resource directory", "directory");
+    QCommandLineOption missingHairTemplateStats("missing-hair-template-stats",
+        "Print helmeted missing-hr units classified by database hair index");
     parser.addOptions({seed, primary, root, workspaceRoot, preferred,
                        profile, expectNid, expectMember,
                        expectFinding, suggestFor, expectSuggestions,
-                       bodyPartStats, statsOnly, auditRoot});
+                       bodyPartStats, statsOnly, auditRoot, databaseResource,
+                       missingHairTemplateStats});
     parser.process(app);
+
+    const QSharedPointer<const ei::SProfileDatabaseSnapshot> database =
+        loadDatabase(parser.value(profile), parser.values(databaseResource));
 
     if(parser.isSet(auditRoot))
     {
@@ -113,6 +276,8 @@ int main(int argc, char* argv[])
         }
         QTextStream out(stdout);
         const int unreadable = printBodyPartStats(members, out);
+        if(parser.isSet(missingHairTemplateStats))
+            printMissingHairTemplateStats(members, database, out);
         return unreadable == 0 ? 0 : 1;
     }
 
@@ -124,6 +289,7 @@ int main(int argc, char* argv[])
     request.mapRoots = parser.values(root);
     request.workspaceRoots = parser.values(workspaceRoot);
     request.preferredMobPath = parser.value(preferred);
+    request.database = database;
     if(request.seedMobPaths.isEmpty() && request.mappedPrimaryMobPath.isEmpty())
     {
         QTextStream(stderr) << "At least one --seed or --primary is required.\n";
@@ -134,6 +300,8 @@ int main(int argc, char* argv[])
     QTextStream out(stdout);
     if(parser.isSet(bodyPartStats))
         printBodyPartStats(report.members, out);
+    if(parser.isSet(missingHairTemplateStats))
+        printMissingHairTemplateStats(report.members, database, out);
     if(!parser.isSet(statsOnly))
         out << report.toText() << "\n";
     bool passed = true;
