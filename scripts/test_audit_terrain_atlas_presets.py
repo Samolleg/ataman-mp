@@ -358,12 +358,12 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
                       "southEast": 10, "southWest": 5},
             },
             "zone14": {
-                497: {"northWest": 11, "northEast": 11,
+                497: {"northWest": 8, "northEast": 1,
                       "southEast": 7, "southWest": 7},
                 506: {"northWest": 7, "northEast": 10,
                       "southEast": 10, "southWest": 10},
-                64: {"northWest": 11, "northEast": 1,
-                     "southEast": 11, "southWest": 11},
+                64: {"northWest": 8, "northEast": 1,
+                     "southEast": 8, "southWest": 16},
             },
             "zone6": {
                 148: {"northWest": 4, "northEast": 2,
@@ -1817,10 +1817,10 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
                         (316, "southEast"): 9,
                         (316, "southWest"): 10},
             "bz11k": {(246, "northEast"): 8,
-                       (477, "southEast"): 10,
+                       (477, "southEast"): 8,
                        (509, "southWest"): 16},
             "Zone14": {(246, "northEast"): 8,
-                        (477, "southEast"): 10,
+                        (477, "southEast"): 8,
                         (509, "southWest"): 16},
             "bz13h": {(248, "northWest"): 4,
                        (248, "southWest"): 2,
@@ -2223,6 +2223,54 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             "Paving / Sand ruins",
             next(family for family in zone19["families"]
                  if family["id"] == 7)["suggestedName"])
+
+    def test_r72_shipped_snow_atlas_replays_full_corner_review(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {value["namespace"]: value for value in catalog["presets"]}
+        bz11k = presets["bz11k"]
+        zone14 = presets["Zone14"]
+        bz_payload = base64.b64decode(bz11k["signaturesBase64"])
+        zone_payload = base64.b64decode(zone14["signaturesBase64"])
+        self.assertEqual(
+            bz_payload, zone_payload,
+            "byte-identical bz11k/Zone14 atlases must keep exact ownership")
+
+        family_ids = {family["name"]: int(family["id"])
+                      for family in bz11k["families"]}
+        remaining_grayish = [
+            (slot, corner)
+            for slot in range(bz11k["slotCount"])
+            for corner in range(4)
+            if bz_payload[slot * 4 + corner]
+            == family_ids["Stone / Grayish"]
+        ]
+        self.assertEqual(
+            [(373, 1), (373, 3), (437, 0), (437, 1),
+             (446, 1), (446, 2)],
+            remaining_grayish,
+            "only the six explicitly deferred Stone / Grayish corners remain")
+
+        def signature(slot: int) -> tuple[int, int, int, int]:
+            start = slot * 4
+            return tuple(bz_payload[start:start + 4])
+
+        self.assertEqual(
+            (family_ids["Stone / Black"], family_ids["Stone / Black"],
+             family_ids["Ground / Trampled"], family_ids["Rock / Black"]),
+            signature(489))
+        self.assertEqual(family_ids["Stone / Dark"], signature(56)[3])
+        self.assertEqual(family_ids["Ground / Light"], signature(176)[0])
+        self.assertEqual(
+            (family_ids["Stone / Dark"], family_ids["Stone / Black"],
+             family_ids["Rock / Black"], family_ids["Rock / Black"]),
+            signature(285))
+        self.assertEqual(
+            (family_ids["Stone / Black"], family_ids["Ground / Light"],
+             family_ids["Rock / Black"], family_ids["Rock / Black"]),
+            signature(495))
 
     def test_family_catalog_mixed_thumbnail_corners_are_explicit(self) -> None:
         cases = {

@@ -2108,6 +2108,47 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     }
     family_renames.update(r71_renames.get(namespace, {}))
 
+    # R72 full-family review.  The reviewer inspected every corner that still
+    # belonged to the provisional Stone / Grayish family, every Rock / Black
+    # corner, the false-uniform Ground / Mountainous anchor, and the disputed
+    # slot 56 quarter.  Apply only the 103 explicit choices.  Six Stone /
+    # Grayish quarters remain deliberately unresolved for a cross-atlas Stone /
+    # Gray comparison.  bz11k and Zone14 are byte-identical atlas owners, so
+    # exact quarter ownership is mirrored between them.
+    r72_snow_corrections = {
+        (31, 0): 1, (56, 3): 1, (60, 1): 1, (63, 1): 1,
+        (202, 0): 1, (203, 0): 1, (221, 2): 1, (223, 2): 1,
+        (224, 2): 1, (231, 2): 1, (231, 3): 1, (233, 2): 1,
+        (248, 0): 1, (249, 0): 1, (285, 0): 1, (289, 0): 1,
+        (289, 2): 1, (290, 0): 1, (290, 2): 1, (313, 1): 1,
+        (320, 0): 1, (327, 1): 1, (327, 2): 1, (329, 2): 1,
+        (330, 2): 1, (331, 0): 1, (331, 2): 1, (334, 0): 1,
+        (334, 2): 1, (345, 2): 1, (354, 1): 1, (366, 0): 1,
+        (393, 2): 1, (431, 1): 1, (467, 2): 1, (470, 2): 1,
+        (473, 0): 1, (497, 1): 1,
+        (31, 1): 8, (31, 3): 8, (64, 0): 8, (64, 2): 8,
+        (132, 3): 8, (133, 3): 8, (134, 3): 8, (203, 3): 8,
+        (221, 3): 8, (223, 3): 8, (224, 3): 8, (233, 3): 8,
+        (248, 3): 8, (249, 3): 8, (285, 1): 8, (286, 1): 8,
+        (289, 3): 8, (290, 3): 8, (296, 0): 8, (297, 0): 8,
+        (297, 2): 8, (313, 2): 8, (313, 3): 8, (327, 0): 8,
+        (329, 1): 8, (329, 3): 8, (330, 1): 8, (330, 3): 8,
+        (331, 3): 8, (354, 0): 8, (354, 2): 8, (366, 1): 8,
+        (366, 2): 8, (367, 0): 8, (367, 2): 8, (368, 0): 8,
+        (368, 2): 8, (376, 0): 8, (393, 3): 8, (417, 1): 8,
+        (431, 2): 8, (467, 1): 8, (470, 1): 8, (473, 2): 8,
+        (477, 2): 8, (485, 2): 8, (487, 0): 8, (489, 0): 8,
+        (489, 1): 8, (495, 0): 8, (497, 0): 8,
+        (60, 3): 16, (63, 3): 16, (64, 3): 16, (320, 2): 16,
+        (320, 3): 16, (345, 3): 16, (431, 3): 16,
+        (470, 3): 16, (473, 3): 16, (489, 2): 16,
+        (496, 0): 16,
+        (176, 0): 6, (495, 1): 6,
+        (489, 3): 10,
+    }
+    if namespace in ("bz11k", "zone14"):
+        corrections.update(r72_snow_corrections)
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)

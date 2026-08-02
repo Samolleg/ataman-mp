@@ -92,7 +92,7 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         self.assertEqual(25, report["runtimeProfileCount"])
         self.assertEqual(1513, report["totalPairCount"])
         self.assertEqual(
-            {"0": 918, "1": 131, "2": 86, "3": 179, "4": 199},
+            {"0": 924, "1": 126, "2": 87, "3": 178, "4": 198},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

@@ -5791,7 +5791,7 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     // Keep this count pinned to the reviewed semantic-atlas catalog. A change
     // means a family crossed the paint-brush/transition-support boundary and
     // must be visually audited before the palette consumes it.
-    QCOMPARE(transitionSupportFamilies, 43);
+    QCOMPARE(transitionSupportFamilies, 45);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
