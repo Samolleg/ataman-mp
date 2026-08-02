@@ -35,6 +35,7 @@
 #include "unit_visual_preparation.h"
 #include "minimap_bake.h"
 #include "tile_brush_stroke_policy.h"
+#include "shadow_cascade.h"
 
 class QLineEdit;
 class QFrame;
@@ -545,6 +546,8 @@ private:
     float m_nearShadowSplit{64.0f};
     bool m_shadowCascadeDiagnostic{false};
     QElapsedTimer m_shadowUpdateTimer;
+    QElapsedTimer m_staticShadowStabilityTimer;
+    ei::ShadowCachePublicationGate m_staticShadowPublicationGate;
     QElapsedTimer m_overlayAnimationTimer;
     bool m_shadowInitialized{false};
     QByteArray m_staticShadowFingerprint;

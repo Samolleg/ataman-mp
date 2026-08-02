@@ -97,7 +97,7 @@ class TerrainShadowContractTests(unittest.TestCase):
             encoding="utf-8")
 
         static_hash = view.split("QCryptographicHash staticHash", 1)[1].split(
-            "const bool rebuildStatic", 1)[0]
+            "bool rebuildStatic", 1)[0]
         self.assertNotIn("sceneSourceFingerprint", static_hash)
         self.assertIn("queue.staticShadowFingerprint()", view)
         self.assertIn("staticHash.addData(staticCasterFingerprint)", static_hash)
@@ -122,6 +122,16 @@ class TerrainShadowContractTests(unittest.TestCase):
                 "bool CLandscape::previewCanonicalOverlaySector", 1)[0]
         self.assertIn("m_terrainShadowFieldEnabled", preview)
         self.assertIn("applyTerrainShadowVisibility", preview)
+
+    def test_transient_caster_states_do_not_replace_complete_shadow_atlases(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        cascade = (ROOT / "source/render/shadow_cascade.h").read_text(encoding="utf-8")
+
+        self.assertIn("ShadowCachePublicationGate", cascade)
+        self.assertIn("candidateNear == currentNear", cascade)
+        self.assertIn("m_pendingSinceMs", cascade)
+        self.assertIn("kStaticShadowSettleMs", view)
+        self.assertIn("m_staticShadowPublicationGate.replacementReady", view)
 
     def test_editor_query_passes_never_clear_the_visible_framebuffer(self):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")

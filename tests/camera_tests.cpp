@@ -11,6 +11,7 @@ private slots:
     void changesOrbitPivotWithoutMovingTheCurrentView();
     void frustumSliceUsesTheRenderedCameraEye();
     void mapsShadowQualityToCapabilityBoundResolution();
+    void retainsCompleteShadowAtlasUntilReplacementIsStable();
     void integratesMovementIndependentlyOfFrameRate();
     void advancesVsyncFramesWithoutFixedStepLag();
     void keepsMovementActiveBetweenInterpolatedSteps();
@@ -81,6 +82,30 @@ void CameraTests::mapsShadowQualityToCapabilityBoundResolution()
     QCOMPARE(ei::shadowAtlasResolution(2, 16384), 4096);
     QCOMPARE(ei::shadowAtlasResolution(2, 2048), 2048);
     QCOMPARE(ei::shadowAtlasResolution(1, 1024), 1024);
+}
+
+void CameraTests::retainsCompleteShadowAtlasUntilReplacementIsStable()
+{
+    ei::ShadowCachePublicationGate gate;
+    const QByteArray currentNear("near-a");
+    const QByteArray currentFar("far-a");
+    const QByteArray transientNear("near-empty");
+    const QByteArray transientFar("far-empty");
+    const QByteArray replacementNear("near-b");
+    const QByteArray replacementFar("far-b");
+
+    QVERIFY(!gate.replacementReady(currentNear, currentFar,
+                                   transientNear, transientFar, 0, 100));
+    // A selection-only transient returns to the accepted caster set on the
+    // next paint and must never be published.
+    QVERIFY(!gate.replacementReady(currentNear, currentFar,
+                                   currentNear, currentFar, 16, 100));
+    QVERIFY(!gate.replacementReady(currentNear, currentFar,
+                                   replacementNear, replacementFar, 32, 100));
+    QVERIFY(!gate.replacementReady(currentNear, currentFar,
+                                   replacementNear, replacementFar, 120, 100));
+    QVERIFY(gate.replacementReady(currentNear, currentFar,
+                                  replacementNear, replacementFar, 132, 100));
 }
 
 void CameraTests::integratesMovementIndependentlyOfFrameRate()

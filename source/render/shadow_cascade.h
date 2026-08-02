@@ -1,6 +1,7 @@
 #ifndef SHADOW_CASCADE_H
 #define SHADOW_CASCADE_H
 
+#include <QByteArray>
 #include <QMatrix4x4>
 #include <QVector>
 #include <QVector3D>
@@ -9,6 +10,47 @@
 
 namespace ei
 {
+
+class ShadowCachePublicationGate
+{
+public:
+    void reset()
+    {
+        m_pendingNear.clear();
+        m_pendingFar.clear();
+        m_pendingSinceMs = -1;
+    }
+
+    bool replacementReady(const QByteArray& currentNear,
+                          const QByteArray& currentFar,
+                          const QByteArray& candidateNear,
+                          const QByteArray& candidateFar,
+                          qint64 nowMs,
+                          qint64 settleMs)
+    {
+        if(candidateNear == currentNear && candidateFar == currentFar)
+        {
+            reset();
+            return false;
+        }
+        if(candidateNear != m_pendingNear || candidateFar != m_pendingFar)
+        {
+            m_pendingNear = candidateNear;
+            m_pendingFar = candidateFar;
+            m_pendingSinceMs = nowMs;
+            return false;
+        }
+        if(m_pendingSinceMs < 0 || nowMs - m_pendingSinceMs < settleMs)
+            return false;
+        reset();
+        return true;
+    }
+
+private:
+    QByteArray m_pendingNear;
+    QByteArray m_pendingFar;
+    qint64 m_pendingSinceMs{-1};
+};
 
 inline int shadowAtlasResolution(int quality, int maximumTextureSize)
 {
