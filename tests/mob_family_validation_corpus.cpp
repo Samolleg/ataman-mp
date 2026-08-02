@@ -1,8 +1,67 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QMap>
 #include <QTextStream>
 
 #include "mob_family_validation.h"
+
+namespace {
+int printBodyPartStats(const QVector<SMobFamilyMember>& members, QTextStream& out)
+{
+    int unreadable = 0;
+    int unitCount = 0;
+    int imported = 0;
+    int missingRecords = 0;
+    int emptyMasks = 0;
+    QMap<int, int> partCounts;
+    QMap<QString, int> tokenCounts;
+    QMap<QString, int> modelCounts;
+    QMap<QString, int> modelEmptyCounts;
+    for(const SMobFamilyMember& member : members)
+    {
+        if(member.missing || !member.error.isEmpty())
+        {
+            ++unreadable;
+            continue;
+        }
+        for(const SMobObjectSnapshot& object : member.objects)
+        {
+            if(!object.unit)
+                continue;
+            ++unitCount;
+            imported += object.hasImportMode && object.importMode ? 1 : 0;
+            const QString model = object.model.trimmed().toLower();
+            const QString modelKey = model.isEmpty() ? QString("<missing>") : model;
+            ++modelCounts[modelKey];
+            if(object.bodyPartsSectionPath.isEmpty())
+            {
+                ++missingRecords;
+                continue;
+            }
+            ++partCounts[object.bodyParts.size()];
+            if(object.bodyParts.isEmpty())
+                ++modelEmptyCounts[modelKey];
+            emptyMasks += object.bodyParts.isEmpty() ? 1 : 0;
+            for(const QString& token : object.bodyParts)
+                ++tokenCounts[token];
+        }
+    }
+    out << "BODYPART_STATS files=" << members.size()
+        << " unreadable=" << unreadable << " units=" << unitCount
+        << " imported=" << imported << " missingRecords=" << missingRecords
+        << " emptyMasks=" << emptyMasks << "\n";
+    for(auto it = partCounts.constBegin(); it != partCounts.constEnd(); ++it)
+        out << "BODYPART_COUNT " << it.key() << "=" << it.value() << "\n";
+    for(auto it = tokenCounts.constBegin(); it != tokenCounts.constEnd(); ++it)
+        out << "BODYPART_TOKEN " << it.key() << "=" << it.value() << "\n";
+    for(auto it = modelCounts.constBegin(); it != modelCounts.constEnd(); ++it)
+        out << "BODYPART_MODEL " << it.key() << " units=" << it.value()
+            << " empty=" << modelEmptyCounts.value(it.key()) << "\n";
+    return unreadable;
+}
+}
 
 int main(int argc, char* argv[])
 {
@@ -18,12 +77,44 @@ int main(int argc, char* argv[])
     QCommandLineOption profile("profile", "Compatibility profile id", "id", "jmv");
     QCommandLineOption expectNid("expect-nid", "Require a critical collision for this NID", "nid");
     QCommandLineOption expectMember("expect-member", "Require this family member", "file");
+    QCommandLineOption expectFinding("expect-finding",
+        "Require a finding code, optionally restricted as code:nid", "code[:nid]");
     QCommandLineOption suggestFor("suggest-for", "Print deterministic repairs for owners in this MOB", "file");
     QCommandLineOption expectSuggestions("expect-suggestions", "Require comma-separated deterministic repairs", "ids");
+    QCommandLineOption bodyPartStats("bodypart-stats",
+        "Print parser-backed serialized unit/body-part inventory");
+    QCommandLineOption statsOnly("stats-only",
+        "Suppress the ordinary family report (use with --bodypart-stats)");
+    QCommandLineOption auditRoot("audit-root",
+        "Audit every readable *.mob in a directory independently", "directory");
     parser.addOptions({seed, primary, root, workspaceRoot, preferred,
                        profile, expectNid, expectMember,
-                       suggestFor, expectSuggestions});
+                       expectFinding, suggestFor, expectSuggestions,
+                       bodyPartStats, statsOnly, auditRoot});
     parser.process(app);
+
+    if(parser.isSet(auditRoot))
+    {
+        QVector<SMobFamilyMember> members;
+        const QDir directory(parser.value(auditRoot));
+        for(const QFileInfo& file : directory.entryInfoList(
+                QStringList() << "*.mob", QDir::Files | QDir::Readable, QDir::Name))
+        {
+            SMobFamilyMember member;
+            member.path = file.absoluteFilePath();
+            member.fileName = file.fileName();
+            CMobDocument document;
+            CValidationReport report;
+            if(document.load(file, &report))
+                member.objects = document.objects();
+            else
+                member.error = report.toText();
+            members.append(member);
+        }
+        QTextStream out(stdout);
+        const int unreadable = printBodyPartStats(members, out);
+        return unreadable == 0 ? 0 : 1;
+    }
 
     SMobFamilyValidationRequest request;
     request.familyLabel = "corpus-probe";
@@ -41,7 +132,10 @@ int main(int argc, char* argv[])
 
     const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
     QTextStream out(stdout);
-    out << report.toText() << "\n";
+    if(parser.isSet(bodyPartStats))
+        printBodyPartStats(report.members, out);
+    if(!parser.isSet(statsOnly))
+        out << report.toText() << "\n";
     bool passed = true;
     for(const QString& expected : parser.values(expectMember))
     {
@@ -65,6 +159,23 @@ int main(int argc, char* argv[])
         if(!valid || !found)
         {
             out << "EXPECTATION FAILED: no critical collision for NID " << expected << "\n";
+            passed = false;
+        }
+    }
+    for(const QString& expected : parser.values(expectFinding))
+    {
+        const int separator = expected.lastIndexOf(':');
+        const QString code = separator > 0 ? expected.left(separator) : expected;
+        bool restrictNid = false;
+        const quint32 nid = separator > 0
+            ? expected.mid(separator + 1).toUInt(&restrictNid) : 0;
+        bool found = false;
+        for(const SMobFamilyFinding& finding : report.findings)
+            found = found || (finding.code == code
+                && (!restrictNid || (finding.hasNid && finding.nid == nid)));
+        if(!found)
+        {
+            out << "EXPECTATION FAILED: missing finding " << expected << "\n";
             passed = false;
         }
     }

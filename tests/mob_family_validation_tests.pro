@@ -4,7 +4,7 @@ CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = mob_family_validation_tests
 
-INCLUDEPATH += ../source/documents
+INCLUDEPATH += ../source/documents ../source/resources
 SOURCES += mob_family_validation_tests.cpp \
            ../source/documents/mob_family_validation.cpp \
            ../source/documents/endurance_document.cpp \

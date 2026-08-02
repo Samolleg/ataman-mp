@@ -1066,7 +1066,8 @@ void EnduranceDocumentTests::semanticAnomaliesAreWarningsOnly()
 {
     const QByteArray emptyTargets = section(0xBBAB0004, u32(0));
     const QByteArray overlappingParts = stringArray(
-        0xB00D, QStringList() << "hd.armor00" << "hd.armor01" << "bd");
+        0xB00D, QStringList() << "hd.armor00" << "hd.armor01" << "bd"
+                              << "hd.armor00" << "future.extension");
     const QByteArray unitObject = section(
         0xB001, section(0xB002, u32(42)) + section(0xBBBB0000, QByteArray()) +
                     overlappingParts);
@@ -1081,6 +1082,12 @@ void EnduranceDocumentTests::semanticAnomaliesAreWarningsOnly()
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(report.toText().contains("mob.semantic.empty_trap_targets"));
     QVERIFY(report.toText().contains("mob.semantic.overlapping_unit_parts"));
+    QVERIFY(report.toText().contains("mob.semantic.duplicate_bodypart_token"));
+    QCOMPARE(document.objects().size(), 1);
+    QCOMPARE(document.objects().first().bodyParts,
+             QStringList() << "hd.armor00" << "hd.armor01" << "bd"
+                           << "hd.armor00" << "future.extension");
+    QCOMPARE(document.serialize(), bytes);
 }
 
 void EnduranceDocumentTests::semanticDiffClassifiesMovementAndAddition()
