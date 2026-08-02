@@ -349,7 +349,7 @@ private slots:
     void authoredPresetCatalogCoversKnownAtlasesAndMatchesZone1();
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
-    void stockMaskPoolRejectsOneCornerForeignEdgeLeaks();
+    void stockInputsCannotOverrideCanonicalOneCornerMask();
     void workingAtlasRealizesExactTransitionsBeyond512Slots();
     void globalAuthoredTransitionLibraryIndexesRealStockBlends();
     void multiRowTerrainAtlasKeepsAuthoredPagesInPlace();
@@ -5881,7 +5881,7 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     QCOMPARE(blendStyles.size(), 11);
 }
 
-void EnduranceDocumentTests::stockMaskPoolRejectsOneCornerForeignEdgeLeaks()
+void EnduranceDocumentTests::stockInputsCannotOverrideCanonicalOneCornerMask()
 {
     CTerrainTransitionCatalog catalog;
     QVector<QImage> tiles;
@@ -5906,6 +5906,12 @@ void EnduranceDocumentTests::stockMaskPoolRejectsOneCornerForeignEdgeLeaks()
     STerrainTransitionSignature oneCorner;
     oneCorner.northWest = 1;
     oneCorner.northEast = oneCorner.southEast = oneCorner.southWest = 2;
+    QString baselineProvenance;
+    const QImage baseline = atlas.reviewBlendMask(
+        oneCorner, 1, 0, &baselineProvenance);
+    QVERIFY(!baseline.isNull());
+    QCOMPARE(baselineProvenance,
+        QStringLiteral("canonical-generated:grass-strands:outer-1of4-v1"));
     const auto transition = [&](bool leaky) {
         QImage pixels(32, 32, QImage::Format_RGBA8888);
         for(int y = 0; y < pixels.height(); ++y)
@@ -5930,7 +5936,8 @@ void EnduranceDocumentTests::stockMaskPoolRejectsOneCornerForeignEdgeLeaks()
     const QImage selected = atlas.reviewBlendMask(
         oneCorner, 1, 0, &provenance);
     QVERIFY(!selected.isNull());
-    QCOMPARE(provenance, QStringLiteral("zzz-contained-mask"));
+    QCOMPARE(selected, baseline);
+    QCOMPARE(provenance, baselineProvenance);
     int foreignRight = 0;
     int foreignTop = 0;
     for(int index = 0; index < selected.height(); ++index)

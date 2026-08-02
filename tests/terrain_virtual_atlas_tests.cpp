@@ -404,28 +404,34 @@ private slots:
     void virtualFieldPaintIsUnboundedByAtlas();
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
-    void missingStockMaskNeverFallsBackToProceduralArtwork();
-    void authoredMapMasksAreAvailableBeforeFirstStroke();
-    void selectedStockMasksAreReviewableAndDeterministic();
+    void canonicalMasksAreAvailableWithoutStockTemplates();
+    void authoredMapTransitionsDoNotPopulateObsoleteMaskPool();
+    void canonicalMasksMeetQuarterCoverageAndCornerContract();
+    void canonicalMasksAreExactComplementsAndRotationCovariant();
+    void canonicalMaskVariationsAreDeterministicAndMacroDistinct();
+    void canonicalAdjacentAndDiagonalTopologiesStayAnchored();
+    void canonicalMasksHaveNoUnanchoredIslandsOrWideFeather();
     void generatedReviewOutcomeUsesRuntimeBlendGenerator();
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
     void generatesFourFamilyTupleWithOrientation();
     void generatedEdgesUseOnlyTheirTwoCornerMaterials();
+    void generatedEdgesHaveSolidEndpointPlateaus();
     void generatedTransitionRetainsSourceTextureIdentity();
     void generatedTransitionBoundaryIsOrganicRatherThanQuadrants();
     void generatedLandBlendCannotPunchTransparentHoles();
     void generatedMultiFamilyBlendHasNoZeroWeightHoles();
     void generatedOverlayBlendPreservesAuthoredAlpha();
-    void stockMaskTransferRemovesPixelSizedIslandsAndPinholes();
-    void stockMaskTransferRemovesLargeDetachedInsideCornerBlocks();
-    void stockMaskTransferPreservesSubstantialAuthoredFragments();
-    void stockMaskTransferPreservesNativeEdgeDetail();
+    void linearLightReviewChangesOnlyMixedPixelsAndPreservesAlpha();
+    void stockPixelNoiseCannotAlterCanonicalFallback();
+    void stockDetachedBlocksCannotAlterCanonicalFallback();
+    void stockFragmentsCannotAlterCanonicalFallback();
+    void stockSerrationCannotAlterCanonicalFallback();
     void degenerateStockMasksAreRejected();
-    void softOneCornerLeakIsRejectedBeforeMaskSelection();
-    void oneCornerMaskCannotRunAlongMostOfAdjacentEdge();
-    void reviewedTargetStyleRejectionsApplyToTransferredMasks();
-    void reviewedBadPavingCutIsNotSelected();
+    void softStockLeakCannotAlterCanonicalFallback();
+    void longStockReachCannotAlterCanonicalFallback();
+    void legacyTargetStyleRejectionCannotAlterCanonicalFallback();
+    void legacyPavingRejectionCannotAlterCanonicalFallback();
     void materialNamesSelectExplicitBlendStyles();
     void materialBlendStylesProvideBoundedDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
@@ -560,20 +566,24 @@ void TerrainVirtualAtlasTests::generatedReviewOutcomeUsesRuntimeBlendGenerator()
     QVERIFY(matchedRuntime);
 }
 
-void TerrainVirtualAtlasTests::missingStockMaskNeverFallsBackToProceduralArtwork()
+void TerrainVirtualAtlasTests::canonicalMasksAreAvailableWithoutStockTemplates()
 {
     Fixture fixture;
     CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u);
     CValidationReport report;
-    const STerrainVirtualTile unresolved = atlas.resolve(
+    const STerrainVirtualTile resolved = atlas.resolve(
         signature(1, 2, 2, 2), 0, 0, &report);
-    QCOMPARE(unresolved.generatedIndex, -1);
-    QVERIFY(report.hasErrors());
-    QVERIFY(report.toText().contains("No reviewed stock JMV mask"));
-    QVERIFY(atlas.generatedTiles().isEmpty());
+    QVERIFY2(resolved.generatedIndex >= 0, qPrintable(report.toText()));
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QCOMPARE(atlas.generatedTiles().size(), 1);
+    QString provenance;
+    const QImage mask = atlas.reviewBlendMask(
+        signature(1, 2, 2, 2), 1, 0, &provenance);
+    QVERIFY(!mask.isNull());
+    QVERIFY(provenance.startsWith(QStringLiteral("canonical-generated:")));
 }
 
-void TerrainVirtualAtlasTests::authoredMapMasksAreAvailableBeforeFirstStroke()
+void TerrainVirtualAtlasTests::authoredMapTransitionsDoNotPopulateObsoleteMaskPool()
 {
     Fixture fixture;
     const QVector<STerrainTransitionSignature> stockPatterns = {
@@ -616,41 +626,378 @@ void TerrainVirtualAtlasTests::authoredMapMasksAreAvailableBeforeFirstStroke()
             signature(1, 2, 2, 2), signature(1, 1, 2, 2),
             signature(1, 2, 1, 2)})
     {
-        QVERIFY(atlas.stockBlendMaskCountFor(requested) > 0);
+        QCOMPARE(atlas.stockBlendMaskCountFor(requested), 0);
         CValidationReport report;
         const STerrainVirtualTile resolved = atlas.resolve(
             requested, 0, 0, &report);
         QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
         QVERIFY(resolved.generatedIndex >= 0);
     }
+    for(const STerrainTransitionSignature& stock : stockPatterns)
+    {
+        CValidationReport report;
+        const STerrainVirtualTile resolved = atlas.resolve(
+            stock, 0, 0, &report);
+        QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+        QVERIFY(resolved.authored);
+    }
 }
 
-void TerrainVirtualAtlasTests::selectedStockMasksAreReviewableAndDeterministic()
+void TerrainVirtualAtlasTests::canonicalMasksMeetQuarterCoverageAndCornerContract()
 {
     Fixture fixture;
-    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u);
-    seedReviewedStockMasks(atlas, fixture);
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    const QVector<ETerrainBlendStyle> styles = {
+        ETerrainBlendStyle::Organic, ETerrainBlendStyle::Soil,
+        ETerrainBlendStyle::Grass, ETerrainBlendStyle::Sand,
+        ETerrainBlendStyle::Gravel, ETerrainBlendStyle::Stone,
+        ETerrainBlendStyle::Paving, ETerrainBlendStyle::Snow,
+        ETerrainBlendStyle::Ice, ETerrainBlendStyle::Water,
+        ETerrainBlendStyle::Swamp, ETerrainBlendStyle::Lava
+    };
+    const QVector<STerrainTransitionSignature> patterns = {
+        signature(1, 2, 2, 2), signature(1, 1, 2, 2),
+        signature(1, 2, 1, 2)
+    };
+    for(ETerrainBlendStyle style : styles)
+    {
+        const QMap<qint32, ETerrainBlendStyle> materialStyles = {
+            {1, style}, {2, ETerrainBlendStyle::Organic}
+        };
+        CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images,
+            19u, {}, materialStyles);
+        for(const STerrainTransitionSignature& requested : patterns)
+        {
+            const STerrainTransitionSignature preview =
+                CTerrainTransitionCatalog::mirroredGridY(requested);
+            const qint32 previewCorners[4] = {preview.northWest,
+                preview.northEast, preview.southEast, preview.southWest};
+            for(qint32 owner : {qint32(1), qint32(2)})
+                for(int variation = 0;
+                    variation < CTerrainVirtualAtlas::blendVariationLimit(requested);
+                    ++variation)
+                {
+                    const QImage mask = atlas.reviewBlendMask(
+                        requested, owner, variation);
+                    QVERIFY2(!mask.isNull(), qPrintable(QString(
+                        "Missing canonical %1 mask").arg(
+                            CTerrainVirtualAtlas::blendStyleName(style))));
+                    const int half = mask.width() / 2;
+                    const int patch = qMax(2, mask.width() / 16);
+                    const QPoint origins[4] = {{0, 0}, {half, 0},
+                        {half, half}, {0, half}};
+                    for(int corner = 0; corner < 4; ++corner)
+                    {
+                        int strongOwner = 0;
+                        int strongOriginal = 0;
+                        int total = 0;
+                        for(int y = origins[corner].y();
+                            y < origins[corner].y() + half; ++y)
+                            for(int x = origins[corner].x();
+                                x < origins[corner].x() + half; ++x)
+                            {
+                                const int value = mask.pixelColor(x, y).red();
+                                strongOwner += value >= 204;
+                                strongOriginal += value <= 51;
+                                ++total;
+                            }
+                        const bool affected = previewCorners[corner] == owner;
+                        const int strong = affected ? strongOwner : strongOriginal;
+                        QVERIFY2(strong * 100 >= total * 70,
+                            qPrintable(QString("%1 corner %2 has only %3% strong coverage")
+                                .arg(CTerrainVirtualAtlas::blendStyleName(style))
+                                .arg(corner).arg(qRound(100.0 * strong / total))));
+                        if(!affected)
+                            QVERIFY2(strongOwner * 100 <= total * 30,
+                                "Protected quarter exceeds 30% strong invasion");
+
+                        const bool right = corner == 1 || corner == 2;
+                        const bool bottom = corner == 2 || corner == 3;
+                        for(int py = 0; py < patch; ++py)
+                            for(int px = 0; px < patch; ++px)
+                            {
+                                const int x = right ? mask.width() - 1 - px : px;
+                                const int y = bottom ? mask.height() - 1 - py : py;
+                                const int value = mask.pixelColor(x, y).red();
+                                QVERIFY2(affected ? value == 255 : value == 0,
+                                    "Corner safety patch is not solid");
+                            }
+                    }
+                }
+        }
+    }
+}
+
+void TerrainVirtualAtlasTests::canonicalMasksAreExactComplementsAndRotationCovariant()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Grass}, {2, ETerrainBlendStyle::Stone}
+    };
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 73u, {}, styles);
+    for(const STerrainTransitionSignature& requested : {
+            signature(1, 2, 2, 2), signature(1, 1, 2, 2),
+            signature(1, 2, 1, 2)})
+        for(int variation = 0;
+            variation < CTerrainVirtualAtlas::blendVariationLimit(requested);
+            ++variation)
+        {
+            const QImage owner = atlas.reviewBlendMask(
+                requested, 1, variation);
+            const QImage support = atlas.reviewBlendMask(
+                requested, 2, variation);
+            QVERIFY(!owner.isNull());
+            QCOMPARE(owner.size(), support.size());
+            for(int y = 0; y < owner.height(); ++y)
+                for(int x = 0; x < owner.width(); ++x)
+                    QCOMPARE(owner.pixelColor(x, y).red()
+                             + support.pixelColor(x, y).red(), 255);
+
+            const STerrainTransitionSignature rotated =
+                CTerrainTransitionCatalog::rotated(requested, 1);
+            const QImage rotatedMask = atlas.reviewBlendMask(
+                rotated, 1, variation);
+            const QImage expected = owner.transformed(
+                QTransform().rotate(-90.0), Qt::FastTransformation);
+            QCOMPARE(rotatedMask, expected);
+        }
+
+    for(const STerrainTransitionSignature& requested : {
+            signature(1, 2, 2, 2), signature(1, 1, 2, 2)})
+    {
+        const QImage first = atlas.reviewBlendMask(requested, 1, 0);
+        const QImage second = atlas.reviewBlendMask(requested, 1, 1);
+        for(int index = 0; index < first.width(); ++index)
+        {
+            QCOMPARE(first.pixelColor(index, 0), second.pixelColor(index, 0));
+            QCOMPARE(first.pixelColor(index, first.height() - 1),
+                     second.pixelColor(index, second.height() - 1));
+            QCOMPARE(first.pixelColor(0, index), second.pixelColor(0, index));
+            QCOMPARE(first.pixelColor(first.width() - 1, index),
+                     second.pixelColor(second.width() - 1, index));
+        }
+    }
+
+    QString highOwnerProvenance;
+    QVERIFY(!atlas.reviewBlendMask(
+        signature(2, 1, 1, 1), 2, 0, &highOwnerProvenance).isNull());
+    QVERIFY(highOwnerProvenance.endsWith(
+        QStringLiteral(":outer-1of4-v1")));
+}
+
+void TerrainVirtualAtlasTests::canonicalMaskVariationsAreDeterministicAndMacroDistinct()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Grass}, {2, ETerrainBlendStyle::Organic}
+    };
+    CTestTerrainVirtualAtlas first(fixture.catalog, fixture.images, 19u, {}, styles);
+    CTestTerrainVirtualAtlas repeated(fixture.catalog, fixture.images, 999u, {}, styles);
     const STerrainTransitionSignature requested = signature(1, 2, 2, 2);
-    QString firstSource;
-    QString secondSource;
-    const QImage first = atlas.reviewBlendMask(
-        requested, 1, 0, &firstSource);
-    const QImage repeated = atlas.reviewBlendMask(
-        requested, 1, 0, &secondSource);
-    QVERIFY(!first.isNull());
-    QCOMPARE(first, repeated);
-    QCOMPARE(firstSource, secondSource);
-    QVERIFY(firstSource.startsWith(QStringLiteral("reviewed-stock-fixture:")));
-    const STerrainTransitionSignature preview =
-        CTerrainTransitionCatalog::mirroredGridY(requested);
-    const QPoint points[4] = {{0, 0}, {first.width() - 1, 0},
-        {first.width() - 1, first.height() - 1}, {0, first.height() - 1}};
-    const qint32 corners[4] = {preview.northWest, preview.northEast,
-        preview.southEast, preview.southWest};
+    const QImage v1 = first.reviewBlendMask(requested, 1, 0);
+    const QImage v2 = first.reviewBlendMask(requested, 1, 1);
+    QCOMPARE(v1, repeated.reviewBlendMask(requested, 1, 0));
+    QCOMPARE(v2, repeated.reviewBlendMask(requested, 1, 1));
+    QVERIFY(v1 != v2);
+    int macroDifferent = 0;
+    int isolatedDifferent = 0;
+    for(int y = 0; y < v1.height(); ++y)
+        for(int x = 0; x < v1.width(); ++x)
+        {
+            if(qAbs(v1.pixelColor(x, y).red()
+                    - v2.pixelColor(x, y).red()) < 64)
+                continue;
+            ++macroDifferent;
+            bool hasNeighbour = false;
+            for(int dy = -1; dy <= 1; ++dy)
+                for(int dx = -1; dx <= 1; ++dx)
+                    if((dx || dy) && x + dx >= 0 && x + dx < v1.width()
+                       && y + dy >= 0 && y + dy < v1.height()
+                       && qAbs(v1.pixelColor(x + dx, y + dy).red()
+                               - v2.pixelColor(x + dx, y + dy).red()) >= 64)
+                        hasNeighbour = true;
+            isolatedDifferent += !hasNeighbour;
+        }
+    QVERIFY2(macroDifferent >= v1.width() * v1.height() / 40,
+             "Variations differ only cosmetically, not at macro scale");
+    QVERIFY2(isolatedDifferent * 20 <= qMax(1, macroDifferent),
+             "Variation difference is dominated by isolated pixel noise");
+}
+
+void TerrainVirtualAtlasTests::canonicalAdjacentAndDiagonalTopologiesStayAnchored()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const QImage adjacent = atlas.reviewBlendMask(signature(1, 1, 2, 2), 1, 0);
+    const QImage diagonal = atlas.reviewBlendMask(signature(1, 2, 1, 2), 1, 0);
+    QVERIFY(!adjacent.isNull());
+    QVERIFY(!diagonal.isNull());
+
+    // A continuous adjacent-side mask must own the complete path between its
+    // two requested corner patches. The diagonal mask must instead preserve
+    // the two foreign corners and never become a three-corner source.
+    const STerrainTransitionSignature adjacentPreview =
+        CTerrainTransitionCatalog::mirroredGridY(signature(1, 1, 2, 2));
+    const bool ownsTop = adjacentPreview.northWest == 1;
+    const int adjacentY = ownsTop ? 0 : adjacent.height() - 1;
+    for(int x = 0; x < adjacent.width(); ++x)
+        QVERIFY2(adjacent.pixelColor(x, adjacentY).red() >= 204,
+                 "Adjacent mask does not connect its two corner anchors");
+
+    const STerrainTransitionSignature diagonalPreview =
+        CTerrainTransitionCatalog::mirroredGridY(signature(1, 2, 1, 2));
+    const qint32 diagonalCorners[4] = {diagonalPreview.northWest,
+        diagonalPreview.northEast, diagonalPreview.southEast,
+        diagonalPreview.southWest};
+    const QPoint points[4] = {{0, 0}, {diagonal.width() - 1, 0},
+        {diagonal.width() - 1, diagonal.height() - 1},
+        {0, diagonal.height() - 1}};
+    int ownedCorners = 0;
     for(int corner = 0; corner < 4; ++corner)
-        QCOMPARE(first.pixelColor(points[corner]).value(),
-                 corners[corner] == 1 ? 255 : 0);
+    {
+        const bool expected = diagonalCorners[corner] == 1;
+        const bool actual = diagonal.pixelColor(points[corner]).red() >= 204;
+        QCOMPARE(actual, expected);
+        ownedCorners += actual;
+    }
+    QCOMPARE(ownedCorners, 2);
     QVERIFY(atlas.reviewBlendMask(signature(1, 2, 3, 2), 1).isNull());
+}
+
+void TerrainVirtualAtlasTests::canonicalMasksHaveNoUnanchoredIslandsOrWideFeather()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    const QVector<ETerrainBlendStyle> styles = {
+        ETerrainBlendStyle::Organic, ETerrainBlendStyle::Soil,
+        ETerrainBlendStyle::Grass, ETerrainBlendStyle::Sand,
+        ETerrainBlendStyle::Gravel, ETerrainBlendStyle::Stone,
+        ETerrainBlendStyle::Paving, ETerrainBlendStyle::Snow,
+        ETerrainBlendStyle::Ice, ETerrainBlendStyle::Water,
+        ETerrainBlendStyle::Swamp, ETerrainBlendStyle::Lava
+    };
+    const QVector<STerrainTransitionSignature> patterns = {
+        signature(1, 2, 2, 2), signature(1, 1, 2, 2),
+        signature(1, 2, 1, 2)
+    };
+    for(ETerrainBlendStyle style : styles)
+    {
+        const QMap<qint32, ETerrainBlendStyle> materialStyles = {
+            {1, style}, {2, ETerrainBlendStyle::Organic}
+        };
+        CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images,
+            19u, {}, materialStyles);
+        for(const STerrainTransitionSignature& requested : patterns)
+            for(int variation = 0;
+                variation < CTerrainVirtualAtlas::blendVariationLimit(requested);
+                ++variation)
+            {
+                const QImage mask = atlas.reviewBlendMask(
+                    requested, 1, variation);
+                QVERIFY(!mask.isNull());
+                const STerrainTransitionSignature preview =
+                    CTerrainTransitionCatalog::mirroredGridY(requested);
+                const qint32 expectedCorners[4] = {preview.northWest,
+                    preview.northEast, preview.southEast, preview.southWest};
+                const QPoint points[4] = {{0, 0}, {mask.width() - 1, 0},
+                    {mask.width() - 1, mask.height() - 1},
+                    {0, mask.height() - 1}};
+                int boundary = 0;
+                int feather = 0;
+                for(int y = 0; y < mask.height(); ++y)
+                    for(int x = 0; x < mask.width(); ++x)
+                    {
+                        const int value = mask.pixelColor(x, y).red();
+                        feather += value >= 52 && value <= 203;
+                        const bool owner = value >= 128;
+                        if(x > 0)
+                            boundary += owner
+                                != (mask.pixelColor(x - 1, y).red() >= 128);
+                        if(y > 0)
+                            boundary += owner
+                                != (mask.pixelColor(x, y - 1).red() >= 128);
+                    }
+                const double effectiveWidth = double(feather)
+                    / double(qMax(1, boundary));
+                QVERIFY2(effectiveWidth >= 0.5,
+                    "Canonical boundary has no visible feather band");
+                QVERIFY2(effectiveWidth <= mask.width() / 10.0,
+                    "Canonical boundary feather is too broad");
+                QVERIFY2(boundary <= mask.width() * 14,
+                    "Canonical boundary is dominated by high-frequency noise");
+
+                for(int polarity = 0; polarity < 2; ++polarity)
+                {
+                    QVector<quint8> visited(mask.width() * mask.height(), 0);
+                    int components = 0;
+                    for(int start = 0; start < visited.size(); ++start)
+                    {
+                        const int sx = start % mask.width();
+                        const int sy = start / mask.width();
+                        const bool matches = (mask.pixelColor(sx, sy).red() >= 128)
+                            == bool(polarity);
+                        if(visited[start] || !matches) continue;
+                        ++components;
+                        QVector<int> queue;
+                        queue.append(start);
+                        visited[start] = 1;
+                        bool anchored = false;
+                        for(int cursor = 0; cursor < queue.size(); ++cursor)
+                        {
+                            const int index = queue.at(cursor);
+                            const int x = index % mask.width();
+                            const int y = index / mask.width();
+                            for(int corner = 0; corner < 4; ++corner)
+                                anchored = anchored
+                                    || (points[corner] == QPoint(x, y)
+                                        && ((expectedCorners[corner] == 1)
+                                            == bool(polarity)));
+                            const int neighbours[4] = {index - 1, index + 1,
+                                index - mask.width(), index + mask.width()};
+                            for(int direction = 0; direction < 4; ++direction)
+                            {
+                                if((direction == 0 && x == 0)
+                                   || (direction == 1 && x + 1 == mask.width())
+                                   || (direction == 2 && y == 0)
+                                   || (direction == 3 && y + 1 == mask.height()))
+                                    continue;
+                                const int next = neighbours[direction];
+                                if(!visited[next]
+                                   && ((mask.pixelColor(next % mask.width(),
+                                        next / mask.width()).red() >= 128)
+                                       == bool(polarity)))
+                                {
+                                    visited[next] = 1;
+                                    queue.append(next);
+                                }
+                            }
+                        }
+                        QVERIFY2(anchored,
+                            "Canonical mask contains an unanchored island or hole");
+                    }
+                    const bool diagonal = requested.northWest
+                            == requested.southEast
+                        && requested.northEast == requested.southWest;
+                    if(diagonal)
+                        QCOMPARE(components, 2);
+                    else
+                        QCOMPARE(components, 1);
+                }
+            }
+    }
 }
 
 void TerrainVirtualAtlasTests::generatesOneThreeTuple()
@@ -690,24 +1037,75 @@ void TerrainVirtualAtlasTests::generatesFourFamilyTupleWithOrientation()
 void TerrainVirtualAtlasTests::generatedEdgesUseOnlyTheirTwoCornerMaterials()
 {
     Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
     CTestTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
     seedReviewedStockMasks(atlas, fixture);
     const STerrainVirtualTile tile=atlas.resolve(signature(1,2,3,4),0,0);
     const QImage image=atlas.generatedTiles().at(tile.generatedIndex).pixels;
-    const QColor top=image.pixelColor(3,0);
+    const QColor top=image.pixelColor(image.width() / 2,0);
     // The top edge contains only its yellow/blue endpoint materials, but the
     // transition is broad enough to be visible instead of a 90-degree cut.
     QVERIFY(top.red()>100 && top.green()>100 && top.blue()>60);
-    const QColor bottom=image.pixelColor(3,7);
+    const QColor bottom=image.pixelColor(image.width() / 2,
+                                         image.height() - 1);
     // The opposite edge contains only red/green and therefore no blue leak.
     QVERIFY(bottom.red()>100 && bottom.green()>60 && bottom.blue()<40);
+}
+
+void TerrainVirtualAtlasTests::generatedEdgesHaveSolidEndpointPlateaus()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const STerrainTransitionSignature requested = signature(1, 2, 3, 4);
+    const STerrainVirtualTile tile = atlas.resolve(requested, 0, 0);
+    QVERIFY(tile.generatedIndex >= 0);
+    const QImage generated = atlas.generatedTiles().at(tile.generatedIndex).pixels;
+    const STerrainTransitionSignature preview =
+        CTerrainTransitionCatalog::mirroredGridY(requested);
+    const auto source = [&fixture](qint32 material, int x, int y) {
+        return fixture.images.at(material - 1).pixelColor(x, y);
+    };
+    for(int index = 0; index < generated.width(); ++index)
+    {
+        const double position = double(index) / double(generated.width() - 1);
+        if(position <= 0.35)
+        {
+            QCOMPARE(generated.pixelColor(index, 0),
+                     source(preview.northWest, index, 0));
+            QCOMPARE(generated.pixelColor(index, generated.height() - 1),
+                     source(preview.southWest, index, generated.height() - 1));
+            QCOMPARE(generated.pixelColor(0, index),
+                     source(preview.northWest, 0, index));
+            QCOMPARE(generated.pixelColor(generated.width() - 1, index),
+                     source(preview.northEast, generated.width() - 1, index));
+        }
+        if(position >= 0.65)
+        {
+            QCOMPARE(generated.pixelColor(index, 0),
+                     source(preview.northEast, index, 0));
+            QCOMPARE(generated.pixelColor(index, generated.height() - 1),
+                     source(preview.southEast, index, generated.height() - 1));
+            QCOMPARE(generated.pixelColor(0, index),
+                     source(preview.southWest, 0, index));
+            QCOMPARE(generated.pixelColor(generated.width() - 1, index),
+                     source(preview.southEast, generated.width() - 1, index));
+        }
+    }
 }
 
 void TerrainVirtualAtlasTests::generatedTransitionRetainsSourceTextureIdentity()
 {
     Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
     for(int material = 0; material < 2; ++material)
-        for(int y = 0; y < 8; ++y) for(int x = 0; x < 8; ++x)
+        for(int y = 0; y < 64; ++y) for(int x = 0; x < 64; ++x)
         {
             const bool light = ((x + y) & 1) == 0;
             fixture.images[material].setPixelColor(x, y, material == 0
@@ -721,7 +1119,7 @@ void TerrainVirtualAtlasTests::generatedTransitionRetainsSourceTextureIdentity()
     const QImage generated = atlas.generatedTiles().at(tile.generatedIndex).pixels;
     int sourceLike = 0;
     int genuinelyMixed = 0;
-    for(int y = 0; y < 8; ++y) for(int x = 0; x < 8; ++x)
+    for(int y = 0; y < 64; ++y) for(int x = 0; x < 64; ++x)
     {
         const QColor actual = generated.pixelColor(x, y);
         const auto distance = [&actual](const QColor& source) {
@@ -737,9 +1135,11 @@ void TerrainVirtualAtlasTests::generatedTransitionRetainsSourceTextureIdentity()
     // Ordinary bilinear cross-fading makes most of the tile a blurry average.
     // Preserve the authored source texture over most of the tile, while
     // retaining a substantial (not one- or two-pixel) transition band.
-    QVERIFY(sourceLike >= 48);
-    QVERIFY(genuinelyMixed >= 8);
-    QVERIFY(genuinelyMixed <= 16);
+    QVERIFY(sourceLike >= 64 * 64 * 3 / 4);
+    QVERIFY2(genuinelyMixed >= 32,
+             qPrintable(QString("Only %1 genuinely mixed pixels")
+                 .arg(genuinelyMixed)));
+    QVERIFY(genuinelyMixed <= 64 * 64 / 4);
 }
 
 void TerrainVirtualAtlasTests::generatedTransitionBoundaryIsOrganicRatherThanQuadrants()
@@ -849,7 +1249,67 @@ void TerrainVirtualAtlasTests::generatedOverlayBlendPreservesAuthoredAlpha()
     QCOMPARE(translucent, generated.width() * generated.height());
 }
 
-void TerrainVirtualAtlasTests::stockMaskTransferRemovesPixelSizedIslandsAndPinholes()
+void TerrainVirtualAtlasTests::linearLightReviewChangesOnlyMixedPixelsAndPreservesAlpha()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    fixture.images[0].fill(QColor(0, 0, 0, 72));
+    fixture.images[1].fill(QColor(255, 255, 255, 196));
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0, {}, {}, false);
+    const STerrainTransitionSignature requested = signature(1, 1, 2, 2);
+    QString encodedProvenance;
+    QString linearProvenance;
+    const QImage encoded = atlas.reviewGeneratedBlend(
+        requested, 0, &encodedProvenance);
+    const QImage linear = atlas.reviewGeneratedBlendLinearLight(
+        requested, 0, &linearProvenance);
+    QVERIFY(!encoded.isNull());
+    QCOMPARE(linear.size(), encoded.size());
+    QCOMPARE(linearProvenance, encodedProvenance);
+    QCOMPARE(linear, atlas.reviewGeneratedBlendLinearLight(requested, 0));
+    int changed = 0;
+    for(int y = 0; y < encoded.height(); ++y)
+        for(int x = 0; x < encoded.width(); ++x)
+        {
+            const QColor a = encoded.pixelColor(x, y);
+            const QColor b = linear.pixelColor(x, y);
+            QCOMPARE(b.alpha(), a.alpha());
+            QVERIFY(b.red() >= 0 && b.red() <= 255);
+            QVERIFY(b.green() >= 0 && b.green() <= 255);
+            QVERIFY(b.blue() >= 0 && b.blue() <= 255);
+            if(a == b) continue;
+            ++changed;
+            QVERIFY(a != fixture.images[0].pixelColor(x, y));
+            QVERIFY(a != fixture.images[1].pixelColor(x, y));
+            QVERIFY(b.red() >= a.red());
+            QVERIFY(b.green() >= a.green());
+            QVERIFY(b.blue() >= a.blue());
+        }
+    QVERIFY(changed > 0);
+    QCOMPARE(encoded.pixelColor(0, 0), fixture.images[1].pixelColor(0, 0));
+    QCOMPARE(linear.pixelColor(0, 0), encoded.pixelColor(0, 0));
+    QCOMPARE(encoded.pixelColor(encoded.width() - 1, encoded.height() - 1),
+             fixture.images[0].pixelColor(0, 0));
+    QCOMPARE(linear.pixelColor(linear.width() - 1, linear.height() - 1),
+             encoded.pixelColor(encoded.width() - 1, encoded.height() - 1));
+    const QImage ownership = atlas.reviewBlendMask(requested, 1, 0);
+    QVERIFY(!ownership.isNull());
+    for(int y = 0; y < ownership.height(); ++y)
+        for(int x = 0; x < ownership.width(); ++x)
+        {
+            const int value = ownership.pixelColor(x, y).red();
+            if(value != 0 && value != 255) continue;
+            const QColor expected = value == 255
+                ? fixture.images[0].pixelColor(x, y)
+                : fixture.images[1].pixelColor(x, y);
+            QCOMPARE(encoded.pixelColor(x, y), expected);
+            QCOMPARE(linear.pixelColor(x, y), expected);
+        }
+}
+
+void TerrainVirtualAtlasTests::stockPixelNoiseCannotAlterCanonicalFallback()
 {
     Fixture fixture;
     for(QImage& image : fixture.images)
@@ -858,14 +1318,17 @@ void TerrainVirtualAtlasTests::stockMaskTransferRemovesPixelSizedIslandsAndPinho
     fixture.images[0].fill(QColor(230, 20, 20, 255));
     fixture.images[1].fill(QColor(20, 220, 20, 255));
     CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const QImage expected = atlas.reviewGeneratedBlend(
+        signature(1, 1, 2, 2), 0);
     QImage noisy(64, 64, QImage::Format_RGBA8888);
     for(int y = 0; y < 64; ++y)
         for(int x = 0; x < 64; ++x)
             noisy.setPixelColor(x, y, x < 32
                 ? fixture.images[0].pixelColor(x, y)
                 : fixture.images[1].pixelColor(x, y));
-    // These deliberately model the 1-2 pixel grain reported in generated
-    // masks. Neither has enough area to survive the transferred silhouette.
+    // These deliberately model the 1-2 pixel grain reported in the former
+    // stock-transfer fallback. Calibration inputs cannot alter the canonical
+    // generated mask or its composed result.
     noisy.setPixelColor(8, 31, fixture.images[1].pixelColor(8, 31));
     noisy.setPixelColor(54, 30, fixture.images[0].pixelColor(54, 30));
     QVERIFY(atlas.addStockBlendMaskTemplate(signature(1, 1, 2, 2),
@@ -875,13 +1338,10 @@ void TerrainVirtualAtlasTests::stockMaskTransferRemovesPixelSizedIslandsAndPinho
     QVERIFY(tile.generatedIndex >= 0);
     const QImage generated = atlas.generatedTiles().at(
         tile.generatedIndex).pixels;
-    QVERIFY(generated.pixelColor(8, 31).red()
-            > generated.pixelColor(8, 31).green());
-    QVERIFY(generated.pixelColor(54, 30).green()
-            > generated.pixelColor(54, 30).red());
+    QCOMPARE(generated, expected);
 }
 
-void TerrainVirtualAtlasTests::stockMaskTransferRemovesLargeDetachedInsideCornerBlocks()
+void TerrainVirtualAtlasTests::stockDetachedBlocksCannotAlterCanonicalFallback()
 {
     Fixture fixture;
     for(QImage& image : fixture.images)
@@ -890,6 +1350,8 @@ void TerrainVirtualAtlasTests::stockMaskTransferRemovesLargeDetachedInsideCorner
     fixture.images[0].fill(QColor(230, 20, 20, 255));
     fixture.images[1].fill(QColor(20, 220, 20, 255));
     CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const QImage expected = atlas.reviewGeneratedBlend(
+        signature(1, 2, 2, 2), 0);
     QImage malformed(64, 64, QImage::Format_RGBA8888);
     malformed.fill(fixture.images[1].pixelColor(0, 0));
     // Grid Y mirroring places this signature's owner at preview SW.
@@ -909,12 +1371,10 @@ void TerrainVirtualAtlasTests::stockMaskTransferRemovesLargeDetachedInsideCorner
     QVERIFY(tile.generatedIndex >= 0);
     const QImage generated = atlas.generatedTiles().at(
         tile.generatedIndex).pixels;
-    QVERIFY2(generated.pixelColor(40, 16).green()
-             > generated.pixelColor(40, 16).red(),
-             "Detached inside-corner owner block survived mask transfer");
+    QCOMPARE(generated, expected);
 }
 
-void TerrainVirtualAtlasTests::stockMaskTransferPreservesSubstantialAuthoredFragments()
+void TerrainVirtualAtlasTests::stockFragmentsCannotAlterCanonicalFallback()
 {
     Fixture fixture;
     for(QImage& image : fixture.images)
@@ -923,6 +1383,8 @@ void TerrainVirtualAtlasTests::stockMaskTransferPreservesSubstantialAuthoredFrag
     fixture.images[0].fill(QColor(230, 20, 20, 255));
     fixture.images[1].fill(QColor(20, 220, 20, 255));
     CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const QImage expected = atlas.reviewBlendMask(
+        signature(1, 2, 2, 2), 1);
     QImage authored(64, 64, QImage::Format_RGBA8888);
     authored.fill(fixture.images[1].pixelColor(0, 0));
     for(int y = 34; y < 64; ++y)
@@ -938,11 +1400,10 @@ void TerrainVirtualAtlasTests::stockMaskTransferPreservesSubstantialAuthoredFrag
         authored, QStringLiteral("authored-fragment-regression")));
     const QImage mask = atlas.reviewBlendMask(signature(1, 2, 2, 2), 1);
     QVERIFY(!mask.isNull());
-    QVERIFY2(mask.pixelColor(40, 20).value() >= 128,
-             "Substantial authored material fragment was erased");
+    QCOMPARE(mask, expected);
 }
 
-void TerrainVirtualAtlasTests::stockMaskTransferPreservesNativeEdgeDetail()
+void TerrainVirtualAtlasTests::stockSerrationCannotAlterCanonicalFallback()
 {
     Fixture fixture;
     for(QImage& image : fixture.images)
@@ -951,6 +1412,8 @@ void TerrainVirtualAtlasTests::stockMaskTransferPreservesNativeEdgeDetail()
     fixture.images[0].fill(QColor(230, 20, 20, 255));
     fixture.images[1].fill(QColor(20, 220, 20, 255));
     CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const QImage expected = atlas.reviewBlendMask(
+        signature(1, 1, 2, 2), 1);
     QImage authored(256, 256, QImage::Format_RGBA8888);
     for(int y = 0; y < authored.height(); ++y)
         for(int x = 0; x < authored.width(); ++x)
@@ -964,15 +1427,7 @@ void TerrainVirtualAtlasTests::stockMaskTransferPreservesNativeEdgeDetail()
         authored, QStringLiteral("native-detail-regression")));
     const QImage mask = atlas.reviewBlendMask(signature(1, 1, 2, 2), 1);
     QVERIFY(!mask.isNull());
-    int blurredPixels = 0;
-    for(int y = 0; y < mask.height(); ++y)
-        for(int x = 0; x < mask.width(); ++x)
-        {
-            const int value = mask.pixelColor(x, y).value();
-            blurredPixels += value > 8 && value < 247;
-        }
-    QVERIFY2(blurredPixels < 512,
-             "Full-resolution stock mask was softened like an upscaled thumbnail");
+    QCOMPARE(mask, expected);
 }
 
 void TerrainVirtualAtlasTests::degenerateStockMasksAreRejected()
@@ -989,7 +1444,7 @@ void TerrainVirtualAtlasTests::degenerateStockMasksAreRejected()
     QCOMPARE(atlas.stockBlendMaskCountFor(signature(1, 1, 2, 2)), 0);
 }
 
-void TerrainVirtualAtlasTests::softOneCornerLeakIsRejectedBeforeMaskSelection()
+void TerrainVirtualAtlasTests::softStockLeakCannotAlterCanonicalFallback()
 {
     Fixture fixture;
     for(QImage& image : fixture.images)
@@ -1033,10 +1488,11 @@ void TerrainVirtualAtlasTests::softOneCornerLeakIsRejectedBeforeMaskSelection()
     QString provenance;
     QVERIFY(!atlas.reviewBlendMask(signature(1, 2, 2, 2), 1, 0,
                                    &provenance).isNull());
-    QCOMPARE(provenance, QStringLiteral("z-contained-grass-island"));
+    QCOMPARE(provenance, QStringLiteral(
+        "canonical-generated:grass-strands:outer-1of4-v1"));
 }
 
-void TerrainVirtualAtlasTests::oneCornerMaskCannotRunAlongMostOfAdjacentEdge()
+void TerrainVirtualAtlasTests::longStockReachCannotAlterCanonicalFallback()
 {
     Fixture fixture;
     for(QImage& image : fixture.images)
@@ -1070,10 +1526,11 @@ void TerrainVirtualAtlasTests::oneCornerMaskCannotRunAlongMostOfAdjacentEdge()
     QString provenance;
     QVERIFY(!atlas.reviewBlendMask(signature(1, 2, 2, 2), 1, 0,
                                    &provenance).isNull());
-    QCOMPARE(provenance, QStringLiteral("z-contained-grass"));
+    QCOMPARE(provenance, QStringLiteral(
+        "canonical-generated:grass-strands:outer-1of4-v1"));
 }
 
-void TerrainVirtualAtlasTests::reviewedTargetStyleRejectionsApplyToTransferredMasks()
+void TerrainVirtualAtlasTests::legacyTargetStyleRejectionCannotAlterCanonicalFallback()
 {
     Fixture fixture;
     for(QImage& image : fixture.images)
@@ -1103,10 +1560,11 @@ void TerrainVirtualAtlasTests::reviewedTargetStyleRejectionsApplyToTransferredMa
     QString provenance;
     QVERIFY(!atlas.reviewBlendMask(signature(1, 1, 2, 2), 1, 0,
                                    &provenance).isNull());
-    QCOMPARE(provenance, QStringLiteral("zz-reviewed-ice-transfer"));
+    QCOMPARE(provenance, QStringLiteral(
+        "canonical-generated:ice-fracture:edge-2of4-v1"));
 }
 
-void TerrainVirtualAtlasTests::reviewedBadPavingCutIsNotSelected()
+void TerrainVirtualAtlasTests::legacyPavingRejectionCannotAlterCanonicalFallback()
 {
     Fixture fixture;
     for(QImage& image : fixture.images)
@@ -1135,7 +1593,8 @@ void TerrainVirtualAtlasTests::reviewedBadPavingCutIsNotSelected()
     QString provenance;
     QVERIFY(!atlas.reviewBlendMask(signature(1, 1, 2, 2), 1, 0,
                                    &provenance).isNull());
-    QCOMPARE(provenance, QStringLiteral("Zone10:200"));
+    QCOMPARE(provenance, QStringLiteral(
+        "canonical-generated:paving-courses:edge-2of4-v1"));
 }
 
 void TerrainVirtualAtlasTests::materialNamesSelectExplicitBlendStyles()
@@ -1194,8 +1653,9 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideBoundedDistinctVariants
             <= CTestTerrainVirtualAtlas::blendVariationLimit(signature(1,2,2,2)));
     for(const STerrainFinalizedTile& tile : bounded.generatedTiles())
     {
-        QVERIFY(tile.stockDerivedBlend);
-        QVERIFY(tile.blendProvenance.startsWith("reviewed-stock-fixture:"));
+        QVERIFY(!tile.stockDerivedBlend);
+        QVERIFY(tile.canonicalGeneratedBlend);
+        QVERIFY(tile.blendProvenance.startsWith("canonical-generated:"));
     }
 
     Fixture fixture;

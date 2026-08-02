@@ -88,8 +88,39 @@ int terrainBlendStylePriority(ETerrainBlendStyle style)
     return 0;
 }
 
+double srgbToLinear(int channel)
+{
+    static const QVector<double> table = []() {
+        QVector<double> values(256);
+        for(int index = 0; index < values.size(); ++index)
+        {
+            const double value = index / 255.0;
+            values[index] = value <= 0.04045 ? value / 12.92
+                : std::pow((value + 0.055) / 1.055, 2.4);
+        }
+        return values;
+    }();
+    return table.at(qBound(0, channel, 255));
+}
+
+int linearToSrgb(double channel)
+{
+    static const QVector<quint8> table = []() {
+        QVector<quint8> values(65536);
+        for(int index = 0; index < values.size(); ++index)
+        {
+            const double channel = index / 65535.0;
+            const double value = channel <= 0.0031308 ? channel * 12.92
+                : 1.055 * std::pow(channel, 1.0 / 2.4) - 0.055;
+            values[index] = quint8(qBound(0, qRound(value * 255.0), 255));
+        }
+        return values;
+    }();
+    return table.at(qBound(0, qRound(channel * 65535.0), 65535));
+}
+
 QRgb materialBlend(const QRgb samples[4], const double weights[4],
-                   bool forceOpaque)
+                   bool forceOpaque, bool linearLight)
 {
     double alpha = 0.0;
     double red = 0.0;
@@ -104,15 +135,21 @@ QRgb materialBlend(const QRgb samples[4], const double weights[4],
         // the other family. Overlay generation can explicitly retain alpha.
         const double a = forceOpaque ? 1.0 : qAlpha(samples[index]) / 255.0;
         alpha += weights[index] * a;
-        red += weights[index] * a * qRed(samples[index]);
-        green += weights[index] * a * qGreen(samples[index]);
-        blue += weights[index] * a * qBlue(samples[index]);
+        red += weights[index] * a * (linearLight
+            ? srgbToLinear(qRed(samples[index])) : qRed(samples[index]));
+        green += weights[index] * a * (linearLight
+            ? srgbToLinear(qGreen(samples[index])) : qGreen(samples[index]));
+        blue += weights[index] * a * (linearLight
+            ? srgbToLinear(qBlue(samples[index])) : qBlue(samples[index]));
     }
     if(alpha <= 0.0)
         return qRgba(0, 0, 0, 0);
-    return qRgba(qBound(0, qRound(red / alpha), 255),
-                 qBound(0, qRound(green / alpha), 255),
-                 qBound(0, qRound(blue / alpha), 255),
+    return qRgba(linearLight ? linearToSrgb(red / alpha)
+                             : qBound(0, qRound(red / alpha), 255),
+                 linearLight ? linearToSrgb(green / alpha)
+                             : qBound(0, qRound(green / alpha), 255),
+                 linearLight ? linearToSrgb(blue / alpha)
+                             : qBound(0, qRound(blue / alpha), 255),
                  forceOpaque ? 255
                              : qBound(0, qRound(alpha * 255.0), 255));
 }
@@ -440,6 +477,362 @@ QImage rotateImageClockwise(const QImage& image)
     return image.transformed(QTransform().rotate(90.0), Qt::FastTransformation);
 }
 
+struct SCanonicalBlendMaskProfile
+{
+    double cornerExponent{1.6};
+    double cornerExtent{0.62};
+    double adjacentExtent{0.50};
+    double displacement{0.035};
+    double featherEdge{0.012};
+    double featherInterior{0.030};
+    double frequencyA{1.25};
+    double frequencyB{2.15};
+};
+
+SCanonicalBlendMaskProfile canonicalBlendMaskProfile(
+    ETerrainBlendStyle style)
+{
+    SCanonicalBlendMaskProfile result;
+    switch(style)
+    {
+    case ETerrainBlendStyle::Grass:
+        result.cornerExponent = 1.35;
+        result.displacement = 0.050;
+        result.featherInterior = 0.022;
+        result.frequencyA = 1.85;
+        result.frequencyB = 3.10;
+        break;
+    case ETerrainBlendStyle::Soil:
+        result.cornerExponent = 1.70;
+        result.displacement = 0.030;
+        result.featherInterior = 0.032;
+        result.frequencyA = 1.10;
+        result.frequencyB = 2.05;
+        break;
+    case ETerrainBlendStyle::Ice:
+        result.cornerExponent = 1.50;
+        result.displacement = 0.042;
+        result.featherEdge = 0.010;
+        result.featherInterior = 0.026;
+        result.frequencyA = 1.55;
+        result.frequencyB = 2.75;
+        break;
+    case ETerrainBlendStyle::Lava:
+        result.cornerExponent = 1.48;
+        result.displacement = 0.048;
+        result.featherInterior = 0.034;
+        result.frequencyA = 1.20;
+        result.frequencyB = 2.40;
+        break;
+    case ETerrainBlendStyle::Paving:
+        result.cornerExponent = 1.90;
+        result.displacement = 0.026;
+        result.featherEdge = 0.010;
+        result.featherInterior = 0.022;
+        result.frequencyA = 1.05;
+        result.frequencyB = 1.90;
+        break;
+    case ETerrainBlendStyle::Stone:
+        result.cornerExponent = 1.55;
+        result.displacement = 0.044;
+        result.featherInterior = 0.026;
+        result.frequencyA = 1.60;
+        result.frequencyB = 2.85;
+        break;
+    case ETerrainBlendStyle::Gravel:
+        result.cornerExponent = 1.62;
+        result.displacement = 0.050;
+        result.featherInterior = 0.025;
+        result.frequencyA = 1.75;
+        result.frequencyB = 3.00;
+        break;
+    case ETerrainBlendStyle::Sand:
+        result.cornerExponent = 1.82;
+        result.displacement = 0.034;
+        result.featherEdge = 0.016;
+        result.featherInterior = 0.040;
+        result.frequencyA = 1.00;
+        result.frequencyB = 1.85;
+        break;
+    case ETerrainBlendStyle::Snow:
+        result.cornerExponent = 1.80;
+        result.displacement = 0.028;
+        result.featherEdge = 0.018;
+        result.featherInterior = 0.034;
+        result.frequencyA = 0.90;
+        result.frequencyB = 1.70;
+        break;
+    case ETerrainBlendStyle::Swamp:
+        result.cornerExponent = 1.68;
+        result.displacement = 0.044;
+        result.featherEdge = 0.018;
+        result.featherInterior = 0.038;
+        result.frequencyA = 1.15;
+        result.frequencyB = 2.05;
+        break;
+    case ETerrainBlendStyle::Water:
+        result.cornerExponent = 1.82;
+        result.displacement = 0.034;
+        result.featherEdge = 0.018;
+        result.featherInterior = 0.036;
+        result.frequencyA = 0.85;
+        result.frequencyB = 1.65;
+        break;
+    case ETerrainBlendStyle::Organic:
+        result.displacement = 0.055;
+        break;
+    }
+    return result;
+}
+
+double smoothUnit(double value)
+{
+    value = qBound(0.0, value, 1.0);
+    return value * value * (3.0 - 2.0 * value);
+}
+
+double canonicalBoundaryNoise(double u, double v,
+                              const SCanonicalBlendMaskProfile& profile,
+                              ETerrainBlendStyle style, int variation)
+{
+    const double pi = 3.14159265358979323846;
+    const double phase = double(terrainBlendStylePriority(style) + 17) * 0.071
+        + double(variation + 1) * 1.137;
+    const double first = std::sin(2.0 * pi
+        * (profile.frequencyA * u + 0.61 * v) + phase);
+    const double second = std::sin(2.0 * pi
+        * (-0.43 * u + profile.frequencyB * v) + phase * 1.73);
+    return first * 0.64 + second * 0.36;
+}
+
+QImage canonicalNorthWestCornerMask(const QSize& size,
+                                    ETerrainBlendStyle style, int variation)
+{
+    if(size.width() <= 0 || size.width() != size.height()) return {};
+    SCanonicalBlendMaskProfile profile = canonicalBlendMaskProfile(style);
+    // The two variants change the large silhouette rather than adding fine
+    // grain. The exterior crossings remain fixed because their displacement
+    // envelope is exactly zero on the tile boundary.
+    if(variation & 1)
+    {
+        profile.cornerExponent = qMax(1.25, profile.cornerExponent - 0.10);
+        profile.displacement *= -0.90;
+    }
+    QImage result(size, QImage::Format_Grayscale8);
+    const int divisor = qMax(1, size.width() - 1);
+    const double pi = 3.14159265358979323846;
+    for(int y = 0; y < size.height(); ++y)
+        for(int x = 0; x < size.width(); ++x)
+        {
+            const double u = double(x) / double(divisor);
+            const double v = double(y) / double(divisor);
+            const double anchorEnvelope = std::sin(pi * u) * std::sin(pi * v);
+            const double noise = canonicalBoundaryNoise(
+                u, v, profile, style, variation);
+            const double extent = profile.cornerExtent
+                + profile.displacement * anchorEnvelope * noise;
+            const double metric = std::pow(
+                std::pow(u, profile.cornerExponent)
+                    + std::pow(v, profile.cornerExponent),
+                1.0 / profile.cornerExponent);
+            const double feather = profile.featherEdge
+                + profile.featherInterior * anchorEnvelope;
+            const int value = qRound(255.0 * smoothUnit(
+                (extent - metric + feather) / (2.0 * feather)));
+            result.setPixelColor(x, y, QColor(value, value, value));
+        }
+    return result;
+}
+
+QImage canonicalNorthAdjacentMask(const QSize& size,
+                                  ETerrainBlendStyle style, int variation)
+{
+    if(size.width() <= 0 || size.width() != size.height()) return {};
+    SCanonicalBlendMaskProfile profile = canonicalBlendMaskProfile(style);
+    if(variation & 1) profile.displacement *= -0.90;
+    QImage result(size, QImage::Format_Grayscale8);
+    const int divisor = qMax(1, size.width() - 1);
+    const double pi = 3.14159265358979323846;
+    for(int y = 0; y < size.height(); ++y)
+        for(int x = 0; x < size.width(); ++x)
+        {
+            const double u = double(x) / double(divisor);
+            const double v = double(y) / double(divisor);
+            const double anchorEnvelope = std::sin(pi * u);
+            // This odd wave is deliberately antisymmetric around the center.
+            // Therefore inverse(rotation180(mask)) is byte-identical to the
+            // same adjacent ownership assignment, independent of which
+            // material ID happened to sort first.
+            const double centered = u - 0.5;
+            const double noise = 0.64 * std::sin(2.0 * pi * centered)
+                + 0.36 * std::sin(4.0 * pi * centered);
+            const double boundary = profile.adjacentExtent
+                + profile.displacement * anchorEnvelope * noise;
+            const double feather = profile.featherEdge
+                + profile.featherInterior * anchorEnvelope;
+            const int value = qRound(255.0 * smoothUnit(
+                (boundary - v + feather) / (2.0 * feather)));
+            result.setPixelColor(x, y, QColor(value, value, value));
+        }
+    return result;
+}
+
+QImage canonicalNorthWestSouthEastDiagonalMask(
+    const QSize& size, ETerrainBlendStyle style)
+{
+    if(size.width() <= 0 || size.width() != size.height()) return {};
+    const SCanonicalBlendMaskProfile profile = canonicalBlendMaskProfile(style);
+    QImage result(size, QImage::Format_Grayscale8);
+    const int divisor = qMax(1, size.width() - 1);
+    const double pi = 3.14159265358979323846;
+    for(int y = 0; y < size.height(); ++y)
+        for(int x = 0; x < size.width(); ++x)
+        {
+            const double u = double(x) / double(divisor);
+            const double v = double(y) / double(divisor);
+            const double dx = u - 0.5;
+            const double dy = v - 0.5;
+            const double radius2 = dx * dx + dy * dy;
+            // Every term changes sign under a quarter turn. Consequently the
+            // inverse mask is exactly the rotated opposite-diagonal mask, and
+            // both polarities remain two corner-rooted lobes. The quartic term
+            // bends the central saddle without creating pixel-grain islands.
+            const double saddle = dx * dy
+                + profile.displacement * 8.0
+                    * (dx * dx - dy * dy) * radius2;
+            const double signedDistance = saddle
+                / (std::sqrt(radius2) + 0.15);
+            const double interiorEnvelope = std::sin(pi * u) * std::sin(pi * v);
+            const double feather = profile.featherEdge
+                + profile.featherInterior * interiorEnvelope;
+            const int value = qRound(255.0 * smoothUnit(
+                (signedDistance + feather) / (2.0 * feather)));
+            result.setPixelColor(x, y, QColor(value, value, value));
+        }
+    return result;
+}
+
+QImage rotateMaskClockwise(QImage mask, int turns)
+{
+    turns %= 4;
+    if(turns < 0) turns += 4;
+    while(turns-- > 0) mask = rotateImageClockwise(mask);
+    return mask;
+}
+
+void applyCanonicalExteriorProfile(QImage* mask, const bool owner[4])
+{
+    if(!mask || mask->isNull()) return;
+    const int width = mask->width();
+    const int height = mask->height();
+    const auto value = [](bool firstOwner, bool secondOwner, double position) {
+        if(firstOwner == secondOwner) return firstOwner ? 255 : 0;
+        const double secondWeight = smoothUnit((position - 0.38) / 0.24);
+        const double ownerWeight = firstOwner
+            ? 1.0 - secondWeight : secondWeight;
+        return qBound(0, qRound(ownerWeight * 255.0), 255);
+    };
+    for(int x = 0; x < width; ++x)
+    {
+        const double position = width == 1 ? 0.0
+            : double(x) / double(width - 1);
+        mask->setPixelColor(x, 0, QColor(value(owner[0], owner[1], position),
+            value(owner[0], owner[1], position),
+            value(owner[0], owner[1], position)));
+        const int bottom = value(owner[3], owner[2], position);
+        mask->setPixelColor(x, height - 1, QColor(bottom, bottom, bottom));
+    }
+    for(int y = 0; y < height; ++y)
+    {
+        const double position = height == 1 ? 0.0
+            : double(y) / double(height - 1);
+        const int left = value(owner[0], owner[3], position);
+        const int right = value(owner[1], owner[2], position);
+        mask->setPixelColor(0, y, QColor(left, left, left));
+        mask->setPixelColor(width - 1, y, QColor(right, right, right));
+    }
+}
+
+QString canonicalMaskTopologyName(int ownerCount, bool diagonal, int variation)
+{
+    if(ownerCount == 1)
+        return QStringLiteral("outer-1of4-v%1").arg((variation & 1) + 1);
+    if(ownerCount == 3)
+        return QStringLiteral("inside-3of4-v%1").arg((variation & 1) + 1);
+    if(diagonal)
+        return QStringLiteral("diagonal-2of4");
+    return QStringLiteral("edge-2of4-v%1").arg((variation & 1) + 1);
+}
+
+QImage canonicalGeneratedOwnershipMask(
+    const QSize& size, const STerrainTransitionSignature& preview,
+    qint32 ownerMaterial, ETerrainBlendStyle style, int variation,
+    QString* provenance)
+{
+    const QVector<qint32> ids = corners(preview);
+    bool owner[4] = {false, false, false, false};
+    int ownerCount = 0;
+    for(int corner = 0; corner < 4; ++corner)
+    {
+        owner[corner] = ids.at(corner) == ownerMaterial;
+        ownerCount += owner[corner];
+    }
+    if(ownerCount <= 0 || ownerCount >= 4) return {};
+    const bool diagonal = ownerCount == 2
+        && owner[0] == owner[2] && owner[1] == owner[3];
+    QImage result;
+    if(ownerCount == 1 || ownerCount == 3)
+    {
+        int corner = -1;
+        for(int index = 0; index < 4; ++index)
+            if(owner[index] == (ownerCount == 1)) { corner = index; break; }
+        result = rotateMaskClockwise(
+            canonicalNorthWestCornerMask(size, style, variation), corner);
+        if(ownerCount == 3) result.invertPixels();
+    }
+    else if(diagonal)
+    {
+        result = canonicalNorthWestSouthEastDiagonalMask(size, style);
+        if(!owner[0]) result = rotateMaskClockwise(result, 1);
+    }
+    else
+    {
+        int turns = -1;
+        if(owner[0] && owner[1]) turns = 0;
+        else if(owner[1] && owner[2]) turns = 1;
+        else if(owner[2] && owner[3]) turns = 2;
+        else if(owner[3] && owner[0]) turns = 3;
+        if(turns < 0) return {};
+        result = rotateMaskClockwise(
+            canonicalNorthAdjacentMask(size, style, variation), turns);
+    }
+
+    // Structural safety patches are semantic, not decorative. They make each
+    // requested corner visibly originate at full strength and guarantee that
+    // no protected corner can be touched by feathering or silhouette noise.
+    applyCanonicalExteriorProfile(&result, owner);
+    const int patch = qMin(qMin(size.width(), size.height()),
+        qMax(2, (size.width() + 15) / 16));
+    for(int corner = 0; corner < 4; ++corner)
+    {
+        const bool right = corner == 1 || corner == 2;
+        const bool bottom = corner == 2 || corner == 3;
+        const int value = owner[corner] ? 255 : 0;
+        for(int py = 0; py < patch; ++py)
+            for(int px = 0; px < patch; ++px)
+            {
+                const int x = right ? size.width() - 1 - px : px;
+                const int y = bottom ? size.height() - 1 - py : py;
+                result.setPixelColor(x, y, QColor(value, value, value));
+            }
+    }
+    if(provenance)
+        *provenance = QStringLiteral("canonical-generated:%1:%2")
+            .arg(CTerrainVirtualAtlas::blendStyleName(style))
+            .arg(canonicalMaskTopologyName(ownerCount, diagonal, variation));
+    return result;
+}
+
 bool sameOwnerPattern(const STerrainTransitionSignature& first,
                       qint32 firstOwner,
                       const STerrainTransitionSignature& second,
@@ -713,22 +1106,6 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
         m_materialSourceSlots.remove(source.key());
     }
     m_valid = true;
-    // The opened map is itself reviewed stock JMV evidence. Index all of its
-    // authored two-family transitions immediately so the first semantic
-    // stroke can generate an absent tuple without waiting for an unrelated
-    // exact global transition to be imported earlier in the session.
-    for(int slot = 0; slot < authoredTiles.size(); ++slot)
-    {
-        SMprPackedTile packed;
-        packed.tileIndex = quint8(slot % 64);
-        packed.atlasIndex = quint8(slot / 64);
-        bool found = false;
-        const STerrainTransitionSignature signature =
-            catalog.gridSignatureForPacked(packed.encode(), &found);
-        if(found)
-            registerBlendMaskTemplate(signature, authoredTiles.at(slot),
-                QStringLiteral("current-map stock slot %1").arg(slot), nullptr);
-    }
 }
 
 int CTerrainVirtualAtlas::stockBlendMaskCountFor(
@@ -1077,21 +1454,39 @@ QImage CTerrainVirtualAtlas::reviewBlendMask(
     const STerrainTransitionSignature& gridSignature,
     qint32 ownerMaterial, int variation, QString* provenance) const
 {
+    if(!m_valid || m_authoredTiles.isEmpty()) return {};
     const STerrainTransitionSignature preview =
         CTerrainTransitionCatalog::mirroredGridY(gridSignature);
     const QVector<qint32> ids = corners(preview);
     QSet<qint32> unique;
     for(qint32 id : ids) unique.insert(id);
     if(unique.size() != 2 || !unique.contains(ownerMaterial)) return {};
-    unique.remove(ownerMaterial);
-    return alignedStockMask(preview, ownerMaterial, *unique.constBegin(),
-                            qMax(0, variation), provenance);
+    QList<qint32> ordered = unique.values();
+    std::sort(ordered.begin(), ordered.end());
+    const qint32 canonicalOwner = ordered.front();
+    QImage result = canonicalGeneratedOwnershipMask(
+        m_authoredTiles.front().size(), preview, canonicalOwner,
+        blendStyleForSignature(gridSignature), qMax(0, variation), nullptr);
+    if(!result.isNull() && canonicalOwner != ownerMaterial)
+        result.invertPixels();
+    if(provenance && !result.isNull())
+    {
+        int ownerCount = 0;
+        for(qint32 id : ids) ownerCount += id == ownerMaterial;
+        const bool diagonal = ownerCount == 2
+            && ids.at(0) == ids.at(2) && ids.at(1) == ids.at(3);
+        *provenance = QStringLiteral("canonical-generated:%1:%2")
+            .arg(blendStyleName(blendStyleForSignature(gridSignature)))
+            .arg(canonicalMaskTopologyName(
+                ownerCount, diagonal, qMax(0, variation)));
+    }
+    return result;
 }
 
 QImage CTerrainVirtualAtlas::generateTile(
     const STerrainTransitionSignature& gridSignature,
     ETerrainBlendStyle style, int variation,
-    QString* provenance, CValidationReport* report) const
+    QString* provenance, CValidationReport* report, bool linearLight) const
 {
     // Atlas thumbnails are vertically opposite the canonical terrain grid.
     const STerrainTransitionSignature preview =
@@ -1124,13 +1519,14 @@ QImage CTerrainVirtualAtlas::generateTile(
     if(unique.size() == 2)
     {
         QString source;
-        QImage owner = alignedStockMask(preview, unique.at(0), unique.at(1),
-                                        variation, &source);
+        QImage owner = canonicalGeneratedOwnershipMask(
+            m_authoredTiles.front().size(), preview, unique.at(0), style,
+            variation, &source);
         if(owner.isNull())
         {
-            if(report) report->add("terrain.stock_blend_mask_missing",
+            if(report) report->add("terrain.canonical_blend_mask_missing",
                 EValidationSeverity::Error,
-                "No reviewed stock JMV mask matches this transition topology",
+                "No canonical blend mask matches this transition topology",
                 QString("%1/%2 (%3)").arg(unique.at(0)).arg(unique.at(1))
                     .arg(blendStyleName(style)));
             return {};
@@ -1143,47 +1539,27 @@ QImage CTerrainVirtualAtlas::generateTile(
     }
     else
     {
-        // Multi-school junctions are composed from reviewed stock one-corner
-        // transitions. Each corner retains a stock-authored silhouette; equal
-        // identities are aggregated before normalization.
+        // Multi-family junctions use one canonical topology mask for every
+        // material's complete corner assignment. In particular, adjacent
+        // repeated corners remain one connected region instead of a union of
+        // unrelated one-corner source masks.
         for(qint32 material : unique)
         {
-            QImage combined(m_authoredTiles.front().size(),
-                            QImage::Format_Grayscale8);
-            combined.fill(Qt::black);
-            for(int corner = 0; corner < 4; ++corner)
+            QString source;
+            const QImage mask = canonicalGeneratedOwnershipMask(
+                m_authoredTiles.front().size(), preview, material,
+                m_materialBlendStyles.value(material, style), variation,
+                &source);
+            if(mask.isNull())
             {
-                if(ids.at(corner) != material) continue;
-                qint32 support = unique.front() == material && unique.size() > 1
-                    ? unique.at(1) : unique.front();
-                STerrainTransitionSignature oneCorner;
-                oneCorner.northWest = oneCorner.northEast =
-                    oneCorner.southEast = oneCorner.southWest = support;
-                if(corner == 0) oneCorner.northWest = material;
-                if(corner == 1) oneCorner.northEast = material;
-                if(corner == 2) oneCorner.southEast = material;
-                if(corner == 3) oneCorner.southWest = material;
-                QString source;
-                const QImage cornerMask = alignedStockMask(
-                    oneCorner, material, support, variation, &source);
-                if(cornerMask.isNull())
-                {
-                    if(report) report->add("terrain.stock_blend_mask_missing",
-                        EValidationSeverity::Error,
-                        "No reviewed stock JMV one-corner mask can compose a multi-school junction",
-                        QString::number(material));
-                    return {};
-                }
-                sources << source;
-                for(int y = 0; y < combined.height(); ++y)
-                    for(int x = 0; x < combined.width(); ++x)
-                    {
-                        const int value = qMax(combined.pixelColor(x, y).red(),
-                            cornerMask.pixelColor(x, y).red());
-                        combined.setPixelColor(x, y, QColor(value, value, value));
-                    }
+                if(report) report->add("terrain.canonical_blend_mask_missing",
+                    EValidationSeverity::Error,
+                    "No canonical topology mask can compose a multi-family junction",
+                    QString::number(material));
+                return {};
             }
-            ownership << combined;
+            sources << source;
+            ownership << mask;
         }
     }
     sources.removeDuplicates();
@@ -1265,10 +1641,13 @@ QImage CTerrainVirtualAtlas::generateTile(
                                              qint32 secondMaterial,
                                              double position) {
                 for(double& weight : weights) weight = 0.0;
-                double secondWeight = firstMaterial == secondMaterial ? 0.0
-                    : qBound(0.0, position, 1.0);
-                secondWeight = secondWeight * secondWeight
-                    * (3.0 - 2.0 * secondWeight);
+                // Match the stored 8-bit ownership mask exactly. Without this
+                // quantization a sub-half-byte weight can display as black in
+                // the review mask yet still tint a linear-light preview by a
+                // channel value at the edge of the zero/one plateaus.
+                const double secondWeight = firstMaterial == secondMaterial
+                    ? 0.0 : qRound(smoothUnit(
+                        (position - 0.38) / 0.24) * 255.0) / 255.0;
                 for(int corner = 0; corner < 4; ++corner)
                     if(ids.at(corner) == firstMaterial)
                     { weights[corner] = 1.0 - secondWeight; break; }
@@ -1276,9 +1655,10 @@ QImage CTerrainVirtualAtlas::generateTile(
                     if(ids.at(corner) == secondMaterial)
                     { weights[corner] += secondWeight; break; }
             };
-            // Interior artwork comes from the reviewed stock mask. The outer
-            // texel ring is resolved solely from its two edge endpoints so
-            // independently selected interior variants cannot open a seam.
+            // Interior artwork comes from the canonical generated mask. The
+            // outer texel ring is resolved solely from its two endpoints using
+            // a universal plateau profile. This provides solid corner patches
+            // and prevents independently selected variants from opening seams.
             if(y == 0) forceSharedEdge(ids.at(0), ids.at(1),
                 size == 1 ? 0.0 : double(x) / double(size - 1));
             if(y == size - 1) forceSharedEdge(ids.at(3), ids.at(2),
@@ -1289,7 +1669,8 @@ QImage CTerrainVirtualAtlas::generateTile(
                 size == 1 ? 0.0 : double(y) / double(size - 1));
             result.setPixelColor(x, y,
                 QColor::fromRgba(materialBlend(samples, weights,
-                                               m_generatedTilesOpaque)));
+                                               m_generatedTilesOpaque,
+                                               linearLight)));
         }
     return result;
 }
@@ -1300,6 +1681,14 @@ QImage CTerrainVirtualAtlas::reviewGeneratedBlend(
 {
     return generateTile(gridSignature, blendStyleForSignature(gridSignature),
                         qMax(0, variation), provenance, report);
+}
+
+QImage CTerrainVirtualAtlas::reviewGeneratedBlendLinearLight(
+    const STerrainTransitionSignature& gridSignature, int variation,
+    QString* provenance, CValidationReport* report) const
+{
+    return generateTile(gridSignature, blendStyleForSignature(gridSignature),
+                        qMax(0, variation), provenance, report, true);
 }
 
 bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
@@ -1501,7 +1890,7 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
             generated.blendProvenance = provenance;
             QSet<qint32> generatedMaterials;
             for(qint32 id : corners(canonical)) generatedMaterials.insert(id);
-            generated.stockDerivedBlend = generatedMaterials.size() > 1;
+            generated.canonicalGeneratedBlend = generatedMaterials.size() > 1;
             generated.runtimeTerrainType = runtimeType;
             index = m_generatedTiles.size();
             m_generatedTiles.append(generated);
@@ -1610,7 +1999,7 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             {
                 result.error = QStringLiteral(
                     "An exact tile could not be authored. See validation findings for a missing "
-                    "uniform material source or reviewed stock JMV blend mask.");
+                    "uniform material source or canonical blend topology.");
                 return result;
             }
             cells.append({tile, x, y});

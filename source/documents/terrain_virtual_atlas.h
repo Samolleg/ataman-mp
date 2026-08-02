@@ -64,9 +64,10 @@ struct STerrainFinalizedTile
     bool authored{false};
     int sourceSlot{-1};
     // Empty for original map slots. Imported exact tiles and generated tiles
-    // record the stock JMV source used to review/reconstruct their artwork.
+    // record their physical artwork provenance.
     QString blendProvenance;
     bool stockDerivedBlend{false};
+    bool canonicalGeneratedBlend{false};
     // Runtime MP terrain class. This is physical-slot metadata, independent
     // of semantic material IDs and packed rotation.
     qint32 runtimeTerrainType{-1};
@@ -174,7 +175,9 @@ public:
     { return registerBlendMaskTemplate(signature, pixels, sourceLabel, report); }
     int stockBlendMaskCountFor(
         const STerrainTransitionSignature& signature) const;
-    // Returns the exact stock-derived ownership mask selected by generation.
+    // Returns the exact clean-room canonical ownership mask used by fallback
+    // generation. Registered stock masks are calibration evidence only and
+    // cannot change this result.
     // White belongs to ownerMaterial; black belongs to the other material.
     // This is exposed for deterministic human visual review, not editing.
     QImage reviewBlendMask(
@@ -183,8 +186,14 @@ public:
         QString* provenance = nullptr) const;
     // Renders the exact generated pixels used for a missing transition while
     // deliberately bypassing authored-tile lookup. Review tooling uses this to
-    // show the outcome of the selected stock-derived mask beside its sources.
+    // show the canonical mask outcome beside its uniform material sources.
     QImage reviewGeneratedBlend(
+        const STerrainTransitionSignature& gridSignature,
+        int variation = 0, QString* provenance = nullptr,
+        CValidationReport* report = nullptr) const;
+    // Review-only A/B compositor. Runtime generation remains encoded-RGB
+    // until the focused visual comparison is explicitly accepted.
+    QImage reviewGeneratedBlendLinearLight(
         const STerrainTransitionSignature& gridSignature,
         int variation = 0, QString* provenance = nullptr,
         CValidationReport* report = nullptr) const;
@@ -224,7 +233,8 @@ private:
     QImage generateTile(const STerrainTransitionSignature& gridSignature,
                         ETerrainBlendStyle style, int variation,
                         QString* provenance,
-                        CValidationReport* report) const;
+                        CValidationReport* report,
+                        bool linearLight = false) const;
     bool registerBlendMaskTemplate(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel, CValidationReport* report);
