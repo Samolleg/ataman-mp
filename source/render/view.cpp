@@ -5589,10 +5589,14 @@ void CView::draw()
     const ei::SRenderEnvironment environment = ei::renderEnvironment(
         worldSet, overrideWorldTime, previewTime, m_caveEnvironment,
         m_weatherRegion);
-    if(m_pLand && m_pLand->isMprLoad())
+    // Offscreen minimap/query draws are consumers of renderer state, never
+    // owners of the persistent terrain-shadow snapshot. Only the visible
+    // viewport may request a replacement, and disabling a draw pass merely
+    // stops sampling; it cannot retire the last complete texture.
+    if(!m_minimapCaptureActive && terrainShadowsEnabled
+            && m_pLand && m_pLand->isMprLoad())
         m_pLand->updateTerrainShadowVisibility(
-            environment.sunDirection, terrainShadowsEnabled,
-            !m_sculptStrokeActive);
+            environment.sunDirection, !m_sculptStrokeActive);
     syncEnvironmentPreviewWidget(environment.timeHours);
     // Fill the open lower edge of the stock sky cylinder with the same color
     // that distant geometry converges to. This removes the editor-only black
@@ -6784,7 +6788,6 @@ int CView::select(const SSelect &selectParam, bool bAddToSelect)
     }
     recordSelectionChange(selectionBefore);
     viewParameters();
-    emit loadedMapStateChanged();
     return nSelectedNodes();
 }
 
@@ -7258,7 +7261,6 @@ bool CView::selectNodes(const QList<CNode*>& nodes, bool addToSelection)
     }
     viewParameters();
     update();
-    emit loadedMapStateChanged();
     return true;
 }
 
@@ -8063,7 +8065,6 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
                 m_pTree->revealNode(selected.back());
         }
     }
-    emit loadedMapStateChanged();
 }
 
 QVector3D CView::getTerrainPos(bool bLand)
@@ -9031,7 +9032,6 @@ void CView::restoreSelection(const QList<CNode*>& selection)
     }
     viewParameters();
     update();
-    emit loadedMapStateChanged();
     emit selectionChanged();
 }
 
@@ -9092,7 +9092,6 @@ void CView::clearObjectSelection()
         m_pTree->clearViewportSelectionMarker();
     viewParameters();
     update();
-    emit loadedMapStateChanged();
 }
 
 void CView::recordSelectionChange(const QList<CNode*>& before, const QString& text)

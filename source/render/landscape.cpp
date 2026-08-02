@@ -50,10 +50,8 @@ void CLandscape::unloadMpr()
     m_terrainShadowTexture = nullptr;
     m_terrainShadowTextureWidth = 0;
     m_terrainShadowTextureHeight = 0;
-    m_terrainShadowFieldEnabled = false;
     m_terrainShadowFieldGeneration = 0;
     m_terrainShadowSunDirection = QVector3D();
-    m_terrainShadowDesiredEnabled = false;
     m_terrainShadowDesiredGeneration = 0;
     m_terrainShadowDesiredDirection = QVector3D();
     m_terrainShadowFutureActive = false;
@@ -508,7 +506,7 @@ bool CLandscape::uploadTerrainShadowTexture(const STerrainShadowFieldResult& res
 void CLandscape::applyTerrainShadowUniforms(QOpenGLShaderProgram* program,
                                             bool enabled)
 {
-    const bool available = enabled && m_terrainShadowFieldEnabled
+    const bool available = enabled
         && m_terrainShadowTexture && m_terrainShadowTexture->isCreated()
         && m_terrainShadowTextureWidth > 1 && m_terrainShadowTextureHeight > 1;
     program->setUniformValue("u_terrainShadowEnabled", available);
@@ -521,27 +519,15 @@ void CLandscape::applyTerrainShadowUniforms(QOpenGLShaderProgram* program,
 }
 
 void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
-                                               bool enabled, bool allowRebuild)
+                                               bool allowRebuild)
 {
     const int gridWidth = int(widthInWorldUnits()) + 1;
     const int gridHeight = int(heightInWorldUnits()) + 1;
     if(gridWidth < 2 || gridHeight < 2 || m_aSector.isEmpty())
         return;
 
-    if(!enabled)
-    {
-        m_terrainShadowDesiredEnabled = false;
-        m_terrainShadowDesiredGeneration = m_shadowGeneration;
-        m_terrainShadowDesiredDirection = QVector3D();
-        m_terrainShadowFieldEnabled = false;
-        m_terrainShadowFieldGeneration = 0;
-        m_terrainShadowSunDirection = QVector3D();
-        return;
-    }
-
     const QVector3D normalized = sunDirection.lengthSquared() > 0.000001f
         ? sunDirection.normalized() : QVector3D(0.0f, 0.0f, -1.0f);
-    m_terrainShadowDesiredEnabled = true;
     m_terrainShadowDesiredGeneration = m_shadowGeneration;
     m_terrainShadowDesiredDirection = normalized;
 
@@ -549,7 +535,7 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
     {
         const STerrainShadowFieldResult result = m_terrainShadowFuture.result();
         m_terrainShadowFutureActive = false;
-        const bool stillDesired = allowRebuild && m_terrainShadowDesiredEnabled
+        const bool stillDesired = allowRebuild
             && m_terrainShadowFutureGeneration == m_terrainShadowDesiredGeneration
             && m_terrainShadowFutureGeneration == m_shadowGeneration
             && QVector3D::dotProduct(m_terrainShadowFutureDirection,
@@ -561,7 +547,6 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
                 return;
             m_terrainShadowFieldGeneration = m_terrainShadowFutureGeneration;
             m_terrainShadowSunDirection = m_terrainShadowFutureDirection;
-            m_terrainShadowFieldEnabled = true;
             RenderPerformanceContext& performance = RenderPerformanceContext::instance();
             if(performance.collecting())
             {
@@ -577,7 +562,7 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
         }
     }
 
-    if(m_terrainShadowFieldEnabled
+    if(m_terrainShadowTexture
             && m_terrainShadowFieldGeneration == m_shadowGeneration
             && QVector3D::dotProduct(normalized, m_terrainShadowSunDirection) > 0.99999f)
         return;
