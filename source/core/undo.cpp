@@ -9,6 +9,7 @@
 #include "log.h"
 #include "property.h"
 #include "layout_components/tree_view.h"
+#include <QElapsedTimer>
 
 
 //CChangeModelParam::CChangeModelParam(CView* pView, uint nodeId, EObjParam &objParam, QString value, QUndoCommand *parent):
@@ -668,6 +669,8 @@ CMoveBehaviorPointCommand::CMoveBehaviorPointCommand(
 
 void CMoveBehaviorPointCommand::apply(int from, int to)
 {
+    QElapsedTimer timer;
+    timer.start();
     CUnit* unit = m_mob
         ? dynamic_cast<CUnit*>(m_mob->nodeByMapId(m_unitId)) : nullptr;
     CLogic* logic = unit ? unit->logicAt(m_logicSlot) : nullptr;
@@ -682,11 +685,17 @@ void CMoveBehaviorPointCommand::apply(int from, int to)
     if(!changed || !m_view || !m_mob)
         return;
     unit->refreshLogicProjection();
-    m_mob->logicNodesUpdate();
-    m_view->collectObjectTreeData();
+    const qint64 projectionMs = timer.elapsed();
+    m_view->refreshBehaviorOrder(unit, m_logicSlot);
+    const qint64 outlinerMs = timer.elapsed() - projectionMs;
     m_view->viewParameters();
+    const qint64 propertiesMs = timer.elapsed() - projectionMs - outlinerMs;
     m_view->setDurty(m_mob);
     m_view->update();
+    ei::log(eLogInfo, QString(
+        "Behavior collection reorder kind:%1 from:%2 to:%3 projectionMs:%4 outlinerMs:%5 propertiesMs:%6 totalMs:%7")
+        .arg(m_lookPoint ? "look" : "patrol").arg(from).arg(to)
+        .arg(projectionMs).arg(outlinerMs).arg(propertiesMs).arg(timer.elapsed()));
 }
 
 void CMoveBehaviorPointCommand::undo()
@@ -710,6 +719,8 @@ CMoveTrapPointCommand::CMoveTrapPointCommand(
 
 void CMoveTrapPointCommand::apply(int from, int to)
 {
+    QElapsedTimer timer;
+    timer.start();
     CMagicTrap* trap = m_mob
         ? dynamic_cast<CMagicTrap*>(m_mob->nodeByMapId(m_trapId)) : nullptr;
     const bool changed = trap && (m_castTarget
@@ -717,11 +728,16 @@ void CMoveTrapPointCommand::apply(int from, int to)
         : trap->moveActivationArea(from, to));
     if(!changed || !m_view || !m_mob)
         return;
-    m_mob->logicNodesUpdate();
-    m_view->collectObjectTreeData();
+    m_view->refreshBehaviorOrder(trap, -1);
+    const qint64 outlinerMs = timer.elapsed();
     m_view->viewParameters();
+    const qint64 propertiesMs = timer.elapsed() - outlinerMs;
     m_view->setDurty(m_mob);
     m_view->update();
+    ei::log(eLogInfo, QString(
+        "Trap collection reorder kind:%1 from:%2 to:%3 outlinerMs:%4 propertiesMs:%5 totalMs:%6")
+        .arg(m_castTarget ? "cast" : "activation").arg(from).arg(to)
+        .arg(outlinerMs).arg(propertiesMs).arg(timer.elapsed()));
 }
 
 void CMoveTrapPointCommand::undo()

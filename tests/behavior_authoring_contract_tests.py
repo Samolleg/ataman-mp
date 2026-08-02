@@ -22,6 +22,7 @@ def main() -> int:
     settings_ui = source("source/app/settings.ui")
     main_window = source("source/app/main_window.cpp")
     operation_manager = source("source/app/operationmanager.cpp")
+    view_h = source("source/render/view.h")
     view = source("source/render/view.cpp")
     trap = source("source/objects/magictrap.cpp")
     unit_h = source("source/objects/unit.h")
@@ -215,6 +216,14 @@ def main() -> int:
             "collection internal drag-reorder mode")
     require(collection, "requestDropMove",
             "drag reorder dispatch without mutating the widget hierarchy")
+    require(collection, "void dragMoveEvent(QDragMoveEvent* event) override",
+            "live patrol/look order preview while dragging")
+    require(collection, "restoreOriginalOrder();",
+            "cancelled patrol/look drag restoring its original order")
+    require(collection, "updatePreviewLabels();",
+            "patrol/look preview renumbering the entire visible route")
+    require(collection, "if(finalIndex == m_previewIndex)",
+            "patrol/look drag avoiding repeated work for one destination")
     require(collection, "worldSelectionBackground",
             "distinct collection highlight for viewport-selected points")
     require(unit_h, "bool movePatrolPoint(int from, int to);",
@@ -269,7 +278,15 @@ def main() -> int:
             "independent activation-area collection")
     require(trap_collection, 'tr("Cast targets")',
             "independent cast-target collection")
-    require(trap_collection, "source->parent() != target->parent()",
+    require(trap_collection, "void dragMoveEvent(QDragMoveEvent* event) override",
+            "live trap-point order preview while dragging")
+    require(trap_collection, "restoreOriginalOrder();",
+            "cancelled trap-point drag restoring its original order")
+    require(trap_collection, "updatePreviewLabels();",
+            "trap preview renumbering the entire visible section")
+    require(trap_collection, "if(finalIndex == m_previewIndex)",
+            "trap drag avoiding repeated work for one destination")
+    require(trap_collection, "target->parent() != m_dragParent",
             "drag reorder constrained to one trap array")
     require(trap_collection, "worldSelectionBackground",
             "viewport-selected trap child highlight")
@@ -281,6 +298,12 @@ def main() -> int:
             "atomic trap-child reorder undo command")
     require(undo, 'm_castTarget ? "Reorder cast target" : "Reorder activation area"',
             "specific trap reorder undo labels")
+    require(view_h, "void refreshBehaviorOrder(CNode* owner, int logicSlot);",
+            "targeted outliner order refresh API")
+    require(undo, "refreshBehaviorOrder(unit, m_logicSlot);",
+            "behavior reorder avoiding a full outliner rebuild")
+    require(undo, "refreshBehaviorOrder(trap, -1);",
+            "trap reorder avoiding a full outliner rebuild")
     require(view, "trapCollectionOwner(selected)",
             "trap-child selection resolving its owner collection")
     require(view, "setTrapCollection(trap)",

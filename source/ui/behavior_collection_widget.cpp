@@ -4,12 +4,15 @@
 #include <QAbstractItemView>
 #include <QBrush>
 #include <QColor>
+#include <QDragLeaveEvent>
+#include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
 #include <QSet>
+#include <QScrollBar>
 #include <QStyle>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -66,61 +69,258 @@ public:
     }
 
 protected:
-    void dropEvent(QDropEvent* event) override
+    void startDrag(Qt::DropActions supportedActions) override
     {
-        if(!requestDropMove(event))
+        m_dragItem = currentItem();
+        if(!m_dragItem)
+            return;
+        m_dragLookPoint = m_dragItem->data(0, LookPointRole).toBool();
+        if((m_dragLookPoint && !m_dragItem->parent())
+           || (!m_dragLookPoint && m_dragItem->parent()))
+        {
+            m_dragItem = nullptr;
+            return;
+        }
+        m_dragParent = m_dragItem->parent();
+        m_originalOrder = siblings();
+        m_originalIndex = m_originalOrder.indexOf(m_dragItem);
+        m_previewIndex = m_originalIndex;
+        m_dropCommitted = false;
+        QTreeWidget::startDrag(supportedActions);
+        if(!m_dropCommitted)
+            restoreOriginalOrder();
+        m_dragItem = nullptr;
+        m_dragParent = nullptr;
+        m_originalOrder.clear();
+        m_originalIndex = -1;
+        m_previewIndex = -1;
+    }
+
+    void dragEnterEvent(QDragEnterEvent* event) override
+    {
+        if(m_dragItem)
+        {
+            event->setDropAction(Qt::MoveAction);
+            event->accept();
+        }
+        else
             event->ignore();
     }
 
+    void dragMoveEvent(QDragMoveEvent* event) override
+    {
+        if(!m_dragItem || !event)
+            return;
+        QTreeWidgetItem* target = normalizedTarget(itemAt(event->pos()));
+        bool after = false;
+        if(!target)
+        {
+            const QVector<QTreeWidgetItem*> current = siblings();
+            if(current.isEmpty())
+            {
+                event->ignore();
+                return;
+            }
+            QTreeWidgetItem* first = current.first();
+            QTreeWidgetItem* last = current.last();
+            if(event->pos().y() < visualItemRect(first).top())
+                target = first;
+            else if(event->pos().y() > visualItemRect(last).bottom())
+            {
+                target = last;
+                after = true;
+            }
+            else
+            {
+                event->ignore();
+                return;
+            }
+        }
+        else
+            after = event->pos().y() >= visualItemRect(target).center().y();
+
+        if(!sameCollection(target))
+        {
+            event->ignore();
+            return;
+        }
+        previewOrder(target, after);
+        const int edge = 24;
+        if(event->pos().y() < edge)
+            verticalScrollBar()->setValue(verticalScrollBar()->value() - 1);
+        else if(event->pos().y() > viewport()->height() - edge)
+            verticalScrollBar()->setValue(verticalScrollBar()->value() + 1);
+        event->setDropAction(Qt::MoveAction);
+        event->accept();
+    }
+
+    void dragLeaveEvent(QDragLeaveEvent* event) override
+    {
+        restoreOriginalOrder();
+        event->accept();
+    }
+
+    void dropEvent(QDropEvent* event) override
+    {
+        if(!requestDropMove(event))
+        {
+            restoreOriginalOrder();
+            event->ignore();
+        }
+    }
+
 private:
+    QVector<QTreeWidgetItem*> siblings() const
+    {
+        QVector<QTreeWidgetItem*> result;
+        const int count = m_dragParent ? m_dragParent->childCount()
+                                       : topLevelItemCount();
+        result.reserve(count);
+        for(int index = 0; index < count; ++index)
+            result.append(m_dragParent ? m_dragParent->child(index)
+                                       : topLevelItem(index));
+        return result;
+    }
+
+    QTreeWidgetItem* normalizedTarget(QTreeWidgetItem* target) const
+    {
+        if(!target || !m_dragItem)
+            return nullptr;
+        if(!m_dragLookPoint && target->parent())
+            target = target->parent();
+        return target;
+    }
+
+    bool sameCollection(QTreeWidgetItem* target) const
+    {
+        if(!target || target == m_dragItem
+           || target->data(0, LookPointRole).toBool() != m_dragLookPoint)
+            return target == m_dragItem;
+        return m_dragLookPoint ? target->parent() == m_dragParent
+                               : target->parent() == nullptr;
+    }
+
+    void movePreviewItem(int from, int to)
+    {
+        if(from == to || from < 0 || to < 0)
+            return;
+        QTreeWidgetItem* item = m_dragParent
+            ? m_dragParent->takeChild(from) : takeTopLevelItem(from);
+        if(!item)
+            return;
+        if(m_dragParent)
+            m_dragParent->insertChild(to, item);
+        else
+            insertTopLevelItem(to, item);
+        setCurrentItem(item);
+    }
+
+    void previewOrder(QTreeWidgetItem* target, bool after)
+    {
+        const QVector<QTreeWidgetItem*> current = siblings();
+        const int sourceIndex = current.indexOf(m_dragItem);
+        const int targetIndex = current.indexOf(target);
+        if(sourceIndex < 0 || targetIndex < 0)
+            return;
+        int insertion = targetIndex + (after ? 1 : 0);
+        if(sourceIndex < insertion)
+            --insertion;
+        const int finalIndex = qBound(0, insertion, current.size() - 1);
+        if(finalIndex == m_previewIndex)
+            return;
+        movePreviewItem(sourceIndex, finalIndex);
+        m_previewIndex = finalIndex;
+        updatePreviewLabels();
+        viewport()->update();
+    }
+
+    void updatePreviewLabels()
+    {
+        const auto updateLooks = [](QTreeWidgetItem* patrol, int patrolIndex)
+        {
+            if(!patrol)
+                return;
+            for(int look = 0; look < patrol->childCount(); ++look)
+            {
+                QTreeWidgetItem* item = patrol->child(look);
+                item->setText(0, QStringLiteral("%1.%2").arg(patrolIndex).arg(look));
+                item->setText(1, QObject::tr("Look %1").arg(look));
+            }
+        };
+        if(m_dragLookPoint)
+        {
+            updateLooks(m_dragParent, indexOfTopLevelItem(m_dragParent));
+            return;
+        }
+        for(int patrol = 0; patrol < topLevelItemCount(); ++patrol)
+        {
+            QTreeWidgetItem* item = topLevelItem(patrol);
+            item->setText(0, QString::number(patrol));
+            item->setText(1, QObject::tr("Patrol %1").arg(patrol));
+            updateLooks(item, patrol);
+        }
+    }
+
+    void restoreOriginalOrder()
+    {
+        if(!m_dragItem || m_originalOrder.isEmpty()
+           || m_previewIndex == m_originalIndex)
+            return;
+        setUpdatesEnabled(false);
+        while(m_dragParent ? m_dragParent->childCount() : topLevelItemCount())
+        {
+            if(m_dragParent)
+                m_dragParent->takeChild(0);
+            else
+                takeTopLevelItem(0);
+        }
+        for(QTreeWidgetItem* item : m_originalOrder)
+            if(m_dragParent)
+                m_dragParent->addChild(item);
+            else
+                addTopLevelItem(item);
+        m_previewIndex = m_originalIndex;
+        updatePreviewLabels();
+        setCurrentItem(m_dragItem);
+        setUpdatesEnabled(true);
+        viewport()->update();
+    }
+
     bool requestDropMove(QDropEvent* event)
     {
-        QTreeWidgetItem* source = currentItem();
-        QTreeWidgetItem* target = event ? itemAt(event->pos()) : nullptr;
-        if(!source || !target || source == target || !m_moveRequest)
+        if(!event || !m_dragItem || !m_moveRequest || m_previewIndex < 0)
             return false;
-
-        const bool lookPoint = source->data(0, LookPointRole).toBool();
-        if(!lookPoint && target->parent())
-            target = target->parent();
-        if(source == target || target->data(0, LookPointRole).toBool() != lookPoint)
-            return false;
-
-        const int patrol = source->data(0, PatrolIndexRole).toInt();
-        if(lookPoint && (source->parent() != target->parent()
-                         || patrol != target->data(0, PatrolIndexRole).toInt()))
-            return false;
-
-        const int from = lookPoint
-            ? source->data(0, LookIndexRole).toInt()
-            : patrol;
-        const int targetIndex = lookPoint
-            ? target->data(0, LookIndexRole).toInt()
-            : target->data(0, PatrolIndexRole).toInt();
-        bool below = dropIndicatorPosition() == QAbstractItemView::BelowItem;
-        if(dropIndicatorPosition() == QAbstractItemView::OnItem)
-            below = event->pos().y() >= visualItemRect(target).center().y();
-        if(dropIndicatorPosition() == QAbstractItemView::OnViewport)
-            return false;
-
-        int to = targetIndex;
-        if(below && from > targetIndex)
-            ++to;
-        else if(!below && from < targetIndex)
-            --to;
-        if(from == to)
+        if(m_previewIndex != m_originalIndex)
         {
-            event->acceptProposedAction();
-            return true;
+            const QVector<QTreeWidgetItem*> current = siblings();
+            const int neighbourIndex = m_previewIndex < m_originalIndex
+                ? m_previewIndex + 1 : m_previewIndex - 1;
+            QTreeWidgetItem* neighbour = current.value(neighbourIndex);
+            if(!neighbour)
+                return false;
+            const int from = m_dragLookPoint
+                ? m_dragItem->data(0, LookIndexRole).toInt()
+                : m_dragItem->data(0, PatrolIndexRole).toInt();
+            const int to = m_dragLookPoint
+                ? neighbour->data(0, LookIndexRole).toInt()
+                : neighbour->data(0, PatrolIndexRole).toInt();
+            const int patrol = m_dragItem->data(0, PatrolIndexRole).toInt();
+            m_moveRequest(m_dragLookPoint, patrol, from, to);
         }
-
-        m_moveRequest(lookPoint, patrol, from, to);
+        m_dropCommitted = true;
         event->setDropAction(Qt::MoveAction);
         event->accept();
         return true;
     }
 
     MoveRequest m_moveRequest;
+    QTreeWidgetItem* m_dragItem{nullptr};
+    QTreeWidgetItem* m_dragParent{nullptr};
+    QVector<QTreeWidgetItem*> m_originalOrder;
+    int m_originalIndex{-1};
+    int m_previewIndex{-1};
+    bool m_dragLookPoint{false};
+    bool m_dropCommitted{false};
 };
 
 QString positionText(CNode* point)
@@ -190,15 +390,18 @@ CBehaviorCollectionWidget::CBehaviorCollectionWidget(
     m_tree->setDefaultDropAction(Qt::MoveAction);
     m_tree->setDragEnabled(true);
     m_tree->setAcceptDrops(true);
-    m_tree->setDropIndicatorShown(true);
+    m_tree->setDropIndicatorShown(false);
     m_tree->setUniformRowHeights(true);
     m_tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    m_tree->setToolTip(tr("Drag patrols to reorder the route, or drag look points within one patrol. "
-                          "Gold indicates the point selected in the viewport/outliner; clicking another row only focuses it here."));
+    m_tree->setToolTip(tr(
+        "Drag patrols to reorder the route, or drag look points within one patrol. "
+        "The top half of a row places the point before it; the bottom half places it after. "
+        "The complete order previews while dragging; leaving the list or pressing Esc cancels it. "
+        "Gold indicates the point selected in the viewport/outliner; clicking another row only focuses it here."));
     collectionTree->setMoveRequest(
         [this](bool lookPoint, int patrol, int from, int to)
         {

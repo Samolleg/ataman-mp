@@ -11424,6 +11424,127 @@ void CView::collectObjectTreeData()
         m_pTree->markNode(selected.back(), false);
 }
 
+void CView::refreshBehaviorOrder(CNode* owner, int logicSlot)
+{
+    if(!owner || !m_pTree
+       || CScene::getInstance()->getMode() != eEditModeLogic)
+        return;
+
+    const auto reorderChildren = [](QTreeWidgetItem* parent,
+                                    const QList<CNode*>& desired,
+                                    const QString& label)
+    {
+        if(!parent)
+            return;
+        QHash<CNode*, QTreeWidgetItem*> existing;
+        while(parent->childCount())
+        {
+            QTreeWidgetItem* item = parent->takeChild(0);
+            CTreeObject* objectItem = dynamic_cast<CTreeObject*>(item);
+            if(objectItem && objectItem->node())
+                existing.insert(objectItem->node(), item);
+            else
+                delete item;
+        }
+        int visible = 0;
+        for(CNode* node : desired)
+        {
+            if(!node || node->isMarkDeleted())
+                continue;
+            QTreeWidgetItem* item = existing.take(node);
+            if(!item)
+                item = new CTreeObject(parent, node);
+            else
+                parent->addChild(item);
+            item->setText(0, label.arg(++visible));
+            item->setData(0, CTreeView::BehaviorItemRole, true);
+            item->setData(0, CTreeView::FilterTextRole, item->text(0));
+        }
+        qDeleteAll(existing);
+    };
+
+    if(CUnit* unit = dynamic_cast<CUnit*>(owner))
+    {
+        CLogic* logic = unit->logicAt(logicSlot);
+        if(!logic)
+            return;
+        QTreeWidgetItem* logicItem = nullptr;
+        QTreeWidgetItemIterator iterator(m_pTree);
+        while(*iterator)
+        {
+            QTreeWidgetItem* item = *iterator;
+            const CUnit* itemOwner = reinterpret_cast<CUnit*>(quintptr(
+                item->data(0, Qt::UserRole + 11).toULongLong()));
+            if(item->data(0, CTreeView::BehaviorItemRole).toBool()
+               && itemOwner == unit
+               && item->data(0, Qt::UserRole + 10).toInt() == logicSlot)
+            {
+                logicItem = item;
+                break;
+            }
+            ++iterator;
+        }
+        QList<CNode*> patrols;
+        for(CPatrolPoint* patrol : logic->patrolPoints())
+            patrols.append(patrol);
+        reorderChildren(logicItem, patrols, tr("Patrol point %1"));
+        if(logicItem)
+            for(int patrolIndex = 0; patrolIndex < logicItem->childCount(); ++patrolIndex)
+            {
+                CTreeObject* patrolItem = dynamic_cast<CTreeObject*>(
+                    logicItem->child(patrolIndex));
+                CPatrolPoint* patrol = patrolItem
+                    ? dynamic_cast<CPatrolPoint*>(patrolItem->node()) : nullptr;
+                if(!patrol)
+                    continue;
+                QList<CNode*> looks;
+                for(CLookPoint* look : patrol->lookPoint())
+                    looks.append(look);
+                reorderChildren(patrolItem, looks, tr("Look point %1"));
+                patrolItem->setText(1, QString::number(patrolItem->childCount()));
+            }
+        return;
+    }
+
+    CMagicTrap* trap = dynamic_cast<CMagicTrap*>(owner);
+    if(!trap)
+        return;
+    QTreeWidgetItem* trapItem = nullptr;
+    QTreeWidgetItemIterator iterator(m_pTree);
+    while(*iterator)
+    {
+        CTreeObject* item = dynamic_cast<CTreeObject*>(*iterator);
+        if(item && item->node() == trap)
+        {
+            trapItem = item;
+            break;
+        }
+        ++iterator;
+    }
+    if(!trapItem)
+        return;
+    for(int sectionIndex = 0; sectionIndex < trapItem->childCount(); ++sectionIndex)
+    {
+        QTreeWidgetItem* section = trapItem->child(sectionIndex);
+        const bool areas = section->text(0).startsWith(tr("Activation areas"));
+        const bool targets = section->text(0).startsWith(tr("Cast targets"));
+        if(areas)
+        {
+            QList<CNode*> points;
+            for(CActivationZone* point : trap->actZones()) points.append(point);
+            reorderChildren(section, points, tr("Activation area %1"));
+            section->setText(0, tr("Activation areas (%1)").arg(section->childCount()));
+        }
+        else if(targets)
+        {
+            QList<CNode*> points;
+            for(CTrapCastPoint* point : trap->castPoints()) points.append(point);
+            reorderChildren(section, points, tr("Cast target %1"));
+            section->setText(0, tr("Cast targets (%1)").arg(section->childCount()));
+        }
+    }
+}
+
 void CView::refreshLogicSlotOutliner()
 {
     if(CScene::getInstance()->getMode() == eEditModeLogic)

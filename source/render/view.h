@@ -241,6 +241,7 @@ public:
     QOpenGLShaderProgram& shaderObject() {return m_program;}
     void setDirtyMpr();
     void setDurty(CMob* pMob = nullptr);
+    void refreshBehaviorOrder(CNode* owner, int logicSlot);
     void resetCamPosition();
     double cameraSpeedMultiplier() const;
     void setCameraSpeedMultiplier(double multiplier);
