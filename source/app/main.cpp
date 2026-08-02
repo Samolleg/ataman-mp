@@ -952,9 +952,13 @@ int runHeadlessCommand(QApplication& app)
             if(componentType == int(eObjParam_ROTATION_Y)) rotationYPlate = plate;
             componentHitTargetsExpanded = componentHitTargetsExpanded
                     && plate->minimumWidth() >= 32 && plate->minimumHeight() >= 22;
-            QFormLayout* form = qobject_cast<QFormLayout*>(plate->parentWidget()->layout());
+            QLayout* componentLayout = plate->parentWidget()->layout();
+            const QMargins margins = componentLayout
+                    ? componentLayout->contentsMargins() : QMargins();
             componentLayoutHasNoDeadSpace = componentLayoutHasNoDeadSpace
-                    && form && form->horizontalSpacing() == 0 && form->verticalSpacing() == 0;
+                    && componentLayout && componentLayout->spacing() == 0
+                    && margins.left() == 0 && margins.top() == 0
+                    && margins.right() == 0 && margins.bottom() == 0;
         }
         if(positionXPlate) positionXPlate->click();
         if(rotationYPlate) rotationYPlate->click();

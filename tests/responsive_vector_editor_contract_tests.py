@@ -17,6 +17,7 @@ def main() -> int:
         encoding="utf-8")
     source = (ROOT / "source/layout_components/tablemanager.cpp").read_text(
         encoding="utf-8")
+    widget_check = (ROOT / "source/app/main.cpp").read_text(encoding="utf-8")
 
     require(header, "void resizeEvent(QResizeEvent* event) override;",
             "Vector3 resize handling")
@@ -38,6 +39,8 @@ def main() -> int:
             "full component value restored on focus")
     require(source, "setText(m_pValue->toString());",
             "stored value used instead of the shortened preview")
+    require(widget_check, "componentLayout->contentsMargins()",
+            "widget check accepting the responsive component layout")
 
     print("responsive Vector3 editor contract: PASS")
     return 0
