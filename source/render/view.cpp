@@ -1183,6 +1183,68 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperty(const QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(const QSharedPointer<IPropertyBase>&)));
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>&)),
                      this, SLOT(onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>&)));
+    connect(m_tableManager.get(), &CTableManager::onBehaviorPointSelected,
+            this, [this](CNode* point)
+    {
+        CMob* mob = ownerMob(point);
+        QTimer::singleShot(0, this, [this, mob, point]()
+        {
+            if(mob && m_aMob.contains(mob))
+                selectNode(point, false);
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onBehaviorPatrolMove,
+            this, [this](CUnit* unit, int logicSlot, int from, int to)
+    {
+        CMob* mob = ownerMob(unit);
+        const uint unitId = unit ? unit->mapId() : 0;
+        QTimer::singleShot(0, this, [this, mob, unitId, logicSlot, from, to]()
+        {
+            if(!m_pUndoStack || !mob || !m_aMob.contains(mob)
+               || !mob->nodeByMapId(unitId))
+                return;
+            m_pUndoStack->push(new CMoveBehaviorPointCommand(
+                this, mob, unitId, logicSlot, -1, from, to, false));
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onBehaviorLookMove,
+            this, [this](CUnit* unit, int logicSlot, int patrol, int from, int to)
+    {
+        CMob* mob = ownerMob(unit);
+        const uint unitId = unit ? unit->mapId() : 0;
+        QTimer::singleShot(0, this,
+            [this, mob, unitId, logicSlot, patrol, from, to]()
+        {
+            if(!m_pUndoStack || !mob || !m_aMob.contains(mob)
+               || !mob->nodeByMapId(unitId))
+                return;
+            m_pUndoStack->push(new CMoveBehaviorPointCommand(
+                this, mob, unitId, logicSlot, patrol, from, to, true));
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onBehaviorPatrolAdd,
+            this, [this](CUnit* unit)
+    {
+        CMob* mob = ownerMob(unit);
+        const uint unitId = unit ? unit->mapId() : 0;
+        QTimer::singleShot(0, this, [this, mob, unitId]()
+        {
+            CNode* owner = mob && m_aMob.contains(mob)
+                ? mob->nodeByMapId(unitId) : nullptr;
+            if(owner && selectNode(owner, false))
+                addLogicPoint(false);
+        });
+    });
+    connect(m_tableManager.get(), &CTableManager::onBehaviorLookAdd,
+            this, [this](CPatrolPoint* patrol)
+    {
+        CMob* mob = ownerMob(patrol);
+        QTimer::singleShot(0, this, [this, mob, patrol]()
+        {
+            if(mob && m_aMob.contains(mob) && selectNode(patrol, false))
+                addLogicPoint(true);
+        });
+    });
     m_pUndoStack = pStack;
     m_lastUndoStackIndex = m_pUndoStack ? m_pUndoStack->index() : -1;
     connect(m_pUndoStack, &QUndoStack::indexChanged, this, [this](int index)
@@ -10762,6 +10824,10 @@ void CView::viewParameters()
     }
 
     m_tableManager->setNewData(aProp);
+    if(CScene::getInstance()->getMode() == eEditModeLogic
+       && selected.size() == 1)
+        if(CUnit* unit = dynamic_cast<CUnit*>(selected.first()))
+            m_tableManager->setBehaviorCollection(unit, m_logicSlotIndex);
     m_tableManager->setReadOnly(!hasEditableSelection());
     emit selectionStateChanged(true);
 }
@@ -10992,6 +11058,9 @@ void CView::collectObjectTreeData()
             return;
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
         {
+            QMap<uint, QString> behaviorNames;
+            CResourceStringList::getInstance()->getPropList(
+                behaviorNames, eObjParam_LOGIC_BEHAVIOUR);
             for(int logicIndex = 0; logicIndex < unit->logicCount(); ++logicIndex)
             {
                 CLogic* logic = unit->logicAt(logicIndex);
@@ -11002,17 +11071,32 @@ void CView::collectObjectTreeData()
                     [](CPatrolPoint* patrol)
                     { return patrol && !patrol->isMarkDeleted(); });
                 const QString suffix = logicIndex == 0 ? tr(" (default)") : QString();
+                const uint behaviorValue = uint(logic->behaviorType());
+                const QString behaviorName = behaviorNames.value(
+                    behaviorValue,
+                    tr("Unknown behavior (%1)").arg(behaviorValue));
+                const bool effectivelyEnabled = logicIndex == 0 || logic->isUse();
+                const QString enabledStatus = effectivelyEnabled
+                    ? tr("enabled") : tr("disabled");
                 auto slotItem = new QTreeWidgetItem(ownerItem);
-                slotItem->setText(0, tr("Logic %1%2").arg(logicIndex).arg(suffix));
+                const QString slotLabel = tr("Logic %1%2 — %3 — %4")
+                    .arg(logicIndex).arg(suffix)
+                    .arg(behaviorName).arg(enabledStatus);
+                slotItem->setText(0, slotLabel);
                 slotItem->setData(0, CTreeView::BehaviorItemRole, true);
                 slotItem->setData(0, CTreeView::FilterTextRole,
-                    tr("Logic %1 behavior setup").arg(logicIndex));
+                    tr("Logic %1 behavior setup %2 %3")
+                        .arg(logicIndex).arg(behaviorName).arg(enabledStatus));
                 slotItem->setText(1, QString::number(patrolCount));
                 slotItem->setData(0, Qt::UserRole + 10, logicIndex);
                 slotItem->setData(0, Qt::UserRole + 11,
                     QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(unit)));
-                slotItem->setToolTip(0, tr("Behavior setup %1; %2 patrol points")
-                    .arg(logicIndex).arg(patrolCount));
+                slotItem->setToolTip(0, logicIndex == 0
+                    ? tr("Behavior setup %1: %2; default enabled; %3 patrol points. Logic 0 ignores its stored enabled setting.")
+                        .arg(logicIndex).arg(behaviorName).arg(patrolCount)
+                    : tr("Behavior setup %1: %2; %3; %4 patrol points")
+                        .arg(logicIndex).arg(behaviorName)
+                        .arg(enabledStatus).arg(patrolCount));
                 slotItem->setExpanded(logicIndex == m_logicSlotIndex);
                 int patrolNumber = 0;
                 for(CPatrolPoint* patrol : logic->patrolPoints())
@@ -11178,6 +11262,12 @@ void CView::collectObjectTreeData()
     const QList<CNode*> selected = selectionSnapshot();
     if(!selected.isEmpty())
         m_pTree->markNode(selected.back(), false);
+}
+
+void CView::refreshLogicSlotOutliner()
+{
+    if(CScene::getInstance()->getMode() == eEditModeLogic)
+        collectObjectTreeData();
 }
 
 void CView::onRestoreCursor()

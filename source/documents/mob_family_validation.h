@@ -3,11 +3,14 @@
 
 #include <QByteArray>
 #include <QMap>
+#include <QSharedPointer>
 #include <QSet>
 #include <QStringList>
 #include <QVector>
 
 #include "endurance_document.h"
+
+namespace ei { struct SProfileDatabaseSnapshot; }
 
 enum class EMobFamilyFindingSeverity
 {
@@ -80,6 +83,7 @@ struct SMobFamilyValidationRequest
     bool includeProfileWideMobs = true;
     QStringList mapRoots;
     QMap<QString, QByteArray> inMemoryMobData;
+    QSharedPointer<const ei::SProfileDatabaseSnapshot> database;
 };
 
 class CMobFamilyValidationReport

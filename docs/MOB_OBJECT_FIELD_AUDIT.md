@@ -110,10 +110,24 @@ The validator also reports, without blocking load or save:
 - `mob.semantic.overlapping_unit_parts` when a unit explicitly enables two dotted model parts in the
   same anatomical/equipment slot (`hd`, `hp`, `bd`, `rh`, `lh`, or `lg`, including numbered hand
   roots such as `rh3`). Base limb/body entries without a dotted attachment are not treated as
-  competing equipment.
+  competing equipment;
+- `mob.semantic.wearable_bodyparts_missing` and
+  `mob.semantic.wearable_all_parts_enabled` as Critical, report-only findings
+  for standard wearable assemblies, while creature/integral empty masks remain
+  accepted;
+- `mob.semantic.missing_hair_selection` for a helmet-equipped standard
+  wearable that selects neither `hr` nor an authored `hr.NN` member;
+- `mob.semantic.missing_core_bodyparts` for omitted standard non-hair anatomy;
+  and
+- `mob.semantic.duplicate_bodypart_token` as Info while retaining exact order
+  and duplicates.
 
 These warnings preserve the source data. They identify game-tolerated but suspicious authoring
-states and are emitted to both validation output and the workflow log.
+states and are emitted to both validation output and the workflow log. Import
+units use embedded model/equipment; normal units use the active profile database.
+Unknown/model-specific tokens remain visible and lossless and do not receive a
+vocabulary-only warning. See
+[`validation/CHARACTER_BODYPART_VALIDATION.md`](validation/CHARACTER_BODYPART_VALIDATION.md).
 
 ## Research queue
 

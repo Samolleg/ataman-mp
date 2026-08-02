@@ -31,6 +31,8 @@
 #include "unitstat_form.h"
 #include "bodypartedit_form.h"
 #include "profile_database.h"
+#include "behavior_collection_widget.h"
+#include "objects/unit.h"
 
 namespace {
 const char* kPropertyMimeType = "application/x-ei-mapper-property-type";
@@ -536,6 +538,8 @@ void CTableManager::setReadOnly(bool readOnly)
     {
         QWidget* widget = m_pTable->cellWidget(row, 1);
         if(!widget)
+            widget = m_pTable->cellWidget(row, 0);
+        if(!widget)
             continue;
         const bool compoundEditor = qobject_cast<C3DItem*>(widget) != nullptr;
         widget->setProperty("enduranceReadOnly", readOnly);
@@ -556,6 +560,37 @@ void CTableManager::setReadOnly(bool readOnly)
             ? tr("This object belongs to a locked MOB. Activate its owner to edit it.")
             : QString());
     }
+}
+
+void CTableManager::setBehaviorCollection(CUnit* unit, int logicSlot)
+{
+    if(!unit)
+        return;
+    const int row = m_pTable->rowCount();
+    m_pTable->insertRow(row);
+    m_pTable->setSpan(row, 0, 1, 2);
+    CBehaviorCollectionWidget* editor = new CBehaviorCollectionWidget(
+        unit, logicSlot, m_pTable);
+    editor->setEnabled(!m_readOnly);
+    editor->setProperty("enduranceReadOnly", m_readOnly);
+    connect(editor, &CBehaviorCollectionWidget::selectPoint,
+            this, &CTableManager::onBehaviorPointSelected);
+    connect(editor, &CBehaviorCollectionWidget::movePatrolPoint, this,
+            [this, unit, logicSlot](int from, int to)
+            { emit onBehaviorPatrolMove(unit, logicSlot, from, to); });
+    connect(editor, &CBehaviorCollectionWidget::moveLookPoint, this,
+            [this, unit, logicSlot](int patrol, int from, int to)
+            { emit onBehaviorLookMove(unit, logicSlot, patrol, from, to); });
+    connect(editor, &CBehaviorCollectionWidget::addPatrolPoint, this,
+            [this, unit]() { emit onBehaviorPatrolAdd(unit); });
+    connect(editor, &CBehaviorCollectionWidget::addLookPoint, this,
+            [this, unit, logicSlot](int patrol)
+            {
+                CPatrolPoint* point = unit->patrolByIndex(logicSlot, patrol);
+                if(point) emit onBehaviorLookAdd(point);
+            });
+    m_pTable->setCellWidget(row, 0, editor);
+    m_pTable->setRowHeight(row, qBound(190, editor->sizeHint().height(), 390));
 }
 
 void CTableManager::installClipboardFilter(QWidget* widget, int row)

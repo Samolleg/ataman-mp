@@ -95,6 +95,7 @@
 #include "map_spawn_planner.h"
 #include "jmv_map_test_launcher.h"
 #include "resource_profile.h"
+#include "profile_database.h"
 #include "endurance_document.h"
 #include "ai_graph_document.h"
 #include "ai_graph_persistence.h"
@@ -1119,6 +1120,7 @@ MainWindow::MainWindow(QWidget* parent) :
         request.explicitComposition = true;
         request.includeProfileWideMobs = false;
         request.mapRoots = activeMapRoots().toList();
+        request.database = ei::ProfileDatabaseContext::instance().current();
         const QString path = m_pView->currentMob()->filePath().absoluteFilePath();
         request.seedMobPaths << path;
         QByteArray data;
@@ -1147,6 +1149,7 @@ MainWindow::MainWindow(QWidget* parent) :
         request.includeProfileWideMobs = false;
         request.seedMobPaths = files;
         request.mapRoots = activeMapRoots().toList();
+        request.database = ei::ProfileDatabaseContext::instance().current();
         m_familyValidation = CMobFamilyValidator::validate(request);
         updateMobFamilyValidationPanel();
         m_validationDock->show();
@@ -2211,6 +2214,12 @@ QByteArray mobFamilyRequestDigest(const SMobFamilyValidationRequest& request)
     {
         addString(it.key());
         hash.addData(QCryptographicHash::hash(it.value(), QCryptographicHash::Sha256));
+    }
+    if(!request.database.isNull())
+    {
+        addString(request.database->profileId);
+        addString(request.database->providerId);
+        addString(request.database->cacheKey);
     }
     return hash.result();
 }
@@ -4436,6 +4445,7 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
     SMobFamilyValidationRequest request;
     const SResourceProfileEvaluation profile = activeResourceProfile();
     request.profileId = profile.profileId;
+    request.database = ei::ProfileDatabaseContext::instance().current();
     request.mapRoots = activeMapRoots().toList();
     request.explicitComposition = !m_currentCollectionPath.isEmpty();
     if(!request.explicitComposition && !m_mapTestEntry.mobPath.isEmpty())
@@ -5242,8 +5252,14 @@ void MainWindow::notifyFamilyPreflight(const QString& operation)
         .arg(operation, m_familyValidation.toText()));
     QVector<SMobFamilyFinding> actionable;
     for(const SMobFamilyFinding& finding : m_familyValidation.findings)
-        if(finding.severity != EMobFamilyFindingSeverity::Info)
+        // Character-mask diagnostics are intentionally report-only. They can
+        // be numerous in authored/legacy data and must never interpose a modal
+        // acknowledgement in Save or Test Current Map.
+        if(finding.severity != EMobFamilyFindingSeverity::Info
+           && finding.category != "Character model parts")
             actionable.append(finding);
+    if(actionable.isEmpty())
+        return;
     showValidationWarning(tr("MOB family validation"),
                           validationWarningPreview(actionable));
 }

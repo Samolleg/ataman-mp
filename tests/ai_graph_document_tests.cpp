@@ -694,6 +694,17 @@ void AiGraphDocumentTests::regenerationUsesRuntimeHeightRounding()
     QVERIFY2(result.valid, qPrintable(result.error));
     const float expected = 2.0f * input.maximumTerrainHeight / 511.0f;
     QVERIFY(qAbs(result.navigationSurfaceHeights.front() - expected) < 0.0001f);
+
+    // Preserve the runtime's float operation order. Reassociating this as
+    // (height * 511) / maximumTerrainHeight rounds this Zone 9 sample to 110
+    // instead of the runtime's 109 and changes coarse representatives/weights.
+    input.terrainHeights.fill(4.285714149475098f, aiCount);
+    const SAiGraphPreviewBuildResult zone9Sensitive =
+        CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(zone9Sensitive.valid, qPrintable(zone9Sensitive.error));
+    const float zone9Expected = 109.0f * input.maximumTerrainHeight / 511.0f;
+    QVERIFY(qAbs(zone9Sensitive.navigationSurfaceHeights.front()
+                 - zone9Expected) < 0.0001f);
 }
 
 void AiGraphDocumentTests::regenerationUsesRuntimeBridgeHeightRounding()

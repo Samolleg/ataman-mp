@@ -1,0 +1,243 @@
+{
+    "schemaVersion":  1,
+    "capturedDate":  "2026-08-02",
+    "captureMethod":  "Forced whole-map game generation",
+    "fileCount":  47,
+    "files":  [
+                  {
+                      "path":  "basegipat__basecam.grp",
+                      "bytes":  155656,
+                      "sha256":  "3C31E9F7E2B0742A107B110393218EE9A8AB6168171BA1C52FB59154FD66F48B"
+                  },
+                  {
+                      "path":  "bz10k.grp",
+                      "bytes":  155656,
+                      "sha256":  "7FD2F38417ED56885D5E6D758A97B1B90A2E194B136C3345915261C3529306F9"
+                  },
+                  {
+                      "path":  "bz11k.grp",
+                      "bytes":  155656,
+                      "sha256":  "26CC685859CC61EAA1E680C88CC1D66DD3A6BC0C735CF4968C41D42979FC9668"
+                  },
+                  {
+                      "path":  "bz13h.grp",
+                      "bytes":  155656,
+                      "sha256":  "6C3371A311DC8D3BF88B7DCD4700D49152F65AD16B5BEA82305197E1ACB7060A"
+                  },
+                  {
+                      "path":  "bz13h__cz13h.grp",
+                      "bytes":  155656,
+                      "sha256":  "5C1460AA1F4781D90AB3C6BD966E02C426A16CC5509DA7B6612A8C06BD0D6E41"
+                  },
+                  {
+                      "path":  "bz14h.grp",
+                      "bytes":  155656,
+                      "sha256":  "D72E90F854A3E678A460CD01481DF17C1FB69FC1538D1C552E8C0A06FACD4BB5"
+                  },
+                  {
+                      "path":  "bz15h.grp",
+                      "bytes":  155656,
+                      "sha256":  "35268E55B7B9A2A3B6238B65DCE57C6F1C9A18687D37517B4DFCDAC04858991A"
+                  },
+                  {
+                      "path":  "bz16h.grp",
+                      "bytes":  155656,
+                      "sha256":  "4C38123E35352F37DF8E8735798A82165885A33580CFCAF2A477C17513FD5158"
+                  },
+                  {
+                      "path":  "bz18h.grp",
+                      "bytes":  155656,
+                      "sha256":  "FC324516E39AEFF190AAE67D751F9E53314D9B403BA854D17C5C0B2B8AFAB8FE"
+                  },
+                  {
+                      "path":  "bz19g.grp",
+                      "bytes":  155656,
+                      "sha256":  "CD16D3B12EF0E9DD8B873802D51F30EF592CFD24E14D410C79FFF3F98A8A37AB"
+                  },
+                  {
+                      "path":  "bz19g__gz19g.grp",
+                      "bytes":  155656,
+                      "sha256":  "129ACF54514CBDD08824E72308061483B24169B5E4008AFFBC1BA257119E37EF"
+                  },
+                  {
+                      "path":  "bz2g.grp",
+                      "bytes":  155656,
+                      "sha256":  "02435120DEBBDEE1845F68861FC2615377C4185A8FB51D73BA6126B7D5400D7C"
+                  },
+                  {
+                      "path":  "bz3g.grp",
+                      "bytes":  155656,
+                      "sha256":  "F76CE6BB3BCDC607500806A77D75021CD5A9521533852842936117E81A41DBAF"
+                  },
+                  {
+                      "path":  "bz4g.grp",
+                      "bytes":  155656,
+                      "sha256":  "3F3730CCCD6FA0C025F9A643C49166AD7A4C0A2CED6DCB31D8AA985109532C54"
+                  },
+                  {
+                      "path":  "bz5g.grp",
+                      "bytes":  155656,
+                      "sha256":  "DA087D85EA6BCE30FCB32FF75F5CCF593894A8C1029AEBAB1232584F60254026"
+                  },
+                  {
+                      "path":  "bz6g.grp",
+                      "bytes":  155656,
+                      "sha256":  "B3A240BC0E6D87B9D451B0AF020464DC2ED696F8BF94B0C68A8FF28EA1108BD1"
+                  },
+                  {
+                      "path":  "bz7g.grp",
+                      "bytes":  155656,
+                      "sha256":  "9C40CF3303F3C4CBA402E64C1C3882DE8FB50E04C89CB0092C6C47299B95D18C"
+                  },
+                  {
+                      "path":  "bz8k.grp",
+                      "bytes":  155656,
+                      "sha256":  "9DE0F232B5D1A8DE13DF6DF710E4F75FF06E3F63863D43069AF79E6FC68EAB9D"
+                  },
+                  {
+                      "path":  "bz9k.grp",
+                      "bytes":  155656,
+                      "sha256":  "0EF84C1E2E43992F8964127349E70FA82CFAA540B94C07AE5D3F27E4E0A1CCA6"
+                  },
+                  {
+                      "path":  "zone1.grp",
+                      "bytes":  963080,
+                      "sha256":  "0297BCE765DA6276F29634AFA2C8B7CBFDE5F812490B66AA2AC9E911AA496069"
+                  },
+                  {
+                      "path":  "zone1__cz1g.grp",
+                      "bytes":  963080,
+                      "sha256":  "28159B67363E67B5ACE9B5018D39C5B8D5D98134573C339F0C92BCBA90088055"
+                  },
+                  {
+                      "path":  "zone10.grp",
+                      "bytes":  466952,
+                      "sha256":  "F826A77B57A9B0025CF41A1597E3868D6390BA71EB7417A5E0479B542DE568C7"
+                  },
+                  {
+                      "path":  "zone11.grp",
+                      "bytes":  1867784,
+                      "sha256":  "DF7A0C5152654DC9565190BE1A6632A7EC80143DEDE9F8DA637908547A0A7B95"
+                  },
+                  {
+                      "path":  "zone11__bz12k.grp",
+                      "bytes":  1867784,
+                      "sha256":  "A6F6E872FC624E475FB8E985B1FDFA8004E5314338AF0FA124F73ADAFF7B9DAE"
+                  },
+                  {
+                      "path":  "zone11__cz11k.grp",
+                      "bytes":  1867784,
+                      "sha256":  "DA7A23D0F9F5463B79F73BC01F282F4AFB48DDEDED4D0E6E6CEDFF3409BC074A"
+                  },
+                  {
+                      "path":  "zone12.grp",
+                      "bytes":  1556488,
+                      "sha256":  "F3BD56377F663E94AF6C988C46F7546D61BC569F864464A4765F8ED78CAAF6B8"
+                  },
+                  {
+                      "path":  "zone12dun2.grp",
+                      "bytes":  155656,
+                      "sha256":  "3BACC486BA0A2A78005E3694432C6BB184CE38890CBF8FF4453925D68DF39DCD"
+                  },
+                  {
+                      "path":  "zone13.grp",
+                      "bytes":  1634312,
+                      "sha256":  "4FD694859AF66033B00B3FD0B9FCF8C48BE4E262A8EFB20FFE8929F0AFECB857"
+                  },
+                  {
+                      "path":  "zone14.grp",
+                      "bytes":  466952,
+                      "sha256":  "CEE0681B3CCB3FB3EA685080D59F165FAE8FAE1D5B79EF966EBD9118E25E152B"
+                  },
+                  {
+                      "path":  "zone15.grp",
+                      "bytes":  1167368,
+                      "sha256":  "D5754CC84A128A42A594E648B412E18BAD908205ABF4E994471429EF39C6F345"
+                  },
+                  {
+                      "path":  "zone16.grp",
+                      "bytes":  486408,
+                      "sha256":  "868B145411C3F57092DE352F560FDE4AE212CF070F2E73EB5BD9F6A288BF3DFC"
+                  },
+                  {
+                      "path":  "zone17.grp",
+                      "bytes":  1400840,
+                      "sha256":  "6E2BE97413955949FC64225AC8A03B6B1265CE302EB1C5543AB7B411BBF47DC4"
+                  },
+                  {
+                      "path":  "zone18.grp",
+                      "bytes":  2490376,
+                      "sha256":  "45C5032D2601C376A014544D5FA3CB9127CAD253108B6DDBBBF196CBBEFB013D"
+                  },
+                  {
+                      "path":  "zone18__cz18a.grp",
+                      "bytes":  2490376,
+                      "sha256":  "B0F7DBD5A7BB587A8137A2FB962866E3058BE76DBB91189EE14D47B2C1CECA02"
+                  },
+                  {
+                      "path":  "zone18__cz18b.grp",
+                      "bytes":  2490376,
+                      "sha256":  "3B82B00068493D0935D53A27ECDF8472FF54B7E67819954F886E04992E704224"
+                  },
+                  {
+                      "path":  "zone18dun1.grp",
+                      "bytes":  233480,
+                      "sha256":  "ACE842E0627F46B10717FF4308F0D35E6C9F2A26D210E9AF0AEFE043AD6CA3AE"
+                  },
+                  {
+                      "path":  "zone19.grp",
+                      "bytes":  2490376,
+                      "sha256":  "975325045E189D9E2FE739535A8D3696169088A6F12F405FE52E103765465CEF"
+                  },
+                  {
+                      "path":  "zone19__cz19h.grp",
+                      "bytes":  2490376,
+                      "sha256":  "9F1240A8B9814609929238B43F4CF0E5EA484C245B78769D3E1AB981F84F1E40"
+                  },
+                  {
+                      "path":  "zone2.grp",
+                      "bytes":  291848,
+                      "sha256":  "670C7BE17D13E6699CFF5270F2A356A229D51A940335F0A6B30B93AE03DA2267"
+                  },
+                  {
+                      "path":  "zone20.grp",
+                      "bytes":  243208,
+                      "sha256":  "372195888889A26304CF020BABC5F6A24501384511A940DB839F95785C7A30CA"
+                  },
+                  {
+                      "path":  "zone3obr.grp",
+                      "bytes":  1070088,
+                      "sha256":  "71356BC9B6C803A7CB252ABA9044A5EDC49D26571A2C3B63B726E2A59BBE26FF"
+                  },
+                  {
+                      "path":  "zone4.grp",
+                      "bytes":  1556488,
+                      "sha256":  "5B276CC837C0DF7054AD932C013C2EF4AE94C13FF60993EA49476D6FF60DB247"
+                  },
+                  {
+                      "path":  "zone5_1.grp",
+                      "bytes":  389128,
+                      "sha256":  "A14A9106D8DD51F710B3E472F27E8EB269AEE7F6DB58F1BDFE839DD596CCF8C8"
+                  },
+                  {
+                      "path":  "zone6.grp",
+                      "bytes":  933896,
+                      "sha256":  "EB07ADAF0EC0F51833C1FB575017994856043E6049908444F18CB60762D01C48"
+                  },
+                  {
+                      "path":  "zone7.grp",
+                      "bytes":  1556488,
+                      "sha256":  "FD88098C2228313CAA9B856348659C6D99FB0A30C857F8DE78DF06037A8AECE1"
+                  },
+                  {
+                      "path":  "zone8.grp",
+                      "bytes":  1177096,
+                      "sha256":  "19C5AFDEC63D2DC2193780B5D864BB4ACA1E11C5B350D46F1B16B7B45BB69FF0"
+                  },
+                  {
+                      "path":  "zone9.grp",
+                      "bytes":  1361928,
+                      "sha256":  "02ECA7293D40834E0609084D84CE213D942DE9F329C8FF96FEFFB12133504C29"
+                  }
+              ]
+}

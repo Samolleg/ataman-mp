@@ -49,14 +49,24 @@ so NID 800004's missing `hr` predates Endurance.
 Unknown tokens are not automatically errors. They may be valid profile or mod
 extensions and must remain inspectable and lossless.
 
+Profile/family-aware diagnostics now inspect that exact serialized array without
+normalizing it. Empty/missing masks are Critical only after the Import/database
+appearance path resolves to a standard wearable assembly; shipped creature and
+legacy skeleton empty masks remain accepted. Helmeted wearables missing both
+`hr` and `hr.NN`, missing core anatomy, distinct dotted alternatives, and
+duplicates receive non-blocking findings. The complete evidence and severity
+matrix is in
+[`CHARACTER_BODYPART_VALIDATION.md`](CHARACTER_BODYPART_VALIDATION.md).
+
 ## Automated evidence
 
 - `EIMapperEndurance.exe --ui-widget-check`: passes exact-array, unknown-token,
   state/source-filter, column-sorting, canonical-hair-option, filter-only,
   checkbox-only display, interactive-column, exact property-paste,
   order-sensitive equality, duplicate-token, and delta-preservation checks.
-- `mob_family_validation_tests`: passes the renamed-primary overlay regression
-  for installed `zone3obr.mob` plus loaded `zone3obrtest.mob`.
+- `mob_family_validation_tests`: passes the exact NID 3470/NID 800004 zone3
+  control plus Import/database ownership, wearable/creature classification,
+  severity, overlap, duplicate, unknown-token, and byte-preservation cases.
 - The supplied `zone3obrtest2.mob` passes `--validate` and
   `--roundtrip-check`; neither command writes the input.
 - The supplied `zone3obrtest1.mob` is byte-identical to original

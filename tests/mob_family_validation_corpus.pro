@@ -5,7 +5,7 @@ CONFIG -= app_bundle
 TEMPLATE = app
 TARGET = mob_family_validation_corpus
 
-INCLUDEPATH += ../source/documents
+INCLUDEPATH += ../source/documents ../source/resources
 SOURCES += mob_family_validation_corpus.cpp \
            ../source/documents/mob_family_validation.cpp \
            ../source/documents/endurance_document.cpp \

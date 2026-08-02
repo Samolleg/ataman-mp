@@ -227,6 +227,8 @@ QByteArray payload(const SMobSection& section)
     return section.rawBytes.mid(8);
 }
 
+bool decodeStringArray(const SMobSection& section, QStringList* values);
+
 SMobObjectSnapshot snapshotObject(const SMobSection& section)
 {
     SMobObjectSnapshot object;
@@ -269,6 +271,31 @@ SMobObjectSnapshot snapshotObject(const SMobSection& section)
     }
     if(const SMobSection* name = findSection(section, 0xB004))
         object.name = decodeCp1251(payload(*name));
+    if(const SMobSection* model = findSection(section, 0xB006))
+        object.model = decodeCp1251(payload(*model));
+    if(const SMobSection* bodyParts = findSection(section, 0xB00D))
+    {
+        object.bodyPartsSectionPath = bodyParts->path;
+        object.hasBodyParts = decodeStringArray(*bodyParts, &object.bodyParts);
+    }
+    const SMobSection* unit = findSection(section, 0xBBBB0000);
+    object.unit = unit != nullptr;
+    if(unit)
+    {
+        if(const SMobSection* importMode = findSection(*unit, 0xBBBB000A))
+        {
+            const QByteArray data = payload(*importMode);
+            if(data.size() == 1)
+            {
+                object.hasImportMode = true;
+                object.importMode = data.at(0) != 0;
+            }
+        }
+        if(const SMobSection* armor = findSection(*unit, 0xBBBB0009))
+            decodeStringArray(*armor, &object.armor);
+        if(const SMobSection* weapons = findSection(*unit, 0xBBBB0008))
+            decodeStringArray(*weapons, &object.weapons);
+    }
     const SMobSection* prototype = findSection(section, 0xBBBB0002);
     if(!prototype)
         prototype = findSection(section, 0xB006);
@@ -403,6 +430,18 @@ QString equipmentSlotForPart(const QString& part)
     return equipmentRoots.contains(stem) ? root : QString();
 }
 
+QString serializedUnitContext(const SMobObjectSnapshot& object)
+{
+    return QString("NID %1, name \"%2\", prototype \"%3\", model \"%4\", Import=%5, serialized parts [%6]")
+        .arg(object.hasNid ? QString::number(object.nid) : QString("missing"),
+             object.name.isEmpty() ? QString("-") : object.name,
+             object.prototype.isEmpty() ? QString("-") : object.prototype,
+             object.model.isEmpty() ? QString("-") : object.model,
+             object.hasImportMode ? (object.importMode ? QString("true") : QString("false"))
+                                  : QString("missing"),
+             object.hasBodyParts ? object.bodyParts.join(", ") : QString("record missing"));
+}
+
 void addMobSemanticWarnings(const QVector<SMobSection>& sections,
                             const QString& sourcePath, CValidationReport* report)
 {
@@ -470,22 +509,34 @@ void addMobSemanticWarnings(const QVector<SMobSection>& sections,
         QStringList enabledParts;
         if(!decodeStringArray(*bodyParts, &enabledParts))
             continue;
+        const SMobObjectSnapshot snapshot = snapshotObject(*object);
+        QMap<QString, int> tokenCounts;
         QMap<QString, QStringList> partsBySlot;
         for(const QString& part : enabledParts)
         {
+            const QString foldedPart = part.toCaseFolded();
+            tokenCounts[foldedPart] += 1;
             const QString slot = equipmentSlotForPart(part);
-            if(!slot.isEmpty())
+            if(!slot.isEmpty() && !partsBySlot[slot].contains(part, Qt::CaseInsensitive))
                 partsBySlot[slot].append(part);
+        }
+        for(auto it = tokenCounts.constBegin(); it != tokenCounts.constEnd(); ++it)
+        {
+            if(it.value() < 2)
+                continue;
+            report->add("mob.semantic.duplicate_bodypart_token", EValidationSeverity::Info,
+                        QString("%1 repeats serialized model-part token '%2' %3 times; the exact array is preserved")
+                            .arg(serializedUnitContext(snapshot), it.key())
+                            .arg(it.value()),
+                        sourcePath + ":" + bodyParts->path);
         }
         for(auto it = partsBySlot.constBegin(); it != partsBySlot.constEnd(); ++it)
         {
             if(it.value().size() < 2)
                 continue;
-            const SMobObjectSnapshot snapshot = snapshotObject(*object);
             report->add("mob.semantic.overlapping_unit_parts", EValidationSeverity::Warning,
-                        QString("Unit %1 enables multiple model parts in logical slot '%2': %3")
-                            .arg(snapshot.hasNid ? QString::number(snapshot.nid) : snapshot.name,
-                                 it.key(), it.value().join(", ")),
+                        QString("%1 enables mutually overlapping alternatives in logical slot '%2': %3")
+                            .arg(serializedUnitContext(snapshot), it.key(), it.value().join(", ")),
                         sourcePath + ":" + bodyParts->path);
         }
     }
@@ -1200,6 +1251,20 @@ QJsonObject SMobObjectSnapshot::toJson() const
         result.insert("name", name);
     if(!prototype.isEmpty())
         result.insert("prototype", prototype);
+    if(!model.isEmpty())
+        result.insert("model", model);
+    result.insert("unit", unit);
+    if(hasImportMode)
+        result.insert("import", importMode);
+    result.insert("hasBodyParts", hasBodyParts);
+    if(!bodyPartsSectionPath.isEmpty())
+        result.insert("bodyPartsPath", bodyPartsSectionPath);
+    if(hasBodyParts)
+    {
+        result.insert("bodyParts", QJsonArray::fromStringList(bodyParts));
+    }
+    result.insert("armor", QJsonArray::fromStringList(armor));
+    result.insert("weapons", QJsonArray::fromStringList(weapons));
     if(hasPosition)
     {
         QJsonArray position;

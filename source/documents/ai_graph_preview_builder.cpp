@@ -317,8 +317,8 @@ int quantizedHeight(float worldHeight, float maximumTerrainHeight,
     if(!qIsFinite(worldHeight) || !qIsFinite(maximumTerrainHeight)
        || maximumTerrainHeight <= 0.0f)
         return 0;
-    const float scaled = worldHeight * float(MaximumAiHeight)
-        / maximumTerrainHeight;
+    const float scaled = worldHeight
+        * (float(MaximumAiHeight) / maximumTerrainHeight);
     return qBound(0, int(std::nearbyint(double(scaled))), maximumValue);
 }
 

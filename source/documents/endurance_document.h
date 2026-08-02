@@ -105,6 +105,15 @@ struct SMobObjectSnapshot
     bool useInScript = false;
     QString name;
     QString prototype;
+    QString model;
+    bool unit = false;
+    bool hasImportMode = false;
+    bool importMode = false;
+    bool hasBodyParts = false;
+    QString bodyPartsSectionPath;
+    QStringList bodyParts;
+    QStringList armor;
+    QStringList weapons;
     bool hasPosition = false;
     float positionX = 0.0f;
     float positionY = 0.0f;

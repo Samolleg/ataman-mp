@@ -308,6 +308,7 @@ public:
 
     void reset();
     void setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp);
+    void setBehaviorCollection(CUnit* unit, int logicSlot);
     void setReadOnly(bool readOnly);
 
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -329,6 +330,11 @@ private:
 signals:
     void onUpdateProperty(const QSharedPointer<IPropertyBase>); //retranslate value changing from ui to view class
     void onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>& properties);
+    void onBehaviorPointSelected(CNode* point);
+    void onBehaviorPatrolMove(CUnit* unit, int logicSlot, int from, int to);
+    void onBehaviorLookMove(CUnit* unit, int logicSlot, int patrol, int from, int to);
+    void onBehaviorPatrolAdd(CUnit* unit);
+    void onBehaviorLookAdd(CPatrolPoint* patrol);
 
 public slots:
     void onParamChange(const QSharedPointer<IPropertyBase>& pProp); //get value for translating it to view class

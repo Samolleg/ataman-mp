@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "profile_database.h"
 #include "script_reference_analyzer.h"
 
 namespace {
@@ -346,6 +347,276 @@ QString ownerText(const SMobNidOwner& owner)
              owner.objectName.isEmpty() ? owner.sectionPath : owner.objectName,
              owner.hasObjectType ? QString::number(owner.objectType) : QString("unknown"),
              owner.prototype.isEmpty() ? QString("-") : owner.prototype);
+}
+
+bool databaseEquippedHumanoid(const QString& model)
+{
+    static const QSet<QString> models = {
+        "unhuma", "unhufe", "unorma", "unorfe", "unhusk", "unhuzm", "unhuzf",
+        "unmosk", "unmoud", "unmozo", "unmozo0"
+    };
+    return models.contains(model.trimmed().toLower());
+}
+
+bool standardWearableAssembly(const QString& model)
+{
+    // These are the Base/JMV assemblies whose shipped masks consistently use
+    // the standard humanoid anatomy roots. Integral creature and legacy
+    // skeleton assemblies deliberately remain outside this rule.
+    static const QSet<QString> models = {
+        "unhuma", "unhufe", "unorma", "unorfe", "unhusk", "unhuzm", "unhuzf"
+    };
+    return models.contains(model.trimmed().toLower());
+}
+
+QString wearableFamily(const QString& model)
+{
+    const QString folded = model.trimmed().toLower();
+    if(folded == "unhuma" || folded == "unhufe") return "human";
+    if(folded == "unorma" || folded == "unorfe") return "orc";
+    if(folded == "unhusk") return "wearable skeleton";
+    if(folded == "unhuzm" || folded == "unhuzf") return "wearable undead";
+    return standardWearableAssembly(folded) ? "standard wearable" : "non-humanoid/integral";
+}
+
+QString bodyPartSlot(const QString& part)
+{
+    const int dot = part.indexOf('.');
+    if(dot <= 0)
+        return QString();
+    const QString root = part.left(dot).toLower();
+    QString stem = root;
+    while(!stem.isEmpty() && stem.back().isDigit())
+        stem.chop(1);
+    static const QSet<QString> equipmentRoots = {"hd", "hp", "bd", "rh", "lh", "lg"};
+    return equipmentRoots.contains(stem) ? root : QString();
+}
+
+QString itemPrototype(const QString& reference)
+{
+    return reference.section('[', 0, 0).section('.', 0, 0).trimmed().toLower();
+}
+
+struct SBodyPartContext
+{
+    QString model;
+    QString family;
+    QStringList armor;
+    QString equipmentSource;
+    bool wearable = false;
+};
+
+SBodyPartContext bodyPartContext(
+    const SMobObjectSnapshot& object,
+    const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database,
+    const QString& profileId)
+{
+    SBodyPartContext context;
+    context.model = object.model.trimmed();
+    context.armor = object.armor;
+    context.equipmentSource = object.importMode
+        ? "embedded MOB equipment" : "serialized fallback equipment";
+
+    if(!object.importMode && !database.isNull())
+    {
+        const auto monster = database->monsters.constFind(object.prototype.trimmed().toLower());
+        if(monster != database->monsters.constEnd())
+        {
+            context.armor = monster->wears;
+            context.equipmentSource = "active profile database equipment";
+            const auto race = database->raceModels.constFind(monster->baseRace.trimmed().toLower());
+            if(race != database->raceModels.constEnd())
+            {
+                const QString databaseModel = race->model.trimmed();
+                // Match the appearance provider exactly. A creature DB row
+                // keeps the embedded MOB assembly. A DB-equipped actor uses
+                // RaceModels, except that JMV may retain a compatible embedded
+                // humanoid assembly for a legacy equipped-undead mask.
+                if(databaseEquippedHumanoid(databaseModel))
+                {
+                    const bool jmv = profileId.contains("jamais", Qt::CaseInsensitive)
+                        || profileId.compare("jmv", Qt::CaseInsensitive) == 0;
+                    if(!(jmv && databaseEquippedHumanoid(context.model)
+                         && !standardWearableAssembly(databaseModel)))
+                        context.model = databaseModel;
+                }
+            }
+        }
+    }
+    context.wearable = standardWearableAssembly(context.model);
+    context.family = wearableFamily(context.model);
+    return context;
+}
+
+bool hasHelmet(const QStringList& armor,
+               const QSharedPointer<const ei::SProfileDatabaseSnapshot>& database)
+{
+    for(const QString& reference : armor)
+    {
+        if(!database.isNull())
+        {
+            const auto direct = database->items.constFind(itemPrototype(reference));
+            if(direct != database->items.constEnd()
+               && direct->category.compare("armor", Qt::CaseInsensitive) == 0
+               && direct->type.compare("helm", Qt::CaseInsensitive) == 0)
+                return true;
+
+            // Some shipped JMV fields concatenate otherwise valid armor
+            // references. Recognize a known helm prototype at a dot boundary
+            // without rewriting or splitting the serialized value.
+            const QString folded = reference.toCaseFolded();
+            for(auto item = database->items.constBegin(); item != database->items.constEnd(); ++item)
+            {
+                if(item->category.compare("armor", Qt::CaseInsensitive) != 0
+                   || item->type.compare("helm", Qt::CaseInsensitive) != 0)
+                    continue;
+                const QString marker = item.key().toCaseFolded() + ".";
+                if(folded.startsWith(marker) || folded.contains("." + marker))
+                    return true;
+            }
+        }
+        if(reference.contains("helm", Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
+
+QString serializedPartsText(const SMobObjectSnapshot& object)
+{
+    if(object.bodyPartsSectionPath.isEmpty())
+        return "record missing";
+    if(!object.hasBodyParts)
+        return "record malformed";
+    return object.bodyParts.isEmpty() ? "empty (all assembly members enabled)"
+                                      : object.bodyParts.join(", ");
+}
+
+QString unitContext(const SMobFamilyMember& member, const SMobObjectSnapshot& object,
+                    const SBodyPartContext& context)
+{
+    return QString("%1 NID %2, name \"%3\", prototype \"%4\", model \"%5\", family %6, Import=%7, serialized parts [%8]")
+        .arg(member.fileName,
+             object.hasNid ? QString::number(object.nid) : QString("missing"),
+             object.name.isEmpty() ? QString("-") : object.name,
+             object.prototype.isEmpty() ? QString("-") : object.prototype,
+             context.model.isEmpty() ? QString("-") : context.model,
+             context.family,
+             object.hasImportMode ? (object.importMode ? QString("true") : QString("false"))
+                                  : QString("missing"),
+             serializedPartsText(object));
+}
+
+void appendBodyPartFinding(CMobFamilyValidationReport* report,
+                           const SMobFamilyMember& member,
+                           const SMobObjectSnapshot& object,
+                           EMobFamilyFindingSeverity severity,
+                           const QString& code, const QString& message)
+{
+    SMobFamilyFinding finding;
+    finding.severity = severity;
+    finding.code = code;
+    finding.category = "Character model parts";
+    finding.message = message;
+    const QString sectionPath = object.bodyPartsSectionPath.isEmpty()
+        ? object.sectionPath : object.bodyPartsSectionPath;
+    finding.locations << member.path + ":" + sectionPath;
+    finding.hasNid = object.hasNid;
+    finding.nid = object.nid;
+    report->findings.append(finding);
+}
+
+void appendBodyPartFindings(const SMobFamilyValidationRequest& request,
+                            const SMobFamilyMember& member,
+                            CMobFamilyValidationReport* report)
+{
+    static const QStringList coreParts = {
+        "bd", "hd", "hp", "lh1", "lh2", "lh3", "ll1", "ll2", "ll3",
+        "rh1", "rh2", "rh3", "rl1", "rl2", "rl3"
+    };
+    for(const SMobObjectSnapshot& object : member.objects)
+    {
+        if(!object.unit)
+            continue;
+        const SBodyPartContext context = bodyPartContext(
+            object, request.database, request.profileId);
+        const QString prefix = unitContext(member, object, context);
+
+        QMap<QString, int> counts;
+        QMap<QString, QStringList> alternativesBySlot;
+        for(const QString& part : object.bodyParts)
+        {
+            const QString folded = part.toCaseFolded();
+            ++counts[folded];
+            const QString slot = bodyPartSlot(part);
+            if(!slot.isEmpty() && !alternativesBySlot[slot].contains(part, Qt::CaseInsensitive))
+                alternativesBySlot[slot].append(part);
+        }
+        for(auto count = counts.constBegin(); count != counts.constEnd(); ++count)
+        {
+            if(count.value() < 2)
+                continue;
+            appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Info,
+                "mob.semantic.duplicate_bodypart_token",
+                QString("%1 repeats token '%2' %3 times. The exact array remains visible and preserved; compare with an authored peer before changing it.")
+                    .arg(prefix, count.key()).arg(count.value()));
+        }
+        for(auto slot = alternativesBySlot.constBegin(); slot != alternativesBySlot.constEnd(); ++slot)
+        {
+            if(slot.value().size() < 2)
+                continue;
+            appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
+                "mob.semantic.overlapping_unit_parts",
+                QString("%1 enables mutually overlapping alternatives for logical slot '%2': %3. Keep the intended alternative only if a matched working instance proves it; no data was changed.")
+                    .arg(prefix, slot.key(), slot.value().join(", ")));
+        }
+
+        // Empty masks are the shipped norm for integral creatures and legacy
+        // skeleton assemblies. Apply anatomy requirements only after the
+        // Import/DB-aware appearance model resolves to a standard wearable.
+        if(!context.wearable)
+            continue;
+        if(object.bodyPartsSectionPath.isEmpty())
+        {
+            appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Critical,
+                "mob.semantic.wearable_bodyparts_missing",
+                prefix + " has no OBJBODYPARTS record. For a standard wearable assembly this selects every assembly member, including optional alternatives; use a matched working mask as a repair suggestion only.");
+            continue;
+        }
+        if(!object.hasBodyParts)
+        {
+            appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Critical,
+                "mob.semantic.wearable_bodyparts_malformed",
+                prefix + " has an unreadable OBJBODYPARTS payload. It cannot be classified safely and was not changed.");
+            continue;
+        }
+        if(object.bodyParts.isEmpty())
+        {
+            appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Critical,
+                "mob.semantic.wearable_all_parts_enabled",
+                prefix + " has an explicit empty mask, which enables every assembly member including optional alternatives on a standard wearable. Replace it only from a matched working instance; no data was changed.");
+            continue;
+        }
+
+        QStringList missingCore;
+        for(const QString& required : coreParts)
+            if(!counts.contains(required))
+                missingCore.append(required);
+        if(!missingCore.isEmpty())
+            appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
+                "mob.semantic.missing_core_bodyparts",
+                QString("%1 omits standard anatomy root(s): %2. This can expose gaps or clipping; compare with a same-family working instance before proposing a repair.")
+                    .arg(prefix, missingCore.join(", ")));
+
+        bool hasHairSelection = counts.contains("hr");
+        if(!hasHairSelection)
+            for(auto count = counts.constBegin(); count != counts.constEnd(); ++count)
+                hasHairSelection = hasHairSelection || count.key().startsWith("hr.");
+        if(!hasHairSelection && hasHelmet(context.armor, request.database))
+            appendBodyPartFinding(report, member, object, EMobFamilyFindingSeverity::Warning,
+                "mob.semantic.missing_hair_selection",
+                QString("%1 equips a helmet through %2 but selects neither 'hr' nor an authored 'hr.NN' member. The matched zone3 control shows this omission can clip in-game even when Endurance's final-appearance preview masks it. Suggested review: compare with a same-prototype working unit and add only its proven hair selector; no data was changed.")
+                    .arg(prefix, context.equipmentSource));
+    }
 }
 }
 
@@ -800,6 +1071,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     {
         if(member.missing || !member.error.isEmpty())
             continue;
+        appendBodyPartFindings(request, member, &report);
         if(member.activeRuntimeFamily && member.magicTrapCount > 0
            && !member.hasDiplomacyTable)
         {

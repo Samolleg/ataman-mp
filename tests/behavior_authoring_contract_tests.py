@@ -30,6 +30,8 @@ def main() -> int:
     tree = source("source/layout_components/tree_view.cpp")
     undo_h = source("source/core/undo.h")
     undo = source("source/core/undo.cpp")
+    collection_h = source("source/ui/behavior_collection_widget.h")
+    collection = source("source/ui/behavior_collection_widget.cpp")
 
     require(settings, '{"shortcutHistory", "Ctrl+H"}',
             "Undo History default shortcut")
@@ -78,7 +80,14 @@ def main() -> int:
             "selection hierarchy that preserves the selected leaf when narrow")
     require(view, "appendBehaviorTreeChildren",
             "Behavior-mode outliner hierarchy builder")
-    require(view, 'tr("Logic %1%2")', "five logic-slot hierarchy labels")
+    require(view, 'tr("Logic %1%2 — %3 — %4")',
+            "Logic-slot hierarchy labels with behavior and status")
+    require(view, "logicIndex == 0 || logic->isUse()",
+            "Logic 0 effective enabled-state display")
+    require(unit_h, "EBehaviourType behaviorType() const",
+            "read-only behavior label source")
+    require(undo, "refreshLogicSlotOutliner",
+            "immediate Logic-row refresh after edit and Undo/Redo")
     require(view, 'tr("Activation areas (%1)")', "trap activation hierarchy")
     require(view, 'tr("Cast targets (%1)")', "trap cast-target hierarchy")
     require(unit_h, "const QVector<CPatrolPoint*>& patrolPoints() const",
@@ -185,6 +194,31 @@ def main() -> int:
             "Logic-slot paste undo label")
     require(unit, "if(pp->isMarkDeleted())",
             "deleted patrol points excluded from slot clipboard data")
+
+    require(collection_h, "class CBehaviorCollectionWidget",
+            "embedded patrol/look collection editor")
+    require(collection_h, "void selectPoint(CNode* point);",
+            "explicit aim action instead of implicit object selection")
+    require(collection_h, "void movePatrolPoint(int from, int to);",
+            "patrol reorder request")
+    require(collection_h, "void moveLookPoint(int patrol, int from, int to);",
+            "look-point reorder request")
+    require(collection, 'tr("Patrol route — Logic %1',
+            "active-Logic collection heading")
+    require(collection, 'tr("Select in outliner and viewport")',
+            "aim-button tooltip")
+    require(unit_h, "bool movePatrolPoint(int from, int to);",
+            "ordered patrol mutation API")
+    require(unit_h, "bool moveLookPoint(int from, int to);",
+            "ordered look-point mutation API")
+    require(undo_h, "class CMoveBehaviorPointCommand",
+            "atomic point reorder undo command")
+    require(undo, 'setText(m_lookPoint ? "Reorder look point" : "Reorder patrol point")',
+            "specific point reorder undo labels")
+    require(view, "setBehaviorCollection(unit, m_logicSlotIndex)",
+            "single-unit active-Logic collection integration")
+    require(view, "selectNode(point, false)",
+            "aim action selecting the actual Behavior point")
 
     print("behavior authoring contract: PASS")
     return 0

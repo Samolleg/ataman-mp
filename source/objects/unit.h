@@ -72,6 +72,7 @@ public:
     void createViewByIndex(int index);
     void undo_createViewByIndex(int index);
     CLookPoint* viewByIndex(int index);
+    bool moveLookPoint(int from, int to);
 
 signals:
     void patrolChanges();
@@ -112,7 +113,8 @@ public:
     void deSerializeJson(QJsonObject data);
     void replaceFromJson(const QJsonObject& data);
     uint serialize(util::CMobParser& parser);
-    bool isUse() {return m_use;}
+    bool isUse() const {return m_use;}
+    EBehaviourType behaviorType() const {return m_behaviour;}
     void updatePos(QVector3D& offset);
     void appendMovementState(QVector<QVector3D>& state) const;
     bool restoreMovementState(const QVector<QVector3D>& state, int& index);
@@ -138,6 +140,7 @@ public:
     bool owns(const CLookPoint* point, int* patrolIndex = nullptr,
               int* lookIndex = nullptr) const;
     const QVector<CPatrolPoint*>& patrolPoints() const { return m_aPatrolPt; }
+    bool movePatrolPoint(int from, int to);
 
 
 public slots:

@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "mob_family_validation.h"
+#include "profile_database.h"
 
 namespace {
 QByteArray section(quint32 type, const QByteArray& payload = QByteArray())
@@ -25,6 +26,83 @@ QByteArray u32(quint32 value)
     stream.setByteOrder(QDataStream::LittleEndian);
     stream << value;
     return bytes;
+}
+
+QByteArray byteValue(quint8 value)
+{
+    return QByteArray(1, char(value));
+}
+
+QByteArray stringArrayPayload(const QStringList& values)
+{
+    QByteArray bytes = u32(quint32(values.size()));
+    for(const QString& value : values)
+        bytes += section(0, value.toLatin1());
+    return bytes;
+}
+
+QStringList wearableParts(bool includeHair = true)
+{
+    QStringList parts = {
+        "bd", "hd", "hp", "lh1", "lh2", "lh3", "ll1", "ll2", "ll3",
+        "rh1", "rh2", "rh3", "rl1", "rl2", "rl3"
+    };
+    if(includeHair)
+        parts.insert(3, "hr");
+    return parts;
+}
+
+QByteArray unitObject(quint32 nid, const QByteArray& name,
+                      const QByteArray& prototype, const QByteArray& model,
+                      bool importMode, const QStringList& bodyParts,
+                      const QStringList& armor = QStringList(),
+                      const QStringList& weapons = QStringList(),
+                      bool includeBodyPartsRecord = true)
+{
+    QByteArray object = section(0xB002, u32(nid))
+        + section(0xB003, u32(50))
+        + section(0xB004, name)
+        + section(0xB006, model);
+    if(includeBodyPartsRecord)
+        object += section(0xB00D, stringArrayPayload(bodyParts));
+    object += section(0xBBBB0000,
+        section(0xBBBB0002, prototype)
+        + section(0xBBBB0008, stringArrayPayload(weapons))
+        + section(0xBBBB0009, stringArrayPayload(armor))
+        + section(0xBBBB000A, byteValue(importMode ? 1 : 0)));
+    return section(0xB001, object);
+}
+
+QByteArray mobWithUnits(const QList<QByteArray>& units)
+{
+    QByteArray objects;
+    for(const QByteArray& unit : units)
+        objects += unit;
+    return section(0xA000, section(0xC000) + section(0xB000, objects));
+}
+
+QSharedPointer<const ei::SProfileDatabaseSnapshot> wearableDatabase(
+    const QString& prototype, const QString& model, const QStringList& wears)
+{
+    QSharedPointer<ei::SProfileDatabaseSnapshot> database(new ei::SProfileDatabaseSnapshot);
+    database->profileId = "test";
+    database->providerId = "test.database";
+    database->cacheKey = "bodypart-test";
+    ei::SMonsterDatabaseRecord monster;
+    monster.name = prototype;
+    monster.baseRace = "Test race";
+    monster.wears = wears;
+    database->monsters.insert(prototype.toLower(), monster);
+    ei::SRaceModelDatabaseRecord race;
+    race.name = monster.baseRace;
+    race.model = model;
+    database->raceModels.insert(monster.baseRace.toLower(), race);
+    ei::SItemDatabaseRecord helmet;
+    helmet.name = "helmet";
+    helmet.category = "armor";
+    helmet.type = "helm";
+    database->items.insert(helmet.name.toLower(), helmet);
+    return database;
 }
 
 QByteArray mobWithObject(quint32 nid)
@@ -98,6 +176,11 @@ private slots:
     void multipleLoadedPrimaryMobsAreReported();
     void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
     void magicTrapRequiresContainingMobDiplomacy();
+    void zone3HelmetMissingHairSelectionIsReported();
+    void wearableAllPartsMasksAreCriticalButCreatureMasksAreIgnored();
+    void coreOverlapAndDuplicateFindingsPreserveExactParts();
+    void importEquipmentIsAuthoritativeOnlyForImportedUnits();
+    void databaseCreatureResolutionSuppressesWearableMaskRules();
 };
 
 void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()
@@ -332,6 +415,198 @@ void MobFamilyValidationTests::multipleLoadedPrimaryMobsAreReported()
     QCOMPARE(finding->locations.size(), 2);
     QVERIFY(finding->locations.contains(first));
     QVERIFY(finding->locations.contains(second));
+}
+
+void MobFamilyValidationTests::zone3HelmetMissingHairSelectionIsReported()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray goodBytes = mobWithUnits({unitObject(
+        3470, "Boss", "Human Gipath NPC Boss F5", "unhuma", false,
+        wearableParts(true), {"gipat brigand helm.tiger hide"})});
+    const QByteArray badBytes = mobWithUnits({unitObject(
+        800004, "Boss-1000000004", "Human Gipath NPC Boss F5", "unhuma", false,
+        wearableParts(false), {"gipat brigand helm.tiger hide"})});
+    const QString good = writeMob(directory.path(), "zone3obr.mob", goodBytes);
+    const QString bad = writeMob(directory.path(), "Autozone3obradd.mob", badBytes);
+    QVERIFY(!good.isEmpty() && !bad.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "zone3obr-hair-control";
+    request.profileId = "jamais-vu";
+    request.seedMobPaths << good << bad;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase("Human Gipath NPC Boss F5", "unhuma", {"helmet.iron"});
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QVector<SMobFamilyFinding> matches;
+    for(const SMobFamilyFinding& finding : report.findings)
+        if(finding.code == "mob.semantic.missing_hair_selection")
+            matches.append(finding);
+    QCOMPARE(matches.size(), 1);
+    QCOMPARE(matches.first().severity, EMobFamilyFindingSeverity::Warning);
+    QVERIFY(matches.first().hasNid);
+    QCOMPARE(matches.first().nid, quint32(800004));
+    QVERIFY(matches.first().message.contains("Boss-1000000004"));
+    QVERIFY(matches.first().message.contains("Human Gipath NPC Boss F5"));
+    QVERIFY(matches.first().message.contains("Import=false"));
+    QVERIFY(matches.first().message.contains("serialized parts [bd, hd, hp"));
+    QVERIFY(std::any_of(matches.first().locations.cbegin(), matches.first().locations.cend(),
+        [&bad](const QString& location) { return location.startsWith(bad + ":"); }));
+
+    QFile goodFile(good), badFile(bad);
+    QVERIFY(goodFile.open(QIODevice::ReadOnly));
+    QVERIFY(badFile.open(QIODevice::ReadOnly));
+    QCOMPARE(goodFile.readAll(), goodBytes);
+    QCOMPARE(badFile.readAll(), badBytes);
+}
+
+void MobFamilyValidationTests::wearableAllPartsMasksAreCriticalButCreatureMasksAreIgnored()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray bytes = mobWithUnits({
+        unitObject(10, "empty orc", "OrcMaleF3", "unorma", false, {}),
+        unitObject(11, "missing human", "Human F1", "unhuma", false, {}, {}, {}, false),
+        unitObject(12, "integral dragon", "DragonGreenM12", "unmodg", true, {})
+    });
+    const QString path = writeMob(directory.path(), "wearable-empty.mob", bytes);
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "wearable-empty";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto empty = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.wearable_all_parts_enabled"; });
+    QVERIFY(empty != report.findings.cend());
+    QCOMPARE(empty->severity, EMobFamilyFindingSeverity::Critical);
+    QCOMPARE(empty->nid, quint32(10));
+    const auto missing = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.wearable_bodyparts_missing"; });
+    QVERIFY(missing != report.findings.cend());
+    QCOMPARE(missing->severity, EMobFamilyFindingSeverity::Critical);
+    QCOMPARE(missing->nid, quint32(11));
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.hasNid && finding.nid == 12
+                 && finding.code.startsWith("mob.semantic.wearable_"); }));
+}
+
+void MobFamilyValidationTests::coreOverlapAndDuplicateFindingsPreserveExactParts()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QStringList parts = wearableParts(true);
+    parts.removeAll("lh2");
+    parts << "rh3.pike00" << "rh3.tube00" << "hd" << "future.extension";
+    const QByteArray bytes = mobWithUnits({unitObject(
+        6257, "DriadDarkM9-6256", "DriadDarkM15", "unhuma", false, parts)});
+    const QString path = writeMob(directory.path(), "zone12.mob", bytes);
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "body-part-semantics";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto core = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.missing_core_bodyparts"; });
+    QVERIFY(core != report.findings.cend());
+    QCOMPARE(core->severity, EMobFamilyFindingSeverity::Warning);
+    QVERIFY(core->message.contains("lh2"));
+
+    const auto overlap = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.overlapping_unit_parts"; });
+    QVERIFY(overlap != report.findings.cend());
+    QCOMPARE(overlap->severity, EMobFamilyFindingSeverity::Warning);
+    QVERIFY(overlap->message.contains("rh3.pike00"));
+    QVERIFY(overlap->message.contains("rh3.tube00"));
+
+    const auto duplicate = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code == "mob.semantic.duplicate_bodypart_token"; });
+    QVERIFY(duplicate != report.findings.cend());
+    QCOMPARE(duplicate->severity, EMobFamilyFindingSeverity::Info);
+    QVERIFY(duplicate->message.contains("hd"));
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.code.contains("unknown_bodypart"); }));
+    QVERIFY(overlap->message.contains("future.extension"));
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), bytes);
+}
+
+void MobFamilyValidationTests::importEquipmentIsAuthoritativeOnlyForImportedUnits()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray bytes = mobWithUnits({
+        unitObject(21, "imported orc", "OrcF3", "unorma", true,
+                   wearableParts(false), {"helmet.iron"}),
+        unitObject(22, "normal orc", "OrcF3", "unorma", false,
+                   wearableParts(false), {"helmet.iron"})
+    });
+    const QString path = writeMob(directory.path(), "import-source.mob", bytes);
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "import-source";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase("OrcF3", "unorma", {});
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QVector<quint32> missingHair;
+    for(const SMobFamilyFinding& finding : report.findings)
+        if(finding.code == "mob.semantic.missing_hair_selection" && finding.hasNid)
+            missingHair.append(finding.nid);
+    QCOMPARE(missingHair, QVector<quint32>({21}));
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& candidate)
+        { return candidate.code == "mob.semantic.missing_hair_selection"; });
+    QVERIFY(finding != report.findings.cend());
+    QVERIFY(finding->message.contains("embedded MOB equipment"));
+}
+
+void MobFamilyValidationTests::databaseCreatureResolutionSuppressesWearableMaskRules()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray bytes = mobWithUnits({unitObject(
+        31, "database creature", "DragonF0", "unmodg", false, {})});
+    const QString path = writeMob(directory.path(), "database-creature.mob", bytes);
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "database-creature";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase("DragonF0", "unmodg", {});
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& finding)
+        { return finding.hasNid && finding.nid == 31
+                 && finding.code.startsWith("mob.semantic.wearable_"); }));
 }
 
 QTEST_APPLESS_MAIN(MobFamilyValidationTests)

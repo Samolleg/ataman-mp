@@ -37,6 +37,15 @@ textures, component mask, and integral/default weapon parts. Humanoid equipment
 substitution must not replace those with an unrelated RaceModels or inventory
 interpretation.
 
+Validation follows the same ownership boundary but inspects the serialized
+mask, not only the resolved preview. This is necessary because database-driven
+anatomy reconstruction can visually hide an omitted serialized root. Standard
+wearables receive non-blocking empty/missing-mask, core-anatomy, helmet/hair,
+overlap, and duplicate diagnostics. Integral creatures and legacy skeleton
+assemblies retain their corpus-normal empty-mask behavior. Unknown tokens are
+never normalized or rejected. See
+[`validation/CHARACTER_BODYPART_VALIDATION.md`](validation/CHARACTER_BODYPART_VALIDATION.md).
+
 ## Assemblies, geometry, morph vertices, and complexion
 
 Character archives contain named FIG parts plus a `.mod`/`.lnk` parent map.
