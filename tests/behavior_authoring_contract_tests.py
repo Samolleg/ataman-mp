@@ -129,6 +129,27 @@ def main() -> int:
             "one-command Behavior paste/duplicate history transaction")
     require(view, "m_pendingBehaviorPasteNodes",
             "temporary Behavior paste preview state")
+    paste_entry = view[view.index("void CView::clipboradObjectsToScene()"):
+                       view.index("bool CView::pasteBehaviorPoints")]
+    require(paste_entry, "cancelPendingOperation();",
+            "repeat paste cancelling the preceding placement preview")
+    if paste_entry.index("cancelPendingOperation();") > paste_entry.index(
+            "m_clipboard_buffer_file.open(QIODevice::ReadOnly)"):
+        raise AssertionError("paste cancellation occurs after the next action starts")
+    duplicate_entry = view[view.index("void CView::duplicateSelectedObjects()"):
+                           view.index("bool CView::canConvertSelectedWorldObjectToLever")]
+    require(duplicate_entry, "cancelPendingOperation();",
+            "repeat duplicate cancelling the preceding placement preview")
+    if duplicate_entry.index("cancelPendingOperation();") > duplicate_entry.index(
+            "selectedObjectToClipboardBuffer();"):
+        raise AssertionError("duplicate cancellation occurs after copying the pending preview")
+    selection_entry = view[view.index("bool CView::selectNodes"):
+                           view.index("void CView::drawTilePreview")]
+    require(selection_entry, "if(hasPendingOperation())\n        cancelPendingOperation();",
+            "outliner selection cancelling placement before changing destination")
+    if selection_entry.index("cancelPendingOperation();") > selection_entry.index(
+            "const QList<CNode*> before = selectionSnapshot();"):
+        raise AssertionError("selection changes before cancelling the pending preview")
     require(view, 'nodeKind = QStringLiteral("Activation area")',
             "activation-area clipboard support")
     require(view, 'nodeKind = QStringLiteral("Cast target")',
@@ -189,6 +210,10 @@ def main() -> int:
             "typed complete Logic-slot clipboard payload")
     require(view, "pasteLogicSlot(clipboard, preserveWorldPositions)",
             "Logic-slot paste dispatch")
+    logic_slot_paste = view[view.index("bool CView::pasteLogicSlotFromClipboard"):
+                            view.index("void CView::selectedObjectToClipboardBuffer")]
+    require(logic_slot_paste, "cancelPendingOperation();",
+            "context-menu Logic-slot paste cancelling an unfinished placement")
     require(unit_h, "void replaceFromJson(const QJsonObject& data);",
             "complete slot replacement API")
     require(undo_h, "class CReplaceLogicSlotsCommand",
@@ -281,6 +306,14 @@ def main() -> int:
             "Add look cancelling an unfinished placement first")
     require(main_window, "Dirty MOB validation deferred until explicit refresh",
             "no repeated dirty-candidate serialization during normal editing")
+    require(main_window, "void MainWindow::keepFloatingHistoryRaised()",
+            "floating History foreground restoration helper")
+    require(main_window, "QTimer::singleShot(0, m_historyDock",
+            "deferred History reactivation after Undo/Redo settles")
+    undo_navigation = main_window[main_window.index("void MainWindow::runUndoToIndex"):
+                                  main_window.index("bool MainWindow::eventFilter")]
+    require(undo_navigation, "keepFloatingHistoryRaised();",
+            "history navigation retaining the floating window foreground")
 
     require(trap_collection_h, "class CTrapCollectionWidget",
             "embedded magic-trap collection editor")

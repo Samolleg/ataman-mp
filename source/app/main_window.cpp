@@ -2268,7 +2268,10 @@ void MainWindow::runUndoToIndex(int targetIndex)
     targetIndex = qBound(0, targetIndex, m_undoStack->count());
     const int currentIndex = m_undoStack->index();
     if(targetIndex == currentIndex)
+    {
+        keepFloatingHistoryRaised();
         return;
+    }
     int workUnits = 0;
     const int first = qMin(currentIndex, targetIndex);
     const int last = qMax(currentIndex, targetIndex);
@@ -2292,6 +2295,25 @@ void MainWindow::runUndoToIndex(int targetIndex)
     m_undoStack->setIndex(targetIndex);
     if(progress)
         progress->close();
+    keepFloatingHistoryRaised();
+}
+
+void MainWindow::keepFloatingHistoryRaised()
+{
+    if(!m_historyDock || !m_historyDock->isVisible() || !m_historyDock->isFloating())
+        return;
+    // Undo commands rebuild selection/property widgets and a progress dialog
+    // reactivates its main-window parent when it closes. Restore the separate
+    // native History window after those queued focus changes settle.
+    QTimer::singleShot(0, m_historyDock, [this]()
+    {
+        if(!m_historyDock || !m_historyDock->isVisible()
+           || !m_historyDock->isFloating())
+            return;
+        QWidget* historyWindow = m_historyDock->window();
+        historyWindow->raise();
+        historyWindow->activateWindow();
+    });
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
@@ -2513,7 +2535,10 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             if(item.isValid())
             {
                 if(!m_pView->prepareHistoryNavigation())
+                {
+                    keepFloatingHistoryRaised();
                     return true;
+                }
                 runUndoToIndex(item.row());
                 return true;
             }
@@ -7529,6 +7554,8 @@ void MainWindow::on_actionUndo_triggered()
 {
     if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() - 1);
+    else
+        keepFloatingHistoryRaised();
 }
 
 void MainWindow::on_selectButton_clicked()
@@ -7547,6 +7574,8 @@ void MainWindow::on_actionRedo_triggered()
 {
     if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() + 1);
+    else
+        keepFloatingHistoryRaised();
 }
 
 void MainWindow::on_actionOpen_MOB_Script_triggered()

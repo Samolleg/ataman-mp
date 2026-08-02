@@ -7334,6 +7334,11 @@ bool CView::selectNode(CNode* node, bool addToSelection, bool activateOwner)
 
 bool CView::selectNodes(const QList<CNode*>& nodes, bool addToSelection)
 {
+    // Outliner and collection selection is an explicit replacement for an
+    // unfinished viewport gesture. Cancel first so temporary paste nodes are
+    // discarded before the newly requested destination is selected.
+    if(hasPendingOperation())
+        cancelPendingOperation();
     QList<CNode*> selectable;
     for(CNode* node : nodes)
     {
@@ -13567,6 +13572,7 @@ bool CView::pasteLogicSlot(const QJsonObject& clipboard,
 
 bool CView::pasteLogicSlotFromClipboard(bool preserveWorldPositions)
 {
+    cancelPendingOperation();
     if(!m_clipboard_buffer_file.open(QIODevice::ReadOnly))
         return false;
     QJsonParseError error;
@@ -13725,6 +13731,10 @@ void CView::clipboradObjectsToScene()
 {
     if(!m_activeMob)
         return;
+    // A placement preview owns temporary nodes that have not entered history.
+    // Starting another paste must discard that preview before any destination
+    // selection is read or pending ownership fields are replaced.
+    cancelPendingOperation();
 
     if (!m_clipboard_buffer_file.open(QIODevice::ReadOnly))
     {
@@ -14409,7 +14419,12 @@ void CView::duplicateSelectedObjects()
 {
     // Logic points have their own P/L creation workflow and must not cause
     // Ctrl+D to replay a stale normal-object clipboard.
-    if(!m_activeMob || selectionSnapshot().isEmpty())
+    if(!m_activeMob)
+        return;
+    // Duplicate is copy + paste, so a repeated Ctrl+D must first discard the
+    // unfinished placement and restore its source selection.
+    cancelPendingOperation();
+    if(selectionSnapshot().isEmpty())
         return;
     selectedObjectToClipboardBuffer();
     clipboradObjectsToScene();
