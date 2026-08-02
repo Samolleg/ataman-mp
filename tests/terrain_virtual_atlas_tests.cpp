@@ -446,7 +446,7 @@ private slots:
     void workingPreviewPackageStagesSeveralGeneratedPages();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void overlayVirtualPaintAllowsSparseInactiveField();
-    void uniformStrokeUsesOneAuthoredVariationAcrossItsInterior();
+    void uniformStrokeDistributesPureVariantsAndRotationsDeterministically();
     void preservedLayerSlotsArePinnedAndRemapped();
     void inactiveOverlaySentinelSurvivesLandFinalization();
     void gradedAlphaIsRefusedWithoutFlattening();
@@ -1206,6 +1206,30 @@ void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
 
 void TerrainVirtualAtlasTests::rotationsDeduplicateButSemanticAliasesRemainDistinct()
 {
+    // A local authored tile is indexed under all four paint-space signatures;
+    // a rotated request must reuse its physical slot rather than synthesize.
+    CTerrainTransitionCatalog localAuthoredCatalog;
+    const STerrainTransitionSignature authoredBase = signature(1, 2, 3, 4);
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature = CTerrainTransitionCatalog::rotated(
+            authoredBase, -rotation);
+        SMprPackedTile packed;
+        packed.tileIndex = 7;
+        packed.rotation = quint8(rotation);
+        variant.packedTile = packed.encode();
+        QVERIFY(localAuthoredCatalog.addVariant(variant));
+    }
+    bool localFound = false;
+    const SMprPackedTile localRotated = SMprPackedTile::decode(
+        localAuthoredCatalog.selectForPaint(
+            CTerrainTransitionCatalog::rotated(authoredBase, -1),
+            0, 0, 0, &localFound));
+    QVERIFY(localFound);
+    QCOMPARE(localRotated.atlasSlot(), 7);
+    QCOMPARE(localRotated.rotation, quint8(1));
+
     Fixture fixture;
     CTestTerrainVirtualAtlas atlas(fixture.catalog,fixture.images);
     seedReviewedStockMasks(atlas, fixture);
@@ -1215,6 +1239,25 @@ void TerrainVirtualAtlasTests::rotationsDeduplicateButSemanticAliasesRemainDisti
         CTerrainTransitionCatalog::rotated(base,1),0,0,nullptr,1);
     QCOMPARE(first.generatedIndex,rotated.generatedIndex);
     QVERIFY(first.generatedRotation!=rotated.generatedRotation);
+
+    // Imported reviewed artwork follows the same rule: one working physical
+    // tile is shared by four catalog rotations and is never regenerated.
+    CTestTerrainVirtualAtlas importedAtlas(fixture.catalog, fixture.images);
+    CValidationReport importedReport;
+    QVERIFY(importedAtlas.addAuthoredLibraryTransition(
+        authoredBase, solid(qRgba(80, 100, 120, 255)),
+        QStringLiteral("rotated-authored-fixture"), &importedReport));
+    const STerrainVirtualTile importedBase = importedAtlas.resolve(
+        authoredBase, 0, 0, &importedReport, 1);
+    const STerrainVirtualTile importedRotated = importedAtlas.resolve(
+        CTerrainTransitionCatalog::rotated(authoredBase, -1),
+        0, 0, &importedReport, 1);
+    QVERIFY2(!importedReport.hasErrors(), qPrintable(importedReport.toText()));
+    QVERIFY(importedBase.importedAuthored);
+    QVERIFY(importedRotated.importedAuthored);
+    QCOMPARE(importedBase.generatedIndex, importedRotated.generatedIndex);
+    QCOMPARE(importedBase.generatedRotation, quint8(0));
+    QCOMPARE(importedRotated.generatedRotation, quint8(1));
 
     Fixture duplicate(true);
     const QVector<qint32> duplicateTypes = {0, 1, 2, 2};
@@ -1862,19 +1905,25 @@ void TerrainVirtualAtlasTests::overlayVirtualPaintAllowsSparseInactiveField()
     }
 }
 
-void TerrainVirtualAtlasTests::uniformStrokeUsesOneAuthoredVariationAcrossItsInterior()
+void TerrainVirtualAtlasTests::uniformStrokeDistributesPureVariantsAndRotationsDeterministically()
 {
     Fixture fixture;
     int nextSlot = 4;
     // Give material 2 a second legitimate uniform variation, then make every
     // binary edge/corner tuple exact so release is testing distribution rather
     // than generation availability.
-    STerrainTransitionVariant secondUniform;
-    secondUniform.signature = signature(2, 2, 2, 2);
-    SMprPackedTile secondPacked;
-    secondPacked.tileIndex = quint8(nextSlot++);
-    secondUniform.packedTile = secondPacked.encode();
-    QVERIFY(fixture.catalog.addVariant(secondUniform));
+    const int secondUniformSlot = nextSlot++;
+    for(int slot : {1, secondUniformSlot})
+        for(int rotation = slot == 1 ? 1 : 0; rotation < 4; ++rotation)
+        {
+            STerrainTransitionVariant uniform;
+            uniform.signature = signature(2, 2, 2, 2);
+            SMprPackedTile packed;
+            packed.tileIndex = quint8(slot);
+            packed.rotation = quint8(rotation);
+            uniform.packedTile = packed.encode();
+            QVERIFY(fixture.catalog.addVariant(uniform));
+        }
     for(int bits = 1; bits < 15; ++bits)
     {
         const auto value = [bits](int bit) { return (bits & (1 << bit)) ? 2 : 1; };
@@ -1900,22 +1949,41 @@ void TerrainVirtualAtlasTests::uniformStrokeUsesOneAuthoredVariationAcrossItsInt
     CValidationReport report;
     QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
                               QVector<qint32>(64, 1), 0));
+    const auto packedField = [](const CTerrainEditModel& editModel) {
+        QVector<quint16> values;
+        values.reserve(16 * 16);
+        for(int y = 0; y < 16; ++y)
+            for(int x = 0; x < 16; ++x)
+            {
+                bool available = false;
+                values.append(editModel.packedTile(
+                    x, y, ETerrainTileLayer::Land, &available));
+                if(!available)
+                    return QVector<quint16>();
+            }
+        return values;
+    };
+    const QVector<quint16> initialPacked = packedField(model);
+    QCOMPARE(initialPacked.size(), 16 * 16);
     STerrainTileBrush brush;
     brush.centerX = 8; brush.centerY = 8; brush.radius = 4;
     const quint32 strokeSeed = 0x98761234u;
     const STerrainTileCommand preview = model.makeVirtualMaterialPaint(
         8, 8, brush, ETerrainTileLayer::Land, 2,
-        fixture.catalog, strokeSeed, &report);
+        fixture.catalog, strokeSeed, &report, true);
     QVERIFY2(!preview.isEmpty(), qPrintable(report.toText()));
     QVERIFY(model.apply(preview, true, &report));
+    const QVector<quint16> previewPacked = packedField(model);
     const STerrainTileCommand resolution = model.makeVirtualStrokeResolution(
-        preview, fixture.catalog, strokeSeed, &report);
+        preview, fixture.catalog, strokeSeed, &report, true);
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QVERIFY(model.apply(resolution, true, &report));
+    const QVector<quint16> finalPacked = packedField(model);
 
     CTerrainVirtualMaterialField field;
     QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land, &field));
-    QSet<quint16> interiorTiles;
+    QSet<int> interiorSlots;
+    QSet<int> interiorRotations;
     for(int y = 0; y < field.tileHeight(); ++y)
         for(int x = 0; x < field.tileWidth(); ++x)
         {
@@ -1923,12 +1991,80 @@ void TerrainVirtualAtlasTests::uniformStrokeUsesOneAuthoredVariationAcrossItsInt
             const STerrainTransitionSignature exact = field.cellSignature(x, y, &found);
             if(!found || !(exact == signature(2, 2, 2, 2))) continue;
             bool available = false;
-            interiorTiles.insert(model.packedTile(
-                x, y, ETerrainTileLayer::Land, &available));
+            const quint16 value = model.packedTile(
+                x, y, ETerrainTileLayer::Land, &available);
             QVERIFY(available);
+            const SMprPackedTile packed = SMprPackedTile::decode(value);
+            interiorSlots.insert(packed.atlasSlot());
+            interiorRotations.insert(packed.rotation);
+            bool decoded = false;
+            QCOMPARE(fixture.catalog.gridSignatureForPacked(value, &decoded),
+                     signature(2, 2, 2, 2));
+            QVERIFY(decoded);
         }
-    QVERIFY(interiorTiles.size() > 0);
-    QCOMPARE(interiorTiles.size(), 1);
+    QVERIFY(interiorSlots.size() > 1);
+    QVERIFY(interiorRotations.size() > 1);
+
+    // Command history must restore the exact packed field, including the
+    // chosen physical uniform variation and its quarter-turn.
+    QVERIFY(model.apply(resolution, false, &report));
+    QCOMPARE(packedField(model), previewPacked);
+    QVERIFY(model.apply(preview, false, &report));
+    QCOMPARE(packedField(model), initialPacked);
+    QVERIFY(model.apply(preview, true, &report));
+    QVERIFY(model.apply(resolution, true, &report));
+    QCOMPARE(packedField(model), finalPacked);
+
+    // The same source, coordinates and seed reproduce the complete packed
+    // field. Disabling rotation variation may affect uniform rotations only;
+    // exact edge/blend selections must remain byte-identical.
+    CTerrainEditModel repeated;
+    CValidationReport repeatedReport;
+    QVERIFY(repeated.loadSources(1, 1, 100.0f, {source}, &repeatedReport, 1,
+                                 QVector<qint32>(64, 1), 0));
+    const STerrainTileCommand repeatedPreview = repeated.makeVirtualMaterialPaint(
+        8, 8, brush, ETerrainTileLayer::Land, 2,
+        fixture.catalog, strokeSeed, &repeatedReport, true);
+    QVERIFY(repeated.apply(repeatedPreview, true, &repeatedReport));
+    const STerrainTileCommand repeatedResolution = repeated.makeVirtualStrokeResolution(
+        repeatedPreview, fixture.catalog, strokeSeed, &repeatedReport, true);
+    QVERIFY(repeated.apply(repeatedResolution, true, &repeatedReport));
+    QVERIFY2(!repeatedReport.hasErrors(), qPrintable(repeatedReport.toText()));
+    QCOMPARE(packedField(repeated), finalPacked);
+
+    CTerrainEditModel fixedRotation;
+    CValidationReport fixedReport;
+    QVERIFY(fixedRotation.loadSources(1, 1, 100.0f, {source}, &fixedReport, 1,
+                                     QVector<qint32>(64, 1), 0));
+    const STerrainTileCommand fixedPreview = fixedRotation.makeVirtualMaterialPaint(
+        8, 8, brush, ETerrainTileLayer::Land, 2,
+        fixture.catalog, strokeSeed, &fixedReport, false);
+    QVERIFY(fixedRotation.apply(fixedPreview, true, &fixedReport));
+    const STerrainTileCommand fixedResolution = fixedRotation.makeVirtualStrokeResolution(
+        fixedPreview, fixture.catalog, strokeSeed, &fixedReport, false);
+    QVERIFY(fixedRotation.apply(fixedResolution, true, &fixedReport));
+    QVERIFY2(!fixedReport.hasErrors(), qPrintable(fixedReport.toText()));
+    const QVector<quint16> fixedPacked = packedField(fixedRotation);
+    for(int y = 0; y < field.tileHeight(); ++y)
+        for(int x = 0; x < field.tileWidth(); ++x)
+        {
+            bool found = false;
+            const STerrainTransitionSignature exact = field.cellSignature(x, y, &found);
+            if(found && !(exact == signature(2, 2, 2, 2)))
+                QCOMPARE(finalPacked.at(y * 16 + x), fixedPacked.at(y * 16 + x));
+        }
+
+    // Reopening the serialized sector payload preserves every packed bit.
+    STerrainSectorSource reopenedSource = source;
+    reopenedSource.payload = model.sectorPayload(0, 0);
+    QVERIFY(!reopenedSource.payload.isEmpty());
+    CTerrainEditModel reopened;
+    CValidationReport reopenReport;
+    QVERIFY(reopened.loadSources(1, 1, 100.0f, {reopenedSource}, &reopenReport, 1,
+                                 QVector<qint32>(64, 1), 0));
+    QVERIFY2(!reopenReport.hasErrors(), qPrintable(reopenReport.toText()));
+    QCOMPARE(packedField(reopened), finalPacked);
+    QCOMPARE(reopened.sectorPayload(0, 0), reopenedSource.payload);
 }
 
 void TerrainVirtualAtlasTests::externalUniformFamilyPaintsAndBlendsWithoutAuthoredSlot()

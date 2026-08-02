@@ -1886,11 +1886,154 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     }
     family_renames.update(r67_renames.get(namespace, {}))
 
+    # R69 marked-tile review. These are the reviewer's explicit four-corner
+    # classifications from the real-map stripe/circle collections. Keep-current
+    # answers require no rewrite; notes requesting side-by-side checks remain
+    # outside this table. Byte-identical atlas owners receive the same exact
+    # corrections so canonical substitution cannot discard a reviewed result.
+    r69_corrections = {
+        "bz10k": {
+            (316, 0): 5, (316, 2): 9, (316, 3): 10,
+        },
+        "zone12": {
+            (316, 0): 5, (316, 2): 9, (316, 3): 10,
+        },
+        "bz11k": {
+            (246, 1): 8, (246, 2): 1, (246, 3): 8,
+            (287, 0): 1, (287, 1): 8,
+            (309, 0): 8, (309, 1): 1,
+            (310, 0): 8, (310, 1): 1,
+            (311, 0): 8, (311, 1): 1,
+            (346, 0): 8, (346, 1): 8, (346, 3): 1,
+            (450, 0): 1, (450, 2): 8, (450, 3): 8,
+            (477, 0): 6, (477, 1): 6, (477, 2): 10, (477, 3): 8,
+            (509, 0): 16, (509, 1): 1, (509, 2): 8, (509, 3): 16,
+        },
+        "zone14": {
+            (246, 1): 8, (246, 2): 1, (246, 3): 8,
+            (287, 0): 1, (287, 1): 8,
+            (309, 0): 8, (309, 1): 1,
+            (310, 0): 8, (310, 1): 1,
+            (311, 0): 8, (311, 1): 1,
+            (346, 0): 8, (346, 1): 8, (346, 3): 1,
+            (450, 0): 1, (450, 2): 8, (450, 3): 8,
+            (477, 0): 6, (477, 1): 6, (477, 2): 10, (477, 3): 8,
+            (509, 0): 16, (509, 1): 1, (509, 2): 8, (509, 3): 16,
+        },
+        "bz13h": {
+            (227, 3): 3,
+            (248, 0): 4, (248, 1): 1, (248, 2): 4, (248, 3): 2,
+            (288, 0): 4, (288, 1): 4,
+            (341, 3): 7, (343, 3): 7,
+            (369, 2): 3, (370, 2): 3, (410, 2): 3,
+            (449, 3): 7, (495, 0): 3, (495, 3): 6,
+        },
+        "zone15": {
+            (227, 3): 3,
+            (248, 0): 4, (248, 1): 1, (248, 2): 4, (248, 3): 2,
+            (288, 0): 4, (288, 1): 4,
+            (341, 3): 7, (343, 3): 7,
+            (369, 2): 3, (370, 2): 3, (410, 2): 3,
+            (449, 3): 7, (495, 0): 3, (495, 3): 6,
+        },
+        "bz16h": {(420, 3): 2, (470, 0): 8},
+        "zone18": {(420, 3): 2, (445, 2): 1, (470, 0): 8},
+        "bz2g": {
+            (38, 0): 2, (93, 0): 2,
+            (98, 0): 2, (98, 2): 1, (98, 3): 3,
+            (120, 2): 4, (120, 3): 4,
+            (145, 1): 1, (146, 0): 1,
+            (244, 3): 3, (306, 3): "Grass / Burnt", (441, 3): 3,
+        },
+        "zone2": {
+            (38, 0): 2, (93, 0): 2,
+            (98, 0): 2, (98, 2): 1, (98, 3): 3,
+            (120, 2): 4, (120, 3): 4,
+            (145, 1): 1, (146, 0): 1,
+            (244, 3): 3, (306, 3): "Grass / Burnt", (441, 3): 3,
+        },
+        "bz3g": {
+            (172, 1): 1, (172, 3): 14,
+            (192, 2): 12, (220, 0): 12, (244, 1): 12,
+            (267, 0): 12, (271, 3): 17,
+            (283, 0): 2, (283, 3): 14,
+            (307, 0): 5, (347, 3): 17, (504, 1): 11,
+        },
+        "bz4g": {(158, 3): 17, (192, 3): 17},
+        "zone4": {(158, 3): 17, (192, 3): 17},
+        "bz5g": {
+            (318, 0): 6, (318, 1): 2, (318, 2): 5, (318, 3): 5,
+            (355, 2): 7, (358, 0): 7,
+            (462, 3): "Sand / Grainy", (494, 3): "Sand / Grainy",
+        },
+        "zone8": {
+            (318, 0): 6, (318, 1): 2, (318, 2): 5, (318, 3): 5,
+            (355, 2): 7, (358, 0): 7,
+            (462, 3): "Sand / Grainy", (494, 3): "Sand / Grainy",
+        },
+        "bz7g": {
+            (125, 2): 4, (133, 3): 2, (134, 0): 4,
+            (198, 1): 4, (199, 1): 4, (229, 2): 6,
+        },
+        "bz8k": {(323, 1): 6},
+        "bz9k": {(323, 1): 6},
+        "zone11": {(323, 1): 6},
+        "zone1": {(377, 3): 1},
+        "zone10": {
+            (87, 3): 3, (88, 3): 3, (89, 3): 3,
+            (99, 3): 3, (100, 3): 3, (102, 3): 3,
+            (224, 1): 3, (451, 0): 5,
+        },
+        "zone13": {
+            (364, 3): 4, (369, 3): 4,
+            (439, 0): 3, (440, 0): 3, (505, 1): 4,
+        },
+        "zone19": {
+            (310, 3): 4, (353, 3): 5, (354, 3): 5,
+            (472, 3): 5, (494, 0): 1,
+        },
+        "zone3obr": {
+            (38, 3): 13, (39, 3): 13, (218, 3): 13,
+            (347, 2): 4,
+        },
+        "zone5_1": {(167, 2): 2},
+        "zone6": {
+            (265, 3): 15, (268, 3): 15, (291, 3): 15,
+            (314, 2): 15, (314, 3): 15, (317, 3): 15,
+            (336, 1): 4, (336, 3): 15,
+        },
+        "zone6_2": {
+            (266, 3): 18, (269, 2): 8,
+            (314, 2): 18, (314, 3): 18,
+        },
+        "zone7": {(43, 1): 3},
+    }
+    corrections.update(r69_corrections.get(namespace, {}))
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)
     by_slot = {slot["slot"]: slot for slot in result["slots"]}
     for (slot_index, corner_index), family_id in corrections.items():
+        # Focused unit fixtures may intentionally model only the first part of
+        # an atlas. Real compiled recipes still contain every authored slot.
+        if slot_index not in by_slot:
+            continue
+        if isinstance(family_id, str):
+            matches = [
+                family["id"] for family in result["families"]
+                if family_renames.get(
+                    family["id"], family.get("suggestedName", "")
+                ).casefold()
+                == family_id.casefold()
+            ]
+            if len(matches) != 1 and "slotCount" in result:
+                raise ValueError(
+                    f"{result['namespace']}: reviewed family name "
+                    f"{family_id!r} resolved to {matches}")
+            if len(matches) != 1:
+                continue
+            family_id = matches[0]
         by_slot[slot_index]["signature"][corner_names[corner_index]] = family_id
     if family_aliases:
         for slot in result["slots"]:
@@ -1908,6 +2051,22 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         sand_light["uniformSlots"] = []
         sand_light["memberSlots"] = [492, 496]
         result["families"].append(sand_light)
+        result["families"].sort(key=lambda family: family["id"])
+    if namespace == "zone3obr" and not any(
+            family["id"] == 13 for family in result["families"]):
+        # R69 identified the SW quarters of slots 38/39/218 as a distinct
+        # greenish stone. It has no honest four-corner tile in this atlas, so
+        # keep it as a transition-only contextual family rather than borrowing
+        # a misleading uniform thumbnail from Stone / Lime.
+        stone_greenish = copy.deepcopy(next(
+            family for family in result["families"] if family["id"] == 1))
+        stone_greenish["id"] = 13
+        stone_greenish["sourceFamily"] = "reviewed/stone/greenish"
+        stone_greenish["suggestedName"] = "Stone / Greenish"
+        stone_greenish["thumbnailSlot"] = 38
+        stone_greenish["uniformSlots"] = []
+        stone_greenish["memberSlots"] = [38, 39, 218]
+        result["families"].append(stone_greenish)
         result["families"].sort(key=lambda family: family["id"])
     referenced = {
         family_id

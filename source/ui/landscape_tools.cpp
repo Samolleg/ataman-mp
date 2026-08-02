@@ -67,7 +67,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_squarePaintShape(new QToolButton(this))
     , m_manualTileSelection(new QCheckBox(tr("Manual atlas tile mode (no blending)"), this))
     , m_randomizeUniformRotation(new QCheckBox(
-          tr("Vary uniform texture rotation between strokes"), this))
+          tr("Vary uniform texture rotation across strokes"), this))
     , m_paintIssueCategory(new QComboBox(this))
     , m_markPaintIssue(new QToolButton(this))
     , m_overlaySurfaceOperation(new QComboBox(this))
@@ -126,7 +126,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_randomizeUniformRotation->setChecked(settings.value(
         "ui/landscape/randomizeUniformRotation", true).toBool());
     m_randomizeUniformRotation->setToolTip(tr(
-        "Uses one deterministic rotation for every uniform interior tile in a stroke. "
+        "Distributes proven uniform physical variants and deterministic rotations across each stroke interior. "
         "Exact blend rotations remain fixed by their corner identities."));
     m_tool->setCurrentIndex(qBound(0,
         settings.value("ui/landscape/sculptTool", 0).toInt(), m_tool->count() - 1));

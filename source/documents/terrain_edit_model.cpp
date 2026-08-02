@@ -28,6 +28,41 @@ const int kOverlaySectorSize = kLandVertexOffset + 2 * kVertexBlockSize
 const quint32 kSectorSignature = 0xCF4BF774;
 const double kNewOverlayClearanceWorld = 0.02;
 
+quint8 uniformInteriorRotation(quint32 distributionSeed, int cellX, int cellY)
+{
+    quint32 hash = 2166136261u;
+    const auto mix = [&hash](quint32 value) {
+        for(int byte = 0; byte < 4; ++byte)
+        {
+            hash ^= (value >> (byte * 8)) & 0xffu;
+            hash *= 16777619u;
+        }
+    };
+    mix(distributionSeed);
+    mix(quint32(cellX));
+    mix(quint32(cellY));
+    return quint8(hash & 3u);
+}
+
+quint16 selectUniformInteriorTile(
+    const CTerrainTransitionCatalog& catalog,
+    const STerrainTransitionSignature& uniformSignature,
+    int cellX, int cellY, quint32 distributionSeed,
+    bool randomizeRotation, bool* found)
+{
+    bool selected = false;
+    const quint16 value = catalog.selectForPaint(
+        uniformSignature, cellX, cellY, distributionSeed, &selected);
+    if(found)
+        *found = selected;
+    if(!selected)
+        return 0;
+    SMprPackedTile packed = SMprPackedTile::decode(value);
+    packed.rotation = randomizeRotation
+        ? uniformInteriorRotation(distributionSeed, cellX, cellY) : 0;
+    return packed.encode();
+}
+
 quint16 readHeight(const QByteArray& payload, int localX, int localY)
 {
     const int offset = kLandVertexOffset + (localY * kSectorVertices + localX) * kVertexSize + 2;
@@ -4276,14 +4311,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
     STerrainTransitionSignature pure;
     pure.northWest=pure.northEast=pure.southEast=pure.southWest=materialId;
     bool pureFound=false;
-    quint16 purePacked=catalog.selectForPaint(pure,0,0,distributionSeed,&pureFound);
-    if(pureFound && randomizeUniformRotation)
-    {
-        SMprPackedTile varied = SMprPackedTile::decode(purePacked);
-        varied.rotation = quint8((int(varied.rotation)
-            + int(distributionSeed & 3u)) & 3);
-        purePacked = varied.encode();
-    }
+    catalog.selectForPaint(pure,0,0,distributionSeed,&pureFound);
     QVector<int> cells=affected.values().toVector();std::sort(cells.begin(),cells.end());
     for(int cell:cells)
     {
@@ -4308,7 +4336,17 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
                 "This material has no uniform authored tile for an honest unblended preview");
             command.deltas.clear();command.virtualVertices.clear();return command;
         }
-        const quint16 after=purePacked;
+        bool uniformFound = false;
+        const quint16 after = selectUniformInteriorTile(
+            catalog, pure, x, y, distributionSeed,
+            randomizeUniformRotation, &uniformFound);
+        if(!uniformFound)
+        {
+            if(report)report->add("terrain.virtual_paint_preview",
+                EValidationSeverity::Error,
+                "This material has no structurally uniform authored tile for an honest unblended preview");
+            command.deltas.clear();command.virtualVertices.clear();return command;
+        }
         command.semanticAudit.affectedCells.append(QPoint(x,y));
         if(after==before)continue;
         STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.layer=layer;
@@ -4369,19 +4407,10 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
         const bool uniform = exact.northWest == exact.northEast
             && exact.northWest == exact.southEast
             && exact.northWest == exact.southWest;
-        // A brush chooses one authored uniform variation for the stroke. Cell
-        // coordinates may distribute edge-mask variants, but using them for a
-        // uniform interior creates the checkerboard/slab artifacts seen in the
-        // circle review map.
-        quint16 after=catalog.selectForPaint(exact,
-            uniform ? 0 : x, uniform ? 0 : y, distributionSeed, &found);
-        if(found && uniform && randomizeUniformRotation)
-        {
-            SMprPackedTile varied = SMprPackedTile::decode(after);
-            varied.rotation = quint8((int(varied.rotation)
-                + int(distributionSeed & 3u)) & 3);
-            after = varied.encode();
-        }
+        const quint16 after = uniform
+            ? selectUniformInteriorTile(catalog, exact, x, y,
+                distributionSeed, randomizeUniformRotation, &found)
+            : catalog.selectForPaint(exact, x, y, distributionSeed, &found);
         if(!found){++unresolved;continue;}
         command.semanticAudit.affectedCells.append(QPoint(x,y));
         if(after==before)continue;
