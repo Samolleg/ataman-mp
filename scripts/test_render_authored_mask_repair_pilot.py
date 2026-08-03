@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+from pathlib import Path
 import unittest
 
 import numpy as np
@@ -12,8 +14,11 @@ from PIL import Image
 
 from render_authored_mask_repair_pilot import (
     align_authored_mask,
+    band_visualization,
     mask_metrics,
     repair_authored_mask,
+    repair_reviewed_mask,
+    repair_sand_banded_mask,
 )
 
 
@@ -39,6 +44,21 @@ def synthetic_outer_mask(kind: int, size: int = 96) -> Image.Image:
 
 
 class AuthoredMaskRepairPilotTests(unittest.TestCase):
+    def test_r44_decisions_preserve_nine_approvals_and_three_sand_rejections(self) -> None:
+        decision_path = Path(__file__).with_name(
+            "authored_mask_repair_r44_decisions.json")
+        payload = json.loads(decision_path.read_text(encoding="utf-8"))
+        decisions = payload["decisions"]
+        approved = [key for key, value in decisions.items()
+                    if value["answer"] == "Approve repaired authored mask"]
+        rejected = [key for key, value in decisions.items()
+                    if value["answer"] == "Reject this source/topology"]
+        self.assertEqual(len(approved), 9)
+        self.assertEqual(len(rejected), 3)
+        self.assertTrue(all("sand-grain" in key for key in rejected))
+        self.assertTrue(all("opacity edge bands" in decisions[key]["note"]
+                            for key in rejected))
+
     def test_distinct_authored_silhouettes_remain_distinct(self) -> None:
         first = synthetic_outer_mask(0)
         second = synthetic_outer_mask(1)
@@ -102,6 +122,62 @@ class AuthoredMaskRepairPilotTests(unittest.TestCase):
         self.assertGreaterEqual(aligned_score, expected_score - 0.02)
         self.assertNotEqual(transform["rotationCounterClockwise"], 0)
         self.assertFalse(transform["inverted"])
+
+    def test_approved_non_sand_repairs_keep_the_reviewed_single_field_path(self) -> None:
+        source = synthetic_outer_mask(0)
+        expected = repair_authored_mask(
+            source, "outer-1of4-v1", seed=71)
+        actual = repair_reviewed_mask(
+            source, "grass-strands", "outer-1of4-v1", seed=71)
+        self.assertEqual(actual[0].tobytes(), expected[0].tobytes())
+        self.assertEqual(actual[1], expected[1])
+
+    def test_sand_repair_preserves_strong_faceted_silhouette_and_adds_bands(self) -> None:
+        source = synthetic_outer_mask(0)
+        repaired, metrics = repair_sand_banded_mask(
+            source, "outer-1of4-v1", seed=71)
+        raw = np.asarray(source.convert("L"), dtype=np.uint8)
+        result = np.asarray(repaired.convert("L"), dtype=np.uint8)
+        self.assertTrue(np.array_equal(raw >= 128, result >= 128))
+        self.assertEqual(metrics["strongIoU"], 1.0)
+        self.assertEqual(metrics["repairMethod"], "faceted-opacity-bands")
+        self.assertGreaterEqual(metrics["distinctEdgeBands"], 3)
+        self.assertGreater(int((result == 48).sum()), 20)
+        self.assertGreater(int((result == 144).sum()), 20)
+        self.assertGreater(int((result == 216).sum()), 20)
+        self.assertEqual(result[0, 0], 255)
+        self.assertEqual(result[0, -1], 0)
+
+    def test_sand_bands_are_nested_deterministic_and_not_global_blur(self) -> None:
+        source = synthetic_outer_mask(1)
+        first, first_metrics = repair_sand_banded_mask(
+            source, "outer-1of4-v2", seed=2024)
+        repeated, repeated_metrics = repair_sand_banded_mask(
+            source, "outer-1of4-v2", seed=2024)
+        values = np.asarray(first.convert("L"), dtype=np.uint8)
+        self.assertEqual(first.tobytes(), repeated.tobytes())
+        self.assertEqual(first_metrics, repeated_metrics)
+        self.assertTrue(np.all((values >= 216) <= (values >= 144)))
+        self.assertTrue(np.all((values >= 144) <= (values >= 48)))
+        # A global Gaussian field would contain many arbitrary intermediate
+        # values. The sand repair intentionally retains explicit authored-style
+        # opacity plateaus and a hard strong-silhouette boundary.
+        self.assertEqual(set(np.unique(values)).difference(
+            {0, 48, 144, 216, 255}), set())
+        preview = band_visualization(first)
+        self.assertEqual(preview.mode, "RGB")
+        self.assertEqual(preview.size, first.size)
+
+    def test_review_dispatch_uses_banded_path_only_for_sand(self) -> None:
+        source = synthetic_outer_mask(0)
+        sand, sand_metrics = repair_reviewed_mask(
+            source, "sand-grain", "outer-1of4-v1", seed=9)
+        legacy, legacy_metrics = repair_authored_mask(
+            source, "outer-1of4-v1", seed=9)
+        self.assertEqual(sand_metrics["repairMethod"],
+                         "faceted-opacity-bands")
+        self.assertNotEqual(sand.tobytes(), legacy.tobytes())
+        self.assertNotIn("repairMethod", legacy_metrics)
 
 
 if __name__ == "__main__":

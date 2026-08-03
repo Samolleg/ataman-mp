@@ -1,0 +1,46 @@
+{
+  "schema": "ei-authored-mask-repair-decisions-v1",
+  "checkpoint": "R44-AUTHORED-PILOT",
+  "authority": "explicit-user-review",
+  "decisions": {
+    "authored-repair-grass-strands-outer-1of4-v1": {
+      "answer": "Approve repaired authored mask"
+    },
+    "authored-repair-grass-strands-edge-2of4-v1": {
+      "answer": "Approve repaired authored mask"
+    },
+    "authored-repair-grass-strands-diagonal-2of4": {
+      "answer": "Approve repaired authored mask"
+    },
+    "authored-repair-soil-mottle-outer-1of4-v2": {
+      "answer": "Approve repaired authored mask"
+    },
+    "authored-repair-soil-mottle-edge-2of4-v2": {
+      "answer": "Approve repaired authored mask"
+    },
+    "authored-repair-soil-mottle-inside-3of4-v1": {
+      "answer": "Approve repaired authored mask"
+    },
+    "authored-repair-stone-fracture-outer-1of4-v1": {
+      "answer": "Approve repaired authored mask"
+    },
+    "authored-repair-stone-fracture-edge-2of4-v1": {
+      "answer": "Approve repaired authored mask"
+    },
+    "authored-repair-stone-fracture-diagonal-2of4": {
+      "answer": "Approve repaired authored mask"
+    },
+    "authored-repair-sand-grain-outer-1of4-v1": {
+      "answer": "Reject this source/topology",
+      "note": "Preserve the authored faceted/crystal silhouette and reconstruct two or three distinct opacity edge bands; do not reduce it to a binary mask and globally blur it."
+    },
+    "authored-repair-sand-grain-edge-2of4-v2": {
+      "answer": "Reject this source/topology",
+      "note": "Preserve the authored depth effect with two or three distinct opacity edge bands; do not reduce it to a binary mask and globally blur it."
+    },
+    "authored-repair-sand-grain-inside-3of4-v2": {
+      "answer": "Reject this source/topology",
+      "note": "Preserve the authored faceted/crystal silhouette and reconstruct two or three distinct opacity edge bands; do not reduce it to a binary mask and globally blur it."
+    }
+  }
+}

@@ -16,7 +16,7 @@ import html
 import json
 import math
 import re
-from collections import defaultdict
+from collections import defaultdict, deque
 from functools import lru_cache
 from pathlib import Path
 
@@ -42,6 +42,8 @@ PILOT_CASES = (
     ("sand-grain", "edge-2of4-v2"),
     ("sand-grain", "inside-3of4-v2"),
 )
+SAND_PILOT_CASES = tuple(
+    item for item in PILOT_CASES if item[0] == "sand-grain")
 
 
 def _slug(value: str) -> str:
@@ -293,6 +295,113 @@ def repair_authored_mask(source: Image.Image, topology: str,
     return selected
 
 
+def _manhattan_distance_to(seeds: np.ndarray) -> np.ndarray:
+    """Return a faceted distance field without rounding authored corners."""
+    if seeds.ndim != 2:
+        raise ValueError("distance seeds must be a two-dimensional mask")
+    height, width = seeds.shape
+    unreachable = height + width + 1
+    distance = np.full((height, width), unreachable, dtype=np.int32)
+    pending: deque[tuple[int, int]] = deque()
+    for y, x in np.argwhere(seeds):
+        distance[y, x] = 0
+        pending.append((int(y), int(x)))
+    if not pending:
+        return distance
+    while pending:
+        y, x = pending.popleft()
+        next_distance = distance[y, x] + 1
+        for next_y, next_x in ((y - 1, x), (y + 1, x),
+                               (y, x - 1), (y, x + 1)):
+            if (0 <= next_y < height and 0 <= next_x < width and
+                    next_distance < distance[next_y, next_x]):
+                distance[next_y, next_x] = next_distance
+                pending.append((next_y, next_x))
+    return distance
+
+
+def repair_sand_banded_mask(source: Image.Image, topology: str,
+                            seed: int) -> tuple[Image.Image, dict]:
+    """Rebuild sand depth as nested opacity bands around the authored shape.
+
+    Sand is intentionally not sent through the globally blurred probability
+    repair. Its >=128 silhouette remains pixel-exact, including the authored
+    star/crystal facets. One subtle exterior band and two interior shoulders
+    provide the reviewed three-step depth cue before the opaque core.
+    Manhattan distance keeps offsets faceted instead of rounding the points.
+    """
+    del seed  # Reserved for a future reviewed band-variation contract.
+    raw = np.asarray(source.convert("L"), dtype=np.uint8)
+    if raw.ndim != 2 or raw.shape[0] != raw.shape[1] or raw.shape[0] < 16:
+        raise ValueError("pilot masks must be square grayscale images")
+    owner = raw >= 128
+    outside_distance = _manhattan_distance_to(owner)
+    inside_distance = _manhattan_distance_to(~owner)
+    band_width = max(2, min(raw.shape) // 64)
+
+    result = np.zeros(raw.shape, dtype=np.uint8)
+    # A single subtle exterior ledge stays below the protected-quarter 20%
+    # influence threshold. Two interior shoulders then create the visible
+    # stepped depth without expanding the authored ownership silhouette.
+    result[np.logical_and(~owner,
+                          outside_distance <= band_width)] = 48
+    result[owner] = 255
+    result[np.logical_and(owner, inside_distance <= band_width)] = 216
+    result[np.logical_and(owner,
+                          inside_distance <= max(1, band_width // 2))] = 144
+
+    expected = expected_owner_corners(topology)
+    points = ((0, 0), (0, result.shape[1] - 1),
+              (result.shape[0] - 1, result.shape[1] - 1),
+              (result.shape[0] - 1, 0))
+    for index, point in enumerate(points):
+        result[point] = 255 if expected[index] else 0
+
+    image = Image.fromarray(result, "L")
+    metrics = mask_metrics(source, image, topology)
+    metrics["repairMethod"] = "faceted-opacity-bands"
+    metrics["bandWidthPixels"] = band_width
+    metrics["opacityLevels"] = [0, 48, 144, 216, 255]
+    metrics["distinctEdgeBands"] = sum(
+        int(np.any(result == value)) for value in (48, 144, 216))
+    metrics["strongSilhouettePixelExact"] = bool(np.array_equal(
+        raw >= 128, result >= 128))
+    ownership_coverage = {}
+    protected_ownership = {}
+    for index, area in enumerate(_quadrants(*owner.shape)):
+        value = round(float(owner[area].mean()), 4)
+        if expected[index]:
+            ownership_coverage[CORNER_NAMES[index]] = value
+        else:
+            protected_ownership[CORNER_NAMES[index]] = value
+    metrics["ownershipQuarterCoverage"] = ownership_coverage
+    metrics["protectedQuarterOwnership"] = protected_ownership
+    metrics["ownershipTargetMet"] = (
+        all(value >= 0.70 for value in ownership_coverage.values()) and
+        all(value <= 0.30 for value in protected_ownership.values()))
+    return image, metrics
+
+
+def repair_reviewed_mask(source: Image.Image, family: str, topology: str,
+                         seed: int) -> tuple[Image.Image, dict]:
+    """Apply only the methods authorized by the explicit R44 review."""
+    if family == "sand-grain":
+        return repair_sand_banded_mask(source, topology, seed)
+    return repair_authored_mask(source, topology, seed)
+
+
+def band_visualization(mask: Image.Image) -> Image.Image:
+    """Color the discrete sand opacity plateaus for questionnaire review."""
+    values = np.asarray(mask.convert("L"), dtype=np.uint8)
+    result = np.empty((*values.shape, 3), dtype=np.uint8)
+    result[values == 0] = (30, 42, 67)
+    result[np.logical_and(values > 0, values < 96)] = (58, 126, 164)
+    result[np.logical_and(values >= 96, values < 180)] = (75, 182, 170)
+    result[np.logical_and(values >= 180, values < 240)] = (238, 166, 65)
+    result[values >= 240] = (248, 242, 218)
+    return Image.fromarray(result, "RGB")
+
+
 def _source_quality(mask: Image.Image, topology: str) -> float:
     metrics = mask_metrics(mask, mask, topology)
     expected = expected_owner_corners(topology)
@@ -394,7 +503,9 @@ def _topology_label(topology: str) -> str:
 
 
 def render(review: Path, output: Path,
-           checkpoint: str = "R44-AUTHORED-PILOT") -> dict:
+           checkpoint: str = "R44-AUTHORED-PILOT",
+           cases: tuple[tuple[str, str], ...] = PILOT_CASES,
+           reviewed_methods: bool = False) -> dict:
     review = review.resolve()
     output = output.resolve()
     if output.exists() and any(output.iterdir()):
@@ -420,7 +531,7 @@ def render(review: Path, output: Path,
 
     questions = []
     cards = []
-    for number, logical in enumerate(PILOT_CASES, 1):
+    for number, logical in enumerate(cases, 1):
         group_rows = grouped.get(logical, [])
         if not group_rows:
             raise ValueError(f"pilot group is absent from authored evidence: {logical}")
@@ -444,7 +555,10 @@ def render(review: Path, output: Path,
             unique_candidates.values(), key=lambda value: value[:2])
         seed = int(_sha256_bytes(
             f"{logical[0]}|{logical[1]}|{selected_row['provenance']}".encode())[:8], 16)
-        repaired, metrics = repair_authored_mask(aligned_mask, logical[1], seed)
+        repaired, metrics = (repair_reviewed_mask(
+            aligned_mask, logical[0], logical[1], seed)
+            if reviewed_methods else
+            repair_authored_mask(aligned_mask, logical[1], seed))
         key = f"authored-repair-{_slug(logical[0])}-{_slug(logical[1])}"
         prefix = f"{number:02d}-{_slug(logical[0])}-{_slug(logical[1])}"
         source_tile = _cell(
@@ -464,6 +578,10 @@ def render(review: Path, output: Path,
             "contractHeatmap": _save(
                 _heatmap(repaired), images / f"{prefix}-heatmap.png"),
         }
+        if metrics.get("repairMethod") == "faceted-opacity-bands":
+            files["bandVisualization"] = _save(
+                band_visualization(repaired),
+                images / f"{prefix}-opacity-bands.png")
         examples = []
         examples_html = []
         for example_number, row in enumerate(_representatives(group_rows), 1):
@@ -501,6 +619,13 @@ def render(review: Path, output: Path,
             f"{metrics['changedStrongFraction']:.1%} · mean alpha change "
             f"{metrics['meanAbsoluteChange']:.1%} · structural target "
             f"{'met' if metrics['structuralTargetMet'] else 'not fully met'}")
+        if metrics.get("repairMethod") == "faceted-opacity-bands":
+            metric_text += (
+                f" | {metrics['distinctEdgeBands']} explicit edge bands | "
+                f"{metrics['bandWidthPixels']} px per band | strong silhouette "
+                f"{'pixel-exact' if metrics['strongSilhouettePixelExact'] else 'changed'} | "
+                f"70/30 ownership target "
+                f"{'met' if metrics['ownershipTargetMet'] else 'not fully met by authored shape'}")
         owner_corner_text = ", ".join(metrics["expectedOwnerCorners"])
         answer_options = (
             "Still uncertain",
@@ -514,6 +639,12 @@ def render(review: Path, output: Path,
         options = "".join(
             f'<option value="{html.escape(value)}">{html.escape(value)}</option>'
             for value in answer_options)
+        band_figure = ""
+        if "bandVisualization" in files:
+            band_figure = f'''<figure><img src="{files['bandVisualization']['file']}" alt="Separated opacity bands"><figcaption><strong>Opacity bands</strong><br>blue outer | teal inner | amber shoulder | ivory core</figcaption></figure>'''
+        repair_caption = ("Band-preserving faceted repair" if
+                          metrics.get("repairMethod") == "faceted-opacity-bands"
+                          else "Conservatively repaired authored mask")
         cards.append(f'''<article class="pilot-question" data-key="{key}">
 <h2>{number}. {html.escape(logical[0])} · {html.escape(_topology_label(logical[1]))}</h2>
 <p class="muted">Owner corner assignment: <strong>{html.escape(owner_corner_text)}</strong> · selected authored source {html.escape(selected_row['provenance'])} from {len(unique_candidates)} distinct candidates · legal alignment {alignment['rotationCounterClockwise']}° CCW{' + polarity inversion' if alignment['inverted'] else ''} · conservative source score {selected_score:.3f}</p>
@@ -522,7 +653,8 @@ def render(review: Path, output: Path,
 <figure><img src="{files['authoredSource']['file']}" alt="Authored transition tile"><figcaption>Authored transition tile<br><strong>{html.escape(selected_row['provenance'])}</strong></figcaption></figure>
 <figure><img src="{files['rawMask']['file']}" alt="Raw extracted authored mask"><figcaption>Raw extracted mask</figcaption></figure>
 <figure><img src="{files['alignedMask']['file']}" alt="Legally aligned authored mask"><figcaption>Aligned authored mask<br><strong>{alignment['rotationCounterClockwise']}° CCW{' + inverted' if alignment['inverted'] else ''}</strong></figcaption></figure>
-<figure><img src="{files['repairedMask']['file']}" alt="Conservatively repaired authored mask"><figcaption><strong>Proposed repaired mask</strong></figcaption></figure>
+<figure><img src="{files['repairedMask']['file']}" alt="{html.escape(repair_caption)}"><figcaption><strong>{html.escape(repair_caption)}</strong></figcaption></figure>
+{band_figure}
 <figure><img src="{files['difference']['file']}" alt="Difference heatmap"><figcaption>Difference · green added · magenta removed</figcaption></figure>
 <figure><img src="{files['contractHeatmap']['file']}" alt="Coverage heatmap"><figcaption>Contract · green strong owner · navy support · orange feather</figcaption></figure>
 </div><div class="examples">{''.join(examples_html)}</div>
@@ -538,6 +670,7 @@ def render(review: Path, output: Path,
             "candidateCount": len(unique_candidates),
             "sourceScore": selected_score,
             "seed": seed,
+            "repairMethod": metrics.get("repairMethod", "single-field-authored"),
             "files": files,
             "metrics": metrics,
             "examples": examples,
@@ -547,13 +680,29 @@ def render(review: Path, output: Path,
     structural_count = sum(
         bool(question["metrics"]["structuralTargetMet"])
         for question in questions)
+    sand_only = bool(cases) and all(item[0] == "sand-grain" for item in cases)
+    warning_text = ("This is a three-case sand depth pilot, not runtime behavior. "
+        "Each proposal starts from the legally aligned authored silhouette, "
+        "keeps its strong faceted boundary pixel-exact, and reconstructs three "
+        "separate opacity edge bands. No global blur or geometric replacement is used."
+        if sand_only else
+        "This is a 12-case pilot, not runtime behavior. Every proposal starts "
+        "from a real pre-R42 authored JMV mask. The geometric R42 fallback is not used.")
+    summary_text = (f"Each of the {len(questions)} sand questions shows the authored "
+        "transition, extracted and aligned silhouette, separated opacity bands, "
+        "the band-preserving mask, a difference map, and three full material-pair outcomes."
+        if sand_only else
+        f"Each question shows the selected authored transition, its extracted mask, "
+        f"the legally aligned mask, the conservative repair, a difference map, a "
+        f"contract heatmap, and three full material-pair outcomes. {structural_count} "
+        f"of {len(questions)} proposals meet every 70/30 structural target.")
     document = f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Blend-mask {html.escape(checkpoint)} authored repair pilot</title>
 <style>
 :root{{color-scheme:light dark;--bg:light-dark(#fff,#181818);--fg:light-dark(#1a1c1f,#fff);--muted:light-dark(#5f6368,#bdc1c6);--panel:light-dark(#f4f5f6,#252629);--border:light-dark(#d7d9dc,#5f6368)}}
 *{{box-sizing:border-box}}body{{margin:0 auto;max-width:1780px;padding:18px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}}h1{{margin-top:0}}h2{{font-size:20px}}h3{{font-size:15px;margin:0}}.muted{{color:var(--muted)}}.warning{{padding:12px;border:1px solid #d29922;background:var(--panel)}}.toolbar,.answer-row{{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:12px 0}}button,select,input,textarea{{font:inherit}}button,select,input{{padding:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border)}}label{{display:grid;gap:4px;min-width:320px}}.pilot-question{{margin:30px 0;padding-top:22px;border-top:2px solid var(--border)}}.metric{{font:600 13px/1.4 Consolas,monospace}}figure{{margin:0}}figure img{{display:block;width:100%;height:auto;background:var(--panel)}}figcaption{{padding-top:5px;color:var(--muted)}}.evidence-grid{{display:grid;grid-template-columns:repeat(5,minmax(150px,256px));gap:12px;margin:12px 0 20px}}.examples{{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:14px}}.example{{padding:12px;background:var(--panel);border:1px solid var(--border)}}.example-grid{{display:grid;grid-template-columns:repeat(4,minmax(100px,256px));gap:8px}}.export-panel{{margin:14px 0}}#answer-export-text{{width:100%;min-height:160px;background:var(--panel);color:var(--fg);border:1px solid var(--border)}}@media(max-width:1100px){{.evidence-grid{{grid-template-columns:repeat(3,minmax(150px,256px))}}.example-grid{{grid-template-columns:repeat(2,minmax(100px,256px))}}}}@media(max-width:650px){{body{{padding:10px}}.evidence-grid,.example-grid{{grid-template-columns:1fr}}.examples{{grid-template-columns:1fr}}.answer-row label{{min-width:100%}}}}
 </style></head><body><h1>Blend-mask {html.escape(checkpoint)} · authored repair pilot</h1>
-<p class="warning"><strong>This is a 12-case pilot, not runtime behavior.</strong> Every proposal starts from a real pre-R42 authored JMV mask. The geometric R42 fallback is not used. Review whether the repair preserves the authored character while correcting noise, corner ownership and feathering.</p>
-<p class="muted">Each question shows the selected authored transition, its extracted mask, the legally aligned mask, the conservative repair, a difference map, a contract heatmap, and three full material-pair outcomes. {structural_count} of 12 proposals meet every 70/30 structural target; the other {12 - structural_count} deliberately remain under-corrected instead of exceeding the authored-change budget. “Still uncertain” is the safe default.</p>
+<p class="warning"><strong>{html.escape(warning_text)}</strong></p>
+<p class="muted">{html.escape(summary_text)} “Still uncertain” is the safe default.</p>
 <div class="toolbar"><button id="submit-answers">Submit answers to Codex</button><button id="copy-answers">Copy answers</button><button id="download-answers">Download answers.txt</button><button id="show-answers">Select review text</button><span id="status" class="muted"></span></div>
 <section class="export-panel"><strong>Saved review text</strong><textarea id="answer-export-text" readonly></textarea></section>
 <main>{''.join(cards)}</main><script>{script}</script></body></html>'''
@@ -565,6 +714,7 @@ def render(review: Path, output: Path,
         "checkpoint": checkpoint,
         "sourceReview": f"{review.parent.name}/{review.name}",
         "runtimeChanged": False,
+        "reviewedMethods": reviewed_methods,
         "questionCount": len(questions),
         "questions": questions,
     }
@@ -590,8 +740,8 @@ def validate_output(output: Path) -> dict:
     document = html_files[0].read_text(encoding="utf-8")
     errors = []
     questions = analysis.get("questions", [])
-    if analysis.get("questionCount") != 12 or len(questions) != 12:
-        errors.append("pilot must contain exactly 12 questions")
+    if not questions or analysis.get("questionCount") != len(questions):
+        errors.append("pilot question count is empty or inconsistent")
     if document.count('class="pilot-question"') != len(questions):
         errors.append("HTML question count differs from analysis")
     references = set(re.findall(r'<img src="([^"]+)"', document))
@@ -612,6 +762,16 @@ def validate_output(output: Path) -> dict:
             errors.append(f"{question.get('key')} exceeds strong change budget")
         if metrics.get("meanAbsoluteChange", 1.0) > 0.18:
             errors.append(f"{question.get('key')} exceeds alpha change budget")
+        if question.get("repairMethod") == "faceted-opacity-bands":
+            if not metrics.get("strongSilhouettePixelExact"):
+                errors.append(
+                    f"{question.get('key')} changed its faceted strong silhouette")
+            if metrics.get("distinctEdgeBands") != 3:
+                errors.append(
+                    f"{question.get('key')} does not expose three opacity bands")
+            if "bandVisualization" not in question.get("files", {}):
+                errors.append(
+                    f"{question.get('key')} lacks a band visualization")
         if len(question.get("examples", [])) != 3:
             errors.append(f"{question.get('key')} does not show three outcomes")
         file_entries = list(question.get("files", {}).values())
@@ -625,6 +785,30 @@ def validate_output(output: Path) -> dict:
             if hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]:
                 errors.append(f"file hash mismatch: {entry['file']}")
             verified_images += 1
+        try:
+            aligned = Image.open(
+                output / question["files"]["alignedMask"]["file"]).convert("L")
+            repaired = Image.open(
+                output / question["files"]["repairedMask"]["file"]).convert("L")
+            for example in question.get("examples", []):
+                example_files = example["files"]
+                owner = Image.open(
+                    output / example_files["owner"]["file"]).convert("RGB")
+                support = Image.open(
+                    output / example_files["support"]["file"]).convert("RGB")
+                expected_raw = Image.composite(owner, support, aligned)
+                expected_repaired = Image.composite(owner, support, repaired)
+                if (_image_hash(expected_raw) !=
+                        example_files["rawResult"]["pixelSha256"]):
+                    errors.append(
+                        f"{question.get('key')} raw outcome does not match its uniforms")
+                if (_image_hash(expected_repaired) !=
+                        example_files["repairedResult"]["pixelSha256"]):
+                    errors.append(
+                        f"{question.get('key')} repaired outcome does not match its uniforms")
+        except (KeyError, OSError) as exception:
+            errors.append(
+                f"{question.get('key')} outcome verification failed: {exception}")
         if f'data-key="{question.get("key")}"' not in document:
             errors.append(f"HTML missing key {question.get('key')}")
     for marker in ('class="answer form-select"', 'class="note form-control"',
@@ -643,6 +827,9 @@ def validate_output(output: Path) -> dict:
         "structuralTargetsMet": sum(
             bool(value["metrics"]["structuralTargetMet"])
             for value in questions),
+        "ownershipTargetsMet": sum(
+            bool(value["metrics"].get("ownershipTargetMet"))
+            for value in questions),
         "runtimeChanged": False,
     }
 
@@ -652,8 +839,14 @@ def main() -> int:
     parser.add_argument("--review", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--checkpoint", default="R44-AUTHORED-PILOT")
+    parser.add_argument("--sand-band-pilot", action="store_true",
+                        help="render only the three R44-rejected sand cases "
+                             "with the reviewed faceted opacity-band method")
     args = parser.parse_args()
-    print(json.dumps(render(args.review, args.output, args.checkpoint),
+    cases = SAND_PILOT_CASES if args.sand_band_pilot else PILOT_CASES
+    print(json.dumps(render(
+        args.review, args.output, args.checkpoint, cases,
+        reviewed_methods=args.sand_band_pilot),
                      indent=2, ensure_ascii=False))
     return 0
 
