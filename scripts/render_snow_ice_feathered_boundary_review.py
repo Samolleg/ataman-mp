@@ -371,6 +371,36 @@ def validate_output(output: Path) -> dict:
     }
 
 
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify R59 remains pending the two directional shoulder changes."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "feathered-boundary-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R59 decision keys do not exactly match the review")
+    for key, decision in decisions.items():
+        if (decision.get("answer") !=
+                "Needs stronger directional edge feather"):
+            raise ValueError(f"R59 must remain pending edge feather: {key}")
+        note = decision.get("note", "").casefold()
+        if ("ne is correct" not in note or
+                "nw" not in note or "north/top" not in note or
+                "se" not in note or "east/right" not in note):
+            raise ValueError(f"R59 directional feedback is missing: {key}")
+    if review.get("approvedRoutes"):
+        raise ValueError("R59 must not authorize a generation route")
+    return {
+        **rendered,
+        "approved": 0,
+        "rejected": len(decisions),
+        "pending": len(decisions),
+        "generationChanged": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--r57", required=True, type=Path)

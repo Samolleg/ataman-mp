@@ -34,6 +34,10 @@ from render_snow_ice_boundary_gradient_review import (
 )
 from render_snow_ice_feathered_boundary_review import (
     repair_owner_artifacts_with_feathered_boundary,
+    validate_review_decisions as validate_r59_review_decisions,
+)
+from render_snow_ice_directional_edge_review import (
+    preserve_authored_detail_on_support_adjacent_edges,
 )
 
 
@@ -55,6 +59,51 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_r59_keeps_ne_but_requests_two_stronger_edge_shoulders(
+            self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        review = Path(__file__).with_name(
+            "authored_mask_ice_feather_r59_decisions.json")
+        result = validate_r59_review_decisions(
+            root / "artifacts" / "modern-atlas-r59-ice-feathered-boundary" /
+            "questionnaire", review)
+
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(0, result["approved"])
+        self.assertEqual(2, result["rejected"])
+        self.assertEqual(2, result["pending"])
+        self.assertFalse(result["generationChanged"])
+
+    def test_directional_edge_feather_preserves_ne_and_authored_floor(
+            self) -> None:
+        source = np.full((128, 128), 176, dtype=np.uint8)
+        source[64:, :64] = 0
+        source[56:72, :58] = 64
+        rounded = source.copy()
+        rounded[:64, :64] = 246
+        rounded[:64, 64:] = 254
+        rounded[64:, 64:] = 246
+
+        repaired, audit = preserve_authored_detail_on_support_adjacent_edges(
+            Image.fromarray(source, "L"), Image.fromarray(rounded, "L"),
+            "inside-3of4-v1", shoulder_strength=0.90)
+        result = np.asarray(repaired)
+
+        np.testing.assert_array_equal(rounded[:64, 64:], result[:64, 64:])
+        np.testing.assert_array_equal(source[64:, :64], result[64:, :64])
+        self.assertLess(int(result[0, 32]), int(rounded[0, 32]))
+        self.assertLess(int(result[96, -1]), int(rounded[96, -1]))
+        self.assertEqual(int(rounded[0, 0]), int(result[0, 0]))
+        self.assertEqual(int(rounded[-1, -1]), int(result[-1, -1]))
+        self.assertTrue(np.all(result >= source))
+        self.assertEqual(0, audit["changedNEPixels"])
+        self.assertEqual(0, audit["changedSupportQuadrantPixels"])
+        self.assertEqual(0, audit["changedOwnerCornerPatchPixels"])
+        self.assertGreater(audit["changedNWNorthShoulderPixels"], 0)
+        self.assertGreater(audit["changedSEEastShoulderPixels"], 0)
+        self.assertEqual(0, audit["pixelsBelowAuthoredSource"])
+        self.assertTrue(audit["preservesAuthoredContinuousAlpha"])
+
     def test_r58_rejects_square_cutoff_for_rounded_feather(self) -> None:
         root = Path(__file__).resolve().parent.parent
         review = Path(__file__).with_name(

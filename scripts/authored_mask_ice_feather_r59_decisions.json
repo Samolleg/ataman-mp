@@ -1,0 +1,24 @@
+{
+  "schema": "ei-ice-feathered-boundary-decisions-v1",
+  "checkpoint": "R59-ICE-FEATHERED-BOUNDARY",
+  "authority": "explicit-user-review",
+  "status": "rejected-direction",
+  "decisions": {
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Needs stronger directional edge feather",
+      "note": "NE is correct. The NW part of the north/top edge and the SE part of the east/right edge still need more feathering. Preserve NE and the authored contour."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Needs stronger directional edge feather",
+      "note": "NE is correct. The NW part of the north/top edge and the SE part of the east/right edge still need more feathering. Preserve NE and the authored contour."
+    }
+  },
+  "approvedRoutes": [],
+  "pendingRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "acceptedRegion": "NE owner quadrant and its R59 feather",
+  "requestedRepair": "Retain R59 in NE. On the support-adjacent owner shoulders only, preserve more of the authored continuous-alpha detail along the NW north edge and SE east edge without lowering any pixel below the authored mask.",
+  "generationPolicy": "Do not apply either R59 candidate. Both Ice inside routes remain pending directional edge-feather review."
+}
