@@ -14,7 +14,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 from render_authored_mask_repair_pilot import (
     CORNER_NAMES,
@@ -74,6 +74,59 @@ def contract_violation(metrics: dict) -> float:
     return round(violation, 6)
 
 
+def _force_exact_topology_corners(mask: Image.Image,
+                                  topology: str) -> Image.Image:
+    values = np.asarray(mask.convert("L"), dtype=np.uint8).copy()
+    points = ((0, 0), (0, values.shape[1] - 1),
+              (values.shape[0] - 1, values.shape[1] - 1),
+              (values.shape[0] - 1, 0))
+    for point, owned in zip(points, expected_owner_corners(topology)):
+        values[point] = 255 if owned else 0
+    return Image.fromarray(values, "L")
+
+
+def orient_reconstructed_mask(
+        mask: Image.Image, aligned_reference: Image.Image,
+        topology: str) -> tuple[Image.Image, dict]:
+    """Normalize a reconstructed field to the authored owner convention."""
+    reference = aligned_reference.convert("L")
+    reconstructed = mask.convert("L")
+    if reconstructed.size != reference.size:
+        raise ValueError("reconstructed and authored masks differ in size")
+    reference_values = np.asarray(reference, dtype=np.float32) / 255.0
+    reference_strong = reference_values >= 0.5
+    candidates = []
+    for turns in range(4):
+        rotated = reconstructed.rotate(90 * turns)
+        for inverted in (False, True):
+            candidate = ImageOps.invert(rotated) if inverted else rotated
+            candidate = _force_exact_topology_corners(candidate, topology)
+            values = np.asarray(candidate, dtype=np.float32) / 255.0
+            metrics = mask_metrics(candidate, candidate, topology)
+            candidates.append({
+                "image": candidate,
+                "metrics": metrics,
+                "rotationCounterClockwise": turns * 90,
+                "inverted": inverted,
+                "contractViolation": contract_violation(metrics),
+                "referenceStrongDisagreement": round(float(np.not_equal(
+                    values >= 0.5, reference_strong).mean()), 6),
+                "referenceMeanAbsoluteDifference": round(float(np.abs(
+                    values - reference_values).mean()), 6),
+            })
+    chosen = min(candidates, key=lambda item: (
+        item["referenceStrongDisagreement"],
+        item["referenceMeanAbsoluteDifference"],
+        not item["metrics"]["structuralTargetMet"],
+        item["contractViolation"],
+        item["inverted"], item["rotationCounterClockwise"]))
+    decision = {key: value for key, value in chosen.items()
+                if key not in ("image", "metrics")}
+    decision["structuralTargetMet"] = bool(
+        chosen["metrics"]["structuralTargetMet"])
+    return chosen["image"], decision
+
+
 def choose_route_candidate(candidates: list[dict]) -> dict:
     if not candidates:
         raise ValueError("route has no authored candidates")
@@ -87,6 +140,33 @@ def choose_route_candidate(candidates: list[dict]) -> dict:
         not item["contractMetrics"]["structuralTargetMet"],
         item["contractViolation"], item["sourceQuality"],
         item["provenance"]))
+
+
+def choose_shared_route_pair(
+        r44_candidates: list[dict],
+        detailed_candidates: list[dict]) -> tuple[dict, dict]:
+    """Select both methods from one authored provenance."""
+    r44_by_source = {item["provenance"]: item for item in r44_candidates}
+    detailed_by_source = {
+        item["provenance"]: item for item in detailed_candidates}
+    shared = sorted(set(r44_by_source) & set(detailed_by_source))
+    if not shared:
+        raise ValueError("routes have no shared authored source")
+    pairs = []
+    for provenance in shared:
+        r44 = choose_route_candidate([r44_by_source[provenance]])
+        detailed = choose_route_candidate([detailed_by_source[provenance]])
+        eligible_count = sum((
+            bool(r44["contractMetrics"]["structuralTargetMet"]),
+            bool(detailed["contractMetrics"]["structuralTargetMet"])))
+        pairs.append((
+            -eligible_count,
+            r44["contractViolation"] + detailed["contractViolation"],
+            max(r44["contractViolation"], detailed["contractViolation"]),
+            r44["sourceQuality"] + detailed["sourceQuality"],
+            provenance, r44, detailed))
+    selected = min(pairs, key=lambda item: item[:5])
+    return selected[5], selected[6]
 
 
 def _representatives(review: Path, rows: list[dict[str, str]],
@@ -152,9 +232,15 @@ def _build_candidates(review: Path, rows: list[dict[str, str]],
                    16)
         r44_mask, _ = repair_authored_mask(aligned, case.topology, seed)
         r44_metrics = mask_metrics(aligned, r44_mask, case.topology)
-        detail_mask, detail_process = reconstruct_soft_ownership(
+        reconstructed, detail_process = reconstruct_soft_ownership(
             authored_aligned, expected_owner_corners(case.topology),
             remove_bounded_holes=False)
+        detail_mask, ownership_orientation = orient_reconstructed_mask(
+            reconstructed, aligned, case.topology)
+        detail_process = {
+            **detail_process,
+            "ownershipOrientation": ownership_orientation,
+        }
         detail_metrics = mask_metrics(
             detail_mask, detail_mask, case.topology)
         common = {
@@ -163,16 +249,18 @@ def _build_candidates(review: Path, rows: list[dict[str, str]],
                 aligned, case.topology), 6),
             "alignment": alignment,
             "_source": authored,
-            "_alignedSource": authored_aligned,
         }
         r44.append({
             **common, "contractMetrics": r44_metrics,
             "processMetrics": {"method": "R44 repaired authored mask"},
+            "_alignedSource": authored_aligned,
             "_mask": r44_mask,
         })
         detailed.append({
             **common, "contractMetrics": detail_metrics,
             "processMetrics": detail_process,
+            "_alignedSource": authored_aligned.rotate(
+                ownership_orientation["rotationCounterClockwise"]),
             "_mask": detail_mask,
         })
     if not r44 or not detailed:
@@ -287,7 +375,7 @@ def _decision_options(r44_eligible: bool, detail_eligible: bool) -> list[str]:
 
 
 def render(review: Path, output: Path,
-           checkpoint: str = "R49-SNOW-ICE-ROUTES") -> dict:
+           checkpoint: str = "R51-SNOW-ICE-ROUTES") -> dict:
     review = review.resolve()
     output = output.resolve()
     if output.exists() and any(output.iterdir()):
@@ -306,8 +394,8 @@ def render(review: Path, output: Path,
     cards = []
     for number, case in enumerate(REVIEW_CASES, 1):
         r44_candidates, detail_candidates = _build_candidates(review, rows, case)
-        r44 = choose_route_candidate(r44_candidates)
-        detailed = choose_route_candidate(detail_candidates)
+        r44, detailed = choose_shared_route_pair(
+            r44_candidates, detail_candidates)
         r44_summary = _contract_summary(r44["contractMetrics"])
         detail_summary = _contract_summary(detailed["contractMetrics"])
         prefix = f"{number:02d}-{_slug(case.family)}-{_slug(case.topology)}"
@@ -354,12 +442,15 @@ def render(review: Path, output: Path,
             "candidateAudit": candidate_audit,
             "outcomes": outcomes,
         })
-        same_source = r44["provenance"] == detailed["provenance"]
-        source_note = ("Both routes selected the same authored source." if same_source
-                       else "Routes selected different authored sources; each is the best candidate for its own contract result.")
+        source_note = "Both routes use the same aligned authored source."
+        orientation = detailed["processMetrics"]["ownershipOrientation"]
+        orientation_note = (
+            f"Detailed ownership normalized {orientation['rotationCounterClockwise']}° CCW"
+            f"{' + polarity inversion' if orientation['inverted'] else ''}"
+            f" · authored-mask disagreement {orientation['referenceStrongDisagreement']:.1%}")
         cards.append(f'''<article class="pilot-question" data-key="{html.escape(key)}">
 <h2>{number}. {html.escape(case.family)} · {html.escape(case.topology)}</h2>
-<p class="muted">{html.escape(source_note)}</p>
+<p class="muted">{html.escape(source_note)} {html.escape(orientation_note)}</p>
 <div class="route-summary"><section><h3>R44 repaired authored route {_badge(r44_summary)}</h3><p class="metric">{html.escape(r44['provenance'])} · affected min {r44_summary['affectedMinimum']:.1%} · protected max {r44_summary['protectedMaximum']:.1%} · corner patches {'PASS' if r44_summary['cornerPatchesPass'] else 'FAIL'}</p></section>
 <section><h3>Detailed sand route {_badge(detail_summary)}</h3><p class="metric">{html.escape(detailed['provenance'])} · affected min {detail_summary['affectedMinimum']:.1%} · protected max {detail_summary['protectedMaximum']:.1%} · corner patches {'PASS' if detail_summary['cornerPatchesPass'] else 'FAIL'}</p></section></div>
 <div class="evidence-grid">
@@ -377,13 +468,13 @@ def render(review: Path, output: Path,
     document = f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Blend-mask {html.escape(checkpoint)} Snow/Ice route comparison</title>
 <style>:root{{color-scheme:light dark;--bg:light-dark(#fff,#181818);--fg:light-dark(#1a1c1f,#fff);--muted:light-dark(#5f6368,#bdc1c6);--panel:light-dark(#f4f5f6,#252629);--border:light-dark(#d7d9dc,#5f6368);--pass:#2da44e;--fail:#d1242f}}*{{box-sizing:border-box}}body{{margin:0 auto;max-width:1780px;padding:18px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}}h1{{margin-top:0}}h2{{font-size:20px}}h3{{font-size:15px}}.muted{{color:var(--muted)}}.notice{{padding:12px;border:1px solid #5b8def;background:var(--panel)}}.warning-text{{color:#e3a008;font-weight:700}}.toolbar,.answer-row{{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:12px 0}}button,select,input,textarea{{font:inherit}}button,select,input{{padding:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border)}}label{{display:grid;gap:4px;min-width:320px}}.pilot-question{{margin:30px 0;padding-top:22px;border-top:2px solid var(--border)}}.metric{{font:600 13px/1.4 Consolas,monospace}}.badge{{padding:2px 6px;border-radius:4px;color:#fff;font:700 11px/1.2 system-ui}}.badge.pass{{background:var(--pass)}}.badge.fail{{background:var(--fail)}}.route-summary{{display:grid;grid-template-columns:repeat(2,minmax(280px,1fr));gap:12px}}.route-summary section,.example{{padding:12px;background:var(--panel);border:1px solid var(--border)}}figure{{margin:0}}figure img{{display:block;width:100%;height:auto;background:var(--panel)}}figcaption{{padding-top:5px;color:var(--muted)}}.evidence-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,256px));gap:12px;margin:12px 0 20px}}.examples{{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:14px}}.example-grid{{display:grid;grid-template-columns:repeat(4,minmax(100px,256px));gap:8px}}#answer-export-text{{width:100%;min-height:150px;background:var(--panel);color:var(--fg);border:1px solid var(--border)}}@media(max-width:650px){{body{{padding:10px}}.route-summary,.evidence-grid,.example-grid,.examples{{grid-template-columns:1fr}}.answer-row label{{min-width:100%}}}}</style></head><body>
 <h1>Blend-mask {html.escape(checkpoint)} · Snow/Ice route comparison</h1>
-<p class="notice"><strong>Review-only; runtime is unchanged.</strong> R44 and the R47 sand-detail method are evaluated independently against every Snow and Ice topology. Green candidates pass the complete 70/30 quarter and corner-patch gate. Red candidates are diagnostic only and cannot be selected as a preferred route. Outcome pairs without comparable effective detail are explicitly marked; judge mask shape there, not texture fidelity.</p>
+<p class="notice"><strong>Review-only; runtime is unchanged.</strong> Each question applies R44 and the R47 sand-detail method to the exact same aligned authored source. Both outputs are normalized to the same owner-corner convention through legal quarter-turns and polarity selection before comparison. Green candidates pass the complete 70/30 quarter and corner-patch gate. Red candidates are diagnostic only and cannot be selected as a preferred route. Outcome pairs without comparable effective detail are explicitly marked; judge mask shape there, not texture fidelity.</p>
 <div class="toolbar"><button id="submit-answers">Submit answers to Codex</button><button id="copy-answers">Copy answers</button><button id="download-answers">Download answers.txt</button><button id="show-answers">Select review text</button><span id="status" class="muted"></span></div>
 <section><strong>Saved review text</strong><textarea id="answer-export-text" readonly></textarea></section><main>{''.join(cards)}</main><script>{script}</script></body></html>'''
     html_path = output / f"blend-mask-{checkpoint.lower()}-questionnaire.html"
     html_path.write_text(document, encoding="utf-8")
     analysis = {
-        "schema": "ei-snow-ice-route-comparison-v1",
+        "schema": "ei-snow-ice-route-comparison-v2",
         "checkpoint": checkpoint,
         "sourceReview": "modern-atlas-r41-mask-review/blend-mask-review",
         "runtimeChanged": False,
@@ -449,6 +540,10 @@ def validate_output(output: Path) -> dict:
                              else "Prefer detailed sand route")
                 if forbidden in question["allowedDecisions"]:
                     errors.append(f"ineligible {route} is selectable")
+        if (question["routes"]["r44"]["provenance"] !=
+                question["routes"]["detailed"]["provenance"]):
+            errors.append(
+                f"routes use unrelated sources in {question['key']}")
         for outcome in question["outcomes"]:
             entries.extend(outcome["files"].values())
             mismatched_outcomes += not outcome["effectiveDetailCompatible"]
@@ -500,7 +595,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--checkpoint", default="R49-SNOW-ICE-ROUTES")
+    parser.add_argument("--checkpoint", default="R51-SNOW-ICE-ROUTES")
     args = parser.parse_args()
     print(json.dumps(render(args.review, args.output, args.checkpoint),
                      indent=2, ensure_ascii=False))

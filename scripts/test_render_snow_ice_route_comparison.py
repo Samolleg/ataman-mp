@@ -5,10 +5,15 @@ from __future__ import annotations
 
 import unittest
 
+import numpy as np
+from PIL import Image, ImageOps
+
 from render_snow_ice_route_comparison import (
     REVIEW_CASES,
     choose_route_candidate,
+    choose_shared_route_pair,
     contract_violation,
+    orient_reconstructed_mask,
 )
 
 
@@ -30,6 +35,23 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_reconstructed_mask_is_rotated_and_inverted_to_authored_owner(self) -> None:
+        """Reproduce R49's opposite-polarity Snow route comparison."""
+        values = np.zeros((64, 64), dtype=np.uint8)
+        values[:32, :32] = 255
+        values[7:17, 22:32] = 96
+        values[22:32, 28:38] = 180
+        reference = Image.fromarray(values, "L")
+        reconstructed = ImageOps.invert(reference.rotate(90))
+
+        oriented, decision = orient_reconstructed_mask(
+            reconstructed, reference, "outer-1of4-v1")
+
+        self.assertTrue(np.array_equal(
+            np.asarray(reference), np.asarray(oriented)))
+        self.assertEqual(270, decision["rotationCounterClockwise"])
+        self.assertTrue(decision["inverted"])
+
     def test_case_set_covers_every_snow_and_ice_topology_once(self) -> None:
         self.assertEqual(14, len(REVIEW_CASES))
         for family in ("snow-clumps", "ice-fracture"):
@@ -75,6 +97,26 @@ class SnowIceRouteComparisonTests(unittest.TestCase):
         self.assertEqual("Fixture:2", chosen["provenance"])
         self.assertFalse(chosen["contractMetrics"]["structuralTargetMet"])
         self.assertGreater(chosen["contractViolation"], 0.0)
+
+    def test_two_routes_must_use_the_same_authored_source(self) -> None:
+        r44 = [
+            {"sourceQuality": 0.1, "provenance": "Fixture:A",
+             "contractMetrics": metrics(affected=0.80, protected=0.20)},
+            {"sourceQuality": 0.2, "provenance": "Fixture:B",
+             "contractMetrics": metrics(affected=0.68, protected=0.20)},
+        ]
+        detailed = [
+            {"sourceQuality": 0.1, "provenance": "Fixture:A",
+             "contractMetrics": metrics(affected=0.68, protected=0.20)},
+            {"sourceQuality": 0.2, "provenance": "Fixture:B",
+             "contractMetrics": metrics(affected=0.80, protected=0.20)},
+        ]
+
+        selected_r44, selected_detailed = choose_shared_route_pair(
+            r44, detailed)
+
+        self.assertEqual(selected_r44["provenance"],
+                         selected_detailed["provenance"])
 
 
 if __name__ == "__main__":
