@@ -127,14 +127,32 @@ def _palette(features: np.ndarray, selected: np.ndarray,
 def _palette_ownership(features: np.ndarray, owner: np.ndarray,
                        support: np.ndarray) -> np.ndarray:
     flat = features.reshape(-1, features.shape[-1])
-    owner_distance = np.min(np.sum(
-        (flat[:, None, :] - owner[None, :, :]) ** 2, axis=2), axis=1)
-    support_distance = np.min(np.sum(
-        (flat[:, None, :] - support[None, :, :]) ** 2, axis=2), axis=1)
+    owner_distances = np.sum(
+        (flat[:, None, :] - owner[None, :, :]) ** 2, axis=2)
+    support_distances = np.sum(
+        (flat[:, None, :] - support[None, :, :]) ** 2, axis=2)
+    owner_indices = np.argmin(owner_distances, axis=1)
+    support_indices = np.argmin(support_distances, axis=1)
+    owner_distance = owner_distances[
+        np.arange(len(flat)), owner_indices]
+    support_distance = support_distances[
+        np.arange(len(flat)), support_indices]
     denominator = owner_distance + support_distance
-    probability = np.divide(
+    distance_probability = np.divide(
         support_distance, denominator,
         out=np.full_like(denominator, 0.5), where=denominator > 1e-8)
+    # Recover opacity along the nearest authored owner/support color line. The
+    # distance ratio alone behaves like a classifier and crushes intermediate
+    # blend strength; projection retains the continuous merge field.
+    owner_color = owner[owner_indices]
+    support_color = support[support_indices]
+    direction = owner_color - support_color
+    line_length = np.sum(direction * direction, axis=1)
+    projected = np.divide(
+        np.sum((flat - support_color) * direction, axis=1), line_length,
+        out=distance_probability.copy(), where=line_length > 1e-8)
+    probability = np.clip(
+        0.78 * projected + 0.22 * distance_probability, 0.0, 1.0)
     return probability.reshape(features.shape[:2])
 
 
@@ -152,9 +170,68 @@ def _bilinear_corner_prior(height: int, width: int,
     return result
 
 
+def _fill_bounded_support_holes(values: np.ndarray) -> tuple[np.ndarray, dict]:
+    """Fill only support islands fully enclosed by owner at the 50% contour."""
+    support = values < 0.5
+    height, width = support.shape
+    visited = np.zeros_like(support, dtype=bool)
+    result = values.copy()
+    filled_components = 0
+    filled_pixels = 0
+    for start_y in range(height):
+        for start_x in range(width):
+            if visited[start_y, start_x] or not support[start_y, start_x]:
+                continue
+            component = []
+            pending = [(start_y, start_x)]
+            visited[start_y, start_x] = True
+            touches_edge = False
+            boundary_values = []
+            while pending:
+                y, x = pending.pop()
+                component.append((y, x))
+                touches_edge = touches_edge or (
+                    y == 0 or x == 0 or y + 1 == height or x + 1 == width)
+                for next_y, next_x in ((y - 1, x), (y + 1, x),
+                                       (y, x - 1), (y, x + 1)):
+                    if not (0 <= next_y < height and 0 <= next_x < width):
+                        continue
+                    if support[next_y, next_x]:
+                        if not visited[next_y, next_x]:
+                            visited[next_y, next_x] = True
+                            pending.append((next_y, next_x))
+                    else:
+                        boundary_values.append(values[next_y, next_x])
+            if touches_edge or len(component) < 4 or not boundary_values:
+                continue
+            # A bounded component is a texture pit inside an otherwise solid
+            # owner region, not a translucent blend feature. Restore it to the
+            # high-owner plateau represented by its surrounding field.
+            fill = 1.0
+            for y, x in component:
+                result[y, x] = max(result[y, x], fill)
+                for offset_y in range(-3, 4):
+                    for offset_x in range(-3, 4):
+                        if abs(offset_x) + abs(offset_y) > 3:
+                            continue
+                        next_y, next_x = y + offset_y, x + offset_x
+                        if (0 <= next_y < height and 0 <= next_x < width and
+                                not support[next_y, next_x]):
+                            result[next_y, next_x] = max(
+                                result[next_y, next_x], fill)
+            filled_components += 1
+            filled_pixels += len(component)
+    return result, {
+        "components": filled_components,
+        "pixels": filled_pixels,
+        "rule": "only-50pct-support-components-not-connected-to-an-edge",
+    }
+
+
 def reconstruct_soft_ownership(
         authored_transition: Image.Image,
-        owner_corners: tuple[bool, bool, bool, bool]) -> tuple[Image.Image, dict]:
+        owner_corners: tuple[bool, bool, bool, bool],
+        remove_bounded_holes: bool = False) -> tuple[Image.Image, dict]:
     """Recover a continuous ownership field from transition-local evidence."""
     image = authored_transition.convert("RGB")
     width, height = image.size
@@ -168,7 +245,7 @@ def reconstruct_soft_ownership(
         target |= _corner_training_mask(height, width, corner, patch)
 
     estimates = []
-    for radius, weight in ((0.0, 0.12), (2.0, 0.56), (6.0, 0.32)):
+    for radius, weight in ((0.0, 0.20), (2.0, 0.55), (6.0, 0.25)):
         rgb = (np.asarray(image, dtype=np.float32) / 255.0 if radius == 0.0
                else _blur_rgb(image, radius))
         features = _rgb_features(rgb)
@@ -177,7 +254,10 @@ def reconstruct_soft_ownership(
         estimates.append((_palette_ownership(
             features, owner_palette, support_palette), weight))
     ownership = sum(value * weight for value, weight in estimates)
-    ownership = _blur_gray(ownership, max(1.5, min(width, height) / 40.0))
+    # Preserve the authored medium-frequency brush field. Only a sub-pixel
+    # antialiasing pass is allowed here; the rejected R46 implementation used
+    # a tile-scaled Gaussian that flattened lobes and internal opacity changes.
+    ownership = _blur_gray(ownership, 0.65)
 
     # The topology prior resolves only genuinely ambiguous colors. It cannot
     # replace the transition-local painterly field or create a binary lobe.
@@ -186,6 +266,23 @@ def reconstruct_soft_ownership(
     prior = _bilinear_corner_prior(height, width, owner_corners)
     ownership = ownership * (1.0 - prior_weight) + prior * prior_weight
     ownership = np.clip(ownership, 0.0, 1.0)
+    hole_fill = {"components": 0, "pixels": 0, "rule": "disabled"}
+    if remove_bounded_holes:
+        # Texture pits inside a confidently solid owner plateau are not alpha
+        # features. Restore that plateau before considering bounded islands;
+        # the transition band remains untouched because its coarse ownership
+        # is below this confidence threshold.
+        plateau_radius = max(8.0, min(width, height) / 20.0)
+        plateau_features = _rgb_features(_blur_rgb(image, plateau_radius))
+        plateau_owner = _palette(plateau_features, owner_training)
+        plateau_support = _palette(plateau_features, support_training)
+        plateau = _palette_ownership(
+            plateau_features, plateau_owner, plateau_support)
+        solid_owner = plateau >= 0.78
+        ownership[solid_owner] = 1.0
+        ownership, hole_fill = _fill_bounded_support_holes(ownership)
+        hole_fill["solidOwnerPlateauPixels"] = int(solid_owner.sum())
+        hole_fill["plateauRadiusPixels"] = round(plateau_radius, 3)
 
     points = ((0, 0), (0, width - 1),
               (height - 1, width - 1), (height - 1, 0))
@@ -197,7 +294,11 @@ def reconstruct_soft_ownership(
     metrics = {
         "method": "transition-local-multiscale-palettes",
         "usesExternalUniformPixels": False,
-        "usesBinaryCleanup": False,
+        "usesGlobalBinaryCleanup": False,
+        "usesTargetedFalseHoleCleanup": remove_bounded_holes,
+        "usesBroadGaussianSoftening": False,
+        "detailPreservationMethod": "multiscale-field-with-subpixel-antialiasing",
+        "boundedHoleSuppression": hole_fill,
         "trainingPatchPixels": patch,
         "softPixelFraction": round(float(np.logical_and(
             values > 25, values < 230).mean()), 4),
@@ -309,14 +410,14 @@ def _outcomes(review: Path, rows: list[dict[str, str]], mask: Image.Image,
 <p class="muted">{html.escape(row['support_scenario'])}</p><div class="example-grid">
 <figure><img src="{files['owner']['file']}" alt="Requested uniform"><figcaption>Requested uniform</figcaption></figure>
 <figure><img src="{files['legacyResult']['file']}" alt="Rejected extracted-mask outcome"><figcaption>Rejected extracted-mask outcome</figcaption></figure>
-<figure><img src="{files['softResult']['file']}" alt="Soft source-reconstructed outcome"><figcaption><strong>Soft source-reconstructed outcome</strong></figcaption></figure>
+<figure><img src="{files['softResult']['file']}" alt="Detailed opacity-matte outcome"><figcaption><strong>Detailed opacity-matte outcome</strong></figcaption></figure>
 <figure><img src="{files['support']['file']}" alt="Support uniform"><figcaption>Support uniform</figcaption></figure>
 </div></section>''')
     return entries, "".join(sections)
 
 
 def render(review: Path, output: Path,
-           checkpoint: str = "R46-SOFT-SOURCE") -> dict:
+           checkpoint: str = "R47-DETAIL-MATTE") -> dict:
     review = review.resolve()
     output = output.resolve()
     if output.exists() and any(output.iterdir()):
@@ -355,7 +456,7 @@ def render(review: Path, output: Path,
     edge_source_aligned = edge_source.rotate(
         edge_alignment["rotationCounterClockwise"])
     edge_soft, edge_metrics = reconstruct_soft_ownership(
-        edge_source_aligned, EDGE)
+        edge_source_aligned, EDGE, remove_bounded_holes=True)
     edge_metrics["legacyBoundedSupportHoles"] = _bounded_support_holes(edge_legacy)
     edge_metrics["softBoundedSupportHoles"] = _bounded_support_holes(edge_soft)
 
@@ -406,57 +507,57 @@ def render(review: Path, output: Path,
     options = "".join(f'<option value="{html.escape(value)}">{html.escape(value)}</option>'
                       for value in (
                           "Still uncertain",
-                          "Approve soft source reconstruction",
+                          "Approve detailed opacity matte",
                           "Too soft",
                           "Not soft enough",
                           "Wrong ownership shape",
                           "Unwanted holes remain",
                           "Reject this reconstruction"))
-    cards = f'''<article class="pilot-question" data-key="soft-source-sand-grain-outer-inside-v1">
+    cards = f'''<article class="pilot-question" data-key="detail-matte-sand-grain-outer-inside-v1">
 <h2>1. sand-grain · outer 1 of 4 v1 + exact inside 3 of 4 v2 inverse</h2>
 <p class="metric">{outer_metrics['softPixelFraction']:.1%} intermediate-alpha pixels · {outer_metrics['distinctAlphaValues']} alpha values · no binary cleanup · inside derived as rotate 90° CCW then invert</p>
 <div class="evidence-grid">
 <figure><img src="{outer_files['source']['file']}" alt="Authored transition"><figcaption>Authored transition · Zone7:130</figcaption></figure>
 <figure><img src="{outer_files['alignedSource']['file']}" alt="Aligned authored transition"><figcaption>Aligned authored transition used for reconstruction</figcaption></figure>
 <figure><img src="{outer_files['legacyOuter']['file']}" alt="Rejected legacy extraction"><figcaption>Rejected legacy extraction</figcaption></figure>
-<figure><img src="{outer_files['softOuter']['file']}" alt="Soft outer reconstruction"><figcaption><strong>Soft outer reconstruction</strong></figcaption></figure>
+<figure><img src="{outer_files['softOuter']['file']}" alt="Detailed outer opacity matte"><figcaption><strong>Detailed outer opacity matte</strong></figcaption></figure>
 <figure><img src="{outer_files['outerHeatmap']['file']}" alt="Continuous-alpha heatmap"><figcaption>Continuous alpha · navy support · teal/amber transition · ivory owner</figcaption></figure>
 <figure><img src="{outer_files['difference']['file']}" alt="Legacy to soft difference"><figcaption>Legacy → soft difference</figcaption></figure>
 <figure><img src="{outer_files['legacyInside']['file']}" alt="Rejected binary inside inverse"><figcaption>Rejected binary inside inverse</figcaption></figure>
-<figure><img src="{outer_files['softInside']['file']}" alt="Exact soft inside inverse"><figcaption><strong>Exact soft inside inverse</strong></figcaption></figure>
+<figure><img src="{outer_files['softInside']['file']}" alt="Exact detailed inside inverse"><figcaption><strong>Exact detailed inside inverse</strong></figcaption></figure>
 </div><h3>Outer outcomes</h3><div class="examples">{outer_outcomes_html}</div>
 <h3>Inside outcomes · same mask, exact transformed polarity</h3><div class="examples">{inside_outcomes_html}</div>
 <div class="answer-row"><label>Decision<select class="answer form-select">{options}</select></label><label>Note<input class="note form-control" type="text" placeholder="Optional reconstruction detail"></label></div></article>
-<article class="pilot-question" data-key="soft-source-sand-grain-edge-v2">
+<article class="pilot-question" data-key="detail-matte-sand-grain-edge-v2">
 <h2>2. sand-grain · edge 2 of 4 v2</h2>
 <p class="metric">{edge_metrics['softPixelFraction']:.1%} intermediate-alpha pixels · {edge_metrics['distinctAlphaValues']} alpha values · bounded support holes ≥4 px: legacy {edge_metrics['legacyBoundedSupportHoles']['countAtLeast4Pixels']} → soft {edge_metrics['softBoundedSupportHoles']['countAtLeast4Pixels']}</p>
 <div class="evidence-grid">
 <figure><img src="{edge_files['source']['file']}" alt="Authored transition"><figcaption>Authored transition · Zone7:232</figcaption></figure>
 <figure><img src="{edge_files['alignedSource']['file']}" alt="Aligned authored transition"><figcaption>Aligned authored transition used for reconstruction</figcaption></figure>
 <figure><img src="{edge_files['legacy']['file']}" alt="Rejected legacy extraction"><figcaption>Rejected extraction · hard islands and false holes</figcaption></figure>
-<figure><img src="{edge_files['soft']['file']}" alt="Soft edge reconstruction"><figcaption><strong>Soft edge reconstruction</strong></figcaption></figure>
+<figure><img src="{edge_files['soft']['file']}" alt="Detailed edge opacity matte"><figcaption><strong>Detailed edge opacity matte</strong></figcaption></figure>
 <figure><img src="{edge_files['heatmap']['file']}" alt="Continuous-alpha heatmap"><figcaption>Continuous-alpha heatmap</figcaption></figure>
 <figure><img src="{edge_files['difference']['file']}" alt="Legacy to soft difference"><figcaption>Legacy → soft difference</figcaption></figure>
 </div><div class="examples">{edge_outcomes_html}</div>
 <div class="answer-row"><label>Decision<select class="answer form-select">{options}</select></label><label>Note<input class="note form-control" type="text" placeholder="Optional reconstruction detail"></label></div></article>'''
 
     script = interaction_script(checkpoint)
-    document = f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Blend-mask {html.escape(checkpoint)} soft source pilot</title>
+    document = f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Blend-mask {html.escape(checkpoint)} detailed opacity-matte pilot</title>
 <style>:root{{color-scheme:light dark;--bg:light-dark(#fff,#181818);--fg:light-dark(#1a1c1f,#fff);--muted:light-dark(#5f6368,#bdc1c6);--panel:light-dark(#f4f5f6,#252629);--border:light-dark(#d7d9dc,#5f6368)}}*{{box-sizing:border-box}}body{{margin:0 auto;max-width:1780px;padding:18px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}}h1{{margin-top:0}}h2{{font-size:20px}}h3{{font-size:15px}}.muted{{color:var(--muted)}}.warning{{padding:12px;border:1px solid #d29922;background:var(--panel)}}.toolbar,.answer-row{{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:12px 0}}button,select,input,textarea{{font:inherit}}button,select,input{{padding:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border)}}label{{display:grid;gap:4px;min-width:320px}}.pilot-question{{margin:30px 0;padding-top:22px;border-top:2px solid var(--border)}}.metric{{font:600 13px/1.4 Consolas,monospace}}figure{{margin:0}}figure img{{display:block;width:100%;height:auto;background:var(--panel)}}figcaption{{padding-top:5px;color:var(--muted)}}.evidence-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,256px));gap:12px;margin:12px 0 20px}}.examples{{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:14px}}.example{{padding:12px;background:var(--panel);border:1px solid var(--border)}}.example-grid{{display:grid;grid-template-columns:repeat(4,minmax(100px,256px));gap:8px}}#answer-export-text{{width:100%;min-height:150px;background:var(--panel);color:var(--fg);border:1px solid var(--border)}}@media(max-width:650px){{body{{padding:10px}}.evidence-grid,.example-grid,.examples{{grid-template-columns:1fr}}.answer-row label{{min-width:100%}}}}</style></head><body>
-<h1>Blend-mask {html.escape(checkpoint)} · soft authored-source reconstruction</h1>
-<p class="warning"><strong>R45 is rejected and is not runtime behavior.</strong> This two-question replacement reconstructs continuous ownership directly from the authored transition’s full-strength corner regimes. It does not compare transition pixels with unrelated uniform pixels, sharpen the field, or run binary component cleanup.</p>
+<h1>Blend-mask {html.escape(checkpoint)} · detailed authored opacity matte</h1>
+<p class="warning"><strong>R45 and R46 are rejected and are not runtime behavior.</strong> This two-question replacement reconstructs the continuous opacity field from the authored transition, preserves medium-frequency brush detail without broad Gaussian softening, and suppresses only support holes fully enclosed by the edge topology’s owner field.</p>
 <div class="toolbar"><button id="submit-answers">Submit answers to Codex</button><button id="copy-answers">Copy answers</button><button id="download-answers">Download answers.txt</button><button id="show-answers">Select review text</button><span id="status" class="muted"></span></div>
 <section><strong>Saved review text</strong><textarea id="answer-export-text" readonly></textarea></section><main>{cards}</main><script>{script}</script></body></html>'''
     html_path = output / f"blend-mask-{checkpoint.lower()}-questionnaire.html"
     html_path.write_text(document, encoding="utf-8")
     analysis = {
-        "schema": "ei-soft-authored-mask-pilot-v1",
+        "schema": "ei-detailed-authored-opacity-matte-pilot-v1",
         "checkpoint": checkpoint,
         "runtimeChanged": False,
         "questionCount": 2,
         "questions": [
             {
-                "key": "soft-source-sand-grain-outer-inside-v1",
+                "key": "detail-matte-sand-grain-outer-inside-v1",
                 "source": "Zone7:130",
                 "alignment": outer_alignment,
                 "files": outer_files,
@@ -466,7 +567,7 @@ def render(review: Path, output: Path,
                 "insideDerivation": "invert(rotate_ccw_90(softOuter))",
             },
             {
-                "key": "soft-source-sand-grain-edge-v2",
+                "key": "detail-matte-sand-grain-edge-v2",
                 "source": "Zone7:232",
                 "alignment": edge_alignment,
                 "files": edge_files,
@@ -526,14 +627,16 @@ def validate_output(output: Path) -> dict:
         errors.append("inside mask is not the exact rotated polarity inverse")
     for question in questions:
         metrics = question["metrics"]
-        if metrics["usesBinaryCleanup"] or metrics["usesExternalUniformPixels"]:
+        if (metrics["usesGlobalBinaryCleanup"] or
+                metrics["usesExternalUniformPixels"]):
             errors.append(f"{question['key']} used the rejected extraction path")
+        if metrics.get("usesBroadGaussianSoftening"):
+            errors.append(f"{question['key']} flattened authored brush detail")
         if metrics["softPixelFraction"] < 0.10:
             errors.append(f"{question['key']} lost its continuous soft field")
     edge_metrics = questions[1]["metrics"]
-    if (edge_metrics["softBoundedSupportHoles"]["countAtLeast4Pixels"] >=
-            edge_metrics["legacyBoundedSupportHoles"]["countAtLeast4Pixels"]):
-        errors.append("edge reconstruction did not reduce bounded support holes")
+    if edge_metrics["softBoundedSupportHoles"]["countAtLeast4Pixels"] != 0:
+        errors.append("edge reconstruction retained bounded support holes")
     for question in questions:
         outcome_groups = []
         if "outcomes" in question:
@@ -586,7 +689,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--checkpoint", default="R46-SOFT-SOURCE")
+    parser.add_argument("--checkpoint", default="R47-DETAIL-MATTE")
     args = parser.parse_args()
     print(json.dumps(render(args.review, args.output, args.checkpoint),
                      indent=2, ensure_ascii=False))

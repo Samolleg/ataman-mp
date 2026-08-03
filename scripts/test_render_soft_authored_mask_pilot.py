@@ -9,7 +9,7 @@ from pathlib import Path
 import unittest
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 from render_soft_authored_mask_pilot import (
     derive_inside_from_outer,
@@ -32,7 +32,10 @@ def painterly_fixture(size: int = 96):
                                  0.055 * np.sin(yy * 0.18)) * 22.0))
     # A broad translucent painterly echo must survive as intermediate alpha.
     echo = np.exp(-((xx - 58) ** 2 + (yy - 28) ** 2) / 260.0) * 0.38
-    alpha = np.clip(np.maximum(brush, echo), 0.0, 1.0)
+    lobe_envelope = np.exp(-((xx - 42) ** 2 + (yy - 43) ** 2) / 1150.0)
+    lobes = (0.14 * np.sin((xx + yy) * 0.31) +
+             0.10 * np.cos((xx - 1.7 * yy) * 0.23)) * lobe_envelope
+    alpha = np.clip(np.maximum(brush, echo) + lobes, 0.0, 1.0)
     transition = owner * alpha[..., None] + support * (1.0 - alpha[..., None])
     return (Image.fromarray(np.uint8(np.clip(transition, 0, 255)), "RGB"),
             alpha)
@@ -51,6 +54,13 @@ class SoftAuthoredMaskPilotTests(unittest.TestCase):
                       payload["decisions"][
                           "authored-repair-sand-grain-edge-2of4-v2"]["note"])
 
+    def test_r46_feedback_rejects_global_softening(self) -> None:
+        path = Path(__file__).with_name("authored_mask_repair_r46_feedback.json")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["status"], "rejected-detail-flattening")
+        self.assertIn("detail in the mask itself",
+                      payload["decision"]["note"])
+
     def test_soft_reconstruction_retains_intermediate_painterly_ownership(self) -> None:
         transition, expected = painterly_fixture()
         reconstructed, metrics = reconstruct_soft_ownership(
@@ -59,7 +69,7 @@ class SoftAuthoredMaskPilotTests(unittest.TestCase):
         self.assertLess(float(np.abs(actual - expected).mean()), 0.16)
         self.assertGreater(metrics["softPixelFraction"], 0.12)
         self.assertGreater(metrics["distinctAlphaValues"], 64)
-        self.assertFalse(metrics["usesBinaryCleanup"])
+        self.assertFalse(metrics["usesGlobalBinaryCleanup"])
 
     def test_soft_reconstruction_does_not_punch_texture_holes(self) -> None:
         transition, _ = painterly_fixture()
@@ -71,10 +81,35 @@ class SoftAuthoredMaskPilotTests(unittest.TestCase):
                 pixels[y, x] = (235, 207, 151)
         reconstructed, _ = reconstruct_soft_ownership(
             Image.fromarray(pixels, "RGB"),
-            (True, False, False, False))
+            (True, False, False, False), remove_bounded_holes=True)
         values = np.asarray(reconstructed, dtype=np.uint8)
         self.assertGreater(int(values[18:42, 18:42].min()), 48)
         self.assertGreater(float((values[18:42, 18:42] >= 128).mean()), 0.88)
+        self.assertGreater(float((values[18:42, 18:42] >= 230).mean()), 0.82)
+
+    def test_authored_medium_frequency_brush_detail_is_not_flattened(self) -> None:
+        transition, expected = painterly_fixture()
+        reconstructed, metrics = reconstruct_soft_ownership(
+            transition, (True, False, False, False))
+        actual = np.asarray(reconstructed, dtype=np.float32) / 255.0
+
+        def blurred(values: np.ndarray) -> np.ndarray:
+            image = Image.fromarray(
+                np.uint8(np.clip(np.rint(values * 255.0), 0, 255)), "L")
+            return np.asarray(
+                image.filter(ImageFilter.GaussianBlur(5.0)),
+                dtype=np.float32) / 255.0
+
+        expected_detail = expected - blurred(expected)
+        actual_detail = actual - blurred(actual)
+        selected = np.logical_and(expected > 0.08, expected < 0.92)
+        correlation = float(np.corrcoef(
+            expected_detail[selected], actual_detail[selected])[0, 1])
+        retention = (float(np.std(actual_detail[selected])) /
+                     max(1e-6, float(np.std(expected_detail[selected]))))
+        self.assertGreater(correlation, 0.72)
+        self.assertGreater(retention, 0.55)
+        self.assertFalse(metrics["usesBroadGaussianSoftening"])
 
     def test_inside_is_exact_rotated_polarity_inverse_of_outer(self) -> None:
         transition, _ = painterly_fixture()
