@@ -316,6 +316,36 @@ def validate_output(output: Path) -> dict:
     }
 
 
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify rejection of R58's square, hard-clamped distance field."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "boundary-gradient-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R58 decision keys do not exactly match the review")
+    for key, decision in decisions.items():
+        if decision.get("answer") != "Reject square cutoff feather":
+            raise ValueError(f"R58 square cutoff must remain rejected: {key}")
+        note = decision.get("note", "").casefold()
+        if ("straight" not in note or
+                not any(side in note for side in ("east", "right")) or
+                "rounded euclidean" not in note or
+                "hard full-opacity cutoff" not in note):
+            raise ValueError(f"R58 rounded-feather direction is missing: {key}")
+    if review.get("approvedRoutes"):
+        raise ValueError("R58 must not authorize a generation route")
+    return {
+        **rendered,
+        "approved": 0,
+        "rejected": len(decisions),
+        "pending": len(decisions),
+        "generationChanged": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--r57", required=True, type=Path)

@@ -1,0 +1,24 @@
+{
+  "schema": "ei-ice-boundary-gradient-decisions-v1",
+  "checkpoint": "R58-ICE-BOUNDARY-GRADIENT",
+  "authority": "explicit-user-review",
+  "status": "rejected-direction",
+  "decisions": {
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Reject square cutoff feather",
+      "note": "Top and east/right feather boundaries are too straight. Preserve authored-edge distance behavior, but use rounded Euclidean distance and a softer feather without a hard full-opacity cutoff."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Reject square cutoff feather",
+      "note": "Top and east/right feather boundaries are too straight. Preserve authored-edge distance behavior, but use rounded Euclidean distance and a softer feather without a hard full-opacity cutoff."
+    }
+  },
+  "approvedRoutes": [],
+  "pendingRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "rejectedMethod": "Chebyshev/square distance contours plus hard saturation at 56 pixels",
+  "requestedMethod": "Retain authored-boundary-relative thickness, but use rounded Euclidean-style distance and an asymptotic feather that approaches full owner without a straight saturation contour.",
+  "generationPolicy": "Do not apply either R58 candidate. Both Ice inside routes remain pending rounded feather review."
+}

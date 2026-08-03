@@ -30,6 +30,10 @@ from render_snow_ice_gradient_repair_review import (
 )
 from render_snow_ice_boundary_gradient_review import (
     repair_owner_artifacts_by_boundary_distance,
+    validate_review_decisions as validate_r58_review_decisions,
+)
+from render_snow_ice_feathered_boundary_review import (
+    repair_owner_artifacts_with_feathered_boundary,
 )
 
 
@@ -51,6 +55,48 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_r58_rejects_square_cutoff_for_rounded_feather(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        review = Path(__file__).with_name(
+            "authored_mask_ice_boundary_r58_decisions.json")
+        result = validate_r58_review_decisions(
+            root / "artifacts" / "modern-atlas-r58-ice-boundary-gradient" /
+            "questionnaire", review)
+
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(0, result["approved"])
+        self.assertEqual(2, result["rejected"])
+        self.assertEqual(2, result["pending"])
+        self.assertFalse(result["generationChanged"])
+
+    def test_feathered_boundary_has_no_square_saturation_contour(
+            self) -> None:
+        values = np.full((128, 128), 220, dtype=np.uint8)
+        values[64:, :64] = 0
+        values[56:72, :58] = 64
+        values[40:44, 70:74] = 20
+        values[8:12, 108:112] = 20
+        original = values.copy()
+
+        repaired, audit = repair_owner_artifacts_with_feathered_boundary(
+            Image.fromarray(values, "L"), "inside-3of4-v1",
+            exact_edge_radius=4, feather_scale=24.0)
+        result = np.asarray(repaired)
+
+        np.testing.assert_array_equal(original[64:, :64],
+                                      result[64:, :64])
+        np.testing.assert_array_equal(original[56:72, :58],
+                                      result[56:72, :58])
+        self.assertGreater(int(result[41, 71]), int(original[41, 71]))
+        self.assertGreater(int(result[9, 109]), int(result[41, 71]))
+        self.assertLess(int(result[9, 109]), 255)
+        self.assertEqual("chamfer-euclidean", audit["distanceMetric"])
+        self.assertFalse(audit["usesHardSaturation"])
+        self.assertEqual(0, audit["newFullOpacityPixels"])
+        self.assertEqual(0, audit["changedConnectedSupportPixels"])
+        self.assertEqual(0, audit["changedInsideExactEdgeRadius"])
+        self.assertEqual(0, audit["changedSupportQuadrantPixels"])
+
     def test_r57_rejects_tile_gradient_for_boundary_distance(self) -> None:
         review = json.loads((Path(__file__).with_name(
             "authored_mask_ice_gradient_r57_decisions.json")).read_text(
