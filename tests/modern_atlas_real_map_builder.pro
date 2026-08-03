@@ -4,7 +4,9 @@ CONFIG -= app_bundle
 TEMPLATE = app
 TARGET = modern_atlas_real_map_builder
 
-RESOURCES += ../assets/resources/semantic_atlas_presets.qrc
+RESOURCES += \
+    ../assets/resources/semantic_atlas_presets.qrc \
+    ../assets/resources/terrain_blend_masks.qrc
 
 INCLUDEPATH += ../source/documents ../source/core ../source/render ../source/resources
 SOURCES += \

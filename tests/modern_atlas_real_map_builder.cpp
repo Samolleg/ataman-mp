@@ -510,6 +510,8 @@ QJsonObject writeBlendMaskReview(
     int missingMasks = 0;
     QMap<QString, int> familyTopologyCounts;
     QSet<QString> applicationIdentities;
+    QJsonArray limitedExampleGroups;
+    const int targetExamplesPerMask = 4;
     const auto familyTopologyKey = [](const QString& family,
                                       const QString& topology) {
         return family + QLatin1Char('|') + topology;
@@ -788,8 +790,11 @@ QJsonObject writeBlendMaskReview(
 
     // The broad application matrix above is useful evidence, but a low-count
     // material family can be masked by the other style in its initially
-    // selected support pair. Add only the missing evidence cases so every
-    // reachable family/topology candidate has four concrete outcomes.
+    // selected support pair. Add only genuine missing evidence cases, up to
+    // four concrete outcomes. Some atlas families have only one or two
+    // distinct source/support applications for a topology, and some zones
+    // have none. Record that honestly; never pad with duplicated or invented
+    // examples and never reject a valid map for review-only sample scarcity.
     QVector<SupplementalCase> supplemental;
     for(auto styleIt = byStyle.constBegin(); styleIt != byStyle.constEnd(); ++styleIt)
     {
@@ -800,7 +805,9 @@ QJsonObject writeBlendMaskReview(
             const QString groupKey = familyTopologyKey(
                 desiredFamily, topology.name);
             const auto consider = [&](qint32 owner, qint32 support) {
-                if(owner == support || familyTopologyCounts.value(groupKey) >= 4)
+                if(owner == support
+                   || familyTopologyCounts.value(groupKey)
+                        >= targetExamplesPerMask)
                     return;
                 const QString scenario = styles.value(owner) == styles.value(support)
                     ? QStringLiteral("same-style")
@@ -839,13 +846,14 @@ QJsonObject writeBlendMaskReview(
                     for(qint32 support : materialIds)
                         consider(owner, support);
             }
-            if(familyTopologyCounts.value(groupKey) < 4)
+            const int exampleCount = familyTopologyCounts.value(groupKey);
+            if(exampleCount < targetExamplesPerMask)
             {
-                if(error) *error = QStringLiteral(
-                    "Only %1 review examples could exercise %2 %3")
-                    .arg(familyTopologyCounts.value(groupKey))
-                    .arg(desiredFamily, topology.name);
-                return {};
+                QJsonObject limited;
+                limited.insert(QStringLiteral("mask_family"), desiredFamily);
+                limited.insert(QStringLiteral("topology"), topology.name);
+                limited.insert(QStringLiteral("genuine_examples"), exampleCount);
+                limitedExampleGroups.append(limited);
             }
         }
     }
@@ -1010,7 +1018,12 @@ QJsonObject writeBlendMaskReview(
     manifest.insert(QStringLiteral("missing_masks"), missingMasks);
     manifest.insert(QStringLiteral("mask_family_topology_count"),
                     familyTopologyCounts.size());
-    manifest.insert(QStringLiteral("minimum_examples_per_mask"), 4);
+    manifest.insert(QStringLiteral("target_examples_per_mask"),
+                    targetExamplesPerMask);
+    manifest.insert(QStringLiteral("example_selection_policy"),
+                    QStringLiteral("unique-genuine-up-to-target-no-padding"));
+    manifest.insert(QStringLiteral("limited_example_groups"),
+                    limitedExampleGroups);
     manifest.insert(QStringLiteral("columns_per_support"), topologies.size());
     manifest.insert(QStringLiteral("support_scenarios"),
                     QJsonArray{QStringLiteral("cross-style"),
@@ -2784,6 +2797,26 @@ int main(int argc, char** argv)
         return 9;
     }
     outputs.append(stripes.manifest);
+    const QString circleDirectory = QDir(outputRoot).filePath(
+        QStringLiteral("all-material-circles"));
+    BuiltMap circles = buildMap(fullSource, QStringLiteral("Zone2"),
+        globalLandIds, globalNames, zone2External, zone2, &assets,
+        circleDirectory, false, true);
+    if(!circles.success)
+    {
+        err << "all-material-circles: " << circles.error << '\n';
+        return 7;
+    }
+    const QString circleCollectionPath = QDir(outputRoot).filePath(
+        QStringLiteral("all-material-circles.collection"));
+    if(!writeMapCollection(circleCollectionPath, circleDirectory, &circles,
+           QStringLiteral("Every material radius-3 circles - Zone2 environment"),
+           QStringLiteral("zone2.mob"), &error))
+    {
+        err << "all-material-circles collection: " << error << '\n';
+        return 9;
+    }
+    outputs.append(circles.manifest);
     const QString zone18Source = QDir(jmvRoot).filePath(
         QStringLiteral("Maps/zone18.mpr"));
     const QString zone18Mob = QDir(jmvRoot).filePath(
@@ -2834,6 +2867,12 @@ int main(int argc, char** argv)
                 stripes.manifest.value(QStringLiteral("generated_exact_tiles")));
     root.insert(QStringLiteral("stripe_test_global_stock_blends_reused"),
                 stripes.manifest.value(QStringLiteral("global_stock_blends_reused")));
+    root.insert(QStringLiteral("circle_test_required_slots"),
+                circles.manifest.value(QStringLiteral("total_active_slots")));
+    root.insert(QStringLiteral("circle_test_generated_exact_tiles"),
+                circles.manifest.value(QStringLiteral("generated_exact_tiles")));
+    root.insert(QStringLiteral("circle_test_global_stock_blends_reused"),
+                circles.manifest.value(QStringLiteral("global_stock_blends_reused")));
     root.insert(QStringLiteral("unresolved_cells"), 0);
     QDir().mkpath(outputRoot);
     if(!writeBytes(QDir(outputRoot).filePath(QStringLiteral("manifest.json")),
@@ -2851,7 +2890,9 @@ int main(int argc, char** argv)
         "Zone 1, 2, 5_1, 11, 16, and 17 source set used by semantic-atlas review. "
         "`final-material-stripes` lays out the same final brush set as long isolated "
         "stripes so stock transition reuse and generated exact blends can be compared "
-        "visually.\n\n"
+        "visually. `all-material-circles` applies every final brush as an isolated "
+        "radius-3 circle so transition rings and uniform interior variation can be "
+        "reviewed at normal painting scale.\n\n"
         "Every visual manifest must report `unresolved_cells: 0`, which proves "
         "exact semantic corner resolution only. It is not a visual pass. Each map "
         "therefore starts with `visual_review_status: pending-human-review` and includes "

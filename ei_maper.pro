@@ -57,4 +57,5 @@ RESOURCES += \
     assets/resources/data.qrc \
     assets/resources/semantic_atlas_presets.qrc \
     assets/resources/shaders.qrc \
+    assets/resources/terrain_blend_masks.qrc \
     assets/resources/textures.qrc

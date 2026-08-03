@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image
 
 from audit_terrain_atlas_presets import CORNER_NAMES, signatures
-from generate_terrain_atlas_presets import editor_tiles, res_index
+from generate_terrain_atlas_presets import editor_tiles, read_member, res_index
 from render_semantic_atlas_review import common_style
 
 
@@ -56,12 +56,17 @@ update();
 
 
 def save_tile(images: Path, variant: str, namespace: str, slot: int,
-              tile) -> str:
-    name = f"{variant}-{namespace.lower()}-slot-{slot}.jpg"
+              tile, rotation: int = 0) -> str:
+    rotation = int(rotation) % 4
+    suffix = f"-r{rotation * 90}" if rotation else ""
+    name = f"{variant}-{namespace.lower()}-slot-{slot}{suffix}.jpg"
     path = images / name
-    Image.fromarray(tile[:, :, :3], "RGB").resize(
+    image = Image.fromarray(tile[:, :, :3], "RGB")
+    if rotation:
+        image = image.rotate(rotation * 90)
+    image.resize(
         (512, 512), Image.Resampling.NEAREST).save(
-            path, quality=94, subsampling=0, optimize=True)
+        path, quality=94, subsampling=0, optimize=True)
     return f"images/{name}"
 
 
@@ -82,7 +87,7 @@ def save_corner(images: Path, variant: str, namespace: str, slot: int,
 
 def save_family_reference(images: Path, variant: str, namespace: str,
                           slot: int, corner: int, kind: str,
-                          tile) -> tuple[str, str]:
+                          tile, rotation: int = 0) -> tuple[str, str]:
     """Keep family evidence at tile scale and mark non-uniform fallbacks.
 
     A uniform family anchor must be shown as the complete authored tile.  When
@@ -90,7 +95,7 @@ def save_family_reference(images: Path, variant: str, namespace: str,
     the owned corner instead of enlarging one quarter until it resembles a
     uniform reference.
     """
-    image = save_tile(images, variant, namespace, slot, tile)
+    image = save_tile(images, variant, namespace, slot, tile, rotation)
     marker = ""
     if kind != "uniform":
         marker = f'<span class="marker corner-{CORNER_NAMES[corner].lower()}"></span>'
@@ -112,6 +117,72 @@ def family_reference(preset: dict, family_id: int) -> tuple[int, int, str]:
     return slot, corner, "thumbnail/stamp"
 
 
+def family_references(preset: dict, family_id: int,
+                      preferred_slots: list[dict] | None = None,
+                      limit: int = 3,
+                      excluded_slots: set[int] | None = None
+                      ) -> list[tuple[int, int, str, int]]:
+    """Return exact requested sources first, then up to three uniform variants."""
+    table = signatures(preset)
+    excluded = set(excluded_slots or ())
+    rows: list[tuple[int, int, str, int]] = []
+    for preferred in preferred_slots or []:
+        slot = int(preferred["slot"])
+        if slot in excluded:
+            continue
+        rotation = int(preferred.get("rotation", 0)) % 4
+        signature = table[slot]
+        kind = ("uniform" if signature == (family_id,) * 4 else
+                "thumbnail/stamp")
+        try:
+            corner = signature.index(family_id)
+        except ValueError:
+            corner = 0
+        row = (slot, corner, kind, rotation)
+        if row not in rows:
+            rows.append(row)
+    for slot, signature in enumerate(table):
+        if slot in excluded:
+            continue
+        if signature != (family_id,) * 4:
+            continue
+        row = (slot, 0, "uniform", 0)
+        if row not in rows:
+            rows.append(row)
+        if len(rows) >= limit:
+            break
+    if not rows:
+        slot, corner, kind = family_reference(preset, family_id)
+        if slot not in excluded:
+            rows.append((slot, corner, kind, 0))
+    return rows[:limit]
+
+
+def original_dimensions_are_lower(
+        hd_dimensions: set[tuple[int, int]],
+        original_dimensions: set[tuple[int, int]]) -> bool:
+    """Reject an HD override archive masquerading as original evidence."""
+    if not hd_dimensions or not original_dimensions:
+        return False
+    return max(max(width, height) for width, height in original_dimensions) < max(
+        max(width, height) for width, height in hd_dimensions)
+
+
+def atlas_dimensions(archive: Path, index: dict[str, dict],
+                     preset: dict) -> set[tuple[int, int]]:
+    import struct
+
+    dimensions: set[tuple[int, int]] = set()
+    for part in range(int(preset["slotCount"]) // 64):
+        name = f"{preset['namespace']}{part:03d}.mmp".lower()
+        if name not in index:
+            return set()
+        payload = read_member(archive, index[name])
+        _signature, width, height = struct.unpack_from("<3I", payload)
+        dimensions.add((int(width), int(height)))
+    return dimensions
+
+
 def render(presets_path: Path, hd_archive: Path, original_archive: Path,
            questions_path: Path, output: Path) -> dict:
     catalog = json.loads(presets_path.read_text(encoding="utf-8"))
@@ -129,6 +200,43 @@ def render(presets_path: Path, hd_archive: Path, original_archive: Path,
         "hd": (hd_archive, res_index(hd_archive)),
         "original": (original_archive, res_index(original_archive)),
     }
+    reviewed_slots: dict[str, set[int]] = {}
+    for question in questions:
+        reviewed_slots.setdefault(
+            question["namespace"].casefold(), set()).add(int(question["slot"]))
+        for target in question.get("additionalTargets", []):
+            reviewed_slots.setdefault(
+                target["namespace"].casefold(), set()).add(int(target["slot"]))
+
+    # A mod override named textures.res may contain a mixture of original and
+    # HD terrain pages.  Prove that every displayed "Original" namespace is
+    # genuinely lower resolution than its HD counterpart before rendering.
+    required_namespaces = {
+        question["namespace"].casefold() for question in questions
+    }
+    required_namespaces.update(
+        reference["namespace"].casefold()
+        for question in questions for reference in question["references"])
+    required_namespaces.update(
+        target["namespace"].casefold()
+        for question in questions
+        for target in question.get("additionalTargets", []))
+    for namespace_key in sorted(required_namespaces):
+        required = by_namespace[namespace_key]
+        if not (archive_has_namespace(archives["hd"][1], required)
+                and archive_has_namespace(archives["original"][1], required)):
+            continue
+        hd_dimensions = atlas_dimensions(
+            hd_archive, archives["hd"][1], required)
+        original_dimensions = atlas_dimensions(
+            original_archive, archives["original"][1], required)
+        if not original_dimensions_are_lower(
+                hd_dimensions, original_dimensions):
+            raise ValueError(
+                f"{required['namespace']}: Original atlas source is not "
+                f"lower-resolution than HD ({sorted(original_dimensions)} "
+                f"vs {sorted(hd_dimensions)}); choose the genuine original "
+                "textures.res rather than an HD/mixed mod override")
     tile_cache = {}
 
     def tiles(variant: str, namespace: str):
@@ -198,31 +306,52 @@ def render(presets_path: Path, hd_archive: Path, original_archive: Path,
                 family_id = int(reference["familyId"])
                 family = next(value for value in ref_preset["families"]
                               if int(value["id"]) == family_id)
-                ref_slot, ref_corner, kind = family_reference(
-                    ref_preset, family_id)
                 ref_tiles = tiles(variant, ref_namespace)
-                ref_image, ref_marker = save_family_reference(
-                    images, variant, ref_namespace, ref_slot, ref_corner,
-                    kind, ref_tiles[ref_slot])
-                reference_note = (
-                    "uniform authored tile" if kind == "uniform" else
-                    f"no uniform authored tile; {CORNER_NAMES[ref_corner]} corner is the family reference")
-                columns.append(f"""
-<div><div class="tile"><img src="{ref_image}" alt="{html.escape(family['name'])} reference, {variant_label}">{ref_marker}</div><strong class="compare-label">{html.escape(family['name'])}</strong><span class="muted">{html.escape(ref_namespace)} slot {ref_slot}; {html.escape(reference_note)}</span></div>""")
+                role = str(reference.get("role", "Comparison"))
+                for ref_slot, ref_corner, kind, rotation in family_references(
+                        ref_preset, family_id,
+                        reference.get("preferredSlots"), limit=3,
+                        excluded_slots=reviewed_slots.get(
+                            ref_namespace.casefold(), set())):
+                    ref_image, ref_marker = save_family_reference(
+                        images, variant, ref_namespace, ref_slot, ref_corner,
+                        kind, ref_tiles[ref_slot], rotation)
+                    reference_note = (
+                        "uniform authored tile" if kind == "uniform" else
+                        f"no uniform authored tile; {CORNER_NAMES[ref_corner]} corner is the family reference")
+                    if rotation:
+                        reference_note += f"; audit comparison rotated {rotation * 90} degrees CCW"
+                    columns.append(f"""
+<div><div class="tile"><img src="{ref_image}" alt="{html.escape(family['name'])} reference, {variant_label}">{ref_marker}</div><strong class="compare-label">{html.escape(family['name'])}</strong><span class="reference-role">{html.escape(role)}</span><span class="muted">{html.escape(ref_namespace)} slot {ref_slot}; {html.escape(reference_note)}</span></div>""")
             variant_groups.append(
                 f'<h3>{variant_label}</h3><div class="compare-grid" data-variant="{variant}">{"".join(columns)}</div>')
         if not variant_groups:
             raise ValueError(
                 f"no atlas variant is available for {namespace} slot {slot}")
-        values = list(question["options"])
-        keep = next((value for value in values
-                     if value.lower().startswith("keep current")), None)
-        if keep is None:
-            keep = "Keep current"
-        values = [keep] + [value for value in values if value != keep]
+        option_rows = []
+        for value in question["options"]:
+            if isinstance(value, dict):
+                option_rows.append((str(value["value"]),
+                                    str(value.get("label", value["value"]))))
+            else:
+                option_rows.append((str(value), str(value)))
+        default_option = question.get("defaultOption")
+        if default_option is None:
+            default_option = next(
+                (value for value, _ in option_rows
+                 if value.lower().startswith("keep current")),
+                option_rows[0][0] if option_rows else "Keep current")
+        default_rows = [row for row in option_rows if row[0] == default_option]
+        if not default_rows:
+            raise ValueError(
+                f"{question['key']}: default option {default_option!r} is absent")
+        option_rows = default_rows + [
+            row for row in option_rows if row[0] != default_option]
         options = ''.join(
-            f'<option value="{html.escape(value)}">{html.escape(value)}</option>'
-            for value in values)
+            f'<option value="{html.escape(value)}"'
+            f'{" selected" if value == default_option else ""}>'
+            f'{html.escape(label)}</option>'
+            for value, label in option_rows)
         sections.append(f"""
 <section class="question corner-answer" data-key="{html.escape(question['key'])}">
  <h2>{number}. {html.escape(question['prompt'])}</h2>
@@ -232,7 +361,7 @@ def render(presets_path: Path, hd_archive: Path, original_archive: Path,
 </section>""")
 
     interaction_script = questionnaire_interaction_script(checkpoint)
-    document = f"""<!doctype html><meta charset="utf-8"><title>Semantic atlas {html.escape(checkpoint)} focused review</title><style>{common_style()}</style>
+    document = f"""<!doctype html><meta charset="utf-8"><title>Semantic atlas {html.escape(checkpoint)} focused review</title><style>{common_style()} .reference-role{{display:block;color:#fbbc04;font-weight:700;margin:3px 0}}</style>
 <h1>{html.escape(checkpoint)} remaining family decisions</h1><p class="muted">{len(questions)} items remain after the verified corrections. Every texture question shows the same target and titled full-tile references from each available HD/original atlas. Suggested families use a uniform tile from this atlas whenever one exists. A family with no uniform authored tile is shown only as a complete mixed tile with its relevant corner marked and explicitly labelled. Answers save locally as you make them.</p>
 <div class="toolbar"><button id="submit-answers" class="primary">Submit answers to Codex</button><button id="copy-answers">Copy answers</button><button id="download-answers">Download answers.txt</button><button id="show-answers">Select review text</button> <span id="status" class="muted"></span></div>
 <section id="answer-export" class="export-panel"><strong>Saved review text</strong><textarea id="answer-export-text" readonly aria-label="Saved review text"></textarea><p class="muted">This text updates with every answer. If submission or copying is unavailable, select it manually or download the text file.</p></section>

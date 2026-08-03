@@ -238,6 +238,7 @@ private:
         const STerrainTransitionSignature& signature, quint8* rotation) const;
     QImage generateTile(const STerrainTransitionSignature& gridSignature,
                         ETerrainBlendStyle style, int variation,
+                        qint32 reviewedStyleMaterial,
                         QString* provenance,
                         CValidationReport* report,
                         bool linearLight = false) const;
@@ -250,6 +251,9 @@ private:
         QString* provenance) const;
     ETerrainBlendStyle blendStyleForSignature(
         const STerrainTransitionSignature& signature) const;
+    qint32 reviewedMaskStyleMaterial(
+        const STerrainTransitionSignature& signature,
+        ETerrainBlendStyle style) const;
     int blendVariation(int cellX, int cellY,
                        ETerrainBlendStyle style, int limit) const;
     qint32 resolvedRuntimeType(

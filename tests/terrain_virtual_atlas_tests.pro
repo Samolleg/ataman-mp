@@ -3,6 +3,8 @@ CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = terrain_virtual_atlas_tests
 
+RESOURCES += ../assets/resources/terrain_blend_masks.qrc
+
 INCLUDEPATH += ../source/documents ../source/core ../source/resources
 SOURCES += \
     terrain_virtual_atlas_tests.cpp \

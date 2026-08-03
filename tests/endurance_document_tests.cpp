@@ -5787,7 +5787,9 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 58);
-    QCOMPARE(totalFamilies, 455);
+    // R81 removes the disproven Zone20 Stone / Grayish family and resolves
+    // Zone2's four transition-only Ground / Dirt quarters as Ground / Brown.
+    QCOMPARE(totalFamilies, 453);
     // Keep this count pinned to the reviewed semantic-atlas catalog. A change
     // means a family crossed the paint-brush/transition-support boundary and
     // must be visually audited before the palette consumes it.

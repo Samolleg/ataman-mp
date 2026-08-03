@@ -50,6 +50,7 @@ from render_snow_ice_owner_reach_review import (
 )
 from render_snow_ice_continuous_owner_review import (
     apply_continuous_owner_opacity_reach,
+    validate_review_decisions as validate_r63_review_decisions,
 )
 
 
@@ -71,6 +72,31 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_r63_approvals_verify_uniforms_and_both_outcomes(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        result = validate_r63_review_decisions(
+            root / "artifacts" /
+            "modern-atlas-r63-ice-continuous-owner-reach" /
+            "questionnaire",
+            Path(__file__).with_name(
+                "authored_mask_ice_continuous_r63_decisions.json"),
+            root / "assets" / "resources" /
+            "terrain_atlas_presets.json")
+
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(2, result["approved"])
+        self.assertEqual(0, result["pending"])
+        self.assertEqual(4, result["approvedUniformReferencesVerified"])
+        self.assertEqual(4, result["approvedRenderedOutcomesVerified"])
+        self.assertEqual(
+            "72e934360bd84b485f135dd5ee398c13e9fbd9fd382c207606f0a5e2971b9642",
+            result["reviewedPresetSha256"])
+        self.assertEqual(
+            "7ca428aeb09a154138e15f69db40087f6ff60feb53d566c6ab95a74a974b9987",
+            result["validatedPresetSha256"])
+        self.assertTrue(result["presetCompatibilityReverified"])
+        self.assertTrue(result["generationAuthorized"])
+
     def test_r62_is_rejected_for_visible_quadrant_cutoff(self) -> None:
         root = Path(__file__).resolve().parent.parent
         review = Path(__file__).with_name(

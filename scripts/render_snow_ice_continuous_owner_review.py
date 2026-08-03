@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import html
 import json
@@ -433,6 +434,83 @@ def validate_output(output: Path) -> dict:
         "outcomes": outcomes, "verifiedImages": len(indexed),
         "htmlImageReferences": len(references),
         "runtimeChanged": False,
+    }
+
+
+def validate_review_decisions(output: Path, decisions_path: Path,
+                              preset_path: Path) -> dict:
+    """Verify approved masks, semantic sources, uniforms, and outcomes."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "continuous-owner-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    preset_bytes = preset_path.read_bytes()
+    preset_sha = hashlib.sha256(preset_bytes).hexdigest()
+    reviewed_preset_sha = review.get("reviewedPresetSha256")
+    compatible_preset_shas = review.get("compatiblePresetSha256", [])
+    if preset_sha != reviewed_preset_sha and preset_sha not in compatible_preset_shas:
+        raise ValueError("R63 decisions do not match a validated compatible preset")
+    catalog = json.loads(preset_bytes.decode("utf-8"))
+    presets = {item["namespace"]: item for item in catalog["presets"]}
+
+    def slot_signature(namespace: str, slot: int) -> tuple[str, ...]:
+        preset = presets.get(namespace)
+        if not preset or slot < 0 or slot >= preset["slotCount"]:
+            raise ValueError(f"missing semantic slot {namespace}:{slot}")
+        names = {item["id"]: item["name"] for item in preset["families"]}
+        payload = base64.b64decode(preset["signaturesBase64"])
+        ids = payload[slot * 4:slot * 4 + 4]
+        if len(ids) != 4 or any(item not in names for item in ids):
+            raise ValueError(f"invalid semantic signature {namespace}:{slot}")
+        return tuple(names[item] for item in ids)
+
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R63 decision keys do not exactly match the review")
+    expected_masks = review.get("reviewedMaskPixelSha256", {})
+    verified_uniforms = 0
+    verified_outcomes = 0
+    for key, decision in decisions.items():
+        if decision.get("answer") != "Approve continuous owner reach":
+            raise ValueError(f"R63 route is not explicitly approved: {key}")
+        question = questions[key]
+        alignment = question["sourceAlignment"]
+        if slot_signature(alignment["namespace"], alignment["slot"]) != tuple(
+                alignment["sourceCornerMaterials"]):
+            raise ValueError(f"authored source corners changed: {key}")
+        if (question["continuous"]["files"]["mask"]["pixelSha256"] !=
+                expected_masks.get(key)):
+            raise ValueError(f"approved mask identity changed: {key}")
+        for outcome in question["outcomes"]:
+            for source_name, material_name in (
+                    (outcome["ownerSource"], outcome["ownerMaterial"]),
+                    (outcome["supportSource"], outcome["supportMaterial"])):
+                match = re.match(r"^([^:]+):(\d+)\b", source_name)
+                if not match:
+                    raise ValueError(f"uniform provenance is invalid: {key}")
+                signature = slot_signature(match.group(1), int(match.group(2)))
+                if signature != (material_name,) * 4:
+                    raise ValueError(f"source is not four-corner uniform: {key}")
+                verified_uniforms += 1
+            files = outcome["files"]
+            if not files.get("r62Result") or not files.get("continuousResult"):
+                raise ValueError(f"both rendered outcomes are required: {key}")
+            # validate_output already recomposed and hash-checked both images.
+            verified_outcomes += 2
+    if review.get("approvedRoutes") != list(questions) or review.get(
+            "pendingRoutes"):
+        raise ValueError("R63 approved/pending route lists are inconsistent")
+    return {
+        **rendered,
+        "approved": len(decisions),
+        "pending": 0,
+        "approvedUniformReferencesVerified": verified_uniforms,
+        "approvedRenderedOutcomesVerified": verified_outcomes,
+        "reviewedPresetSha256": reviewed_preset_sha,
+        "validatedPresetSha256": preset_sha,
+        "presetCompatibilityReverified": preset_sha != reviewed_preset_sha,
+        "generationAuthorized": True,
     }
 
 

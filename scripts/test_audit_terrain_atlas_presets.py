@@ -24,6 +24,7 @@ from audit_terrain_atlas_presets import (
     verified_anchor_prototypes,
     uniform_exact_owner_review,
 )
+from audit_semantic_atlas_high_confidence import reviewed_keep_current
 from audit_terrain_atlas_binding_conflicts import decoded_identity_rows
 from render_semantic_atlas_review import (
     pending_review_namespaces,
@@ -31,6 +32,8 @@ from render_semantic_atlas_review import (
 )
 from render_pending_family_questionnaire import (
     archive_has_namespace,
+    family_references,
+    original_dimensions_are_lower,
     questionnaire_interaction_script,
     save_family_reference,
 )
@@ -44,6 +47,7 @@ from audit_semantic_atlas_map_vertices import (
 )
 from generate_terrain_atlas_presets import (
     apply_canonical_identity,
+    corroborated_quadrant_identity_evidence,
     exact_pixel_identity_evidence,
     finalize_identity_decisions,
     reviewed_fragment_corrections,
@@ -79,6 +83,118 @@ class ExactPixelIdentityOwnershipTests(unittest.TestCase):
         self.assertEqual(0, ambiguities)
         self.assertEqual("suggestion", decisions[0]["kind"])
         self.assertEqual([1], decisions[0]["candidateFamilyIds"])
+
+
+class CorroboratedQuadrantIdentityTests(unittest.TestCase):
+    @staticmethod
+    def family(family_id: int, layers=("land",), underwater=False) -> dict:
+        return {
+            "id": family_id,
+            "allowedLayers": list(layers),
+            "underwater": underwater,
+        }
+
+    @staticmethod
+    def slot(slot_id: int, family_id: int) -> dict:
+        return {"slot": slot_id, "signature": {
+            "northWest": family_id, "northEast": family_id,
+            "southEast": family_id, "southWest": family_id}}
+
+    def test_two_independent_full_quadrant_anchors_allow_exact_repair(self) -> None:
+        anchor = np.full((32, 32, 4), (40, 80, 120, 255), dtype=np.uint8)
+        target = np.full((32, 32, 4), (180, 20, 10, 255), dtype=np.uint8)
+        target[:16, :16] = anchor[:16, :16]
+        recipe = {
+            "namespace": "synthetic",
+            "families": [self.family(1), self.family(2), self.family(3)],
+            "slots": [self.slot(0, 1), self.slot(1, 1), {
+                "slot": 2, "signature": {
+                    "northWest": 2, "northEast": 3,
+                    "southEast": 3, "southWest": 3}}],
+        }
+
+        audited, accepted, suspicious = corroborated_quadrant_identity_evidence(
+            recipe, [anchor, anchor.copy(), target], apply=True)
+
+        self.assertEqual(1, len(accepted))
+        self.assertEqual([], suspicious)
+        self.assertEqual(1, audited["slots"][2]["signature"]["northWest"])
+        self.assertEqual([0, 1], accepted[0]["candidateFamilies"][0]["anchorSlots"])
+
+    def test_one_anchor_is_review_only(self) -> None:
+        anchor = np.full((32, 32, 4), (40, 80, 120, 255), dtype=np.uint8)
+        target = np.full((32, 32, 4), (180, 20, 10, 255), dtype=np.uint8)
+        target[:16, :16] = anchor[:16, :16]
+        recipe = {
+            "namespace": "synthetic",
+            "families": [self.family(1), self.family(2), self.family(3)],
+            "slots": [self.slot(0, 1), {
+                "slot": 1, "signature": {
+                    "northWest": 2, "northEast": 3,
+                    "southEast": 3, "southWest": 3}}],
+        }
+
+        audited, accepted, suspicious = corroborated_quadrant_identity_evidence(
+            recipe, [anchor, target], apply=True)
+
+        self.assertEqual([], accepted)
+        self.assertEqual(1, len(suspicious))
+        self.assertEqual("fewer-than-two-independent-anchors",
+                         suspicious[0]["reason"])
+        self.assertEqual(2, audited["slots"][1]["signature"]["northWest"])
+
+    def test_tiny_shared_vertex_patch_is_not_full_quadrant_evidence(self) -> None:
+        anchor = np.full((32, 32, 4), (40, 80, 120, 255), dtype=np.uint8)
+        target = np.full((32, 32, 4), (180, 20, 10, 255), dtype=np.uint8)
+        target[:8, :8] = anchor[:8, :8]
+        recipe = {
+            "namespace": "synthetic",
+            "families": [self.family(1), self.family(2), self.family(3)],
+            "slots": [self.slot(0, 1), self.slot(1, 1), {
+                "slot": 2, "signature": {
+                    "northWest": 2, "northEast": 3,
+                    "southEast": 3, "southWest": 3}}],
+        }
+
+        audited, accepted, suspicious = corroborated_quadrant_identity_evidence(
+            recipe, [anchor, anchor.copy(), target], apply=True)
+
+        self.assertEqual([], accepted)
+        self.assertEqual([], suspicious)
+        self.assertEqual(2, audited["slots"][2]["signature"]["northWest"])
+
+    def test_layer_or_underwater_mismatch_cannot_reassign(self) -> None:
+        anchor = np.full((32, 32, 4), (40, 80, 120, 255), dtype=np.uint8)
+        recipe = {
+            "namespace": "synthetic",
+            "families": [
+                self.family(1, ("overlay",)),
+                self.family(2, ("land",)),
+                self.family(3, ("land",), underwater=True),
+            ],
+            "slots": [self.slot(0, 1), self.slot(1, 1), self.slot(2, 2),
+                      self.slot(3, 3)],
+        }
+
+        audited, accepted, suspicious = corroborated_quadrant_identity_evidence(
+            recipe, [anchor.copy() for _ in range(4)], apply=True)
+
+        self.assertEqual([], accepted)
+        self.assertEqual([], suspicious)
+        self.assertEqual(recipe, audited)
+
+    def test_r76_reviewed_keep_requires_exact_location_and_families(self) -> None:
+        record = {
+            "namespace": "Zone16", "slot": 146,
+            "corner": "northWest", "currentFamilyName": "Ground / Tan",
+            "candidateFamilies": [{"familyName": "Stone / Red"}],
+        }
+        self.assertTrue(reviewed_keep_current(record))
+        self.assertFalse(reviewed_keep_current({**record, "slot": 147}))
+        self.assertFalse(reviewed_keep_current({
+            **record,
+            "candidateFamilies": [{"familyName": "Rubble / Red"}],
+        }))
 
 
 class AuthoredMapVertexAuditTests(unittest.TestCase):
@@ -354,7 +470,9 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
                       "southEast": 4, "southWest": 5},
                 428: {"northWest": 10, "northEast": 5,
                       "southEast": 8, "southWest": 8},
-                445: {"northWest": 10, "northEast": 5,
+                # R80 explicitly reclassifies the NE quarter as Ground /
+                # Common after the earlier false-uniform recovery.
+                445: {"northWest": 10, "northEast": 6,
                       "southEast": 10, "southWest": 5},
             },
             "zone14": {
@@ -1472,7 +1590,9 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             "bz8k": ({}, {}, {7: "Grass / Yellow lichen"}),
             "bz9k": ({}, {}, {7: "Grass / Yellow lichen"}),
             "Zone10": ({}, {(291, 1): 5}, {}),
-            "Zone13": ({14: 3}, {(325, 0): 9}, {}),
+            # R80 supersedes the earlier provisional Ground / Common choice
+            # after the full-map visual review selected Ground / Light.
+            "Zone13": ({14: 3}, {(325, 0): 3}, {}),
         }
         for namespace, (aliases, exact, names) in cases.items():
             with self.subTest(namespace=namespace):
@@ -2437,6 +2557,31 @@ class ReviewDocumentTests(unittest.TestCase):
         self.assertIn("corner-se", mixed_marker)
         self.assertNotIn("-se.png", mixed_image)
 
+    def test_questionnaire_never_trusts_a_tile_queued_for_review(self) -> None:
+        preset = {
+            "families": [{"id": 1, "thumbnailSlot": 0}],
+            "signaturesBase64": base64.b64encode(bytes([
+                1, 1, 1, 1,
+                1, 1, 1, 1,
+                1, 1, 1, 1,
+            ])).decode("ascii"),
+        }
+        references = family_references(
+            preset, 1,
+            preferred_slots=[{"slot": 1, "rotation": 0}],
+            excluded_slots={0, 1}, limit=3)
+        self.assertEqual([(2, 0, "uniform", 0)], references)
+
+    def test_original_questionnaire_source_must_be_lower_resolution(self) -> None:
+        self.assertTrue(original_dimensions_are_lower(
+            {(2048, 2048)}, {(512, 512)}))
+        self.assertTrue(original_dimensions_are_lower(
+            {(2048, 2048)}, {(1024, 1024)}))
+        self.assertFalse(original_dimensions_are_lower(
+            {(2048, 2048)}, {(2048, 2048)}))
+        self.assertFalse(original_dimensions_are_lower(
+            {(1024, 1024)}, {(2048, 2048)}))
+
     def test_catalog_requires_one_comment_field_per_family(self) -> None:
         errors = review_document_errors(
             self.CATALOG_CONTROLS +
@@ -2495,6 +2640,16 @@ class ReviewDocumentTests(unittest.TestCase):
         self.assertIn("Keep current:", source)
         self.assertNotIn('<option value="">Not answered</option>', source)
         self.assertIn("comparison-comment", source)
+
+    def test_uniform_variant_questionnaire_is_conservative_by_default(self) -> None:
+        source = Path(__file__).with_name(
+            "render_uniform_variant_whitelist_questionnaire.py").read_text(
+                encoding="utf-8")
+        self.assertIn("Keep included: current representative", source)
+        self.assertIn("Keep excluded pending review", source)
+        self.assertIn("Include as safe uniform paint variant", source)
+        self.assertIn("Different family (note)", source)
+        self.assertNotIn("Not answered", source)
 
     def test_questionnaire_interaction_uses_requested_checkpoint(self) -> None:
         script = questionnaire_interaction_script("R50")
@@ -2612,6 +2767,292 @@ class ReviewDocumentTests(unittest.TestCase):
         self.assertNotIn(19, family_ids["Zone6_2"])
         self.assertNotIn(16, family_ids["Zone7"])
         self.assertNotIn(22, family_ids["Zone7"])
+
+    def test_shipped_catalog_contains_exact_r80_corner_decisions(self) -> None:
+        """R80 keeps explicit human choices and no longer trusts false uniforms."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        def corner_name(namespace: str, slot: int, corner_index: int) -> str:
+            preset = presets[namespace.casefold()]
+            names = {int(family["id"]): family["name"]
+                     for family in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            return names[payload[slot * 4 + corner_index]]
+
+        # All entries here are explicit choices. Still-uncertain R80 rows and
+        # notes that only request another review are intentionally absent.
+        decisions = {
+            "bz5g": {
+                (279, 0): "Ground / Common",
+                (465, 3): "Ground / Gravel",
+                (356, 0): "Sand / Common",
+                (18, 0): "Ground / Common",
+                (367, 0): "Sand / Common",
+                (445, 1): "Ground / Common",
+                (458, 3): "Sand / Grainy",
+                (465, 1): "Ground / Common",
+            },
+            "zone8": {
+                (279, 0): "Ground / Common",
+                (465, 3): "Ground / Gravel",
+                (356, 0): "Sand / Common",
+                (18, 0): "Ground / Common",
+                (367, 0): "Sand / Common",
+                (445, 1): "Ground / Common",
+                (458, 3): "Sand / Grainy",
+                (465, 1): "Ground / Common",
+            },
+            "zone19": {
+                (309, 1): "Sand / Gravel",
+                (446, 1): "Sand / Common",
+                (310, 1): "Sand / Gravel",
+                (310, 3): "Sand / Gravel",
+            },
+            "bz2g": {
+                (180, 0): "Grass / Common",
+                (376, 0): "Grass / Irregular",
+            },
+            "zone2": {
+                (180, 0): "Grass / Common",
+                (376, 0): "Grass / Irregular",
+            },
+            "bz16h": {
+                (191, 0): "Ground / Red", (191, 1): "Ground / Red",
+            },
+            "zone18": {
+                (191, 0): "Ground / Red", (191, 1): "Ground / Red",
+            },
+            "bz13h": {(288, 1): "Stone / Orange"},
+            "zone15": {(288, 1): "Stone / Orange"},
+            "bz11k": {(327, 3): "Rock / Black"},
+            "zone14": {(327, 3): "Rock / Black"},
+            "bz8k": {
+                (337, 0): "Grass / Winter normal",
+                (326, 0): "Ground / Light", (327, 0): "Ground / Light",
+            },
+            "bz9k": {
+                (337, 0): "Grass / Winter normal",
+                (326, 0): "Ground / Light", (327, 0): "Ground / Light",
+            },
+            "zone11": {
+                (337, 0): "Grass / Winter normal",
+                (326, 0): "Ground / Light", (327, 0): "Ground / Light",
+            },
+            "bz3g": {(186, 1): "Ground / Gravel"},
+            "zone10": {(471, 3): "Slabs / Square"},
+            "zone13": {
+                (112, 0): "Ground / Light", (279, 3): "Sand / Common",
+                (283, 3): "Sand / Common", (63, 1): "Ground / Light",
+                (164, 0): "Ground / Light", (164, 1): "Grass / Tundra",
+                (324, 0): "Ground / Light", (325, 0): "Ground / Light",
+                (326, 0): "Ground / Light", (327, 0): "Ground / Light",
+                (398, 2): "Ground / Light", (409, 1): "Ground / Light",
+                (449, 0): "Ground / Light", (450, 1): "Ground / Light",
+            },
+            "zone20": {
+                (37, 0): "Stone / Greenish", (38, 0): "Stone / Greenish",
+                (52, 0): "Stone / Greenish", (189, 0): "Stone / Greenish",
+            },
+            "zone6": {
+                (28, 3): "Ground / Dark", (471, 0): "Grass / Sparse dark",
+                (71, 0): "Ground / Common", (278, 0): "Ground / Common",
+                (394, 0): "Ground / Common", (401, 3): "Ground / Dark",
+                (60, 3): "Ground / Dark",
+            },
+            "zone6_2": {
+                (28, 3): "Ground / Dark", (471, 0): "Grass / Sparse dark",
+                (394, 1): "Grass / Sparse dark",
+                (71, 0): "Ground / Common", (278, 0): "Ground / Common",
+            },
+        }
+        for namespace, expected in decisions.items():
+            for (slot, corner_index), family_name in expected.items():
+                with self.subTest(namespace=namespace, slot=slot,
+                                  corner=corner_index):
+                    self.assertEqual(
+                        family_name, corner_name(namespace, slot, corner_index))
+
+        # The non-HD semantic policy remains one identity per reviewed pair.
+        for namespace in ("bz13h", "zone15", "bz15h", "zone17"):
+            names = [family["name"]
+                     for family in presets[namespace]["families"]]
+            self.assertEqual(1, names.count("Ground / Red"))
+            self.assertEqual(1, names.count("Rubble / Orange"))
+
+    def test_shipped_catalog_contains_exact_r81_corner_decisions(self) -> None:
+        """R81 applies explicit quarters and mirrors only canonical owners."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        def corner_name(namespace: str, slot: int, corner: int) -> str:
+            preset = presets[namespace.casefold()]
+            names = {int(family["id"]): family["name"]
+                     for family in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            return names[payload[slot * 4 + corner]]
+
+        groups = [
+            (("bz5g", "zone8"), {
+                (345, 0): "Ground / Common", (345, 1): "Sand / Grainy",
+                (345, 2): "Sand / Grainy", (345, 3): "Sand / Grainy",
+                (106, 0): "Sand / Common", (106, 1): "Sand / Common",
+                (106, 2): "Sand / Light", (106, 3): "Sand / Light",
+                (150, 0): "Sand / Common", (150, 1): "Sand / Common",
+                (150, 2): "Sand / Grainy", (150, 3): "Sand / Grainy",
+            }),
+            (("zone19",), {
+                (488, 0): "Sand / Dark", (488, 1): "Sand / Gravel",
+                (488, 2): "Sand / Gravel", (488, 3): "Sand / Gravel",
+                (121, 0): "Sand / Common", (121, 1): "Sand / Common",
+                (121, 2): "Sand / Common", (121, 3): "Sand / Gravel",
+                (122, 0): "Sand / Common", (122, 1): "Sand / Common",
+                (122, 2): "Sand / Common", (122, 3): "Sand / Gravel",
+                (88, 0): "Sand / Common", (88, 1): "Sand / Common",
+                (88, 2): "Sand / Dark", (88, 3): "Sand / Dark",
+                (388, 1): "Sand / Dark", (388, 2): "Sand / Dark",
+                (388, 3): "Sand / Dark",
+            }),
+            (("bz16h", "zone18"), {
+                (193, 0): "Ground / Red", (193, 1): "Ground / Red",
+                (193, 2): "Ground / Desert algae",
+                (193, 3): "Ground / Desert algae",
+                (194, 0): "Ground / Red", (194, 1): "Ground / Red",
+                (194, 2): "Ground / Desert algae",
+                (194, 3): "Ground / Desert algae",
+            }),
+            (("bz13h", "zone15"), {
+                (257, 0): "Ground / Red", (257, 1): "Stone / Orange",
+                (257, 2): "Stone / Orange", (257, 3): "Stone / Orange",
+            }),
+            (("bz15h", "zone17"), {
+                (236, 0): "Ground / Topsoil",
+                (236, 1): "Rubble / Orange",
+                (236, 2): "Rubble / Orange",
+                (236, 3): "Rubble / Orange",
+            }),
+            (("zone10",), {
+                (279, 0): "Grass / Sparse dark",
+                (279, 1): "Grass / Sparse dark",
+                (279, 2): "Stone / Black", (279, 3): "Slabs / Square",
+            }),
+            (("zone13",), {
+                (370, 0): "Ground / Light", (370, 1): "Sand / Common",
+                (370, 2): "Sand / Common", (370, 3): "Sand / Common",
+                (289, 0): "Ground / Light", (289, 1): "Snow / Common",
+                (289, 2): "Ground / Light", (289, 3): "Grass / Tundra",
+                (173, 0): "Ground / Light", (173, 1): "Ground / Light",
+                (173, 2): "Ground / Light", (173, 3): "Grass / Tundra",
+                (444, 0): "Snow / Common", (444, 1): "Snow / Common",
+                (444, 2): "Snow / Common", (444, 3): "Grass / Tundra",
+            }),
+            (("zone20",), {
+                (39, 0): "Stone / Greenish", (39, 1): "Stone / Black",
+                (39, 2): "Stone / Black", (39, 3): "Stone / Black",
+                (40, 0): "Stone / Greenish", (41, 0): "Stone / Greenish",
+                (42, 0): "Stone / Greenish", (44, 0): "Stone / Greenish",
+                (46, 0): "Stone / Greenish", (47, 0): "Stone / Greenish",
+                (48, 0): "Stone / Greenish", (50, 0): "Stone / Greenish",
+                (54, 0): "Stone / Greenish", (57, 0): "Stone / Greenish",
+                (61, 0): "Stone / Greenish", (151, 2): "Stone / Greenish",
+                (155, 2): "Stone / Greenish", (156, 2): "Stone / Greenish",
+                (157, 2): "Stone / Greenish", (160, 2): "Stone / Greenish",
+                (183, 0): "Stone / Greenish", (183, 1): "Slabs / Carved",
+                (183, 2): "Stone / Greenish", (184, 0): "Stone / Greenish",
+                (185, 0): "Stone / Greenish", (186, 0): "Stone / Greenish",
+                (186, 3): "Stone / Black", (187, 0): "Stone / Greenish",
+                (187, 3): "Stone / Black", (188, 0): "Stone / Greenish",
+            }),
+            (("bz2g", "zone2"), {
+                (448, 1): "Ground / Brown", (448, 2): "Ground / Brown",
+                (448, 3): "Ground / Brown", (502, 0): "Ground / Brown",
+            }),
+        ]
+        checked = 0
+        for namespaces, decisions in groups:
+            for namespace in namespaces:
+                for (slot, corner), expected in decisions.items():
+                    with self.subTest(namespace=namespace, slot=slot,
+                                      corner=corner):
+                        self.assertEqual(
+                            expected, corner_name(namespace, slot, corner))
+                        checked += 1
+        self.assertEqual(133, checked)
+        self.assertNotIn(
+            "Stone / Grayish",
+            [family["name"] for family in presets["zone20"]["families"]])
+
+    def test_shipped_catalog_contains_exact_r82_corner_decisions(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        def corner_name(namespace: str, slot: int, corner: int) -> str:
+            preset = presets[namespace.casefold()]
+            names = {int(family["id"]): family["name"]
+                     for family in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            return names[payload[slot * 4 + corner]]
+
+        groups = [
+            (("bz5g", "zone8"), {
+                (19, 0): "Ground / Common", (19, 1): "Ground / Gravel",
+                (19, 2): "Ground / Gravel", (19, 3): "Ground / Gravel",
+                (122, 0): "Sand / Common", (122, 1): "Sand / Light",
+                (122, 2): "Sand / Light", (122, 3): "Sand / Light",
+            }),
+            (("zone19",), {
+                (50, 0): "Sand / Common", (50, 1): "Sand / Common",
+                (50, 2): "Sand / Yellow", (50, 3): "Sand / Yellow",
+                (123, 0): "Sand / Common", (123, 1): "Sand / Common",
+                (123, 2): "Sand / Common", (123, 3): "Sand / Gravel",
+                (389, 0): "Sand / Grass", (389, 1): "Sand / Dark",
+                (389, 2): "Sand / Dark", (389, 3): "Sand / Dark",
+                (490, 1): "Sand / Yellow", (490, 2): "Sand / Yellow",
+                (490, 3): "Sand / Yellow", (388, 0): "Sand / Grass",
+            }),
+            (("bz16h", "zone18"), {
+                (79, 0): "Ground / Red", (79, 1): "Ground / Red",
+                (79, 2): "Ground / Plant soil",
+                (79, 3): "Ground / Plant soil",
+            }),
+            (("zone13",), {
+                (65, 0): "Snow / Common", (65, 1): "Snow / Dark",
+                (65, 2): "Snow / Dark", (65, 3): "Snow / Dark",
+                (176, 0): "Ground / Light", (176, 1): "Ground / Light",
+                (176, 2): "Ground / Light", (176, 3): "Grass / Tundra",
+            }),
+        ]
+        checked = 0
+        for namespaces, decisions in groups:
+            for namespace in namespaces:
+                for (slot, corner), expected in decisions.items():
+                    with self.subTest(namespace=namespace, slot=slot,
+                                      corner=corner):
+                        self.assertEqual(
+                            expected, corner_name(namespace, slot, corner))
+                        checked += 1
+        self.assertEqual(48, checked)
+        # Comment-only ambiguity stays unresolved; no paving identity is
+        # invented for Zone19 slot 490 NW.
+        self.assertEqual("Sand / Yellow", corner_name("zone19", 490, 0))
+        self.assertIn(
+            "Ground / Dirt",
+            {family["name"] for family in presets["zone10"]["families"]})
+        self.assertIn(
+            "Ground / Brown",
+            {family["name"] for family in presets["bz2g"]["families"]})
 
     def test_completed_questionnaire_excludes_only_follow_up_corners(self) -> None:
         root = Path(__file__).resolve().parent.parent

@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/terrain_blend_masks">
+        <file>terrain_blend_masks/ice-inside-3of4-v1-r63.png</file>
+        <file>terrain_blend_masks/ice-inside-3of4-v2-r63.png</file>
+    </qresource>
+</RCC>

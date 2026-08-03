@@ -2193,6 +2193,248 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     if namespace in ("bz11k", "zone14"):
         corrections[(70, 3)] = 16
 
+    # R80 full-pass reconciliation. Apply only the reviewer's explicit
+    # corner identities and mirror them solely to byte-identical/canonical
+    # atlas owners. Notes identifying false uniform references are evidence
+    # for the next four-corner review, not permission to propagate from those
+    # contaminated anchors. The four Zone2 Ground / Dirt stamp corners and
+    # Zone13 slot 444 SW remain deliberately unresolved.
+    r80_corrections = {
+        "bz5g": {
+            (279, 0): 6, (465, 3): 5,
+            (356, 0): 7, (18, 0): 6,
+            (367, 0): 7, (445, 1): 6,
+            (458, 3): 14, (465, 1): 6,
+        },
+        "zone8": {
+            (279, 0): 6, (465, 3): 5,
+            (356, 0): 7, (18, 0): 6,
+            (367, 0): 7, (445, 1): 6,
+            (458, 3): 11, (465, 1): 6,
+        },
+        "zone19": {
+            (309, 1): 4, (446, 1): 1,
+            (310, 1): 4, (310, 3): 4,
+        },
+        "bz2g": {
+            (180, 0): 2, (376, 0): 9,
+        },
+        "zone2": {
+            (180, 0): 2, (376, 0): 9,
+        },
+        "bz16h": {(191, 0): 4, (191, 1): 4},
+        "zone18": {(191, 0): 4, (191, 1): 4},
+        "bz13h": {(288, 1): 4},
+        "zone15": {(288, 1): 4},
+        "bz11k": {(327, 3): 10},
+        "zone14": {(327, 3): 10},
+        "bz8k": {
+            (337, 0): 11, (326, 0): 6, (327, 0): 6,
+        },
+        "bz9k": {
+            (337, 0): 11, (326, 0): 6, (327, 0): 6,
+        },
+        "zone11": {
+            (337, 0): 11, (326, 0): 6, (327, 0): 6,
+        },
+        "bz3g": {(186, 1): 8},
+        "zone10": {(471, 3): 6},
+        "zone13": {
+            (112, 0): 3, (279, 3): 7,
+            (283, 3): 7, (63, 1): 3,
+            (164, 0): 3, (164, 1): 4,
+            (324, 0): 3, (325, 0): 3,
+            (326, 0): 3, (327, 0): 3,
+            (398, 2): 3, (409, 1): 3,
+            (449, 0): 3, (450, 1): 3,
+        },
+        "zone20": {
+            (37, 0): 2, (38, 0): 2, (52, 0): 2, (189, 0): 2,
+        },
+        "zone6": {
+            (28, 3): 5, (471, 0): 3,
+            (71, 0): 8, (278, 0): 8,
+            (394, 0): 8, (401, 3): 5, (60, 3): 5,
+        },
+        "zone6_2": {
+            (28, 3): 5, (471, 0): 3, (394, 1): 3,
+            (71, 0): 8, (278, 0): 8,
+        },
+    }
+    corrections.update(r80_corrections.get(namespace, {}))
+
+    # R81 reviews every quarter of the false-uniform comparison tiles, removes
+    # the remaining provisional Zone20 Stone / Grayish ownership, and resolves
+    # Zone2's transition-only Ground / Dirt quarters as Ground / Brown.  Use
+    # semantic names here because byte-identical/canonical owners do not all
+    # share the same numeric family ids.  Comment-only doubts and Zone19 slot
+    # 388 NW ("some grass") remain unresolved for R82.
+    r81_corrections = {
+        "bz5g": {
+            (345, 0): "Ground / Common",
+            (345, 1): "Sand / Grainy", (345, 2): "Sand / Grainy",
+            (345, 3): "Sand / Grainy",
+            (106, 0): "Sand / Common", (106, 1): "Sand / Common",
+            (106, 2): "Sand / Light", (106, 3): "Sand / Light",
+            (150, 0): "Sand / Common", (150, 1): "Sand / Common",
+            (150, 2): "Sand / Grainy", (150, 3): "Sand / Grainy",
+        },
+        "zone8": {
+            (345, 0): "Ground / Common",
+            (345, 1): "Sand / Grainy", (345, 2): "Sand / Grainy",
+            (345, 3): "Sand / Grainy",
+            (106, 0): "Sand / Common", (106, 1): "Sand / Common",
+            (106, 2): "Sand / Light", (106, 3): "Sand / Light",
+            (150, 0): "Sand / Common", (150, 1): "Sand / Common",
+            (150, 2): "Sand / Grainy", (150, 3): "Sand / Grainy",
+        },
+        "zone19": {
+            (488, 0): "Sand / Dark",
+            (488, 1): "Sand / Gravel", (488, 2): "Sand / Gravel",
+            (488, 3): "Sand / Gravel",
+            (121, 0): "Sand / Common", (121, 1): "Sand / Common",
+            (121, 2): "Sand / Common", (121, 3): "Sand / Gravel",
+            (122, 0): "Sand / Common", (122, 1): "Sand / Common",
+            (122, 2): "Sand / Common", (122, 3): "Sand / Gravel",
+            (88, 0): "Sand / Common", (88, 1): "Sand / Common",
+            (88, 2): "Sand / Dark", (88, 3): "Sand / Dark",
+            (388, 1): "Sand / Dark", (388, 2): "Sand / Dark",
+            (388, 3): "Sand / Dark",
+        },
+        "bz16h": {
+            (193, 0): "Ground / Red", (193, 1): "Ground / Red",
+            (193, 2): "Ground / Desert algae",
+            (193, 3): "Ground / Desert algae",
+            (194, 0): "Ground / Red", (194, 1): "Ground / Red",
+            (194, 2): "Ground / Desert algae",
+            (194, 3): "Ground / Desert algae",
+        },
+        "zone18": {
+            (193, 0): "Ground / Red", (193, 1): "Ground / Red",
+            (193, 2): "Ground / Desert algae",
+            (193, 3): "Ground / Desert algae",
+            (194, 0): "Ground / Red", (194, 1): "Ground / Red",
+            (194, 2): "Ground / Desert algae",
+            (194, 3): "Ground / Desert algae",
+        },
+        "bz13h": {
+            (257, 0): "Ground / Red",
+            (257, 1): "Stone / Orange", (257, 2): "Stone / Orange",
+            (257, 3): "Stone / Orange",
+        },
+        "zone15": {
+            (257, 0): "Ground / Red",
+            (257, 1): "Stone / Orange", (257, 2): "Stone / Orange",
+            (257, 3): "Stone / Orange",
+        },
+        "bz15h": {
+            (236, 0): "Ground / Topsoil",
+            (236, 1): "Rubble / Orange", (236, 2): "Rubble / Orange",
+            (236, 3): "Rubble / Orange",
+        },
+        "zone17": {
+            (236, 0): "Ground / Topsoil",
+            (236, 1): "Rubble / Orange", (236, 2): "Rubble / Orange",
+            (236, 3): "Rubble / Orange",
+        },
+        "zone10": {
+            (279, 0): "Grass / Sparse dark",
+            (279, 1): "Grass / Sparse dark",
+            (279, 2): "Stone / Black", (279, 3): "Slabs / Square",
+        },
+        "zone13": {
+            (370, 0): "Ground / Light",
+            (370, 1): "Sand / Common", (370, 2): "Sand / Common",
+            (370, 3): "Sand / Common",
+            (289, 0): "Ground / Light", (289, 1): "Snow / Common",
+            (289, 2): "Ground / Light", (289, 3): "Grass / Tundra",
+            (173, 0): "Ground / Light", (173, 1): "Ground / Light",
+            (173, 2): "Ground / Light", (173, 3): "Grass / Tundra",
+            (444, 0): "Snow / Common", (444, 1): "Snow / Common",
+            (444, 2): "Snow / Common", (444, 3): "Grass / Tundra",
+        },
+        "zone20": {
+            (39, 0): "Stone / Greenish", (39, 1): "Stone / Black",
+            (39, 2): "Stone / Black", (39, 3): "Stone / Black",
+            (40, 0): "Stone / Greenish", (41, 0): "Stone / Greenish",
+            (42, 0): "Stone / Greenish", (44, 0): "Stone / Greenish",
+            (46, 0): "Stone / Greenish", (47, 0): "Stone / Greenish",
+            (48, 0): "Stone / Greenish", (50, 0): "Stone / Greenish",
+            (54, 0): "Stone / Greenish", (57, 0): "Stone / Greenish",
+            (61, 0): "Stone / Greenish", (151, 2): "Stone / Greenish",
+            (155, 2): "Stone / Greenish", (156, 2): "Stone / Greenish",
+            (157, 2): "Stone / Greenish", (160, 2): "Stone / Greenish",
+            (183, 0): "Stone / Greenish", (183, 1): "Slabs / Carved",
+            (183, 2): "Stone / Greenish", (184, 0): "Stone / Greenish",
+            (185, 0): "Stone / Greenish", (186, 0): "Stone / Greenish",
+            (186, 3): "Stone / Black", (187, 0): "Stone / Greenish",
+            (187, 3): "Stone / Black", (188, 0): "Stone / Greenish",
+        },
+        "bz2g": {
+            (448, 1): "Ground / Brown", (448, 2): "Ground / Brown",
+            (448, 3): "Ground / Brown", (502, 0): "Ground / Brown",
+        },
+        "zone2": {
+            (448, 1): "Ground / Brown", (448, 2): "Ground / Brown",
+            (448, 3): "Ground / Brown", (502, 0): "Ground / Brown",
+        },
+    }
+    corrections.update(r81_corrections.get(namespace, {}))
+
+    # R82 resolves the newly exposed mixed "uniform" tiles.  Slot 490 NW in
+    # Zone19 remains deliberately unresolved because the reviewer identified
+    # only a paving/tile-like family, not a final identity.  The cross-atlas
+    # comparison explicitly keeps Zone10 Ground / Dirt separate from Zone2
+    # Ground / Brown, so it requires no corner reassignment.
+    r82_corrections = {
+        "bz5g": {
+            (19, 0): "Ground / Common",
+            (19, 1): "Ground / Gravel", (19, 2): "Ground / Gravel",
+            (19, 3): "Ground / Gravel",
+            (122, 0): "Sand / Common",
+            (122, 1): "Sand / Light", (122, 2): "Sand / Light",
+            (122, 3): "Sand / Light",
+        },
+        "zone8": {
+            (19, 0): "Ground / Common",
+            (19, 1): "Ground / Gravel", (19, 2): "Ground / Gravel",
+            (19, 3): "Ground / Gravel",
+            (122, 0): "Sand / Common",
+            (122, 1): "Sand / Light", (122, 2): "Sand / Light",
+            (122, 3): "Sand / Light",
+        },
+        "zone19": {
+            (50, 0): "Sand / Common", (50, 1): "Sand / Common",
+            (50, 2): "Sand / Yellow", (50, 3): "Sand / Yellow",
+            (123, 0): "Sand / Common", (123, 1): "Sand / Common",
+            (123, 2): "Sand / Common", (123, 3): "Sand / Gravel",
+            (389, 0): "Sand / Grass",
+            (389, 1): "Sand / Dark", (389, 2): "Sand / Dark",
+            (389, 3): "Sand / Dark",
+            (490, 1): "Sand / Yellow", (490, 2): "Sand / Yellow",
+            (490, 3): "Sand / Yellow",
+            (388, 0): "Sand / Grass",
+        },
+        "bz16h": {
+            (79, 0): "Ground / Red", (79, 1): "Ground / Red",
+            (79, 2): "Ground / Plant soil",
+            (79, 3): "Ground / Plant soil",
+        },
+        "zone18": {
+            (79, 0): "Ground / Red", (79, 1): "Ground / Red",
+            (79, 2): "Ground / Plant soil",
+            (79, 3): "Ground / Plant soil",
+        },
+        "zone13": {
+            (65, 0): "Snow / Common",
+            (65, 1): "Snow / Dark", (65, 2): "Snow / Dark",
+            (65, 3): "Snow / Dark",
+            (176, 0): "Ground / Light", (176, 1): "Ground / Light",
+            (176, 2): "Ground / Light", (176, 3): "Grass / Tundra",
+        },
+    }
+    corrections.update(r82_corrections.get(namespace, {}))
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)
@@ -2210,7 +2452,10 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                 ).casefold()
                 == family_id.casefold()
             ]
-            if len(matches) != 1 and "slotCount" in result:
+            has_semantic_names = any(
+                family.get("suggestedName") for family in result["families"])
+            if (len(matches) != 1 and "slotCount" in result
+                    and has_semantic_names):
                 raise ValueError(
                     f"{result['namespace']}: reviewed family name "
                     f"{family_id!r} resolved to {matches}")
@@ -2343,6 +2588,108 @@ def exact_pixel_identity_evidence(recipe: dict,
             suggestions += 1
 
     return result, suggestions, ambiguous, decisions
+
+
+def corroborated_quadrant_identity_evidence(
+        recipe: dict, tiles: list[np.ndarray], apply: bool = False
+        ) -> tuple[dict, list[dict], list[dict]]:
+    """Find uniquely corroborated exact full-quadrant identity matches.
+
+    A tiny vertex patch can be identical even when a blend mask changes the
+    rest of that corner, so it is audit evidence only.  This stricter gate
+    hashes the complete half-by-half quadrant and requires the same digest in
+    at least two *different* uniform tiles of one compatible family.  Exact
+    matches supported by only one anchor, matches shared by multiple families,
+    and layer/underwater conflicts are reported as suspicious but never
+    applied.  Hand-reviewed corrections are reapplied after this pass and
+    therefore remain authoritative.
+    """
+    corner_names = ("northWest", "northEast", "southEast", "southWest")
+    families = {family["id"]: family for family in recipe["families"]}
+
+    def compatible(first: int, second: int) -> bool:
+        a, b = families.get(first), families.get(second)
+        if a is None or b is None:
+            return False
+        return (set(a.get("allowedLayers", []))
+                == set(b.get("allowedLayers", []))
+                and bool(a.get("underwater", False))
+                == bool(b.get("underwater", False)))
+
+    def digest(tile: np.ndarray, corner: int) -> bytes:
+        height, width = tile.shape[:2]
+        middle_y, middle_x = height // 2, width // 2
+        if corner == 0:
+            patch = tile[:middle_y, :middle_x, :3]
+        elif corner == 1:
+            patch = tile[:middle_y, width - middle_x:, :3]
+        elif corner == 2:
+            patch = tile[height - middle_y:, width - middle_x:, :3]
+        else:
+            patch = tile[height - middle_y:, :middle_x, :3]
+        return hashlib.sha256(patch.tobytes(order="C")).digest()
+
+    anchors: dict[bytes, dict[int, set[int]]] = defaultdict(
+        lambda: defaultdict(set))
+    for slot in recipe["slots"]:
+        values = list(slot["signature"].values())
+        if len(set(values)) != 1:
+            continue
+        family_id = values[0]
+        for corner in range(4):
+            anchors[digest(tiles[slot["slot"]], corner)][family_id].add(
+                slot["slot"])
+
+    result = copy.deepcopy(recipe)
+    by_slot = {slot["slot"]: slot for slot in result["slots"]}
+    accepted: list[dict] = []
+    suspicious: list[dict] = []
+    for source in recipe["slots"]:
+        for corner, name in enumerate(corner_names):
+            current = source["signature"][name]
+            evidence = anchors.get(digest(tiles[source["slot"]], corner), {})
+            candidates = {
+                family_id: sorted(anchor_slots - {source["slot"]})
+                for family_id, anchor_slots in evidence.items()
+                if family_id != current
+                and compatible(current, family_id)
+                and len(anchor_slots - {source["slot"]}) >= 2
+            }
+            record = {
+                "namespace": recipe["namespace"],
+                "slot": source["slot"],
+                "corner": name,
+                "currentFamilyId": current,
+                "candidateFamilies": [
+                    {"familyId": family_id, "anchorSlots": slots}
+                    for family_id, slots in sorted(candidates.items())
+                ],
+            }
+            if len(candidates) == 1:
+                replacement = next(iter(candidates))
+                record["replacementFamilyId"] = replacement
+                accepted.append(record)
+                if apply:
+                    by_slot[source["slot"]]["signature"][name] = replacement
+            elif candidates:
+                suspicious.append(record)
+            else:
+                # Preserve weaker exact evidence for review without allowing it
+                # to enter the near-certain auto-apply set.
+                weaker = {
+                    family_id: sorted(anchor_slots - {source["slot"]})
+                    for family_id, anchor_slots in evidence.items()
+                    if family_id != current and compatible(current, family_id)
+                    and anchor_slots - {source["slot"]}
+                }
+                if weaker:
+                    record["candidateFamilies"] = [
+                        {"familyId": family_id, "anchorSlots": slots}
+                        for family_id, slots in sorted(weaker.items())
+                    ]
+                    record["reason"] = "fewer-than-two-independent-anchors"
+                    suspicious.append(record)
+    return result, accepted, suspicious
 
 
 def finalize_identity_decisions(decisions: list[dict],

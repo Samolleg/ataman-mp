@@ -3,7 +3,9 @@ CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = endurance_document_tests
 
-RESOURCES += ../assets/resources/semantic_atlas_presets.qrc
+RESOURCES += \
+    ../assets/resources/semantic_atlas_presets.qrc \
+    ../assets/resources/terrain_blend_masks.qrc
 
 INCLUDEPATH += ../source/documents ../source/core ../source/render ../source/resources ../source/app
 SOURCES += \

@@ -764,9 +764,74 @@ QString canonicalMaskTopologyName(int ownerCount, bool diagonal, int variation)
     return QStringLiteral("edge-2of4-v%1").arg((variation & 1) + 1);
 }
 
+QByteArray grayscaleMaskPixelHash(const QImage& source)
+{
+    const QImage image = source.convertToFormat(QImage::Format_Grayscale8);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(int y = 0; y < image.height(); ++y)
+        hash.addData(reinterpret_cast<const char*>(image.constScanLine(y)),
+                     image.width());
+    return hash.result().toHex();
+}
+
+QImage approvedR63IceInsideMask(
+    const QSize& size, const STerrainTransitionSignature& preview,
+    qint32 ownerMaterial, qint32 reviewedStyleMaterial, int variation,
+    QString* provenance)
+{
+    if(size.width() <= 0 || size.width() != size.height()
+       || reviewedStyleMaterial == 0)
+        return {};
+    const QVector<qint32> ids = corners(preview);
+    int ownerCount = 0;
+    int supportCorner = -1;
+    for(int corner = 0; corner < ids.size(); ++corner)
+    {
+        if(ids.at(corner) == reviewedStyleMaterial)
+            ++ownerCount;
+        else
+            supportCorner = corner;
+    }
+    if(ownerCount != 3 || supportCorner < 0)
+        return {};
+    static const char* const resources[2] = {
+        ":/terrain_blend_masks/terrain_blend_masks/ice-inside-3of4-v1-r63.png",
+        ":/terrain_blend_masks/terrain_blend_masks/ice-inside-3of4-v2-r63.png"
+    };
+    static const char* const hashes[2] = {
+        "1617f1c7b073aae77ad0d181368e83d68f2b013e612101c4dc3eb257625f247b",
+        "53c17ae64fffa80b182002d4b9e44c54ce381c750329e689eabd65e4ae1aae8d"
+    };
+    const int index = variation & 1;
+    QImage result(QString::fromLatin1(resources[index]));
+    if(result.isNull() || result.size() != QSize(256, 256)
+       || grayscaleMaskPixelHash(result) != QByteArray(hashes[index]))
+        return {};
+    result = result.convertToFormat(QImage::Format_Grayscale8);
+    // Reviewed authority is stored in logical grid coordinates with owner at
+    // NW/NE/SE and support at SW. Runtime masks use preview coordinates, whose
+    // Y axis is mirrored at the grid boundary, so the same base mask has its
+    // support at preview NW before any requested quarter-turn is applied.
+    // Transform that exact corner assignment; never score or infer orientation.
+    result = result.mirrored(false, true);
+    result = rotateMaskClockwise(result, supportCorner);
+    if(result.size() != size)
+        result = result.scaled(size, Qt::IgnoreAspectRatio,
+                               Qt::SmoothTransformation)
+                       .convertToFormat(QImage::Format_Grayscale8);
+    if(ownerMaterial != reviewedStyleMaterial)
+        result.invertPixels();
+    if(provenance)
+        *provenance = QStringLiteral(
+            "canonical-generated:ice-fracture:inside-3of4-v%1:r63-approved")
+                .arg(index + 1);
+    return result;
+}
+
 QImage canonicalGeneratedOwnershipMask(
     const QSize& size, const STerrainTransitionSignature& preview,
     qint32 ownerMaterial, ETerrainBlendStyle style, int variation,
+    qint32 reviewedStyleMaterial,
     QString* provenance)
 {
     const QVector<qint32> ids = corners(preview);
@@ -778,6 +843,10 @@ QImage canonicalGeneratedOwnershipMask(
         ownerCount += owner[corner];
     }
     if(ownerCount <= 0 || ownerCount >= 4) return {};
+    if(style == ETerrainBlendStyle::Ice && reviewedStyleMaterial != 0)
+        return approvedR63IceInsideMask(
+            size, preview, ownerMaterial, reviewedStyleMaterial,
+            variation, provenance);
     const bool diagonal = ownerCount == 2
         && owner[0] == owner[2] && owner[1] == owner[3];
     QImage result;
@@ -1155,6 +1224,14 @@ ETerrainBlendStyle CTerrainVirtualAtlas::blendStyleForSignature(
     QMap<qint32, int> counts;
     for(qint32 material : corners(signature))
         ++counts[material];
+    // R63 explicitly approves the authored-derived Ice language when Ice
+    // owns three corners. Keep every other family/topology on its existing
+    // path until its own review decision is applied.
+    for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
+        if(it.value() == 3 && m_materialBlendStyles.value(
+               it.key(), ETerrainBlendStyle::Organic)
+               == ETerrainBlendStyle::Ice)
+            return ETerrainBlendStyle::Ice;
     int selectedCount = 5;
     int selectedPriority = -1;
     ETerrainBlendStyle selected = ETerrainBlendStyle::Organic;
@@ -1174,6 +1251,23 @@ ETerrainBlendStyle CTerrainVirtualAtlas::blendStyleForSignature(
         }
     }
     return selected;
+}
+
+qint32 CTerrainVirtualAtlas::reviewedMaskStyleMaterial(
+    const STerrainTransitionSignature& signature,
+    ETerrainBlendStyle style) const
+{
+    if(style != ETerrainBlendStyle::Ice)
+        return 0;
+    QMap<qint32, int> counts;
+    for(qint32 material : corners(signature))
+        ++counts[material];
+    for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
+        if(it.value() == 3 && m_materialBlendStyles.value(
+               it.key(), ETerrainBlendStyle::Organic)
+               == ETerrainBlendStyle::Ice)
+            return it.key();
+    return 0;
 }
 
 int CTerrainVirtualAtlas::blendVariationLimit(
@@ -1464,19 +1558,29 @@ QImage CTerrainVirtualAtlas::reviewBlendMask(
     QList<qint32> ordered = unique.values();
     std::sort(ordered.begin(), ordered.end());
     const qint32 canonicalOwner = ordered.front();
+    const ETerrainBlendStyle style = blendStyleForSignature(gridSignature);
+    const qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
+        gridSignature, style);
+    QString canonicalProvenance;
     QImage result = canonicalGeneratedOwnershipMask(
         m_authoredTiles.front().size(), preview, canonicalOwner,
-        blendStyleForSignature(gridSignature), qMax(0, variation), nullptr);
+        style, qMax(0, variation), reviewedStyleMaterial,
+        &canonicalProvenance);
     if(!result.isNull() && canonicalOwner != ownerMaterial)
         result.invertPixels();
     if(provenance && !result.isNull())
     {
+        if(canonicalProvenance.endsWith(QStringLiteral(":r63-approved")))
+        {
+            *provenance = canonicalProvenance;
+            return result;
+        }
         int ownerCount = 0;
         for(qint32 id : ids) ownerCount += id == ownerMaterial;
         const bool diagonal = ownerCount == 2
             && ids.at(0) == ids.at(2) && ids.at(1) == ids.at(3);
         *provenance = QStringLiteral("canonical-generated:%1:%2")
-            .arg(blendStyleName(blendStyleForSignature(gridSignature)))
+            .arg(blendStyleName(style))
             .arg(canonicalMaskTopologyName(
                 ownerCount, diagonal, qMax(0, variation)));
     }
@@ -1486,6 +1590,7 @@ QImage CTerrainVirtualAtlas::reviewBlendMask(
 QImage CTerrainVirtualAtlas::generateTile(
     const STerrainTransitionSignature& gridSignature,
     ETerrainBlendStyle style, int variation,
+    qint32 reviewedStyleMaterial,
     QString* provenance, CValidationReport* report, bool linearLight) const
 {
     // Atlas thumbnails are vertically opposite the canonical terrain grid.
@@ -1521,7 +1626,7 @@ QImage CTerrainVirtualAtlas::generateTile(
         QString source;
         QImage owner = canonicalGeneratedOwnershipMask(
             m_authoredTiles.front().size(), preview, unique.at(0), style,
-            variation, &source);
+            variation, reviewedStyleMaterial, &source);
         if(owner.isNull())
         {
             if(report) report->add("terrain.canonical_blend_mask_missing",
@@ -1549,6 +1654,7 @@ QImage CTerrainVirtualAtlas::generateTile(
             const QImage mask = canonicalGeneratedOwnershipMask(
                 m_authoredTiles.front().size(), preview, material,
                 m_materialBlendStyles.value(material, style), variation,
+                0,
                 &source);
             if(mask.isNull())
             {
@@ -1679,16 +1785,20 @@ QImage CTerrainVirtualAtlas::reviewGeneratedBlend(
     const STerrainTransitionSignature& gridSignature, int variation,
     QString* provenance, CValidationReport* report) const
 {
-    return generateTile(gridSignature, blendStyleForSignature(gridSignature),
-                        qMax(0, variation), provenance, report);
+    const ETerrainBlendStyle style = blendStyleForSignature(gridSignature);
+    return generateTile(gridSignature, style, qMax(0, variation),
+                        reviewedMaskStyleMaterial(gridSignature, style),
+                        provenance, report);
 }
 
 QImage CTerrainVirtualAtlas::reviewGeneratedBlendLinearLight(
     const STerrainTransitionSignature& gridSignature, int variation,
     QString* provenance, CValidationReport* report) const
 {
-    return generateTile(gridSignature, blendStyleForSignature(gridSignature),
-                        qMax(0, variation), provenance, report, true);
+    const ETerrainBlendStyle style = blendStyleForSignature(gridSignature);
+    return generateTile(gridSignature, style, qMax(0, variation),
+                        reviewedMaskStyleMaterial(gridSignature, style),
+                        provenance, report, true);
 }
 
 bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
@@ -1888,12 +1998,17 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     const STerrainTransitionSignature canonical =
         canonicalSignature(signature, &rotation);
     const ETerrainBlendStyle style = blendStyleForSignature(canonical);
+    const qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
+        canonical, style);
     const int variation = blendVariation(
         cellX, cellY, style, blendVariationLimit(canonical));
     QByteArray key = signatureKey(canonical);
     key.append(char(terrainBlendStylePriority(style)));
     key.append(char(variation));
     char typeBytes[4];
+    qToLittleEndian<qint32>(reviewedStyleMaterial,
+        reinterpret_cast<uchar*>(typeBytes));
+    key.append(typeBytes, 4);
     qToLittleEndian<qint32>(runtimeType,
         reinterpret_cast<uchar*>(typeBytes));
     key.append(typeBytes, 4);
@@ -1901,8 +2016,9 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     if(index < 0)
     {
         QString provenance;
-        const QImage pixels = generateTile(canonical, style, variation,
-                                           &provenance, report);
+        const QImage pixels = generateTile(
+            canonical, style, variation, reviewedStyleMaterial,
+            &provenance, report);
         if(pixels.isNull())
             return result;
         const QByteArray pixelsHash = imageHash(pixels);

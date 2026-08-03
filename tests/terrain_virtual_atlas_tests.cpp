@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QCryptographicHash>
 #include <QtEndian>
 #include <QDir>
 #include <QFile>
@@ -27,6 +28,16 @@ QImage solid(QRgb color)
     QImage image(8,8,QImage::Format_RGBA8888);
     image.fill(QColor::fromRgba(color));
     return image;
+}
+
+QByteArray grayscalePixelHash(const QImage& source)
+{
+    const QImage image = source.convertToFormat(QImage::Format_Grayscale8);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(int y = 0; y < image.height(); ++y)
+        hash.addData(reinterpret_cast<const char*>(image.constScanLine(y)),
+                     image.width());
+    return hash.result().toHex();
 }
 
 struct Fixture
@@ -412,6 +423,7 @@ private slots:
     void canonicalMaskVariationsAreDeterministicAndMacroDistinct();
     void canonicalAdjacentAndDiagonalTopologiesStayAnchored();
     void canonicalMasksHaveNoUnanchoredIslandsOrWideFeather();
+    void approvedIceInsideMasksDriveRuntimeGeneration();
     void generatedReviewOutcomeUsesRuntimeBlendGenerator();
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
@@ -474,6 +486,116 @@ private slots:
     void generatedSlotsNeverInheritCompactedAnimationRanges();
     void generatedPaintMatrixSavesReopensAndMatchesVertexOracle();
 };
+
+void TerrainVirtualAtlasTests::approvedIceInsideMasksDriveRuntimeGeneration()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    images << QImage(256, 256, QImage::Format_RGBA8888)
+           << QImage(256, 256, QImage::Format_RGBA8888);
+    images[0].fill(QColor(226, 235, 248));
+    images[1].fill(QColor(42, 104, 36));
+    for(int material = 1; material <= 2; ++material)
+    {
+        STerrainTransitionVariant uniform;
+        uniform.signature = signature(material, material, material, material);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(material - 1);
+        uniform.packedTile = packed.encode();
+        catalog.addVariant(uniform);
+    }
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Ice}, {2, ETerrainBlendStyle::Grass}
+    };
+    CTestTerrainVirtualAtlas atlas(catalog, images, 0x63u, {}, styles);
+    const STerrainTransitionSignature inside = signature(1, 1, 1, 2);
+    const QByteArray expectedHashes[2] = {
+        QByteArray("1617f1c7b073aae77ad0d181368e83d68f2b013e612101c4dc3eb257625f247b"),
+        QByteArray("53c17ae64fffa80b182002d4b9e44c54ce381c750329e689eabd65e4ae1aae8d")
+    };
+    for(int variation = 0; variation < 2; ++variation)
+    {
+        QString provenance;
+        const QImage mask = atlas.reviewBlendMask(
+            inside, 1, variation, &provenance);
+        QVERIFY(!mask.isNull());
+        QCOMPARE(mask.size(), QSize(256, 256));
+        // Review assets are approved in logical grid coordinates; the runtime
+        // compositor consumes the vertically mirrored preview-coordinate mask.
+        QCOMPARE(grayscalePixelHash(mask.mirrored(false, true)),
+                 expectedHashes[variation]);
+        QCOMPARE(provenance, QStringLiteral(
+            "canonical-generated:ice-fracture:inside-3of4-v%1:r63-approved")
+                .arg(variation + 1));
+
+        QString resultProvenance;
+        CValidationReport report;
+        const QImage generated = atlas.reviewGeneratedBlend(
+            inside, variation, &resultProvenance, &report);
+        QVERIFY2(!generated.isNull(), qPrintable(report.toText()));
+        QCOMPARE(resultProvenance, provenance);
+        QImage expected(generated.size(), QImage::Format_RGBA8888);
+        for(int y = 0; y < expected.height(); ++y)
+            for(int x = 0; x < expected.width(); ++x)
+            {
+                double owner = qBound(0.0,
+                    (mask.pixelColor(x, y).redF() - 0.38) / 0.24, 1.0);
+                owner = owner * owner * (3.0 - 2.0 * owner);
+                const QColor a = images[0].pixelColor(x, y);
+                const QColor b = images[1].pixelColor(x, y);
+                expected.setPixelColor(x, y, QColor(
+                    qRound(a.red() * owner + b.red() * (1.0 - owner)),
+                    qRound(a.green() * owner + b.green() * (1.0 - owner)),
+                    qRound(a.blue() * owner + b.blue() * (1.0 - owner)), 255));
+            }
+        // Runtime applies its established narrow ownership remap above, then
+        // replaces the outermost texel row/column with the shared-edge
+        // continuity contract. Every interior texel must still derive from the
+        // approved mask; corners must resolve to their semantic source.
+        QCOMPARE(generated.copy(1, 1, generated.width() - 2,
+                                generated.height() - 2),
+                 expected.copy(1, 1, expected.width() - 2,
+                               expected.height() - 2));
+        // Generated atlas pixels are in preview coordinates: logical SW is
+        // preview NW at this boundary.
+        QCOMPARE(generated.pixelColor(0, 0), images[1].pixelColor(0, 0));
+        QCOMPARE(generated.pixelColor(generated.width() - 1, 0),
+                 images[0].pixelColor(generated.width() - 1, 0));
+        QCOMPARE(generated.pixelColor(generated.width() - 1,
+                                      generated.height() - 1),
+                 images[0].pixelColor(generated.width() - 1,
+                                      generated.height() - 1));
+        QCOMPARE(generated.pixelColor(0, generated.height() - 1),
+                 images[0].pixelColor(0, generated.height() - 1));
+
+        bool runtimeMatched = false;
+        for(int y = 0; y < 16 && !runtimeMatched; ++y)
+            for(int x = 0; x < 16 && !runtimeMatched; ++x)
+            {
+                CValidationReport runtimeReport;
+                const STerrainVirtualTile tile = atlas.resolve(
+                    inside, x, y, &runtimeReport);
+                QVERIFY2(tile.generatedIndex >= 0,
+                         qPrintable(runtimeReport.toText()));
+                const STerrainFinalizedTile& realized =
+                    atlas.generatedTiles().at(tile.generatedIndex);
+                runtimeMatched = realized.pixels == generated
+                    && realized.blendProvenance == provenance;
+            }
+        QVERIFY2(runtimeMatched,
+                 "Resolver did not realize the approved R63 variation");
+
+        const STerrainTransitionSignature rotated =
+            CTerrainTransitionCatalog::rotated(inside, 1);
+        const QImage rotatedMask = atlas.reviewBlendMask(
+            rotated, 1, variation);
+        QCOMPARE(rotatedMask, mask.transformed(
+            QTransform().rotate(-90.0), Qt::FastTransformation));
+        QImage inverse = mask;
+        inverse.invertPixels();
+        QCOMPARE(atlas.reviewBlendMask(inside, 2, variation), inverse);
+    }
+}
 
 void TerrainVirtualAtlasTests::virtualFieldPaintIsUnboundedByAtlas()
 {
