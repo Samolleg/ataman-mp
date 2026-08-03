@@ -11053,8 +11053,8 @@ void CView::viewParameters()
                         playerGroup, mob->diplomacyField(),
                         mob->diplomacyNames())
                     : ei::deriveTrapTargetSummary(playerGroup, {}, {});
-                propStr effectiveTargets(
-                    eObjParam_TRAP_EFFECTIVE_TARGETS, targets.display);
+                propTrapTargets effectiveTargets(
+                    eObjParam_TRAP_EFFECTIVE_TARGETS, targets);
                 util::addParam(aProp, &effectiveTargets);
             }
         }

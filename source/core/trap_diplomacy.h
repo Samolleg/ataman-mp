@@ -10,8 +10,10 @@ namespace ei {
 struct STrapTargetSummary
 {
     bool available = false;
+    int playerGroup = -1;
     quint32 mask = 0;
     QVector<int> groups;
+    QStringList labels;
     QString display;
 };
 

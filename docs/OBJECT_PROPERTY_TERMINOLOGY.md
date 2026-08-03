@@ -162,7 +162,7 @@ an override nor an additional filter.
 
 | UI label | Value | Current property UI | Tooltip |
 |---|---|---|---|
-| Will attack (derived) | Player-group names and numbers | Read-only in Logic mode | Groups marked War in this trap's Player group row of the containing MOB's diplomacy table. This is the target mask the game calculates when the map loads. |
+| Will attack | Read-only target-table button | Opens one non-editable row containing only groups marked War in this trap's Player group row of the containing MOB's diplomacy table. This is the target set the game calculates when the map loads. |
 | Stored target mask (legacy) | 32-bit player-group bitmask | Preserved but omitted from the normal property UI | Serialized mask replaced during normal map loading. |
 | Spell | Spell expression | Exposed in Logic mode | Spell cast when the trap activates. |
 | Cast interval | Game ticks; `15` = 1 second | Exposed in Logic mode | Delay before the trap can cast again. |

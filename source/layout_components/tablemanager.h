@@ -20,6 +20,7 @@ class CLineEditEventFilter;
 class CMultiLineEditForm;
 class CUnitStatForm;
 class CBodyPartEditForm;
+class QDialog;
 class QContextMenuEvent;
 class CMagicTrap;
 class QBoxLayout;
@@ -313,6 +314,22 @@ private:
     QSharedPointer<IPropertyBase> m_pValue;
     QSharedPointer<CBodyPartEditForm> m_pPartForm;
 
+};
+
+/// Read-only, parts-style launcher for the diplomacy-derived trap target table.
+class CTrapTargetItem: public QToolButton
+{
+    Q_OBJECT
+public:
+    CTrapTargetItem() = delete;
+    explicit CTrapTargetItem(const QSharedPointer<IPropertyBase>& prop);
+
+public slots:
+    void onTargetViewOpen();
+
+private:
+    QSharedPointer<IPropertyBase> m_pValue;
+    QSharedPointer<QDialog> m_pTargetDialog;
 };
 
 ///

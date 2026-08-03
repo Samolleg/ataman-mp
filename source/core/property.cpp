@@ -151,6 +151,46 @@ QSharedPointer<IPropertyBase> CPropertyStringArray::createEmptyCopy()
     return QSharedPointer<IPropertyBase>(new CPropertyStringArray(m_type));
 }
 
+IPropertyBase* CPropertyTrapTargets::clone() const
+{
+    return m_bInit
+        ? static_cast<IPropertyBase*>(new CPropertyTrapTargets(m_type, m_value))
+        : static_cast<IPropertyBase*>(new CPropertyTrapTargets(m_type));
+}
+
+bool CPropertyTrapTargets::isEqual(const IPropertyBase* property) const
+{
+    if(!isValidProp(property, this))
+        return false;
+    const CPropertyTrapTargets* other = dynamic_cast<const CPropertyTrapTargets*>(property);
+    return other
+        && m_value.available == other->m_value.available
+        && m_value.playerGroup == other->m_value.playerGroup
+        && m_value.groups == other->m_value.groups
+        && m_value.labels == other->m_value.labels
+        && m_value.display == other->m_value.display;
+}
+
+bool CPropertyTrapTargets::isEqual(const QString text) const
+{
+    return m_bInit && m_value.display == text;
+}
+
+QString CPropertyTrapTargets::toString()
+{
+    return m_bInit ? m_value.display : QString();
+}
+
+void CPropertyTrapTargets::resetFromString(const QString& text)
+{
+    Q_UNUSED(text);
+}
+
+QSharedPointer<IPropertyBase> CPropertyTrapTargets::createEmptyCopy()
+{
+    return QSharedPointer<IPropertyBase>(new CPropertyTrapTargets(m_type));
+}
+
 bool IPropertyBase::isValidProp(const IPropertyBase* pPropA, const IPropertyBase* pPropB) const
 {
     if(!pPropA->isInit() || !pPropB->isInit())

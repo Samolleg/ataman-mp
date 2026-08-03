@@ -339,10 +339,10 @@ CTrapCollectionWidget::CTrapCollectionWidget(CMagicTrap* trap, QWidget* parent)
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_tree->setToolTip(tr(
-        "Activation areas and cast targets are independent sibling arrays. "
-        "Drag within one section to reorder it; the top half of a row places the point before it, "
-        "and the bottom half places it after. The complete order previews while dragging; "
-        "leaving the list or pressing Esc cancels it. Gold indicates the point selected "
+        "Activation areas and cast targets are independent sibling arrays.\n"
+        "Drag within one section to reorder it; the top half of a row places the point before it,\n"
+        "and the bottom half places it after. The complete order previews while dragging;\n"
+        "leaving the list or pressing Esc cancels it. Gold indicates the point selected\n"
         "in the viewport/outliner; clicking another row only focuses it here."));
     collectionTree->setMoveRequest([this](bool castTarget, int from, int to)
     {

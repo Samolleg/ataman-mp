@@ -398,9 +398,9 @@ CBehaviorCollectionWidget::CBehaviorCollectionWidget(
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     m_tree->setToolTip(tr(
-        "Drag patrols to reorder the route, or drag look points within one patrol. "
-        "The top half of a row places the point before it; the bottom half places it after. "
-        "The complete order previews while dragging; leaving the list or pressing Esc cancels it. "
+        "Drag patrols to reorder the route, or drag look points within one patrol.\n"
+        "The top half of a row places the point before it; the bottom half places it after.\n"
+        "The complete order previews while dragging; leaving the list or pressing Esc cancels it.\n"
         "Gold indicates the point selected in the viewport/outliner; clicking another row only focuses it here."));
     collectionTree->setMoveRequest(
         [this](bool lookPoint, int patrol, int from, int to)

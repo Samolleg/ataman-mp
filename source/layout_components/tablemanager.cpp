@@ -22,6 +22,8 @@
 #include <QItemSelectionModel>
 #include <QResizeEvent>
 #include <QTimer>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QtMath>
 #include <cmath>
 #include <functional>
@@ -1066,7 +1068,7 @@ void CTableManager::initRowName()
     m_aRowName[eObjParam_LEVER_IS_DOOR] = "Door interaction";
     m_aRowName[eObjParam_LEVER_RECALC_GRAPH] = "Recalculate navigation graph";
     m_aRowName[eObjParam_TRAP_DIPLOMACY] = "Stored target mask (legacy)";
-    m_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Will attack (derived)";
+    m_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Will attack";
     m_aRowName[eObjParam_TRAP_SPELL] = "Spell";
     m_aRowName[eObjParam_TRAP_AREA_RADIUS] = "Activation radius";
     m_aRowName[eObjParam_TRAP_CAST_INTERVAL] = "Cast interval";
@@ -1413,7 +1415,6 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             break;
         }
         case eObjParam_OBJECT_TYPE:
-        case eObjParam_TRAP_EFFECTIVE_TARGETS:
         {
             m_pTable->insertRow(i);
             m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[type]));
@@ -1422,6 +1423,17 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             value->setReadOnly(true);
             value->setFocusPolicy(Qt::StrongFocus);
             m_pTable->setCellWidget(i, 1, value);
+            registerPropertyRow(i, item);
+            ++i;
+            break;
+        }
+        case eObjParam_TRAP_EFFECTIVE_TARGETS:
+        {
+            m_pTable->insertRow(i);
+            m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[type]));
+            blockEditWidget(m_pTable->item(i, 0));
+            CTrapTargetItem* targets = new CTrapTargetItem(item);
+            m_pTable->setCellWidget(i, 1, targets);
             registerPropertyRow(i, item);
             ++i;
             break;
@@ -2532,4 +2544,77 @@ void CBodyPartItem::_onParamChange(const QSharedPointer<IPropertyBase>& prop)
 {
     m_pValue.reset(prop->clone());
     emit onParamChange(prop);
+}
+
+CTrapTargetItem::CTrapTargetItem(const QSharedPointer<IPropertyBase>& prop)
+{
+    setFocusPolicy(Qt::StrongFocus);
+    m_pValue = prop.isNull()
+        ? QSharedPointer<IPropertyBase>()
+        : QSharedPointer<IPropertyBase>(prop->clone());
+    const propTrapTargets* targets = dynamic_cast<const propTrapTargets*>(m_pValue.get());
+    if(!targets || !targets->isInit())
+        setText(tr("View mixed targets"));
+    else if(!targets->value().available)
+        setText(tr("Targets unavailable"));
+    else
+        setText(tr("View targets (%1)").arg(targets->value().labels.size()));
+    connect(this, &QToolButton::clicked, this, &CTrapTargetItem::onTargetViewOpen);
+}
+
+void CTrapTargetItem::onTargetViewOpen()
+{
+    const propTrapTargets* targets = dynamic_cast<const propTrapTargets*>(m_pValue.get());
+    if(m_pTargetDialog.isNull())
+    {
+        m_pTargetDialog.reset(new QDialog());
+        m_pTargetDialog->setObjectName(QStringLiteral("trapTargetDialog"));
+        m_pTargetDialog->setAttribute(Qt::WA_QuitOnClose, false);
+        m_pTargetDialog->setWindowTitle(tr("Trap targets"));
+        QVBoxLayout* layout = new QVBoxLayout(m_pTargetDialog.get());
+
+        if(!targets || !targets->isInit())
+            layout->addWidget(new QLabel(tr("Selected traps have different target sets."),
+                                         m_pTargetDialog.get()));
+        else if(!targets->value().available)
+            layout->addWidget(new QLabel(targets->value().display, m_pTargetDialog.get()));
+        else
+        {
+            layout->addWidget(new QLabel(
+                tr("Player group %1 attacks factions marked War in its diplomacy row.")
+                    .arg(targets->value().playerGroup), m_pTargetDialog.get()));
+            const QStringList labels = targets->value().labels;
+            if(labels.isEmpty())
+                layout->addWidget(new QLabel(tr("No factions are marked War."),
+                                             m_pTargetDialog.get()));
+            else
+            {
+                QTableWidget* table = new QTableWidget(1, labels.size(),
+                                                       m_pTargetDialog.get());
+                table->setObjectName(QStringLiteral("trapTargetTable"));
+                table->setHorizontalHeaderLabels(labels);
+                table->setVerticalHeaderLabels({tr("Will attack")});
+                table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                table->setSelectionMode(QAbstractItemView::NoSelection);
+                for(int column = 0; column < labels.size(); ++column)
+                {
+                    QTableWidgetItem* war = new QTableWidgetItem(tr("War"));
+                    war->setTextAlignment(Qt::AlignCenter);
+                    table->setItem(0, column, war);
+                }
+                table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+                table->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+                table->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
+                layout->addWidget(table);
+            }
+        }
+
+        QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close,
+                                                         m_pTargetDialog.get());
+        connect(buttons, &QDialogButtonBox::rejected, m_pTargetDialog.get(), &QDialog::close);
+        layout->addWidget(buttons);
+    }
+    m_pTargetDialog->show();
+    m_pTargetDialog->raise();
+    m_pTargetDialog->activateWindow();
 }

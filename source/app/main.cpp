@@ -4,6 +4,7 @@
 #include <QProxyStyle>
 #include <QIcon>
 #include <QCommandLineParser>
+#include <QDialog>
 #include <QFileInfo>
 #include <QFont>
 #include <QJsonDocument>
@@ -647,6 +648,52 @@ int runHeadlessCommand(QApplication& app)
             }
             return -1;
         };
+        ei::STrapTargetSummary targetSummary;
+        targetSummary.available = true;
+        targetSummary.playerGroup = 3;
+        targetSummary.groups = {4, 12};
+        targetSummary.labels = QStringList()
+            << QStringLiteral("4 (Guards)")
+            << QStringLiteral("12 (Orcs)");
+        targetSummary.display = QStringLiteral(
+            "Player group 3 → 4 (Guards), 12 (Orcs)");
+        QList<QSharedPointer<IPropertyBase>> trapTargetProperties;
+        trapTargetProperties << QSharedPointer<IPropertyBase>(new propTrapTargets(
+            eObjParam_TRAP_EFFECTIVE_TARGETS, targetSummary));
+        QTableWidget trapTargetPropertyTable;
+        CTableManager trapTargetManager(&trapTargetPropertyTable);
+        trapTargetManager.setNewData(trapTargetProperties, true);
+        const int trapTargetRow = rowForType(
+            trapTargetPropertyTable, eObjParam_TRAP_EFFECTIVE_TARGETS);
+        CTrapTargetItem* trapTargetButton = trapTargetRow >= 0
+            ? qobject_cast<CTrapTargetItem*>(
+                trapTargetPropertyTable.cellWidget(trapTargetRow, 1))
+            : nullptr;
+        if(trapTargetButton) trapTargetButton->click();
+        QApplication::processEvents();
+        QDialog* trapTargetDialog = nullptr;
+        for(QWidget* widget : QApplication::topLevelWidgets())
+            if(widget->objectName() == QStringLiteral("trapTargetDialog"))
+                trapTargetDialog = qobject_cast<QDialog*>(widget);
+        QTableWidget* trapTargetTable = trapTargetDialog
+            ? trapTargetDialog->findChild<QTableWidget*>(
+                QStringLiteral("trapTargetTable")) : nullptr;
+        const bool trapTargetsUseReadOnlyTable = trapTargetRow >= 0
+            && trapTargetPropertyTable.item(trapTargetRow, 0)->text()
+                == QStringLiteral("Will attack")
+            && trapTargetButton
+            && !trapTargetPropertyTable.cellWidget(trapTargetRow, 1)
+                ->findChild<QLineEdit*>()
+            && trapTargetTable && trapTargetTable->rowCount() == 1
+            && trapTargetTable->columnCount() == 2
+            && trapTargetTable->horizontalHeaderItem(0)->text()
+                == QStringLiteral("4 (Guards)")
+            && trapTargetTable->horizontalHeaderItem(1)->text()
+                == QStringLiteral("12 (Orcs)")
+            && trapTargetTable->verticalHeaderItem(0)->text()
+                == QStringLiteral("Will attack")
+            && trapTargetTable->editTriggers() == QAbstractItemView::NoEditTriggers;
+        if(trapTargetDialog) trapTargetDialog->close();
         QList<QSharedPointer<IPropertyBase>> staticChoiceProperties;
         staticChoiceProperties
             << QSharedPointer<IPropertyBase>(new propUint(eObjParam_TYPE, 50))
@@ -2107,6 +2154,7 @@ int runHeadlessCommand(QApplication& app)
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
                 && prefixesOnly && valueStable && focusCancel && escapeCancel
                 && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork
+                && trapTargetsUseReadOnlyTable
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
@@ -2217,6 +2265,7 @@ int runHeadlessCommand(QApplication& app)
                << " staticChoicePopupTooltipClear=" << staticChoicePopupTooltipClear
                << " staticChoiceItemTooltipsWork=" << staticChoiceItemTooltipsWork
                << " alarmConditionItemTooltipsWork=" << alarmConditionItemTooltipsWork
+               << " trapTargetsUseReadOnlyTable=" << trapTargetsUseReadOnlyTable
                << " unitCategoryIdsVisible=" << unitCategoryIdsVisible
                << " helperFigureCacheIdentityDistinct=" << helperFigureCacheIdentityDistinct
                << " settingsTabsUsable=" << settingsTabsUsable

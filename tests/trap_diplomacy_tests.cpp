@@ -42,8 +42,10 @@ void TrapDiplomacyTests::derivesWarTargetsFromOwningPlayerRow()
         3, table, playerNames());
 
     QVERIFY(summary.available);
+    QCOMPARE(summary.playerGroup, 3);
     QCOMPARE(summary.mask, quint32((1u << 4) | (1u << 12)));
     QCOMPARE(summary.groups, QVector<int>({4, 12}));
+    QCOMPARE(summary.labels, QStringList({"4 (Guards)", "12 (Orcs)"}));
     QCOMPARE(summary.display,
              QString("Player group 3 → 4 (Guards), 12 (Orcs)"));
 }

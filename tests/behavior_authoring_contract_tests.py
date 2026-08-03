@@ -37,6 +37,7 @@ def main() -> int:
     trap_collection = source("source/ui/trap_collection_widget.cpp")
     trap_targets = source("source/core/trap_diplomacy.cpp")
     table = source("source/layout_components/tablemanager.cpp")
+    table_h = source("source/layout_components/tablemanager.h")
 
     require(settings, '{"shortcutHistory", "Ctrl+H"}',
             "Undo History default shortcut")
@@ -105,10 +106,16 @@ def main() -> int:
                              trap.index("void CMagicTrap::applyLogicParam")]
     if "eObjParam_TRAP_DIPLOMACY" in logic_trap_params:
         raise AssertionError("legacy trap target mask remains editable in Logic mode")
-    require(table, 'm_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Will attack (derived)";',
-            "read-only effective trap-target property label")
-    require(table, "case eObjParam_TRAP_EFFECTIVE_TARGETS:",
-            "read-only effective trap-target property editor")
+    require(table, 'm_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Will attack";',
+            "plain effective trap-target property label")
+    require(table_h, "class CTrapTargetItem: public QToolButton",
+            "parts-style read-only trap-target button")
+    require(table, "QTableWidget(1, labels.size()",
+            "one-row effective trap-target table")
+    require(table, "QAbstractItemView::NoEditTriggers",
+            "non-editable effective trap-target table")
+    require(table, 'setVerticalHeaderLabels({tr("Will attack")});',
+            "effective trap-target row heading")
     require(unit_h, "const QVector<CPatrolPoint*>& patrolPoints() const",
             "read-only patrol hierarchy access")
     require(tree, "setLogicSlotIndex(logicSlot);",
@@ -267,6 +274,10 @@ def main() -> int:
             "patrol/look drag avoiding repeated work for one destination")
     require(collection, "worldSelectionBackground",
             "distinct collection highlight for viewport-selected points")
+    require(collection, '"Drag patrols to reorder the route, or drag look points within one patrol.\\n"',
+            "line-broken patrol collection tooltip")
+    require(trap_collection, '"Activation areas and cast targets are independent sibling arrays.\\n"',
+            "line-broken trap collection tooltip")
     require(unit_h, "bool movePatrolPoint(int from, int to);",
             "ordered patrol mutation API")
     require(unit_h, "bool moveLookPoint(int from, int to);",

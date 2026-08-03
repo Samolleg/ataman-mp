@@ -7,6 +7,7 @@
 #include <QStringList>
 #include "types.h"
 #include "log.h"
+#include "trap_diplomacy.h"
 
 ///
 /// \brief The IPropertyBase class is the base class for handling object properties that are stored in the *mob file. Each property type is defined below.
@@ -201,6 +202,29 @@ private:
 
 typedef CPropertyString propStr;
 typedef CPropertyStringArray propStrAr;
+
+class CPropertyTrapTargets final: public IPropertyBase
+{
+public:
+    CPropertyTrapTargets() = delete;
+    explicit CPropertyTrapTargets(EObjParam type): IPropertyBase(type) {}
+    CPropertyTrapTargets(EObjParam type, const ei::STrapTargetSummary& value)
+        : IPropertyBase(type, true), m_value(value) {}
+
+    IPropertyBase* clone() const override;
+    bool isEqual(const IPropertyBase* property) const override;
+    bool isEqual(const QString text) const override;
+    QString toString() override;
+    void resetFromString(const QString& text) override;
+    QSharedPointer<IPropertyBase> createEmptyCopy() override;
+
+    const ei::STrapTargetSummary& value() const { Q_ASSERT(m_bInit); return m_value; }
+
+private:
+    ei::STrapTargetSummary m_value;
+};
+
+typedef CPropertyTrapTargets propTrapTargets;
 typedef CProperty3D prop3D;
 typedef CPropertyUnitStat propUnitStat;
 typedef CPropertyNumber<bool> propBool;

@@ -10,6 +10,7 @@ STrapTargetSummary deriveTrapTargetSummary(
 {
     Q_UNUSED(storedMask);
     STrapTargetSummary result;
+    result.playerGroup = playerGroup;
     if(playerGroup < 0 || playerGroup >= 32)
     {
         result.display = QString("Unavailable — invalid Player group %1")
@@ -37,9 +38,11 @@ STrapTargetSummary deriveTrapTargetSummary(
         result.groups.append(target);
         const QString name = target < playerNames.size()
             ? playerNames.at(target).trimmed() : QString();
-        targets.append(name.isEmpty()
+        const QString label = name.isEmpty()
             ? QString::number(target)
-            : QString("%1 (%2)").arg(target).arg(name));
+            : QString("%1 (%2)").arg(target).arg(name);
+        targets.append(label);
+        result.labels.append(label);
     }
 
     const QString targetText = targets.isEmpty()
