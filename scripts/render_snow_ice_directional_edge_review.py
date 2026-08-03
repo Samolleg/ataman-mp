@@ -411,6 +411,36 @@ def validate_output(output: Path) -> dict:
     }
 
 
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify R60 attenuation remains rejected as weaker than R59."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "directional-edge-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R60 decision keys do not exactly match the review")
+    for key, decision in decisions.items():
+        if (decision.get("answer") !=
+                "Reject attenuation; less pronounced than R59"):
+            raise ValueError(f"R60 attenuation must remain rejected: {key}")
+        note = decision.get("note", "").casefold()
+        if ("less pronounced than r59" not in note or
+                "blue guide" not in note or
+                "visibly stronger blend body" not in note):
+            raise ValueError(f"R60 reach correction is missing: {key}")
+    if review.get("approvedRoutes"):
+        raise ValueError("R60 must not authorize a generation route")
+    return {
+        **rendered,
+        "approved": 0,
+        "rejected": len(decisions),
+        "pending": len(decisions),
+        "generationChanged": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--r57", required=True, type=Path)

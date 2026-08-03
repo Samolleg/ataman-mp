@@ -38,6 +38,10 @@ from render_snow_ice_feathered_boundary_review import (
 )
 from render_snow_ice_directional_edge_review import (
     preserve_authored_detail_on_support_adjacent_edges,
+    validate_review_decisions as validate_r60_review_decisions,
+)
+from render_snow_ice_pronounced_reach_review import (
+    strengthen_connected_support_reach,
 )
 
 
@@ -59,6 +63,49 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_r60_is_rejected_as_weaker_without_blue_guide_reach(
+            self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        review = Path(__file__).with_name(
+            "authored_mask_ice_directional_r60_decisions.json")
+        result = validate_r60_review_decisions(
+            root / "artifacts" /
+            "modern-atlas-r60-ice-directional-edge-feather" /
+            "questionnaire", review)
+
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(0, result["approved"])
+        self.assertEqual(2, result["rejected"])
+        self.assertEqual(2, result["pending"])
+        self.assertFalse(result["generationChanged"])
+
+    def test_pronounced_reach_strengthens_connected_soft_support_only(
+            self) -> None:
+        authored = np.full((128, 128), 250, dtype=np.uint8)
+        authored[64:, :64] = 0
+        authored[52:64, :70] = 210
+        authored[40:52, :76] = 230
+        authored[28:40, :82] = 238
+        authored[0:4, 96:100] = 210  # Detached beyond the reach band.
+        baseline = authored.copy()
+
+        repaired, audit = strengthen_connected_support_reach(
+            Image.fromarray(authored, "L"),
+            Image.fromarray(baseline, "L"), "inside-3of4-v1")
+        result = np.asarray(repaired)
+
+        self.assertLess(int(result[45, 60]), int(baseline[45, 60]))
+        self.assertLess(int(result[57, 60]), int(result[45, 60]))
+        np.testing.assert_array_equal(
+            baseline[0:4, 96:100], result[0:4, 96:100])
+        self.assertEqual(int(baseline[0, 100]), int(result[0, 100]))
+        self.assertGreater(audit["changedConnectedReachPixels"], 0)
+        self.assertEqual(0, audit["changedOutsideConnectedReachPixels"])
+        self.assertGreater(audit["newSupportDominantPixels"], 0)
+        self.assertEqual(0, audit["changedDistantOwnerPixels"])
+        self.assertTrue(audit["preservesContinuousAuthoredDetail"])
+        self.assertFalse(audit["usesGlobalBlur"])
+
     def test_r59_keeps_ne_but_requests_two_stronger_edge_shoulders(
             self) -> None:
         root = Path(__file__).resolve().parent.parent
