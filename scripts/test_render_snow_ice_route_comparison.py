@@ -6,14 +6,15 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image
 
 from render_snow_ice_route_comparison import (
     REVIEW_CASES,
     choose_route_candidate,
     choose_shared_route_pair,
     contract_violation,
-    orient_reconstructed_mask,
+    explicit_source_alignment,
+    physical_to_logical,
 )
 
 
@@ -35,22 +36,55 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
-    def test_reconstructed_mask_is_rotated_and_inverted_to_authored_owner(self) -> None:
-        """Reproduce R49's opposite-polarity Snow route comparison."""
+    def test_physical_mask_is_mirrored_to_explicit_logical_corners(self) -> None:
+        """Reproduce R51's incorrect rotation of a physical SW owner."""
         values = np.zeros((64, 64), dtype=np.uint8)
-        values[:32, :32] = 255
-        values[7:17, 22:32] = 96
-        values[22:32, 28:38] = 180
-        reference = Image.fromarray(values, "L")
-        reconstructed = ImageOps.invert(reference.rotate(90))
+        values[32:, :32] = 255
+        values[37:47, 22:32] = 96
+        values[54:64, 28:38] = 180
+        physical = Image.fromarray(values, "L")
 
-        oriented, decision = orient_reconstructed_mask(
-            reconstructed, reference, "outer-1of4-v1")
+        logical, decision = physical_to_logical(physical)
 
-        self.assertTrue(np.array_equal(
-            np.asarray(reference), np.asarray(oriented)))
-        self.assertEqual(270, decision["rotationCounterClockwise"])
-        self.assertTrue(decision["inverted"])
+        logical_values = np.asarray(logical)
+        self.assertEqual(255, logical_values[0, 0])
+        self.assertEqual(0, logical_values[-1, 0])
+        self.assertEqual(180, logical_values[0, 28])
+        self.assertEqual("vertical-mirror", decision["transform"])
+        self.assertEqual(0, decision["rotationCounterClockwise"])
+        self.assertFalse(decision["inverted"])
+
+    def test_physical_to_logical_mirror_does_not_swap_left_and_right(self) -> None:
+        values = np.zeros((8, 8), dtype=np.uint8)
+        values[7, 1] = 91
+        values[7, 6] = 203
+
+        logical, _ = physical_to_logical(Image.fromarray(values, "L"))
+
+        self.assertEqual(91, np.asarray(logical)[0, 1])
+        self.assertEqual(203, np.asarray(logical)[0, 6])
+
+    def test_source_rotation_comes_only_from_semantic_corner_assignment(self) -> None:
+        outer = explicit_source_alignment((
+            "Snow / Common", "Stone / Gray",
+            "Stone / Gray", "Stone / Gray"), "outer-1of4-v1")
+        edge = explicit_source_alignment((
+            "Ground / Light", "Ground / Light",
+            "Snow / Common", "Snow / Common"), "edge-2of4-v1")
+        inside = explicit_source_alignment((
+            "Snow / Common", "Snow / Common",
+            "Snow / Common", "Grass / Yellow lichen"),
+            "inside-3of4-v2")
+
+        self.assertEqual(270, outer["sourceRotationClockwise"])
+        self.assertEqual("Snow / Common", outer["mappedOwnerMaterial"])
+        self.assertEqual(0, edge["sourceRotationClockwise"])
+        self.assertEqual("Snow / Common", edge["mappedOwnerMaterial"])
+        self.assertEqual(90, inside["sourceRotationClockwise"])
+        self.assertEqual("Snow / Common", inside["mappedOwnerMaterial"])
+        for decision in (outer, edge, inside):
+            self.assertEqual("semantic-corner-pattern",
+                             decision["transformAuthority"])
 
     def test_case_set_covers_every_snow_and_ice_topology_once(self) -> None:
         self.assertEqual(14, len(REVIEW_CASES))

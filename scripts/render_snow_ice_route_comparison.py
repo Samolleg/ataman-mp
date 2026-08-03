@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 from dataclasses import dataclass
 import hashlib
@@ -25,7 +26,6 @@ from render_authored_mask_repair_pilot import (
     _sha256_bytes,
     _slug,
     _source_quality,
-    align_authored_mask,
     expected_owner_corners,
     mask_metrics,
     repair_authored_mask,
@@ -74,57 +74,111 @@ def contract_violation(metrics: dict) -> float:
     return round(violation, 6)
 
 
-def _force_exact_topology_corners(mask: Image.Image,
-                                  topology: str) -> Image.Image:
-    values = np.asarray(mask.convert("L"), dtype=np.uint8).copy()
+def physical_to_logical(image: Image.Image) -> tuple[Image.Image, dict]:
+    """Map atlas raster coordinates to semantic NW/NE/SE/SW coordinates."""
+    return ImageOps.flip(image), {
+        "transform": "vertical-mirror",
+        "rotationCounterClockwise": 0,
+        "inverted": False,
+    }
+
+
+def _logical_owner_corners(mask: Image.Image) -> tuple[bool, bool, bool, bool]:
+    values = np.asarray(mask.convert("L"), dtype=np.uint8)
     points = ((0, 0), (0, values.shape[1] - 1),
               (values.shape[0] - 1, values.shape[1] - 1),
               (values.shape[0] - 1, 0))
-    for point, owned in zip(points, expected_owner_corners(topology)):
-        values[point] = 255 if owned else 0
-    return Image.fromarray(values, "L")
+    return tuple(bool(values[point] >= 128) for point in points)
 
 
-def orient_reconstructed_mask(
-        mask: Image.Image, aligned_reference: Image.Image,
-        topology: str) -> tuple[Image.Image, dict]:
-    """Normalize a reconstructed field to the authored owner convention."""
-    reference = aligned_reference.convert("L")
-    reconstructed = mask.convert("L")
-    if reconstructed.size != reference.size:
-        raise ValueError("reconstructed and authored masks differ in size")
-    reference_values = np.asarray(reference, dtype=np.float32) / 255.0
-    reference_strong = reference_values >= 0.5
-    candidates = []
+def _global_material_id(name: str) -> int:
+    value = 2166136261
+    for byte in ("land:" + name.strip().casefold()).encode("utf-8"):
+        value ^= byte
+        value = (value * 16777619) & 0xffffffff
+    return 0x40000000 | (value & 0x3fffffff)
+
+
+def _rotate_corners_clockwise(values: tuple) -> tuple:
+    nw, ne, se, sw = values
+    return sw, nw, ne, se
+
+
+def explicit_source_alignment(
+        source_corner_names: tuple[str, str, str, str],
+        topology: str) -> dict:
+    """Reproduce the resolver's exact corner-pattern transform."""
+    source_ids = tuple(_global_material_id(name)
+                       for name in source_corner_names)
+    unique = sorted(set(source_ids))
+    if len(unique) != 2:
+        raise ValueError("authored mask source must contain two materials")
+    source_owner, source_other = unique
+    logical_owner = expected_owner_corners(topology)
+    requested_preview_owner = (
+        logical_owner[3], logical_owner[2],
+        logical_owner[1], logical_owner[0])
+    rotated = source_ids
     for turns in range(4):
-        rotated = reconstructed.rotate(90 * turns)
-        for inverted in (False, True):
-            candidate = ImageOps.invert(rotated) if inverted else rotated
-            candidate = _force_exact_topology_corners(candidate, topology)
-            values = np.asarray(candidate, dtype=np.float32) / 255.0
-            metrics = mask_metrics(candidate, candidate, topology)
-            candidates.append({
-                "image": candidate,
-                "metrics": metrics,
-                "rotationCounterClockwise": turns * 90,
-                "inverted": inverted,
-                "contractViolation": contract_violation(metrics),
-                "referenceStrongDisagreement": round(float(np.not_equal(
-                    values >= 0.5, reference_strong).mean()), 6),
-                "referenceMeanAbsoluteDifference": round(float(np.abs(
-                    values - reference_values).mean()), 6),
-            })
-    chosen = min(candidates, key=lambda item: (
-        item["referenceStrongDisagreement"],
-        item["referenceMeanAbsoluteDifference"],
-        not item["metrics"]["structuralTargetMet"],
-        item["contractViolation"],
-        item["inverted"], item["rotationCounterClockwise"]))
-    decision = {key: value for key, value in chosen.items()
-                if key not in ("image", "metrics")}
-    decision["structuralTargetMet"] = bool(
-        chosen["metrics"]["structuralTargetMet"])
-    return chosen["image"], decision
+        owner_pattern = tuple(value == source_owner for value in rotated)
+        other_pattern = tuple(value == source_other for value in rotated)
+        if owner_pattern == requested_preview_owner:
+            inverted = False
+            break
+        if other_pattern == requested_preview_owner:
+            inverted = True
+            break
+        rotated = _rotate_corners_clockwise(rotated)
+    else:
+        raise ValueError(
+            f"source signature cannot realize topology {topology}")
+    id_to_name = {
+        _global_material_id(name): name for name in source_corner_names}
+    mapped_owner = source_other if inverted else source_owner
+    return {
+        "sourceCornerMaterials": list(source_corner_names),
+        "requestedOwnerLogicalCorners": [
+            CORNER_NAMES[index] for index, owned in enumerate(logical_owner)
+            if owned],
+        "sourceRotationClockwise": turns * 90,
+        "sourceOwnerInverted": inverted,
+        "mappedOwnerMaterial": id_to_name[mapped_owner],
+        "transformAuthority": "semantic-corner-pattern",
+    }
+
+
+def _preset_source_alignment(catalog: dict, provenance: str,
+                             topology: str) -> dict:
+    namespace, separator, slot_text = provenance.rpartition(":")
+    if not separator or not slot_text.isdigit():
+        raise ValueError(f"invalid authored provenance {provenance}")
+    preset = next((item for item in catalog["presets"]
+                   if item["namespace"].casefold() == namespace.casefold()),
+                  None)
+    if preset is None:
+        raise ValueError(f"preset namespace is unavailable: {namespace}")
+    slot = int(slot_text)
+    signatures = base64.b64decode(preset["signaturesBase64"])
+    if slot < 0 or (slot + 1) * 4 > len(signatures):
+        raise ValueError(f"source slot is unavailable: {provenance}")
+    family_names = {int(item["id"]): item["name"]
+                    for item in preset["families"]}
+    local_ids = signatures[slot * 4:(slot + 1) * 4]
+    try:
+        names = tuple(family_names[value] for value in local_ids)
+    except KeyError as error:
+        raise ValueError(
+            f"source corner family is unavailable: {provenance}") from error
+    result = explicit_source_alignment(names, topology)
+    result.update({"namespace": namespace, "slot": slot})
+    return result
+
+
+def _align_authored_source(image: Image.Image,
+                           alignment: dict) -> Image.Image:
+    physical = image.rotate(-alignment["sourceRotationClockwise"])
+    logical, _ = physical_to_logical(physical)
+    return logical
 
 
 def choose_route_candidate(candidates: list[dict]) -> dict:
@@ -207,7 +261,8 @@ def _representatives(review: Path, rows: list[dict[str, str]],
 
 
 def _build_candidates(review: Path, rows: list[dict[str, str]],
-                      case: ReviewCase) -> tuple[list[dict], list[dict]]:
+                      case: ReviewCase,
+                      catalog: dict) -> tuple[list[dict], list[dict]]:
     r44 = []
     detailed = []
     seen = set()
@@ -221,25 +276,31 @@ def _build_candidates(review: Path, rows: list[dict[str, str]],
                     int(row["column"]), "L")
         if _image_hash(raw).lower() != row["mask_sha256"].lower():
             raise ValueError(f"mask hash mismatch for {row['provenance']}")
-        aligned, alignment = align_authored_mask(raw, case.topology)
+        aligned, alignment = physical_to_logical(raw)
+        actual_corners = _logical_owner_corners(aligned)
+        expected_corners = expected_owner_corners(case.topology)
+        if actual_corners != expected_corners:
+            raise ValueError(
+                f"explicit corner mismatch for {row['provenance']}: "
+                f"{actual_corners} != {expected_corners}")
         authored = _cell(
             review, row["source_example_sheet"], int(row["row"]),
             int(row["column"]), "RGB")
-        authored_aligned = authored.rotate(
-            alignment["rotationCounterClockwise"])
+        source_alignment = _preset_source_alignment(
+            catalog, row["provenance"], case.topology)
+        authored_aligned = _align_authored_source(
+            authored, source_alignment)
         seed = int(_sha256_bytes(
             f"{case.family}|{case.topology}|{row['provenance']}".encode())[:8],
                    16)
         r44_mask, _ = repair_authored_mask(aligned, case.topology, seed)
         r44_metrics = mask_metrics(aligned, r44_mask, case.topology)
-        reconstructed, detail_process = reconstruct_soft_ownership(
+        detail_mask, detail_process = reconstruct_soft_ownership(
             authored_aligned, expected_owner_corners(case.topology),
             remove_bounded_holes=False)
-        detail_mask, ownership_orientation = orient_reconstructed_mask(
-            reconstructed, aligned, case.topology)
         detail_process = {
             **detail_process,
-            "ownershipOrientation": ownership_orientation,
+            "physicalToLogical": alignment,
         }
         detail_metrics = mask_metrics(
             detail_mask, detail_mask, case.topology)
@@ -248,6 +309,7 @@ def _build_candidates(review: Path, rows: list[dict[str, str]],
             "sourceQuality": round(_source_quality(
                 aligned, case.topology), 6),
             "alignment": alignment,
+            "sourceAlignment": source_alignment,
             "_source": authored,
         }
         r44.append({
@@ -259,8 +321,7 @@ def _build_candidates(review: Path, rows: list[dict[str, str]],
         detailed.append({
             **common, "contractMetrics": detail_metrics,
             "processMetrics": detail_process,
-            "_alignedSource": authored_aligned.rotate(
-                ownership_orientation["rotationCounterClockwise"]),
+            "_alignedSource": authored_aligned,
             "_mask": detail_mask,
         })
     if not r44 or not detailed:
@@ -375,7 +436,7 @@ def _decision_options(r44_eligible: bool, detail_eligible: bool) -> list[str]:
 
 
 def render(review: Path, output: Path,
-           checkpoint: str = "R51-SNOW-ICE-ROUTES") -> dict:
+           checkpoint: str = "R53-SNOW-ICE-ROUTES") -> dict:
     review = review.resolve()
     output = output.resolve()
     if output.exists() and any(output.iterdir()):
@@ -383,6 +444,10 @@ def render(review: Path, output: Path,
     output.mkdir(parents=True, exist_ok=True)
     images = output / "images"
     images.mkdir()
+    catalog_path = (Path(__file__).resolve().parents[1] / "assets" /
+                    "resources" / "terrain_atlas_presets.json")
+    catalog_bytes = catalog_path.read_bytes()
+    catalog = json.loads(catalog_bytes.decode("utf-8"))
     with (review / "index.csv").open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     grouped = defaultdict(list)
@@ -393,7 +458,8 @@ def render(review: Path, output: Path,
     questions = []
     cards = []
     for number, case in enumerate(REVIEW_CASES, 1):
-        r44_candidates, detail_candidates = _build_candidates(review, rows, case)
+        r44_candidates, detail_candidates = _build_candidates(
+            review, rows, case, catalog)
         r44, detailed = choose_shared_route_pair(
             r44_candidates, detail_candidates)
         r44_summary = _contract_summary(r44["contractMetrics"])
@@ -443,11 +509,16 @@ def render(review: Path, output: Path,
             "outcomes": outcomes,
         })
         source_note = "Both routes use the same aligned authored source."
-        orientation = detailed["processMetrics"]["ownershipOrientation"]
+        owner_corner_text = ", ".join(
+            CORNER_NAMES[index] for index, owned in enumerate(
+                expected_owner_corners(case.topology)) if owned)
+        source_alignment = detailed["sourceAlignment"]
         orientation_note = (
-            f"Detailed ownership normalized {orientation['rotationCounterClockwise']}° CCW"
-            f"{' + polarity inversion' if orientation['inverted'] else ''}"
-            f" · authored-mask disagreement {orientation['referenceStrongDisagreement']:.1%}")
+            f"Owner material corners: {owner_corner_text}. "
+            f"Authored source maps {source_alignment['mappedOwnerMaterial']} "
+            f"with an explicit {source_alignment['sourceRotationClockwise']}° "
+            "clockwise source rotation, then the fixed physical→logical "
+            "vertical mirror. No image score or inferred transform.")
         cards.append(f'''<article class="pilot-question" data-key="{html.escape(key)}">
 <h2>{number}. {html.escape(case.family)} · {html.escape(case.topology)}</h2>
 <p class="muted">{html.escape(source_note)} {html.escape(orientation_note)}</p>
@@ -468,15 +539,16 @@ def render(review: Path, output: Path,
     document = f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Blend-mask {html.escape(checkpoint)} Snow/Ice route comparison</title>
 <style>:root{{color-scheme:light dark;--bg:light-dark(#fff,#181818);--fg:light-dark(#1a1c1f,#fff);--muted:light-dark(#5f6368,#bdc1c6);--panel:light-dark(#f4f5f6,#252629);--border:light-dark(#d7d9dc,#5f6368);--pass:#2da44e;--fail:#d1242f}}*{{box-sizing:border-box}}body{{margin:0 auto;max-width:1780px;padding:18px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}}h1{{margin-top:0}}h2{{font-size:20px}}h3{{font-size:15px}}.muted{{color:var(--muted)}}.notice{{padding:12px;border:1px solid #5b8def;background:var(--panel)}}.warning-text{{color:#e3a008;font-weight:700}}.toolbar,.answer-row{{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:12px 0}}button,select,input,textarea{{font:inherit}}button,select,input{{padding:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border)}}label{{display:grid;gap:4px;min-width:320px}}.pilot-question{{margin:30px 0;padding-top:22px;border-top:2px solid var(--border)}}.metric{{font:600 13px/1.4 Consolas,monospace}}.badge{{padding:2px 6px;border-radius:4px;color:#fff;font:700 11px/1.2 system-ui}}.badge.pass{{background:var(--pass)}}.badge.fail{{background:var(--fail)}}.route-summary{{display:grid;grid-template-columns:repeat(2,minmax(280px,1fr));gap:12px}}.route-summary section,.example{{padding:12px;background:var(--panel);border:1px solid var(--border)}}figure{{margin:0}}figure img{{display:block;width:100%;height:auto;background:var(--panel)}}figcaption{{padding-top:5px;color:var(--muted)}}.evidence-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,256px));gap:12px;margin:12px 0 20px}}.examples{{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:14px}}.example-grid{{display:grid;grid-template-columns:repeat(4,minmax(100px,256px));gap:8px}}#answer-export-text{{width:100%;min-height:150px;background:var(--panel);color:var(--fg);border:1px solid var(--border)}}@media(max-width:650px){{body{{padding:10px}}.route-summary,.evidence-grid,.example-grid,.examples{{grid-template-columns:1fr}}.answer-row label{{min-width:100%}}}}</style></head><body>
 <h1>Blend-mask {html.escape(checkpoint)} · Snow/Ice route comparison</h1>
-<p class="notice"><strong>Review-only; runtime is unchanged.</strong> Each question applies R44 and the R47 sand-detail method to the exact same aligned authored source. Both outputs are normalized to the same owner-corner convention through legal quarter-turns and polarity selection before comparison. Green candidates pass the complete 70/30 quarter and corner-patch gate. Red candidates are diagnostic only and cannot be selected as a preferred route. Outcome pairs without comparable effective detail are explicitly marked; judge mask shape there, not texture fidelity.</p>
+<p class="notice"><strong>Review-only; runtime is unchanged.</strong> Each question applies R44 and the R47 sand-detail method to the exact same authored source and explicit owner-corner assignment. The authored source transform is reproduced solely from its reviewed semantic NW/NE/SE/SW signature and the requested owner corners; the physical mask then receives the one fixed vertical mirror into logical coordinates. No image score chooses rotation or polarity. Green candidates pass the complete 70/30 quarter and corner-patch gate. Red candidates are diagnostic only and cannot be selected as a preferred route. Outcome pairs without comparable effective detail are explicitly marked; judge mask shape there, not texture fidelity.</p>
 <div class="toolbar"><button id="submit-answers">Submit answers to Codex</button><button id="copy-answers">Copy answers</button><button id="download-answers">Download answers.txt</button><button id="show-answers">Select review text</button><span id="status" class="muted"></span></div>
 <section><strong>Saved review text</strong><textarea id="answer-export-text" readonly></textarea></section><main>{''.join(cards)}</main><script>{script}</script></body></html>'''
     html_path = output / f"blend-mask-{checkpoint.lower()}-questionnaire.html"
     html_path.write_text(document, encoding="utf-8")
     analysis = {
-        "schema": "ei-snow-ice-route-comparison-v2",
+        "schema": "ei-snow-ice-route-comparison-v4",
         "checkpoint": checkpoint,
         "sourceReview": "modern-atlas-r41-mask-review/blend-mask-review",
+        "presetSha256": hashlib.sha256(catalog_bytes).hexdigest(),
         "runtimeChanged": False,
         "questionCount": len(questions),
         "hardGate": {
@@ -544,6 +616,28 @@ def validate_output(output: Path) -> dict:
                 question["routes"]["detailed"]["provenance"]):
             errors.append(
                 f"routes use unrelated sources in {question['key']}")
+        r44_route = question["routes"]["r44"]
+        detailed_route = question["routes"]["detailed"]
+        if r44_route["sourceAlignment"] != detailed_route["sourceAlignment"]:
+            errors.append(
+                f"routes use different source transforms in {question['key']}")
+        expected_names = [
+            CORNER_NAMES[index] for index, owned in enumerate(
+                expected_owner_corners(question["topology"])) if owned]
+        for route in (r44_route, detailed_route):
+            raster = route["alignment"]
+            source = route["sourceAlignment"]
+            if (raster.get("transform") != "vertical-mirror"
+                    or raster.get("rotationCounterClockwise") != 0
+                    or raster.get("inverted") is not False):
+                errors.append(
+                    f"noncanonical raster transform in {question['key']}")
+            if (source.get("transformAuthority") !=
+                    "semantic-corner-pattern"
+                    or source.get("requestedOwnerLogicalCorners") !=
+                    expected_names):
+                errors.append(
+                    f"nonsemantic source transform in {question['key']}")
         for outcome in question["outcomes"]:
             entries.extend(outcome["files"].values())
             mismatched_outcomes += not outcome["effectiveDetailCompatible"]
@@ -595,7 +689,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--checkpoint", default="R51-SNOW-ICE-ROUTES")
+    parser.add_argument("--checkpoint", default="R53-SNOW-ICE-ROUTES")
     args = parser.parse_args()
     print(json.dumps(render(args.review, args.output, args.checkpoint),
                      indent=2, ensure_ascii=False))
