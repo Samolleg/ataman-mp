@@ -1,0 +1,84 @@
+{
+  "schema": "ei-snow-ice-route-decisions-v1",
+  "checkpoint": "R53-SNOW-ICE-ROUTES",
+  "authority": "explicit-user-review",
+  "status": "partial-approval",
+  "decisions": {
+    "route-compare-snow-clumps-outer-1of4-v1": {
+      "answer": "Prefer detailed sand route"
+    },
+    "route-compare-snow-clumps-outer-1of4-v2": {
+      "answer": "Prefer detailed sand route"
+    },
+    "route-compare-snow-clumps-edge-2of4-v1": {
+      "answer": "Prefer detailed sand route"
+    },
+    "route-compare-snow-clumps-edge-2of4-v2": {
+      "answer": "Prefer detailed sand route"
+    },
+    "route-compare-snow-clumps-diagonal-2of4": {
+      "answer": "Still uncertain",
+      "note": "The detailed result may work visually, but the questionnaire did not allow selecting it because it failed the hard topology gate. This is not an approval."
+    },
+    "route-compare-snow-clumps-inside-3of4-v1": {
+      "answer": "Still uncertain",
+      "note": "The detailed result looks good, but the questionnaire did not allow selecting it because it failed the hard topology gate. This is not an approval."
+    },
+    "route-compare-snow-clumps-inside-3of4-v2": {
+      "answer": "Still uncertain",
+      "note": "The detailed result looks good, but the questionnaire did not allow selecting it because it failed the hard topology gate. This is not an approval."
+    },
+    "route-compare-ice-fracture-outer-1of4-v1": {
+      "answer": "Prefer detailed sand route"
+    },
+    "route-compare-ice-fracture-outer-1of4-v2": {
+      "answer": "Prefer detailed sand route"
+    },
+    "route-compare-ice-fracture-edge-2of4-v1": {
+      "answer": "Prefer detailed sand route"
+    },
+    "route-compare-ice-fracture-edge-2of4-v2": {
+      "answer": "Prefer detailed sand route"
+    },
+    "route-compare-ice-fracture-diagonal-2of4": {
+      "answer": "Still uncertain",
+      "note": "The detailed result looks good, but the questionnaire did not allow selecting it because it failed the hard topology gate. This is not an approval."
+    },
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Still uncertain",
+      "note": "The detailed result is better in its belonging corner, but noise in the outer unrelated corner must be cleaned before approval."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Still uncertain",
+      "note": "The detailed result is better in its belonging corner, but noise in the outer unrelated corner must be cleaned before approval."
+    }
+  },
+  "approvedRoutes": {
+    "snow-clumps": [
+      "outer-1of4-v1",
+      "outer-1of4-v2",
+      "edge-2of4-v1",
+      "edge-2of4-v2"
+    ],
+    "ice-fracture": [
+      "outer-1of4-v1",
+      "outer-1of4-v2",
+      "edge-2of4-v1",
+      "edge-2of4-v2"
+    ]
+  },
+  "pendingRoutes": {
+    "snow-clumps": [
+      "diagonal-2of4",
+      "inside-3of4-v1",
+      "inside-3of4-v2"
+    ],
+    "ice-fracture": [
+      "diagonal-2of4",
+      "inside-3of4-v1",
+      "inside-3of4-v2"
+    ]
+  },
+  "generationPolicy": "Apply only approvedRoutes. Still uncertain entries remain non-authoritative and must not change generation.",
+  "reviewCaveat": "Every R53 outcome pair has mismatched effective texture detail. The user nevertheless explicitly approved the eight listed detailed masks after visual review of both results."
+}

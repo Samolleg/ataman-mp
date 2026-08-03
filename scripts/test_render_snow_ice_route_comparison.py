@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import unittest
 
 import numpy as np
@@ -15,6 +17,9 @@ from render_snow_ice_route_comparison import (
     contract_violation,
     explicit_source_alignment,
     physical_to_logical,
+)
+from render_snow_ice_pending_review import (
+    remove_disconnected_protected_alpha,
 )
 
 
@@ -36,6 +41,57 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_protected_corner_cleanup_removes_only_disconnected_alpha(
+            self) -> None:
+        values = np.full((256, 256), 255, dtype=np.uint8)
+        values[128:, :128] = 0
+        values[128:190, 112:128] = 176  # Main owner edge, connected north.
+        values[170:178, 36:44] = 224    # Unrelated isolated alpha island.
+        values[224:232, 8:16] = 48      # Low-alpha protected-corner noise.
+        original = values.copy()
+
+        cleaned, audit = remove_disconnected_protected_alpha(
+            Image.fromarray(values, "L"), "inside-3of4-v1")
+        result = np.asarray(cleaned)
+
+        np.testing.assert_array_equal(original[:128, :], result[:128, :])
+        np.testing.assert_array_equal(original[128:, 128:],
+                                      result[128:, 128:])
+        np.testing.assert_array_equal(original[128:190, 112:128],
+                                      result[128:190, 112:128])
+        self.assertEqual(0, int(result[173, 39]))
+        self.assertEqual(0, int(result[227, 11]))
+        self.assertGreater(audit["removedPixels"], 0)
+        self.assertEqual(["SW"], audit["protectedCorners"])
+
+    def test_r53_decisions_approve_only_reviewed_outer_and_edge_routes(
+            self) -> None:
+        review = json.loads((Path(__file__).with_name(
+            "authored_mask_snow_ice_r53_decisions.json")).read_text(
+                encoding="utf-8"))
+        approved = {
+            key for key, decision in review["decisions"].items()
+            if decision["answer"] == "Prefer detailed sand route"
+        }
+        pending = {
+            key for key, decision in review["decisions"].items()
+            if decision["answer"] == "Still uncertain"
+        }
+
+        expected_approved = {
+            f"route-compare-{family}-{topology}"
+            for family in ("snow-clumps", "ice-fracture")
+            for topology in (
+                "outer-1of4-v1", "outer-1of4-v2",
+                "edge-2of4-v1", "edge-2of4-v2")
+        }
+        self.assertEqual(expected_approved, approved)
+        self.assertEqual(6, len(pending))
+        self.assertTrue(all(
+            "diagonal-2of4" in key or "inside-3of4" in key
+            for key in pending))
+        self.assertEqual(set(review["decisions"]), approved | pending)
+
     def test_physical_mask_is_mirrored_to_explicit_logical_corners(self) -> None:
         """Reproduce R51's incorrect rotation of a physical SW owner."""
         values = np.zeros((64, 64), dtype=np.uint8)

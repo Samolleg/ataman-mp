@@ -685,6 +685,58 @@ def validate_output(output: Path) -> dict:
     }
 
 
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify explicit route decisions against the exact rendered evidence."""
+    rendered = validate_output(output)
+    analysis = json.loads(
+        (output / "route-comparison-analysis.json").read_text(
+            encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("decision keys do not exactly match R53 questions")
+    approved = []
+    pending = []
+    verified_outcomes = 0
+    verified_uniforms = 0
+    for key, decision in decisions.items():
+        answer = decision.get("answer")
+        question = questions[key]
+        if answer == "Prefer detailed sand route":
+            if not question["routes"]["detailed"]["summary"]["eligible"]:
+                raise ValueError(f"approved route failed its hard gate: {key}")
+            if (question["routes"]["r44"]["provenance"] !=
+                    question["routes"]["detailed"]["provenance"]):
+                raise ValueError(f"approved routes use different sources: {key}")
+            approved.append(key)
+            for outcome in question["outcomes"]:
+                files = outcome["files"]
+                if not outcome.get("ownerSource") or not outcome.get(
+                        "supportSource"):
+                    raise ValueError(f"uniform provenance is missing: {key}")
+                if not files.get("r44Result") or not files.get("detailResult"):
+                    raise ValueError(f"both route outcomes are required: {key}")
+                verified_uniforms += 2
+                verified_outcomes += 2
+        elif answer == "Still uncertain":
+            pending.append(key)
+        else:
+            raise ValueError(f"unsupported R53 decision for {key}: {answer}")
+    if len(approved) != 8 or len(pending) != 6:
+        raise ValueError(
+            f"unexpected approval split: {len(approved)} approved, "
+            f"{len(pending)} pending")
+    return {
+        **rendered,
+        "approved": len(approved),
+        "pending": len(pending),
+        "approvedUniformsVerified": verified_uniforms,
+        "approvedRouteOutcomesVerified": verified_outcomes,
+        "generationChanged": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review", required=True, type=Path)
