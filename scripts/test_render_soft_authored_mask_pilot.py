@@ -61,6 +61,16 @@ class SoftAuthoredMaskPilotTests(unittest.TestCase):
         self.assertIn("detail in the mask itself",
                       payload["decision"]["note"])
 
+    def test_r47_decisions_approve_masks_but_preserve_pairing_caveat(self) -> None:
+        path = Path(__file__).with_name(
+            "authored_mask_detail_r47_decisions.json")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(2, len(payload["decisions"]))
+        self.assertTrue(all(
+            item["answer"] == "Approve detailed opacity matte"
+            for item in payload["decisions"].values()))
+        self.assertIn("mismatched effective detail", payload["reviewCaveat"])
+
     def test_soft_reconstruction_retains_intermediate_painterly_ownership(self) -> None:
         transition, expected = painterly_fixture()
         reconstructed, metrics = reconstruct_soft_ownership(

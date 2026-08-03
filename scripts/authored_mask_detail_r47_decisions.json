@@ -1,0 +1,14 @@
+{
+  "schema": "ei-authored-mask-detail-decisions-v1",
+  "checkpoint": "R47-DETAIL-MATTE",
+  "authority": "explicit-user-review",
+  "decisions": {
+    "detail-matte-sand-grain-outer-inside-v1": {
+      "answer": "Approve detailed opacity matte"
+    },
+    "detail-matte-sand-grain-edge-v2": {
+      "answer": "Approve detailed opacity matte"
+    }
+  },
+  "reviewCaveat": "The masks themselves are approved. The Sand / Dark plus Grass / Common outcome was invalid for mask review because the uniforms had strongly mismatched effective detail."
+}
