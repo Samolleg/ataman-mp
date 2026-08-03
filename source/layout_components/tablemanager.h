@@ -326,7 +326,9 @@ public:
     CTableManager(QTableWidget* pTable);
 
     void reset();
-    void setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp);
+    void setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp,
+                    bool magicTrapContext = false,
+                    bool lookPointContext = false);
     void setBehaviorCollection(CUnit* unit, int logicSlot);
     void setTrapCollection(CMagicTrap* trap);
     void setLogicZeroContext(bool logicZero);
@@ -375,6 +377,8 @@ private:
     QMap<int, QSharedPointer<IPropertyBase>> m_rowValues;
     bool m_readOnly{false};
     bool m_torchPropertyContext{false};
+    bool m_magicTrapPropertyContext{false};
+    bool m_lookPointPropertyContext{false};
     bool m_logicZeroContext{false};
     int m_savedVerticalScroll{0};
     int m_savedHorizontalScroll{0};

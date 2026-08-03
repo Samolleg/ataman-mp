@@ -82,7 +82,7 @@ and undo/redo follow the selected slot.
 | Aggression mode | See values below | Exposed for the selected slot | Controls how the unit reacts to enemies. |
 | Alarm condition | `0` Enemy seen, `1` Attacked, `2` Suspicion | Exposed for the selected slot | Event that makes this unit raise its configured alarm. |
 | Patrol route repeats | On/off | Exposed for the selected slot | On returns from the last patrol point to the first. Off follows the route back in reverse. |
-| Guard idle time | Float | Exposed for the selected slot | — |
+| Guard idle time | Float | Exposed for the selected slot | Stored and preserved in the MOB. The audited unit AI does not use this value. |
 | Alarm raised | Unsigned integer | Exposed for the selected slot | World alarm this unit raises when its alarm condition occurs. `0` raises no alarm. |
 
 Behaviour values:
@@ -110,14 +110,14 @@ Display corrections such as `Briffing` to `Player/script controlled`,
 only.
 
 The game stores the Guard idle time value but the audited runtime logic does not
-use it. Keep it preserved and omit its user-facing tooltip.
+use it. Keep it editable and preserved, and explain that status in its tooltip.
 
 ## Patrol and look points
 
 | Category | UI label | Value | Current property UI | Tooltip |
 |---|---|---|---|---|
 | Patrol point | Position | X, Y, Z | Exposed for the selected slot | Position the unit travels to on this patrol route. |
-| Look point | Look-at position | X, Y, Z | Exposed for the selected slot | Position the unit faces while waiting at the patrol point. |
+| Look point | Look-at position | X, Y, Z | Exposed for the selected slot | X and Y determine the facing direction. Z is preserved but is not used when the look angle is calculated. |
 | Look point | Wait time | Game ticks; `15` = 1 second | Exposed for the selected slot | Time spent looking toward this point. |
 | Look point | Turn speed | Unsigned 32-bit speed | Exposed for the selected slot | How quickly the unit turns toward this point. `0` turns immediately. |
 | Look point | Action flags | Bitmask | Exposed for the selected slot | `0` uses normal behaviour. `1` rests at the point. |
@@ -176,6 +176,11 @@ Explicit spell target points are destinations for ground/point spells. Trap area
 and target arrays store X/Y only; a separately editable Z value would not be
 serialized.
 
+Inherited magic-trap values such as rotation, scale, secondary texture, shadow,
+Parent ID, parent template, script availability, and attached quest value remain
+editable and losslessly preserved. Their property tooltips note that no confirmed
+native magic-trap behavior or visualization consumes them.
+
 ## Torches
 
 | UI label | Value | Current property UI | Tooltip |
@@ -205,10 +210,10 @@ serialized.
 | Inner radius | Distance | Exposed as Range | Area where the sound plays at full volume. |
 | Outer radius | Distance | Exposed as Sound distance | Distance where the sound fades to silence. |
 | Sound files | Ordered resource list | Exposed as Sound filepath | Sound resources used by this source. |
-| Minimum delay | Game ticks; `15` = 1 second | Exposed as Sound min | Shortest delay between ambient playbacks. |
-| Maximum delay | Game ticks; `15` = 1 second | Exposed as Sound max | Longest delay between ambient playbacks. |
+| Minimum delay | Stored integer | Exposed as Sound min | Shortest stored delay between ambient playbacks. |
+| Maximum delay | Stored integer | Exposed as Sound max | Longest stored delay between ambient playbacks. |
 | Ambient | On/off | Exposed | Play this source repeatedly using its delay range. |
-| Music | On/off | Exposed | Treat this source as music. |
+| Music | On/off | Exposed | Stored and preserved in the MOB. No confirmed runtime audio behavior uses this flag. |
 | Name | Text | Exposed | Name stored with this sound in the MOB. |
 | Comments | Text | Exposed | Editor notes. The game does not use this text. |
 

@@ -11062,7 +11062,9 @@ void CView::viewParameters()
             pNode->collectParams(aProp, commonType);
     }
 
-    m_tableManager->setNewData(aProp);
+    m_tableManager->setNewData(aProp,
+                               commonType == eMagicTrap,
+                               commonType == eLookPoint);
     if(CScene::getInstance()->getMode() == eEditModeLogic)
     {
         if(CUnit* unit = behaviorCollectionOwner(selected))

@@ -63,6 +63,30 @@ def main() -> int:
         'm_aRowToolTip[eObjParam_GUARD_PLACE] = "Center of random roaming for Guard area. Alarm guard ignores this value and uses the active alarm coordinates.";',
         "guard-position tooltip distinguishes Guard area from Alarm guard",
     )
+    require(
+        table_cpp,
+        'm_aRowToolTip[eObjParam_LOGIC_WAIT] = "Stored and preserved in the MOB. The audited unit AI does not use this value.";',
+        "unused guard-idle value remains editable but is explained",
+    )
+    require(
+        table_cpp,
+        'm_aRowToolTip[eObjParam_SOUND_IS_MUSIC] = "Stored and preserved in the MOB. No confirmed runtime audio behavior uses this flag.";',
+        "unconfirmed Music flag remains editable but is explained",
+    )
+    require(table_cpp, "m_magicTrapPropertyContext",
+            "magic-trap-specific tooltip context")
+    require(table_cpp, "m_lookPointPropertyContext",
+            "look-point-specific tooltip context")
+    require(
+        table_cpp,
+        "Z is stored but is not used when the look angle is calculated.",
+        "look-point Z storage-only explanation",
+    )
+    require(
+        table_cpp,
+        "Preserved in the MOB, but no confirmed native magic-trap behavior or visualization uses this value.",
+        "unused inherited magic-trap field explanation",
+    )
 
     forbidden = (
         "m_aLogic.front()->collectlogicParams",
