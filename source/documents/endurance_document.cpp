@@ -2784,3 +2784,40 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
     }
     return true;
 }
+
+bool CMobDocument::diplomacyTable(QVector<QVector<quint32>>* table,
+                                  QStringList* names,
+                                  QString* sectionPath) const
+{
+    if(!table)
+        return false;
+    table->clear();
+    if(names)
+        names->clear();
+    if(sectionPath)
+        sectionPath->clear();
+    if(m_sections.isEmpty())
+        return false;
+    const SMobSection* field = findSection(m_sections.front(), 0xDDDDDDD2);
+    if(!field)
+        return false;
+    const QByteArray bytes = payload(*field);
+    if(bytes.size() != 32 * 32 * int(sizeof(quint32)))
+        return false;
+    table->resize(32);
+    for(int row = 0; row < 32; ++row)
+    {
+        (*table)[row].resize(32);
+        for(int column = 0; column < 32; ++column)
+            (*table)[row][column] = readU32(bytes, (row * 32 + column) * 4);
+    }
+    if(sectionPath)
+        *sectionPath = field->path;
+    if(names)
+    {
+        const SMobSection* nameSection = findSection(m_sections.front(), 0xDDDDDDD3);
+        if(nameSection)
+            decodeStringArray(*nameSection, names);
+    }
+    return true;
+}

@@ -454,7 +454,8 @@ class CChangeDiplomacyTableItem: public QObject, public QUndoCommand
 public:
     enum { Id = 114 };
 
-    CChangeDiplomacyTableItem(CMob* pMob, int row, int column, QUndoCommand *parent = nullptr);
+    CChangeDiplomacyTableItem(CMob* pMob, int row, int column, bool symmetric,
+                              QUndoCommand *parent = nullptr);
 
     void undo() override;
     void redo() override;

@@ -57,6 +57,7 @@
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
 #include "mob/mob_parameters.h"
+#include "core/undo.h"
 #include "layout_components/tree_view.h"
 #include "layout_components/viewport_widget.h"
 #include "ui/landscape_tools.h"
@@ -708,10 +709,67 @@ int runHeadlessCommand(QApplication& app)
             if(candidate->rowCount() == 32 && candidate->columnCount() == 32)
                 diplomacyTable = candidate;
         const bool diplomacyValuesExplainMeaning = diplomacyTable
-            && diplomacyTable->item(0, 1)->text() == QStringLiteral("0 (Ally)")
-            && diplomacyTable->item(0, 2)->text() == QStringLiteral("1 (Neutral)")
-            && diplomacyTable->item(0, 3)->text() == QStringLiteral("2 (War)")
+            && diplomacyTable->item(0, 1)->text() == QStringLiteral("0")
+            && diplomacyTable->item(0, 2)->text() == QStringLiteral("1")
+            && diplomacyTable->item(0, 3)->text() == QStringLiteral("2")
+            && diplomacyTable->item(0, 1)->toolTip().contains(QStringLiteral("Ally"))
+            && diplomacyTable->item(0, 2)->toolTip().contains(QStringLiteral("Neutral"))
             && diplomacyTable->item(0, 3)->toolTip().contains(QStringLiteral("hostile"));
+        QVector<QVector<uint>>& commandDiplomacy = diplomacyMob.diplomacyField();
+        commandDiplomacy[4][5] = 2;
+        commandDiplomacy[5][4] = 1;
+        CChangeDiplomacyTableItem oneWayCommand(&diplomacyMob, 4, 5, false);
+        oneWayCommand.redo();
+        const bool oneWayRedoPreservesReverse = commandDiplomacy[4][5] == 0
+            && commandDiplomacy[5][4] == 1;
+        oneWayCommand.undo();
+        const bool oneWayUndoPreservesReverse = commandDiplomacy[4][5] == 2
+            && commandDiplomacy[5][4] == 1;
+        commandDiplomacy[6][6] = 0;
+        CChangeDiplomacyTableItem selfCommand(&diplomacyMob, 6, 6, true);
+        selfCommand.redo();
+        const bool selfRelationEditable = commandDiplomacy[6][6] == 1;
+        selfCommand.undo();
+        const bool selfRelationUndoable = commandDiplomacy[6][6] == 0;
+
+        QSettings diplomacySettings;
+        const QString diplomacySizeKey = QStringLiteral("ui/diplomacyWindowSize");
+        const bool hadDiplomacySize = diplomacySettings.contains(diplomacySizeKey);
+        const QVariant previousDiplomacySize = diplomacySettings.value(diplomacySizeKey);
+        diplomacySettings.remove(diplomacySizeKey);
+        QMetaObject::invokeMethod(&diplomacyParameters,
+                                  "on_diplomacyButton_clicked");
+        QApplication::processEvents();
+        QWidget* diplomacyWindow = diplomacyParameters.findChild<QWidget*>(
+            QStringLiteral("diplomacyWindow"));
+        QCheckBox* symmetricDiplomacy = diplomacyWindow
+            ? diplomacyWindow->findChild<QCheckBox*>() : nullptr;
+        const bool diplomacyWindowAutoFitsAndResizable = diplomacyWindow
+            && diplomacyWindow->isVisible()
+            && diplomacyWindow->minimumSize() != diplomacyWindow->maximumSize()
+            && diplomacyWindow->size().width() > 400
+            && diplomacyWindow->size().height() > 300
+            && diplomacyTable->horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded
+            && diplomacyTable->verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded;
+        const bool diplomacyDirectionControlVisible = symmetricDiplomacy
+            && symmetricDiplomacy->text()
+                == QStringLiteral("Apply changes in both directions");
+        const QSize testDiplomacySize(733, 511);
+        if(diplomacyWindow)
+        {
+            diplomacyWindow->resize(testDiplomacySize);
+            diplomacyWindow->close();
+        }
+        QMetaObject::invokeMethod(&diplomacyParameters,
+                                  "on_diplomacyButton_clicked");
+        QApplication::processEvents();
+        const bool diplomacyWindowSizePersists = diplomacyWindow
+            && diplomacyWindow->size() == testDiplomacySize;
+        if(diplomacyWindow) diplomacyWindow->close();
+        if(hadDiplomacySize)
+            diplomacySettings.setValue(diplomacySizeKey, previousDiplomacySize);
+        else
+            diplomacySettings.remove(diplomacySizeKey);
         QList<QSharedPointer<IPropertyBase>> staticChoiceProperties;
         staticChoiceProperties
             << QSharedPointer<IPropertyBase>(new propUint(eObjParam_TYPE, 50))
@@ -2174,6 +2232,10 @@ int runHeadlessCommand(QApplication& app)
                 && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork
                 && trapTargetsUseReadOnlyTable
                 && diplomacyValuesExplainMeaning
+                && oneWayRedoPreservesReverse && oneWayUndoPreservesReverse
+                && selfRelationEditable && selfRelationUndoable
+                && diplomacyWindowAutoFitsAndResizable
+                && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
@@ -2286,6 +2348,13 @@ int runHeadlessCommand(QApplication& app)
                << " alarmConditionItemTooltipsWork=" << alarmConditionItemTooltipsWork
                << " trapTargetsUseReadOnlyTable=" << trapTargetsUseReadOnlyTable
                << " diplomacyValuesExplainMeaning=" << diplomacyValuesExplainMeaning
+               << " oneWayRedoPreservesReverse=" << oneWayRedoPreservesReverse
+               << " oneWayUndoPreservesReverse=" << oneWayUndoPreservesReverse
+               << " selfRelationEditable=" << selfRelationEditable
+               << " selfRelationUndoable=" << selfRelationUndoable
+               << " diplomacyWindowAutoFitsAndResizable=" << diplomacyWindowAutoFitsAndResizable
+               << " diplomacyDirectionControlVisible=" << diplomacyDirectionControlVisible
+               << " diplomacyWindowSizePersists=" << diplomacyWindowSizePersists
                << " unitCategoryIdsVisible=" << unitCategoryIdsVisible
                << " helperFigureCacheIdentityDistinct=" << helperFigureCacheIdentityDistinct
                << " settingsTabsUsable=" << settingsTabsUsable

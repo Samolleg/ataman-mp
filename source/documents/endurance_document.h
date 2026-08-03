@@ -237,6 +237,9 @@ public:
                                CValidationReport* report = nullptr) const;
     bool embeddedScript(QString* script,
                         CValidationReport* report = nullptr) const;
+    bool diplomacyTable(QVector<QVector<quint32>>* table,
+                        QStringList* names = nullptr,
+                        QString* sectionPath = nullptr) const;
     bool duplicateObjectSubtree(const QString& objectPath,
                                 const QByteArray& expectedSubtreeSha256,
                                 QByteArray* output,

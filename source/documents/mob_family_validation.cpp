@@ -351,6 +351,24 @@ QString ownerText(const SMobNidOwner& owner)
              owner.prototype.isEmpty() ? QString("-") : owner.prototype);
 }
 
+QString diplomacyRelationName(quint32 value)
+{
+    switch(value)
+    {
+    case 0: return QStringLiteral("Ally");
+    case 1: return QStringLiteral("Neutral");
+    case 2: return QStringLiteral("War");
+    default: return QString("Unknown %1").arg(value);
+    }
+}
+
+QString diplomacyFactionName(const SMobFamilyMember& member, int index)
+{
+    const QString name = member.diplomacyNames.value(index).trimmed();
+    return name.isEmpty() ? QString("Faction %1").arg(index)
+                          : QString("%1 [%2]").arg(name).arg(index);
+}
+
 bool databaseEquippedCharacter(const QString& model)
 {
     static const QSet<QString> models = {
@@ -967,6 +985,8 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         member.primaryMob = !document.isQuestMob();
         member.hasDiplomacyTable = containsSectionType(document.sections(),
                                                        kDiplomacyFieldSection);
+        document.diplomacyTable(&member.diplomacy, &member.diplomacyNames,
+                                &member.diplomacySectionPath);
         for(const SMobObjectSnapshot& object : member.objects)
         {
             if(object.sectionType != kMagicTrapSection)
@@ -980,6 +1000,70 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         document.embeddedScript(&member.script, nullptr);
         report.members.append(member);
         const int memberIndex = report.members.size() - 1;
+
+        if(member.diplomacy.size() == 32)
+        {
+            QStringList selfSamples;
+            QStringList asymmetricSamples;
+            int selfCount = 0;
+            int asymmetricCount = 0;
+            for(int row = 0; row < 32; ++row)
+            {
+                if(member.diplomacy.value(row).size() != 32)
+                    continue;
+                const quint32 selfValue = member.diplomacy.at(row).at(row);
+                if(selfValue != 0)
+                {
+                    ++selfCount;
+                    if(selfSamples.size() < 3)
+                        selfSamples.append(QString("%1 is %2 to itself")
+                            .arg(diplomacyFactionName(member, row),
+                                 diplomacyRelationName(selfValue)));
+                }
+                for(int column = row + 1; column < 32; ++column)
+                {
+                    const quint32 forward = member.diplomacy.at(row).at(column);
+                    const quint32 reverse = member.diplomacy.at(column).value(row);
+                    if(forward == reverse)
+                        continue;
+                    ++asymmetricCount;
+                    if(asymmetricSamples.size() < 3)
+                        asymmetricSamples.append(QString("%1 → %2: %3; reverse: %4")
+                            .arg(diplomacyFactionName(member, row),
+                                 diplomacyFactionName(member, column),
+                                 diplomacyRelationName(forward),
+                                 diplomacyRelationName(reverse)));
+                }
+            }
+            if(asymmetricCount > 0)
+            {
+                SMobFamilyFinding finding;
+                finding.severity = EMobFamilyFindingSeverity::Warning;
+                finding.code = "diplomacy.asymmetric_relations";
+                finding.category = "Diplomacy";
+                finding.message = QString(
+                    "%1 has %2 directional diplomacy pair(s). One-way relations are supported and are not normalized, but confirm they are intentional: %3")
+                    .arg(member.fileName).arg(asymmetricCount)
+                    .arg(asymmetricSamples.join(" | "));
+                finding.locations << QString("%1:%2")
+                    .arg(path, member.diplomacySectionPath);
+                report.findings.append(finding);
+            }
+            if(selfCount > 0)
+            {
+                SMobFamilyFinding finding;
+                finding.severity = EMobFamilyFindingSeverity::Warning;
+                finding.code = "diplomacy.self_relation";
+                finding.category = "Diplomacy";
+                finding.message = QString(
+                    "%1 has %2 non-Ally self-relation(s). Self-relations are supported and are preserved, but are unusual; confirm they are intentional: %3")
+                    .arg(member.fileName).arg(selfCount)
+                    .arg(selfSamples.join(" | "));
+                finding.locations << QString("%1:%2")
+                    .arg(path, member.diplomacySectionPath);
+                report.findings.append(finding);
+            }
+        }
 
         const QVector<ScriptMobReference> references = addMobReferences(member.script);
         for(const ScriptMobReference& reference : references)

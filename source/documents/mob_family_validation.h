@@ -40,6 +40,9 @@ struct SMobFamilyMember
     bool primaryMob = false;
     bool activeRuntimeFamily = true;
     bool hasDiplomacyTable = false;
+    QVector<QVector<quint32>> diplomacy;
+    QStringList diplomacyNames;
+    QString diplomacySectionPath;
     int magicTrapCount = 0;
     QStringList magicTrapSectionPaths;
     QVector<SMobObjectSnapshot> magicTraps;

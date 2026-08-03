@@ -167,6 +167,21 @@ QString writeMob(const QString& directory, const QString& name, const QByteArray
     return QFileInfo(path).absoluteFilePath();
 }
 
+QByteArray mobWithDiplomacy(const QVector<QVector<quint32>>& values)
+{
+    QByteArray data;
+    QDataStream stream(&data, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    for(int row = 0; row < 32; ++row)
+        for(int column = 0; column < 32; ++column)
+            stream << values.value(row).value(column);
+    QStringList names;
+    for(int index = 0; index < 32; ++index)
+        names.append(QString("Faction %1").arg(index));
+    return section(0xA000, section(0xDDDDDDD1,
+        section(0xDDDDDDD2, data) + section(0xDDDDDDD3, stringArrayPayload(names))));
+}
+
 QByteArray resArchive(const QMap<QString, QByteArray>& members)
 {
     struct Entry
@@ -272,6 +287,7 @@ private slots:
     void multipleLoadedPrimaryMobsAreReported();
     void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
     void magicTrapRequiresContainingMobDiplomacy();
+    void directionalAndSelfDiplomacyAreSupportedWithWarnings();
     void zone3HelmetHairFallbackIsReported();
     void orcHairRootDoesNotSelectDatabaseHair();
     void coveredDatabaseHairDoesNotReportFallback();
@@ -520,6 +536,46 @@ void MobFamilyValidationTests::multipleLoadedPrimaryMobsAreReported()
     QCOMPARE(finding->locations.size(), 2);
     QVERIFY(finding->locations.contains(first));
     QVERIFY(finding->locations.contains(second));
+}
+
+void MobFamilyValidationTests::directionalAndSelfDiplomacyAreSupportedWithWarnings()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QVector<QVector<quint32>> diplomacy(32, QVector<quint32>(32, 0));
+    diplomacy[1][2] = 2;
+    diplomacy[2][1] = 1;
+    diplomacy[3][3] = 2;
+    const QString path = writeMob(directory.path(), "directional.mob",
+                                  mobWithDiplomacy(diplomacy));
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "directional-diplomacy";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto asymmetric = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "diplomacy.asymmetric_relations"; });
+    QVERIFY(asymmetric != report.findings.cend());
+    QCOMPARE(asymmetric->severity, EMobFamilyFindingSeverity::Warning);
+    QVERIFY(asymmetric->message.contains("supported"));
+    QVERIFY(asymmetric->message.contains("Faction 1"));
+    QVERIFY(asymmetric->message.contains("War"));
+    QVERIFY(asymmetric->message.contains("Neutral"));
+
+    const auto self = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "diplomacy.self_relation"; });
+    QVERIFY(self != report.findings.cend());
+    QCOMPARE(self->severity, EMobFamilyFindingSeverity::Warning);
+    QVERIFY(self->message.contains("supported"));
+    QVERIFY(self->message.contains("Faction 3"));
+    QVERIFY(self->message.contains("War"));
 }
 
 void MobFamilyValidationTests::zone3HelmetHairFallbackIsReported()

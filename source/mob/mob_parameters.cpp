@@ -4,6 +4,12 @@
 #include <QMenu>
 #include <QCloseEvent>
 #include <QInputDialog>
+#include <QCheckBox>
+#include <QGuiApplication>
+#include <QLabel>
+#include <QScreen>
+#include <QSettings>
+#include <QVBoxLayout>
 
 #include "mob_parameters.h"
 #include "ui_mob_parameters.h"
@@ -19,6 +25,8 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
   ,ui(new Ui::CMobParameters)
   ,m_pCurMob(pMob)
   ,m_pView(pView)
+  ,m_pDiplomacyWindow(nullptr)
+  ,m_pSymmetricDiplomacyCheck(nullptr)
    ,m_isDurty(false)
   ,m_closeAccepted(false)
   ,m_pShortcut(nullptr)
@@ -46,9 +54,51 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
 
     generateTitle();
     ui->listRanges->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
-    m_pTable.reset(new QTableWidget(32, 32, this));
-    m_pTable->setWindowFlag(Qt::Window, true);
-    m_pTable->setAttribute(Qt::WA_QuitOnClose, false);
+    m_pDiplomacyWindow = new QWidget(this, Qt::Window);
+    m_pDiplomacyWindow->setObjectName(QStringLiteral("diplomacyWindow"));
+    m_pDiplomacyWindow->setWindowTitle(tr("MOB Diplomacy"));
+    m_pDiplomacyWindow->setAttribute(Qt::WA_QuitOnClose, false);
+    m_pDiplomacyWindow->installEventFilter(this);
+    QVBoxLayout* diplomacyLayout = new QVBoxLayout(m_pDiplomacyWindow);
+    QLabel* legend = new QLabel(tr(
+        "0 (Ally): friendly. 1 (Neutral): neither friendly nor hostile.\n"
+        "2 (War): hostile. Double-click any cell to cycle its value."),
+        m_pDiplomacyWindow);
+    legend->setWordWrap(true);
+    diplomacyLayout->addWidget(legend);
+    m_pSymmetricDiplomacyCheck = new QCheckBox(
+        tr("Apply changes in both directions"), m_pDiplomacyWindow);
+    m_pSymmetricDiplomacyCheck->setToolTip(tr(
+        "Checked: changing A → B also changes B → A.\n"
+        "Unchecked: edit only the selected row-to-column relationship. "
+        "Directional relationships are supported."));
+    bool symmetric = true;
+    if(m_pView && m_pView->settings())
+        if(COptBool* option = dynamic_cast<COptBool*>(
+               m_pView->settings()->opt("dipEditSymmetric")))
+            symmetric = option->value();
+    m_pSymmetricDiplomacyCheck->setChecked(symmetric);
+    connect(m_pSymmetricDiplomacyCheck, &QCheckBox::toggled,
+            this, [this](bool checked)
+    {
+        if(!m_pView || !m_pView->settings())
+            return;
+        if(COptBool* option = dynamic_cast<COptBool*>(
+               m_pView->settings()->opt("dipEditSymmetric")))
+        {
+            option->setValue(checked);
+            m_pView->settings()->persistOptions();
+        }
+    });
+    diplomacyLayout->addWidget(m_pSymmetricDiplomacyCheck);
+    QLabel* directionNotice = new QLabel(tr(
+        "Rows are the acting faction; columns are the faction being treated. "
+        "Self-relations and one-way relations are supported, but validation "
+        "warns so unusual values can be confirmed."), m_pDiplomacyWindow);
+    directionNotice->setWordWrap(true);
+    diplomacyLayout->addWidget(directionNotice);
+    m_pTable.reset(new QTableWidget(32, 32, m_pDiplomacyWindow));
+    diplomacyLayout->addWidget(m_pTable.get(), 1);
     QObject::connect(m_pTable.get(), SIGNAL(cellDoubleClicked(int,int)), this, SLOT(tableItemClicked(int,int)));
     m_pShortcut = new QShortcut(QKeySequence(Qt::CTRL + eKey_S), this, SLOT(onSaveShortcut()));
     //m_aCell.clear();
@@ -173,13 +223,7 @@ void colorizeCell(QTableWidgetItem* pCell, int value)
 
 QString diplomacyValueText(uint value)
 {
-    switch(value)
-    {
-    case 0: return QObject::tr("0 (Ally)");
-    case 1: return QObject::tr("1 (Neutral)");
-    case 2: return QObject::tr("2 (War)");
-    default: return QObject::tr("%1 (Unknown)").arg(value);
-    }
+    return QString::number(value);
 }
 
 QString diplomacyValueToolTip(uint value)
@@ -301,19 +345,20 @@ void CMobParameters::on_diplomacyButton_clicked()
 
     m_pTable->setHorizontalHeader(headerView); //set our custom headerview
     m_pTable->setToolTip(tr(
-        "0 (Ally): friendly. 1 (Neutral): neither friendly nor hostile. "
-        "2 (War): hostile. Double-click a non-diagonal cell to cycle its value."));
+        "0 (Ally): friendly. 1 (Neutral): neither friendly nor hostile.\n"
+        "2 (War): hostile. Double-click any cell to cycle its value."));
     m_pTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_pTable->setVerticalHeaderLabels(dipName);
     m_pTable->setHorizontalHeaderLabels(dipName);
-    m_pTable->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum);
-    m_pTable->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_pTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_pTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_pTable->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_pTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_pTable->resizeColumnsToContents();
     m_pTable->resizeRowsToContents();
-    m_pTable->setFixedSize(m_pTable->horizontalHeader()->length() + m_pTable->verticalHeader()->width() + m_pTable->columnWidth(0), m_pTable->verticalHeader()->length() + m_pTable->rowHeight(0)*3);
-    //m_pTable->setFixedSize(m_pTable->horizontalHeader()->length()+m_pTable->verticalHeader()->width(), m_pTable->verticalHeader()->length()+m_pTable->horizontalHeader()->height());
-    m_pTable->show();
+    restoreDiplomacyWindowSize();
+    m_pDiplomacyWindow->show();
+    m_pDiplomacyWindow->raise();
+    m_pDiplomacyWindow->activateWindow();
     //todo: disable mob parameter widget, connect to table close signal to enable main window again
 }
 
@@ -382,12 +427,45 @@ void CMobParameters::copyDiplomacyFromLoadedMob()
 
 void CMobParameters::tableItemClicked(int r, int c)
 {
-    if (r==c)
-        return;
-
-    auto pCommand = new CChangeDiplomacyTableItem(m_pCurMob, r, c);
+    auto pCommand = new CChangeDiplomacyTableItem(
+        m_pCurMob, r, c, m_pSymmetricDiplomacyCheck->isChecked());
     QObject::connect(pCommand, SIGNAL(changeDipGroup(int,int)), this, SLOT(updateDiplomacyTable(int,int)));
     m_pUndoStack->push(pCommand);
+}
+
+void CMobParameters::restoreDiplomacyWindowSize()
+{
+    static const char kSizeKey[] = "ui/diplomacyWindowSize";
+    QSettings settings;
+    const QSize saved = settings.value(kSizeKey).toSize();
+    if(saved.isValid())
+    {
+        m_pDiplomacyWindow->resize(saved);
+        return;
+    }
+
+    m_pDiplomacyWindow->layout()->activate();
+    const int wantedWidth = m_pTable->verticalHeader()->width()
+        + m_pTable->horizontalHeader()->length()
+        + m_pDiplomacyWindow->layout()->contentsMargins().left()
+        + m_pDiplomacyWindow->layout()->contentsMargins().right() + 24;
+    const int wantedHeight = m_pTable->horizontalHeader()->height()
+        + m_pTable->verticalHeader()->length()
+        + m_pDiplomacyWindow->sizeHint().height() - m_pTable->sizeHint().height() + 24;
+    QScreen* screen = QGuiApplication::screenAt(m_pDiplomacyWindow->frameGeometry().center());
+    if(!screen)
+        screen = QGuiApplication::primaryScreen();
+    const QSize available = screen ? screen->availableGeometry().size() : QSize(1280, 800);
+    m_pDiplomacyWindow->resize(
+        qMin(wantedWidth, qRound(available.width() * 0.9)),
+        qMin(wantedHeight, qRound(available.height() * 0.9)));
+}
+
+bool CMobParameters::eventFilter(QObject* watched, QEvent* event)
+{
+    if(watched == m_pDiplomacyWindow && event->type() == QEvent::Close)
+        QSettings().setValue("ui/diplomacyWindowSize", m_pDiplomacyWindow->size());
+    return QWidget::eventFilter(watched, event);
 }
 
 void CMobParameters::on_pushCancel_clicked()

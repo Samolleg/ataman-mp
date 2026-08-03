@@ -1042,16 +1042,14 @@ void CChangeRangeCommand::redo()
     emit changeRangeSignal();
 }
 
-CChangeDiplomacyTableItem::CChangeDiplomacyTableItem(CMob *pMob, int row, int column, QUndoCommand *parent):
+CChangeDiplomacyTableItem::CChangeDiplomacyTableItem(
+    CMob *pMob, int row, int column, bool symmetric, QUndoCommand *parent):
     QUndoCommand(parent)
   ,m_pMob(pMob)
   ,m_row(row)
   ,m_column(column)
-  ,m_bSymmetric(true)
+  ,m_bSymmetric(symmetric)
 {
-    COptBool* pOpt = dynamic_cast<COptBool*>(pMob->view()->settings()->opt("dipEditSymmetric"));
-    if (pOpt)
-        m_bSymmetric = pOpt->value();
 }
 
 void CChangeDiplomacyTableItem::undo()
@@ -1066,9 +1064,12 @@ void CChangeDiplomacyTableItem::undo()
         return;
     }
     dipTable[m_row][m_column] = m_oldValue;
-    dipTable[m_column][m_row] = m_oldValueSymetric;
     emit changeDipGroup(m_row, m_column);
-    emit changeDipGroup(m_column, m_row);
+    if(m_bSymmetric && m_row != m_column)
+    {
+        dipTable[m_column][m_row] = m_oldValueSymetric;
+        emit changeDipGroup(m_column, m_row);
+    }
 }
 
 void CChangeDiplomacyTableItem::redo()
@@ -1086,7 +1087,7 @@ void CChangeDiplomacyTableItem::redo()
     value = value % 3;
     dipTable[m_row][m_column] = value;
     emit changeDipGroup(m_row, m_column);
-    if(m_bSymmetric)
+    if(m_bSymmetric && m_row != m_column)
     {
         dipTable[m_column][m_row] = value;
         emit changeDipGroup(m_column, m_row);

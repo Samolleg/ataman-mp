@@ -289,7 +289,8 @@ foundation as one coherent `0.3.0` release.
   and [`86e6ae0`](https://github.com/Ilufus/ei-mapper-endurance/commit/86e6ae0)
   ([interaction validation](packaging/ALPHA26_OBJECT_UI_REVIEW_R20.md),
   [trap-target table](packaging/ALPHA26_TRAP_TARGET_TABLE_R23.md),
-  [diplomacy labels](packaging/ALPHA26_DIPLOMACY_LABELS_R24.md)).
+  [diplomacy labels](packaging/ALPHA26_DIPLOMACY_LABELS_R24.md),
+  [directional diplomacy](packaging/ALPHA26_DIPLOMACY_DIRECTION_R25.md)).
 - Profile visuals, particles, and environment:
   [`37e0231`](https://github.com/Ilufus/ei-mapper-endurance/commit/37e0231),
   [`aa465c3`](https://github.com/Ilufus/ei-mapper-endurance/commit/aa465c3),

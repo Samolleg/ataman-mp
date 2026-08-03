@@ -14,6 +14,7 @@
 #include "mob.h"
 
 class CMobParameters;
+class QCheckBox;
 class CParamLineEdit : public QLineEdit
 {
     Q_OBJECT
@@ -55,6 +56,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
     void editFinishedSignal(CMobParameters*); //todo: add signal for pressing 'X'
@@ -68,6 +70,7 @@ private:
     void generateTitle();
     void applyParameterChanges();
     bool resolveCloseRequest();
+    void restoreDiplomacyWindowSize();
 
 private slots:
     void updateWindow();
@@ -97,6 +100,8 @@ private:
     CMob* m_pCurMob;
     QVector<QSharedPointer<QTableWidgetItem>> m_aCell;
     QSharedPointer<QTableWidget> m_pTable;
+    QWidget* m_pDiplomacyWindow;
+    QCheckBox* m_pSymmetricDiplomacyCheck;
     QString m_lastItemText;
     CView* m_pView;
     QSharedPointer<QUndoStack> m_pUndoStack;
