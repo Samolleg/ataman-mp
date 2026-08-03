@@ -56,8 +56,8 @@ def _quadrant_slice(index: int, height: int, width: int):
     )[index]
 
 
-def _owned_corner_seeds(foreground: np.ndarray,
-                        expected: tuple[bool, bool, bool, bool]):
+def _corner_seeds(foreground: np.ndarray,
+                  selected: tuple[bool, bool, bool, bool]):
     height, width = foreground.shape
     patch = max(4, min(height, width) // 16)
     areas = (
@@ -66,8 +66,8 @@ def _owned_corner_seeds(foreground: np.ndarray,
         (range(height - patch, height), range(width - patch, width)),
         (range(height - patch, height), range(0, patch)),
     )
-    for owned, (ys, xs) in zip(expected, areas):
-        if not owned:
+    for include, (ys, xs) in zip(selected, areas):
+        if not include:
             continue
         for y in ys:
             for x in xs:
@@ -93,7 +93,7 @@ def remove_disconnected_protected_alpha(
     foreground = values >= int(round(connectivity_floor * 255.0))
     reachable = np.zeros_like(foreground, dtype=np.bool_)
     queue = deque()
-    for point in _owned_corner_seeds(foreground, expected):
+    for point in _corner_seeds(foreground, expected):
         if not reachable[point]:
             reachable[point] = True
             queue.append(point)
@@ -127,6 +127,72 @@ def remove_disconnected_protected_alpha(
         "changedOutsideProtected": int(outside.sum()),
         "ownerQuadrantsPixelExact": int(outside.sum()) == 0,
         "connectedPixelsChanged": int((changed & reachable).sum()),
+    }
+
+
+def remove_disconnected_owner_quadrant_support(
+        mask: Image.Image, topology: str,
+        support_floor: float = 0.20) -> tuple[Image.Image, dict]:
+    """Fill support-opacity islands disconnected from the support corner.
+
+    Inside-3-of-4 masks own NW/NE/SE and retain SW as support.  Only support
+    opacity at or above the contract's 20% boundary can be removed.  The SW
+    quadrant, the connected authored support body, and subtler opacity remain
+    byte-exact.
+    """
+    expected = expected_owner_corners(topology)
+    support = tuple(not owned for owned in expected)
+    if sum(support) != 1 or not topology.startswith("inside-3of4"):
+        raise ValueError("owner-quadrant cleanup is limited to inside-3of4")
+    values = np.asarray(mask.convert("L"), dtype=np.uint8).copy()
+    original = values.copy()
+    threshold = int(round(support_floor * 255.0))
+    support_foreground = (255 - values.astype(np.int16)) >= threshold
+    reachable = np.zeros_like(support_foreground, dtype=np.bool_)
+    queue = deque()
+    for point in _corner_seeds(support_foreground, support):
+        if not reachable[point]:
+            reachable[point] = True
+            queue.append(point)
+    height, width = values.shape
+    while queue:
+        y, x = queue.popleft()
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if not (dx or dy):
+                    continue
+                ny, nx = y + dy, x + dx
+                if (0 <= ny < height and 0 <= nx < width and
+                        support_foreground[ny, nx] and
+                        not reachable[ny, nx]):
+                    reachable[ny, nx] = True
+                    queue.append((ny, nx))
+    owner_region = np.zeros_like(support_foreground, dtype=np.bool_)
+    support_region = np.zeros_like(support_foreground, dtype=np.bool_)
+    for index, owned in enumerate(expected):
+        area = _quadrant_slice(index, height, width)
+        (owner_region if owned else support_region)[area] = True
+    filled = owner_region & support_foreground & ~reachable
+    values[filled] = 255
+    changed = values != original
+    cleaned = Image.fromarray(values, "L")
+    return cleaned, {
+        "method": "owner-quadrant disconnected-support cleanup",
+        "supportFloor": support_floor,
+        "ownerCorners": [
+            CORNER_NAMES[index] for index, owned in enumerate(expected)
+            if owned],
+        "supportCorners": [
+            CORNER_NAMES[index] for index, selected in enumerate(support)
+            if selected],
+        "filledPixels": int(filled.sum()),
+        "changedPixels": int(changed.sum()),
+        "changedFraction": round(float(changed.mean()), 6),
+        "changedInSupportQuadrants": int(
+            (changed & support_region).sum()),
+        "connectedPixelsChanged": int((changed & reachable).sum()),
+        "subThresholdPixelsChanged": int(
+            (changed & ~support_foreground).sum()),
     }
 
 
@@ -424,6 +490,56 @@ def validate_output(output: Path) -> dict:
         "verifiedImages": len(indexed),
         "htmlImageReferences": len(references),
         "runtimeChanged": False,
+    }
+
+
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify the four R54 approvals and two corrected pending rows."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "pending-review-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R54 decision keys do not exactly match the review")
+    approved = []
+    pending = []
+    verified_outcomes = 0
+    for key, decision in decisions.items():
+        answer = decision.get("answer")
+        question = questions[key]
+        if answer == "Approve current detailed route despite measured gate":
+            if question.get("cleaned") is not None:
+                raise ValueError(
+                    f"R54 approved the current route, not cleanup: {key}")
+            approved.append(key)
+            for outcome in question["outcomes"]:
+                if (not outcome.get("ownerSource") or
+                        not outcome.get("supportSource") or
+                        not outcome["files"].get("currentResult")):
+                    raise ValueError(f"R54 evidence is incomplete: {key}")
+                verified_outcomes += 1
+        elif answer == "Still uncertain":
+            pending.append(key)
+            note = decision.get("note", "").casefold()
+            if "owner quadrant" not in note or "especially ne" not in note:
+                raise ValueError(
+                    f"corrected owner-quadrant direction is missing: {key}")
+        else:
+            raise ValueError(f"unsupported R54 decision for {key}: {answer}")
+    if len(approved) != 4 or len(pending) != 2:
+        raise ValueError(
+            f"unexpected R54 split: {len(approved)} approved, "
+            f"{len(pending)} pending")
+    if set(pending) != set(CLEANUP_KEYS):
+        raise ValueError("only the two Ice inside masks may remain pending")
+    return {
+        **rendered,
+        "approved": len(approved),
+        "pending": len(pending),
+        "approvedOutcomesVerified": verified_outcomes,
+        "generationChanged": False,
     }
 
 

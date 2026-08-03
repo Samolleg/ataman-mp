@@ -1,0 +1,41 @@
+{
+  "schema": "ei-snow-ice-pending-decisions-v1",
+  "checkpoint": "R54-SNOW-ICE-PENDING",
+  "authority": "explicit-user-review",
+  "status": "partial-approval",
+  "decisions": {
+    "route-compare-snow-clumps-diagonal-2of4": {
+      "answer": "Approve current detailed route despite measured gate"
+    },
+    "route-compare-snow-clumps-inside-3of4-v1": {
+      "answer": "Approve current detailed route despite measured gate"
+    },
+    "route-compare-snow-clumps-inside-3of4-v2": {
+      "answer": "Approve current detailed route despite measured gate"
+    },
+    "route-compare-ice-fracture-diagonal-2of4": {
+      "answer": "Approve current detailed route despite measured gate"
+    },
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Still uncertain",
+      "note": "The earlier protected-SW cleanup direction was based on reading this as 1-of-4. For this 3-of-4 mask, clean disconnected support noise from the owner quadrants, especially NE. This is not an approval."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Still uncertain",
+      "note": "The earlier protected-SW cleanup direction was based on reading this as 1-of-4. For this 3-of-4 mask, clean disconnected support noise from the owner quadrants, especially NE. This is not an approval."
+    }
+  },
+  "approvedRoutes": [
+    "route-compare-snow-clumps-diagonal-2of4",
+    "route-compare-snow-clumps-inside-3of4-v1",
+    "route-compare-snow-clumps-inside-3of4-v2",
+    "route-compare-ice-fracture-diagonal-2of4"
+  ],
+  "pendingRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "supersededCleanupDirection": "Do not use the R54 protected-SW disconnected-alpha cleanup for the two Ice inside masks.",
+  "requestedCleanupDirection": "Remove disconnected support-opacity islands from the NW/NE/SE owner quadrants, especially NE, while preserving SW and the connected authored boundary.",
+  "generationPolicy": "Apply only the four approved current detailed routes. Keep both Ice inside routes pending until the corrected cleanup is explicitly reviewed."
+}

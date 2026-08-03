@@ -20,6 +20,7 @@ from render_snow_ice_route_comparison import (
 )
 from render_snow_ice_pending_review import (
     remove_disconnected_protected_alpha,
+    remove_disconnected_owner_quadrant_support,
 )
 
 
@@ -41,6 +42,60 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_r54_decisions_keep_only_ice_inside_pending(self) -> None:
+        review = json.loads((Path(__file__).with_name(
+            "authored_mask_snow_ice_r54_decisions.json")).read_text(
+                encoding="utf-8"))
+        approved = {
+            key for key, decision in review["decisions"].items()
+            if decision["answer"] ==
+            "Approve current detailed route despite measured gate"
+        }
+        pending = {
+            key for key, decision in review["decisions"].items()
+            if decision["answer"] == "Still uncertain"
+        }
+
+        self.assertEqual({
+            "route-compare-snow-clumps-diagonal-2of4",
+            "route-compare-snow-clumps-inside-3of4-v1",
+            "route-compare-snow-clumps-inside-3of4-v2",
+            "route-compare-ice-fracture-diagonal-2of4",
+        }, approved)
+        self.assertEqual({
+            "route-compare-ice-fracture-inside-3of4-v1",
+            "route-compare-ice-fracture-inside-3of4-v2",
+        }, pending)
+        for key in pending:
+            note = review["decisions"][key]["note"].casefold()
+            self.assertIn("owner quadrant", note)
+            self.assertIn("especially ne", note)
+
+    def test_owner_cleanup_fills_only_disconnected_support_islands(
+            self) -> None:
+        values = np.full((256, 256), 255, dtype=np.uint8)
+        values[128:, :128] = 0
+        values[112:128, :96] = 72       # Support edge connected to SW.
+        values[30:38, 200:208] = 24     # Unrelated NE support island.
+        values[44:52, 180:188] = 230    # Sub-20% painterly opacity.
+        original = values.copy()
+
+        cleaned, audit = remove_disconnected_owner_quadrant_support(
+            Image.fromarray(values, "L"), "inside-3of4-v1")
+        result = np.asarray(cleaned)
+
+        np.testing.assert_array_equal(original[128:, :128],
+                                      result[128:, :128])
+        np.testing.assert_array_equal(original[112:128, :96],
+                                      result[112:128, :96])
+        self.assertEqual(255, int(result[33, 203]))
+        self.assertEqual(230, int(result[47, 183]))
+        self.assertGreater(audit["filledPixels"], 0)
+        self.assertEqual(["NW", "NE", "SE"], audit["ownerCorners"])
+        self.assertEqual(["SW"], audit["supportCorners"])
+        self.assertEqual(0, audit["changedInSupportQuadrants"])
+        self.assertEqual(0, audit["connectedPixelsChanged"])
+
     def test_protected_corner_cleanup_removes_only_disconnected_alpha(
             self) -> None:
         values = np.full((256, 256), 255, dtype=np.uint8)
