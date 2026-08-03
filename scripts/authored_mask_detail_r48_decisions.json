@@ -1,0 +1,47 @@
+{
+  "schema": "ei-authored-mask-detail-decisions-v1",
+  "checkpoint": "R48-DETAIL-MATTE-BATCH",
+  "authority": "explicit-user-review",
+  "status": "rejected-general-detail-route",
+  "decisions": {
+    "detail-matte-grass-strands-outer-1of4-v1": {
+      "answer": "Keep approved R44 mask"
+    },
+    "detail-matte-grass-strands-edge-2of4-v1": {
+      "answer": "Keep approved R44 mask"
+    },
+    "detail-matte-grass-strands-diagonal-2of4": {
+      "answer": "Keep approved R44 mask"
+    },
+    "detail-matte-soil-mottle-outer-1of4-v2": {
+      "answer": "Wrong ownership shape",
+      "note": "The candidate reads as 3-of-4 instead of the requested 1-of-4, so the comparison is invalid."
+    },
+    "detail-matte-soil-mottle-edge-2of4-v2": {
+      "answer": "Keep approved R44 mask",
+      "note": "The continuous-alpha candidate breaks the protected-side and maximum-fill rules."
+    },
+    "detail-matte-soil-mottle-inside-3of4-v1": {
+      "answer": "Keep approved R44 mask",
+      "note": "The candidate has the wrong ownership extent, so the comparison is invalid."
+    },
+    "detail-matte-stone-fracture-outer-1of4-v1": {
+      "answer": "Keep approved R44 mask",
+      "note": "The candidate adds undesired noise in unrelated corners."
+    },
+    "detail-matte-stone-fracture-edge-2of4-v1": {
+      "answer": "Keep approved R44 mask"
+    },
+    "detail-matte-stone-fracture-diagonal-2of4": {
+      "answer": "Keep approved R44 mask"
+    }
+  },
+  "routeDecisions": {
+    "sand-grain": "R47 detailed opacity matte approved",
+    "grass-strands": "R44 repaired authored mask",
+    "soil-mottle": "R44 repaired authored mask",
+    "stone-fracture": "R44 repaired authored mask",
+    "snow-clumps": "pending focused confirmation"
+  },
+  "requiredGate": "Future detail-route candidates must pass affected-quarter coverage, protected-quarter presence, and full corner-patch ownership before human review. Exact corner pixels alone are insufficient."
+}

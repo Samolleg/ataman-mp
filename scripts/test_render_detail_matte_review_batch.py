@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 from render_authored_mask_repair_pilot import expected_owner_corners
+from render_authored_mask_repair_pilot import mask_metrics
 from render_detail_matte_review_batch import (
     APPROVED_CASES,
     compatible_representatives,
@@ -30,6 +31,37 @@ def _texture(path: Path, detail: int) -> None:
 
 
 class DetailMatteReviewBatchTests(unittest.TestCase):
+    def test_r48_decisions_keep_non_sand_families_on_r44(self) -> None:
+        decision_path = Path(__file__).with_name(
+            "authored_mask_detail_r48_decisions.json")
+        payload = json.loads(decision_path.read_text(encoding="utf-8"))
+        self.assertEqual("rejected-general-detail-route", payload["status"])
+        self.assertEqual(9, len(payload["decisions"]))
+        self.assertEqual(8, sum(
+            item["answer"] == "Keep approved R44 mask"
+            for item in payload["decisions"].values()))
+        self.assertEqual(
+            "R47 detailed opacity matte approved",
+            payload["routeDecisions"]["sand-grain"])
+        for family in ("grass-strands", "soil-mottle", "stone-fracture"):
+            self.assertEqual("R44 repaired authored mask",
+                             payload["routeDecisions"][family])
+        self.assertEqual("pending focused confirmation",
+                         payload["routeDecisions"]["snow-clumps"])
+
+    def test_exact_corner_pixels_cannot_bypass_topology_gate(self) -> None:
+        values = np.full((96, 96), 150, dtype=np.uint8)
+        values[0, 0] = 255
+        values[0, -1] = values[-1, -1] = values[-1, 0] = 0
+        mask = Image.fromarray(values, "L")
+
+        measured = mask_metrics(mask, mask, "outer-1of4-v1")
+
+        self.assertEqual(255, int(np.asarray(mask)[0, 0]))
+        self.assertLess(measured["cornerPatchMeans"]["NW"], 0.80)
+        self.assertFalse(measured["structuralTargetMet"])
+        self.assertLess(measured["affectedQuarterStrongCoverage"]["NW"], 0.70)
+
     def test_case_set_is_exactly_the_nine_r44_approvals(self) -> None:
         decision_path = Path(__file__).with_name(
             "authored_mask_repair_r44_decisions.json")
