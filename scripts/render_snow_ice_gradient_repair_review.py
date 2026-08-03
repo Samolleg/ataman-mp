@@ -393,6 +393,32 @@ def validate_output(output: Path) -> dict:
     }
 
 
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify rejection of R57's tile-position gradient."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "gradient-repair-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R57 decision keys do not exactly match the review")
+    for key, decision in decisions.items():
+        if decision.get("answer") != "Reject tile-position gradient repair":
+            raise ValueError(f"R57 tile gradient must remain rejected: {key}")
+        note = decision.get("note", "").casefold()
+        if ("distance from the irregular authored blend edge" not in note or
+                "quadrant-to-center geometric haze" not in note):
+            raise ValueError(f"R57 boundary-distance direction is missing: {key}")
+    return {
+        **rendered,
+        "approved": 0,
+        "rejected": len(decisions),
+        "pending": len(decisions),
+        "generationChanged": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--r56", required=True, type=Path)

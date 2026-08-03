@@ -28,6 +28,9 @@ from render_snow_ice_owner_plateau_review import (
 from render_snow_ice_gradient_repair_review import (
     repair_owner_artifacts_with_edge_gradient,
 )
+from render_snow_ice_boundary_gradient_review import (
+    repair_owner_artifacts_by_boundary_distance,
+)
 
 
 def metrics(*, affected: float, protected: float,
@@ -48,6 +51,48 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_r57_rejects_tile_gradient_for_boundary_distance(self) -> None:
+        review = json.loads((Path(__file__).with_name(
+            "authored_mask_ice_gradient_r57_decisions.json")).read_text(
+                encoding="utf-8"))
+
+        self.assertEqual([], review["approvedRoutes"])
+        self.assertEqual(2, len(review["pendingRoutes"]))
+        self.assertTrue(all(
+            decision["answer"] == "Reject tile-position gradient repair" and
+            "distance from the irregular authored blend edge" in
+            decision["note"].casefold() and
+            "quadrant-to-center geometric haze" in
+            decision["note"].casefold()
+            for decision in review["decisions"].values()))
+
+    def test_boundary_gradient_thickens_with_distance_from_authored_edge(
+            self) -> None:
+        values = np.full((128, 128), 220, dtype=np.uint8)
+        values[64:, :64] = 0
+        values[56:72, :58] = 64       # Connected irregular support edge.
+        values[40:44, 70:74] = 20    # Artifact near, but outside edge hold.
+        values[8:12, 108:112] = 20   # Artifact far inside owner field.
+        original = values.copy()
+
+        repaired, audit = repair_owner_artifacts_by_boundary_distance(
+            Image.fromarray(values, "L"), "inside-3of4-v1",
+            exact_edge_radius=4, full_owner_radius=32)
+        result = np.asarray(repaired)
+
+        np.testing.assert_array_equal(original[64:, :64],
+                                      result[64:, :64])
+        np.testing.assert_array_equal(original[56:72, :58],
+                                      result[56:72, :58])
+        self.assertGreater(int(result[41, 71]), int(original[41, 71]))
+        self.assertGreater(int(result[9, 109]), int(result[41, 71]))
+        self.assertEqual(255, int(result[9, 109]))
+        self.assertEqual(0, audit["changedConnectedSupportPixels"])
+        self.assertEqual(0, audit["changedInsideExactEdgeRadius"])
+        self.assertEqual(0, audit["changedSupportQuadrantPixels"])
+        self.assertTrue(audit["usesBoundaryDistanceGradient"])
+        self.assertFalse(audit["usesTilePositionGradient"])
+
     def test_r56_rejects_hard_plateau_and_requests_gradient(self) -> None:
         review = json.loads((Path(__file__).with_name(
             "authored_mask_ice_plateau_r56_decisions.json")).read_text(
