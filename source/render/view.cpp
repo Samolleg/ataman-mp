@@ -72,6 +72,7 @@
 #include "shadow_cascade.h"
 #include "particle_animation.h"
 #include "utils.h"
+#include "trap_diplomacy.h"
 #include "part.h"
 #include "objects/light.h"
 #include "objects/particle.h"
@@ -11040,7 +11041,23 @@ void CView::viewParameters()
     foreach(pNode, selected)
     {
         if(CScene::getInstance()->getMode() == eEditModeLogic)
+        {
             pNode->collectlogicParams(aProp, commonType);
+            if(CMagicTrap* trap = dynamic_cast<CMagicTrap*>(pNode))
+            {
+                CMob* mob = ownerMob(trap);
+                const int playerGroup = int(
+                    static_cast<unsigned char>(trap->dipGroup()));
+                const ei::STrapTargetSummary targets = mob
+                    ? ei::deriveTrapTargetSummary(
+                        playerGroup, mob->diplomacyField(),
+                        mob->diplomacyNames())
+                    : ei::deriveTrapTargetSummary(playerGroup, {}, {});
+                propStr effectiveTargets(
+                    eObjParam_TRAP_EFFECTIVE_TARGETS, targets.display);
+                util::addParam(aProp, &effectiveTargets);
+            }
+        }
         else
             pNode->collectParams(aProp, commonType);
     }

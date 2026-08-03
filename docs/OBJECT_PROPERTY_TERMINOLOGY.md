@@ -154,12 +154,16 @@ their raw numeric value.
 
 ## Magic traps
 
-Magic traps also use the common `Player group`, which determines the trap's
-effective hostility through the MOB diplomacy table.
+Magic traps also use the common `Player group`. During normal map loading, the
+game takes that player's row from the containing MOB's 32-player diplomacy
+table and creates a target bit for every group marked `War`. This calculated
+mask replaces the serialized `MT_DIPLOMACY` value; the stored value is neither
+an override nor an additional filter.
 
 | UI label | Value | Current property UI | Tooltip |
 |---|---|---|---|
-| Stored enemy mask (raw) | Signed integer/bitmask | Exposed in Logic mode | During normal loading, trap hostility is rebuilt from Player group and the MOB diplomacy table. |
+| Will attack (derived) | Player-group names and numbers | Read-only in Logic mode | Groups marked War in this trap's Player group row of the containing MOB's diplomacy table. This is the target mask the game calculates when the map loads. |
+| Stored target mask (legacy) | 32-bit player-group bitmask | Preserved but omitted from the normal property UI | Serialized mask replaced during normal map loading. |
 | Spell | Spell expression | Exposed in Logic mode | Spell cast when the trap activates. |
 | Cast interval | Game ticks; `15` = 1 second | Exposed in Logic mode | Delay before the trap can cast again. |
 | Nearest unit only | On/off | Exposed in Logic mode as Is cast once? | For unit-targeted spells, affect only the nearest eligible unit. Off affects all eligible units. |

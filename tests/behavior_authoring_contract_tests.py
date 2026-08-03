@@ -35,6 +35,8 @@ def main() -> int:
     collection = source("source/ui/behavior_collection_widget.cpp")
     trap_collection_h = source("source/ui/trap_collection_widget.h")
     trap_collection = source("source/ui/trap_collection_widget.cpp")
+    trap_targets = source("source/core/trap_diplomacy.cpp")
+    table = source("source/layout_components/tablemanager.cpp")
 
     require(settings, '{"shortcutHistory", "Ctrl+H"}',
             "Undo History default shortcut")
@@ -93,6 +95,20 @@ def main() -> int:
             "immediate Logic-row refresh after edit and Undo/Redo")
     require(view, 'tr("Activation areas (%1)")', "trap activation hierarchy")
     require(view, 'tr("Cast targets (%1)")', "trap cast-target hierarchy")
+    require(view, "deriveTrapTargetSummary(",
+            "trap target summary derived from the containing MOB diplomacy")
+    require(trap_targets, "if(row.at(target) != 2)",
+            "War-only trap target derivation")
+    require(trap_targets, "Q_UNUSED(storedMask);",
+            "serialized trap mask excluded from effective target derivation")
+    logic_trap_params = trap[trap.index("void CMagicTrap::collectlogicParams"):
+                             trap.index("void CMagicTrap::applyLogicParam")]
+    if "eObjParam_TRAP_DIPLOMACY" in logic_trap_params:
+        raise AssertionError("legacy trap target mask remains editable in Logic mode")
+    require(table, 'm_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Will attack (derived)";',
+            "read-only effective trap-target property label")
+    require(table, "case eObjParam_TRAP_EFFECTIVE_TARGETS:",
+            "read-only effective trap-target property editor")
     require(unit_h, "const QVector<CPatrolPoint*>& patrolPoints() const",
             "read-only patrol hierarchy access")
     require(tree, "setLogicSlotIndex(logicSlot);",

@@ -307,8 +307,6 @@ void CMagicTrap::collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp,
     if (comm != eMagicTrap)
         return;
 
-    propInt diplomacy(eObjParam_TRAP_DIPLOMACY, m_diplomacy);
-    util::addParam(aProp, &diplomacy);
     propStr spell(eObjParam_TRAP_SPELL, m_spell);
     util::addParam(aProp, &spell);
     propUint castInterval(eObjParam_TRAP_CAST_INTERVAL, m_castInterval);
@@ -322,7 +320,7 @@ void CMagicTrap::applyLogicParam(const QSharedPointer<IPropertyBase>& prop)
     switch (prop->type()){
     case eObjParam_TRAP_DIPLOMACY:
     {
-        m_diplomacy = dynamic_cast<const propChar*>(prop.get())->value();
+        m_diplomacy = dynamic_cast<const propInt*>(prop.get())->value();
         break;
     }
     case eObjParam_TRAP_SPELL:
@@ -350,7 +348,7 @@ void CMagicTrap::getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam pr
     switch (propType) {
     case eObjParam_TRAP_DIPLOMACY:
     {
-        prop.reset(new propChar(propType, m_diplomacy));
+        prop.reset(new propInt(propType, m_diplomacy));
         break;
     }
     case eObjParam_TRAP_SPELL:
@@ -403,7 +401,7 @@ void CMagicTrap::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propTyp
     switch (propType) {
     case eObjParam_TRAP_DIPLOMACY:
     {
-        prop.reset(new propChar(propType, m_diplomacy));
+        prop.reset(new propInt(propType, m_diplomacy));
         break;
     }
     case eObjParam_TRAP_SPELL:
@@ -434,7 +432,7 @@ void CMagicTrap::applyParam(const QSharedPointer<IPropertyBase>& prop)
     switch (prop->type()) {
     case eObjParam_TRAP_DIPLOMACY:
     {
-        m_diplomacy = dynamic_cast<propChar*>(prop.get())->value();
+        m_diplomacy = dynamic_cast<propInt*>(prop.get())->value();
         break;
     }
     case eObjParam_TRAP_SPELL:

@@ -165,6 +165,7 @@ enum EObjParam
     ,eObjParam_LEVER_RECALC_GRAPH
 
     ,eObjParam_TRAP_DIPLOMACY
+    ,eObjParam_TRAP_EFFECTIVE_TARGETS
     ,eObjParam_TRAP_SPELL
     ,eObjParam_TRAP_AREA_RADIUS
     //,eObjParam_TRAP_AREAS

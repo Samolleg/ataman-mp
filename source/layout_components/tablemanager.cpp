@@ -804,9 +804,13 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
     for(int row : rows)
     {
         const QSharedPointer<IPropertyBase> destination = m_rowValues.value(row);
-        if(!destination.isNull() && destination->type() == eObjParam_OBJECT_TYPE)
+        if(!destination.isNull()
+           && (destination->type() == eObjParam_OBJECT_TYPE
+               || destination->type() == eObjParam_TRAP_EFFECTIVE_TARGETS))
         {
-            if(error) *error = tr("Object type is read-only. Use an explicit conversion command to change it.");
+            if(error) *error = destination->type() == eObjParam_OBJECT_TYPE
+                ? tr("Object type is read-only. Use an explicit conversion command to change it.")
+                : tr("Effective trap targets are read-only and derived from Player group and MOB diplomacy.");
             return false;
         }
     }
@@ -1040,7 +1044,8 @@ void CTableManager::initRowName()
     m_aRowName[eObjParam_LEVER_IS_CYCLED] = "Repeatable";
     m_aRowName[eObjParam_LEVER_IS_DOOR] = "Door interaction";
     m_aRowName[eObjParam_LEVER_RECALC_GRAPH] = "Recalculate navigation graph";
-    m_aRowName[eObjParam_TRAP_DIPLOMACY] = "Stored enemy mask (raw)";
+    m_aRowName[eObjParam_TRAP_DIPLOMACY] = "Stored target mask (legacy)";
+    m_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Will attack (derived)";
     m_aRowName[eObjParam_TRAP_SPELL] = "Spell";
     m_aRowName[eObjParam_TRAP_AREA_RADIUS] = "Activation radius";
     m_aRowName[eObjParam_TRAP_CAST_INTERVAL] = "Cast interval";
@@ -1118,7 +1123,8 @@ void CTableManager::initRowName()
     m_aRowToolTip[eObjParam_LEVER_IS_DOOR] = "Treat this lever as a door approached from its usable sides.";
     m_aRowToolTip[eObjParam_LEVER_RECALC_GRAPH] = "Update AI navigation when this object's state changes. Enable it when states change passability.";
 
-    m_aRowToolTip[eObjParam_TRAP_DIPLOMACY] = "During normal loading, trap hostility is rebuilt from Player group and the MOB diplomacy table.";
+    m_aRowToolTip[eObjParam_TRAP_DIPLOMACY] = "Serialized 32-bit player-group mask. Normal map loading replaces it using Player group and the MOB diplomacy table.";
+    m_aRowToolTip[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Groups marked War in this trap's Player group row of the containing MOB's diplomacy table. This is the target mask the game calculates when the map loads.";
     m_aRowToolTip[eObjParam_TRAP_SPELL] = "Spell cast when the trap activates.";
     m_aRowToolTip[eObjParam_TRAP_CAST_INTERVAL] = "Delay before the trap can cast again. 15 ticks equal one second.";
     m_aRowToolTip[eObjParam_TRAP_CAST_ONCE] = "For unit-targeted spells, affect only the nearest eligible unit. Off affects all eligible units.";
@@ -1381,6 +1387,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             break;
         }
         case eObjParam_OBJECT_TYPE:
+        case eObjParam_TRAP_EFFECTIVE_TARGETS:
         {
             m_pTable->insertRow(i);
             m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[type]));
