@@ -7,6 +7,8 @@
 #include <QItemSelectionModel>
 #include <QCheckBox>
 #include <QGuiApplication>
+#include <QApplication>
+#include <QEventLoop>
 #include <QLabel>
 #include <QScreen>
 #include <QSettings>
@@ -100,6 +102,14 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     diplomacyLayout->addWidget(directionNotice);
     m_pTable.reset(new QTableWidget(32, 32, m_pDiplomacyWindow));
     m_pTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_pTable->setWordWrap(false);
+    m_pTable->setTextElideMode(Qt::ElideNone);
+    m_pTable->setHorizontalHeader(new HorizontalHeaderView(
+        Qt::Horizontal, m_pTable.get()));
+    m_pTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    m_pTable->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    m_pTable->horizontalHeader()->setHighlightSections(true);
+    m_pTable->verticalHeader()->setHighlightSections(true);
     diplomacyLayout->addWidget(m_pTable.get(), 1);
     QObject::connect(m_pTable.get(), SIGNAL(cellDoubleClicked(int,int)), this, SLOT(tableItemClicked(int,int)));
     QObject::connect(m_pTable.get(), SIGNAL(currentCellChanged(int,int,int,int)),
@@ -336,17 +346,12 @@ void CMobParameters::on_diplomacyButton_clicked()
         return;
     }
 
-    //setup view
-
-    HorizontalHeaderView* headerView = new HorizontalHeaderView(Qt::Horizontal); //todo: remove memory leak!
-
-    //QHeaderView* headerView = new QHeaderView(Qt::Horizontal);
-
-    m_pTable->setHorizontalHeader(headerView); //set our custom headerview
+    // Populate and measure once. Fixed section modes avoid remeasuring all
+    // rotated labels during every subsequent window-resize event.
+    m_pTable->setUpdatesEnabled(false);
     m_pTable->setToolTip(tr(
         "0 (Ally): friendly. 1 (Neutral): neither friendly nor hostile.\n"
         "2 (War): hostile. Double-click any cell to cycle its value."));
-    m_pTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_pTable->setVerticalHeaderLabels(dipName);
     m_pTable->setHorizontalHeaderLabels(dipName);
     m_pTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -355,7 +360,10 @@ void CMobParameters::on_diplomacyButton_clicked()
     m_pTable->resizeColumnsToContents();
     m_pTable->resizeRowsToContents();
     m_pDiplomacyWindow->show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     restoreDiplomacyWindowSize();
+    m_pTable->setUpdatesEnabled(true);
+    m_pTable->viewport()->update();
     m_pDiplomacyWindow->raise();
     m_pDiplomacyWindow->activateWindow();
     //todo: disable mob parameter widget, connect to table close signal to enable main window again
@@ -444,6 +452,28 @@ void CMobParameters::highlightDiplomacySelection(
                       QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     selection->select(m_pTable->model()->index(0, currentColumn),
                       QItemSelectionModel::Select | QItemSelectionModel::Columns);
+    const auto boldHeaderSection = [](QTableWidget* table, Qt::Orientation orientation,
+                                      int activeSection)
+    {
+        const int count = orientation == Qt::Horizontal
+            ? table->columnCount() : table->rowCount();
+        for(int index = 0; index < count; ++index)
+        {
+            QTableWidgetItem* item = orientation == Qt::Horizontal
+                ? table->horizontalHeaderItem(index)
+                : table->verticalHeaderItem(index);
+            if(!item)
+                continue;
+            QFont font = item->font();
+            font.setBold(index == activeSection);
+            item->setFont(font);
+        }
+        QHeaderView* header = orientation == Qt::Horizontal
+            ? table->horizontalHeader() : table->verticalHeader();
+        header->viewport()->update();
+    };
+    boldHeaderSection(m_pTable.get(), Qt::Horizontal, currentColumn);
+    boldHeaderSection(m_pTable.get(), Qt::Vertical, currentRow);
 }
 
 QSize CMobParameters::diplomacyContentSize() const
@@ -461,12 +491,16 @@ QSize CMobParameters::diplomacyContentSize() const
         QSize itemSize = widget->sizeHint();
         if(widget == m_pTable.get())
         {
+            int columnsWidth = 0;
+            for(int index = 0; index < m_pTable->columnCount(); ++index)
+                columnsWidth += m_pTable->columnWidth(index);
+            int rowsHeight = 0;
+            for(int index = 0; index < m_pTable->rowCount(); ++index)
+                rowsHeight += m_pTable->rowHeight(index);
             itemSize.setWidth(m_pTable->verticalHeader()->width()
-                + m_pTable->horizontalHeader()->length()
-                + m_pTable->frameWidth() * 2 + 4);
+                + columnsWidth + m_pTable->frameWidth() * 2 + 4);
             itemSize.setHeight(m_pTable->horizontalHeader()->height()
-                + m_pTable->verticalHeader()->length()
-                + m_pTable->frameWidth() * 2 + 4);
+                + rowsHeight + m_pTable->frameWidth() * 2 + 4);
         }
         width = qMax(width, itemSize.width());
         height += itemSize.height();
@@ -478,7 +512,7 @@ QSize CMobParameters::diplomacyContentSize() const
 
 void CMobParameters::restoreDiplomacyWindowSize()
 {
-    static const char kSizeKey[] = "ui/diplomacyWindowSizeV2";
+    static const char kSizeKey[] = "ui/diplomacyWindowSizeV3";
     QSettings settings;
     const QSize saved = settings.value(kSizeKey).toSize();
     if(saved.isValid())
@@ -495,14 +529,14 @@ void CMobParameters::restoreDiplomacyWindowSize()
         screen = QGuiApplication::primaryScreen();
     const QSize available = screen ? screen->availableGeometry().size() : QSize(1280, 800);
     m_pDiplomacyWindow->resize(
-        qMin(wanted.width(), qRound(available.width() * 0.9)),
-        qMin(wanted.height(), qRound(available.height() * 0.9)));
+        qMin(wanted.width(), qRound(available.width() * 0.95)),
+        qMin(wanted.height(), qRound(available.height() * 0.95)));
 }
 
 bool CMobParameters::eventFilter(QObject* watched, QEvent* event)
 {
     if(watched == m_pDiplomacyWindow && event->type() == QEvent::Close)
-        QSettings().setValue("ui/diplomacyWindowSizeV2", m_pDiplomacyWindow->size());
+        QSettings().setValue("ui/diplomacyWindowSizeV3", m_pDiplomacyWindow->size());
     return QWidget::eventFilter(watched, event);
 }
 

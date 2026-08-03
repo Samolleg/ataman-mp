@@ -725,6 +725,7 @@ int runHeadlessCommand(QApplication& app)
         for(int index = 0; diplomacySelectionCrossHighlights && index < 32; ++index)
             diplomacySelectionCrossHighlights = diplomacyTable->item(7, index)->isSelected()
                 && diplomacyTable->item(index, 8)->isSelected();
+        bool diplomacyHeadersBoldSelection = false;
         QVector<QVector<uint>>& commandDiplomacy = diplomacyMob.diplomacyField();
         commandDiplomacy[4][5] = 2;
         commandDiplomacy[5][4] = 1;
@@ -743,13 +744,26 @@ int runHeadlessCommand(QApplication& app)
         const bool selfRelationUndoable = commandDiplomacy[6][6] == 0;
 
         QSettings diplomacySettings;
-        const QString diplomacySizeKey = QStringLiteral("ui/diplomacyWindowSizeV2");
+        const QString diplomacySizeKey = QStringLiteral("ui/diplomacyWindowSizeV3");
         const bool hadDiplomacySize = diplomacySettings.contains(diplomacySizeKey);
         const QVariant previousDiplomacySize = diplomacySettings.value(diplomacySizeKey);
         diplomacySettings.remove(diplomacySizeKey);
         QMetaObject::invokeMethod(&diplomacyParameters,
                                   "on_diplomacyButton_clicked");
         QApplication::processEvents();
+        if(diplomacyTable)
+        {
+            diplomacyTable->setCurrentCell(7, 9);
+            diplomacyTable->setCurrentCell(7, 8);
+        }
+        QApplication::processEvents();
+        diplomacyHeadersBoldSelection = diplomacyTable
+            && diplomacyTable->horizontalHeaderItem(8)
+            && diplomacyTable->verticalHeaderItem(7)
+            && diplomacyTable->horizontalHeaderItem(8)->font().bold()
+            && diplomacyTable->verticalHeaderItem(7)->font().bold()
+            && !diplomacyTable->horizontalHeaderItem(7)->font().bold()
+            && !diplomacyTable->verticalHeaderItem(8)->font().bold();
         QWidget* diplomacyWindow = diplomacyParameters.findChild<QWidget*>(
             QStringLiteral("diplomacyWindow"));
         QCheckBox* symmetricDiplomacy = diplomacyWindow
@@ -777,9 +791,14 @@ int runHeadlessCommand(QApplication& app)
               + diplomacyTable->frameWidth() * 2 + 4 : 0;
         const bool diplomacyFirstOpenFitsContent = diplomacyWindow
             && diplomacyWindow->width() >= qMin(
-                diplomacyTableContentWidth, qRound(diplomacyAvailable.width() * 0.9))
+                diplomacyTableContentWidth, qRound(diplomacyAvailable.width() * 0.95))
             && diplomacyWindow->height() >= qMin(
-                diplomacyTableContentHeight, qRound(diplomacyAvailable.height() * 0.9));
+                diplomacyTableContentHeight, qRound(diplomacyAvailable.height() * 0.95));
+        const bool diplomacyResizeUsesFixedSections = diplomacyTable
+            && diplomacyTable->horizontalHeader()->sectionResizeMode(0)
+                == QHeaderView::Fixed
+            && diplomacyTable->verticalHeader()->sectionResizeMode(0)
+                == QHeaderView::Fixed;
         const bool diplomacyDirectionControlVisible = symmetricDiplomacy
             && symmetricDiplomacy->text()
                 == QStringLiteral("Apply changes in both directions");
@@ -2263,10 +2282,12 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyValuesExplainMeaning
                 && diplomacyDiagonalUsesRelationColor
                 && diplomacySelectionCrossHighlights
+                && diplomacyHeadersBoldSelection
                 && oneWayRedoPreservesReverse && oneWayUndoPreservesReverse
                 && selfRelationEditable && selfRelationUndoable
                 && diplomacyWindowAutoFitsAndResizable
                 && diplomacyFirstOpenFitsContent
+                && diplomacyResizeUsesFixedSections
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
@@ -2382,12 +2403,14 @@ int runHeadlessCommand(QApplication& app)
                << " diplomacyValuesExplainMeaning=" << diplomacyValuesExplainMeaning
                << " diplomacyDiagonalUsesRelationColor=" << diplomacyDiagonalUsesRelationColor
                << " diplomacySelectionCrossHighlights=" << diplomacySelectionCrossHighlights
+               << " diplomacyHeadersBoldSelection=" << diplomacyHeadersBoldSelection
                << " oneWayRedoPreservesReverse=" << oneWayRedoPreservesReverse
                << " oneWayUndoPreservesReverse=" << oneWayUndoPreservesReverse
                << " selfRelationEditable=" << selfRelationEditable
                << " selfRelationUndoable=" << selfRelationUndoable
                << " diplomacyWindowAutoFitsAndResizable=" << diplomacyWindowAutoFitsAndResizable
                << " diplomacyFirstOpenFitsContent=" << diplomacyFirstOpenFitsContent
+               << " diplomacyResizeUsesFixedSections=" << diplomacyResizeUsesFixedSections
                << " diplomacyDirectionControlVisible=" << diplomacyDirectionControlVisible
                << " diplomacyWindowSizePersists=" << diplomacyWindowSizePersists
                << " unitCategoryIdsVisible=" << unitCategoryIdsVisible

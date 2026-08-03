@@ -19,7 +19,7 @@ def main() -> int:
         '"2 (War): hostile. Double-click any cell to cycle its value."':
             "interaction help",
         '"Apply changes in both directions"': "directional edit checkbox",
-        '"ui/diplomacyWindowSizeV2"': "persisted diplomacy window size",
+        '"ui/diplomacyWindowSizeV3"': "persisted corrected diplomacy window size",
         "Qt::ScrollBarAsNeeded": "scrollbars for a constrained window",
         "restoreDiplomacyWindowSize()": "first-open auto-fit/restore",
         "m_pSymmetricDiplomacyCheck->isChecked()": "explicit edit direction",
@@ -27,6 +27,10 @@ def main() -> int:
         "QItemSelectionModel::Rows": "selected-row highlight",
         "QItemSelectionModel::Columns": "selected-column highlight",
         "diplomacyContentSize()": "content-derived first-open size",
+        "QHeaderView::Fixed": "fixed-cost header sizing while resizing",
+        "font.setBold(index == activeSection)": "active header bolding",
+        "m_pTable->columnWidth(index)": "settled column-width summation",
+        "m_pTable->rowHeight(index)": "settled row-height summation",
     }
     for fragment, description in expected.items():
         if fragment not in source:
@@ -38,6 +42,7 @@ def main() -> int:
         "setFixedSize(": "fixed diplomacy-table window",
         "Qt::ScrollBarAlwaysOff": "disabled diplomacy scrolling",
         "Qt::gray": "forced gray diagonal diplomacy cells",
+        "QHeaderView::ResizeToContents": "continuous header remeasurement during resize",
     }
     for fragment, description in forbidden.items():
         if fragment in source:
