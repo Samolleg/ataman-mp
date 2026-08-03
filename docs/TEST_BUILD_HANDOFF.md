@@ -34,6 +34,10 @@ artifacts/EI-Mapper-Endurance-<version>-<purpose>-test/
 The folder must be directly runnable and contain the editor executable, its Qt
 runtime, current Endurance runtime components, required data/test fixtures,
 licenses/notices, `VERSION`, checksums, and exactly one current changelist.
+For the retained MinGW kit, stage with `windeployqt --compiler-runtime` while
+the matching MinGW `bin` directory is on `PATH`, or copy its
+`libgcc_s_seh-1.dll`, `libstdc++-6.dll`, and `libwinpthread-1.dll` explicitly.
+The distribution validator requires all three compiler-runtime DLLs.
 
 Do not include:
 

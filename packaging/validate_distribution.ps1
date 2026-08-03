@@ -18,6 +18,9 @@ $requiredFiles = @(
     'Qt5Widgets.dll',
     'Qt5OpenGL.dll',
     'Qt5Concurrent.dll',
+    'libgcc_s_seh-1.dll',
+    'libstdc++-6.dll',
+    'libwinpthread-1.dll',
     'platforms\qwindows.dll'
 )
 foreach ($relative in $requiredFiles) {
