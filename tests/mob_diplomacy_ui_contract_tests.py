@@ -19,10 +19,14 @@ def main() -> int:
         '"2 (War): hostile. Double-click any cell to cycle its value."':
             "interaction help",
         '"Apply changes in both directions"': "directional edit checkbox",
-        '"ui/diplomacyWindowSize"': "persisted diplomacy window size",
+        '"ui/diplomacyWindowSizeV2"': "persisted diplomacy window size",
         "Qt::ScrollBarAsNeeded": "scrollbars for a constrained window",
         "restoreDiplomacyWindowSize()": "first-open auto-fit/restore",
         "m_pSymmetricDiplomacyCheck->isChecked()": "explicit edit direction",
+        "highlightDiplomacySelection": "row-and-column selection highlight",
+        "QItemSelectionModel::Rows": "selected-row highlight",
+        "QItemSelectionModel::Columns": "selected-column highlight",
+        "diplomacyContentSize()": "content-derived first-open size",
     }
     for fragment, description in expected.items():
         if fragment not in source:
@@ -33,6 +37,7 @@ def main() -> int:
         "if (r==c)": "diagonal/self-relation edit rejection",
         "setFixedSize(": "fixed diplomacy-table window",
         "Qt::ScrollBarAlwaysOff": "disabled diplomacy scrolling",
+        "Qt::gray": "forced gray diagonal diplomacy cells",
     }
     for fragment, description in forbidden.items():
         if fragment in source:

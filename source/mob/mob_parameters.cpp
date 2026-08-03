@@ -4,6 +4,7 @@
 #include <QMenu>
 #include <QCloseEvent>
 #include <QInputDialog>
+#include <QItemSelectionModel>
 #include <QCheckBox>
 #include <QGuiApplication>
 #include <QLabel>
@@ -98,8 +99,11 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     directionNotice->setWordWrap(true);
     diplomacyLayout->addWidget(directionNotice);
     m_pTable.reset(new QTableWidget(32, 32, m_pDiplomacyWindow));
+    m_pTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
     diplomacyLayout->addWidget(m_pTable.get(), 1);
     QObject::connect(m_pTable.get(), SIGNAL(cellDoubleClicked(int,int)), this, SLOT(tableItemClicked(int,int)));
+    QObject::connect(m_pTable.get(), SIGNAL(currentCellChanged(int,int,int,int)),
+                     this, SLOT(highlightDiplomacySelection(int,int,int,int)));
     m_pShortcut = new QShortcut(QKeySequence(Qt::CTRL + eKey_S), this, SLOT(onSaveShortcut()));
     //m_aCell.clear();
     m_aCell.resize(32*32);
@@ -305,12 +309,7 @@ void CMobParameters::updateWindow()
                 auto pCell = m_aCell[i*32 + j];
                 val = dipTable[i][j];
                 setDiplomacyCellPresentation(pCell.get(), uint(val));
-                if(i == j)
-                    pCell->setBackground(QBrush(Qt::gray));
-                else
-                {
-                    colorizeCell(pCell.get(), val);
-                }
+                colorizeCell(pCell.get(), val);
                 pCell->setTextColor(Qt::white);
                 pCell->setFlags(pCell->flags() & ~Qt::ItemIsEditable);
             }
@@ -355,8 +354,8 @@ void CMobParameters::on_diplomacyButton_clicked()
     m_pTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_pTable->resizeColumnsToContents();
     m_pTable->resizeRowsToContents();
-    restoreDiplomacyWindowSize();
     m_pDiplomacyWindow->show();
+    restoreDiplomacyWindowSize();
     m_pDiplomacyWindow->raise();
     m_pDiplomacyWindow->activateWindow();
     //todo: disable mob parameter widget, connect to table close signal to enable main window again
@@ -433,9 +432,53 @@ void CMobParameters::tableItemClicked(int r, int c)
     m_pUndoStack->push(pCommand);
 }
 
+void CMobParameters::highlightDiplomacySelection(
+    int currentRow, int currentColumn, int previousRow, int previousColumn)
+{
+    Q_UNUSED(previousRow)
+    Q_UNUSED(previousColumn)
+    if(currentRow < 0 || currentColumn < 0 || !m_pTable->selectionModel())
+        return;
+    QItemSelectionModel* selection = m_pTable->selectionModel();
+    selection->select(m_pTable->model()->index(currentRow, 0),
+                      QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    selection->select(m_pTable->model()->index(0, currentColumn),
+                      QItemSelectionModel::Select | QItemSelectionModel::Columns);
+}
+
+QSize CMobParameters::diplomacyContentSize() const
+{
+    const QMargins margins = m_pDiplomacyWindow->layout()->contentsMargins();
+    int width = 0;
+    int height = margins.top() + margins.bottom();
+    const int count = m_pDiplomacyWindow->layout()->count();
+    for(int index = 0; index < count; ++index)
+    {
+        QLayoutItem* item = m_pDiplomacyWindow->layout()->itemAt(index);
+        QWidget* widget = item ? item->widget() : nullptr;
+        if(!widget)
+            continue;
+        QSize itemSize = widget->sizeHint();
+        if(widget == m_pTable.get())
+        {
+            itemSize.setWidth(m_pTable->verticalHeader()->width()
+                + m_pTable->horizontalHeader()->length()
+                + m_pTable->frameWidth() * 2 + 4);
+            itemSize.setHeight(m_pTable->horizontalHeader()->height()
+                + m_pTable->verticalHeader()->length()
+                + m_pTable->frameWidth() * 2 + 4);
+        }
+        width = qMax(width, itemSize.width());
+        height += itemSize.height();
+    }
+    if(count > 1)
+        height += m_pDiplomacyWindow->layout()->spacing() * (count - 1);
+    return QSize(width + margins.left() + margins.right(), height);
+}
+
 void CMobParameters::restoreDiplomacyWindowSize()
 {
-    static const char kSizeKey[] = "ui/diplomacyWindowSize";
+    static const char kSizeKey[] = "ui/diplomacyWindowSizeV2";
     QSettings settings;
     const QSize saved = settings.value(kSizeKey).toSize();
     if(saved.isValid())
@@ -444,27 +487,22 @@ void CMobParameters::restoreDiplomacyWindowSize()
         return;
     }
 
+    m_pDiplomacyWindow->ensurePolished();
     m_pDiplomacyWindow->layout()->activate();
-    const int wantedWidth = m_pTable->verticalHeader()->width()
-        + m_pTable->horizontalHeader()->length()
-        + m_pDiplomacyWindow->layout()->contentsMargins().left()
-        + m_pDiplomacyWindow->layout()->contentsMargins().right() + 24;
-    const int wantedHeight = m_pTable->horizontalHeader()->height()
-        + m_pTable->verticalHeader()->length()
-        + m_pDiplomacyWindow->sizeHint().height() - m_pTable->sizeHint().height() + 24;
+    const QSize wanted = diplomacyContentSize();
     QScreen* screen = QGuiApplication::screenAt(m_pDiplomacyWindow->frameGeometry().center());
     if(!screen)
         screen = QGuiApplication::primaryScreen();
     const QSize available = screen ? screen->availableGeometry().size() : QSize(1280, 800);
     m_pDiplomacyWindow->resize(
-        qMin(wantedWidth, qRound(available.width() * 0.9)),
-        qMin(wantedHeight, qRound(available.height() * 0.9)));
+        qMin(wanted.width(), qRound(available.width() * 0.9)),
+        qMin(wanted.height(), qRound(available.height() * 0.9)));
 }
 
 bool CMobParameters::eventFilter(QObject* watched, QEvent* event)
 {
     if(watched == m_pDiplomacyWindow && event->type() == QEvent::Close)
-        QSettings().setValue("ui/diplomacyWindowSize", m_pDiplomacyWindow->size());
+        QSettings().setValue("ui/diplomacyWindowSizeV2", m_pDiplomacyWindow->size());
     return QWidget::eventFilter(watched, event);
 }
 
@@ -794,6 +832,7 @@ void CMobParameters::updateDiplomacyTable()
             {
                 auto pCell = m_aCell[i*32 + j];
                 setDiplomacyCellPresentation(pCell.get(), dipTable[i][j]);
+                colorizeCell(pCell.get(), int(dipTable[i][j]));
                 //pCell->setFlags(pCell->flags() & ~Qt::ItemIsEditable);
             }
         }

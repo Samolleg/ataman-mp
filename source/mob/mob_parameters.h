@@ -71,6 +71,7 @@ private:
     void applyParameterChanges();
     bool resolveCloseRequest();
     void restoreDiplomacyWindowSize();
+    QSize diplomacyContentSize() const;
 
 private slots:
     void updateWindow();
@@ -78,6 +79,8 @@ private slots:
     void createNeutralDiplomacyTable();
     void copyDiplomacyFromLoadedMob();
     void tableItemClicked(int r, int c);
+    void highlightDiplomacySelection(int currentRow, int currentColumn,
+                                     int previousRow, int previousColumn);
     void on_pushCancel_clicked();
     void on_pushApply_clicked();
     void on_isPrimaryBox_clicked();
