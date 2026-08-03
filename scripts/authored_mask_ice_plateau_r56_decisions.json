@@ -1,0 +1,24 @@
+{
+  "schema": "ei-ice-owner-plateau-decisions-v1",
+  "checkpoint": "R56-ICE-OWNER-PLATEAU",
+  "authority": "explicit-user-review",
+  "status": "rejected-direction",
+  "decisions": {
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Reject targeted owner-plateau route",
+      "note": "Do not fill the owner field with a clean-cut 100% opacity plateau. Repair support artifacts with an edge-to-center opacity gradient while preserving the original blend edge."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Reject targeted owner-plateau route",
+      "note": "Do not fill the owner field with a clean-cut 100% opacity plateau. Repair support artifacts with an edge-to-center opacity gradient while preserving the original blend edge."
+    }
+  },
+  "approvedRoutes": [],
+  "pendingRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "rejectedMethod": "solid owner plateau / hard 100% opacity fill",
+  "requestedMethod": "Lift support-like opacity dips with a gradient that begins at 100% on owner-facing outer tile edges and decreases toward the center, while leaving the original connected blend edge intact.",
+  "generationPolicy": "Do not apply either R56 plateau candidate. Both Ice inside routes remain pending gradient repair review."
+}

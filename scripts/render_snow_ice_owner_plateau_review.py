@@ -264,6 +264,32 @@ def validate_output(output: Path) -> dict:
     }
 
 
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify that the hard R56 plateau was rejected for both masks."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "owner-plateau-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R56 decision keys do not exactly match the review")
+    for key, decision in decisions.items():
+        if decision.get("answer") != "Reject targeted owner-plateau route":
+            raise ValueError(f"R56 plateau must remain rejected: {key}")
+        note = decision.get("note", "").casefold()
+        if ("edge-to-center opacity gradient" not in note or
+                "original blend edge" not in note):
+            raise ValueError(f"R56 gradient direction is missing: {key}")
+    return {
+        **rendered,
+        "approved": 0,
+        "rejected": len(decisions),
+        "pending": len(decisions),
+        "generationChanged": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--r55", required=True, type=Path)
