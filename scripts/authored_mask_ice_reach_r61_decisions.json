@@ -1,0 +1,24 @@
+{
+  "schema": "ei-ice-pronounced-reach-decisions-v1",
+  "checkpoint": "R61-ICE-PRONOUNCED-SUPPORT-REACH",
+  "authority": "explicit-user-review",
+  "status": "rejected-polarity",
+  "decisions": {
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Reject inverted opacity polarity",
+      "note": "R61 made mask pixels near the blend edge more transparent. The white owner repair must instead remain visibly opaque toward the drawn blue reach, with transparency confined to the narrow final approach to the authored dark blend edge."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Reject inverted opacity polarity",
+      "note": "R61 made mask pixels near the blend edge more transparent. The white owner repair must instead remain visibly opaque toward the drawn blue reach, with transparency confined to the narrow final approach to the authored dark blend edge."
+    }
+  },
+  "approvedRoutes": [],
+  "pendingRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "rejectedMethod": "Multiplying owner alpha downward through a broad 72-pixel band, which widened transparency instead of extending opaque owner paint.",
+  "requestedRepair": "Raise owner alpha in the reviewed NW and SE fields toward the blue reach. Preserve the exact authored dark edge and a narrow terminal feather; keep NE and SW byte-identical to R59.",
+  "generationPolicy": "Do not apply R61. Both Ice inside routes remain pending correct-polarity owner-opacity review."
+}

@@ -42,6 +42,10 @@ from render_snow_ice_directional_edge_review import (
 )
 from render_snow_ice_pronounced_reach_review import (
     strengthen_connected_support_reach,
+    validate_review_decisions as validate_r61_review_decisions,
+)
+from render_snow_ice_owner_reach_review import (
+    raise_owner_opacity_toward_reviewed_reach,
 )
 
 
@@ -63,6 +67,49 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_r61_is_rejected_for_lowering_owner_alpha(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        review = Path(__file__).with_name(
+            "authored_mask_ice_reach_r61_decisions.json")
+        result = validate_r61_review_decisions(
+            root / "artifacts" /
+            "modern-atlas-r61-ice-pronounced-support-reach" /
+            "questionnaire", review)
+
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(0, result["approved"])
+        self.assertEqual(2, result["rejected"])
+        self.assertEqual(2, result["pending"])
+        self.assertFalse(result["generationChanged"])
+
+    def test_owner_reach_raises_alpha_without_touching_ne_sw_or_edge(
+            self) -> None:
+        authored = np.full((128, 128), 180, dtype=np.uint8)
+        authored[64:, :64] = 0
+        authored[58:70, :60] = 96
+        baseline = authored.copy()
+
+        repaired, audit = raise_owner_opacity_toward_reviewed_reach(
+            Image.fromarray(authored, "L"),
+            Image.fromarray(baseline, "L"), "inside-3of4-v1")
+        result = np.asarray(repaired)
+
+        self.assertGreater(int(result[16, 32]), int(baseline[16, 32]))
+        self.assertGreater(int(result[96, 112]), int(baseline[96, 112]))
+        np.testing.assert_array_equal(
+            baseline[:64, 64:], result[:64, 64:])
+        np.testing.assert_array_equal(
+            baseline[64:, :64], result[64:, :64])
+        np.testing.assert_array_equal(
+            baseline[58:70, :60], result[58:70, :60])
+        self.assertTrue(np.all(result >= baseline))
+        self.assertGreater(audit["pixelsMadeMoreOpaque"], 0)
+        self.assertEqual(0, audit["pixelsMadeMoreTransparent"])
+        self.assertEqual(0, audit["changedNEPixels"])
+        self.assertEqual(0, audit["changedSWPixels"])
+        self.assertEqual(0, audit["changedInsideExactEdge"])
+        self.assertEqual(0, audit["newFullOpacityPixels"])
+
     def test_r60_is_rejected_as_weaker_without_blue_guide_reach(
             self) -> None:
         root = Path(__file__).resolve().parent.parent

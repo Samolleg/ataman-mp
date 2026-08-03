@@ -384,6 +384,36 @@ def validate_output(output: Path) -> dict:
     }
 
 
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify R61 remains rejected for lowering owner opacity."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "pronounced-reach-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R61 decision keys do not exactly match the review")
+    for key, decision in decisions.items():
+        if decision.get("answer") != "Reject inverted opacity polarity":
+            raise ValueError(f"R61 inverted polarity must remain rejected: {key}")
+        note = decision.get("note", "").casefold()
+        if ("more transparent" not in note or
+                "white owner repair" not in note or
+                "visibly opaque" not in note or
+                "narrow final approach" not in note):
+            raise ValueError(f"R61 opacity correction is missing: {key}")
+    if review.get("approvedRoutes"):
+        raise ValueError("R61 must not authorize a generation route")
+    return {
+        **rendered,
+        "approved": 0,
+        "rejected": len(decisions),
+        "pending": len(decisions),
+        "generationChanged": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--r57", required=True, type=Path)
