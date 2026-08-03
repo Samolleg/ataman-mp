@@ -258,6 +258,35 @@ def validate_output(output: Path) -> dict:
     }
 
 
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify that both R55 candidates remain explicitly pending."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "owner-cleanup-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R55 decision keys do not exactly match the review")
+    for key, decision in decisions.items():
+        if decision.get("answer") != "Still uncertain":
+            raise ValueError(f"R55 route was not approved: {key}")
+        note = decision.get("note", "").casefold()
+        if "support-texture artifact" not in note:
+            raise ValueError(f"R55 residual artifact note is missing: {key}")
+        for outcome in questions[key]["outcomes"]:
+            if (not outcome.get("ownerSource") or
+                    not outcome.get("supportSource") or
+                    not outcome["files"].get("cleanedResult")):
+                raise ValueError(f"R55 evidence is incomplete: {key}")
+    return {
+        **rendered,
+        "approved": 0,
+        "pending": len(decisions),
+        "generationChanged": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--r54", required=True, type=Path)

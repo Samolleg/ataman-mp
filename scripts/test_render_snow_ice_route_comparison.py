@@ -22,6 +22,9 @@ from render_snow_ice_pending_review import (
     remove_disconnected_protected_alpha,
     remove_disconnected_owner_quadrant_support,
 )
+from render_snow_ice_owner_plateau_review import (
+    reconstruct_ice_owner_plateau,
+)
 
 
 def metrics(*, affected: float, protected: float,
@@ -42,6 +45,40 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_r55_decisions_keep_both_owner_cleanup_routes_pending(
+            self) -> None:
+        review = json.loads((Path(__file__).with_name(
+            "authored_mask_ice_owner_r55_decisions.json")).read_text(
+                encoding="utf-8"))
+
+        self.assertEqual([], review["approvedRoutes"])
+        self.assertEqual({
+            "route-compare-ice-fracture-inside-3of4-v1",
+            "route-compare-ice-fracture-inside-3of4-v2",
+        }, set(review["pendingRoutes"]))
+        self.assertTrue(all(
+            decision["answer"] == "Still uncertain" and
+            "support-texture artifact" in decision["note"].casefold()
+            for decision in review["decisions"].values()))
+
+    def test_ice_owner_plateau_enables_targeted_false_hole_cleanup(
+            self) -> None:
+        pixels = np.full((128, 128, 3), (211, 225, 235), dtype=np.uint8)
+        pixels[64:, :64] = (36, 86, 43)
+        pixels[24:34, 92:102] = (36, 86, 43)
+
+        mask, process = reconstruct_ice_owner_plateau(
+            Image.fromarray(pixels, "RGB"), "inside-3of4-v1")
+        values = np.asarray(mask)
+
+        self.assertTrue(process["usesTargetedFalseHoleCleanup"])
+        self.assertNotEqual(
+            "disabled", process["boundedHoleSuppression"]["rule"])
+        self.assertEqual(255, int(values[0, 0]))
+        self.assertEqual(255, int(values[0, -1]))
+        self.assertEqual(255, int(values[-1, -1]))
+        self.assertEqual(0, int(values[-1, 0]))
+
     def test_r54_decisions_keep_only_ice_inside_pending(self) -> None:
         review = json.loads((Path(__file__).with_name(
             "authored_mask_snow_ice_r54_decisions.json")).read_text(

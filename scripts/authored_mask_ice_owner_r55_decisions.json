@@ -1,0 +1,22 @@
+{
+  "schema": "ei-ice-owner-cleanup-decisions-v1",
+  "checkpoint": "R55-ICE-OWNER-CLEANUP",
+  "authority": "explicit-user-review",
+  "status": "pending",
+  "decisions": {
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Still uncertain",
+      "note": "Better, but visible support-texture artifacting remains inside the owner quadrants. This is not an approval."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Still uncertain",
+      "note": "Better, but visible support-texture artifacting remains inside the owner quadrants. This is not an approval."
+    }
+  },
+  "approvedRoutes": [],
+  "pendingRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "generationPolicy": "Do not apply either R55 owner-cleaned candidate. Both Ice inside routes remain pending until residual support-texture artifacts are removed and reviewed."
+}
