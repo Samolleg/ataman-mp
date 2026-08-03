@@ -17,9 +17,9 @@ history. The permanent safety and compatibility rules are in
   hidden safe fields plus all five unit logic slots. Serialized names and values
   remain unchanged; structural object type stays read-only
   ([`55b8510`](https://github.com/Ilufus/ei-mapper-endurance/commit/55b8510)).
-- [ ] Add structured patrol/look-point and magic-trap attachment editing:
-  owner/child lists, viewport selection, orphan/wrong-parent validation, and
-  complete compound copy/remap transactions.
+- [ ] Finish structural validation and remapping for Behavior attachments:
+  detect orphan/wrong-parent relationships and complete cross-owner compound
+  copy/remap transactions without weakening the implemented authoring UI.
 - [ ] Add Russian localization and an in-app language switch.
 - [ ] Add opt-in Windows associations for `.mpr`, `.mob`, and `.collection`.
 - [ ] Add a viewport action that copies the current camera transform as
@@ -202,6 +202,12 @@ foundation as one coherent `0.3.0` release.
 - [x] Parameter-aware outliner search, dockable workspace panels, transactional
   property/component/model-part copy, configurable shortcuts, and internal/
   external script workflows.
+- [x] Structured Behavior-mode authoring for all unit Logic slots, patrol/look
+  hierarchies, and magic-trap activation/cast arrays: outliner and property
+  collections, viewport selection, disabled-slot preview, contextual creation,
+  copy/paste/duplicate, drag reordering, parent/sibling navigation, and a
+  diplomacy-derived read-only trap-target table with a symbolic
+  Ally/Neutral/War MOB diplomacy matrix.
 - [x] Profile-correct humanoid appearance, equipment, animation, texture/UV
   inspection, camera-priority preparation, session caches, culling, and render
   queues.
@@ -275,6 +281,15 @@ foundation as one coherent `0.3.0` release.
   [`51d9ad0`](https://github.com/Ilufus/ei-mapper-endurance/commit/51d9ad0),
   [`517cc1f`](https://github.com/Ilufus/ei-mapper-endurance/commit/517cc1f),
   and [`a06e5fd`](https://github.com/Ilufus/ei-mapper-endurance/commit/a06e5fd).
+- Behavior hierarchy and collection authoring:
+  [`e2015b1`](https://github.com/Ilufus/ei-mapper-endurance/commit/e2015b1),
+  [`0b220d9`](https://github.com/Ilufus/ei-mapper-endurance/commit/0b220d9),
+  [`36230d4`](https://github.com/Ilufus/ei-mapper-endurance/commit/36230d4),
+  [`a4bb00e`](https://github.com/Ilufus/ei-mapper-endurance/commit/a4bb00e),
+  and [`86e6ae0`](https://github.com/Ilufus/ei-mapper-endurance/commit/86e6ae0)
+  ([interaction validation](packaging/ALPHA26_OBJECT_UI_REVIEW_R20.md),
+  [trap-target table](packaging/ALPHA26_TRAP_TARGET_TABLE_R23.md),
+  [diplomacy labels](packaging/ALPHA26_DIPLOMACY_LABELS_R24.md)).
 - Profile visuals, particles, and environment:
   [`37e0231`](https://github.com/Ilufus/ei-mapper-endurance/commit/37e0231),
   [`aa465c3`](https://github.com/Ilufus/ei-mapper-endurance/commit/aa465c3),

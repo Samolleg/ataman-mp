@@ -56,6 +56,7 @@
 #include "resource_profile.h"
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
+#include "mob/mob_parameters.h"
 #include "layout_components/tree_view.h"
 #include "layout_components/viewport_widget.h"
 #include "ui/landscape_tools.h"
@@ -694,6 +695,23 @@ int runHeadlessCommand(QApplication& app)
                 == QStringLiteral("Will attack")
             && trapTargetTable->editTriggers() == QAbstractItemView::NoEditTriggers;
         if(trapTargetDialog) trapTargetDialog->close();
+
+        CMob diplomacyMob;
+        diplomacyMob.generateDiplomacyTable();
+        diplomacyMob.setRanges(true, QVector<SRange>() << SRange(0, 100));
+        diplomacyMob.diplomacyField()[0][1] = 0;
+        diplomacyMob.diplomacyField()[0][2] = 1;
+        diplomacyMob.diplomacyField()[0][3] = 2;
+        CMobParameters diplomacyParameters(nullptr, &diplomacyMob, nullptr);
+        QTableWidget* diplomacyTable = nullptr;
+        for(QTableWidget* candidate : diplomacyParameters.findChildren<QTableWidget*>())
+            if(candidate->rowCount() == 32 && candidate->columnCount() == 32)
+                diplomacyTable = candidate;
+        const bool diplomacyValuesExplainMeaning = diplomacyTable
+            && diplomacyTable->item(0, 1)->text() == QStringLiteral("0 (Ally)")
+            && diplomacyTable->item(0, 2)->text() == QStringLiteral("1 (Neutral)")
+            && diplomacyTable->item(0, 3)->text() == QStringLiteral("2 (War)")
+            && diplomacyTable->item(0, 3)->toolTip().contains(QStringLiteral("hostile"));
         QList<QSharedPointer<IPropertyBase>> staticChoiceProperties;
         staticChoiceProperties
             << QSharedPointer<IPropertyBase>(new propUint(eObjParam_TYPE, 50))
@@ -2155,6 +2173,7 @@ int runHeadlessCommand(QApplication& app)
                 && prefixesOnly && valueStable && focusCancel && escapeCancel
                 && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork
                 && trapTargetsUseReadOnlyTable
+                && diplomacyValuesExplainMeaning
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
@@ -2266,6 +2285,7 @@ int runHeadlessCommand(QApplication& app)
                << " staticChoiceItemTooltipsWork=" << staticChoiceItemTooltipsWork
                << " alarmConditionItemTooltipsWork=" << alarmConditionItemTooltipsWork
                << " trapTargetsUseReadOnlyTable=" << trapTargetsUseReadOnlyTable
+               << " diplomacyValuesExplainMeaning=" << diplomacyValuesExplainMeaning
                << " unitCategoryIdsVisible=" << unitCategoryIdsVisible
                << " helperFigureCacheIdentityDistinct=" << helperFigureCacheIdentityDistinct
                << " settingsTabsUsable=" << settingsTabsUsable

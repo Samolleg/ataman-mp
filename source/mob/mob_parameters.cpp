@@ -171,6 +171,40 @@ void colorizeCell(QTableWidgetItem* pCell, int value)
     }
 }
 
+QString diplomacyValueText(uint value)
+{
+    switch(value)
+    {
+    case 0: return QObject::tr("0 (Ally)");
+    case 1: return QObject::tr("1 (Neutral)");
+    case 2: return QObject::tr("2 (War)");
+    default: return QObject::tr("%1 (Unknown)").arg(value);
+    }
+}
+
+QString diplomacyValueToolTip(uint value)
+{
+    switch(value)
+    {
+    case 0: return QObject::tr(
+        "Ally: the row faction treats the column faction as friendly.");
+    case 1: return QObject::tr(
+        "Neutral: the row faction treats the column faction as neither friendly nor hostile.");
+    case 2: return QObject::tr(
+        "War: the row faction treats the column faction as hostile.");
+    default: return QObject::tr(
+        "Unknown stored diplomacy value %1; Endurance preserves it.").arg(value);
+    }
+}
+
+void setDiplomacyCellPresentation(QTableWidgetItem* cell, uint value)
+{
+    if(!cell)
+        return;
+    cell->setText(diplomacyValueText(value));
+    cell->setToolTip(diplomacyValueToolTip(value));
+}
+
 void CMobParameters::updateWindow()
 {
     Q_ASSERT(m_pCurMob);
@@ -226,7 +260,7 @@ void CMobParameters::updateWindow()
             {
                 auto pCell = m_aCell[i*32 + j];
                 val = dipTable[i][j];
-                pCell->setText(QString::number(val));
+                setDiplomacyCellPresentation(pCell.get(), uint(val));
                 if(i == j)
                     pCell->setBackground(QBrush(Qt::gray));
                 else
@@ -266,6 +300,9 @@ void CMobParameters::on_diplomacyButton_clicked()
     //QHeaderView* headerView = new QHeaderView(Qt::Horizontal);
 
     m_pTable->setHorizontalHeader(headerView); //set our custom headerview
+    m_pTable->setToolTip(tr(
+        "0 (Ally): friendly. 1 (Neutral): neither friendly nor hostile. "
+        "2 (War): hostile. Double-click a non-diagonal cell to cycle its value."));
     m_pTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_pTable->setVerticalHeaderLabels(dipName);
     m_pTable->setHorizontalHeaderLabels(dipName);
@@ -678,7 +715,7 @@ void CMobParameters::updateDiplomacyTable()
             for (int j(0); j < dipTable[i].size(); ++j)
             {
                 auto pCell = m_aCell[i*32 + j];
-                pCell->setText(QString::number(dipTable[i][j]));
+                setDiplomacyCellPresentation(pCell.get(), dipTable[i][j]);
                 //pCell->setFlags(pCell->flags() & ~Qt::ItemIsEditable);
             }
         }
@@ -695,7 +732,7 @@ void CMobParameters::updateDiplomacyTable(int row, int column)
         Q_ASSERT(dipName.size() == 32);
         auto pCell = m_aCell[row*32 + column];
         int value = dipTable[row][column];
-        pCell->setText(QString::number(value));
+        setDiplomacyCellPresentation(pCell.get(), uint(value));
         colorizeCell(pCell.get(), value);
     }
 }
