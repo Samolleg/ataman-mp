@@ -46,6 +46,10 @@ from render_snow_ice_pronounced_reach_review import (
 )
 from render_snow_ice_owner_reach_review import (
     raise_owner_opacity_toward_reviewed_reach,
+    validate_review_decisions as validate_r62_review_decisions,
+)
+from render_snow_ice_continuous_owner_review import (
+    apply_continuous_owner_opacity_reach,
 )
 
 
@@ -67,6 +71,50 @@ def metrics(*, affected: float, protected: float,
 
 
 class SnowIceRouteComparisonTests(unittest.TestCase):
+    def test_r62_is_rejected_for_visible_quadrant_cutoff(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        review = Path(__file__).with_name(
+            "authored_mask_ice_owner_r62_decisions.json")
+        result = validate_r62_review_decisions(
+            root / "artifacts" / "modern-atlas-r62-ice-opaque-owner-reach" /
+            "questionnaire", review)
+
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(0, result["approved"])
+        self.assertEqual(2, result["rejected"])
+        self.assertEqual(2, result["pending"])
+        self.assertFalse(result["generationChanged"])
+
+    def test_continuous_owner_reach_has_no_tile_midline_cut(self) -> None:
+        authored = np.full((128, 128), 180, dtype=np.uint8)
+        authored[64:, :64] = 0
+        authored[58:70, :60] = 96
+        baseline = authored.copy()
+
+        repaired, audit = apply_continuous_owner_opacity_reach(
+            Image.fromarray(authored, "L"),
+            Image.fromarray(baseline, "L"), "inside-3of4-v1")
+        result = np.asarray(repaired)
+
+        vertical_jump = np.abs(
+            result[:56, 63].astype(np.int16) -
+            result[:56, 64].astype(np.int16))
+        horizontal_jump = np.abs(
+            result[63, 72:].astype(np.int16) -
+            result[64, 72:].astype(np.int16))
+        self.assertLessEqual(int(vertical_jump.max()), 3)
+        self.assertLessEqual(int(horizontal_jump.max()), 3)
+        self.assertTrue(np.all(result >= baseline))
+        self.assertEqual(int(baseline[0, -1]), int(result[0, -1]))
+        self.assertEqual(int(baseline[-1, 0]), int(result[-1, 0]))
+        self.assertGreater(audit["pixelsMadeMoreOpaque"], 0)
+        self.assertEqual(0, audit["pixelsMadeMoreTransparent"])
+        self.assertEqual(0, audit["changedInsideExactEdge"])
+        self.assertEqual(0, audit["changedSemanticCornerPixels"])
+        self.assertFalse(audit["usesHardQuadrantClipping"])
+        self.assertFalse(audit["usesHardCornerPatchClipping"])
+        self.assertTrue(audit["usesRadialCornerHold"])
+
     def test_r61_is_rejected_for_lowering_owner_alpha(self) -> None:
         root = Path(__file__).resolve().parent.parent
         review = Path(__file__).with_name(

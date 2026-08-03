@@ -397,6 +397,34 @@ def validate_output(output: Path) -> dict:
     }
 
 
+def validate_review_decisions(output: Path, decisions_path: Path) -> dict:
+    """Verify R62 remains rejected for visible quadrant clipping."""
+    rendered = validate_output(output)
+    analysis = json.loads((output / "opaque-owner-analysis.json")
+                          .read_text(encoding="utf-8"))
+    review = json.loads(decisions_path.read_text(encoding="utf-8"))
+    questions = {item["key"]: item for item in analysis["questions"]}
+    decisions = review.get("decisions", {})
+    if set(decisions) != set(questions):
+        raise ValueError("R62 decision keys do not exactly match the review")
+    for key, decision in decisions.items():
+        if decision.get("answer") != "Reject hard quadrant cutoff":
+            raise ValueError(f"R62 quadrant cutoff must remain rejected: {key}")
+        note = decision.get("note", "").casefold()
+        if ("quadrant" not in note or "midline" not in note or
+                "continuously" not in note):
+            raise ValueError(f"R62 continuity correction is missing: {key}")
+    if review.get("approvedRoutes"):
+        raise ValueError("R62 must not authorize a generation route")
+    return {
+        **rendered,
+        "approved": 0,
+        "rejected": len(decisions),
+        "pending": len(decisions),
+        "generationChanged": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--r57", required=True, type=Path)
