@@ -1866,6 +1866,68 @@ QImage CTerrainVirtualAtlas::reviewBlendMask(
     return result;
 }
 
+QImage CTerrainVirtualAtlas::reviewEffectiveBlendMask(
+    const STerrainTransitionSignature& gridSignature,
+    qint32 ownerMaterial, int variation, QString* provenance,
+    qint32 preferredPaintMaterial) const
+{
+    QImage result = reviewBlendMask(
+        gridSignature, ownerMaterial, variation, provenance,
+        preferredPaintMaterial);
+    if(result.isNull()) return {};
+    result = result.convertToFormat(QImage::Format_Grayscale8);
+    for(int y = 0; y < result.height(); ++y)
+        for(int x = 0; x < result.width(); ++x)
+        {
+            const double source = result.pixelColor(x, y).redF();
+            const double weight = smoothUnit((source - 0.38) / 0.24);
+            // Preserve exact 0/1 plateaus, but never label a non-zero mixed
+            // runtime weight as a pure source pixel merely because its 8-bit
+            // review visualization rounds to an endpoint.
+            const int effective = weight <= 0.0 ? 0
+                : weight >= 1.0 ? 255
+                : qBound(1, qRound(weight * 255.0), 254);
+            result.setPixelColor(x, y, QColor(effective, effective, effective));
+        }
+
+    const STerrainTransitionSignature preview =
+        CTerrainTransitionCatalog::mirroredGridY(gridSignature);
+    const QVector<qint32> ids = corners(preview);
+    const auto edgeOwnerValue = [&](qint32 firstMaterial,
+                                    qint32 secondMaterial,
+                                    double position) {
+        if(firstMaterial == secondMaterial)
+            return firstMaterial == ownerMaterial ? 255 : 0;
+        const int secondWeight = qRound(
+            smoothUnit((position - 0.38) / 0.24) * 255.0);
+        if(ownerMaterial == firstMaterial) return 255 - secondWeight;
+        if(ownerMaterial == secondMaterial) return secondWeight;
+        return 0;
+    };
+    const auto setValue = [&](int x, int y, int value) {
+        result.setPixelColor(x, y, QColor(value, value, value));
+    };
+    const int width = result.width();
+    const int height = result.height();
+    for(int x = 0; x < width; ++x)
+    {
+        const double position = width == 1
+            ? 0.0 : double(x) / double(width - 1);
+        setValue(x, 0, edgeOwnerValue(ids.at(0), ids.at(1), position));
+        setValue(x, height - 1,
+                 edgeOwnerValue(ids.at(3), ids.at(2), position));
+    }
+    for(int y = 0; y < height; ++y)
+    {
+        const double position = height == 1
+            ? 0.0 : double(y) / double(height - 1);
+        setValue(0, y, edgeOwnerValue(ids.at(0), ids.at(3), position));
+        setValue(width - 1, y,
+                 edgeOwnerValue(ids.at(1), ids.at(2), position));
+    }
+    return result;
+}
+
 QImage CTerrainVirtualAtlas::generateTile(
     const STerrainTransitionSignature& gridSignature,
     ETerrainBlendStyle style, int variation,

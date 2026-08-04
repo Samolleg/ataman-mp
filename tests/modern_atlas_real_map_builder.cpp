@@ -596,7 +596,7 @@ QJsonObject writeBlendMaskReview(
                             ? owner : (topology.ownerCorners >= 3 ? owner : support);
                         signature.southWest = support;
                         QString provenance;
-                        QImage mask = atlas.reviewBlendMask(
+                        QImage mask = atlas.reviewEffectiveBlendMask(
                             signature, owner, topology.variation,
                             &provenance, owner);
                         // Review the same paint-owned family and polarity that
@@ -893,7 +893,7 @@ QJsonObject writeBlendMaskReview(
                 : (item.topology.ownerCorners >= 3 ? item.owner : item.support);
             signature.southWest = item.support;
             QString provenance;
-            const QImage mask = atlas.reviewBlendMask(
+            const QImage mask = atlas.reviewEffectiveBlendMask(
                 signature, item.owner, item.topology.variation,
                 &provenance, item.owner);
             if(mask.isNull())
@@ -1005,10 +1005,10 @@ QJsonObject writeBlendMaskReview(
                    csv, error)) return {};
     QJsonObject manifest;
     manifest.insert(QStringLiteral("schema"),
-                    QStringLiteral("ei-canonical-blend-mask-review-v4"));
+                    QStringLiteral("ei-canonical-blend-mask-review-v5"));
     manifest.insert(QStringLiteral("meaning"),
         QStringLiteral("White is the requested brush material; black is support. "
-                       "Every cell is the exact clean-room canonical mask used by generation."));
+                       "Every cell is the effective runtime ownership after the reviewed source mask, narrow ownership remap, and shared-edge continuity profile."));
     manifest.insert(QStringLiteral("comparison_assets"),
         QStringLiteral("Each indexed cell includes full requested/support uniform tiles, "
                        "a threshold heatmap, the runtime encoded-RGB result, and a review-only linear-light result."));

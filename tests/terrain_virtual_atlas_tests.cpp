@@ -427,6 +427,7 @@ private slots:
     void canonicalMasksHaveNoUnanchoredIslandsOrWideFeather();
     void approvedIceInsideMasksDriveRuntimeGeneration();
     void approvedReviewedMasksDriveRuntimeGeneration();
+    void effectiveReviewMaskMatchesGeneratedPurePixels();
     void finalizationCarriesPaintMaterialIntoReviewedMaskSelection();
     void reviewedTopologyNeverFallsBackToUnapprovedVariation();
     void generatedReviewOutcomeUsesRuntimeBlendGenerator();
@@ -791,6 +792,55 @@ void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
         signature(1, 2, 2, 2), 1, 1, &unreviewedProvenance, 1);
     QVERIFY(!unreviewed.isNull());
     QVERIFY(!unreviewedProvenance.endsWith(QStringLiteral(":r71-approved")));
+}
+
+void TerrainVirtualAtlasTests::effectiveReviewMaskMatchesGeneratedPurePixels()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    images << QImage(256, 256, QImage::Format_RGBA8888)
+           << QImage(256, 256, QImage::Format_RGBA8888);
+    images[0].fill(QColor(226, 235, 248));
+    images[1].fill(QColor(42, 104, 36));
+    for(int material = 1; material <= 2; ++material)
+    {
+        STerrainTransitionVariant uniform;
+        uniform.signature = signature(material, material, material, material);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(material - 1);
+        uniform.packedTile = packed.encode();
+        catalog.addVariant(uniform);
+    }
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Ice}, {2, ETerrainBlendStyle::Grass}
+    };
+    CTestTerrainVirtualAtlas atlas(catalog, images, 0x73u, {}, styles);
+    const STerrainTransitionSignature requested = signature(1, 1, 1, 2);
+    const QImage raw = atlas.reviewBlendMask(requested, 1, 0, nullptr, 1);
+    QString maskProvenance;
+    const QImage effective = atlas.reviewEffectiveBlendMask(
+        requested, 1, 0, &maskProvenance, 1);
+    QString resultProvenance;
+    CValidationReport report;
+    const QImage generated = atlas.reviewGeneratedBlend(
+        requested, 0, &resultProvenance, &report, 1);
+    QVERIFY2(!raw.isNull() && !effective.isNull() && !generated.isNull(),
+             qPrintable(report.toText()));
+    QVERIFY(raw != effective);
+    QCOMPARE(maskProvenance, resultProvenance);
+    int purePixels = 0;
+    for(int y = 0; y < effective.height(); ++y)
+        for(int x = 0; x < effective.width(); ++x)
+        {
+            const int value = effective.pixelColor(x, y).red();
+            if(value != 0 && value != 255) continue;
+            ++purePixels;
+            const QColor expected = value == 255
+                ? images[0].pixelColor(x, y)
+                : images[1].pixelColor(x, y);
+            QCOMPARE(generated.pixelColor(x, y), expected);
+        }
+    QVERIFY(purePixels > 0);
 }
 
 void TerrainVirtualAtlasTests::finalizationCarriesPaintMaterialIntoReviewedMaskSelection()

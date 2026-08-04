@@ -190,6 +190,15 @@ public:
         qint32 ownerMaterial, int variation = 0,
         QString* provenance = nullptr,
         qint32 preferredPaintMaterial = 0) const;
+    // Returns the ownership actually consumed by the compositor after its
+    // narrow ownership remap and shared-edge continuity profile. Questionnaire
+    // outcomes must be compared against this mask, while reviewBlendMask()
+    // remains the exact reviewed source asset used to derive it.
+    QImage reviewEffectiveBlendMask(
+        const STerrainTransitionSignature& gridSignature,
+        qint32 ownerMaterial, int variation = 0,
+        QString* provenance = nullptr,
+        qint32 preferredPaintMaterial = 0) const;
     // Renders the exact generated pixels used for a missing transition while
     // deliberately bypassing authored-tile lookup. Review tooling uses this to
     // show the canonical mask outcome beside its uniform material sources.
