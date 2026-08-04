@@ -41,5 +41,32 @@
         <file>terrain_blend_masks/water-edge-2of4-v1-r71-conservative.png</file>
         <file>terrain_blend_masks/water-diagonal-2of4-r71-detailed.png</file>
         <file>terrain_blend_masks/water-inside-3of4-v1-r71-detailed.png</file>
+        <file>terrain_blend_masks/grass-edge-2of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/grass-inside-3of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/grass-outer-1of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/gravel-edge-2of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/gravel-inside-3of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/gravel-outer-1of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/gravel-outer-1of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/paving-inside-3of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/sand-edge-2of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/sand-edge-2of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/sand-inside-3of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/snow-edge-2of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/soil-diagonal-2of4-r75-authored.png</file>
+        <file>terrain_blend_masks/soil-edge-2of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/soil-edge-2of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/soil-inside-3of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/soil-inside-3of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/soil-outer-1of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/soil-outer-1of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/stone-outer-1of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/water-diagonal-2of4-r75-authored.png</file>
+        <file>terrain_blend_masks/water-edge-2of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/water-edge-2of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/water-inside-3of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/water-inside-3of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/water-outer-1of4-v1-r75-authored.png</file>
+        <file>terrain_blend_masks/water-outer-1of4-v2-r75-authored.png</file>
     </qresource>
 </RCC>

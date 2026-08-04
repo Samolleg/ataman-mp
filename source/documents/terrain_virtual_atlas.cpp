@@ -786,6 +786,124 @@ struct SReviewedCanonicalMask
 const SReviewedCanonicalMask* reviewedCanonicalMask(
     ETerrainBlendStyle style, const QString& topology)
 {
+    // Explicit R75 approvals supersede older reviewed masks for the same
+    // style/topology.  Keeping this authority separate makes it impossible for
+    // a still-pending R75 adjustment request to enter production by accident.
+    static const SReviewedCanonicalMask r75Masks[] = {
+        {ETerrainBlendStyle::Grass, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/grass-edge-2of4-v2-r75-authored.png",
+         "3b7e22c38268056ff48737f8af84c03e5492cc4f1b0ce89d6b945cdb707e0a66",
+         "canonical-generated:grass-strands:edge-2of4-v2:r75-approved-authored-restoration:bz3g:184"},
+        {ETerrainBlendStyle::Grass, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/grass-inside-3of4-v2-r75-authored.png",
+         "e82bd23fe502ef031e9c4001d567e1ce4a3243b879968a68cace5a6a2e9c7e52",
+         "canonical-generated:grass-strands:inside-3of4-v2:r75-approved-authored-restoration:Zone5_1:110"},
+        {ETerrainBlendStyle::Grass, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/grass-outer-1of4-v2-r75-authored.png",
+         "f982aad28868aede6379e489a24668576831f1b7ac967e1cb044f4b31d55de80",
+         "canonical-generated:grass-strands:outer-1of4-v2:r75-approved-authored-restoration:Zone3Obr:435"},
+        {ETerrainBlendStyle::Gravel, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/gravel-edge-2of4-v2-r75-authored.png",
+         "dadcb6ed1c915fbccf78111c74dd174db6b284d72cb968c81d4277067e7277f3",
+         "canonical-generated:gravel-chunks:edge-2of4-v2:r75-approved-authored-restoration:bz13h:414"},
+        {ETerrainBlendStyle::Gravel, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/gravel-inside-3of4-v1-r75-authored.png",
+         "1048f7a93ae4f3704ef205afb3804cf7aa37671237eb5a2e4bcb17eb2f94f6ed",
+         "canonical-generated:gravel-chunks:inside-3of4-v1:r75-approved-authored-restoration:bz5g:496"},
+        {ETerrainBlendStyle::Gravel, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/gravel-outer-1of4-v1-r75-authored.png",
+         "9ffc86db49fcf58605e69c366ed6469a657246f39800a1f91bd87d484c9bbcb6",
+         "canonical-generated:gravel-chunks:outer-1of4-v1:r75-approved-authored-restoration:bz13h:213"},
+        {ETerrainBlendStyle::Gravel, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/gravel-outer-1of4-v2-r75-authored.png",
+         "33f15a7716cbf5f87716a98c9b35d8e2e74c64367098acf21e6586fe4e41373f",
+         "canonical-generated:gravel-chunks:outer-1of4-v2:r75-approved-authored-restoration:bz13h:214"},
+        {ETerrainBlendStyle::Paving, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/paving-inside-3of4-v2-r75-authored.png",
+         "686d6c02ac891b0721870a433f307bd44988015d22509235e5ce822e49ec0ee1",
+         "canonical-generated:paving-courses:inside-3of4-v2:r75-approved-authored-restoration:Zone10:499"},
+        {ETerrainBlendStyle::Sand, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-edge-2of4-v1-r75-authored.png",
+         "0f17756cfea98c8725e05d379e888249f111efa1ca0a570e56fecbd68ed23c99",
+         "canonical-generated:sand-grain:edge-2of4-v1:r75-approved-authored-restoration:bz16h:155"},
+        {ETerrainBlendStyle::Sand, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-edge-2of4-v2-r75-authored.png",
+         "0c142f61025b54f5b2147ac9961e9b9ad280120c0313a5842c87d00ebf5ccc3f",
+         "canonical-generated:sand-grain:edge-2of4-v2:r75-approved-authored-restoration:bz16h:161"},
+        {ETerrainBlendStyle::Sand, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-inside-3of4-v1-r75-authored.png",
+         "cd04494e556162822d919e0b8a2c7289d61024dc54267f83185aa592dddf9e20",
+         "canonical-generated:sand-grain:inside-3of4-v1:r75-approved-authored-restoration:Zone7:297"},
+        {ETerrainBlendStyle::Snow, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-edge-2of4-v1-r75-authored.png",
+         "143f5b7599608c91420618753aa2641bf64f56e974fcfe59caff4b77818fd293",
+         "canonical-generated:snow-clumps:edge-2of4-v1:r75-approved-authored-restoration:bz10k:156"},
+        {ETerrainBlendStyle::Soil, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-diagonal-2of4-r75-authored.png",
+         "c406fc01d3c31ce9bd4742ddd024fcfeabaf7c9e78b9d2251bce8efff9db6e5e",
+         "canonical-generated:soil-mottle:diagonal-2of4:r75-approved-authored-restoration:Zone1:353"},
+        {ETerrainBlendStyle::Soil, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-edge-2of4-v1-r75-authored.png",
+         "14e1ba8841bd685d938c23534ffe90cc6bf9a9aba7c3caae37d6ff2223762fa3",
+         "canonical-generated:soil-mottle:edge-2of4-v1:r75-approved-authored-restoration:bz16h:111"},
+        {ETerrainBlendStyle::Soil, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-edge-2of4-v2-r75-authored.png",
+         "25c8b5c55dc820868669e56c788c555757e5930746e9ced4bea2c380d9961c9f",
+         "canonical-generated:soil-mottle:edge-2of4-v2:r75-approved-authored-restoration:bz16h:114"},
+        {ETerrainBlendStyle::Soil, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-inside-3of4-v1-r75-authored.png",
+         "71374bd31017e599c3216106552307f922c68c57f3ee40bc99b0e1ee8820d4a2",
+         "canonical-generated:soil-mottle:inside-3of4-v1:r75-approved-authored-restoration:bz4g:191"},
+        {ETerrainBlendStyle::Soil, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-inside-3of4-v2-r75-authored.png",
+         "0afae4e6b53b3238788e53955995a92407076a640eaa617bb1a064fa6d769566",
+         "canonical-generated:soil-mottle:inside-3of4-v2:r75-approved-authored-restoration:bz3g:97"},
+        {ETerrainBlendStyle::Soil, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-outer-1of4-v1-r75-authored.png",
+         "f92b2531c420b89ef3a9a706444f501eef19b65217b9122f6d820cf96cf7b664",
+         "canonical-generated:soil-mottle:outer-1of4-v1:r75-approved-authored-restoration:bz4g:191"},
+        {ETerrainBlendStyle::Soil, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-outer-1of4-v2-r75-authored.png",
+         "5a930baa567911ceb215d95863acf75ccc455b5378cd4d5ba055f6229c215c38",
+         "canonical-generated:soil-mottle:outer-1of4-v2:r75-approved-authored-restoration:Zone7:297"},
+        {ETerrainBlendStyle::Stone, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/stone-outer-1of4-v2-r75-authored.png",
+         "c008228b70109b4d02fa93988c565e4a0e2f4978335ee4a2570ab23a2074fca6",
+         "canonical-generated:stone-fracture:outer-1of4-v2:r75-approved-authored-restoration:bz10k:216"},
+        {ETerrainBlendStyle::Water, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/water-diagonal-2of4-r75-authored.png",
+         "376b90b14ac98d1b29bb2a405ce361fad3a6d2ef317145514e600e80fbb073e3",
+         "canonical-generated:water-ripples:diagonal-2of4:r75-approved-authored-restoration:Zone1:351"},
+        {ETerrainBlendStyle::Water, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/water-edge-2of4-v1-r75-authored.png",
+         "d6d712616251dfc2b424d60852e67d12ce9366d327d42f8319a7a04824b677f3",
+         "canonical-generated:water-ripples:edge-2of4-v1:r75-approved-authored-restoration:Zone3Obr:249"},
+        {ETerrainBlendStyle::Water, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/water-edge-2of4-v2-r75-authored.png",
+         "a88fffed2e8f74b49a7c090cc9caaa8389a5ce92b517f2a8ee6bb19ca4f9150f",
+         "canonical-generated:water-ripples:edge-2of4-v2:r75-approved-authored-restoration:Zone3Obr:496"},
+        {ETerrainBlendStyle::Water, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/water-inside-3of4-v1-r75-authored.png",
+         "5838ab682cd53a8c16606f9b133f7c237bb8c2179d8e0e1737a49730b5503ddd",
+         "canonical-generated:water-ripples:inside-3of4-v1:r75-approved-authored-restoration:Zone3Obr:435"},
+        {ETerrainBlendStyle::Water, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/water-inside-3of4-v2-r75-authored.png",
+         "d0060c4b54bdc2e5fd9d27aa65ab80e7761fbe481a5cbd5fb1ca1b0449f65666",
+         "canonical-generated:water-ripples:inside-3of4-v2:r75-approved-authored-restoration:Zone1:223"},
+        {ETerrainBlendStyle::Water, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/water-outer-1of4-v1-r75-authored.png",
+         "8bbcc4762db352ace282d7f98e179d34430b498c3c042774d0a85114a2db7394",
+         "canonical-generated:water-ripples:outer-1of4-v1:r75-approved-authored-restoration:Zone3Obr:235"},
+        {ETerrainBlendStyle::Water, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/water-outer-1of4-v2-r75-authored.png",
+         "617f5f3ee4231049108dec6334028667652a5604f8a7b2f53f207861c1f9d14b",
+         "canonical-generated:water-ripples:outer-1of4-v2:r75-approved-authored-restoration:Zone3Obr:166"}
+    };
+    for(const SReviewedCanonicalMask& mask : r75Masks)
+        if(mask.style == style
+           && topology == QString::fromLatin1(mask.topology))
+            return &mask;
+
     static const SReviewedCanonicalMask masks[] = {
         {ETerrainBlendStyle::Grass, "outer-1of4-v1",
          ":/terrain_blend_masks/terrain_blend_masks/grass-outer-1of4-v1-r44-repaired.png",
@@ -1849,7 +1967,9 @@ QImage CTerrainVirtualAtlas::reviewBlendMask(
         result.invertPixels();
     if(provenance && !result.isNull())
     {
-        if(canonicalProvenance.endsWith(QStringLiteral("-approved")))
+        // Newer approval provenance retains the authored namespace/slot after
+        // the review marker.  Approval is an explicit segment, not a suffix.
+        if(canonicalProvenance.contains(QStringLiteral("-approved")))
         {
             *provenance = canonicalProvenance;
             return result;

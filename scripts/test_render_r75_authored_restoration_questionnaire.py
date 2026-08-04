@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
@@ -57,6 +59,47 @@ class AuthoredRestorationTests(unittest.TestCase):
                 alignment["orientationSelection"],
                 "exact-corner-assignment-only")
             self.assertEqual(alignment["rotationCounterClockwise"], 90)
+
+    def test_only_explicit_r75_approvals_are_installed(self) -> None:
+        scripts = Path(__file__).resolve().parent
+        root = scripts.parent
+        decisions = json.loads((
+            scripts / "authored_mask_r75_decisions.json"
+        ).read_text(encoding="utf-8"))
+        approved = set(decisions["approvedRestorations"])
+        pending = set(decisions["adjustmentRequests"])
+        self.assertEqual(len(approved), 27)
+        self.assertEqual(len(pending), 20)
+        self.assertFalse(approved & pending)
+
+        source = (root / "source/documents/terrain_virtual_atlas.cpp").read_text(
+            encoding="utf-8")
+        r75_block = source.split(
+            "static const SReviewedCanonicalMask r75Masks[] = {", 1
+        )[1].split("    };", 1)[0]
+        records = re.findall(
+            r'\{ETerrainBlendStyle::(\w+), "([^"]+)",\s*'
+            r'"[^"]*/([^/"]+)",\s*"([0-9a-f]{64})",\s*'
+            r'"([^"]+:r75-approved-authored-restoration:[^"]+)"\}',
+            r75_block)
+        self.assertEqual(len(records), 27)
+        self.assertEqual(len({(style, topology) for style, topology, *_ in records}), 27)
+
+        qrc = (root / "assets/resources/terrain_blend_masks.qrc").read_text(
+            encoding="utf-8")
+        installed = set()
+        for style, topology, filename, expected_hash, provenance in records:
+            family = provenance.split(":", 2)[1]
+            key = f"mask-family-{family}-{topology}"
+            installed.add(key)
+            self.assertIn(f"terrain_blend_masks/{filename}", qrc)
+            image = Image.open(
+                root / "assets/resources/terrain_blend_masks" / filename
+            ).convert("L")
+            self.assertEqual(hashlib.sha256(image.tobytes()).hexdigest(),
+                             expected_hash)
+        self.assertEqual(installed, approved)
+        self.assertFalse(installed & pending)
 
     def test_runtime_edge_normalization_preserves_authored_interior(self) -> None:
         values = np.arange(32 * 32, dtype=np.uint16).reshape(32, 32) % 256

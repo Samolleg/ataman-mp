@@ -606,6 +606,13 @@ void TerrainVirtualAtlasTests::approvedIceInsideMasksDriveRuntimeGeneration()
 
 void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
 {
+    const QImage r75ResourceProbe(QStringLiteral(
+        ":/terrain_blend_masks/terrain_blend_masks/"
+        "soil-outer-1of4-v2-r75-authored.png"));
+    QVERIFY(!r75ResourceProbe.isNull());
+    QCOMPARE(grayscalePixelHash(r75ResourceProbe), QByteArray(
+        "5a930baa567911ceb215d95863acf75ccc455b5378cd4d5ba055f6229c215c38"));
+
     struct ReviewedCase
     {
         ETerrainBlendStyle style;
@@ -625,14 +632,14 @@ void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
          "39a4bd49aa72525cb955d44e797235cf102d549ea5b1aec995fa6095dc457945",
          "canonical-generated:grass-strands:diagonal-2of4:r44-approved"},
         {ETerrainBlendStyle::Soil, signature(1, 2, 2, 2), 1,
-         "f9ea6dde4e3cd8095d79d4650aaccf0f70cae20991dccc9a5fa8fdc9a89f08df",
-         "canonical-generated:soil-mottle:outer-1of4-v2:r44-approved"},
+         "5a930baa567911ceb215d95863acf75ccc455b5378cd4d5ba055f6229c215c38",
+         "canonical-generated:soil-mottle:outer-1of4-v2:r75-approved-authored-restoration:Zone7:297"},
         {ETerrainBlendStyle::Soil, signature(1, 1, 2, 2), 1,
-         "168f98d2d6b6ab53598cb30622b784aaf7a0eadb8815968e238b2a19ec7f7bd3",
-         "canonical-generated:soil-mottle:edge-2of4-v2:r44-approved"},
+         "25c8b5c55dc820868669e56c788c555757e5930746e9ced4bea2c380d9961c9f",
+         "canonical-generated:soil-mottle:edge-2of4-v2:r75-approved-authored-restoration:bz16h:114"},
         {ETerrainBlendStyle::Soil, signature(1, 1, 1, 2), 0,
-         "1953ce4e0062f23052e59a9fc6ae6e8d9324345c2caba7110823bf624a30e998",
-         "canonical-generated:soil-mottle:inside-3of4-v1:r44-approved"},
+         "71374bd31017e599c3216106552307f922c68c57f3ee40bc99b0e1ee8820d4a2",
+         "canonical-generated:soil-mottle:inside-3of4-v1:r75-approved-authored-restoration:bz4g:191"},
         {ETerrainBlendStyle::Stone, signature(1, 2, 2, 2), 0,
          "2c107b3db7f37268082b952e2038419aa4b8371a28d28abbbb8cbd89a832505e",
          "canonical-generated:stone-fracture:outer-1of4-v1:r44-approved"},
@@ -646,11 +653,11 @@ void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
          "01cb028bd15bec4642750ea35825423aa1b54b1cbc98275975071fb5399210b9",
          "canonical-generated:sand-grain:outer-1of4-v1:r47-approved"},
         {ETerrainBlendStyle::Sand, signature(1, 1, 2, 2), 1,
-         "0f0b55bce8ecb96963d467897c5dcdec71a09af343545d6350b8e965d6ea0ddb",
-         "canonical-generated:sand-grain:edge-2of4-v2:r47-approved"},
+         "0c142f61025b54f5b2147ac9961e9b9ad280120c0313a5842c87d00ebf5ccc3f",
+         "canonical-generated:sand-grain:edge-2of4-v2:r75-approved-authored-restoration:bz16h:161"},
         {ETerrainBlendStyle::Sand, signature(1, 1, 1, 2), 0,
-         "581cb3c7c4ad785da566f21eeae319ad7c2e2a24e4695f2df4658635062dad56",
-         "canonical-generated:sand-grain:inside-3of4-v1:r47-approved"},
+         "cd04494e556162822d919e0b8a2c7289d61024dc54267f83185aa592dddf9e20",
+         "canonical-generated:sand-grain:inside-3of4-v1:r75-approved-authored-restoration:Zone7:297"},
         {ETerrainBlendStyle::Snow, signature(1, 2, 2, 2), 0,
          "b4eeffed78157e662b508d66eb8e675d4b98bfe55ee6d9d1135c4a2c97e40eaf",
          "canonical-generated:snow-clumps:outer-1of4-v1:r53-approved"},
@@ -658,8 +665,8 @@ void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
          "3970d79ffae6c1d3faccac4e839135864cf44879d423d4fbcf5f373e09416c72",
          "canonical-generated:snow-clumps:outer-1of4-v2:r53-approved"},
         {ETerrainBlendStyle::Snow, signature(1, 1, 2, 2), 0,
-         "cdc9c3f16dccdcd88cf952dbf8c239e510ff1372148eb9a47193d3d0d3972a2e",
-         "canonical-generated:snow-clumps:edge-2of4-v1:r53-approved"},
+         "143f5b7599608c91420618753aa2641bf64f56e974fcfe59caff4b77818fd293",
+         "canonical-generated:snow-clumps:edge-2of4-v1:r75-approved-authored-restoration:bz10k:156"},
         {ETerrainBlendStyle::Snow, signature(1, 1, 2, 2), 1,
          "d8971e2ac0b5ee39d5b86ed174995166fc7e1b85658846fb41016e8bc568b9f8",
          "canonical-generated:snow-clumps:edge-2of4-v2:r53-approved"},
@@ -694,8 +701,8 @@ void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
          "6daedacfdf19739a485e004812d12edfae348e876fffa3153521b5e9379040ea",
          "canonical-generated:stone-fracture:inside-3of4-v1:r71-approved"},
         {ETerrainBlendStyle::Gravel, signature(1, 2, 2, 2), 0,
-         "eb23ccb05747b9e97792661c4e59e8c9968cef7373f8cbde8ece1181fdb98fd2",
-         "canonical-generated:gravel-chunks:outer-1of4-v1:r71-approved"},
+         "9ffc86db49fcf58605e69c366ed6469a657246f39800a1f91bd87d484c9bbcb6",
+         "canonical-generated:gravel-chunks:outer-1of4-v1:r75-approved-authored-restoration:bz13h:213"},
         {ETerrainBlendStyle::Gravel, signature(1, 1, 2, 2), 0,
          "af124c29a708ac3a4f9160e3c7f894aeea0de4e41ea22b7b8b49a95618cb68be",
          "canonical-generated:gravel-chunks:edge-2of4-v1:r71-approved"},
@@ -703,8 +710,8 @@ void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
          "71bfa4e9f7f7ad04ea5c774a36811c0d31ac549a82eb15df0ec87d8d0504c9d9",
          "canonical-generated:gravel-chunks:diagonal-2of4:r71-approved"},
         {ETerrainBlendStyle::Gravel, signature(1, 1, 1, 2), 0,
-         "c0e0b78765fa1615da376335c95f2d80aca1f803d28c2cda3010ae2f7dfe864d",
-         "canonical-generated:gravel-chunks:inside-3of4-v1:r71-approved"},
+         "1048f7a93ae4f3704ef205afb3804cf7aa37671237eb5a2e4bcb17eb2f94f6ed",
+         "canonical-generated:gravel-chunks:inside-3of4-v1:r75-approved-authored-restoration:bz5g:496"},
         {ETerrainBlendStyle::Paving, signature(1, 2, 2, 2), 0,
          "f8f6c3247ad468c6e8558111f4e6b8fe96221076402882aa90d4ace40d67a21c",
          "canonical-generated:paving-courses:outer-1of4-v1:r71-approved"},
@@ -721,17 +728,62 @@ void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
          "b0d911e4e6a0516ca1f4f43e9fe6096a2ca5f017173cdd267c59bf1e91f6ddb1",
          "canonical-generated:sand-grain:diagonal-2of4:r71-approved"},
         {ETerrainBlendStyle::Water, signature(1, 2, 2, 2), 0,
-         "8df2999930ab72c856d6d0744483ecb5a69bb7a04ff8e11660f64f98ab858e9b",
-         "canonical-generated:water-ripples:outer-1of4-v1:r71-approved"},
+         "8bbcc4762db352ace282d7f98e179d34430b498c3c042774d0a85114a2db7394",
+         "canonical-generated:water-ripples:outer-1of4-v1:r75-approved-authored-restoration:Zone3Obr:235"},
         {ETerrainBlendStyle::Water, signature(1, 1, 2, 2), 0,
-         "f6de1773292e3063bc58715182767b9cc6d74f984269c98a8267d0fcb127265b",
-         "canonical-generated:water-ripples:edge-2of4-v1:r71-approved"},
+         "d6d712616251dfc2b424d60852e67d12ce9366d327d42f8319a7a04824b677f3",
+         "canonical-generated:water-ripples:edge-2of4-v1:r75-approved-authored-restoration:Zone3Obr:249"},
         {ETerrainBlendStyle::Water, signature(1, 2, 1, 2), 0,
-         "38f05a9ba431ff65abfa859ee6dab3d400a15d9886776a0500373bcb2a235448",
-         "canonical-generated:water-ripples:diagonal-2of4:r71-approved"},
+         "376b90b14ac98d1b29bb2a405ce361fad3a6d2ef317145514e600e80fbb073e3",
+         "canonical-generated:water-ripples:diagonal-2of4:r75-approved-authored-restoration:Zone1:351"},
         {ETerrainBlendStyle::Water, signature(1, 1, 1, 2), 0,
-         "c0231ccb71e9adf6c8f5eba7470ef994f545d0ea24fea9961571be363dba0e80",
-         "canonical-generated:water-ripples:inside-3of4-v1:r71-approved"}
+         "5838ab682cd53a8c16606f9b133f7c237bb8c2179d8e0e1737a49730b5503ddd",
+         "canonical-generated:water-ripples:inside-3of4-v1:r75-approved-authored-restoration:Zone3Obr:435"},
+        {ETerrainBlendStyle::Grass, signature(1, 2, 2, 2), 1,
+         "f982aad28868aede6379e489a24668576831f1b7ac967e1cb044f4b31d55de80",
+         "canonical-generated:grass-strands:outer-1of4-v2:r75-approved-authored-restoration:Zone3Obr:435"},
+        {ETerrainBlendStyle::Grass, signature(1, 1, 2, 2), 1,
+         "3b7e22c38268056ff48737f8af84c03e5492cc4f1b0ce89d6b945cdb707e0a66",
+         "canonical-generated:grass-strands:edge-2of4-v2:r75-approved-authored-restoration:bz3g:184"},
+        {ETerrainBlendStyle::Grass, signature(1, 1, 1, 2), 1,
+         "e82bd23fe502ef031e9c4001d567e1ce4a3243b879968a68cace5a6a2e9c7e52",
+         "canonical-generated:grass-strands:inside-3of4-v2:r75-approved-authored-restoration:Zone5_1:110"},
+        {ETerrainBlendStyle::Gravel, signature(1, 2, 2, 2), 1,
+         "33f15a7716cbf5f87716a98c9b35d8e2e74c64367098acf21e6586fe4e41373f",
+         "canonical-generated:gravel-chunks:outer-1of4-v2:r75-approved-authored-restoration:bz13h:214"},
+        {ETerrainBlendStyle::Gravel, signature(1, 1, 2, 2), 1,
+         "dadcb6ed1c915fbccf78111c74dd174db6b284d72cb968c81d4277067e7277f3",
+         "canonical-generated:gravel-chunks:edge-2of4-v2:r75-approved-authored-restoration:bz13h:414"},
+        {ETerrainBlendStyle::Paving, signature(1, 1, 1, 2), 1,
+         "686d6c02ac891b0721870a433f307bd44988015d22509235e5ce822e49ec0ee1",
+         "canonical-generated:paving-courses:inside-3of4-v2:r75-approved-authored-restoration:Zone10:499"},
+        {ETerrainBlendStyle::Sand, signature(1, 1, 2, 2), 0,
+         "0f17756cfea98c8725e05d379e888249f111efa1ca0a570e56fecbd68ed23c99",
+         "canonical-generated:sand-grain:edge-2of4-v1:r75-approved-authored-restoration:bz16h:155"},
+        {ETerrainBlendStyle::Soil, signature(1, 2, 2, 2), 0,
+         "f92b2531c420b89ef3a9a706444f501eef19b65217b9122f6d820cf96cf7b664",
+         "canonical-generated:soil-mottle:outer-1of4-v1:r75-approved-authored-restoration:bz4g:191"},
+        {ETerrainBlendStyle::Soil, signature(1, 1, 2, 2), 0,
+         "14e1ba8841bd685d938c23534ffe90cc6bf9a9aba7c3caae37d6ff2223762fa3",
+         "canonical-generated:soil-mottle:edge-2of4-v1:r75-approved-authored-restoration:bz16h:111"},
+        {ETerrainBlendStyle::Soil, signature(1, 2, 1, 2), 0,
+         "c406fc01d3c31ce9bd4742ddd024fcfeabaf7c9e78b9d2251bce8efff9db6e5e",
+         "canonical-generated:soil-mottle:diagonal-2of4:r75-approved-authored-restoration:Zone1:353"},
+        {ETerrainBlendStyle::Soil, signature(1, 1, 1, 2), 1,
+         "0afae4e6b53b3238788e53955995a92407076a640eaa617bb1a064fa6d769566",
+         "canonical-generated:soil-mottle:inside-3of4-v2:r75-approved-authored-restoration:bz3g:97"},
+        {ETerrainBlendStyle::Stone, signature(1, 2, 2, 2), 1,
+         "c008228b70109b4d02fa93988c565e4a0e2f4978335ee4a2570ab23a2074fca6",
+         "canonical-generated:stone-fracture:outer-1of4-v2:r75-approved-authored-restoration:bz10k:216"},
+        {ETerrainBlendStyle::Water, signature(1, 2, 2, 2), 1,
+         "617f5f3ee4231049108dec6334028667652a5604f8a7b2f53f207861c1f9d14b",
+         "canonical-generated:water-ripples:outer-1of4-v2:r75-approved-authored-restoration:Zone3Obr:166"},
+        {ETerrainBlendStyle::Water, signature(1, 1, 2, 2), 1,
+         "a88fffed2e8f74b49a7c090cc9caaa8389a5ce92b517f2a8ee6bb19ca4f9150f",
+         "canonical-generated:water-ripples:edge-2of4-v2:r75-approved-authored-restoration:Zone3Obr:496"},
+        {ETerrainBlendStyle::Water, signature(1, 1, 1, 2), 1,
+         "d0060c4b54bdc2e5fd9d27aa65ab80e7761fbe481a5cbd5fb1ca1b0449f65666",
+         "canonical-generated:water-ripples:inside-3of4-v2:r75-approved-authored-restoration:Zone1:223"}
     };
 
     CTerrainTransitionCatalog catalog;
@@ -787,11 +839,15 @@ void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
         {1, ETerrainBlendStyle::Gravel}, {2, ETerrainBlendStyle::Organic}
     };
     CTestTerrainVirtualAtlas gravel(catalog, images, 0x71u, {}, gravelStyles);
-    QString unreviewedProvenance;
-    const QImage unreviewed = gravel.reviewBlendMask(
-        signature(1, 2, 2, 2), 1, 1, &unreviewedProvenance, 1);
-    QVERIFY(!unreviewed.isNull());
-    QVERIFY(!unreviewedProvenance.endsWith(QStringLiteral(":r71-approved")));
+    // Gravel inside-v2 is one of the explicit R75 adjustment requests.  It
+    // must remain on the prior/fallback path until the adjusted mask is
+    // separately approved.
+    QString pendingProvenance;
+    const QImage pending = gravel.reviewBlendMask(
+        signature(1, 1, 1, 2), 1, 1, &pendingProvenance, 1);
+    QVERIFY(!pending.isNull());
+    QVERIFY2(!pendingProvenance.contains(QStringLiteral(":r75-approved-")),
+             qPrintable(pendingProvenance));
 }
 
 void TerrainVirtualAtlasTests::effectiveReviewMaskMatchesGeneratedPurePixels()
@@ -874,8 +930,8 @@ void TerrainVirtualAtlasTests::finalizationCarriesPaintMaterialIntoReviewedMaskS
         {}, {}, {}, {1});
     QVERIFY2(finalized.success, qPrintable(report.toText()));
     QCOMPARE(finalized.tiles.size(), 1);
-    QVERIFY2(finalized.tiles.front().blendProvenance.endsWith(
-                 QStringLiteral(":r71-approved")),
+    QVERIFY2(finalized.tiles.front().blendProvenance.contains(
+                 QStringLiteral(":r75-approved-authored-restoration:")),
              qPrintable(finalized.tiles.front().blendProvenance));
 }
 
@@ -909,8 +965,14 @@ void TerrainVirtualAtlasTests::reviewedTopologyNeverFallsBackToUnapprovedVariati
             provenance.insert(atlas.generatedTiles().at(
                 tile.generatedIndex).blendProvenance);
         }
-    QCOMPARE(provenance, QSet<QString>({QStringLiteral(
-        "canonical-generated:gravel-chunks:outer-1of4-v1:r71-approved")}));
+    QCOMPARE(provenance, QSet<QString>({
+        QStringLiteral(
+            "canonical-generated:gravel-chunks:outer-1of4-v1:"
+            "r75-approved-authored-restoration:bz13h:213"),
+        QStringLiteral(
+            "canonical-generated:gravel-chunks:outer-1of4-v2:"
+            "r75-approved-authored-restoration:bz13h:214")
+    }));
 }
 
 void TerrainVirtualAtlasTests::virtualFieldPaintIsUnboundedByAtlas()
@@ -2088,7 +2150,8 @@ void TerrainVirtualAtlasTests::paintedMaterialOwnsGeneratedMaskFamily()
     QVERIFY(!reviewed.isNull());
     QCOMPARE(reviewProvenance,
              QStringLiteral(
-                 "canonical-generated:soil-mottle:inside-3of4-v1:r44-approved"));
+                 "canonical-generated:soil-mottle:inside-3of4-v1:"
+                 "r75-approved-authored-restoration:bz4g:191"));
 
     const STerrainVirtualTile resolved = atlas.resolve(
         requested, 7, 11, nullptr, 1);
