@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import ast
 import unittest
 import hashlib
 import json
@@ -2617,6 +2618,8 @@ class ReviewDocumentTests(unittest.TestCase):
         self.assertIn("answer-export-text", script)
         self.assertNotIn("not answered", script.lower())
         self.assertIn("Comment", script)
+        self.assertIn("answer!==block.dataset.default", script)
+        self.assertNotIn("explicitly reviewed", script.lower())
         self.assertNotIn(
             "focused review decisions:\n'", script,
             "a literal newline inside a quoted JavaScript string disables every questionnaire action")
@@ -2640,6 +2643,25 @@ class ReviewDocumentTests(unittest.TestCase):
         self.assertIn("Keep current:", source)
         self.assertNotIn('<option value="">Not answered</option>', source)
         self.assertIn("comparison-comment", source)
+
+    def test_merged_questionnaire_has_no_separate_review_checkbox(self) -> None:
+        source = Path(__file__).with_name(
+            "render_r86_merged_modern_review.py").read_text(encoding="utf-8")
+        self.assertNotIn('class="reviewed"', source)
+        self.assertNotIn("querySelector('.reviewed')", source)
+        self.assertNotIn("review-agreements", source)
+        self.assertIn("value!==c.dataset.default", source)
+
+    def test_combined_corner_questionnaire_resolves_tile_in_one_card(self) -> None:
+        source = Path(__file__).with_name(
+            "render_r87_combined_corner_questionnaire.py").read_text(
+                encoding="utf-8")
+        self.assertIn("This tile is uniform", source)
+        self.assertIn("Assign all four corners individually", source)
+        for corner in ("NW", "NE", "SE", "SW"):
+            self.assertIn(f'"{corner}"', source)
+        self.assertNotIn('<input type="checkbox"', source)
+        self.assertIn("untouchedDefaultsOmitted", source)
 
     def test_uniform_variant_questionnaire_is_conservative_by_default(self) -> None:
         source = Path(__file__).with_name(
@@ -3044,15 +3066,124 @@ class ReviewDocumentTests(unittest.TestCase):
                             expected, corner_name(namespace, slot, corner))
                         checked += 1
         self.assertEqual(48, checked)
-        # Comment-only ambiguity stays unresolved; no paving identity is
-        # invented for Zone19 slot 490 NW.
-        self.assertEqual("Sand / Yellow", corner_name("zone19", 490, 0))
+        # R82 deliberately left this comment-only ambiguity unresolved. R83's
+        # recovered human selection later resolves it as Paving / Sand ruins.
+        self.assertEqual(
+            "Paving / Sand ruins", corner_name("zone19", 490, 0))
         self.assertIn(
             "Ground / Dirt",
             {family["name"] for family in presets["zone10"]["families"]})
         self.assertIn(
             "Ground / Brown",
             {family["name"] for family in presets["bz2g"]["families"]})
+
+    def test_shipped_catalog_contains_exact_r83_r84_corner_decisions(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        def corner_name(namespace: str, slot: int, corner: int) -> str:
+            preset = presets[namespace.casefold()]
+            names = {int(family["id"]): family["name"]
+                     for family in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            return names[payload[slot * 4 + corner]]
+
+        groups = [
+            (("bz5g", "zone8"), {
+                (119, 0): "Sand / Common", (119, 1): "Sand / Common",
+                (119, 2): "Sand / Common", (119, 3): "Sand / Light",
+                (124, 0): "Sand / Common", (124, 1): "Sand / Light",
+                (124, 2): "Sand / Light", (124, 3): "Sand / Light",
+                (171, 0): "Sand / Common", (171, 1): "Sand / Grainy",
+                (171, 2): "Sand / Grainy", (171, 3): "Sand / Grainy",
+            }),
+            (("zone19",), {
+                (313, 0): "Sand / Common", (313, 1): "Sand / Gravel",
+                (313, 2): "Sand / Common", (313, 3): "Sand / Gravel",
+                (479, 0): "Sand / Common", (479, 1): "Sand / Common",
+                (479, 2): "Sand / Yellow", (479, 3): "Sand / Gravel",
+                (490, 0): "Paving / Sand ruins",
+            }),
+            (("bz16h", "zone18"), {
+                (80, 0): "Ground / Red", (80, 1): "Ground / Red",
+                (80, 2): "Ground / Plant soil",
+                (80, 3): "Ground / Plant soil",
+            }),
+            (("zone13",), {
+                (70, 0): "Snow / Common", (70, 1): "Snow / Dark",
+                (70, 2): "Snow / Dark", (70, 3): "Snow / Dark",
+                (238, 0): "Ground / Light", (238, 1): "Ground / Light",
+                (238, 2): "Ground / Light", (238, 3): "Paving / Square",
+                (239, 0): "Ground / Light", (239, 1): "Ground / Light",
+                (239, 2): "Ground / Light", (239, 3): "Paving / Square",
+            }),
+        ]
+        checked = 0
+        for namespaces, decisions in groups:
+            for namespace in namespaces:
+                for (slot, corner), expected in decisions.items():
+                    with self.subTest(namespace=namespace, slot=slot,
+                                      corner=corner):
+                        self.assertEqual(
+                            expected, corner_name(namespace, slot, corner))
+                        checked += 1
+        self.assertEqual(53, checked)
+
+    def test_shipped_catalog_contains_corrected_r87_corner_decisions(self) -> None:
+        """R87 south fields follow physical SW-left/SE-right placement."""
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "scripts" / "generate_terrain_atlas_presets.py").read_text(
+            encoding="utf-8")
+        module = ast.parse(source)
+        signatures = next(
+            ast.literal_eval(node.value)
+            for node in ast.walk(module)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name)
+                    and target.id == "r87_signatures"
+                    for target in node.targets))
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+        owners = {
+            "zone15": ("bz13h", "zone15"),
+            "zone16": ("bz14h", "bz18h", "zone16"),
+            "zone17": ("bz15h", "zone17"),
+            "bz16h": ("bz16h",),
+            "zone2": ("bz2g", "zone2"),
+            "bz3g": ("bz3g", "zone9"),
+            "bz4g": ("bz4g", "zone4"),
+            "zone8": ("bz5g", "bz6g", "zone8"),
+            "bz9k": ("bz8k", "bz9k", "zone11"),
+            "zone13": ("zone13",),
+            "zone18": ("zone18",),
+            "zone5_1": ("zone5_1",),
+        }
+
+        checked = 0
+        for owner, slots in signatures.items():
+            for namespace in owners[owner]:
+                preset = presets[namespace]
+                names = {int(family["id"]): family["name"]
+                         for family in preset["families"]}
+                payload = base64.b64decode(preset["signaturesBase64"])
+                for slot, expected in slots.items():
+                    for corner, family_name in enumerate(expected):
+                        if family_name is None:
+                            continue
+                        with self.subTest(namespace=namespace, slot=slot,
+                                          corner=corner):
+                            self.assertEqual(
+                                family_name,
+                                names[payload[slot * 4 + corner]])
+                            checked += 1
+        self.assertEqual(474, checked)
 
     def test_completed_questionnaire_excludes_only_follow_up_corners(self) -> None:
         root = Path(__file__).resolve().parent.parent

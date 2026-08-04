@@ -94,8 +94,11 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # Zone2's transition-only Ground / Dirt.  Their 16 pair combinations
         # must disappear rather than remain as phantom topology coverage.
         self.assertEqual(1470, report["totalPairCount"])
+        # R87 replaces false-uniform ownership with the reviewed mixed-corner
+        # signatures. This redistributes eight family pairs between supported
+        # topology counts without changing the catalog's total pair count.
         self.assertEqual(
-            {"0": 890, "1": 123, "2": 81, "3": 179, "4": 197},
+            {"0": 887, "1": 125, "2": 80, "3": 178, "4": 200},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

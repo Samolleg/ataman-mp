@@ -44,7 +44,7 @@ const blocks=[...document.querySelectorAll('[data-key]')];
 const status=document.getElementById('status');
 function save(block){{const answer=block.querySelector('.answer').value;const note=block.querySelector('.note').value;try{{localStorage.setItem(prefix+block.dataset.key,JSON.stringify({{answer,note}}));}}catch(e){{}}update();}}
 blocks.forEach(block=>{{const answer=block.querySelector('.answer');const note=block.querySelector('.note');try{{const saved=JSON.parse(localStorage.getItem(prefix+block.dataset.key)||'null');if(saved){{if(saved.answer)answer.value=saved.answer;note.value=saved.note||'';}}}}catch(e){{}}answer.addEventListener('change',()=>save(block));note.addEventListener('input',()=>save(block));}});
-function rows(){{return blocks.map(block=>{{const answer=block.querySelector('.answer').value;const note=block.querySelector('.note').value.trim();return answer||note?block.dataset.key+': '+(answer||'Comment')+(note?' \\u2014 '+note:''):'';}}).filter(Boolean);}}
+function rows(){{return blocks.map(block=>{{const answer=block.querySelector('.answer').value;const note=block.querySelector('.note').value.trim();const changed=answer!==block.dataset.default;return changed||note?block.dataset.key+': '+(changed?answer:'Comment')+(note?' \\u2014 '+note:''):'';}}).filter(Boolean);}}
 function text(){{return {review_header}+rows().join({line_break})+{review_footer};}}
 function update(message){{document.getElementById('answer-export-text').value=text();status.textContent=message||rows().length+' saved response'+(rows().length===1?'':'s');}}
 document.getElementById('show-answers').addEventListener('click',()=>{{const area=document.getElementById('answer-export-text');area.focus();area.select();update('Review text selected');}});
@@ -353,7 +353,7 @@ def render(presets_path: Path, hd_archive: Path, original_archive: Path,
             f'{html.escape(label)}</option>'
             for value, label in option_rows)
         sections.append(f"""
-<section class="question corner-answer" data-key="{html.escape(question['key'])}">
+<section class="question corner-answer" data-key="{html.escape(question['key'])}" data-default="{html.escape(str(default_option), quote=True)}">
  <h2>{number}. {html.escape(question['prompt'])}</h2>
  <p class="muted">{html.escape(question['context'])}</p>
  {''.join(variant_groups)}

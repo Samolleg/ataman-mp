@@ -2435,6 +2435,162 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     }
     corrections.update(r82_corrections.get(namespace, {}))
 
+    # R83/R84 applies the exact answers recovered from the image-only R83
+    # review PDF and the seven explicit R84 follow-up decisions.  The PDF's
+    # vague "pavement" note for Zone13 slot 238 SW was not guessed: R84
+    # explicitly resolved it as Paving / Square and independently reviewed all
+    # four corners of connected slot 239.  bz5g and bz16h are mirrored only to
+    # their canonical byte-identical owners (Zone8 and Zone18 respectively).
+    r84_corrections = {
+        "bz5g": {
+            (119, 0): "Sand / Common", (119, 1): "Sand / Common",
+            (119, 2): "Sand / Common", (119, 3): "Sand / Light",
+            (124, 0): "Sand / Common", (124, 1): "Sand / Light",
+            (124, 2): "Sand / Light", (124, 3): "Sand / Light",
+            (171, 0): "Sand / Common", (171, 1): "Sand / Grainy",
+            (171, 2): "Sand / Grainy", (171, 3): "Sand / Grainy",
+        },
+        "zone8": {
+            (119, 0): "Sand / Common", (119, 1): "Sand / Common",
+            (119, 2): "Sand / Common", (119, 3): "Sand / Light",
+            (124, 0): "Sand / Common", (124, 1): "Sand / Light",
+            (124, 2): "Sand / Light", (124, 3): "Sand / Light",
+            (171, 0): "Sand / Common", (171, 1): "Sand / Grainy",
+            (171, 2): "Sand / Grainy", (171, 3): "Sand / Grainy",
+        },
+        "zone19": {
+            (313, 0): "Sand / Common", (313, 1): "Sand / Gravel",
+            (313, 2): "Sand / Common", (313, 3): "Sand / Gravel",
+            (479, 0): "Sand / Common", (479, 1): "Sand / Common",
+            (479, 2): "Sand / Yellow", (479, 3): "Sand / Gravel",
+            (490, 0): "Paving / Sand ruins",
+        },
+        "bz16h": {
+            (80, 0): "Ground / Red", (80, 1): "Ground / Red",
+            (80, 2): "Ground / Plant soil",
+            (80, 3): "Ground / Plant soil",
+        },
+        "zone18": {
+            (80, 0): "Ground / Red", (80, 1): "Ground / Red",
+            (80, 2): "Ground / Plant soil",
+            (80, 3): "Ground / Plant soil",
+        },
+        "zone13": {
+            (70, 0): "Snow / Common", (70, 1): "Snow / Dark",
+            (70, 2): "Snow / Dark", (70, 3): "Snow / Dark",
+            (238, 0): "Ground / Light", (238, 1): "Ground / Light",
+            (238, 2): "Ground / Light", (238, 3): "Paving / Square",
+            (239, 0): "Ground / Light", (239, 1): "Ground / Light",
+            (239, 2): "Ground / Light", (239, 3): "Paving / Square",
+        },
+    }
+    corrections.update(r84_corrections.get(namespace, {}))
+
+    # R87 resolves the mixed tiles exposed by the R86 false-uniform audit.
+    # The questionnaire accidentally displayed SE in the lower-left control
+    # and SW in the lower-right control. The reviewer explicitly confirmed
+    # that every submitted south value follows that visual placement, so the
+    # tuples below are corrected to engine/catalog order NW, NE, SE, SW.
+    #
+    # Canonical byte-identical owners carry these decisions for their siblings.
+    # Comment-only and explicitly uncertain identities are deliberately absent:
+    # Zone7 slot 405; bz15h slots 146/148 NE/SE/SW; and the proposed Ground /
+    # Plant soil quarters in the Zone16/bz14h/bz18h atlas.
+    r87_signatures = {
+        "zone15": {
+            184: ("Sand / Common", "Sand / Common", "Sand / Gravel", "Sand / Gravel"),
+            185: ("Sand / Common", "Sand / Common", "Sand / Gravel", "Sand / Gravel"),
+            187: ("Sand / Common", "Sand / Common", "Sand / Gravel", "Sand / Gravel"),
+            220: ("Sand / Common", "Sand / Gravel", "Sand / Gravel", "Sand / Gravel"),
+            223: ("Sand / Common", "Sand / Gravel", "Sand / Gravel", "Sand / Gravel"),
+            224: ("Sand / Common", "Sand / Gravel", "Sand / Gravel", "Sand / Gravel"),
+        },
+        "zone16": {
+            184: (None, "Stone / Red", "Stone / Red", "Stone / Red"),
+            233: (None, "Rubble / Red", None, "Stone / Red"),
+            236: ("Rubble / Red", "Rubble / Red", None, "Rubble / Red"),
+            244: (None, "Rubble / Red", "Rubble / Red", "Rubble / Red"),
+            245: (None, "Rubble / Red", "Rubble / Red", "Rubble / Red"),
+        },
+        "zone17": {
+            146: ("Rubble / Orange", None, None, None),
+            148: ("Rubble / Orange", None, None, None),
+        },
+        "bz16h": {
+            167: ("Ground / Red", "Ground / Plant soil", "Ground / Plant soil", "Ground / Plant soil"),
+            189: ("Ground / Red", "Ground / Red", "Ground / Desert algae", "Ground / Desert algae"),
+            190: ("Ground / Red", "Ground / Red", "Ground / Desert algae", "Ground / Desert algae"),
+            192: ("Ground / Red", "Ground / Red", "Ground / Desert algae", "Ground / Desert algae"),
+            195: ("Ground / Red", "Ground / Red", "Ground / Desert algae", "Ground / Desert algae"),
+            196: ("Ground / Red", "Ground / Red", "Ground / Desert algae", "Ground / Desert algae"),
+            362: ("Stone / Weathered", "Ground / Plant soil", "Ground / Plant soil", "Ground / Plant soil"),
+            398: ("Ground / Desert algae", "Ground / Red", "Ground / Plant soil", "Ground / Plant soil"),
+            399: ("Ground / Red", "Ground / Red", "Stone / Weathered", "Ground / Plant soil"),
+            403: ("Ground / Red", "Ground / Plant soil", "Ground / Red", "Ground / Plant soil"),
+            438: ("Ground / Red", "Stone / Weathered", "Ground / Plant soil", "Ground / Plant soil"),
+        },
+        "zone2": {
+            50: ("Grass / Common", "Grass / Fresh", "Grass / Fresh", "Grass / Fresh"),
+            51: ("Grass / Common", "Grass / Fresh", "Grass / Fresh", "Grass / Fresh"),
+            147: ("Grass / Common", "Grass / Fresh", "Grass / Fresh", "Grass / Fresh"),
+            176: ("Grass / Common", "Grass / Fresh", "Grass / Fresh", "Grass / Fresh"),
+            183: ("Grass / Fresh", "Grass / Common", "Grass / Fresh", "Grass / Fresh"),
+            209: ("Ground / Dark", "Grass / Fresh", "Grass / Fresh", "Grass / Fresh"),
+            408: ("Grass / Common", "Grass / Common", "Grass / Fresh", "Grass / Fresh"),
+        },
+        "bz3g": {
+            77: ("Ground / Common", "Ground / Gravel", "Ground / Gravel", "Ground / Gravel"),
+            78: ("Ground / Common", "Ground / Gravel", "Ground / Gravel", "Ground / Gravel"),
+        },
+        "bz4g": {
+            40: ("Ground / Common", "Ground / Common", "Ground / Common", "Ground / Gravel"),
+            41: ("Ground / Common", "Ground / Common", "Ground / Common", "Ground / Gravel"),
+            102: ("Ground / Common", "Ground / Common", "Ground / Gravel", "Ground / Gravel"),
+            103: ("Ground / Common", "Ground / Common", "Ground / Gravel", "Ground / Gravel"),
+            121: ("Ground / Common", "Ground / Gravel", "Ground / Gravel", "Ground / Gravel"),
+            201: ("Ground / Common", "Ground / Gravel", "Ground / Common", "Ground / Gravel"),
+            386: ("Grass / Dark", "Grass / Common", "Grass / Common", "Grass / Fresh"),
+        },
+        "zone8": {
+            172: ("Sand / Common", "Sand / Grainy", "Sand / Grainy", "Sand / Grainy"),
+            206: ("Sand / Common", "Sand / Common", "Sand / Common", "Sand / Grainy"),
+            207: ("Sand / Common", "Sand / Common", "Sand / Common", "Sand / Grainy"),
+            213: ("Rock / Underwater emerald", "Rock / Underwater emerald", "Rock / Underwater emerald", "Sand / Underwater"),
+            214: ("Rock / Underwater emerald", "Rock / Underwater emerald", "Rock / Underwater emerald", "Sand / Underwater"),
+            368: ("Sand / Common", "Sand / Grainy", "Sand / Common", "Sand / Grainy"),
+            415: ("Sand / Light", "Sand / Light", "Sand / Common", "Sand / Grainy"),
+            441: ("Sand / Common", "Sand / Light", "Sand / Grainy", "Sand / Grainy"),
+            442: ("Sand / Light", "Sand / Light", "Sand / Grainy", "Sand / Grainy"),
+            454: ("Sand / Light", "Sand / Common", "Sand / Grainy", "Sand / Grainy"),
+        },
+        "bz9k": {
+            247: ("Ground / Light", "Stone / Gray", "Stone / Gray", "Stone / Gray"),
+            249: ("Ground / Light", "Stone / Gray", "Stone / Gray", "Stone / Gray"),
+            369: ("Ground / Light", "Ground / Light", "Paving / Square", "Paving / Square"),
+            476: ("Grass / Winter normal", "Stone / Gray", "Stone / Gray", "Grass / Winter faded"),
+        },
+        "zone13": {
+            113: ("Ground / Light", "Snow / Common", "Snow / Common", "Snow / Common"),
+            115: ("Ground / Light", "Snow / Common", "Snow / Common", "Snow / Common"),
+            116: ("Ground / Light", "Snow / Common", "Snow / Common", "Snow / Common"),
+            117: ("Ground / Light", "Snow / Common", "Snow / Common", "Snow / Common"),
+            118: ("Ground / Light", "Snow / Common", "Snow / Common", "Snow / Common"),
+            241: ("Ground / Light", "Ground / Light", "Ground / Light", "Paving / Square"),
+            242: ("Ground / Light", "Ground / Light", "Ground / Light", "Paving / Square"),
+            376: ("Ground / Light", "Snow / Common", "Snow / Common", "Stone / Gray"),
+        },
+        "zone18": {
+            190: ("Ground / Red", "Ground / Red", "Ground / Desert algae", "Ground / Desert algae"),
+        },
+        "zone5_1": {
+            157: ("Ground / Dirt", "Grass / Irregular", "Grass / Irregular", "Stone / Greenish"),
+        },
+    }
+    for slot_index, names in r87_signatures.get(namespace, {}).items():
+        for corner_index, family_name in enumerate(names):
+            if family_name is not None:
+                corrections[(slot_index, corner_index)] = family_name
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)
