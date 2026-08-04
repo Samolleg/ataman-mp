@@ -596,16 +596,14 @@ QJsonObject writeBlendMaskReview(
                             ? owner : (topology.ownerCorners >= 3 ? owner : support);
                         signature.southWest = support;
                         QString provenance;
-                        const qint32 canonicalMaskOwner = qMin(owner, support);
                         QImage mask = atlas.reviewBlendMask(
-                            signature, canonicalMaskOwner,
-                            topology.variation, &provenance);
-                        // Generation deterministically chooses the smaller
-                        // material id as its first ownership channel. Review
-                        // cards consistently show white as the requested
-                        // material without reselecting a different source mask.
-                        if(!mask.isNull() && canonicalMaskOwner != owner)
-                            mask.invertPixels();
+                            signature, owner, topology.variation,
+                            &provenance, owner);
+                        // Review the same paint-owned family and polarity that
+                        // the generated outcome uses. Canonical material-id
+                        // ordering is an internal compositor detail and must
+                        // never select or rotate a different questionnaire
+                        // mask.
                         const int column = scenario * topologies.size()
                             + topologyIndex;
                         if(mask.isNull())
@@ -896,7 +894,8 @@ QJsonObject writeBlendMaskReview(
             signature.southWest = item.support;
             QString provenance;
             const QImage mask = atlas.reviewBlendMask(
-                signature, item.owner, item.topology.variation, &provenance);
+                signature, item.owner, item.topology.variation,
+                &provenance, item.owner);
             if(mask.isNull())
             {
                 if(error) *error = QStringLiteral(

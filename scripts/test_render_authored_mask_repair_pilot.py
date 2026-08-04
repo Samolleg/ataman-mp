@@ -17,6 +17,7 @@ from render_authored_mask_repair_pilot import (
     REMAINING_HARD_BASELINE_CASES,
     align_authored_mask,
     align_runtime_review_mask_exact,
+    align_runtime_review_source_exact,
     band_visualization,
     mask_metrics,
     repair_authored_mask,
@@ -109,6 +110,18 @@ class AuthoredMaskRepairPilotTests(unittest.TestCase):
         self.assertEqual(transform["rotationCounterClockwise"], 0)
         self.assertTrue(transform["physicalPreviewToLogicalGridMirrorY"])
 
+    def test_hard_questionnaire_source_uses_the_same_fixed_grid_mirror(self) -> None:
+        source = Image.new("RGB", (4, 4))
+        source.putpixel((0, 0), (1, 0, 0))
+        source.putpixel((3, 0), (2, 0, 0))
+        source.putpixel((3, 3), (3, 0, 0))
+        source.putpixel((0, 3), (4, 0, 0))
+        aligned = align_runtime_review_source_exact(source)
+        self.assertEqual(
+            tuple(aligned.getpixel(point)[0] for point in
+                  ((0, 0), (3, 0), (3, 3), (0, 3))),
+            (4, 3, 2, 1))
+
         source = Image.new("RGB", (4, 4))
         source.putpixel((0, 0), (1, 0, 0))
         source.putpixel((3, 0), (2, 0, 0))
@@ -167,6 +180,23 @@ class AuthoredMaskRepairPilotTests(unittest.TestCase):
         self.assertTrue(all("sand-grain" in key for key in rejected))
         self.assertTrue(all("opacity edge bands" in decisions[key]["note"]
                             for key in rejected))
+
+    def test_r71_hard_decisions_apply_six_repairs_and_four_raw_masks(self) -> None:
+        payload = json.loads(Path(__file__).with_name(
+            "authored_mask_hard_r71_decisions.json").read_text(
+                encoding="utf-8"))
+        decisions = payload["decisions"]
+        self.assertEqual(len(decisions), 10)
+        self.assertEqual(sum(
+            item["answer"] == "Approve repaired authored mask"
+            for item in decisions.values()), 6)
+        self.assertEqual(sum(
+            item["answer"] == "Prefer raw authored mask"
+            for item in decisions.values()), 4)
+        self.assertEqual(set(decisions), set(payload["reviewedMasks"]))
+        self.assertTrue(all(
+            len(item["pixelSha256"]) == 64
+            for item in payload["reviewedMasks"].values()))
 
     def test_distinct_authored_silhouettes_remain_distinct(self) -> None:
         first = synthetic_outer_mask(0)

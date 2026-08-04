@@ -774,47 +774,276 @@ QByteArray grayscaleMaskPixelHash(const QImage& source)
     return hash.result().toHex();
 }
 
-QImage approvedR63IceInsideMask(
+struct SReviewedCanonicalMask
+{
+    ETerrainBlendStyle style;
+    const char* topology;
+    const char* resource;
+    const char* pixelSha256;
+    const char* provenance;
+};
+
+const SReviewedCanonicalMask* reviewedCanonicalMask(
+    ETerrainBlendStyle style, const QString& topology)
+{
+    static const SReviewedCanonicalMask masks[] = {
+        {ETerrainBlendStyle::Grass, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/grass-outer-1of4-v1-r44-repaired.png",
+         "7161801ae53a63a4968abc3a39eb6f9971a5c3786d168c9c7644d5a95f442876",
+         "canonical-generated:grass-strands:outer-1of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Grass, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/grass-edge-2of4-v1-r44-repaired.png",
+         "be0f21c2e9d01ce56b4003411e63ed70026820725701d460b1466711f2277bca",
+         "canonical-generated:grass-strands:edge-2of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Grass, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/grass-diagonal-2of4-r44-repaired.png",
+         "39a4bd49aa72525cb955d44e797235cf102d549ea5b1aec995fa6095dc457945",
+         "canonical-generated:grass-strands:diagonal-2of4:r44-approved"},
+        {ETerrainBlendStyle::Soil, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-outer-1of4-v2-r44-repaired.png",
+         "f9ea6dde4e3cd8095d79d4650aaccf0f70cae20991dccc9a5fa8fdc9a89f08df",
+         "canonical-generated:soil-mottle:outer-1of4-v2:r44-approved"},
+        {ETerrainBlendStyle::Soil, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-edge-2of4-v2-r44-repaired.png",
+         "168f98d2d6b6ab53598cb30622b784aaf7a0eadb8815968e238b2a19ec7f7bd3",
+         "canonical-generated:soil-mottle:edge-2of4-v2:r44-approved"},
+        {ETerrainBlendStyle::Soil, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/soil-inside-3of4-v1-r44-repaired.png",
+         "1953ce4e0062f23052e59a9fc6ae6e8d9324345c2caba7110823bf624a30e998",
+         "canonical-generated:soil-mottle:inside-3of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Stone, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/stone-outer-1of4-v1-r44-repaired.png",
+         "2c107b3db7f37268082b952e2038419aa4b8371a28d28abbbb8cbd89a832505e",
+         "canonical-generated:stone-fracture:outer-1of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Stone, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/stone-edge-2of4-v1-r44-repaired.png",
+         "3555e3e95a387d04d219e71cd0de3e8bde69d4bf369cc566f007ee66e83a7090",
+         "canonical-generated:stone-fracture:edge-2of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Stone, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/stone-diagonal-2of4-r44-repaired.png",
+         "eea78b03896e90d1137cc79f7991f17912248ab5480e55415bc5e0fcd502a002",
+         "canonical-generated:stone-fracture:diagonal-2of4:r44-approved"},
+        {ETerrainBlendStyle::Sand, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-outer-1of4-v1-r47-detailed.png",
+         "01cb028bd15bec4642750ea35825423aa1b54b1cbc98275975071fb5399210b9",
+         "canonical-generated:sand-grain:outer-1of4-v1:r47-approved"},
+        {ETerrainBlendStyle::Sand, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-edge-2of4-v2-r47-detailed.png",
+         "0f0b55bce8ecb96963d467897c5dcdec71a09af343545d6350b8e965d6ea0ddb",
+         "canonical-generated:sand-grain:edge-2of4-v2:r47-approved"},
+        {ETerrainBlendStyle::Sand, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-inside-3of4-v1-r47-detailed.png",
+         "581cb3c7c4ad785da566f21eeae319ad7c2e2a24e4695f2df4658635062dad56",
+         "canonical-generated:sand-grain:inside-3of4-v1:r47-approved"},
+        {ETerrainBlendStyle::Snow, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-outer-1of4-v1-r53-detailed.png",
+         "b4eeffed78157e662b508d66eb8e675d4b98bfe55ee6d9d1135c4a2c97e40eaf",
+         "canonical-generated:snow-clumps:outer-1of4-v1:r53-approved"},
+        {ETerrainBlendStyle::Snow, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-outer-1of4-v2-r53-detailed.png",
+         "3970d79ffae6c1d3faccac4e839135864cf44879d423d4fbcf5f373e09416c72",
+         "canonical-generated:snow-clumps:outer-1of4-v2:r53-approved"},
+        {ETerrainBlendStyle::Snow, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-edge-2of4-v1-r53-detailed.png",
+         "cdc9c3f16dccdcd88cf952dbf8c239e510ff1372148eb9a47193d3d0d3972a2e",
+         "canonical-generated:snow-clumps:edge-2of4-v1:r53-approved"},
+        {ETerrainBlendStyle::Snow, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-edge-2of4-v2-r53-detailed.png",
+         "d8971e2ac0b5ee39d5b86ed174995166fc7e1b85658846fb41016e8bc568b9f8",
+         "canonical-generated:snow-clumps:edge-2of4-v2:r53-approved"},
+        {ETerrainBlendStyle::Snow, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-diagonal-2of4-r54-detailed.png",
+         "07f01530b7bd83018cc04831ba1e1a7dd7da9209d36c6e546987626188732970",
+         "canonical-generated:snow-clumps:diagonal-2of4:r54-approved"},
+        {ETerrainBlendStyle::Snow, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-inside-3of4-v1-r54-detailed.png",
+         "b576e2c9ce1b055325b715aa51a8e53aed9bccf98af9a2ed4ea007ed597e9ed3",
+         "canonical-generated:snow-clumps:inside-3of4-v1:r54-approved"},
+        {ETerrainBlendStyle::Snow, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-inside-3of4-v2-r54-detailed.png",
+         "b576e2c9ce1b055325b715aa51a8e53aed9bccf98af9a2ed4ea007ed597e9ed3",
+         "canonical-generated:snow-clumps:inside-3of4-v2:r54-approved"},
+        {ETerrainBlendStyle::Ice, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-outer-1of4-v1-r53-detailed.png",
+         "740a2e823540ca51db9f3606d612cef30c0aac7a6cd513dfb53101e769a576ae",
+         "canonical-generated:ice-fracture:outer-1of4-v1:r53-approved"},
+        {ETerrainBlendStyle::Ice, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-outer-1of4-v2-r53-detailed.png",
+         "845be2dce324f8a209a2f5cc50fb869ce1c75da30b0dcce755337aa2e148225f",
+         "canonical-generated:ice-fracture:outer-1of4-v2:r53-approved"},
+        {ETerrainBlendStyle::Ice, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-edge-2of4-v1-r53-detailed.png",
+         "3878111591a0787ca4e723dd6b0be7455ba9dcd986a3cfefc5aaf1059d3e8f48",
+         "canonical-generated:ice-fracture:edge-2of4-v1:r53-approved"},
+        {ETerrainBlendStyle::Ice, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-edge-2of4-v2-r53-detailed.png",
+         "14f4e15a6cf02f2f93ef09ebae3590e050a53fa5455aaaae403ceb5d6bd289f1",
+         "canonical-generated:ice-fracture:edge-2of4-v2:r53-approved"},
+        {ETerrainBlendStyle::Ice, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-diagonal-2of4-r54-detailed.png",
+         "0b00ef5bf181d9741ab982a8cd4b225338d451516274343354158f38447c9183",
+         "canonical-generated:ice-fracture:diagonal-2of4:r54-approved"},
+        {ETerrainBlendStyle::Ice, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-inside-3of4-v1-r63.png",
+         "1617f1c7b073aae77ad0d181368e83d68f2b013e612101c4dc3eb257625f247b",
+         "canonical-generated:ice-fracture:inside-3of4-v1:r63-approved"},
+        {ETerrainBlendStyle::Ice, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-inside-3of4-v2-r63.png",
+         "53c17ae64fffa80b182002d4b9e44c54ce381c750329e689eabd65e4ae1aae8d",
+         "canonical-generated:ice-fracture:inside-3of4-v2:r63-approved"},
+        {ETerrainBlendStyle::Grass, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/grass-inside-3of4-v1-r71-repaired.png",
+         "f6d66a4adbf2b207a56e71052009801a4d3d4f254ab98f73b38ddfdaabb97d57",
+         "canonical-generated:grass-strands:inside-3of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Stone, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/stone-inside-3of4-v1-r71-repaired.png",
+         "6daedacfdf19739a485e004812d12edfae348e876fffa3153521b5e9379040ea",
+         "canonical-generated:stone-fracture:inside-3of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Gravel, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/gravel-outer-1of4-v1-r71-repaired.png",
+         "eb23ccb05747b9e97792661c4e59e8c9968cef7373f8cbde8ece1181fdb98fd2",
+         "canonical-generated:gravel-chunks:outer-1of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Gravel, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/gravel-edge-2of4-v1-r71-repaired.png",
+         "af124c29a708ac3a4f9160e3c7f894aeea0de4e41ea22b7b8b49a95618cb68be",
+         "canonical-generated:gravel-chunks:edge-2of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Gravel, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/gravel-diagonal-2of4-r71-repaired.png",
+         "71bfa4e9f7f7ad04ea5c774a36811c0d31ac549a82eb15df0ec87d8d0504c9d9",
+         "canonical-generated:gravel-chunks:diagonal-2of4:r71-approved"},
+        {ETerrainBlendStyle::Gravel, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/gravel-inside-3of4-v1-r71-repaired.png",
+         "c0e0b78765fa1615da376335c95f2d80aca1f803d28c2cda3010ae2f7dfe864d",
+         "canonical-generated:gravel-chunks:inside-3of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Paving, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/paving-outer-1of4-v1-r71-raw.png",
+         "f8f6c3247ad468c6e8558111f4e6b8fe96221076402882aa90d4ace40d67a21c",
+         "canonical-generated:paving-courses:outer-1of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Paving, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/paving-edge-2of4-v1-r71-raw.png",
+         "ab9b12faecc9c4494c7eeaeea9eee3553df20c4150bf8945cc1847c6b3734868",
+         "canonical-generated:paving-courses:edge-2of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Paving, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/paving-diagonal-2of4-r71-raw.png",
+         "18a869617280149a2cf28df72b0a9cc6431a8f47cc3e98ea739a9d8f1932a200",
+         "canonical-generated:paving-courses:diagonal-2of4:r71-approved"},
+        {ETerrainBlendStyle::Paving, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/paving-inside-3of4-v1-r71-raw.png",
+         "f91bd0998972534cfe74f55a0491549a944dc336e40deea2079c67392f57298f",
+         "canonical-generated:paving-courses:inside-3of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Sand, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-diagonal-2of4-r71-detailed.png",
+         "b0d911e4e6a0516ca1f4f43e9fe6096a2ca5f017173cdd267c59bf1e91f6ddb1",
+         "canonical-generated:sand-grain:diagonal-2of4:r71-approved"},
+        {ETerrainBlendStyle::Water, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/water-outer-1of4-v1-r71-conservative.png",
+         "8df2999930ab72c856d6d0744483ecb5a69bb7a04ff8e11660f64f98ab858e9b",
+         "canonical-generated:water-ripples:outer-1of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Water, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/water-edge-2of4-v1-r71-conservative.png",
+         "f6de1773292e3063bc58715182767b9cc6d74f984269c98a8267d0fcb127265b",
+         "canonical-generated:water-ripples:edge-2of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Water, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/water-diagonal-2of4-r71-detailed.png",
+         "38f05a9ba431ff65abfa859ee6dab3d400a15d9886776a0500373bcb2a235448",
+         "canonical-generated:water-ripples:diagonal-2of4:r71-approved"},
+        {ETerrainBlendStyle::Water, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/water-inside-3of4-v1-r71-detailed.png",
+         "c0231ccb71e9adf6c8f5eba7470ef994f545d0ea24fea9961571be363dba0e80",
+         "canonical-generated:water-ripples:inside-3of4-v1:r71-approved"}
+    };
+    for(const SReviewedCanonicalMask& mask : masks)
+        if(mask.style == style
+           && topology == QString::fromLatin1(mask.topology))
+            return &mask;
+    return nullptr;
+}
+
+void rotateCornerPatternClockwise(bool pattern[4])
+{
+    const bool before[4] = {
+        pattern[0], pattern[1], pattern[2], pattern[3]
+    };
+    pattern[0] = before[3];
+    pattern[1] = before[0];
+    pattern[2] = before[1];
+    pattern[3] = before[2];
+}
+
+QImage approvedReviewedMask(
     const QSize& size, const STerrainTransitionSignature& preview,
-    qint32 ownerMaterial, qint32 reviewedStyleMaterial, int variation,
-    QString* provenance)
+    qint32 ownerMaterial, ETerrainBlendStyle style,
+    qint32 reviewedStyleMaterial, int variation, QString* provenance)
 {
     if(size.width() <= 0 || size.width() != size.height()
        || reviewedStyleMaterial == 0)
         return {};
     const QVector<qint32> ids = corners(preview);
+    bool requested[4] = {false, false, false, false};
     int ownerCount = 0;
-    int supportCorner = -1;
     for(int corner = 0; corner < ids.size(); ++corner)
     {
-        if(ids.at(corner) == reviewedStyleMaterial)
-            ++ownerCount;
-        else
-            supportCorner = corner;
+        requested[corner] = ids.at(corner) == reviewedStyleMaterial;
+        ownerCount += requested[corner];
     }
-    if(ownerCount != 3 || supportCorner < 0)
+    if(ownerCount <= 0 || ownerCount >= 4)
         return {};
-    static const char* const resources[2] = {
-        ":/terrain_blend_masks/terrain_blend_masks/ice-inside-3of4-v1-r63.png",
-        ":/terrain_blend_masks/terrain_blend_masks/ice-inside-3of4-v2-r63.png"
-    };
-    static const char* const hashes[2] = {
-        "1617f1c7b073aae77ad0d181368e83d68f2b013e612101c4dc3eb257625f247b",
-        "53c17ae64fffa80b182002d4b9e44c54ce381c750329e689eabd65e4ae1aae8d"
-    };
-    const int index = variation & 1;
-    QImage result(QString::fromLatin1(resources[index]));
+    const bool diagonal = ownerCount == 2
+        && requested[0] == requested[2]
+        && requested[1] == requested[3];
+    const QString topology = canonicalMaskTopologyName(
+        ownerCount, diagonal, variation);
+    const SReviewedCanonicalMask* reviewed = reviewedCanonicalMask(
+        style, topology);
+    if(!reviewed)
+        return {};
+    QImage result(QString::fromLatin1(reviewed->resource));
     if(result.isNull() || result.size() != QSize(256, 256)
-       || grayscaleMaskPixelHash(result) != QByteArray(hashes[index]))
+       || grayscaleMaskPixelHash(result)
+            != QByteArray(reviewed->pixelSha256))
         return {};
     result = result.convertToFormat(QImage::Format_Grayscale8);
-    // Reviewed authority is stored in logical grid coordinates with owner at
-    // NW/NE/SE and support at SW. Runtime masks use preview coordinates, whose
-    // Y axis is mirrored at the grid boundary, so the same base mask has its
-    // support at preview NW before any requested quarter-turn is applied.
-    // Transform that exact corner assignment; never score or infer orientation.
+    // Every reviewed asset is stored in the questionnaire's fixed logical
+    // corner layout. Cross the grid/preview boundary once, then rotate only
+    // until the four semantic corner booleans exactly match the request.
     result = result.mirrored(false, true);
-    result = rotateMaskClockwise(result, supportCorner);
+    bool base[4] = {false, false, false, false};
+    if(ownerCount == 1) base[0] = true;
+    else if(ownerCount == 3) base[0] = base[1] = base[2] = true;
+    else if(diagonal) base[0] = base[2] = true;
+    else base[0] = base[1] = true;
+    const bool logical[4] = {base[0], base[1], base[2], base[3]};
+    base[0] = logical[3];
+    base[1] = logical[2];
+    base[2] = logical[1];
+    base[3] = logical[0];
+    int turns = -1;
+    for(int step = 0; step < 4; ++step)
+    {
+        // A diagonal signature repeats after 180 degrees, but its authored
+        // pixels generally do not. Prefer the grid-covariant counter-clockwise
+        // quarter-turn (3 preview-clockwise turns) for the opposite diagonal;
+        // never let the boolean symmetry choose the unrelated +90 artwork.
+        const int candidate = diagonal
+            ? (step == 0 ? 0 : step == 1 ? 3 : step == 2 ? 2 : 1)
+            : step;
+        bool candidatePattern[4] = {
+            base[0], base[1], base[2], base[3]
+        };
+        for(int turn = 0; turn < candidate; ++turn)
+            rotateCornerPatternClockwise(candidatePattern);
+        bool matches = true;
+        for(int corner = 0; corner < 4; ++corner)
+            matches &= candidatePattern[corner] == requested[corner];
+        if(matches)
+        {
+            turns = candidate;
+            break;
+        }
+    }
+    if(turns < 0)
+        return {};
+    result = rotateMaskClockwise(result, turns);
     if(result.size() != size)
         result = result.scaled(size, Qt::IgnoreAspectRatio,
                                Qt::SmoothTransformation)
@@ -822,9 +1051,7 @@ QImage approvedR63IceInsideMask(
     if(ownerMaterial != reviewedStyleMaterial)
         result.invertPixels();
     if(provenance)
-        *provenance = QStringLiteral(
-            "canonical-generated:ice-fracture:inside-3of4-v%1:r63-approved")
-                .arg(index + 1);
+        *provenance = QString::fromLatin1(reviewed->provenance);
     return result;
 }
 
@@ -843,10 +1070,14 @@ QImage canonicalGeneratedOwnershipMask(
         ownerCount += owner[corner];
     }
     if(ownerCount <= 0 || ownerCount >= 4) return {};
-    if(style == ETerrainBlendStyle::Ice && reviewedStyleMaterial != 0)
-        return approvedR63IceInsideMask(
-            size, preview, ownerMaterial, reviewedStyleMaterial,
+    if(reviewedStyleMaterial != 0)
+    {
+        const QImage reviewed = approvedReviewedMask(
+            size, preview, ownerMaterial, style, reviewedStyleMaterial,
             variation, provenance);
+        if(!reviewed.isNull())
+            return reviewed;
+    }
     const bool diagonal = ownerCount == 2
         && owner[0] == owner[2] && owner[1] == owner[3];
     QImage result;
@@ -1265,17 +1496,21 @@ qint32 CTerrainVirtualAtlas::reviewedMaskStyleMaterial(
     const STerrainTransitionSignature& signature,
     ETerrainBlendStyle style, qint32 preferredPaintMaterial) const
 {
-    if(style != ETerrainBlendStyle::Ice)
-        return 0;
     QMap<qint32, int> counts;
     for(qint32 material : corners(signature))
         ++counts[material];
     if(preferredPaintMaterial != 0
-       && counts.value(preferredPaintMaterial) == 3
+       && counts.contains(preferredPaintMaterial)
        && m_materialBlendStyles.value(
               preferredPaintMaterial, ETerrainBlendStyle::Organic)
-              == ETerrainBlendStyle::Ice)
+              == style)
         return preferredPaintMaterial;
+    // R63's Ice inside masks were explicitly approved before paint-material
+    // ownership was threaded through every context-free caller. Preserve that
+    // narrow fallback. Other reviewed families are activated only by the
+    // selected paint material and an exact reviewed style/topology lookup.
+    if(style != ETerrainBlendStyle::Ice)
+        return 0;
     for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
         if(it.value() == 3 && m_materialBlendStyles.value(
                it.key(), ETerrainBlendStyle::Organic)
@@ -1586,7 +1821,7 @@ QImage CTerrainVirtualAtlas::reviewBlendMask(
         result.invertPixels();
     if(provenance && !result.isNull())
     {
-        if(canonicalProvenance.endsWith(QStringLiteral(":r63-approved")))
+        if(canonicalProvenance.endsWith(QStringLiteral("-approved")))
         {
             *provenance = canonicalProvenance;
             return result;

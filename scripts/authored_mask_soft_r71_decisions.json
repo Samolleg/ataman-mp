@@ -1,0 +1,28 @@
+{
+  "schema": "ei-authored-mask-soft-decisions-v1",
+  "checkpoint": "R71-SOFT-MASK-ROTATION-CORRECTED",
+  "authority": "explicit-user-review",
+  "status": "approved",
+  "decisions": {
+    "route-compare-sand-grain-diagonal-2of4": {"answer": "Prefer detailed opacity route"},
+    "route-compare-water-ripples-outer-1of4-v1": {"answer": "Prefer conservative authored repair"},
+    "route-compare-water-ripples-edge-2of4-v1": {"answer": "Prefer conservative authored repair"},
+    "route-compare-water-ripples-diagonal-2of4": {
+      "answer": "Prefer detailed opacity route",
+      "note": "The routes looked polarity-opposed. Verification confirms both assign owner to NW/SE and support to NE/SW; the detailed field is broader but is not an inversion."
+    },
+    "route-compare-water-ripples-inside-3of4-v1": {"answer": "Prefer detailed opacity route"}
+  },
+  "reviewedPresetSha256": "7ca428aeb09a154138e15f69db40087f6ff60feb53d566c6ab95a74a974b9987",
+  "compatiblePresetSha256": [
+    "08b0acf9c9d382f11dd01cc1e82ee93de0f42a1b1e4ec4db8458630a5b76b7b5"
+  ],
+  "reviewedMasks": {
+    "route-compare-sand-grain-diagonal-2of4": {"route": "detailed", "source": "Zone7:423", "pixelSha256": "b0d911e4e6a0516ca1f4f43e9fe6096a2ca5f017173cdd267c59bf1e91f6ddb1"},
+    "route-compare-water-ripples-outer-1of4-v1": {"route": "conservative", "source": "Zone3Obr:235", "pixelSha256": "8df2999930ab72c856d6d0744483ecb5a69bb7a04ff8e11660f64f98ab858e9b"},
+    "route-compare-water-ripples-edge-2of4-v1": {"route": "conservative", "source": "BaseGipat:190", "pixelSha256": "f6de1773292e3063bc58715182767b9cc6d74f984269c98a8267d0fcb127265b"},
+    "route-compare-water-ripples-diagonal-2of4": {"route": "detailed", "source": "Zone1:351", "pixelSha256": "38f05a9ba431ff65abfa859ee6dab3d400a15d9886776a0500373bcb2a235448"},
+    "route-compare-water-ripples-inside-3of4-v1": {"route": "detailed", "source": "Zone3Obr:435", "pixelSha256": "c0231ccb71e9adf6c8f5eba7470ef994f545d0ea24fea9961571be363dba0e80"}
+  },
+  "generationPolicy": "Use only the explicitly selected route for the exact family/topology and reviewed hash. Corner assignment is exact; no orientation scoring or implicit v1/v2 propagation is authorized."
+}

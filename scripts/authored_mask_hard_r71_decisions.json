@@ -1,0 +1,38 @@
+{
+  "schema": "ei-authored-mask-hard-decisions-v1",
+  "checkpoint": "R71-HARD-MASK-ROTATION-CORRECTED",
+  "authority": "explicit-user-review",
+  "status": "approved",
+  "decisions": {
+    "authored-repair-grass-strands-inside-3of4-v1": {"answer": "Approve repaired authored mask"},
+    "authored-repair-stone-fracture-inside-3of4-v1": {"answer": "Approve repaired authored mask"},
+    "authored-repair-gravel-chunks-outer-1of4-v1": {
+      "answer": "Approve repaired authored mask",
+      "note": "The mask is approved. The questionnaire displayed the physical source beside logical-grid outcomes; that presentation defect is fixed separately."
+    },
+    "authored-repair-gravel-chunks-edge-2of4-v1": {"answer": "Approve repaired authored mask"},
+    "authored-repair-gravel-chunks-diagonal-2of4": {"answer": "Approve repaired authored mask"},
+    "authored-repair-gravel-chunks-inside-3of4-v1": {"answer": "Approve repaired authored mask"},
+    "authored-repair-paving-courses-outer-1of4-v1": {"answer": "Prefer raw authored mask"},
+    "authored-repair-paving-courses-edge-2of4-v1": {"answer": "Prefer raw authored mask"},
+    "authored-repair-paving-courses-diagonal-2of4": {"answer": "Prefer raw authored mask"},
+    "authored-repair-paving-courses-inside-3of4-v1": {"answer": "Prefer raw authored mask"}
+  },
+  "reviewedPresetSha256": "7ca428aeb09a154138e15f69db40087f6ff60feb53d566c6ab95a74a974b9987",
+  "compatiblePresetSha256": [
+    "08b0acf9c9d382f11dd01cc1e82ee93de0f42a1b1e4ec4db8458630a5b76b7b5"
+  ],
+  "reviewedMasks": {
+    "authored-repair-grass-strands-inside-3of4-v1": {"route": "repaired", "source": "BaseGipat:205", "pixelSha256": "f6d66a4adbf2b207a56e71052009801a4d3d4f254ab98f73b38ddfdaabb97d57"},
+    "authored-repair-stone-fracture-inside-3of4-v1": {"route": "repaired", "source": "Zone20:76", "pixelSha256": "6daedacfdf19739a485e004812d12edfae348e876fffa3153521b5e9379040ea"},
+    "authored-repair-gravel-chunks-outer-1of4-v1": {"route": "repaired", "source": "bz13h:213", "pixelSha256": "eb23ccb05747b9e97792661c4e59e8c9968cef7373f8cbde8ece1181fdb98fd2"},
+    "authored-repair-gravel-chunks-edge-2of4-v1": {"route": "repaired", "source": "Zone6:425", "pixelSha256": "af124c29a708ac3a4f9160e3c7f894aeea0de4e41ea22b7b8b49a95618cb68be"},
+    "authored-repair-gravel-chunks-diagonal-2of4": {"route": "repaired", "source": "bz14h:224", "pixelSha256": "71bfa4e9f7f7ad04ea5c774a36811c0d31ac549a82eb15df0ec87d8d0504c9d9"},
+    "authored-repair-gravel-chunks-inside-3of4-v1": {"route": "repaired", "source": "bz13h:213", "pixelSha256": "c0e0b78765fa1615da376335c95f2d80aca1f803d28c2cda3010ae2f7dfe864d"},
+    "authored-repair-paving-courses-outer-1of4-v1": {"route": "raw-aligned", "source": "BaseGipat:308", "pixelSha256": "f8f6c3247ad468c6e8558111f4e6b8fe96221076402882aa90d4ace40d67a21c"},
+    "authored-repair-paving-courses-edge-2of4-v1": {"route": "raw-aligned", "source": "BaseGipat:256", "pixelSha256": "ab9b12faecc9c4494c7eeaeea9eee3553df20c4150bf8945cc1847c6b3734868"},
+    "authored-repair-paving-courses-diagonal-2of4": {"route": "raw-aligned", "source": "BaseGipat:317", "pixelSha256": "18a869617280149a2cf28df72b0a9cc6431a8f47cc3e98ea739a9d8f1932a200"},
+    "authored-repair-paving-courses-inside-3of4-v1": {"route": "raw-aligned", "source": "Zone10:260", "pixelSha256": "f91bd0998972534cfe74f55a0491549a944dc336e40deea2079c67392f57298f"}
+  },
+  "generationPolicy": "Use only the exact reviewed style/topology route and pixel hash. Rotate from its fixed logical owner-corner assignment by exact corner matching; never score orientation or extend a v1 decision to v2."
+}

@@ -424,6 +424,7 @@ private slots:
     void canonicalAdjacentAndDiagonalTopologiesStayAnchored();
     void canonicalMasksHaveNoUnanchoredIslandsOrWideFeather();
     void approvedIceInsideMasksDriveRuntimeGeneration();
+    void approvedReviewedMasksDriveRuntimeGeneration();
     void generatedReviewOutcomeUsesRuntimeBlendGenerator();
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
@@ -596,6 +597,196 @@ void TerrainVirtualAtlasTests::approvedIceInsideMasksDriveRuntimeGeneration()
         inverse.invertPixels();
         QCOMPARE(atlas.reviewBlendMask(inside, 2, variation), inverse);
     }
+}
+
+void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
+{
+    struct ReviewedCase
+    {
+        ETerrainBlendStyle style;
+        STerrainTransitionSignature signature;
+        int variation;
+        const char* pixelSha256;
+        const char* provenance;
+    };
+    const ReviewedCase cases[] = {
+        {ETerrainBlendStyle::Grass, signature(1, 2, 2, 2), 0,
+         "7161801ae53a63a4968abc3a39eb6f9971a5c3786d168c9c7644d5a95f442876",
+         "canonical-generated:grass-strands:outer-1of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Grass, signature(1, 1, 2, 2), 0,
+         "be0f21c2e9d01ce56b4003411e63ed70026820725701d460b1466711f2277bca",
+         "canonical-generated:grass-strands:edge-2of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Grass, signature(1, 2, 1, 2), 0,
+         "39a4bd49aa72525cb955d44e797235cf102d549ea5b1aec995fa6095dc457945",
+         "canonical-generated:grass-strands:diagonal-2of4:r44-approved"},
+        {ETerrainBlendStyle::Soil, signature(1, 2, 2, 2), 1,
+         "f9ea6dde4e3cd8095d79d4650aaccf0f70cae20991dccc9a5fa8fdc9a89f08df",
+         "canonical-generated:soil-mottle:outer-1of4-v2:r44-approved"},
+        {ETerrainBlendStyle::Soil, signature(1, 1, 2, 2), 1,
+         "168f98d2d6b6ab53598cb30622b784aaf7a0eadb8815968e238b2a19ec7f7bd3",
+         "canonical-generated:soil-mottle:edge-2of4-v2:r44-approved"},
+        {ETerrainBlendStyle::Soil, signature(1, 1, 1, 2), 0,
+         "1953ce4e0062f23052e59a9fc6ae6e8d9324345c2caba7110823bf624a30e998",
+         "canonical-generated:soil-mottle:inside-3of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Stone, signature(1, 2, 2, 2), 0,
+         "2c107b3db7f37268082b952e2038419aa4b8371a28d28abbbb8cbd89a832505e",
+         "canonical-generated:stone-fracture:outer-1of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Stone, signature(1, 1, 2, 2), 0,
+         "3555e3e95a387d04d219e71cd0de3e8bde69d4bf369cc566f007ee66e83a7090",
+         "canonical-generated:stone-fracture:edge-2of4-v1:r44-approved"},
+        {ETerrainBlendStyle::Stone, signature(1, 2, 1, 2), 0,
+         "eea78b03896e90d1137cc79f7991f17912248ab5480e55415bc5e0fcd502a002",
+         "canonical-generated:stone-fracture:diagonal-2of4:r44-approved"},
+        {ETerrainBlendStyle::Sand, signature(1, 2, 2, 2), 0,
+         "01cb028bd15bec4642750ea35825423aa1b54b1cbc98275975071fb5399210b9",
+         "canonical-generated:sand-grain:outer-1of4-v1:r47-approved"},
+        {ETerrainBlendStyle::Sand, signature(1, 1, 2, 2), 1,
+         "0f0b55bce8ecb96963d467897c5dcdec71a09af343545d6350b8e965d6ea0ddb",
+         "canonical-generated:sand-grain:edge-2of4-v2:r47-approved"},
+        {ETerrainBlendStyle::Sand, signature(1, 1, 1, 2), 0,
+         "581cb3c7c4ad785da566f21eeae319ad7c2e2a24e4695f2df4658635062dad56",
+         "canonical-generated:sand-grain:inside-3of4-v1:r47-approved"},
+        {ETerrainBlendStyle::Snow, signature(1, 2, 2, 2), 0,
+         "b4eeffed78157e662b508d66eb8e675d4b98bfe55ee6d9d1135c4a2c97e40eaf",
+         "canonical-generated:snow-clumps:outer-1of4-v1:r53-approved"},
+        {ETerrainBlendStyle::Snow, signature(1, 2, 2, 2), 1,
+         "3970d79ffae6c1d3faccac4e839135864cf44879d423d4fbcf5f373e09416c72",
+         "canonical-generated:snow-clumps:outer-1of4-v2:r53-approved"},
+        {ETerrainBlendStyle::Snow, signature(1, 1, 2, 2), 0,
+         "cdc9c3f16dccdcd88cf952dbf8c239e510ff1372148eb9a47193d3d0d3972a2e",
+         "canonical-generated:snow-clumps:edge-2of4-v1:r53-approved"},
+        {ETerrainBlendStyle::Snow, signature(1, 1, 2, 2), 1,
+         "d8971e2ac0b5ee39d5b86ed174995166fc7e1b85658846fb41016e8bc568b9f8",
+         "canonical-generated:snow-clumps:edge-2of4-v2:r53-approved"},
+        {ETerrainBlendStyle::Snow, signature(1, 2, 1, 2), 0,
+         "07f01530b7bd83018cc04831ba1e1a7dd7da9209d36c6e546987626188732970",
+         "canonical-generated:snow-clumps:diagonal-2of4:r54-approved"},
+        {ETerrainBlendStyle::Snow, signature(1, 1, 1, 2), 0,
+         "b576e2c9ce1b055325b715aa51a8e53aed9bccf98af9a2ed4ea007ed597e9ed3",
+         "canonical-generated:snow-clumps:inside-3of4-v1:r54-approved"},
+        {ETerrainBlendStyle::Snow, signature(1, 1, 1, 2), 1,
+         "b576e2c9ce1b055325b715aa51a8e53aed9bccf98af9a2ed4ea007ed597e9ed3",
+         "canonical-generated:snow-clumps:inside-3of4-v2:r54-approved"},
+        {ETerrainBlendStyle::Ice, signature(1, 2, 2, 2), 0,
+         "740a2e823540ca51db9f3606d612cef30c0aac7a6cd513dfb53101e769a576ae",
+         "canonical-generated:ice-fracture:outer-1of4-v1:r53-approved"},
+        {ETerrainBlendStyle::Ice, signature(1, 2, 2, 2), 1,
+         "845be2dce324f8a209a2f5cc50fb869ce1c75da30b0dcce755337aa2e148225f",
+         "canonical-generated:ice-fracture:outer-1of4-v2:r53-approved"},
+        {ETerrainBlendStyle::Ice, signature(1, 1, 2, 2), 0,
+         "3878111591a0787ca4e723dd6b0be7455ba9dcd986a3cfefc5aaf1059d3e8f48",
+         "canonical-generated:ice-fracture:edge-2of4-v1:r53-approved"},
+        {ETerrainBlendStyle::Ice, signature(1, 1, 2, 2), 1,
+         "14f4e15a6cf02f2f93ef09ebae3590e050a53fa5455aaaae403ceb5d6bd289f1",
+         "canonical-generated:ice-fracture:edge-2of4-v2:r53-approved"},
+        {ETerrainBlendStyle::Ice, signature(1, 2, 1, 2), 0,
+         "0b00ef5bf181d9741ab982a8cd4b225338d451516274343354158f38447c9183",
+         "canonical-generated:ice-fracture:diagonal-2of4:r54-approved"},
+        {ETerrainBlendStyle::Grass, signature(1, 1, 1, 2), 0,
+         "f6d66a4adbf2b207a56e71052009801a4d3d4f254ab98f73b38ddfdaabb97d57",
+         "canonical-generated:grass-strands:inside-3of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Stone, signature(1, 1, 1, 2), 0,
+         "6daedacfdf19739a485e004812d12edfae348e876fffa3153521b5e9379040ea",
+         "canonical-generated:stone-fracture:inside-3of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Gravel, signature(1, 2, 2, 2), 0,
+         "eb23ccb05747b9e97792661c4e59e8c9968cef7373f8cbde8ece1181fdb98fd2",
+         "canonical-generated:gravel-chunks:outer-1of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Gravel, signature(1, 1, 2, 2), 0,
+         "af124c29a708ac3a4f9160e3c7f894aeea0de4e41ea22b7b8b49a95618cb68be",
+         "canonical-generated:gravel-chunks:edge-2of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Gravel, signature(1, 2, 1, 2), 0,
+         "71bfa4e9f7f7ad04ea5c774a36811c0d31ac549a82eb15df0ec87d8d0504c9d9",
+         "canonical-generated:gravel-chunks:diagonal-2of4:r71-approved"},
+        {ETerrainBlendStyle::Gravel, signature(1, 1, 1, 2), 0,
+         "c0e0b78765fa1615da376335c95f2d80aca1f803d28c2cda3010ae2f7dfe864d",
+         "canonical-generated:gravel-chunks:inside-3of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Paving, signature(1, 2, 2, 2), 0,
+         "f8f6c3247ad468c6e8558111f4e6b8fe96221076402882aa90d4ace40d67a21c",
+         "canonical-generated:paving-courses:outer-1of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Paving, signature(1, 1, 2, 2), 0,
+         "ab9b12faecc9c4494c7eeaeea9eee3553df20c4150bf8945cc1847c6b3734868",
+         "canonical-generated:paving-courses:edge-2of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Paving, signature(1, 2, 1, 2), 0,
+         "18a869617280149a2cf28df72b0a9cc6431a8f47cc3e98ea739a9d8f1932a200",
+         "canonical-generated:paving-courses:diagonal-2of4:r71-approved"},
+        {ETerrainBlendStyle::Paving, signature(1, 1, 1, 2), 0,
+         "f91bd0998972534cfe74f55a0491549a944dc336e40deea2079c67392f57298f",
+         "canonical-generated:paving-courses:inside-3of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Sand, signature(1, 2, 1, 2), 0,
+         "b0d911e4e6a0516ca1f4f43e9fe6096a2ca5f017173cdd267c59bf1e91f6ddb1",
+         "canonical-generated:sand-grain:diagonal-2of4:r71-approved"},
+        {ETerrainBlendStyle::Water, signature(1, 2, 2, 2), 0,
+         "8df2999930ab72c856d6d0744483ecb5a69bb7a04ff8e11660f64f98ab858e9b",
+         "canonical-generated:water-ripples:outer-1of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Water, signature(1, 1, 2, 2), 0,
+         "f6de1773292e3063bc58715182767b9cc6d74f984269c98a8267d0fcb127265b",
+         "canonical-generated:water-ripples:edge-2of4-v1:r71-approved"},
+        {ETerrainBlendStyle::Water, signature(1, 2, 1, 2), 0,
+         "38f05a9ba431ff65abfa859ee6dab3d400a15d9886776a0500373bcb2a235448",
+         "canonical-generated:water-ripples:diagonal-2of4:r71-approved"},
+        {ETerrainBlendStyle::Water, signature(1, 1, 1, 2), 0,
+         "c0231ccb71e9adf6c8f5eba7470ef994f545d0ea24fea9961571be363dba0e80",
+         "canonical-generated:water-ripples:inside-3of4-v1:r71-approved"}
+    };
+
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    images << QImage(256, 256, QImage::Format_RGBA8888)
+           << QImage(256, 256, QImage::Format_RGBA8888);
+    images[0].fill(QColor(35, 90, 155));
+    images[1].fill(QColor(185, 145, 75));
+    for(int material = 1; material <= 2; ++material)
+    {
+        STerrainTransitionVariant uniform;
+        uniform.signature = signature(material, material, material, material);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(material - 1);
+        uniform.packedTile = packed.encode();
+        catalog.addVariant(uniform);
+    }
+
+    for(const ReviewedCase& item : cases)
+    {
+        const QMap<qint32, ETerrainBlendStyle> styles = {
+            {1, item.style}, {2, ETerrainBlendStyle::Organic}
+        };
+        CTestTerrainVirtualAtlas atlas(catalog, images, 0x71u, {}, styles);
+        QString provenance;
+        const QImage mask = atlas.reviewBlendMask(
+            item.signature, 1, item.variation, &provenance, 1);
+        QVERIFY2(!mask.isNull(), item.provenance);
+        QCOMPARE(grayscalePixelHash(mask.mirrored(false, true)),
+                 QByteArray(item.pixelSha256));
+        QCOMPARE(provenance, QString::fromLatin1(item.provenance));
+
+        QString resultProvenance;
+        CValidationReport report;
+        const QImage result = atlas.reviewGeneratedBlend(
+            item.signature, item.variation, &resultProvenance, &report, 1);
+        QVERIFY2(!result.isNull(), qPrintable(report.toText()));
+        QCOMPARE(resultProvenance, provenance);
+
+        const STerrainTransitionSignature rotated =
+            CTerrainTransitionCatalog::rotated(item.signature, 1);
+        const QImage rotatedMask = atlas.reviewBlendMask(
+            rotated, 1, item.variation, nullptr, 1);
+        QCOMPARE(rotatedMask, mask.transformed(
+            QTransform().rotate(-90.0), Qt::FastTransformation));
+        QImage inverse = mask;
+        inverse.invertPixels();
+        QCOMPARE(atlas.reviewBlendMask(
+            item.signature, 2, item.variation, nullptr, 1), inverse);
+    }
+
+    const QMap<qint32, ETerrainBlendStyle> gravelStyles = {
+        {1, ETerrainBlendStyle::Gravel}, {2, ETerrainBlendStyle::Organic}
+    };
+    CTestTerrainVirtualAtlas gravel(catalog, images, 0x71u, {}, gravelStyles);
+    QString unreviewedProvenance;
+    const QImage unreviewed = gravel.reviewBlendMask(
+        signature(1, 2, 2, 2), 1, 1, &unreviewedProvenance, 1);
+    QVERIFY(!unreviewed.isNull());
+    QVERIFY(!unreviewedProvenance.endsWith(QStringLiteral(":r71-approved")));
 }
 
 void TerrainVirtualAtlasTests::virtualFieldPaintIsUnboundedByAtlas()
@@ -1772,7 +1963,8 @@ void TerrainVirtualAtlasTests::paintedMaterialOwnsGeneratedMaskFamily()
         requested, 1, 0, &reviewProvenance, 1);
     QVERIFY(!reviewed.isNull());
     QCOMPARE(reviewProvenance,
-             QStringLiteral("canonical-generated:soil-mottle:inside-3of4-v1"));
+             QStringLiteral(
+                 "canonical-generated:soil-mottle:inside-3of4-v1:r44-approved"));
 
     const STerrainVirtualTile resolved = atlas.resolve(
         requested, 7, 11, nullptr, 1);

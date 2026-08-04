@@ -492,6 +492,11 @@ def align_runtime_review_mask_exact(
     }
 
 
+def align_runtime_review_source_exact(source: Image.Image) -> Image.Image:
+    """Put a physical authored preview in the same logical grid as its mask."""
+    return ImageOps.flip(source.convert("RGB"))
+
+
 def _save(image: Image.Image, path: Path) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path, "PNG", optimize=True)
@@ -629,10 +634,14 @@ def render(review: Path, output: Path,
             repair_authored_mask(aligned_mask, logical[1], seed))
         key = f"authored-repair-{_slug(logical[0])}-{_slug(logical[1])}"
         prefix = f"{number:02d}-{_slug(logical[0])}-{_slug(logical[1])}"
-        source_tile = _cell(
+        physical_source_tile = _cell(
             review, selected_row["source_example_sheet"],
             int(selected_row["row"]), int(selected_row["column"]), "RGB")
+        source_tile = align_runtime_review_source_exact(physical_source_tile)
         files = {
+            "physicalAuthoredSource": _save(
+                physical_source_tile,
+                images / f"{prefix}-physical-source.png"),
             "authoredSource": _save(source_tile, images / f"{prefix}-source.png"),
             "rawMask": _save(
                 extracted_mask, images / f"{prefix}-raw-mask.png"),
@@ -730,7 +739,8 @@ def render(review: Path, output: Path,
 <p class="muted">Owner corner assignment: <strong>{html.escape(owner_corner_text)}</strong> · selected authored source {html.escape(selected_row['provenance'])} from {len(unique_candidates)} distinct candidates · {html.escape(alignment_summary)} · conservative source score {selected_score:.3f}</p>
 <p class="metric">{html.escape(metric_text)}</p>
 <div class="evidence-grid">
-<figure><img src="{files['authoredSource']['file']}" alt="Authored transition tile"><figcaption>Authored transition tile<br><strong>{html.escape(selected_row['provenance'])}</strong></figcaption></figure>
+<figure><img src="{files['physicalAuthoredSource']['file']}" alt="Physical authored transition tile"><figcaption>Physical authored preview<br><strong>{html.escape(selected_row['provenance'])}</strong></figcaption></figure>
+<figure><img src="{files['authoredSource']['file']}" alt="Grid-aligned authored transition tile"><figcaption><strong>Grid-aligned authored transition</strong><br>same fixed Y mirror as the mask</figcaption></figure>
 <figure><img src="{files['rawMask']['file']}" alt="Raw extracted authored mask"><figcaption>Raw extracted mask</figcaption></figure>
 <figure><img src="{files['alignedMask']['file']}" alt="Legally aligned authored mask"><figcaption>Aligned authored mask<br><strong>{html.escape(alignment_label)}</strong></figcaption></figure>
 <figure><img src="{files['repairedMask']['file']}" alt="{html.escape(repair_caption)}"><figcaption><strong>{html.escape(repair_caption)}</strong></figcaption></figure>

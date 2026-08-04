@@ -71,6 +71,20 @@ class SoftAuthoredMaskPilotTests(unittest.TestCase):
             for item in payload["decisions"].values()))
         self.assertIn("mismatched effective detail", payload["reviewCaveat"])
 
+    def test_r71_soft_decisions_record_all_five_explicit_routes(self) -> None:
+        payload = json.loads(Path(__file__).with_name(
+            "authored_mask_soft_r71_decisions.json").read_text(
+                encoding="utf-8"))
+        decisions = payload["decisions"]
+        self.assertEqual(len(decisions), 5)
+        self.assertEqual(set(decisions), set(payload["reviewedMasks"]))
+        self.assertEqual(
+            decisions["route-compare-water-ripples-diagonal-2of4"]["answer"],
+            "Prefer detailed opacity route")
+        self.assertIn(
+            "not an inversion",
+            decisions["route-compare-water-ripples-diagonal-2of4"]["note"])
+
     def test_soft_reconstruction_retains_intermediate_painterly_ownership(self) -> None:
         transition, expected = painterly_fixture()
         reconstructed, metrics = reconstruct_soft_ownership(
