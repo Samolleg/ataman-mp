@@ -8405,6 +8405,7 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
         m_unitAppearanceProgressTotal = unresolved.size();
         m_unitAppearanceProgressCompleted = 0;
         m_unitAppearanceCacheHits = 0;
+        m_unitAppearanceSharedPreparations = 0;
         m_unitAppearanceProgressPending = true;
         if(m_unitVisualPreparationTimer && !m_unitVisualPreparationTimer->isActive())
             m_unitVisualPreparationTimer->start();
@@ -8438,11 +8439,12 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
                                       m_unitAppearanceLastLoggedCompleted))
     {
         ei::log(eLogInfo, QString("Full character visual progress completed:%1 total:%2 "
-                                 "batchPending:%3 watcherRunning:%4 cacheHits:%5")
+                                 "batchPending:%3 watcherRunning:%4 cacheHits:%5 sharedPreparations:%6")
                 .arg(m_unitAppearanceProgressCompleted).arg(m_unitAppearanceProgressTotal)
                 .arg(m_unitAppearanceBatchPending)
                 .arg(m_unitAppearanceWatcher && m_unitAppearanceWatcher->isRunning())
-                .arg(m_unitAppearanceCacheHits));
+                .arg(m_unitAppearanceCacheHits)
+                .arg(m_unitAppearanceSharedPreparations));
         m_unitAppearanceLastLoggedCompleted = m_unitAppearanceProgressCompleted;
     }
     if(m_pProgress && m_pProgress->isVisible())
@@ -8453,8 +8455,10 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
         if(m_unitAppearanceProgressTotal > 0)
         {
             m_unitAppearanceProgressCompleted = m_unitAppearanceProgressTotal;
-            ei::log(eLogInfo, QString("Full character visual preparation complete total:%1 appearanceCacheHits:%2")
+            ei::log(eLogInfo, QString("Full character visual preparation complete total:%1 "
+                                     "appearanceCacheHits:%2 sharedPreparations:%3")
                     .arg(m_unitAppearanceProgressTotal).arg(m_unitAppearanceCacheHits)
+                    .arg(m_unitAppearanceSharedPreparations)
                     );
             const ei::SVisualAssemblyCacheTelemetry assembly
                 = ei::visualAssemblyCacheTelemetry();
@@ -8470,6 +8474,7 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
             m_unitAppearanceProgressTotal = 0;
             m_unitAppearanceProgressCompleted = 0;
             m_unitAppearanceCacheHits = 0;
+            m_unitAppearanceSharedPreparations = 0;
             m_unitAppearanceLastLoggedCompleted = -1;
             m_unitAppearanceProgressPending = false;
             if(m_unitVisualPreparationTimer)
@@ -8549,6 +8554,7 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
             const QVector<SUnitAppearancePreparationResult> results
                 = m_unitAppearanceWatcher->result();
             int batchCacheHits = 0;
+            int batchSharedPreparations = 0;
             for(const SUnitAppearancePreparationResult& result : results)
             {
                 if(result.cacheHit)
@@ -8556,14 +8562,20 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
                     ++m_unitAppearanceCacheHits;
                     ++batchCacheHits;
                 }
+                if(result.sharedPreparation)
+                {
+                    ++m_unitAppearanceSharedPreparations;
+                    ++batchSharedPreparations;
+                }
                 const QPointer<CUnit> unit = m_unitAppearanceTargets.value(result.unitKey);
                 if(unit)
                     unit->acceptAppearancePreparation(result);
                 m_unitAppearanceTargets.remove(result.unitKey);
             }
             m_unitAppearanceBatchPending = false;
-            ei::log(eLogInfo, QString("Character appearance batch accepted results:%1 cacheHits:%2")
-                    .arg(results.size()).arg(batchCacheHits));
+            ei::log(eLogInfo, QString("Character appearance batch accepted results:%1 "
+                                     "cacheHits:%2 sharedPreparations:%3")
+                    .arg(results.size()).arg(batchCacheHits).arg(batchSharedPreparations));
             update();
         });
     }

@@ -72,6 +72,7 @@ struct SUnitAppearancePreparationResult
     QJsonObject appearance;
     QString diagnostic;
     bool cacheHit{false};
+    bool sharedPreparation{false};
 };
 
 QString unitAppearancePreparationCacheKey(const SUnitAppearancePreparationTask& task);

@@ -736,6 +736,7 @@ private:
     int m_unitAppearanceProgressTotal{0};
     int m_unitAppearanceProgressCompleted{0};
     int m_unitAppearanceCacheHits{0};
+    int m_unitAppearanceSharedPreparations{0};
     int m_unitAppearanceLastLoggedCompleted{-1};
     bool m_unitAppearanceProgressPending{false};
     bool m_unitVisualPreparationSuspended{false};

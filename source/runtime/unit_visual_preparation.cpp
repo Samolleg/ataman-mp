@@ -240,6 +240,7 @@ QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
     const QString effectiveCacheDirectory = cacheDirectory.isNull()
         ? unitAppearancePreparationCacheDirectory() : cacheDirectory;
     const bool cacheReady = prepareCacheDirectory(effectiveCacheDirectory);
+    QHash<QString, SUnitAppearancePreparationResult> preparedInBatch;
     for(const SUnitAppearancePreparationTask& task : tasks)
     {
         SUnitAppearancePreparationResult result;
@@ -248,9 +249,20 @@ QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
         result.visualRevision = task.visualRevision;
         const QString cacheKey = unitAppearancePreparationCacheKey(task);
         const bool cacheable = canCacheTask(task);
+        if(cacheable && preparedInBatch.contains(cacheKey))
+        {
+            result = preparedInBatch.value(cacheKey);
+            result.unitKey = task.unitKey;
+            result.databaseGeneration = task.databaseGeneration;
+            result.visualRevision = task.visualRevision;
+            result.sharedPreparation = true;
+            results.append(result);
+            continue;
+        }
         if(cacheable && cacheReady
                 && readCacheEntry(effectiveCacheDirectory, cacheKey, &result))
         {
+            preparedInBatch.insert(cacheKey, result);
             results.append(result);
             continue;
         }
@@ -265,6 +277,8 @@ QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
             result.providerResult = resolver->resolve(task.request, &result.appearance);
         if(cacheable && cacheReady)
             writeCacheEntry(effectiveCacheDirectory, cacheKey, result);
+        if(cacheable)
+            preparedInBatch.insert(cacheKey, result);
         results.append(result);
     }
     return results;

@@ -109,6 +109,7 @@ private slots:
     void boundsColdVisualResolutionDuringCameraMovement();
     void resolvesAppearancePreparationWithoutSceneObjects();
     void cachesPreparedAppearanceByContentIdentity();
+    void sharesDatabaseAppearancePreparationAcrossEquivalentUnits();
     void keepsAppearanceProgressVisibleBetweenWorkerBatches();
     void pumpsIncompleteIdleVisualPreparation();
     void retainsAppearanceBatchOwnershipUntilResultsAreConsumed();
@@ -657,6 +658,60 @@ void UnitAnimationTests::cachesPreparedAppearanceByContentIdentity()
         = resolveUnitAppearanceTasks({task}, cache.path());
     QCOMPARE(changedUnit.size(), 1);
     QVERIFY(!changedUnit.first().cacheHit);
+}
+
+void UnitAnimationTests::sharesDatabaseAppearancePreparationAcrossEquivalentUnits()
+{
+    QTemporaryDir cache;
+    QVERIFY(cache.isValid());
+    QSharedPointer<ei::SProfileDatabaseSnapshot> database(new ei::SProfileDatabaseSnapshot);
+    database->cacheKey = QStringLiteral("database-content-shared");
+    ei::SRaceModelDatabaseRecord race;
+    race.name = QStringLiteral("Human Male");
+    race.model = QStringLiteral("unhuma");
+    race.primaryTextures << QStringLiteral("unhumaskin_00");
+    database->raceModels.insert(race.name.toLower(), race);
+    ei::SMonsterDatabaseRecord monster;
+    monster.name = QStringLiteral("997569");
+    monster.baseRace = race.name;
+    monster.skinIndex = 0;
+    database->monsters.insert(monster.name.toLower(), monster);
+
+    SUnitAppearancePreparationTask first;
+    first.unitKey = 101;
+    first.databaseGeneration = 7;
+    first.visualRevision = 3;
+    first.providerId = QStringLiteral("jmv.v1");
+    first.database = database;
+    first.request.profileId = QStringLiteral("jmv");
+    first.request.runtimeManifestId = QStringLiteral("jmv-runtime");
+    first.request.prototype = QStringLiteral("997569");
+    first.request.parentTemplate = QStringLiteral("stale-parent-a");
+    first.request.model = QStringLiteral("stale-model-a");
+    first.request.primaryTexture = QStringLiteral("stale-texture-a");
+    first.request.bodyParts = QStringList() << QStringLiteral("stale-part-a");
+    first.request.dataSource = EUnitVisualDataSource::ProfileDatabase;
+
+    SUnitAppearancePreparationTask second = first;
+    second.unitKey = 202;
+    second.databaseGeneration = 8;
+    second.visualRevision = 4;
+
+    QCOMPARE(unitAppearancePreparationCacheKey(first),
+             unitAppearancePreparationCacheKey(second));
+    const QVector<SUnitAppearancePreparationResult> shared
+        = resolveUnitAppearanceTasks({first, second}, QStringLiteral(""));
+    QCOMPARE(shared.size(), 2);
+    QVERIFY(shared.at(0).providerResult.success);
+    QCOMPARE(shared.at(1).appearance, shared.at(0).appearance);
+    QVERIFY(shared.at(1).sharedPreparation);
+    QCOMPARE(shared.at(1).unitKey, quintptr(202));
+    QCOMPARE(shared.at(1).databaseGeneration, quint64(8));
+    QCOMPARE(shared.at(1).visualRevision, quint64(4));
+
+    second.request.model = QStringLiteral("different-authored-assembly");
+    QVERIFY(unitAppearancePreparationCacheKey(first)
+            != unitAppearancePreparationCacheKey(second));
 }
 
 void UnitAnimationTests::keepsAppearanceProgressVisibleBetweenWorkerBatches()
