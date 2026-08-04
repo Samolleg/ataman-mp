@@ -215,7 +215,8 @@ public:
                                        CValidationReport* report = nullptr,
                                        const QVector<quint16>& pinnedPackedTiles = {},
                                        const QVector<qint32>& preferredCellTypes = {},
-                                       const QVector<quint16>& preferredPackedCells = {});
+                                       const QVector<quint16>& preferredPackedCells = {},
+                                       const QVector<qint32>& preferredPaintMaterials = {});
 
     static QImage composePage(const QVector<QImage>& tiles, int firstTile,
                               int tileSize);

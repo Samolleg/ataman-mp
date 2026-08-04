@@ -141,7 +141,8 @@ public:
         CValidationReport* report = nullptr,
         const QVector<quint16>& pinnedPackedTiles = {},
         const QVector<qint32>& preferredCellTypes = {},
-        const QVector<quint16>& preferredPackedCells = {})
+        const QVector<quint16>& preferredPackedCells = {},
+        const QVector<qint32>& preferredPaintMaterials = {})
     {
         QVector<qint32> cellTypes = preferredCellTypes;
         if(cellTypes.isEmpty())
@@ -157,7 +158,8 @@ public:
         return CTerrainVirtualAtlas::finalize(
             field, sourceNamespace, capacityLimit,
             sourceTileTypes.isEmpty() ? m_testSourceTypes : sourceTileTypes,
-            report, pinnedPackedTiles, cellTypes, preferredPackedCells);
+            report, pinnedPackedTiles, cellTypes, preferredPackedCells,
+            preferredPaintMaterials);
     }
 
 private:
@@ -425,6 +427,8 @@ private slots:
     void canonicalMasksHaveNoUnanchoredIslandsOrWideFeather();
     void approvedIceInsideMasksDriveRuntimeGeneration();
     void approvedReviewedMasksDriveRuntimeGeneration();
+    void finalizationCarriesPaintMaterialIntoReviewedMaskSelection();
+    void reviewedTopologyNeverFallsBackToUnapprovedVariation();
     void generatedReviewOutcomeUsesRuntimeBlendGenerator();
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
@@ -787,6 +791,76 @@ void TerrainVirtualAtlasTests::approvedReviewedMasksDriveRuntimeGeneration()
         signature(1, 2, 2, 2), 1, 1, &unreviewedProvenance, 1);
     QVERIFY(!unreviewed.isNull());
     QVERIFY(!unreviewedProvenance.endsWith(QStringLiteral(":r71-approved")));
+}
+
+void TerrainVirtualAtlasTests::finalizationCarriesPaintMaterialIntoReviewedMaskSelection()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    images << solid(qRgb(90, 75, 55)) << solid(qRgb(35, 110, 45));
+    for(int material = 1; material <= 2; ++material)
+    {
+        STerrainTransitionVariant uniform;
+        uniform.signature = signature(material, material, material, material);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(material - 1);
+        uniform.packedTile = packed.encode();
+        catalog.addVariant(uniform);
+    }
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Gravel}, {2, ETerrainBlendStyle::Grass}
+    };
+    CTestTerrainVirtualAtlas atlas(catalog, images, 0x72u, {}, styles);
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1));
+    field.setMaterial(0, 0, 1);
+    field.setMaterial(1, 0, 2);
+    field.setMaterial(1, 1, 2);
+    field.setMaterial(0, 1, 2);
+
+    CValidationReport report;
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("FinalizationPaintOwner"), 512, {}, &report,
+        {}, {}, {}, {1});
+    QVERIFY2(finalized.success, qPrintable(report.toText()));
+    QCOMPARE(finalized.tiles.size(), 1);
+    QVERIFY2(finalized.tiles.front().blendProvenance.endsWith(
+                 QStringLiteral(":r71-approved")),
+             qPrintable(finalized.tiles.front().blendProvenance));
+}
+
+void TerrainVirtualAtlasTests::reviewedTopologyNeverFallsBackToUnapprovedVariation()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    images << solid(qRgb(90, 75, 55)) << solid(qRgb(35, 110, 45));
+    for(int material = 1; material <= 2; ++material)
+    {
+        STerrainTransitionVariant uniform;
+        uniform.signature = signature(material, material, material, material);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(material - 1);
+        uniform.packedTile = packed.encode();
+        catalog.addVariant(uniform);
+    }
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Gravel}, {2, ETerrainBlendStyle::Grass}
+    };
+    CTestTerrainVirtualAtlas atlas(catalog, images, 0x72u, {}, styles);
+    const STerrainTransitionSignature outer = signature(1, 2, 2, 2);
+    QSet<QString> provenance;
+    for(int y = 0; y < 16; ++y)
+        for(int x = 0; x < 16; ++x)
+        {
+            CValidationReport report;
+            const STerrainVirtualTile tile = atlas.resolve(
+                outer, x, y, &report, 1);
+            QVERIFY2(tile.generatedIndex >= 0, qPrintable(report.toText()));
+            provenance.insert(atlas.generatedTiles().at(
+                tile.generatedIndex).blendProvenance);
+        }
+    QCOMPARE(provenance, QSet<QString>({QStringLiteral(
+        "canonical-generated:gravel-chunks:outer-1of4-v1:r71-approved")}));
 }
 
 void TerrainVirtualAtlasTests::virtualFieldPaintIsUnboundedByAtlas()

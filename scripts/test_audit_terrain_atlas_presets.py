@@ -2335,8 +2335,9 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
         self.assertEqual(13, zone7["slots"][329]["signature"]["southEast"])
         self.assertEqual(17, zone7["slots"][329]["signature"]["southWest"])
         self.assertEqual(13, zone7["slots"][335]["signature"]["southEast"])
-        self.assertEqual(17, zone7["slots"][480]["signature"]["southWest"])
-        self.assertNotIn(16, {family["id"] for family in zone7["families"]})
+        self.assertEqual(21, zone7["slots"][480]["signature"]["southWest"])
+        self.assertIn(16, {family["id"] for family in zone7["families"]})
+        self.assertIn(21, {family["id"] for family in zone7["families"]})
         self.assertNotIn(22, {family["id"] for family in zone7["families"]})
 
         zone19 = reviewed_fragment_corrections(recipe("Zone19"))
@@ -2774,7 +2775,7 @@ class ReviewDocumentTests(unittest.TestCase):
             corner("Zone7", 329, 0), corner("Zone7", 329, 2),
             corner("Zone7", 329, 3)))
         self.assertEqual(13, corner("Zone7", 335, 2))
-        self.assertEqual(17, corner("Zone7", 480, 3))
+        self.assertEqual(21, corner("Zone7", 480, 3))
         self.assertEqual(3, corner("Zone13", 164, 0))
         self.assertEqual(4, corner("Zone13", 164, 1))
         self.assertEqual(
@@ -2787,7 +2788,8 @@ class ReviewDocumentTests(unittest.TestCase):
         }
         self.assertNotIn(19, family_ids["Zone6"])
         self.assertNotIn(19, family_ids["Zone6_2"])
-        self.assertNotIn(16, family_ids["Zone7"])
+        self.assertIn(16, family_ids["Zone7"])
+        self.assertIn(21, family_ids["Zone7"])
         self.assertNotIn(22, family_ids["Zone7"])
 
     def test_shipped_catalog_contains_exact_r80_corner_decisions(self) -> None:
@@ -3183,7 +3185,51 @@ class ReviewDocumentTests(unittest.TestCase):
                                 family_name,
                                 names[payload[slot * 4 + corner]])
                             checked += 1
-        self.assertEqual(474, checked)
+        self.assertEqual(492, checked)
+
+    def test_r89_preserves_distinct_zone7_ground_families(self) -> None:
+        """R89 renames slot405 without swallowing Dirt or Trampled fragments."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        zone7 = presets["zone7"]
+        names = {int(family["id"]): family["name"]
+                 for family in zone7["families"]}
+        payload = base64.b64decode(zone7["signaturesBase64"])
+        self.assertEqual("Ground / Dirt", names[16])
+        self.assertEqual("Ground / Brownish", names[17])
+        self.assertEqual("Ground / Trampled", names[21])
+        self.assertEqual(16, payload[257 * 4 + 3])
+        self.assertEqual(21, payload[335 * 4 + 3])
+        self.assertEqual(
+            21, payload[480 * 4 + 3],
+            "provisional Dirt must retain its previous Trampled meaning")
+        self.assertEqual({17}, set(payload[405 * 4:405 * 4 + 4]))
+
+        bz16h = presets["bz16h"]
+        bz_names = {int(family["id"]): family["name"]
+                    for family in bz16h["families"]}
+        bz_payload = base64.b64decode(bz16h["signaturesBase64"])
+        self.assertEqual("Ground / Red", bz_names[bz_payload[169 * 4]])
+        self.assertEqual(
+            ["Ground / Plant soil"] * 3,
+            [bz_names[value] for value in bz_payload[169 * 4 + 1:169 * 4 + 4]],
+            "unreviewable R89 defaults are unresolved, not confirmations")
+
+    def test_questionnaire_layout_contract_is_locked(self) -> None:
+        policy = (Path(__file__).resolve().parent.parent / "docs" /
+                  "TERRAIN_ATLAS_REVIEW.md").read_text(encoding="utf-8")
+        for required in (
+                "identical texture/pixel scale",
+                "Every concrete family offered by a selector has a titled reference",
+                "NW/NE above SW/SE",
+                "serialize as NW, NE, SE, SW",
+                "must not be redesigned without direct user authorization"):
+            self.assertIn(required, policy)
 
     def test_completed_questionnaire_excludes_only_follow_up_corners(self) -> None:
         root = Path(__file__).resolve().parent.parent

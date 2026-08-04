@@ -40,24 +40,23 @@ labeled **transition support**, kept for exact corner review, and not offered as
 a brush. Contextual cards do not duplicate or merge profile assignments.
 Hovering shows the exact card name and assigned-slot count.
 
-All semantic material brushes operate on terrain vertices. Size 1 selects the
-nearest vertex and resolves the maximum four tiles sharing it. Larger circles
-and squares select every vertex in the visible footprint; each affected tile is
-then chosen from its four requested corner materials and the authored atlas
-rotation. MPR storage, preview, save, and undo remain tile-based.
+All semantic material brushes operate on terrain vertices. During a drag the
+editor shows the selected material immediately as a temporary hard-edged,
+unblended fill. It does not repeatedly resolve transition tiles against the
+partially completed stroke. On release, that temporary fill is removed and the
+complete accumulated vertex footprint is resolved once from the original
+terrain state. MPR storage, final preview, save, and undo remain tile-based.
 
 Some authored detail materials have no uniform four-corner tile. Each contextual
 palette card therefore retains the exact support material shown in its preview.
-A click first places the authored four-tile `detail on support` vertex motif,
-with the correct rotation in every incident tile. If two copies touch but the
-atlas has no required 2-corner or 3-corner transition, the later click remains
-paintable: each missing incident tile uses the closest local authored signature
-that still contains the selected material at the selected vertex, and the
-editor reports a diagnostic warning. Larger brush sizes still place only the
-center motif for a sparse family. This keeps the result bounded and makes the
-atlas limitation visible without turning it into a workflow blocker. Ordinary
-materials retain the normal vertex-area brush and hard-edge fallback. No paint
-action expands beyond tiles incident to the requested vertices.
+A click first requests the authored four-tile `detail on support` vertex motif,
+with the correct rotation in every incident tile. When a complete stroke asks
+for a 2-corner or 3-corner combination absent from the atlas, the resolver keeps
+a deterministic representable subset and leaves unsupported
+vertices unchanged. It never selects four independent "closest" tiles: every
+retained vertex has one identity shared by all incident tiles. The editor
+reports exactly how many requested vertices the atlas could not retain. No
+paint action expands beyond tiles incident to requested vertices.
 
 The coverage label beside **Material atlas...** reports, for example,
 `509 / 512 assigned (3 unassigned)`. Deterministic, structurally valid
@@ -67,6 +66,19 @@ transition does not exist, painting uses a hard edge and records a diagnostic;
 it never invents atlas content.
 
 ## Visual editing
+
+Every corner control uses the tile's physical two-by-two layout:
+
+```text
+NW  NE
+SW  SE
+```
+
+The serialized atlas signature remains `NW, NE, SE, SW`; display order and
+serialization order are intentionally different. A questionnaire must never
+place SE at lower-left or SW at lower-right. A questioned tile offers both
+**This tile is uniform** and independent four-corner assignment on the same
+card, with no separate Reviewed checkbox.
 
 The Material Atlas window has three material groups on the left and an
 unassigned tile pool on the right. Expand a material to see every assigned tile.
@@ -106,6 +118,60 @@ resolved by assigning or excluding the tile. If the parser could not prove a
 material's identity or classification, that material shows one explicit
 **Confirm material** action with the reason. Tile moves and corner edits update
 all dependent memberships automatically.
+
+## Research questionnaires
+
+Every semantic-atlas review questionnaire is delivered as a standalone local
+HTML document that opens in an ordinary browser. Inline conversation views are
+optional convenience copies and are never the only review surface. The browser
+document saves answers locally as they are entered and always exposes the full
+plain-text response for manual selection and pasting. Copy, download, and direct
+submit controls are additional conveniences; none may be required to recover
+the answers. Every suggested family is accompanied by a titled full-tile
+uniform reference from the relevant atlas whenever such an authored anchor
+exists. A tile whose identity is under review is excluded from every reference
+set in that questionnaire, including references shown for other questions.
+Questions visually default to **Keep current** and do not expose a separate
+**Not answered** state, but an untouched default is omitted from the exported
+answer set. A changed selection or a comment is the explicit review action;
+there is no separate **Reviewed** or **Explicitly reviewed** checkbox. Notes
+without a family change export as a plain **Comment** row.
+
+A suspected non-uniform tile is never deferred to a later questionnaire merely
+to discover its corners. Its first review card provides both paths in one place:
+
+- **This tile is uniform**, with a material-family selector; or
+- **Assign corners individually**, with independent NW, NE, SE, and SW family
+  selectors.
+
+The same card shows the complete target tile and titled uniform comparison
+tiles for the current family and the strongest trustworthy alternatives. If the
+inverse audit supplies evidence, the page labels it as an uncalibrated ranking
+with source atlas, slot, rotation, residual, and runner-up margin. It must not be
+presented as a probability or silently applied. HD and original artwork remain
+separate evidence classes. Any target, connected lead, or equivalent tile queued
+in the current batch is globally untrusted for that batch and cannot be reused
+as a comparison reference.
+
+### Locked questionnaire presentation
+
+The compact R81/R82 review layout is the permanent semantic-atlas questionnaire
+contract. It must not be redesigned without direct user authorization:
+
+- Every target and reference in one comparison row uses identical displayed
+  dimensions **and identical texture/pixel scale**. A target corner is compared
+  with the equivalent corner crop from a reference, never with a whole uniform
+  tile magnified or reduced into the same CSS box.
+- Every concrete family offered by a selector has a titled reference visible on
+  that same card. Only **Different family/name** may omit a reference.
+- The card order is target whole tile, horizontal comparison row, controls, then
+  optional expanded evidence.
+- Corners display as NW/NE above SW/SE and serialize as NW, NE, SE, SW.
+- HD and original evidence stay separate but use equivalent rows and scales.
+- There is no review checkbox or **Not answered** option. A changed selection or
+  comment is explicit; untouched defaults are omitted from the export.
+- CSS, layout, and control behavior remain locked unless the user directly asks
+  for a presentation change.
 
 ## Saving and profile identity
 

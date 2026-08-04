@@ -5787,13 +5787,13 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 58);
-    // R81 removes the disproven Zone20 Stone / Grayish family and resolves
-    // Zone2's four transition-only Ground / Dirt quarters as Ground / Brown.
-    QCOMPARE(totalFamilies, 453);
+    // R89 separates Zone7's reviewed Ground / Brownish network from the
+    // retained Ground / Dirt and Ground / Trampled transition identities.
+    QCOMPARE(totalFamilies, 455);
     // Keep this count pinned to the reviewed semantic-atlas catalog. A change
     // means a family crossed the paint-brush/transition-support boundary and
     // must be visually audited before the palette consumes it.
-    QCOMPARE(transitionSupportFamilies, 45);
+    QCOMPARE(transitionSupportFamilies, 46);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -5900,10 +5900,9 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    // Keep this pinned to the reviewed R71 global palette. Exact-corner review
-    // promoted two additional land identities to structurally proven uniform
-    // paint sources without changing the catalog's total family count.
-    QCOMPARE(landFamilyCount, 72);
+    // R89 promotes Zone7's reviewed Ground / Brownish network to its own
+    // paintable global identity while keeping Dirt and Trampled contextual.
+    QCOMPARE(landFamilyCount, 73);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);

@@ -959,6 +959,34 @@ const SReviewedCanonicalMask* reviewedCanonicalMask(
     return nullptr;
 }
 
+QVector<int> reviewedCanonicalVariations(
+    const STerrainTransitionSignature& signature,
+    ETerrainBlendStyle style, qint32 reviewedStyleMaterial)
+{
+    QVector<int> result;
+    if(reviewedStyleMaterial == 0)
+        return result;
+    const QVector<qint32> ids = corners(signature);
+    bool requested[4] = {false, false, false, false};
+    int ownerCount = 0;
+    for(int corner = 0; corner < ids.size(); ++corner)
+    {
+        requested[corner] = ids.at(corner) == reviewedStyleMaterial;
+        ownerCount += requested[corner];
+    }
+    if(ownerCount <= 0 || ownerCount >= 4)
+        return result;
+    const bool diagonal = ownerCount == 2
+        && requested[0] == requested[2]
+        && requested[1] == requested[3];
+    const int limit = diagonal ? 1 : 2;
+    for(int variation = 0; variation < limit; ++variation)
+        if(reviewedCanonicalMask(style, canonicalMaskTopologyName(
+               ownerCount, diagonal, variation)))
+            result.append(variation);
+    return result;
+}
+
 void rotateCornerPatternClockwise(bool pattern[4])
 {
     const bool before[4] = {
@@ -2258,8 +2286,15 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
         canonical, preferredPaintMaterial);
     const qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
         canonical, style, preferredPaintMaterial);
-    const int variation = blendVariation(
-        cellX, cellY, style, blendVariationLimit(canonical));
+    int variation = 0;
+    const QVector<int> reviewedVariations = reviewedCanonicalVariations(
+        canonical, style, reviewedStyleMaterial);
+    if(reviewedVariations.isEmpty())
+        variation = blendVariation(
+            cellX, cellY, style, blendVariationLimit(canonical));
+    else
+        variation = reviewedVariations.at(blendVariation(
+            cellX, cellY, style, reviewedVariations.size()));
     QByteArray key = signatureKey(canonical);
     key.append(char(terrainBlendStylePriority(style)));
     key.append(char(variation));
@@ -2371,7 +2406,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     int capacityLimit, const QVector<qint32>& sourceTileTypes,
     CValidationReport* report,const QVector<quint16>& pinnedPackedTiles,
     const QVector<qint32>& preferredCellTypes,
-    const QVector<quint16>& preferredPackedCells)
+    const QVector<quint16>& preferredPackedCells,
+    const QVector<qint32>& preferredPaintMaterials)
 {
     STerrainAtlasFinalization result;
     result.capacityLimit = capacityLimit;
@@ -2379,6 +2415,9 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
        || capacityLimit <= 0 || capacityLimit > 16384
        || (!preferredPackedCells.isEmpty()
            && preferredPackedCells.size()
+                != field.tileWidth() * field.tileHeight())
+       || (!preferredPaintMaterials.isEmpty()
+           && preferredPaintMaterials.size()
                 != field.tileWidth() * field.tileHeight()))
     {
         result.error = !m_valid ? m_error
@@ -2399,6 +2438,9 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             const int cellIndex = y * field.tileWidth() + x;
             const qint32 preferredType = cellIndex < preferredCellTypes.size()
                 ? preferredCellTypes.at(cellIndex) : -1;
+            const qint32 preferredPaintMaterial =
+                cellIndex < preferredPaintMaterials.size()
+                    ? preferredPaintMaterials.at(cellIndex) : 0;
             const STerrainTransitionSignature desired =
                 field.cellSignature(x, y);
             STerrainVirtualTile tile;
@@ -2424,7 +2466,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
                 }
             }
             if(!preserved)
-                tile = resolve(desired, x, y, report, 0, preferredType);
+                tile = resolve(desired, x, y, report,
+                               preferredPaintMaterial, preferredType);
             if(!tile.authored && tile.generatedIndex < 0)
             {
                 result.error = QStringLiteral(

@@ -1308,7 +1308,7 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         preferredCellTypes.append(runtimeTypes.value(material, -1));
     const STerrainAtlasFinalization finalized = atlas.finalize(
         field, nameSpace, 16384, document.mapInfo().tileTypes, &report, pinned,
-        preferredCellTypes);
+        preferredCellTypes, {}, paintedMaterial);
     if(!finalized.success)
     {
         result.error = finalized.error + QLatin1Char('\n') + report.toText();
@@ -1345,6 +1345,55 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         result.error = QStringLiteral("Finalized map contains %1 unresolved cells.\n%2\n%3")
             .arg(unresolved).arg(unresolvedDetails.join(QLatin1Char('\n')),
                                  report.toText());
+        return result;
+    }
+    int actualReviewedMaskTiles = 0;
+    for(const STerrainFinalizedTile& tile : finalized.tiles)
+        actualReviewedMaskTiles += !tile.authored
+            && tile.blendProvenance.contains(QStringLiteral("-approved"));
+    if((stripeLayout || circleLayout) && actualReviewedMaskTiles == 0)
+    {
+        result.error = QStringLiteral(
+            "The finalized material test map contains no generated tile with "
+            "reviewed mask provenance.");
+        return result;
+    }
+    int unapprovedTwoFamilyNonJunctionCells = 0;
+    for(int cellIndex = 0; cellIndex < finalized.packedCells.size(); ++cellIndex)
+    {
+        const int physicalSlot = SMprPackedTile::decode(
+            finalized.packedCells.at(cellIndex)).atlasSlot();
+        if(physicalSlot < 0 || physicalSlot >= finalized.tiles.size())
+            continue;
+        const STerrainFinalizedTile& tile = finalized.tiles.at(physicalSlot);
+        QSet<qint32> materials;
+        materials.insert(tile.canonicalSignature.northWest);
+        materials.insert(tile.canonicalSignature.northEast);
+        materials.insert(tile.canonicalSignature.southEast);
+        materials.insert(tile.canonicalSignature.southWest);
+        if(tile.authored || materials.size() != 2
+           || tile.blendProvenance.contains(QStringLiteral("-approved")))
+            continue;
+        const int x = cellIndex % field.tileWidth();
+        const int y = cellIndex / field.tileWidth();
+        bool belongsToExplicitJunction = false;
+        for(const QJsonValue& value : fourFamilyJunctions)
+        {
+            const QJsonObject junction = value.toObject();
+            belongsToExplicitJunction |= qAbs(
+                x - junction.value(QStringLiteral("cell_x")).toInt()) <= 1
+                && qAbs(y - junction.value(
+                    QStringLiteral("cell_y")).toInt()) <= 1;
+        }
+        unapprovedTwoFamilyNonJunctionCells += !belongsToExplicitJunction;
+    }
+    if((stripeLayout || circleLayout)
+       && unapprovedTwoFamilyNonJunctionCells != 0)
+    {
+        result.error = QStringLiteral(
+            "The finalized material test map contains %1 ordinary two-family "
+            "cell(s) using unapproved mask provenance.")
+            .arg(unapprovedTwoFamilyNonJunctionCells);
         return result;
     }
     const STerrainPortableAtlasPackage package =
@@ -1555,6 +1604,11 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
                     maskReview.value(QStringLiteral("selected_masks")));
     manifest.insert(QStringLiteral("blend_mask_review_missing_masks"),
                     maskReview.value(QStringLiteral("missing_masks")));
+    manifest.insert(QStringLiteral("actual_reviewed_mask_tiles"),
+                    actualReviewedMaskTiles);
+    manifest.insert(QStringLiteral(
+                        "unapproved_two_family_non_junction_cells"),
+                    unapprovedTwoFamilyNonJunctionCells);
     manifest.insert(QStringLiteral("total_active_slots"), finalized.requiredSlots);
     manifest.insert(QStringLiteral("texture_pages"), finalized.textureCount);
     manifest.insert(QStringLiteral("capacity_limit"), finalized.capacityLimit);

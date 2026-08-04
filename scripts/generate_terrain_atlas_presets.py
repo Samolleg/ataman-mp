@@ -2493,9 +2493,10 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     # tuples below are corrected to engine/catalog order NW, NE, SE, SW.
     #
     # Canonical byte-identical owners carry these decisions for their siblings.
-    # Comment-only and explicitly uncertain identities are deliberately absent:
-    # Zone7 slot 405; bz15h slots 146/148 NE/SE/SW; and the proposed Ground /
-    # Plant soil quarters in the Zone16/bz14h/bz18h atlas.
+    # R88 subsequently confirmed the six Ground / Tan corners in the shared
+    # Zone16/bz14h/bz18h atlas. Comment-only and explicitly uncertain identities
+    # remain absent: Zone7 slot 405, bz16h slot 169, and the requested rename of
+    # bz15h/Zone17 Rock / Orange.
     r87_signatures = {
         "zone15": {
             184: ("Sand / Common", "Sand / Common", "Sand / Gravel", "Sand / Gravel"),
@@ -2506,11 +2507,11 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             224: ("Sand / Common", "Sand / Gravel", "Sand / Gravel", "Sand / Gravel"),
         },
         "zone16": {
-            184: (None, "Stone / Red", "Stone / Red", "Stone / Red"),
-            233: (None, "Rubble / Red", None, "Stone / Red"),
-            236: ("Rubble / Red", "Rubble / Red", None, "Rubble / Red"),
-            244: (None, "Rubble / Red", "Rubble / Red", "Rubble / Red"),
-            245: (None, "Rubble / Red", "Rubble / Red", "Rubble / Red"),
+            184: ("Ground / Tan", "Stone / Red", "Stone / Red", "Stone / Red"),
+            233: ("Ground / Tan", "Rubble / Red", "Ground / Tan", "Stone / Red"),
+            236: ("Rubble / Red", "Rubble / Red", "Ground / Tan", "Rubble / Red"),
+            244: ("Ground / Tan", "Rubble / Red", "Rubble / Red", "Rubble / Red"),
+            245: ("Ground / Tan", "Rubble / Red", "Rubble / Red", "Rubble / Red"),
         },
         "zone17": {
             146: ("Rubble / Orange", None, None, None),
@@ -2591,9 +2592,53 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             if family_name is not None:
                 corrections[(slot_index, corner_index)] = family_name
 
+    # R89 confirms that Zone7's old Ground / Trampled identity actually owns
+    # the coherent Ground / Brownish network around uniform slot 405. Two
+    # reviewed corners do not belong to that network: slot 257 SW is a genuine
+    # one-on-three Ground / Dirt stamp, while slot 335 SW remains a distinct
+    # Ground / Trampled transition fragment. Slot 480 SW was only a provisional
+    # Dirt choice, so preserve its pre-review Trampled meaning until the equal-
+    # scale follow-up resolves it. bz16h slot 169 NW is explicitly Ground / Red;
+    # its other three corners remain unresolved and unchanged.
+    r89_corrections = {
+        "zone7": {
+            (257, 3): 16,
+            (335, 3): 21,
+            (480, 3): 21,
+        },
+        "bz16h": {(169, 0): 4},
+    }
+    corrections.update(r89_corrections.get(namespace, {}))
+    if namespace == "zone7":
+        family_renames[17] = "Ground / Brownish"
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)
+    if namespace == "zone7" and any(
+            family["id"] == 17 for family in result["families"]):
+        # The original recipe's transition-only fragment IDs were previously
+        # pruned after every occurrence was reassigned. R89 supplies direct
+        # human evidence for two distinct identities, so restore them from a
+        # land-family template before applying the new signatures.
+        template = copy.deepcopy(next(
+            family for family in result["families"] if family["id"] == 17))
+        result["families"] = [
+            family for family in result["families"]
+            if family["id"] not in {16, 21}
+        ]
+        for family_id, name, thumbnail in (
+                (16, "Ground / Dirt", 257),
+                (21, "Ground / Trampled", 335)):
+            family = copy.deepcopy(template)
+            family["id"] = family_id
+            family["sourceFamily"] = "reviewed/ground/" + name.split(" / ")[1].lower()
+            family["suggestedName"] = name
+            family["thumbnailSlot"] = thumbnail
+            family["uniformSlots"] = []
+            family["memberSlots"] = [thumbnail]
+            result["families"].append(family)
+        result["families"].sort(key=lambda family: family["id"])
     by_slot = {slot["slot"]: slot for slot in result["slots"]}
     for (slot_index, corner_index), family_id in corrections.items():
         # Focused unit fixtures may intentionally model only the first part of

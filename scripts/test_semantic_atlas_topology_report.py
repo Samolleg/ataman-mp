@@ -90,15 +90,13 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         report = build_report(catalog)
         self.assertEqual(38, report["namespaceCount"])
         self.assertEqual(25, report["runtimeProfileCount"])
-        # R81 removes two disproven land families: Zone20 Stone / Grayish and
-        # Zone2's transition-only Ground / Dirt.  Their 16 pair combinations
-        # must disappear rather than remain as phantom topology coverage.
-        self.assertEqual(1470, report["totalPairCount"])
-        # R87 replaces false-uniform ownership with the reviewed mixed-corner
-        # signatures. This redistributes eight family pairs between supported
-        # topology counts without changing the catalog's total pair count.
+        # R89 restores the directly reviewed Zone7 Ground / Dirt and Ground /
+        # Trampled transition-support identities while renaming the coherent
+        # slot405 network Ground / Brownish. Their real pair combinations are
+        # counted; no phantom family remains.
+        self.assertEqual(1501, report["totalPairCount"])
         self.assertEqual(
-            {"0": 887, "1": 125, "2": 80, "3": 178, "4": 200},
+            {"0": 917, "1": 126, "2": 81, "3": 177, "4": 200},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):
