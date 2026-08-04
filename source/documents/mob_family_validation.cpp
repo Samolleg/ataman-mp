@@ -843,7 +843,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         SMobFamilyFinding finding;
         finding.severity = EMobFamilyFindingSeverity::Critical;
         finding.code = "jmv.tables.unit_perk_unavailable";
-        finding.category = "JMV character perks";
+        finding.category = "JMV";
         finding.message = request.database->jmvUnitPerkDiagnostic.isEmpty()
             ? "The active JMV tables.lua UnitPerk table is unavailable or malformed. Character perk ownership and titan-grip visualization cannot be validated."
             : request.database->jmvUnitPerkDiagnostic
@@ -1247,12 +1247,11 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
                    && !request.database->jmvStrongManByPrototype.contains(key))
                 {
                     SMobFamilyFinding finding;
-                    finding.severity = EMobFamilyFindingSeverity::Critical;
+                    finding.severity = EMobFamilyFindingSeverity::Warning;
                     finding.code = "jmv.tables.unit_perk_row_missing";
-                    finding.category = "JMV character perks";
+                    finding.category = "JMV";
                     finding.message = QString(
-                        "JMV database character '%1' has no UnitPerk row in tables.lua; runtime character setup and titan-grip ownership are incomplete.")
-                        .arg(prototype);
+                        "Character '%1' doesn't have a valid tables.lua entry.").arg(prototype);
                     finding.locations << member.path + ":" + object.sectionPath;
                     finding.hasNid = object.hasNid;
                     finding.nid = object.nid;

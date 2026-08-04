@@ -96,6 +96,7 @@ private slots:
     void parsesAndSelectsDeterministically();
     void providersSeparateBaseAndJmvMasks();
     void jmvSelectsStandingModelSpecificIdles();
+    void jmvTitanGripUsesOrdinaryDualWieldIdle();
     void parsesNestedClipAndClosingSample();
     void anchorsRootTranslationToBindPose();
     void interpolatesMorphClosingSample();
@@ -397,6 +398,48 @@ void UnitAnimationTests::jmvSelectsStandingModelSpecificIdles()
     }));
     QVERIFY(selectJmvDefaultIdleAction(twoHand, "unhufe", 12, &selected));
     QCOMPARE(selected.name, QString("2hscidle01"));
+}
+
+void UnitAnimationTests::jmvTitanGripUsesOrdinaryDualWieldIdle()
+{
+    QSharedPointer<ei::SProfileDatabaseSnapshot> db(new ei::SProfileDatabaseSnapshot);
+    db->jmvUnitPerkTableStatus = ei::EJmvUnitPerkTableStatus::Valid;
+    db->jmvStrongManByPrototype.insert("titan", 1);
+    db->actionTables.insert("unhuma.adb", adb({
+        {"cidle01", 80, idlePacked(121, 2), 100, 65},
+        {"2hacidle01", 179, idlePacked(543, 2), 100, 65},
+        {"2hscidle01", 180, idlePacked(31, 2), 100, 65}
+    }));
+    ei::SItemDatabaseRecord sword;
+    sword.name = "great sword"; sword.category = "weapons"; sword.typeId = 12;
+    db->items.insert(sword.name, sword);
+    ei::SItemDatabaseRecord axe;
+    axe.name = "great axe"; axe.category = "weapons"; axe.typeId = 13;
+    db->items.insert(axe.name, axe);
+    ei::SItemDatabaseRecord shield;
+    shield.name = "shield"; shield.category = "weapons"; shield.typeId = 9;
+    db->items.insert(shield.name, shield);
+
+    ProfileVisualProviderService providers;
+    const auto resolver = providers.animationResolver("jmv.v1", db);
+    SUnitAnimationRequest request;
+    request.prototype = "Titan";
+    request.model = "unhuma";
+    QJsonObject output;
+
+    request.weapons = QStringList() << "great sword" << "shield";
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("actionName").toString(), QString("cidle01"));
+
+    request.weapons = QStringList() << "great sword" << "great axe";
+    output = QJsonObject();
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("actionName").toString(), QString("cidle01"));
+
+    request.prototype = "Ordinary";
+    output = QJsonObject();
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(output.value("actionName").toString(), QString("2hscidle01"));
 }
 
 void UnitAnimationTests::anchorsRootTranslationToBindPose()

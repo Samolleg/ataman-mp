@@ -134,7 +134,10 @@ The JMV provider reads authoritative `UnitPerkType.StrongMan` ownership from a
 bounded, non-executing parse of the active mod's `lua/tables.lua`. Nonzero
 ownership enables dual-two-hand and two-hand+shield; absent ownership keeps the
 safe first-2H/closed fallback. Equipment alone is not TitanGrip evidence. Bow
-layouts include authored quiver, arrow, bow-part, and string members.
+and crossbow layouts include the assembly's shared authored quiver and arrow
+members. Those shared meshes receive the equipped weapon's distinct `BW` or
+`CB` atlas, including its TTI and material code; they are not generic-textured
+editor placeholders.
 
 Numbered equipment inherits authored attachment nodes. For example,
 `lh2.shieldNN -> lh2.shield00 -> lh2`: animation belongs to `shield00` and must

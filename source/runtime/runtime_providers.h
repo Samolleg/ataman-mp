@@ -128,6 +128,7 @@ struct SUnitAnimationRequest
 {
     QString profileId;
     QString runtimeManifestId;
+    QString prototype;
     QString model;
     QStringList weapons;
 };

@@ -47,6 +47,7 @@ QSharedPointer<ei::SProfileDatabaseSnapshot> database()
     db->items.insert("sword", item("sword", "weapons", 0, 1));
     db->items.insert("axe", item("axe", "weapons", 1, 2));
     db->items.insert("bow", item("bow", "weapons", 5, 3));
+    db->items.insert("crossbow", item("crossbow", "weapons", 6, 2));
     db->items.insert("shield", item("shield", "weapons", 9, 4));
     db->items.insert("great sword", item("great sword", "weapons", 12, 1));
     db->items.insert("great axe", item("great axe", "weapons", 13, 3));
@@ -127,6 +128,7 @@ private slots:
     void magicEquipmentCarriesWhiteEmission();
     void jmvTwoHandWeaponsUseDedicatedAtlasFamilies();
     void resolvesCompoundBowGeometry();
+    void resolvesCrossbowQuiverWithCrossbowAtlas();
     void jmvIgnoresWeaponsBeyondFirstPair();
     void unknownVisualProviderFailsClosed();
 };
@@ -1023,6 +1025,25 @@ void ProfileVisualProviderTests::resolvesCompoundBowGeometry()
     const QJsonObject textures = output.value("componentTextures").toObject();
     for(const QString& component : request.assemblyParts)
         QCOMPARE(textures.value(component).toString(), QString("unhumabw_03.ir.0.x2.mmp"));
+}
+
+void ProfileVisualProviderTests::resolvesCrossbowQuiverWithCrossbowAtlas()
+{
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", database());
+    SEquipmentLayoutRequest request;
+    request.model = "unhuma";
+    request.weapons << "crossbow.silver";
+    request.assemblyParts << "rh3.crbow02main"
+                          << "crbow02part01" << "crbow02part02"
+                          << "crbow02tetiva01" << "crbow02tetiva02"
+                          << "quiver" << "arrows";
+    QJsonObject output;
+    QVERIFY(resolver->resolve(request, &output).success);
+    QCOMPARE(jsonStrings(output, "components"), request.assemblyParts);
+    const QJsonObject textures = output.value("componentTextures").toObject();
+    for(const QString& component : request.assemblyParts)
+        QCOMPARE(textures.value(component).toString(), QString("unhumacb_02.sv.0.x2.mmp"));
 }
 
 void ProfileVisualProviderTests::jmvIgnoresWeaponsBeyondFirstPair()

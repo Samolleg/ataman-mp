@@ -652,6 +652,7 @@ void CUnit::refreshAnimationPose()
     const quint64 databaseGeneration = ei::ProfileDatabaseContext::instance().generation();
     prepareUnitGenerationCaches(databaseGeneration);
     const QString fingerprint = providerId + '|' + QString::number(databaseGeneration)
+        + '|' + m_prototypeName.toLower()
         + '|' + m_resolvedAnimationModel.toLower()
         + '|' + m_resolvedAnimationWeapons.join(';').toLower();
     if(fingerprint != m_animationFingerprint)
@@ -675,6 +676,7 @@ void CUnit::refreshAnimationPose()
                 SUnitAnimationRequest request;
                 request.profileId = database.isNull() ? QString() : database->profileId;
                 request.runtimeManifestId = database.isNull() ? QString() : database->runtimeManifestId;
+                request.prototype = m_prototypeName;
                 request.model = m_resolvedAnimationModel;
                 request.weapons = m_resolvedAnimationWeapons;
                 result = resolver->resolve(request, &resolved);

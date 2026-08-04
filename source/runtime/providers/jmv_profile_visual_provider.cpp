@@ -62,11 +62,35 @@ SRuntimeProviderResult JmvAnimationResolver::resolve(const SUnitAnimationRequest
     const QByteArray adb = m_database->actionTables.value(request.model.toLower() + ".adb");
     QStringList diagnostics;
     const QVector<SAdbAction> actions = parseAdbActions(adb, &diagnostics);
+    QVector<int> weaponTypes;
     int weaponType = -1;
     for(const QString& weapon : request.weapons)
     {
         const QString key = weapon.section('[', 0, 0).section('.', 0, 0).trimmed().toLower();
-        if(m_database->items.contains(key)) { weaponType = m_database->items.value(key).typeId; break; }
+        if(m_database->items.contains(key))
+        {
+            const int typeId = m_database->items.value(key).typeId;
+            weaponTypes.append(typeId);
+            if(weaponType < 0)
+                weaponType = typeId;
+        }
+    }
+    const bool titanGrip = m_database->jmvUnitPerkTableStatus
+            == ei::EJmvUnitPerkTableStatus::Valid
+        && m_database->jmvStrongManByPrototype.value(
+            request.prototype.trimmed().toLower()) != 0;
+    if(titanGrip && weaponTypes.size() >= 2)
+    {
+        const int first = weaponTypes.at(0);
+        const int second = weaponTypes.at(1);
+        const bool firstTwoHand = first >= 10 && first <= 15;
+        const bool secondTwoHand = second >= 10 && second <= 15;
+        const bool twoHandShield = (firstTwoHand && second == 9)
+            || (secondTwoHand && first == 9);
+        if((firstTwoHand && secondTwoHand) || twoHandShield)
+            // JMV has no dedicated Titan Grip standing action. Its ordinary
+            // cidle01 is the authored one-hand/shield and dual-wield stance.
+            weaponType = 0;
     }
     SAdbAction selected;
     if(!selectJmvDefaultIdleAction(actions, request.model, weaponType, &selected, &result.message))

@@ -151,7 +151,9 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
 6. Validate `zone1` ID 221 with its six bow members (`bwparta`, `bwpartb`, both
    `bwtetiva` members, `quiver`, and `arrows`), `zon3obr` IDs 233/234 with
    `UnhumaSD` shield textures, and `zon3obr` ID 198 with its `hd.armorNN`
-   helmet.
+   helmet. Also validate a JMV crossbow unit: its five numbered crossbow members
+   plus `quiver` and `arrows` must be visible, and all seven must use that
+   crossbow's `CB` TTI/material atlas rather than a bow or generic texture.
 7. Validate spear goblins with only the explicit pike visible and ogres with
    their club using OBJ secondary texture. This follows the FIG header texture
    selector (`1` primary, `2` secondary); body texture must not propagate to

@@ -332,7 +332,12 @@ void appendRangedComponents(int typeId, int tti, const SEquipmentLayoutRequest& 
         const QString index = QString::number(tti).rightJustified(2, '0');
         expected << "rh3.crbow" + index + "main"
                  << "crbow" + index + "part01" << "crbow" + index + "part02"
-                 << "crbow" + index + "tetiva01" << "crbow" + index + "tetiva02";
+                 << "crbow" + index + "tetiva01" << "crbow" + index + "tetiva02"
+                 // The authored humanoid assembly shares these meshes between
+                 // bows and crossbows. Their appearance still follows the
+                 // equipped weapon: the matched set receives this crossbow's
+                 // CB atlas, including its TTI and material code, below.
+                 << "quiver" << "arrows";
     }
     for(const QString& wanted : expected)
     {

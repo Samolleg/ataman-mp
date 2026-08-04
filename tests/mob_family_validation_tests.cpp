@@ -341,7 +341,10 @@ void MobFamilyValidationTests::jmvUnitPerkTableFailuresAreCritical()
         [](const SMobFamilyFinding& item)
         { return item.code == "jmv.tables.unit_perk_row_missing"; });
     QVERIFY(finding != report.findings.cend());
-    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Critical);
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
+    QCOMPARE(finding->category, QString("JMV"));
+    QCOMPARE(finding->message,
+             QString("Character '%1' doesn't have a valid tables.lua entry.").arg(prototype));
     QVERIFY(finding->message.contains(prototype));
 
     database->providerId = "base.standard.v1";

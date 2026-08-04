@@ -34,7 +34,9 @@ cross-contaminate one another.
 
 The JMV provider selects only standing-state (`allowedState == 2`) defaults.
 It prefers `cidle01` for ordinary actors and the matching JMV 2H action family
-for equipped humanoids.
+for equipped humanoids. StrongMan-authorized dual-2H and 2H+shield layouts use
+the ordinary `cidle01` one-hand/shield and dual-wield stance because the active
+JMV humanoid ADB has no dedicated Titan Grip standing action.
 Aggregate ADB weapon masks remain compatible with unarmed actors, which is
 required by the `unmogo` family. Root translation is applied relative to its
 first animation sample so the actor stays at its MOB position.
