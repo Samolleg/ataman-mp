@@ -13,12 +13,18 @@ import numpy as np
 from PIL import Image
 
 from render_authored_mask_repair_pilot import (
+    HARD_BASELINE_SOURCE_GAPS,
+    REMAINING_HARD_BASELINE_CASES,
     align_authored_mask,
     band_visualization,
     mask_metrics,
     repair_authored_mask,
     repair_reviewed_mask,
     repair_sand_banded_mask,
+)
+from render_soft_family_route_comparison import (
+    CASES as SOFT_ROUTE_CASES,
+    _source_alignment,
 )
 
 
@@ -44,6 +50,67 @@ def synthetic_outer_mask(kind: int, size: int = 96) -> Image.Image:
 
 
 class AuthoredMaskRepairPilotTests(unittest.TestCase):
+    def test_authored_rgb_alignment_uses_exact_provenance_corners(self) -> None:
+        payload = json.loads((Path(__file__).resolve().parents[1]
+            / "assets" / "resources" / "terrain_atlas_presets.json")
+            .read_text(encoding="utf-8"))
+        presets = {preset["namespace"]: preset
+                   for preset in payload["presets"]}
+        outer = _source_alignment(
+            presets, "Zone3Obr:235", "outer-1of4-v1")
+        inside = _source_alignment(
+            presets, "Zone3Obr:435", "inside-3of4-v1")
+        diagonal = _source_alignment(
+            presets, "Zone1:351", "diagonal-2of4")
+        self.assertEqual(outer["stockRotationClockwise"], 270)
+        self.assertEqual(outer["mappedSourceMaterial"], "Ground / Water")
+        self.assertEqual(inside["stockRotationClockwise"], 0)
+        self.assertEqual(inside["mappedSourceMaterial"], "Ground / Water")
+        self.assertEqual(diagonal["stockRotationClockwise"], 0)
+        self.assertEqual(diagonal["mappedSourceMaterial"], "Ground / Water")
+        self.assertTrue(all(value["fixedGridToPreviewMirrorY"]
+                            for value in (outer, inside, diagonal)))
+
+    def test_diagonal_alignment_rotates_without_polarity_inversion(self) -> None:
+        raw = np.zeros((64, 64), dtype=np.uint8)
+        raw[:32, 32:] = 255
+        raw[32:, :32] = 255
+        image, transform = align_authored_mask(
+            Image.fromarray(raw, "L"), "diagonal-2of4")
+        values = np.asarray(image, dtype=np.uint8)
+        self.assertEqual(
+            (values[0, 0], values[0, -1], values[-1, -1], values[-1, 0]),
+            (255, 0, 255, 0))
+        self.assertFalse(transform["inverted"])
+        self.assertIn(transform["rotationCounterClockwise"], (90, 270))
+
+    def test_soft_route_batch_is_five_unique_family_topology_questions(self) -> None:
+        self.assertEqual(len(SOFT_ROUTE_CASES), 5)
+        self.assertEqual(len(set(SOFT_ROUTE_CASES)), 5)
+        self.assertEqual(
+            SOFT_ROUTE_CASES[0], ("sand-grain", "diagonal-2of4"))
+        self.assertEqual(
+            {topology for family, topology in SOFT_ROUTE_CASES
+             if family == "water-ripples"},
+            {"outer-1of4-v1", "edge-2of4-v1", "diagonal-2of4",
+             "inside-3of4-v1"})
+
+    def test_remaining_hard_batch_is_compact_unique_and_excludes_soft_routes(self) -> None:
+        self.assertEqual(len(REMAINING_HARD_BASELINE_CASES), 10)
+        self.assertEqual(len(set(REMAINING_HARD_BASELINE_CASES)), 10)
+        families = {family for family, _ in REMAINING_HARD_BASELINE_CASES}
+        self.assertEqual(
+            families,
+            {"grass-strands", "stone-fracture", "gravel-chunks",
+             "paving-courses"})
+        self.assertEqual(
+            HARD_BASELINE_SOURCE_GAPS,
+            (("soil-mottle", "diagonal-2of4"),))
+        self.assertTrue(all(
+            family not in {"sand-grain", "snow-clumps", "ice-fracture",
+                           "water-ripples"}
+            for family, _ in REMAINING_HARD_BASELINE_CASES))
+
     def test_r44_decisions_preserve_nine_approvals_and_three_sand_rejections(self) -> None:
         decision_path = Path(__file__).with_name(
             "authored_mask_repair_r44_decisions.json")

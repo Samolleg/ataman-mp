@@ -1219,11 +1219,19 @@ STerrainTransitionSignature CTerrainVirtualAtlas::canonicalSignature(
 }
 
 ETerrainBlendStyle CTerrainVirtualAtlas::blendStyleForSignature(
-    const STerrainTransitionSignature& signature) const
+    const STerrainTransitionSignature& signature,
+    qint32 preferredPaintMaterial) const
 {
     QMap<qint32, int> counts;
     for(qint32 material : corners(signature))
         ++counts[material];
+    // A committed paint stroke carries the selected brush material explicitly.
+    // That material owns the mask language even when it already occupies three
+    // corners and the support material is the one-corner minority. Falling back
+    // to corner frequency is reserved for context-free callers and old maps.
+    if(preferredPaintMaterial != 0 && counts.contains(preferredPaintMaterial))
+        return m_materialBlendStyles.value(
+            preferredPaintMaterial, ETerrainBlendStyle::Organic);
     // R63 explicitly approves the authored-derived Ice language when Ice
     // owns three corners. Keep every other family/topology on its existing
     // path until its own review decision is applied.
@@ -1255,13 +1263,19 @@ ETerrainBlendStyle CTerrainVirtualAtlas::blendStyleForSignature(
 
 qint32 CTerrainVirtualAtlas::reviewedMaskStyleMaterial(
     const STerrainTransitionSignature& signature,
-    ETerrainBlendStyle style) const
+    ETerrainBlendStyle style, qint32 preferredPaintMaterial) const
 {
     if(style != ETerrainBlendStyle::Ice)
         return 0;
     QMap<qint32, int> counts;
     for(qint32 material : corners(signature))
         ++counts[material];
+    if(preferredPaintMaterial != 0
+       && counts.value(preferredPaintMaterial) == 3
+       && m_materialBlendStyles.value(
+              preferredPaintMaterial, ETerrainBlendStyle::Organic)
+              == ETerrainBlendStyle::Ice)
+        return preferredPaintMaterial;
     for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
         if(it.value() == 3 && m_materialBlendStyles.value(
                it.key(), ETerrainBlendStyle::Organic)
@@ -1546,7 +1560,8 @@ QImage CTerrainVirtualAtlas::alignedStockMask(
 
 QImage CTerrainVirtualAtlas::reviewBlendMask(
     const STerrainTransitionSignature& gridSignature,
-    qint32 ownerMaterial, int variation, QString* provenance) const
+    qint32 ownerMaterial, int variation, QString* provenance,
+    qint32 preferredPaintMaterial) const
 {
     if(!m_valid || m_authoredTiles.isEmpty()) return {};
     const STerrainTransitionSignature preview =
@@ -1558,9 +1573,10 @@ QImage CTerrainVirtualAtlas::reviewBlendMask(
     QList<qint32> ordered = unique.values();
     std::sort(ordered.begin(), ordered.end());
     const qint32 canonicalOwner = ordered.front();
-    const ETerrainBlendStyle style = blendStyleForSignature(gridSignature);
+    const ETerrainBlendStyle style = blendStyleForSignature(
+        gridSignature, preferredPaintMaterial);
     const qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
-        gridSignature, style);
+        gridSignature, style, preferredPaintMaterial);
     QString canonicalProvenance;
     QImage result = canonicalGeneratedOwnershipMask(
         m_authoredTiles.front().size(), preview, canonicalOwner,
@@ -1783,21 +1799,27 @@ QImage CTerrainVirtualAtlas::generateTile(
 
 QImage CTerrainVirtualAtlas::reviewGeneratedBlend(
     const STerrainTransitionSignature& gridSignature, int variation,
-    QString* provenance, CValidationReport* report) const
+    QString* provenance, CValidationReport* report,
+    qint32 preferredPaintMaterial) const
 {
-    const ETerrainBlendStyle style = blendStyleForSignature(gridSignature);
+    const ETerrainBlendStyle style = blendStyleForSignature(
+        gridSignature, preferredPaintMaterial);
     return generateTile(gridSignature, style, qMax(0, variation),
-                        reviewedMaskStyleMaterial(gridSignature, style),
+                        reviewedMaskStyleMaterial(
+                            gridSignature, style, preferredPaintMaterial),
                         provenance, report);
 }
 
 QImage CTerrainVirtualAtlas::reviewGeneratedBlendLinearLight(
     const STerrainTransitionSignature& gridSignature, int variation,
-    QString* provenance, CValidationReport* report) const
+    QString* provenance, CValidationReport* report,
+    qint32 preferredPaintMaterial) const
 {
-    const ETerrainBlendStyle style = blendStyleForSignature(gridSignature);
+    const ETerrainBlendStyle style = blendStyleForSignature(
+        gridSignature, preferredPaintMaterial);
     return generateTile(gridSignature, style, qMax(0, variation),
-                        reviewedMaskStyleMaterial(gridSignature, style),
+                        reviewedMaskStyleMaterial(
+                            gridSignature, style, preferredPaintMaterial),
                         provenance, report, true);
 }
 
@@ -1997,9 +2019,10 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     quint8 rotation = 0;
     const STerrainTransitionSignature canonical =
         canonicalSignature(signature, &rotation);
-    const ETerrainBlendStyle style = blendStyleForSignature(canonical);
+    const ETerrainBlendStyle style = blendStyleForSignature(
+        canonical, preferredPaintMaterial);
     const qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
-        canonical, style);
+        canonical, style, preferredPaintMaterial);
     const int variation = blendVariation(
         cellX, cellY, style, blendVariationLimit(canonical));
     QByteArray key = signatureKey(canonical);

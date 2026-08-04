@@ -659,12 +659,12 @@ QJsonObject writeBlendMaskReview(
                         QString resultProvenance;
                         const QImage generatedResult = atlas.reviewGeneratedBlend(
                             signature, topology.variation, &resultProvenance,
-                            &blendReport);
+                            &blendReport, owner);
                         QString linearProvenance;
                         const QImage linearResult =
                             atlas.reviewGeneratedBlendLinearLight(
                                 signature, topology.variation,
-                                &linearProvenance, &blendReport);
+                                &linearProvenance, &blendReport, owner);
                         if(generatedResult.isNull())
                             resultPainter.fillRect(column * tileSize,
                                 localRow * tileSize, tileSize, tileSize,
@@ -925,11 +925,11 @@ QJsonObject writeBlendMaskReview(
             QString resultProvenance;
             const QImage generatedResult = atlas.reviewGeneratedBlend(
                 signature, item.topology.variation, &resultProvenance,
-                &blendReport);
+                &blendReport, item.owner);
             QString linearProvenance;
             const QImage linearResult = atlas.reviewGeneratedBlendLinearLight(
                 signature, item.topology.variation, &linearProvenance,
-                &blendReport);
+                &blendReport, item.owner);
             const QString maskFamily = provenance.section(
                 QLatin1Char(':'), 1, 1);
             if(generatedResult.isNull() || linearResult.isNull()

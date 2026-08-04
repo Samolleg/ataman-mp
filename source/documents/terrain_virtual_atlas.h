@@ -188,20 +188,23 @@ public:
     QImage reviewBlendMask(
         const STerrainTransitionSignature& gridSignature,
         qint32 ownerMaterial, int variation = 0,
-        QString* provenance = nullptr) const;
+        QString* provenance = nullptr,
+        qint32 preferredPaintMaterial = 0) const;
     // Renders the exact generated pixels used for a missing transition while
     // deliberately bypassing authored-tile lookup. Review tooling uses this to
     // show the canonical mask outcome beside its uniform material sources.
     QImage reviewGeneratedBlend(
         const STerrainTransitionSignature& gridSignature,
         int variation = 0, QString* provenance = nullptr,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        qint32 preferredPaintMaterial = 0) const;
     // Review-only A/B compositor. Runtime generation remains encoded-RGB
     // until the focused visual comparison is explicitly accepted.
     QImage reviewGeneratedBlendLinearLight(
         const STerrainTransitionSignature& gridSignature,
         int variation = 0, QString* provenance = nullptr,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        qint32 preferredPaintMaterial = 0) const;
     const QVector<STerrainFinalizedTile>& generatedTiles() const
         { return m_generatedTiles; }
 
@@ -250,10 +253,12 @@ private:
         qint32 ownerMaterial, qint32 otherMaterial, int variation,
         QString* provenance) const;
     ETerrainBlendStyle blendStyleForSignature(
-        const STerrainTransitionSignature& signature) const;
+        const STerrainTransitionSignature& signature,
+        qint32 preferredPaintMaterial = 0) const;
     qint32 reviewedMaskStyleMaterial(
         const STerrainTransitionSignature& signature,
-        ETerrainBlendStyle style) const;
+        ETerrainBlendStyle style,
+        qint32 preferredPaintMaterial = 0) const;
     int blendVariation(int cellX, int cellY,
                        ETerrainBlendStyle style, int limit) const;
     qint32 resolvedRuntimeType(

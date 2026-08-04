@@ -446,6 +446,7 @@ private slots:
     void legacyTargetStyleRejectionCannotAlterCanonicalFallback();
     void legacyPavingRejectionCannotAlterCanonicalFallback();
     void materialNamesSelectExplicitBlendStyles();
+    void paintedMaterialOwnsGeneratedMaskFamily();
     void materialBlendStylesProvideBoundedDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
     void rotationsDeduplicateButSemanticAliasesRemainDistinct();
@@ -1754,6 +1755,32 @@ void TerrainVirtualAtlasTests::materialNamesSelectExplicitBlendStyles()
              ETerrainBlendStyle::Water);
     QCOMPARE(CTestTerrainVirtualAtlas::blendStyleForMaterialName("Future material"),
              ETerrainBlendStyle::Organic);
+}
+
+void TerrainVirtualAtlasTests::paintedMaterialOwnsGeneratedMaskFamily()
+{
+    Fixture fixture;
+    QMap<qint32, ETerrainBlendStyle> styles;
+    styles.insert(1, ETerrainBlendStyle::Soil);
+    styles.insert(2, ETerrainBlendStyle::Grass);
+    CTestTerrainVirtualAtlas atlas(
+        fixture.catalog, fixture.images, 0x6d61736bu, {}, styles);
+    const STerrainTransitionSignature requested = signature(1, 1, 1, 2);
+
+    QString reviewProvenance;
+    const QImage reviewed = atlas.reviewBlendMask(
+        requested, 1, 0, &reviewProvenance, 1);
+    QVERIFY(!reviewed.isNull());
+    QCOMPARE(reviewProvenance,
+             QStringLiteral("canonical-generated:soil-mottle:inside-3of4-v1"));
+
+    const STerrainVirtualTile resolved = atlas.resolve(
+        requested, 7, 11, nullptr, 1);
+    QVERIFY(!resolved.authored);
+    QVERIFY(resolved.generatedIndex >= 0);
+    QVERIFY(atlas.generatedTiles().at(resolved.generatedIndex).blendProvenance
+                .startsWith(QStringLiteral(
+                    "canonical-generated:soil-mottle:inside-3of4-v")));
 }
 
 void TerrainVirtualAtlasTests::materialBlendStylesProvideBoundedDistinctVariants()

@@ -45,6 +45,30 @@ PILOT_CASES = (
 SAND_PILOT_CASES = tuple(
     item for item in PILOT_CASES if item[0] == "sand-grain")
 
+# One unresolved baseline per hard-material family and corner topology.  Do not
+# repeat masks already approved in R44/R48, and do not send Sand, Snow, Ice, or
+# Water through this route: those continuous/soft families require the detailed
+# opacity workflow (or an explicit A/B review) instead.
+REMAINING_HARD_BASELINE_CASES = (
+    ("grass-strands", "inside-3of4-v1"),
+    ("stone-fracture", "inside-3of4-v1"),
+    ("gravel-chunks", "outer-1of4-v1"),
+    ("gravel-chunks", "edge-2of4-v1"),
+    ("gravel-chunks", "diagonal-2of4"),
+    ("gravel-chunks", "inside-3of4-v1"),
+    ("paving-courses", "outer-1of4-v1"),
+    ("paving-courses", "edge-2of4-v1"),
+    ("paving-courses", "diagonal-2of4"),
+    ("paving-courses", "inside-3of4-v1"),
+)
+
+# Both genuine Soil diagonal sources are near-solid ownership fields and fail
+# the user's protected-quarter rule. They are recorded as a source gap instead
+# of asking the reviewer to approve an obviously invalid mask.
+HARD_BASELINE_SOURCE_GAPS = (
+    ("soil-mottle", "diagonal-2of4"),
+)
+
 
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
@@ -423,20 +447,26 @@ def _source_quality(mask: Image.Image, topology: str) -> float:
 
 
 def align_authored_mask(mask: Image.Image, topology: str) -> tuple[Image.Image, dict]:
-    """Choose only a legal rotation/polarity that matches requested corners."""
+    """Quarter-turn the requested owner corners into the canonical layout."""
+    expected = expected_owner_corners(topology)
     candidates = []
     for turns in range(4):
         rotated = mask.convert("L").rotate(90 * turns)
-        for inverted in ((False, True) if "-2of4" in topology else (False,)):
-            candidate = Image.eval(rotated, lambda value: 255 - value) \
-                if inverted else rotated
-            score = round(_source_quality(candidate, topology), 6)
-            candidates.append((score, inverted, turns, candidate))
-    score, inverted, turns, aligned = min(
-        candidates, key=lambda value: (value[0], value[1], value[2]))
+        points = ((0, 0), (rotated.width - 1, 0),
+                  (rotated.width - 1, rotated.height - 1),
+                  (0, rotated.height - 1))
+        actual = tuple(rotated.getpixel(point) >= 128 for point in points)
+        if actual == expected:
+            candidates.append((
+                round(_source_quality(rotated, topology), 6), turns, rotated))
+    if not candidates:
+        raise ValueError(
+            f"authored mask corners do not match {topology} under rotation")
+    score, turns, aligned = min(
+        candidates, key=lambda value: (value[0], value[1]))
     return aligned, {
         "rotationCounterClockwise": turns * 90,
-        "inverted": inverted,
+        "inverted": False,
         "alignmentScore": score,
     }
 
@@ -544,15 +574,28 @@ def render(review: Path, output: Path,
                 raise ValueError(
                     f"authored mask hash mismatch for {row['provenance']}")
             aligned_mask, alignment = align_authored_mask(raw_mask, logical[1])
-            candidate = (round(_source_quality(aligned_mask, logical[1]), 6),
+            candidate_seed = int(_sha256_bytes(
+                f"{logical[0]}|{logical[1]}|{row['provenance']}".encode()
+            )[:8], 16)
+            _, candidate_metrics = (repair_reviewed_mask(
+                aligned_mask, logical[0], logical[1], candidate_seed)
+                if reviewed_methods else repair_authored_mask(
+                    aligned_mask, logical[1], candidate_seed))
+            gate_failures = sum((
+                candidate_metrics.get("strongIoU", 0.0) < 0.68,
+                candidate_metrics.get("changedStrongFraction", 1.0) > 0.22,
+                candidate_metrics.get("meanAbsoluteChange", 1.0) > 0.18,
+            ))
+            candidate = (gate_failures,
+                         round(_source_quality(aligned_mask, logical[1]), 6),
                          row["provenance"], row, raw_mask, aligned_mask,
                          alignment)
             previous = unique_candidates.get(raw_hash)
-            if previous is None or candidate[:2] < previous[:2]:
+            if previous is None or candidate[:3] < previous[:3]:
                 unique_candidates[raw_hash] = candidate
-        (selected_score, _, selected_row, extracted_mask, aligned_mask,
-         alignment) = min(
-            unique_candidates.values(), key=lambda value: value[:2])
+        (_, selected_score, _, selected_row, extracted_mask, aligned_mask,
+          alignment) = min(
+            unique_candidates.values(), key=lambda value: value[:3])
         seed = int(_sha256_bytes(
             f"{logical[0]}|{logical[1]}|{selected_row['provenance']}".encode())[:8], 16)
         repaired, metrics = (repair_reviewed_mask(
@@ -842,8 +885,15 @@ def main() -> int:
     parser.add_argument("--sand-band-pilot", action="store_true",
                         help="render only the three R44-rejected sand cases "
                              "with the reviewed faceted opacity-band method")
+    parser.add_argument("--remaining-hard-baselines", action="store_true",
+                        help="render the compact unresolved hard-material "
+                             "family/topology baseline batch")
     args = parser.parse_args()
-    cases = SAND_PILOT_CASES if args.sand_band_pilot else PILOT_CASES
+    if args.sand_band_pilot and args.remaining_hard_baselines:
+        parser.error("select only one focused batch")
+    cases = (SAND_PILOT_CASES if args.sand_band_pilot else
+             REMAINING_HARD_BASELINE_CASES
+             if args.remaining_hard_baselines else PILOT_CASES)
     print(json.dumps(render(
         args.review, args.output, args.checkpoint, cases,
         reviewed_methods=args.sand_band_pilot),
