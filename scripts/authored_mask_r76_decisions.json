@@ -1,0 +1,30 @@
+{
+  "schema": "ei-authored-mask-r76-decisions-v1",
+  "checkpoint": "R76-AUTHORED-ADJUSTMENTS",
+  "authority": "explicit-user-review",
+  "approvedAdjustments": [
+    "mask-family-gravel-chunks-inside-3of4-v2",
+    "mask-family-ice-fracture-diagonal-2of4",
+    "mask-family-ice-fracture-edge-2of4-v1",
+    "mask-family-ice-fracture-edge-2of4-v2",
+    "mask-family-ice-fracture-inside-3of4-v1",
+    "mask-family-ice-fracture-inside-3of4-v2",
+    "mask-family-ice-fracture-outer-1of4-v1",
+    "mask-family-ice-fracture-outer-1of4-v2",
+    "mask-family-sand-grain-inside-3of4-v2",
+    "mask-family-sand-grain-outer-1of4-v1",
+    "mask-family-snow-clumps-diagonal-2of4",
+    "mask-family-snow-clumps-inside-3of4-v1",
+    "mask-family-snow-clumps-inside-3of4-v2",
+    "mask-family-snow-clumps-outer-1of4-v1",
+    "mask-family-snow-clumps-outer-1of4-v2",
+    "mask-family-stone-fracture-inside-3of4-v2"
+  ],
+  "adjustmentRequests": {
+    "mask-family-paving-courses-edge-2of4-v2": "Start from recovered authored ownership. Feather from the south support edge through about two-fifths of the tile height, with low-frequency noise so the boundary is not completely smooth.",
+    "mask-family-paving-courses-outer-1of4-v2": "Replace the rectangular support cleanup with a circular construction.",
+    "mask-family-sand-grain-outer-1of4-v2": "Remove the square cleanup edges; support-edge attenuation must be uneven.",
+    "mask-family-snow-clumps-edge-2of4-v2": "Remove every straight cleanup edge."
+  },
+  "policy": "Only approvedAdjustments may replace production masks. The four adjustment requests remain review-only until explicit approval."
+}

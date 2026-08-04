@@ -786,6 +786,77 @@ struct SReviewedCanonicalMask
 const SReviewedCanonicalMask* reviewedCanonicalMask(
     ETerrainBlendStyle style, const QString& topology)
 {
+    static const SReviewedCanonicalMask r76Masks[] = {
+        {ETerrainBlendStyle::Gravel, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/gravel-inside-3of4-v2-r76-adjusted.png",
+         "c20c0e1e5941773e71a529794e146f58cc2331bc592ad8205479395ed5d1f0b0",
+         "canonical-generated:gravel-chunks:inside-3of4-v2:r76-approved-adjustment:bz5g:423"},
+        {ETerrainBlendStyle::Ice, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-diagonal-2of4-r76-adjusted.png",
+         "dbb729aca28b033be78a2f603d95b5f7ee3ad9936b28ddc9de6a3dc0eb73ffc0",
+         "canonical-generated:ice-fracture:diagonal-2of4:r76-approved-adjustment:bz11k:373"},
+        {ETerrainBlendStyle::Ice, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-edge-2of4-v1-r76-adjusted.png",
+         "1ba9c2e33295d6f400f577a7615a8100963be76de753705f421ea27be436e7a7",
+         "canonical-generated:ice-fracture:edge-2of4-v1:r76-approved-adjustment:bz11k:401"},
+        {ETerrainBlendStyle::Ice, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-edge-2of4-v2-r76-adjusted.png",
+         "e872626e4618432db888ca6dd329c6d457ee20e85fd5361d6d3295fe23720cfc",
+         "canonical-generated:ice-fracture:edge-2of4-v2:r76-approved-adjustment:bz11k:364"},
+        {ETerrainBlendStyle::Ice, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-inside-3of4-v1-r76-adjusted.png",
+         "47f439119039111046f1aa7bc40b4d404dab03fdf47934707cdb5c39667d15c1",
+         "canonical-generated:ice-fracture:inside-3of4-v1:r76-approved-adjustment:bz11k:478"},
+        {ETerrainBlendStyle::Ice, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-inside-3of4-v2-r76-adjusted.png",
+         "4f0f7e118e4539bc6c5500a1d6dff4e31799be47d15bc6f964fe0ddb23a6bebe",
+         "canonical-generated:ice-fracture:inside-3of4-v2:r76-approved-adjustment:bz11k:438"},
+        {ETerrainBlendStyle::Ice, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-outer-1of4-v1-r76-adjusted.png",
+         "5c7697948e158f687404c59ca440b6a15b3367f1ad4621fcb55153df2a8f34de",
+         "canonical-generated:ice-fracture:outer-1of4-v1:r76-approved-adjustment:bz11k:406"},
+        {ETerrainBlendStyle::Ice, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-outer-1of4-v2-r76-adjusted.png",
+         "2864da37b32d311f477f3378d4ff0592c4d0bce972dbd4dcf033c9fdfc00ab0b",
+         "canonical-generated:ice-fracture:outer-1of4-v2:r76-approved-adjustment:bz11k:405"},
+        {ETerrainBlendStyle::Sand, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-inside-3of4-v2-r76-adjusted.png",
+         "9ad8602bc5085b0ab4226e4544837988e8911784fc9312d3021eefbad1db312f",
+         "canonical-generated:sand-grain:inside-3of4-v2:r76-approved-adjustment:bz5g:180"},
+        {ETerrainBlendStyle::Sand, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-outer-1of4-v1-r76-adjusted.png",
+         "142edf134ed25289299f4771e83d8b5782cbc2d74e66f57f03a3c6850b2bc0e5",
+         "canonical-generated:sand-grain:outer-1of4-v1:r76-approved-adjustment:bz5g:496"},
+        {ETerrainBlendStyle::Snow, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-diagonal-2of4-r76-adjusted.png",
+         "3547b045e1160533ae609fb353f67efd60eb711a9c68eb9a441b6a21e8e220b6",
+         "canonical-generated:snow-clumps:diagonal-2of4:r76-approved-adjustment:bz10k:242"},
+        {ETerrainBlendStyle::Snow, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-inside-3of4-v1-r76-adjusted.png",
+         "c371c06523916c840b69f5ffb2e2703a12b68dbb3bdb2640b4386be4f57fcdaf",
+         "canonical-generated:snow-clumps:inside-3of4-v1:r76-approved-adjustment:bz10k:224"},
+        {ETerrainBlendStyle::Snow, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-inside-3of4-v2-r76-adjusted.png",
+         "6915fd79c4628e0c8661c9f4bf54017f88eb27201b1fb8df6ad4fb88a5ba03de",
+         "canonical-generated:snow-clumps:inside-3of4-v2:r76-approved-adjustment:bz10k:217"},
+        {ETerrainBlendStyle::Snow, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-outer-1of4-v1-r76-adjusted.png",
+         "301dff7dd30938a8da53e1b9ebae5d427a5c6bd2f7a82798f932bc3a43558cd6",
+         "canonical-generated:snow-clumps:outer-1of4-v1:r76-approved-adjustment:bz10k:224"},
+        {ETerrainBlendStyle::Snow, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-outer-1of4-v2-r76-adjusted.png",
+         "236e3fe45a9e41de68b3d88e1a621632eeaea2ec337107f375620a7427e8dcec",
+         "canonical-generated:snow-clumps:outer-1of4-v2:r76-approved-adjustment:bz8k:236"},
+        {ETerrainBlendStyle::Stone, "inside-3of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/stone-inside-3of4-v2-r76-adjusted.png",
+         "871752a42a283fd144f49ec38c24573a32dca4e6c61a3acf9ad8cea8dd55288f",
+         "canonical-generated:stone-fracture:inside-3of4-v2:r76-approved-adjustment:bz10k:143"}
+    };
+    for(const SReviewedCanonicalMask& mask : r76Masks)
+        if(mask.style == style
+           && topology == QString::fromLatin1(mask.topology))
+            return &mask;
+
     // Explicit R75 approvals supersede older reviewed masks for the same
     // style/topology.  Keeping this authority separate makes it impossible for
     // a still-pending R75 adjustment request to enter production by accident.

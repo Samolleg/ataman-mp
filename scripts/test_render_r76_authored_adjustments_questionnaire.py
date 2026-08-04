@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
+import re
 import unittest
 
 import numpy as np
@@ -47,6 +49,43 @@ class AuthoredAdjustmentTests(unittest.TestCase):
         self.assertTrue(np.all(values[128:208, 48:208] == 180))
         self.assertFalse(audit["changesOwnerQuadrants"])
         self.assertFalse(audit["usesHardQuadrantFill"])
+
+    def test_only_explicit_r76_approvals_are_installed(self) -> None:
+        scripts = Path(__file__).resolve().parent
+        root = scripts.parent
+        decisions = json.loads((
+            scripts / "authored_mask_r76_decisions.json"
+        ).read_text(encoding="utf-8"))
+        approved = set(decisions["approvedAdjustments"])
+        pending = set(decisions["adjustmentRequests"])
+        self.assertEqual(len(approved), 16)
+        self.assertEqual(len(pending), 4)
+        self.assertFalse(approved & pending)
+
+        source = (root / "source/documents/terrain_virtual_atlas.cpp").read_text(
+            encoding="utf-8")
+        block = source.split(
+            "static const SReviewedCanonicalMask r76Masks[] = {", 1
+        )[1].split("    };", 1)[0]
+        records = re.findall(
+            r'\{ETerrainBlendStyle::(\w+), "([^"]+)",\s*'
+            r'"[^"]*/([^/"]+)",\s*"([0-9a-f]{64})",\s*'
+            r'"([^"]+:r76-approved-adjustment:[^"]+)"\}', block)
+        self.assertEqual(len(records), 16)
+        installed = set()
+        qrc = (root / "assets/resources/terrain_blend_masks.qrc").read_text(
+            encoding="utf-8")
+        for _, topology, filename, expected_hash, provenance in records:
+            family = provenance.split(":", 2)[1]
+            installed.add(f"mask-family-{family}-{topology}")
+            self.assertIn(f"terrain_blend_masks/{filename}", qrc)
+            image = Image.open(
+                root / "assets/resources/terrain_blend_masks" / filename
+            ).convert("L")
+            self.assertEqual(hashlib.sha256(image.tobytes()).hexdigest(),
+                             expected_hash)
+        self.assertEqual(installed, approved)
+        self.assertFalse(installed & pending)
 
     def test_recovered_route_changes_only_shared_edge_ring(self) -> None:
         values = np.arange(256 * 256, dtype=np.uint32).reshape(256, 256)

@@ -68,5 +68,21 @@
         <file>terrain_blend_masks/water-inside-3of4-v2-r75-authored.png</file>
         <file>terrain_blend_masks/water-outer-1of4-v1-r75-authored.png</file>
         <file>terrain_blend_masks/water-outer-1of4-v2-r75-authored.png</file>
+        <file>terrain_blend_masks/gravel-inside-3of4-v2-r76-adjusted.png</file>
+        <file>terrain_blend_masks/ice-diagonal-2of4-r76-adjusted.png</file>
+        <file>terrain_blend_masks/ice-edge-2of4-v1-r76-adjusted.png</file>
+        <file>terrain_blend_masks/ice-edge-2of4-v2-r76-adjusted.png</file>
+        <file>terrain_blend_masks/ice-inside-3of4-v1-r76-adjusted.png</file>
+        <file>terrain_blend_masks/ice-inside-3of4-v2-r76-adjusted.png</file>
+        <file>terrain_blend_masks/ice-outer-1of4-v1-r76-adjusted.png</file>
+        <file>terrain_blend_masks/ice-outer-1of4-v2-r76-adjusted.png</file>
+        <file>terrain_blend_masks/sand-inside-3of4-v2-r76-adjusted.png</file>
+        <file>terrain_blend_masks/sand-outer-1of4-v1-r76-adjusted.png</file>
+        <file>terrain_blend_masks/snow-diagonal-2of4-r76-adjusted.png</file>
+        <file>terrain_blend_masks/snow-inside-3of4-v1-r76-adjusted.png</file>
+        <file>terrain_blend_masks/snow-inside-3of4-v2-r76-adjusted.png</file>
+        <file>terrain_blend_masks/snow-outer-1of4-v1-r76-adjusted.png</file>
+        <file>terrain_blend_masks/snow-outer-1of4-v2-r76-adjusted.png</file>
+        <file>terrain_blend_masks/stone-inside-3of4-v2-r76-adjusted.png</file>
     </qresource>
 </RCC>
