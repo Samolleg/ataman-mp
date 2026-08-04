@@ -147,11 +147,9 @@ back to the legacy rebuilding serializer; graph persistence remains explicit.
 - [ ] Runtime-confirm landscape edit-mode neutral geometry, overlay reset after
   unload/reload, traversal, liquid interaction, and changed-map save/load.
 - [ ] Offer explicit follow-up `map.txt` registration after new-MPR creation.
-- [ ] Add cost/component inspection and deterministic loaded/regenerated graph
-  diff, including the Zone 6 frozen/unfrozen source comparison.
-- [ ] Track navigation-dirty regions incrementally and validate entrance
-  reachability, asymmetry, isolation, clearance, and component changes.
-- [ ] Runtime-validate representative Base/JMV traversal against generated and
+- [x] Add cost/component inspection and deterministic loaded/regenerated graph
+  comparison, backed by the native graph parity audit.
+- [x] Runtime-validate representative Base/JMV traversal against generated and
   persisted graphs.
 
 ## Approved changelists and evidence
@@ -161,6 +159,8 @@ back to the legacy rebuilding serializer; graph persistence remains explicit.
 - [AI graph profile policy](docs/validation/AI_GRAPH_PROFILE_POLICY.md).
 - [AI graph persistence validation](packaging/ALPHA26_AI_GRAPH_PERSISTENCE_R3.md).
 - [AI graph runtime validation](packaging/ALPHA26_AI_GRAPH_RUNTIME_R1.md).
+- [AI graph parity validation](packaging/ALPHA26_AI_GRAPH_PARITY_R4.md) and the
+  preserved 47-graph native audit corpus (`9739e1e`).
 - [Public graph research reference](https://habr.com/ru/articles/769050/).
 - [MPR settings and height-range contract](docs/MPR_SETTINGS_AND_HEIGHT_RANGE.md).
 - [MPR settings validation](docs/validation/MPR_SETTINGS_HEIGHT_OPERATIONS_R1.md).
