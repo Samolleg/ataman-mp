@@ -90,13 +90,12 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         report = build_report(catalog)
         self.assertEqual(38, report["namespaceCount"])
         self.assertEqual(25, report["runtimeProfileCount"])
-        # R89 restores the directly reviewed Zone7 Ground / Dirt and Ground /
-        # Trampled transition-support identities while renaming the coherent
-        # slot405 network Ground / Brownish. Their real pair combinations are
-        # counted; no phantom family remains.
-        self.assertEqual(1501, report["totalPairCount"])
+        # R92 adds the separately reviewed Sand / Irregular artwork identity
+        # for the shared bz11k/Zone14 atlas. Its otherwise absent pair rows are
+        # reported honestly as zero-coverage topology, not hidden.
+        self.assertEqual(1514, report["totalPairCount"])
         self.assertEqual(
-            {"0": 917, "1": 126, "2": 81, "3": 177, "4": 200},
+            {"0": 930, "1": 126, "2": 81, "3": 177, "4": 200},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

@@ -2335,7 +2335,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
         self.assertEqual(13, zone7["slots"][329]["signature"]["southEast"])
         self.assertEqual(17, zone7["slots"][329]["signature"]["southWest"])
         self.assertEqual(13, zone7["slots"][335]["signature"]["southEast"])
-        self.assertEqual(21, zone7["slots"][480]["signature"]["southWest"])
+        self.assertEqual(17, zone7["slots"][480]["signature"]["southWest"])
         self.assertIn(16, {family["id"] for family in zone7["families"]})
         self.assertIn(21, {family["id"] for family in zone7["families"]})
         self.assertNotIn(22, {family["id"] for family in zone7["families"]})
@@ -2775,7 +2775,7 @@ class ReviewDocumentTests(unittest.TestCase):
             corner("Zone7", 329, 0), corner("Zone7", 329, 2),
             corner("Zone7", 329, 3)))
         self.assertEqual(13, corner("Zone7", 335, 2))
-        self.assertEqual(21, corner("Zone7", 480, 3))
+        self.assertEqual(17, corner("Zone7", 480, 3))
         self.assertEqual(3, corner("Zone13", 164, 0))
         self.assertEqual(4, corner("Zone13", 164, 1))
         self.assertEqual(
@@ -3206,8 +3206,8 @@ class ReviewDocumentTests(unittest.TestCase):
         self.assertEqual(16, payload[257 * 4 + 3])
         self.assertEqual(21, payload[335 * 4 + 3])
         self.assertEqual(
-            21, payload[480 * 4 + 3],
-            "provisional Dirt must retain its previous Trampled meaning")
+            17, payload[480 * 4 + 3],
+            "R92 resolved the provisional corner as Ground / Brownish")
         self.assertEqual({17}, set(payload[405 * 4:405 * 4 + 4]))
 
         bz16h = presets["bz16h"]
@@ -3219,6 +3219,92 @@ class ReviewDocumentTests(unittest.TestCase):
             ["Ground / Plant soil"] * 3,
             [bz_names[value] for value in bz_payload[169 * 4 + 1:169 * 4 + 4]],
             "unreviewable R89 defaults are unresolved, not confirmations")
+
+    def test_r92_applies_only_resolved_family_and_corner_decisions(self) -> None:
+        """R92 must split reviewed sand without guessing pending corners."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        def names_and_payload(namespace: str):
+            preset = presets[namespace]
+            return ({int(family["id"]): family["name"]
+                     for family in preset["families"]},
+                    base64.b64decode(preset["signaturesBase64"]))
+
+        for namespace in ("bz11k", "zone14"):
+            names, payload = names_and_payload(namespace)
+            self.assertEqual(
+                ["Ground / Light", "Ground / Trampled",
+                 "Ground / Trampled", "Ground / Trampled"],
+                [names[value] for value in payload[462 * 4:462 * 4 + 4]])
+            self.assertEqual("Sand / Irregular", names[20])
+            for slot in (218, 219):
+                self.assertEqual(
+                    ["Sand / Irregular"] * 4,
+                    [names[value] for value in payload[slot * 4:slot * 4 + 4]])
+
+        zone7_names, zone7_payload = names_and_payload("zone7")
+        self.assertEqual(
+            "Ground / Brownish", zone7_names[zone7_payload[480 * 4 + 3]])
+
+        for namespace in ("bz15h", "zone17"):
+            names, _ = names_and_payload(namespace)
+            self.assertEqual("Rubble / Dry", names[2])
+
+        # The user explicitly retained these base/original-identical HD colour
+        # variants in one family; they are not part of the follow-up queue.
+        for namespace, slot in (("bz13h", 10), ("bz4g", 6), ("zone4", 6)):
+            names, payload = names_and_payload(namespace)
+            self.assertEqual(
+                ["Sand / Dark"] * 4,
+                [names[value] for value in payload[slot * 4:slot * 4 + 4]])
+
+    def test_r93_applies_resolved_corners_without_guessing_named_ground(self) -> None:
+        """R93 must apply explicit corners and retain the five unnamed ones."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        def signature(namespace: str, slot: int):
+            preset = presets[namespace]
+            names = {int(family["id"]): family["name"]
+                     for family in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            return [names[value]
+                    for value in payload[slot * 4:slot * 4 + 4]]
+
+        for namespace in ("bz5g", "bz6g", "zone8"):
+            self.assertEqual(
+                ["Sand / Common", "Sand / Common",
+                 "Sand / Light", "Sand / Grainy"],
+                signature(namespace, 426))
+            self.assertEqual(
+                ["Sand / Common", "Sand / Common",
+                 "Sand / Common", "Sand / Light"],
+                signature(namespace, 121))
+
+        for namespace in ("bz3g", "zone9"):
+            self.assertEqual(
+                ["Stone / Lime", "Ground / Common",
+                 "Grass / Sparse dark", "Stone / Grayish"],
+                signature(namespace, 416))
+            self.assertEqual(
+                ["Stone / Grayish", "Ground / Dark",
+                 "Stone / Grayish", "Ground / Dark"],
+                signature(namespace, 445),
+                "NE/SW remain pending; Ground / Dark is context, not confirmation")
+            self.assertEqual(
+                ["Ground / Dark", "Stone / Grayish",
+                 "Ground / Dark", "Ground / Dark"],
+                signature(namespace, 468),
+                "NW/SE/SW remain pending; do not infer Ground / Brownish")
 
     def test_questionnaire_layout_contract_is_locked(self) -> None:
         policy = (Path(__file__).resolve().parent.parent / "docs" /

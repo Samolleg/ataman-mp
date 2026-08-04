@@ -5584,6 +5584,25 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(zone2.slotDefinitions.at(416).signature.southWest, pink->id);
     QCOMPARE(zone2.slotDefinitions.at(285).signature.northWest, mossy->id);
 
+    CValidationReport zone8Report;
+    const STerrainAtlasProfile zone8 = CTerrainAtlasPresetCatalog::exactProfile(
+        "Zone8",
+        "4ad67630a39a00a6d5fb1d421e7873c76faa64707a4c5565744a84476dfdc35e",
+        512, &zone8Report);
+    QVERIFY2(zone8.approved, qPrintable(zone8Report.toText()));
+    const STerrainTransitionSignature reviewedSand426 =
+        zone8.slotDefinitions.at(426).signature;
+    QCOMPARE(reviewedSand426.northWest, qint32(7));
+    QCOMPARE(reviewedSand426.northEast, qint32(7));
+    QCOMPARE(reviewedSand426.southEast, qint32(12));
+    QCOMPARE(reviewedSand426.southWest, qint32(11));
+    const STerrainTransitionSignature reviewedSand121 =
+        zone8.slotDefinitions.at(121).signature;
+    QCOMPARE(reviewedSand121.northWest, qint32(7));
+    QCOMPARE(reviewedSand121.northEast, qint32(7));
+    QCOMPARE(reviewedSand121.southEast, qint32(7));
+    QCOMPARE(reviewedSand121.southWest, qint32(12));
+
     CValidationReport bz3gReport;
     const STerrainAtlasProfile bz3g = CTerrainAtlasPresetCatalog::exactProfile(
         "bz3g",
@@ -5608,6 +5627,24 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(bz3g.slotDefinitions.at(298).signature.northWest, qint32(2));
     QCOMPARE(bz3g.slotDefinitions.at(450).signature.northEast, qint32(5));
     QCOMPARE(bz3g.slotDefinitions.at(450).signature.southEast, qint32(2));
+    const STerrainTransitionSignature reviewed416 =
+        bz3g.slotDefinitions.at(416).signature;
+    QCOMPARE(reviewed416.northWest, qint32(14));
+    QCOMPARE(reviewed416.northEast, qint32(12));
+    QCOMPARE(reviewed416.southEast, qint32(5));
+    QCOMPARE(reviewed416.southWest, qint32(3));
+    const STerrainTransitionSignature reviewed445 =
+        bz3g.slotDefinitions.at(445).signature;
+    QCOMPARE(reviewed445.northWest, qint32(3));
+    QCOMPARE(reviewed445.northEast, qint32(6));
+    QCOMPARE(reviewed445.southEast, qint32(3));
+    QCOMPARE(reviewed445.southWest, qint32(6));
+    const STerrainTransitionSignature reviewed468 =
+        bz3g.slotDefinitions.at(468).signature;
+    QCOMPARE(reviewed468.northWest, qint32(6));
+    QCOMPARE(reviewed468.northEast, qint32(3));
+    QCOMPARE(reviewed468.southEast, qint32(6));
+    QCOMPARE(reviewed468.southWest, qint32(6));
 
     CValidationReport zone9Report;
     const STerrainAtlasProfile zone9 = CTerrainAtlasPresetCatalog::exactProfile(
@@ -5618,6 +5655,41 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(zone9.families.size(), bz3g.families.size());
     QCOMPARE(zone9.slotDefinitions.at(450).signature,
              bz3g.slotDefinitions.at(450).signature);
+
+    CValidationReport snowRockReport;
+    const STerrainAtlasProfile snowRock =
+        CTerrainAtlasPresetCatalog::exactProfile(
+            "bz11k",
+            "bd1873929c5ba9d3406d8be7d642dfa37fcb42a1a48edc914d5dd97610ee00d2",
+            512, &snowRockReport);
+    QVERIFY2(snowRock.approved, qPrintable(snowRockReport.toText()));
+    const STerrainTransitionSignature reviewed462 =
+        snowRock.slotDefinitions.at(462).signature;
+    QCOMPARE(reviewed462.northWest, qint32(6));
+    QCOMPARE(reviewed462.northEast, qint32(16));
+    QCOMPARE(reviewed462.southEast, qint32(16));
+    QCOMPARE(reviewed462.southWest, qint32(16));
+    for(const int slot : {218, 219})
+    {
+        const STerrainTransitionSignature irregularSand =
+            snowRock.slotDefinitions.at(slot).signature;
+        QCOMPARE(irregularSand.northWest, qint32(20));
+        QCOMPARE(irregularSand.northEast, qint32(20));
+        QCOMPARE(irregularSand.southEast, qint32(20));
+        QCOMPARE(irregularSand.southWest, qint32(20));
+    }
+    QVERIFY(std::any_of(snowRock.families.cbegin(), snowRock.families.cend(),
+        [](const STerrainAtlasProfileFamily& family) {
+            return family.name == QStringLiteral("Sand / Irregular");
+        }));
+
+    CValidationReport zone7Report;
+    const STerrainAtlasProfile zone7 = CTerrainAtlasPresetCatalog::exactProfile(
+        "Zone7",
+        "dacf1b6653cee1f4afc908b1ff3fe219784f4b4a1ff8d38fd46efb38aa9cd897",
+        512, &zone7Report);
+    QVERIFY2(zone7.approved, qPrintable(zone7Report.toText()));
+    QCOMPARE(zone7.slotDefinitions.at(480).signature.southWest, qint32(17));
 }
 
 void EnduranceDocumentTests::semanticAtlasInferenceAssignsExactRepeatedPhysicalSlots()
@@ -5787,9 +5859,9 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 58);
-    // R89 separates Zone7's reviewed Ground / Brownish network from the
-    // retained Ground / Dirt and Ground / Trampled transition identities.
-    QCOMPARE(totalFamilies, 455);
+    // R93 keeps the reviewed Zone7 identities distinct and restores the
+    // explicitly reviewed irregular Sand family in bz11k/Zone14.
+    QCOMPARE(totalFamilies, 457);
     // Keep this count pinned to the reviewed semantic-atlas catalog. A change
     // means a family crossed the paint-brush/transition-support boundary and
     // must be visually audited before the palette consumes it.
@@ -5900,9 +5972,9 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    // R89 promotes Zone7's reviewed Ground / Brownish network to its own
-    // paintable global identity while keeping Dirt and Trampled contextual.
-    QCOMPARE(landFamilyCount, 73);
+    // R93 adds the explicitly reviewed bz11k/Zone14 Sand / Irregular family
+    // while preserving Zone7 Brownish, Dirt, and contextual Trampled.
+    QCOMPARE(landFamilyCount, 74);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);

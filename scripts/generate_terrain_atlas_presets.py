@@ -2612,6 +2612,55 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     if namespace == "zone7":
         family_renames[17] = "Ground / Brownish"
 
+    # R92 complete review. Apply only explicit resolved choices. The shared
+    # bz11k/Zone14 slot 462 is one Light corner over three Trampled corners;
+    # the two original-like sand variants at 218/219 form a separate authored
+    # Sand / Irregular family. Zone7 slot 480 SW is now conclusively part of
+    # the Brownish network, and the orange rubble family in the shared
+    # bz15h/Zone17 atlas receives its reviewed user-facing name. bz6g slots
+    # 426/121 and bz3g slots 416/445/468 remain follow-up work: their confirmed
+    # corners already have the current identity, while the other corners must
+    # not be guessed here.
+    r92_corrections = {
+        "bz11k": {
+            (462, 0): 6,
+            **{(slot, corner): 20
+               for slot in (218, 219) for corner in range(4)},
+        },
+        "zone14": {
+            (462, 0): 6,
+            **{(slot, corner): 20
+               for slot in (218, 219) for corner in range(4)},
+        },
+        "zone7": {(480, 3): 17},
+    }
+    corrections.update(r92_corrections.get(namespace, {}))
+    if namespace in ("bz15h", "zone17"):
+        family_renames[2] = "Rubble / Dry"
+
+    # R93 resolves both shared Zone8 sand transitions and the complete bz3g
+    # slot 416 signature. For slots 445 and 468, apply only the explicitly
+    # named Stone / Grayish corners. Their remaining brown-looking corners
+    # retain the existing Ground / Dark identity as unresolved context; the
+    # Zone7-only Ground / Brownish family must not be inferred here.
+    r93_corrections = {
+        **{owner: {
+            (426, 2): 12,
+            (426, 3): 11,
+            (121, 3): 12,
+        } for owner in ("bz5g", "bz6g", "zone8")},
+        **{owner: {
+            (416, 0): 14,
+            (416, 1): 12,
+            (416, 2): 5,
+            (416, 3): 3,
+            (445, 0): 3,
+            (445, 2): 3,
+            (468, 1): 3,
+        } for owner in ("bz3g", "zone9")},
+    }
+    corrections.update(r93_corrections.get(namespace, {}))
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)
@@ -2638,6 +2687,19 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             family["uniformSlots"] = []
             family["memberSlots"] = [thumbnail]
             result["families"].append(family)
+        result["families"].sort(key=lambda family: family["id"])
+    if (namespace in ("bz11k", "zone14")
+            and any(family["id"] == 19 for family in result["families"])
+            and not any(family["id"] == 20 for family in result["families"])):
+        irregular = copy.deepcopy(next(
+            family for family in result["families"] if family["id"] == 19))
+        irregular["id"] = 20
+        irregular["sourceFamily"] = "reviewed/sand/irregular"
+        irregular["suggestedName"] = "Sand / Irregular"
+        irregular["thumbnailSlot"] = 218
+        irregular["uniformSlots"] = [218, 219]
+        irregular["memberSlots"] = [218, 219]
+        result["families"].append(irregular)
         result["families"].sort(key=lambda family: family["id"])
     by_slot = {slot["slot"]: slot for slot in result["slots"]}
     for (slot_index, corner_index), family_id in corrections.items():
