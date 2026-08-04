@@ -19,7 +19,7 @@ from render_authored_mask_repair_pilot import (
     _representatives,
     _save,
     _source_quality,
-    align_authored_mask,
+    align_runtime_review_mask_exact,
     expected_owner_corners,
     mask_metrics,
     repair_authored_mask,
@@ -41,13 +41,44 @@ CASES = (
     ("water-ripples", "inside-3of4-v1"),
 )
 
+# R70 explicitly rejected the selected bz16h:332 Sand diagonal source and
+# requested another genuine authored source.  Zone7:423 is the other distinct
+# provenance-qualified Sand diagonal already present in the R41 evidence.
+SOURCE_OVERRIDES = {
+    ("sand-grain", "diagonal-2of4"): "Zone7:423",
+}
+
 
 def _rotate_pattern_clockwise(values: tuple) -> tuple:
     return values[3], values[0], values[1], values[2]
 
 
+def _material_style(name: str) -> str:
+    normalized = name.strip().casefold()
+    if normalized.startswith("grass"):
+        return "grass-strands"
+    if "snow" in normalized:
+        return "snow-clumps"
+    if normalized.startswith("sand"):
+        return "sand-grain"
+    if normalized.startswith("rubble") or "gravel" in normalized:
+        return "gravel-chunks"
+    if normalized.startswith("water") or "/ water" in normalized:
+        return "water-ripples"
+    if normalized.startswith("ice"):
+        return "ice-fracture"
+    if normalized.startswith("paving") or normalized.startswith("slabs"):
+        return "paving-courses"
+    if normalized.startswith("stone") or normalized.startswith("rock"):
+        return "stone-fracture"
+    if (normalized.startswith("ground") or "soil" in normalized
+            or "dirt" in normalized or "mud" in normalized):
+        return "soil-mottle"
+    return "organic-fallback"
+
+
 def _source_alignment(presets: dict[str, dict], provenance: str,
-                      topology: str) -> dict:
+                      topology: str, requested_family: str) -> dict:
     namespace, separator, slot_text = provenance.rpartition(":")
     if not separator or namespace not in presets or not slot_text.isdigit():
         raise ValueError(f"unresolvable authored provenance: {provenance}")
@@ -62,34 +93,52 @@ def _source_alignment(presets: dict[str, dict], provenance: str,
     if len(unique) != 2:
         raise ValueError(f"source is not a two-family blend: {provenance}")
 
-    # The stock selector starts from the source signature mirrored into preview
-    # coordinates, then rotates clockwise until either the lower-id ownership
-    # field or its exact complement matches the requested owner corners.
-    preview = (signature[3], signature[2], signature[1], signature[0])
+    # Preset signatures describe the physical atlas preview.  This is also the
+    # coordinate system of the source image.  Replaying an authored source must
+    # therefore start from these corners directly, apply only a legal packed
+    # clockwise quarter-turn, and perform the single preview-to-grid Y mirror
+    # afterward.  The previous code mirrored the signature before this search,
+    # which double-mirrored the source and could map the support field as owner.
+    preview = signature
     expected = expected_owner_corners(topology)
     requested_preview = (expected[3], expected[2], expected[1], expected[0])
-    mapped = None
-    turns = 0
+    names = {family["id"]: family["name"]
+             for family in preset.get("families", [])}
+    candidates = []
     for turns in range(4):
         for material in unique:
             if tuple(value == material for value in preview) == requested_preview:
-                mapped = material
-                break
-        if mapped is not None:
-            break
+                candidates.append((
+                    _material_style(names.get(material, str(material)))
+                        != requested_family,
+                    turns, material))
         preview = _rotate_pattern_clockwise(preview)
-    if mapped is None:
+    if not candidates:
         raise ValueError(
             f"source corners cannot supply {topology}: {provenance}")
-    names = {family["id"]: family["name"]
-             for family in preset.get("families", [])}
+    # The corner pattern is mandatory.  When both complementary fields can
+    # satisfy it (especially diagonals), the requested semantic mask family is
+    # mandatory too.  Only a source with no matching family uses the stable
+    # earliest-turn fallback needed for reviewed cross-style transfers.
+    style_fallback, turns, mapped = min(candidates)
     return {
-        "fixedGridToPreviewMirrorY": True,
+        "fixedPreviewToGridMirrorY": True,
         "stockRotationClockwise": turns * 90,
         "mappedSourceMaterialId": mapped,
         "mappedSourceMaterial": names.get(mapped, str(mapped)),
+        "mappedSourceStyle": _material_style(
+            names.get(mapped, str(mapped))),
+        "requestedMaskFamily": requested_family,
+        "exactSourceStyleMatch": not style_fallback,
+        "sourceOwnerInverted": mapped != unique[0],
         "sourceSignature": list(signature),
     }
+
+
+def _align_source_image(source: Image.Image, alignment: dict) -> Image.Image:
+    """Replay the exact stock turn, then the same fixed grid reflection."""
+    rotated = source.rotate(-alignment["stockRotationClockwise"])
+    return ImageOps.flip(rotated)
 
 
 def _slug(value: str) -> str:
@@ -99,14 +148,18 @@ def _slug(value: str) -> str:
 
 
 def _select_source(review: Path, rows: list[dict[str, str]],
-                   topology: str):
+                   family: str, topology: str):
     candidates = {}
+    required_provenance = SOURCE_OVERRIDES.get((family, topology))
     for row in rows:
         if row.get("missing") == "1":
             continue
+        if (required_provenance is not None
+                and row["provenance"] != required_provenance):
+            continue
         raw = _cell(review, row["sheet"], int(row["row"]),
                     int(row["column"]), "L")
-        aligned, transform = align_authored_mask(raw, topology)
+        aligned, transform = align_runtime_review_mask_exact(raw, topology)
         identity = hashlib.sha256(aligned.tobytes()).hexdigest()
         candidate = (
             round(_source_quality(aligned, topology), 6),
@@ -151,7 +204,7 @@ def render(review: Path, output: Path,
         if not group:
             raise ValueError(f"missing authored evidence for {family}/{topology}")
         (_, provenance, selected, raw, aligned,
-         transform) = _select_source(review, group, topology)
+         transform) = _select_source(review, group, family, topology)
         seed = int(hashlib.sha256(
             f"{family}|{topology}|{provenance}".encode()).hexdigest()[:8], 16)
         conservative, conservative_metrics = repair_authored_mask(
@@ -160,13 +213,12 @@ def render(review: Path, output: Path,
             review, selected["source_example_sheet"], int(selected["row"]),
             int(selected["column"]), "RGB")
         source_alignment = _source_alignment(
-            presets, provenance, topology)
-        # Reproduce the exact stock-selector transform for this provenance,
-        # then apply the mask questionnaire's canonical quarter-turn. The
-        # source signature decides every step; pixels are never scored.
-        aligned_source = ImageOps.flip(source).rotate(
-            -source_alignment["stockRotationClockwise"]).rotate(
-                transform["rotationCounterClockwise"])
+            presets, provenance, topology, family)
+        # Reproduce the exact stock-selector turn for this provenance, then
+        # cross the physical-preview/logical-grid boundary once.  The mask
+        # uses the identical fixed mirror; no pixel score, arbitrary diagonal
+        # half-turn, or extra inversion participates.
+        aligned_source = _align_source_image(source, source_alignment)
         detailed, detailed_process = reconstruct_soft_ownership(
             aligned_source, expected_owner_corners(topology),
             remove_bounded_holes=family == "sand-grain"

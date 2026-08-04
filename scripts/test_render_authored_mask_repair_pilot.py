@@ -16,6 +16,7 @@ from render_authored_mask_repair_pilot import (
     HARD_BASELINE_SOURCE_GAPS,
     REMAINING_HARD_BASELINE_CASES,
     align_authored_mask,
+    align_runtime_review_mask_exact,
     band_visualization,
     mask_metrics,
     repair_authored_mask,
@@ -24,6 +25,8 @@ from render_authored_mask_repair_pilot import (
 )
 from render_soft_family_route_comparison import (
     CASES as SOFT_ROUTE_CASES,
+    SOURCE_OVERRIDES,
+    _align_source_image,
     _source_alignment,
 )
 
@@ -57,19 +60,28 @@ class AuthoredMaskRepairPilotTests(unittest.TestCase):
         presets = {preset["namespace"]: preset
                    for preset in payload["presets"]}
         outer = _source_alignment(
-            presets, "Zone3Obr:235", "outer-1of4-v1")
+            presets, "Zone3Obr:235", "outer-1of4-v1", "water-ripples")
+        edge = _source_alignment(
+            presets, "BaseGipat:190", "edge-2of4-v1", "water-ripples")
         inside = _source_alignment(
-            presets, "Zone3Obr:435", "inside-3of4-v1")
+            presets, "Zone3Obr:435", "inside-3of4-v1", "water-ripples")
         diagonal = _source_alignment(
-            presets, "Zone1:351", "diagonal-2of4")
-        self.assertEqual(outer["stockRotationClockwise"], 270)
+            presets, "Zone1:351", "diagonal-2of4", "water-ripples")
+        # Preset signatures describe the physical tile preview.  The stock
+        # source must first receive the resolver's exact packed quarter-turn;
+        # only then is the fixed preview-to-grid Y mirror applied.  Treating
+        # the preset as a grid signature mirrors it twice and maps the wrong
+        # material field (BaseGipat:190 used to become Grass / Common).
+        self.assertEqual(outer["stockRotationClockwise"], 0)
         self.assertEqual(outer["mappedSourceMaterial"], "Ground / Water")
-        self.assertEqual(inside["stockRotationClockwise"], 0)
+        self.assertEqual(edge["stockRotationClockwise"], 0)
+        self.assertEqual(edge["mappedSourceMaterial"], "Ground / Water")
+        self.assertEqual(inside["stockRotationClockwise"], 90)
         self.assertEqual(inside["mappedSourceMaterial"], "Ground / Water")
-        self.assertEqual(diagonal["stockRotationClockwise"], 0)
+        self.assertEqual(diagonal["stockRotationClockwise"], 90)
         self.assertEqual(diagonal["mappedSourceMaterial"], "Ground / Water")
-        self.assertTrue(all(value["fixedGridToPreviewMirrorY"]
-                            for value in (outer, inside, diagonal)))
+        self.assertTrue(all(value["fixedPreviewToGridMirrorY"]
+                            for value in (outer, edge, inside, diagonal)))
 
     def test_diagonal_alignment_rotates_without_polarity_inversion(self) -> None:
         raw = np.zeros((64, 64), dtype=np.uint8)
@@ -83,6 +95,36 @@ class AuthoredMaskRepairPilotTests(unittest.TestCase):
             (255, 0, 255, 0))
         self.assertFalse(transform["inverted"])
         self.assertIn(transform["rotationCounterClockwise"], (90, 270))
+
+    def test_runtime_review_alignment_uses_only_fixed_grid_mirror(self) -> None:
+        raw = np.zeros((8, 8), dtype=np.uint8)
+        raw[:4, 4:] = 255
+        raw[4:, :4] = 255
+        aligned, transform = align_runtime_review_mask_exact(
+            Image.fromarray(raw, "L"), "diagonal-2of4")
+        values = np.asarray(aligned, dtype=np.uint8)
+        self.assertEqual(
+            (values[0, 0], values[0, -1], values[-1, -1], values[-1, 0]),
+            (255, 0, 255, 0))
+        self.assertEqual(transform["rotationCounterClockwise"], 0)
+        self.assertTrue(transform["physicalPreviewToLogicalGridMirrorY"])
+
+        source = Image.new("RGB", (4, 4))
+        source.putpixel((0, 0), (1, 0, 0))
+        source.putpixel((3, 0), (2, 0, 0))
+        source.putpixel((3, 3), (3, 0, 0))
+        source.putpixel((0, 3), (4, 0, 0))
+        transformed = _align_source_image(source, {
+            "stockRotationClockwise": 90})
+        self.assertEqual(
+            tuple(transformed.getpixel(point)[0] for point in
+                  ((0, 0), (3, 0), (3, 3), (0, 3))),
+            (3, 2, 1, 4))
+
+    def test_r70_rejected_sand_diagonal_uses_alternate_source(self) -> None:
+        self.assertEqual(
+            SOURCE_OVERRIDES[("sand-grain", "diagonal-2of4")],
+            "Zone7:423")
 
     def test_soft_route_batch_is_five_unique_family_topology_questions(self) -> None:
         self.assertEqual(len(SOFT_ROUTE_CASES), 5)

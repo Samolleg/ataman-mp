@@ -21,7 +21,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 
 from render_blend_mask_questionnaire import interaction_script
 
@@ -471,6 +471,27 @@ def align_authored_mask(mask: Image.Image, topology: str) -> tuple[Image.Image, 
     }
 
 
+def align_runtime_review_mask_exact(
+        mask: Image.Image, topology: str) -> tuple[Image.Image, dict]:
+    """Map a runtime preview mask to the logical grid with one fixed mirror."""
+    aligned = ImageOps.flip(mask.convert("L"))
+    points = ((0, 0), (aligned.width - 1, 0),
+              (aligned.width - 1, aligned.height - 1),
+              (0, aligned.height - 1))
+    actual = tuple(aligned.getpixel(point) >= 128 for point in points)
+    expected = expected_owner_corners(topology)
+    if actual != expected:
+        raise ValueError(
+            f"runtime review mask corners {actual} do not match {topology} "
+            f"after the fixed preview-to-grid mirror")
+    return aligned, {
+        "physicalPreviewToLogicalGridMirrorY": True,
+        "rotationCounterClockwise": 0,
+        "inverted": False,
+        "alignmentRule": "fixed-preview-to-grid-mirror-y",
+    }
+
+
 def _save(image: Image.Image, path: Path) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path, "PNG", optimize=True)
@@ -559,6 +580,7 @@ def render(review: Path, output: Path,
     for row in rows:
         grouped[(row["owner_style"], row["topology"])].append(row)
 
+    exact_runtime_alignment = tuple(cases) == REMAINING_HARD_BASELINE_CASES
     questions = []
     cards = []
     for number, logical in enumerate(cases, 1):
@@ -573,7 +595,10 @@ def render(review: Path, output: Path,
             if raw_hash.lower() != row["mask_sha256"].lower():
                 raise ValueError(
                     f"authored mask hash mismatch for {row['provenance']}")
-            aligned_mask, alignment = align_authored_mask(raw_mask, logical[1])
+            aligned_mask, alignment = (
+                align_runtime_review_mask_exact(raw_mask, logical[1])
+                if exact_runtime_alignment else
+                align_authored_mask(raw_mask, logical[1]))
             candidate_seed = int(_sha256_bytes(
                 f"{logical[0]}|{logical[1]}|{row['provenance']}".encode()
             )[:8], 16)
@@ -688,14 +713,26 @@ def render(review: Path, output: Path,
         repair_caption = ("Band-preserving faceted repair" if
                           metrics.get("repairMethod") == "faceted-opacity-bands"
                           else "Conservatively repaired authored mask")
+        if alignment.get("physicalPreviewToLogicalGridMirrorY"):
+            alignment_summary = (
+                "fixed physical-preview → logical-grid Y mirror")
+            alignment_label = "preview → grid mirror Y"
+        else:
+            polarity = " + polarity inversion" if alignment["inverted"] else ""
+            alignment_summary = (
+                f"legal alignment {alignment['rotationCounterClockwise']}° CCW"
+                f"{polarity}")
+            alignment_label = (
+                f"{alignment['rotationCounterClockwise']}° CCW"
+                f"{' + inverted' if alignment['inverted'] else ''}")
         cards.append(f'''<article class="pilot-question" data-key="{key}">
 <h2>{number}. {html.escape(logical[0])} · {html.escape(_topology_label(logical[1]))}</h2>
-<p class="muted">Owner corner assignment: <strong>{html.escape(owner_corner_text)}</strong> · selected authored source {html.escape(selected_row['provenance'])} from {len(unique_candidates)} distinct candidates · legal alignment {alignment['rotationCounterClockwise']}° CCW{' + polarity inversion' if alignment['inverted'] else ''} · conservative source score {selected_score:.3f}</p>
+<p class="muted">Owner corner assignment: <strong>{html.escape(owner_corner_text)}</strong> · selected authored source {html.escape(selected_row['provenance'])} from {len(unique_candidates)} distinct candidates · {html.escape(alignment_summary)} · conservative source score {selected_score:.3f}</p>
 <p class="metric">{html.escape(metric_text)}</p>
 <div class="evidence-grid">
 <figure><img src="{files['authoredSource']['file']}" alt="Authored transition tile"><figcaption>Authored transition tile<br><strong>{html.escape(selected_row['provenance'])}</strong></figcaption></figure>
 <figure><img src="{files['rawMask']['file']}" alt="Raw extracted authored mask"><figcaption>Raw extracted mask</figcaption></figure>
-<figure><img src="{files['alignedMask']['file']}" alt="Legally aligned authored mask"><figcaption>Aligned authored mask<br><strong>{alignment['rotationCounterClockwise']}° CCW{' + inverted' if alignment['inverted'] else ''}</strong></figcaption></figure>
+<figure><img src="{files['alignedMask']['file']}" alt="Legally aligned authored mask"><figcaption>Aligned authored mask<br><strong>{html.escape(alignment_label)}</strong></figcaption></figure>
 <figure><img src="{files['repairedMask']['file']}" alt="{html.escape(repair_caption)}"><figcaption><strong>{html.escape(repair_caption)}</strong></figcaption></figure>
 {band_figure}
 <figure><img src="{files['difference']['file']}" alt="Difference heatmap"><figcaption>Difference · green added · magenta removed</figcaption></figure>
@@ -729,7 +766,7 @@ def render(review: Path, output: Path,
         "keeps its strong faceted boundary pixel-exact, and reconstructs three "
         "separate opacity edge bands. No global blur or geometric replacement is used."
         if sand_only else
-        "This is a 12-case pilot, not runtime behavior. Every proposal starts "
+        f"This is a {len(cases)}-case pilot, not runtime behavior. Every proposal starts "
         "from a real pre-R42 authored JMV mask. The geometric R42 fallback is not used.")
     summary_text = (f"Each of the {len(questions)} sand questions shows the authored "
         "transition, extracted and aligned silhouette, separated opacity bands, "
