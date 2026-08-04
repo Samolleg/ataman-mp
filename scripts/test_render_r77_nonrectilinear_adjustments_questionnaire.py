@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import re
 import unittest
 
 import numpy as np
@@ -27,6 +29,43 @@ class NonRectilinearAdjustmentTests(unittest.TestCase):
         self.assertEqual(len(EXPECTED_KEYS), 4)
         self.assertFalse(
             set(EXPECTED_KEYS) & set(decisions["approvedAdjustments"]))
+
+    def test_only_explicit_r77_approvals_are_installed(self) -> None:
+        scripts = Path(__file__).resolve().parent
+        root = scripts.parent
+        decisions = json.loads((
+            scripts / "authored_mask_r77_decisions.json"
+        ).read_text(encoding="utf-8"))
+        approved = set(decisions["approvedAdjustments"])
+        pending = set(decisions["adjustmentRequests"])
+        self.assertEqual(approved, set(EXPECTED_KEYS))
+        self.assertEqual(len(approved), 4)
+        self.assertFalse(pending)
+
+        source = (root / "source/documents/terrain_virtual_atlas.cpp").read_text(
+            encoding="utf-8")
+        block = source.split(
+            "static const SReviewedCanonicalMask r77Masks[] = {", 1
+        )[1].split("    };", 1)[0]
+        records = re.findall(
+            r'\{ETerrainBlendStyle::(\w+), "([^"]+)",\s*'
+            r'"[^"]*/([^/"]+)",\s*"([0-9a-f]{64})",\s*'
+            r'"([^"]+:r77-approved-nonrectilinear-adjustment:[^"]+)"\}',
+            block)
+        self.assertEqual(len(records), 4)
+        installed = set()
+        qrc = (root / "assets/resources/terrain_blend_masks.qrc").read_text(
+            encoding="utf-8")
+        for _, topology, filename, expected_hash, provenance in records:
+            family = provenance.split(":", 2)[1]
+            installed.add(f"mask-family-{family}-{topology}")
+            self.assertIn(f"terrain_blend_masks/{filename}", qrc)
+            image = Image.open(
+                root / "assets/resources/terrain_blend_masks" / filename
+            ).convert("L")
+            self.assertEqual(hashlib.sha256(image.tobytes()).hexdigest(),
+                             expected_hash)
+        self.assertEqual(installed, approved)
 
     def test_paving_edge_has_no_straight_interior_fade_boundary(self) -> None:
         recovered = Image.new("L", (256, 256), 255)

@@ -786,6 +786,29 @@ struct SReviewedCanonicalMask
 const SReviewedCanonicalMask* reviewedCanonicalMask(
     ETerrainBlendStyle style, const QString& topology)
 {
+    static const SReviewedCanonicalMask r77Masks[] = {
+        {ETerrainBlendStyle::Paving, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/paving-edge-2of4-v2-r77-adjusted.png",
+         "ff6415e2a059b7f0f4becb6b7655a6a8adb3b199241084d7cffef91a883236ce",
+         "canonical-generated:paving-courses:edge-2of4-v2:r77-approved-nonrectilinear-adjustment:Zone10:218"},
+        {ETerrainBlendStyle::Paving, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/paving-outer-1of4-v2-r77-adjusted.png",
+         "7f2af62ff745000591d72a3ea4229b7485c59967a18c7ce9cb7b6308051a7250",
+         "canonical-generated:paving-courses:outer-1of4-v2:r77-approved-nonrectilinear-adjustment:Zone10:509"},
+        {ETerrainBlendStyle::Sand, "outer-1of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/sand-outer-1of4-v2-r77-adjusted.png",
+         "3c7f026631344e1688f4bf782806608526bc9b1486adb6517d352b8bbad46539",
+         "canonical-generated:sand-grain:outer-1of4-v2:r77-approved-nonrectilinear-adjustment:bz5g:467"},
+        {ETerrainBlendStyle::Snow, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/snow-edge-2of4-v2-r77-adjusted.png",
+         "1803cc86631d8fe57a485c1eef8b785f329af90d184d03fa77258117d5bdf4b6",
+         "canonical-generated:snow-clumps:edge-2of4-v2:r77-approved-nonrectilinear-adjustment:bz10k:158"}
+    };
+    for(const SReviewedCanonicalMask& mask : r77Masks)
+        if(mask.style == style
+           && topology == QString::fromLatin1(mask.topology))
+            return &mask;
+
     static const SReviewedCanonicalMask r76Masks[] = {
         {ETerrainBlendStyle::Gravel, "inside-3of4-v2",
          ":/terrain_blend_masks/terrain_blend_masks/gravel-inside-3of4-v2-r76-adjusted.png",

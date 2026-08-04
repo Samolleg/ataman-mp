@@ -84,5 +84,9 @@
         <file>terrain_blend_masks/snow-outer-1of4-v1-r76-adjusted.png</file>
         <file>terrain_blend_masks/snow-outer-1of4-v2-r76-adjusted.png</file>
         <file>terrain_blend_masks/stone-inside-3of4-v2-r76-adjusted.png</file>
+        <file>terrain_blend_masks/paving-edge-2of4-v2-r77-adjusted.png</file>
+        <file>terrain_blend_masks/paving-outer-1of4-v2-r77-adjusted.png</file>
+        <file>terrain_blend_masks/sand-outer-1of4-v2-r77-adjusted.png</file>
+        <file>terrain_blend_masks/snow-edge-2of4-v2-r77-adjusted.png</file>
     </qresource>
 </RCC>
