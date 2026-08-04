@@ -1,4 +1,4 @@
-QT += core gui testlib
+QT += core gui concurrent testlib
 CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = unit_animation_tests

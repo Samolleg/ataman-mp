@@ -110,6 +110,9 @@ private slots:
     void resolvesAppearancePreparationWithoutSceneObjects();
     void cachesPreparedAppearanceByContentIdentity();
     void sharesDatabaseAppearancePreparationAcrossEquivalentUnits();
+    void groupsAllEquivalentUnitsAcrossDistanceOrderedWork();
+    void keepsDistinctAssembliesInSeparatePreparationGroups();
+    void boundsAppearancePreparationWorkerCount();
     void keepsAppearanceProgressVisibleBetweenWorkerBatches();
     void pumpsIncompleteIdleVisualPreparation();
     void retainsAppearanceBatchOwnershipUntilResultsAreConsumed();
@@ -708,10 +711,76 @@ void UnitAnimationTests::sharesDatabaseAppearancePreparationAcrossEquivalentUnit
     QCOMPARE(shared.at(1).unitKey, quintptr(202));
     QCOMPARE(shared.at(1).databaseGeneration, quint64(8));
     QCOMPARE(shared.at(1).visualRevision, quint64(4));
+    QVERIFY(shared.at(0).providerExecuted);
+    QVERIFY(!shared.at(0).cacheHit);
+    QVERIFY(!shared.at(0).sharedPreparation);
+    QVERIFY(!shared.at(1).providerExecuted);
+    QVERIFY(!shared.at(1).cacheHit);
 
     second.request.model = QStringLiteral("different-authored-assembly");
     QVERIFY(unitAppearancePreparationCacheKey(first)
             != unitAppearancePreparationCacheKey(second));
+}
+
+void UnitAnimationTests::groupsAllEquivalentUnitsAcrossDistanceOrderedWork()
+{
+    QVector<SUnitAppearancePreparationTask> ordered;
+    for(int index = 0; index < 32; ++index)
+    {
+        SUnitAppearancePreparationTask peasant;
+        peasant.unitKey = quintptr(1000 + index);
+        peasant.providerId = QStringLiteral("jmv.v1");
+        peasant.request.prototype = QStringLiteral("Peasant");
+        peasant.request.model = QStringLiteral("unhuma");
+        peasant.request.primaryTexture = QStringLiteral("unhumaskin_00_x4");
+        ordered.append(peasant);
+
+        SUnitAppearancePreparationTask unique = peasant;
+        unique.unitKey = quintptr(2000 + index);
+        unique.request.prototype = QStringLiteral("Unique %1").arg(index);
+        ordered.append(unique);
+    }
+
+    const QVector<SUnitAppearancePreparationTask> selected
+        = selectUnitAppearancePreparationBatch(ordered, 16);
+    int peasants = 0;
+    QSet<QString> uniqueKeys;
+    for(const SUnitAppearancePreparationTask& task : selected)
+    {
+        if(task.request.prototype == QStringLiteral("Peasant"))
+            ++peasants;
+        uniqueKeys.insert(unitAppearancePreparationCacheKey(task));
+    }
+    QCOMPARE(peasants, 32);
+    QCOMPARE(uniqueKeys.size(), 16);
+    QCOMPARE(selected.size(), 47);
+}
+
+void UnitAnimationTests::keepsDistinctAssembliesInSeparatePreparationGroups()
+{
+    SUnitAppearancePreparationTask ordinary;
+    ordinary.unitKey = 1;
+    ordinary.providerId = QStringLiteral("jmv.v1");
+    ordinary.request.prototype = QStringLiteral("Shared prototype");
+    ordinary.request.model = QStringLiteral("unhuma");
+    ordinary.request.primaryTexture = QStringLiteral("skin");
+    SUnitAppearancePreparationTask authored = ordinary;
+    authored.unitKey = 2;
+    authored.request.model = QStringLiteral("special-authored-assembly");
+
+    const QVector<SUnitAppearancePreparationTask> selected
+        = selectUnitAppearancePreparationBatch({ordinary, authored}, 1);
+    QCOMPARE(selected.size(), 1);
+    QCOMPARE(selected.first().unitKey, quintptr(1));
+}
+
+void UnitAnimationTests::boundsAppearancePreparationWorkerCount()
+{
+    QCOMPARE(unitAppearancePreparationWorkerLimit(0), 1);
+    QCOMPARE(unitAppearancePreparationWorkerLimit(1), 1);
+    QCOMPARE(unitAppearancePreparationWorkerLimit(2), 2);
+    QCOMPARE(unitAppearancePreparationWorkerLimit(8), 4);
+    QCOMPARE(unitAppearancePreparationWorkerLimit(64), 4);
 }
 
 void UnitAnimationTests::keepsAppearanceProgressVisibleBetweenWorkerBatches()

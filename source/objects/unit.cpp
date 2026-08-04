@@ -173,7 +173,7 @@ bool CUnit::needsAppearancePreparation() const
              && m_preparedAppearanceRevision == m_visualRevision);
 }
 
-bool CUnit::takeAppearancePreparationTask(SUnitAppearancePreparationTask* task)
+bool CUnit::describeAppearancePreparationTask(SUnitAppearancePreparationTask* task) const
 {
     if(!task || !needsAppearancePreparation())
         return false;
@@ -194,6 +194,13 @@ bool CUnit::takeAppearancePreparationTask(SUnitAppearancePreparationTask* task)
     task->request.bodyParts = m_bodyParts;
     task->request.dataSource = m_bImport ? EUnitVisualDataSource::EmbeddedMob
                                         : EUnitVisualDataSource::ProfileDatabase;
+    return true;
+}
+
+bool CUnit::takeAppearancePreparationTask(SUnitAppearancePreparationTask* task)
+{
+    if(!describeAppearancePreparationTask(task))
+        return false;
     m_appearancePreparationInFlight = true;
     return true;
 }

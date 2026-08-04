@@ -14,6 +14,9 @@
 #include <QMutexLocker>
 #include <QSaveFile>
 #include <QSet>
+#include <QThread>
+#include <QThreadPool>
+#include <QtConcurrent/QtConcurrentRun>
 
 namespace {
 
@@ -198,6 +201,35 @@ QString unitAppearancePreparationCacheKey(const SUnitAppearancePreparationTask& 
         QCryptographicHash::Sha256).toHex());
 }
 
+QVector<SUnitAppearancePreparationTask> selectUnitAppearancePreparationBatch(
+    const QVector<SUnitAppearancePreparationTask>& distanceOrderedTasks,
+    int maximumUniqueAppearances)
+{
+    QVector<SUnitAppearancePreparationTask> selected;
+    if(maximumUniqueAppearances <= 0)
+        return selected;
+    QSet<QString> selectedKeys;
+    for(const SUnitAppearancePreparationTask& task : distanceOrderedTasks)
+    {
+        QString key = unitAppearancePreparationCacheKey(task);
+        if(!canCacheTask(task))
+            key += QStringLiteral("|unit:") + QString::number(qulonglong(task.unitKey));
+        if(!selectedKeys.contains(key))
+        {
+            if(selectedKeys.size() >= maximumUniqueAppearances)
+                continue;
+            selectedKeys.insert(key);
+        }
+        selected.append(task);
+    }
+    return selected;
+}
+
+int unitAppearancePreparationWorkerLimit(int idealThreadCount)
+{
+    return qBound(1, idealThreadCount, 4);
+}
+
 QString unitAppearancePreparationCacheDirectory()
 {
     if(!QCoreApplication::instance())
@@ -234,52 +266,101 @@ QString unitAppearancePreparationCacheDirectoryForApplication(
 QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(
     const QVector<SUnitAppearancePreparationTask>& tasks, const QString& cacheDirectory)
 {
-    QVector<SUnitAppearancePreparationResult> results;
-    results.reserve(tasks.size());
-    ProfileVisualProviderService providers;
+    QVector<SUnitAppearancePreparationResult> results(tasks.size());
+    if(tasks.isEmpty())
+        return results;
     const QString effectiveCacheDirectory = cacheDirectory.isNull()
         ? unitAppearancePreparationCacheDirectory() : cacheDirectory;
     const bool cacheReady = prepareCacheDirectory(effectiveCacheDirectory);
-    QHash<QString, SUnitAppearancePreparationResult> preparedInBatch;
-    for(const SUnitAppearancePreparationTask& task : tasks)
+
+    struct SPreparationGroup
     {
-        SUnitAppearancePreparationResult result;
-        result.unitKey = task.unitKey;
-        result.databaseGeneration = task.databaseGeneration;
-        result.visualRevision = task.visualRevision;
+        QString cacheKey;
+        SUnitAppearancePreparationTask representative;
+        QVector<int> taskIndexes;
+        bool cacheable{false};
+    };
+    QVector<SPreparationGroup> groups;
+    QHash<QString, int> groupByKey;
+    for(int taskIndex = 0; taskIndex < tasks.size(); ++taskIndex)
+    {
+        const SUnitAppearancePreparationTask& task = tasks.at(taskIndex);
         const QString cacheKey = unitAppearancePreparationCacheKey(task);
         const bool cacheable = canCacheTask(task);
-        if(cacheable && preparedInBatch.contains(cacheKey))
+        int groupIndex = cacheable ? groupByKey.value(cacheKey, -1) : -1;
+        if(groupIndex < 0)
         {
-            result = preparedInBatch.value(cacheKey);
+            groupIndex = groups.size();
+            SPreparationGroup group;
+            group.cacheKey = cacheKey;
+            group.representative = task;
+            group.cacheable = cacheable;
+            groups.append(group);
+            if(cacheable)
+                groupByKey.insert(cacheKey, groupIndex);
+        }
+        groups[groupIndex].taskIndexes.append(taskIndex);
+    }
+
+    QThreadPool workerPool;
+    workerPool.setMaxThreadCount(unitAppearancePreparationWorkerLimit(
+        QThread::idealThreadCount()));
+    QVector<QFuture<SUnitAppearancePreparationResult>> futures;
+    futures.reserve(groups.size());
+    for(const SPreparationGroup& group : groups)
+    {
+        const SUnitAppearancePreparationTask task = group.representative;
+        const QString cacheKey = group.cacheKey;
+        const bool cacheable = group.cacheable;
+        futures.append(QtConcurrent::run(&workerPool,
+            [task, cacheKey, cacheable, cacheReady, effectiveCacheDirectory]()
+        {
+            SUnitAppearancePreparationResult result;
             result.unitKey = task.unitKey;
             result.databaseGeneration = task.databaseGeneration;
             result.visualRevision = task.visualRevision;
-            result.sharedPreparation = true;
-            results.append(result);
-            continue;
-        }
-        if(cacheable && cacheReady
-                && readCacheEntry(effectiveCacheDirectory, cacheKey, &result))
+            if(cacheable && cacheReady
+                    && readCacheEntry(effectiveCacheDirectory, cacheKey, &result))
+                return result;
+            ProfileVisualProviderService providers;
+            const auto resolver = providers.appearanceResolver(
+                task.providerId, task.database, &result.diagnostic);
+            if(resolver.isNull())
+            {
+                result.providerResult.code = QStringLiteral("provider.unavailable");
+                result.providerResult.message = result.diagnostic;
+            }
+            else
+            {
+                result.providerExecuted = true;
+                result.providerResult = resolver->resolve(task.request, &result.appearance);
+            }
+            if(cacheable && cacheReady)
+                writeCacheEntry(effectiveCacheDirectory, cacheKey, result);
+            return result;
+        }));
+    }
+
+    for(int groupIndex = 0; groupIndex < groups.size(); ++groupIndex)
+    {
+        const SUnitAppearancePreparationResult prepared = futures.at(groupIndex).result();
+        const SPreparationGroup& group = groups.at(groupIndex);
+        for(int memberIndex = 0; memberIndex < group.taskIndexes.size(); ++memberIndex)
         {
-            preparedInBatch.insert(cacheKey, result);
-            results.append(result);
-            continue;
+            const int taskIndex = group.taskIndexes.at(memberIndex);
+            const SUnitAppearancePreparationTask& task = tasks.at(taskIndex);
+            SUnitAppearancePreparationResult result = prepared;
+            result.unitKey = task.unitKey;
+            result.databaseGeneration = task.databaseGeneration;
+            result.visualRevision = task.visualRevision;
+            if(memberIndex > 0)
+            {
+                result.cacheHit = false;
+                result.providerExecuted = false;
+                result.sharedPreparation = true;
+            }
+            results[taskIndex] = result;
         }
-        const auto resolver = providers.appearanceResolver(
-            task.providerId, task.database, &result.diagnostic);
-        if(resolver.isNull())
-        {
-            result.providerResult.code = QStringLiteral("provider.unavailable");
-            result.providerResult.message = result.diagnostic;
-        }
-        else
-            result.providerResult = resolver->resolve(task.request, &result.appearance);
-        if(cacheable && cacheReady)
-            writeCacheEntry(effectiveCacheDirectory, cacheKey, result);
-        if(cacheable)
-            preparedInBatch.insert(cacheKey, result);
-        results.append(result);
     }
     return results;
 }

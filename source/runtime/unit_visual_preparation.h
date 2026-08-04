@@ -73,9 +73,14 @@ struct SUnitAppearancePreparationResult
     QString diagnostic;
     bool cacheHit{false};
     bool sharedPreparation{false};
+    bool providerExecuted{false};
 };
 
 QString unitAppearancePreparationCacheKey(const SUnitAppearancePreparationTask& task);
+QVector<SUnitAppearancePreparationTask> selectUnitAppearancePreparationBatch(
+    const QVector<SUnitAppearancePreparationTask>& distanceOrderedTasks,
+    int maximumUniqueAppearances);
+int unitAppearancePreparationWorkerLimit(int idealThreadCount);
 QString unitAppearancePreparationCacheDirectoryForApplication(const QString& applicationDirectory);
 QString unitAppearancePreparationCacheDirectory();
 QVector<SUnitAppearancePreparationResult> resolveUnitAppearanceTasks(

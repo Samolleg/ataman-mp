@@ -216,6 +216,7 @@ public:
     bool needsVisualResolution() const;
     bool hasPreparedAppearance() const;
     bool needsAppearancePreparation() const;
+    bool describeAppearancePreparationTask(SUnitAppearancePreparationTask* task) const;
     bool takeAppearancePreparationTask(SUnitAppearancePreparationTask* task);
     void acceptAppearancePreparation(const SUnitAppearancePreparationResult& result);
     bool updatePos(QVector3D& pos) override;
