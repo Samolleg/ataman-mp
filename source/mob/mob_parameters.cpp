@@ -13,6 +13,7 @@
 #include <QScreen>
 #include <QSettings>
 #include <QVBoxLayout>
+#include <QTimer>
 
 #include "mob_parameters.h"
 #include "ui_mob_parameters.h"
@@ -27,10 +28,11 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     QWidget(parent, Qt::Window)
   ,ui(new Ui::CMobParameters)
   ,m_pCurMob(pMob)
-  ,m_pView(pView)
   ,m_pDiplomacyWindow(nullptr)
   ,m_pSymmetricDiplomacyCheck(nullptr)
-   ,m_isDurty(false)
+  ,m_pDiplomacyResizeTimer(nullptr)
+  ,m_pView(pView)
+  ,m_isDurty(false)
   ,m_closeAccepted(false)
   ,m_pShortcut(nullptr)
 {
@@ -62,6 +64,16 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     m_pDiplomacyWindow->setWindowTitle(tr("MOB Diplomacy"));
     m_pDiplomacyWindow->setAttribute(Qt::WA_QuitOnClose, false);
     m_pDiplomacyWindow->installEventFilter(this);
+    m_pDiplomacyResizeTimer = new QTimer(this);
+    m_pDiplomacyResizeTimer->setSingleShot(true);
+    m_pDiplomacyResizeTimer->setInterval(75);
+    connect(m_pDiplomacyResizeTimer, &QTimer::timeout, this, [this]()
+    {
+        if(!m_pTable)
+            return;
+        m_pTable->setUpdatesEnabled(true);
+        m_pTable->viewport()->update();
+    });
     QVBoxLayout* diplomacyLayout = new QVBoxLayout(m_pDiplomacyWindow);
     QLabel* legend = new QLabel(tr(
         "0 (Ally): friendly. 1 (Neutral): neither friendly nor hostile.\n"
@@ -346,6 +358,7 @@ void CMobParameters::on_diplomacyButton_clicked()
         return;
     }
 
+    m_pDiplomacyWindow->setProperty("diplomacyInitializing", true);
     // Populate and measure once. Fixed section modes avoid remeasuring all
     // rotated labels during every subsequent window-resize event.
     m_pTable->setUpdatesEnabled(false);
@@ -364,6 +377,7 @@ void CMobParameters::on_diplomacyButton_clicked()
     restoreDiplomacyWindowSize();
     m_pTable->setUpdatesEnabled(true);
     m_pTable->viewport()->update();
+    m_pDiplomacyWindow->setProperty("diplomacyInitializing", false);
     m_pDiplomacyWindow->raise();
     m_pDiplomacyWindow->activateWindow();
     //todo: disable mob parameter widget, connect to table close signal to enable main window again
@@ -474,6 +488,9 @@ void CMobParameters::highlightDiplomacySelection(
     };
     boldHeaderSection(m_pTable.get(), Qt::Horizontal, currentColumn);
     boldHeaderSection(m_pTable.get(), Qt::Vertical, currentRow);
+    if(HorizontalHeaderView* header = dynamic_cast<HorizontalHeaderView*>(
+           m_pTable->horizontalHeader()))
+        header->setActiveSection(currentColumn);
 }
 
 QSize CMobParameters::diplomacyContentSize() const
@@ -512,7 +529,7 @@ QSize CMobParameters::diplomacyContentSize() const
 
 void CMobParameters::restoreDiplomacyWindowSize()
 {
-    static const char kSizeKey[] = "ui/diplomacyWindowSizeV3";
+    static const char kSizeKey[] = "ui/diplomacyWindowSizeV4";
     QSettings settings;
     const QSize saved = settings.value(kSizeKey).toSize();
     if(saved.isValid())
@@ -535,8 +552,24 @@ void CMobParameters::restoreDiplomacyWindowSize()
 
 bool CMobParameters::eventFilter(QObject* watched, QEvent* event)
 {
-    if(watched == m_pDiplomacyWindow && event->type() == QEvent::Close)
-        QSettings().setValue("ui/diplomacyWindowSizeV3", m_pDiplomacyWindow->size());
+    if(watched == m_pDiplomacyWindow)
+    {
+        if(event->type() == QEvent::Resize && m_pDiplomacyWindow->isVisible()
+           && !m_pDiplomacyWindow->property("diplomacyInitializing").toBool())
+        {
+            m_pTable->setUpdatesEnabled(false);
+            m_pDiplomacyResizeTimer->start();
+        }
+        else if(event->type() == QEvent::Close)
+        {
+            m_pDiplomacyResizeTimer->stop();
+            m_pTable->setUpdatesEnabled(true);
+            if(!m_pDiplomacyWindow->property(
+                   "skipDiplomacySizePersistence").toBool())
+                QSettings().setValue("ui/diplomacyWindowSizeV4",
+                                     m_pDiplomacyWindow->size());
+        }
+    }
     return QWidget::eventFilter(watched, event);
 }
 

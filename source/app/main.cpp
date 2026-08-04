@@ -744,7 +744,7 @@ int runHeadlessCommand(QApplication& app)
         const bool selfRelationUndoable = commandDiplomacy[6][6] == 0;
 
         QSettings diplomacySettings;
-        const QString diplomacySizeKey = QStringLiteral("ui/diplomacyWindowSizeV3");
+        const QString diplomacySizeKey = QStringLiteral("ui/diplomacyWindowSizeV4");
         const bool hadDiplomacySize = diplomacySettings.contains(diplomacySizeKey);
         const QVariant previousDiplomacySize = diplomacySettings.value(diplomacySizeKey);
         diplomacySettings.remove(diplomacySizeKey);
@@ -813,7 +813,19 @@ int runHeadlessCommand(QApplication& app)
         QApplication::processEvents();
         const bool diplomacyWindowSizePersists = diplomacyWindow
             && diplomacyWindow->size() == testDiplomacySize;
-        if(diplomacyWindow) diplomacyWindow->close();
+        bool diplomacyResizeRepaintCoalesced = false;
+        bool diplomacyResizeRepaintResumes = false;
+        if(diplomacyWindow)
+        {
+            diplomacyWindow->setProperty("skipDiplomacySizePersistence", true);
+            diplomacyWindow->resize(testDiplomacySize + QSize(17, 11));
+            diplomacyResizeRepaintCoalesced = !diplomacyTable->updatesEnabled();
+            QEventLoop resizeWait;
+            QTimer::singleShot(100, &resizeWait, &QEventLoop::quit);
+            resizeWait.exec();
+            diplomacyResizeRepaintResumes = diplomacyTable->updatesEnabled();
+            diplomacyWindow->close();
+        }
         if(hadDiplomacySize)
             diplomacySettings.setValue(diplomacySizeKey, previousDiplomacySize);
         else
@@ -2288,6 +2300,7 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyWindowAutoFitsAndResizable
                 && diplomacyFirstOpenFitsContent
                 && diplomacyResizeUsesFixedSections
+                && diplomacyResizeRepaintCoalesced && diplomacyResizeRepaintResumes
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
@@ -2411,6 +2424,8 @@ int runHeadlessCommand(QApplication& app)
                << " diplomacyWindowAutoFitsAndResizable=" << diplomacyWindowAutoFitsAndResizable
                << " diplomacyFirstOpenFitsContent=" << diplomacyFirstOpenFitsContent
                << " diplomacyResizeUsesFixedSections=" << diplomacyResizeUsesFixedSections
+               << " diplomacyResizeRepaintCoalesced=" << diplomacyResizeRepaintCoalesced
+               << " diplomacyResizeRepaintResumes=" << diplomacyResizeRepaintResumes
                << " diplomacyDirectionControlVisible=" << diplomacyDirectionControlVisible
                << " diplomacyWindowSizePersists=" << diplomacyWindowSizePersists
                << " unitCategoryIdsVisible=" << unitCategoryIdsVisible

@@ -292,7 +292,8 @@ foundation as one coherent `0.3.0` release.
   [diplomacy labels](packaging/ALPHA26_DIPLOMACY_LABELS_R24.md),
   [directional diplomacy](packaging/ALPHA26_DIPLOMACY_DIRECTION_R25.md),
   [diplomacy display](packaging/ALPHA26_DIPLOMACY_DISPLAY_R26.md),
-  [diplomacy layout](packaging/ALPHA26_DIPLOMACY_LAYOUT_R27.md)).
+  [diplomacy layout](packaging/ALPHA26_DIPLOMACY_LAYOUT_R27.md),
+  [responsive diplomacy](packaging/ALPHA26_DIPLOMACY_RESPONSIVE_R28.md)).
 - Profile visuals, particles, and environment:
   [`37e0231`](https://github.com/Ilufus/ei-mapper-endurance/commit/37e0231),
   [`aa465c3`](https://github.com/Ilufus/ei-mapper-endurance/commit/aa465c3),

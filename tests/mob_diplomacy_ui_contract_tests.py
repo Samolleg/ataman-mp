@@ -19,7 +19,7 @@ def main() -> int:
         '"2 (War): hostile. Double-click any cell to cycle its value."':
             "interaction help",
         '"Apply changes in both directions"': "directional edit checkbox",
-        '"ui/diplomacyWindowSizeV3"': "persisted corrected diplomacy window size",
+        '"ui/diplomacyWindowSizeV4"': "persisted isolated diplomacy window size",
         "Qt::ScrollBarAsNeeded": "scrollbars for a constrained window",
         "restoreDiplomacyWindowSize()": "first-open auto-fit/restore",
         "m_pSymmetricDiplomacyCheck->isChecked()": "explicit edit direction",
@@ -31,6 +31,10 @@ def main() -> int:
         "font.setBold(index == activeSection)": "active header bolding",
         "m_pTable->columnWidth(index)": "settled column-width summation",
         "m_pTable->rowHeight(index)": "settled row-height summation",
+        '"skipDiplomacySizePersistence"': "test-isolated size persistence",
+        "m_pDiplomacyResizeTimer->start()": "coalesced resize repaint",
+        "m_pTable->setUpdatesEnabled(false)": "suppressed intermediate table paints",
+        "setActiveSection(currentColumn)": "explicit rotated-column bold state",
     }
     for fragment, description in expected.items():
         if fragment not in source:

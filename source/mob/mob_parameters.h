@@ -15,6 +15,7 @@
 
 class CMobParameters;
 class QCheckBox;
+class QTimer;
 class CParamLineEdit : public QLineEdit
 {
     Q_OBJECT
@@ -105,6 +106,7 @@ private:
     QSharedPointer<QTableWidget> m_pTable;
     QWidget* m_pDiplomacyWindow;
     QCheckBox* m_pSymmetricDiplomacyCheck;
+    QTimer* m_pDiplomacyResizeTimer;
     QString m_lastItemText;
     CView* m_pView;
     QSharedPointer<QUndoStack> m_pUndoStack;
@@ -121,13 +123,20 @@ private:
 class HorizontalHeaderView : public QHeaderView {
 public:
     explicit HorizontalHeaderView(Qt::Orientation orientation, QWidget *parent = nullptr)
-        : QHeaderView(orientation, parent) {}
-//todo: set text to bold when cell is selected
-//todo: implement column selected when clicked
+        : QHeaderView(orientation, parent), m_activeSection(-1) {}
+    void setActiveSection(int activeSection) {
+        if(m_activeSection == activeSection)
+            return;
+        m_activeSection = activeSection;
+        viewport()->update();
+    }
     void paintSection(QPainter *painter, const QRect &rect,
                       int logicalIndex) const override {
         QPointF rectCenter = QRectF(rect).center();
         painter->save();
+        QFont font = painter->font();
+        font.setBold(logicalIndex == m_activeSection);
+        painter->setFont(font);
         //rotate around rectCenter
         painter->translate(rectCenter.x(), rectCenter.y());
         painter->rotate(-90.0);
@@ -145,6 +154,9 @@ public:
         //swap height and width
         return QSize(val.height(), val.width());
     }
+
+private:
+    int m_activeSection;
 };
 
 #endif // CMOBPARAMETERS_H
