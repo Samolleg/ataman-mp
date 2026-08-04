@@ -28,11 +28,13 @@ public:
                                    QJsonObject* equipment) const override
     {
         SJmvEquipmentGates gates;
-        // Database rows can list paired TypeID 15 staffs, but the corresponding
-        // dual-two-hand layout requires the TitanGrip perk. The authoritative
-        // per-unit Lua/perk source is not resolved here. The equipment resolver
-        // previews only the first weapon for dual-two-hand requests; true dual
-        // rendering and two-hand+shield remain gated.
+        const bool titanGrip = m_database
+            && m_database->jmvUnitPerkTableStatus
+                == ei::EJmvUnitPerkTableStatus::Valid
+            && m_database->jmvStrongManByPrototype.value(
+                request.prototype.trimmed().toLower()) != 0;
+        gates.dualTwoHand = titanGrip;
+        gates.twoHandShield = titanGrip;
         return resolveEquipmentLayout(providerId(), true, gates, m_database, request, equipment);
     }
 private:

@@ -113,8 +113,21 @@ private slots:
     void parsesStableLinksAndCurrentNames();
     void validatesBalancedItemGrammarWithoutMutation();
     void providersAreStrictAndJmvOverlaysOnlyActions();
+    void jmvLoadsBoundedUnitPerkOwnership();
+    void installedJmvTitanGripControl();
     void unknownProviderFailsClosed();
 };
+
+QByteArray unitPerkLua(const QString& prototype, int strongMan)
+{
+    QStringList fields;
+    fields << QString("\"%1\"").arg(prototype);
+    for(int luaIndex = 2; luaIndex <= 44; ++luaIndex)
+        fields << QString::number(luaIndex == 42 ? strongMan : 0);
+    return QString("\xEF\xBB\xBF\nUnitPerk = {\n{%1,},\n}\n")
+        .arg(fields.join(','))
+        .toUtf8();
+}
 
 void ProfileDatabaseTests::parsesStableLinksAndCurrentNames()
 {
@@ -176,6 +189,58 @@ void ProfileDatabaseTests::providersAreStrictAndJmvOverlaysOnlyActions()
     QCOMPARE(jmvSnapshot->actionTables.value("unhuma.adb"), QByteArray("jmv-overlay-action"));
     QVERIFY(jmvSnapshot->actionTableProvenance.value("unhuma.adb").overlay);
     QVERIFY(baseSnapshot->cacheKey != jmvSnapshot->cacheKey);
+}
+
+void ProfileDatabaseTests::jmvLoadsBoundedUnitPerkOwnership()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    QDir root(temporary.path());
+    QVERIFY(root.mkpath("mod/res"));
+    QVERIFY(root.mkpath("mod/lua"));
+    write(root.filePath("mod/res/database.res"), resArchive(relationalMembers()));
+    write(root.filePath("mod/res/databaseJmv.res"), resArchive({}));
+    write(root.filePath("mod/lua/tables.lua"), unitPerkLua("Human Test", 1));
+
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId = "jmv.v1";
+    request.profileId = "jamais-vu";
+    request.runtimeManifestId = "test-jmv";
+    request.resourceDirectories << root.filePath("mod/res");
+    auto snapshot = service.snapshot(request);
+    QVERIFY2(snapshot->jmvUnitPerkTableStatus == ei::EJmvUnitPerkTableStatus::Valid,
+             qPrintable(snapshot->jmvUnitPerkDiagnostic));
+    QCOMPARE(snapshot->jmvStrongManByPrototype.value("human test"), 1);
+
+    write(root.filePath("mod/lua/tables.lua"), "UnitPerk = { {\"Human Test\", nope} }");
+    snapshot = service.snapshot(request);
+    QCOMPARE(snapshot->jmvUnitPerkTableStatus, ei::EJmvUnitPerkTableStatus::Malformed);
+    QVERIFY(!snapshot->jmvUnitPerkDiagnostic.isEmpty());
+
+    QVERIFY(QFile::remove(root.filePath("mod/lua/tables.lua")));
+    snapshot = service.snapshot(request);
+    QCOMPARE(snapshot->jmvUnitPerkTableStatus, ei::EJmvUnitPerkTableStatus::Missing);
+}
+
+void ProfileDatabaseTests::installedJmvTitanGripControl()
+{
+    const QString modRoot = qEnvironmentVariable("EI_TEST_JMV_MOD_ROOT");
+    if(modRoot.isEmpty())
+        QSKIP("Set EI_TEST_JMV_MOD_ROOT to run the installed JMV UnitPerk control.");
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId = "jmv.v1";
+    request.profileId = "jamais-vu";
+    request.runtimeManifestId = "installed-control";
+    request.resourceDirectories << QDir(modRoot).filePath("Res");
+    const auto snapshot = service.snapshot(request);
+    QVERIFY2(snapshot->jmvUnitPerkTableStatus == ei::EJmvUnitPerkTableStatus::Valid,
+             qPrintable(snapshot->jmvUnitPerkDiagnostic));
+    const QString prototype = "human hadagan guard commander f20";
+    QVERIFY(snapshot->monsters.contains(prototype));
+    QVERIFY(snapshot->jmvStrongManByPrototype.contains(prototype));
+    QVERIFY(snapshot->jmvStrongManByPrototype.value(prototype) != 0);
 }
 
 void ProfileDatabaseTests::unknownProviderFailsClosed()

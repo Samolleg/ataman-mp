@@ -14,6 +14,28 @@
 
 namespace {
 
+QString auxiliaryTablesLua(const QString& resourceDirectory)
+{
+    QDir modRoot(resourceDirectory);
+    if(!modRoot.cdUp())
+        return QString();
+    QString luaPath;
+    for(const QFileInfo& entry : modRoot.entryInfoList(
+            QDir::Dirs | QDir::Readable | QDir::NoDotAndDotDot, QDir::Name))
+        if(entry.fileName().compare("lua", Qt::CaseInsensitive) == 0)
+        {
+            luaPath = entry.absoluteFilePath();
+            break;
+        }
+    if(luaPath.isEmpty())
+        return QString();
+    for(const QFileInfo& entry : QDir(luaPath).entryInfoList(
+            QDir::Files | QDir::Readable, QDir::Name))
+        if(entry.fileName().compare("tables.lua", Qt::CaseInsensitive) == 0)
+            return entry.absoluteFilePath();
+    return QString();
+}
+
 quint8 u8(const QByteArray& data, int offset) { return quint8(uchar(data.at(offset))); }
 
 quint32 u32(const QByteArray& data, int offset)
@@ -421,6 +443,16 @@ QSharedPointer<const SProfileDatabaseSnapshot> ProfileDatabaseService::snapshot(
             if(file.open(QIODevice::ReadOnly))
                 hash.addData(&file);
             key += ':' + name + ':' + QString::fromLatin1(hash.result().toHex());
+        }
+        if(request.providerId.compare("jmv.v1", Qt::CaseInsensitive) == 0)
+        {
+            const QString tablesPath = auxiliaryTablesLua(directory);
+            QFile tables(tablesPath);
+            QCryptographicHash hash(QCryptographicHash::Sha256);
+            if(!tablesPath.isEmpty() && tables.open(QIODevice::ReadOnly))
+                hash.addData(&tables);
+            key += ":tables.lua:" + tablesPath.toLower() + ':'
+                + QString::fromLatin1(hash.result().toHex());
         }
     }
     const QString hashedKey = QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex());

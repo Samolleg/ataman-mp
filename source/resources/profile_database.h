@@ -12,6 +12,14 @@ namespace ei {
 
 enum class EDatabaseDiagnosticSeverity { Info, Warning, Error };
 
+enum class EJmvUnitPerkTableStatus
+{
+    NotApplicable,
+    Missing,
+    Malformed,
+    Valid
+};
+
 struct SDatabaseDiagnostic
 {
     SDatabaseDiagnostic() = default;
@@ -100,6 +108,12 @@ struct SProfileDatabaseSnapshot
     QStringList perks;
     QMap<QString, QByteArray> actionTables;
     QMap<QString, SDatabaseProvenance> actionTableProvenance;
+    EJmvUnitPerkTableStatus jmvUnitPerkTableStatus{
+        EJmvUnitPerkTableStatus::NotApplicable};
+    QMap<QString, int> jmvStrongManByPrototype;
+    QString jmvUnitPerkSourcePath;
+    QString jmvUnitPerkSha256;
+    QString jmvUnitPerkDiagnostic;
     QVector<SDatabaseProvenance> provenance;
     QVector<SDatabaseDiagnostic> diagnostics;
 

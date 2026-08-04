@@ -302,7 +302,55 @@ private slots:
     void coreOverlapAndDuplicateFindingsPreserveExactParts();
     void importWithoutTemplateHairEvidenceDoesNotReportMissingHair();
     void databaseCreatureResolutionSuppressesWearableMaskRules();
+    void jmvUnitPerkTableFailuresAreCritical();
 };
+
+void MobFamilyValidationTests::jmvUnitPerkTableFailuresAreCritical()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString prototype = "Human Test";
+    const QString path = writeMob(directory.path(), "unit-perk.mob", mobWithUnits({unitObject(
+        997569, "Titan guard", prototype.toLatin1(), "unhuma", false, wearableParts())}));
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "jmv-unit-perk";
+    request.profileId = "jamais-vu";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    auto database = qSharedPointerConstCast<ei::SProfileDatabaseSnapshot>(
+        wearableDatabase(prototype, "unhuma", {}));
+    database->providerId = "jmv.v1";
+    database->jmvUnitPerkTableStatus = ei::EJmvUnitPerkTableStatus::Missing;
+    database->jmvUnitPerkDiagnostic = "tables.lua was not found";
+    request.database = database;
+
+    CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+    auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "jmv.tables.unit_perk_unavailable"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Critical);
+
+    database->jmvUnitPerkTableStatus = ei::EJmvUnitPerkTableStatus::Valid;
+    database->jmvUnitPerkDiagnostic.clear();
+    report = CMobFamilyValidator::validate(request);
+    finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "jmv.tables.unit_perk_row_missing"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Critical);
+    QVERIFY(finding->message.contains(prototype));
+
+    database->providerId = "base.standard.v1";
+    database->jmvUnitPerkTableStatus = ei::EJmvUnitPerkTableStatus::NotApplicable;
+    report = CMobFamilyValidator::validate(request);
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code.startsWith("jmv.tables."); }));
+}
 
 void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()
 {

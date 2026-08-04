@@ -18,7 +18,7 @@ may record hashes and structural summaries but not redistribute game data.
 | Helmet hair follows DB selection, exact assembly replacement/removal/fallback; quick items invisible | Base/JMV | shared runtime decision + focused provider/validator tests | legacy `hr`, exact `hr.NN`, replacement and equipped-undead controls | Verified algorithm/renderer/provider |
 | Base one weapon; JMV first pair/layouts | Base/JMV | provider tests | ordinary, 1H+shield, dual 1H, 2H | Verified renderer/provider |
 | Standalone item, family, and hand geometry are independent | JMV | clean nested FIG replacements plus controlled game screenshots | `InitWeapons.res/initwedg8weapon.fig`; `unhuma.mod/rh3.dagger08`; negative `lh3.dagger08` control | Verified JMV male runtime control; other families/hands require their own control |
-| TitanGrip requires StrongMan ownership | JMV | JMV Lua branch analysis + safe fallback | zone17 47533 | Ownership interpretation supported; parser/render layouts deferred |
+| TitanGrip requires StrongMan ownership | JMV | bounded active-profile Lua parser + provider/validation tests | zone17 47533; zone19 997569 | Verified JMV provider rule; missing/malformed/absent rows fail closed |
 | Attachment channel inherited once | Base/JMV | hierarchy tests + viewer | zon3obr 233/234 shield across frames | Verified renderer; runtime control retained |
 | ADB standing IDLE and provider masks | Base/JMV | animation parser/provider tests | unarmed/1H/ranged, JMV 2H | Verified renderer/provider |
 | 15 Hz, closing sample, child*parent, root-relative translation | Base/JMV | unit animation tests + ei_figer behavior | synthetic nested ANM | Verified renderer/ei_figer triangulation |

@@ -256,7 +256,7 @@ QVector<SResourceProfile> builtInResourceProfiles()
     jmv.capabilities.insert("runtime.appearanceResolver", capability("runtime.appearanceResolver", EProfileCapabilityStatus::Available,
         "Profile-database and strict embedded-MOB appearance precedence is implemented.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.equipmentResolver", capability("runtime.equipmentResolver", EProfileCapabilityStatus::Available,
-        "Ordinary, 1H+shield, dual-1H, and single-2H layouts are available; dual-2H and 2H+shield remain diagnostic-only.", jmv.runtimeManifestId));
+        "Ordinary, shield, dual-1H, and 2H layouts are available; dual-2H and 2H+shield require nonzero StrongMan ownership from bounded active-profile tables.lua data.", jmv.runtimeManifestId));
     jmv.capabilities.insert("runtime.semanticValidation", capability("runtime.semanticValidation", EProfileCapabilityStatus::Experimental,
         "Runtime validation requires manual JMV game tests.", jmv.runtimeManifestId));
 

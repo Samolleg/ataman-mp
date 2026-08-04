@@ -959,6 +959,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
             for(const Weapon& weapon : weapons) placeholders.append(weapon.reference);
         }
     }
+    int visibleHandWeapon = 0;
     if(renderWeapons)
         for(int weaponIndex = 0;
             weaponIndex < weapons.size() && !(suppressSecondTwoHand && weaponIndex > 0);
@@ -977,7 +978,7 @@ SRuntimeProviderResult resolveEquipmentLayout(
                 appendHandComponent("lh2", family, weapon.item.textureType1, request, &components,
                                     &placeholders, &diagnostics, &matched);
             else if(weapon.kind == EWeaponClass::OneHand || weapon.kind == EWeaponClass::TwoHand)
-                appendHandComponent(weaponIndex == 0 ? "rh3" : "lh3", family,
+                appendHandComponent(visibleHandWeapon++ == 0 ? "rh3" : "lh3", family,
                                     weapon.item.textureType1, request, &components,
                                     &placeholders, &diagnostics, &matched);
             else if(weapon.kind == EWeaponClass::Ranged)

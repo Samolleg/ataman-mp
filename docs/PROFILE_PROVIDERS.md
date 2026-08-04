@@ -62,9 +62,10 @@ temporary compatibility mechanisms, not provider-extension examples. A
 deferred refactor will pass MOB subtype into provider requests, classify
 database-equipped humans from subtype 50 after a corpus audit, and resolve
 monster integral weapons from authoritative Monster/MOB/FIG data. JMV perk
-capabilities will likewise come from a bounded parser for `lua/tables.lua`, not
-from equipment inference or arbitrary Lua execution. The detailed evidence,
-controls, and fail-closed requirements are recorded in
+capabilities come from the active mod's bounded, non-executing
+`lua/tables.lua` parser, never from equipment inference. Missing/malformed
+tables and DB character prototypes without a `UnitPerk` row fail closed and
+are critical validation findings. The detailed evidence and controls are recorded in
 `HUMANOID_VISUAL_RUNTIME_VALIDATION.md`.
 
 ## Adding a mod provider

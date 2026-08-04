@@ -32,12 +32,12 @@ edit `database.res`, JMV/Base archives, live MOBs, maps, or the game install.
    second weapon and confirm it is ignored with a diagnostic.
 2. JMV: independently validate ordinary, 1H+shield, dual 1H, and single 2H on
    models that contain the requested TTI components.
-3. JMV: request dual 2H and confirm the first weapon renders through the
-   single-2H path while the second is suppressed with a diagnostic. Request
-   2H+shield and confirm it remains diagnostic-only. This is the current safe
-   fallback until the JMV provider parses prototype perk ownership from
-   `lua/tables.lua`; `zone17` ID 47533 is the control for the later
-   TitanGrip-authorized dual-2H path.
+3. JMV: use a DB character with nonzero `StrongMan` ownership in the active
+   `lua/tables.lua` and confirm dual 2H renders in `rh3`/`lh3`, while 2H+shield
+   renders the weapon in `rh3` and shield in `lh2`. Without ownership, confirm
+   the safe first-2H/closed fallback. `zone17` ID 47533 and `zone19` ID 997569
+   are controls. Missing/malformed tables and missing character rows must be
+   critical validation findings.
 4. Use an item whose TTI component is absent from the selected assembly and an
    unbalanced modifier string. Confirm the original field remains unchanged and
    a structured diagnostic/placeholder is shown.
@@ -237,10 +237,6 @@ test build:
 4. Cover goblin sling/spear, ogre club, and lizardman trident controls. Select
    one mutually exclusive integral weapon group, retain its primary/secondary
    texture selector, and pass its semantic weapon family to ADB idle selection.
-5. Add a profile-scoped, bounded JMV `lua/tables.lua` reader for `UnitPerk` and
-   `UnitPerkType`. Enable TitanGrip layouts only from the resolved prototype's
-   nonzero StrongMan branch; malformed/missing Lua remains diagnostic and
-   closed. Do not execute arbitrary profile Lua in the editor.
 
 ## Corpus-established JMV equipment atlas mapping
 

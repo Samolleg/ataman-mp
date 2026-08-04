@@ -104,6 +104,7 @@ private slots:
     void importedAppearanceNeverFallsBack();
     void basePreservesSingleWeaponBehavior();
     void jmvLayoutsAreIndependentlyGated();
+    void jmvTitanGripUsesTablesLuaOwnership();
     void validatesAssemblyPartsWithPlaceholders();
     void armorUsesSlotsAndMaterialTextureResources();
     void jmvExplicitMaterialSuffixCanCrossGameplayMaterialFamilies();
@@ -776,6 +777,47 @@ void ProfileVisualProviderTests::helmetAddsDatabaseGeometryAndAtlas()
     QVERIFY(!output.contains("hidesHair"));
     QCOMPARE(output.value("componentTextures").toObject().value("hd.armor08").toString(),
              QString("unhumahl_08.ir.0.x2.mmp"));
+}
+
+void ProfileVisualProviderTests::jmvTitanGripUsesTablesLuaOwnership()
+{
+    auto db = database();
+    db->jmvUnitPerkTableStatus = ei::EJmvUnitPerkTableStatus::Valid;
+    db->jmvStrongManByPrototype.insert("titan guard", 1);
+    ProfileVisualProviderService service;
+    const auto resolver = service.equipmentResolver("jmv.v1", db);
+
+    struct Case { QStringList weapons; QStringList components; };
+    const QVector<Case> cases = {
+        {{"great sword.iron", "great axe.iron"},
+         {"rh3.dsword01", "lh3.daxe03"}},
+        {{"great sword.iron", "shield.iron"},
+         {"rh3.dsword01", "lh2.shield04"}},
+        {{"shield.iron", "great sword.iron"},
+         {"lh2.shield04", "rh3.dsword01"}}
+    };
+    for(const Case& test : cases)
+    {
+        SEquipmentLayoutRequest request;
+        request.prototype = "Titan Guard";
+        request.model = "unhuma";
+        request.weapons = test.weapons;
+        request.assemblyParts << "rh3.dsword01" << "lh3.daxe03" << "lh2.shield04";
+        QJsonObject output;
+        const SRuntimeProviderResult result = resolver->resolve(request, &output);
+        QVERIFY2(result.success, qPrintable(result.message));
+        QCOMPARE(jsonStrings(output, "components"), test.components);
+        QVERIFY(output.value("placeholders").toArray().isEmpty());
+    }
+
+    SEquipmentLayoutRequest unauthorized;
+    unauthorized.prototype = "No Perk Row";
+    unauthorized.model = "unhuma";
+    unauthorized.weapons << "great sword.iron" << "shield.iron";
+    unauthorized.assemblyParts << "rh3.dsword01" << "lh2.shield04";
+    QJsonObject output;
+    QVERIFY(!resolver->resolve(unauthorized, &output).success);
+    QCOMPARE(jsonStrings(output, "components"), QStringList());
 }
 
 void ProfileVisualProviderTests::helmetHairFallbackMatchesSerializedSelection()

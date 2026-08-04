@@ -13,6 +13,8 @@ void applyRelationalMembers(const QMap<QString, QByteArray>& members, const QStr
                             SProfileDatabaseSnapshot* snapshot);
 void applyActionMembers(const QMap<QString, QByteArray>& members, const QString& sourcePath,
                         bool overlay, SProfileDatabaseSnapshot* snapshot);
+void applyJmvUnitPerkTable(const QStringList& resourceDirectories,
+                           SProfileDatabaseSnapshot* snapshot);
 SDatabaseProvenance databaseProvenance(const SProfileDatabaseSnapshot& snapshot,
                                        const QString& path, const QString& member,
                                        bool overlay);

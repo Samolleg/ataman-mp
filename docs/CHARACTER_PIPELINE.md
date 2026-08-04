@@ -130,10 +130,11 @@ member, matching the runtime part lookup rather than collapsing the whole slot.
 Base preserves one one-handed or ranged weapon and diagnoses extras. JMV has
 layouts for ordinary, one-hand+shield, dual one-hand, single two-hand, requested
 dual two-hand, and requested two-hand+shield. Only the first pair is considered.
-Without authoritative nonzero JMV `UnitPerkType.StrongMan` ownership, requested
-dual-two-hand renders only the first weapon and two-hand+shield remains closed.
-Equipment alone is not TitanGrip evidence. Bow layouts include authored quiver,
-arrow, bow-part, and string members.
+The JMV provider reads authoritative `UnitPerkType.StrongMan` ownership from a
+bounded, non-executing parse of the active mod's `lua/tables.lua`. Nonzero
+ownership enables dual-two-hand and two-hand+shield; absent ownership keeps the
+safe first-2H/closed fallback. Equipment alone is not TitanGrip evidence. Bow
+layouts include authored quiver, arrow, bow-part, and string members.
 
 Numbered equipment inherits authored attachment nodes. For example,
 `lh2.shieldNN -> lh2.shield00 -> lh2`: animation belongs to `shield00` and must
@@ -200,8 +201,6 @@ not an unverified claim that every named family has identical archive structure.
   and 52 monster; inconsistent data must still fail closed.
 - Replace `unmogo` suppression and family crutches with a general resolver for
   Monster Items + MOB parts + FIG group/texture selectors.
-- Parse bounded profile-scoped JMV perk tables without executing Lua before
-  enabling TitanGrip layouts.
 - Establish exact root/height behavior for floating/flying complexion controls.
 - Treat ADB writing and MMP/PNT3 encoding as unsupported until their owning
   encoders are reverse-engineered and no-op/changed round trips pass.

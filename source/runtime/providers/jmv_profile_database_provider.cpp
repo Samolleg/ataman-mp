@@ -25,6 +25,7 @@ QSharedPointer<SProfileDatabaseSnapshot> JmvProfileDatabaseProvider::load(
             "databaseJmv.res is unavailable; JMV supplemental ADB actions are disabled.", database});
     else
         applyActionMembers(readDatabaseArchive(overlay, &result->diagnostics), overlay, true, result.data());
+    applyJmvUnitPerkTable(request.resourceDirectories, result.data());
     return result;
 }
 

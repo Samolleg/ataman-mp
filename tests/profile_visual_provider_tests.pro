@@ -3,7 +3,7 @@ CONFIG += testcase console c++11
 TEMPLATE = app
 TARGET = profile_visual_provider_tests
 
-INCLUDEPATH += ../source/resources ../source/runtime ../source/runtime/providers
+INCLUDEPATH += ../source ../source/core ../source/resources ../source/runtime ../source/runtime/providers
 SOURCES += \
     profile_visual_provider_tests.cpp \
     ../source/resources/profile_database.cpp \

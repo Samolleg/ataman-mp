@@ -834,6 +834,24 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     CMobFamilyValidationReport report;
     report.familyLabel = request.familyLabel;
     report.profileId = request.profileId;
+    const bool jmvDatabase = request.database
+        && request.database->providerId.compare("jmv.v1", Qt::CaseInsensitive) == 0;
+    if(jmvDatabase
+       && request.database->jmvUnitPerkTableStatus
+            != ei::EJmvUnitPerkTableStatus::Valid)
+    {
+        SMobFamilyFinding finding;
+        finding.severity = EMobFamilyFindingSeverity::Critical;
+        finding.code = "jmv.tables.unit_perk_unavailable";
+        finding.category = "JMV character perks";
+        finding.message = request.database->jmvUnitPerkDiagnostic.isEmpty()
+            ? "The active JMV tables.lua UnitPerk table is unavailable or malformed. Character perk ownership and titan-grip visualization cannot be validated."
+            : request.database->jmvUnitPerkDiagnostic
+                + " Character perk ownership and titan-grip visualization cannot be validated.";
+        if(!request.database->jmvUnitPerkSourcePath.isEmpty())
+            finding.locations << request.database->jmvUnitPerkSourcePath;
+        report.findings.append(finding);
+    }
 
     struct Pending
     {
@@ -1219,6 +1237,28 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         }
         for(const SMobObjectSnapshot& object : member.objects)
         {
+            if(jmvDatabase && object.unit && !object.importMode
+               && request.database->jmvUnitPerkTableStatus
+                    == ei::EJmvUnitPerkTableStatus::Valid)
+            {
+                const QString prototype = object.prototype.trimmed();
+                const QString key = prototype.toLower();
+                if(request.database->monsters.contains(key)
+                   && !request.database->jmvStrongManByPrototype.contains(key))
+                {
+                    SMobFamilyFinding finding;
+                    finding.severity = EMobFamilyFindingSeverity::Critical;
+                    finding.code = "jmv.tables.unit_perk_row_missing";
+                    finding.category = "JMV character perks";
+                    finding.message = QString(
+                        "JMV database character '%1' has no UnitPerk row in tables.lua; runtime character setup and titan-grip ownership are incomplete.")
+                        .arg(prototype);
+                    finding.locations << member.path + ":" + object.sectionPath;
+                    finding.hasNid = object.hasNid;
+                    finding.nid = object.nid;
+                    report.findings.append(finding);
+                }
+            }
             if(!object.hasNid)
                 continue;
             ownersWithinMob[object.nid].append(&object);
