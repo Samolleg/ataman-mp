@@ -3306,8 +3306,8 @@ class ReviewDocumentTests(unittest.TestCase):
                 signature(namespace, 468),
                 "NW/SE/SW retain the reviewed family renamed Ground / Dead")
 
-    def test_r97_syncs_reviewed_ground_and_sand_without_followup_guesses(self) -> None:
-        """R97 applies selectors; the three comment-only SW corners stay dark."""
+    def test_r97_r98_syncs_reviewed_ground_and_sand_corners(self) -> None:
+        """R97 applies its queue; R98 closes the six reviewed SW corners."""
         root = Path(__file__).resolve().parent.parent
         catalog = json.loads((
             root / "assets" / "resources" / "terrain_atlas_presets.json"
@@ -3356,20 +3356,19 @@ class ReviewDocumentTests(unittest.TestCase):
             self.assertEqual(expected, signature(*key))
 
         irregular = {
-            194: (1, 2), 195: (1, 2), 196: (1, 2),
-            220: (0, 1, 2, 3), 374: (2, 3), 375: (2, 3),
+            194: (1, 2, 3), 195: (1, 2, 3), 196: (1, 2, 3),
+            220: (0, 1, 2, 3), 292: (3,),
+            374: (2, 3), 375: (2, 3),
             384: (1, 2, 3), 385: (1, 2, 3), 392: (2, 3),
-            395: (3,), 396: (2,), 397: (2,), 459: (3,),
+            394: (3,), 395: (3,), 396: (2, 3), 397: (2,), 459: (3,),
             507: (3,), 508: (1, 3),
         }
-        self.assertEqual(29, sum(len(corners) for corners in irregular.values()))
+        self.assertEqual(35, sum(len(corners) for corners in irregular.values()))
         for namespace in ("bz11k", "zone14"):
             for slot, corners in irregular.items():
                 values = signature(namespace, slot)
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
-            for slot in (194, 195, 196):
-                self.assertEqual("Sand / Dark", signature(namespace, slot)[3])
 
     def test_questionnaire_layout_contract_is_locked(self) -> None:
         policy = (Path(__file__).resolve().parent.parent / "docs" /

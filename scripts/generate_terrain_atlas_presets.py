@@ -2676,8 +2676,8 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
 
     # R97/R98 focused review resolves every selector-backed corner from the
     # Ground / Dead and Sand / Irregular questionnaire.  The three additional
-    # comment-only SW suggestions on sand slots 194/195/196 remain deliberately
-    # unchanged until the follow-up evidence audit confirms them.
+    # comment-only SW suggestions on sand slots 194/195/196 were subsequently
+    # confirmed in R98 together with their three connected SW alarm corners.
     r97_ground_corrections = {
         "zone9": {
             163: (3, 6, 6, 6),
@@ -2697,11 +2697,12 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             corrections[(slot_index, corner_index)] = family_id
 
     r98_sand_irregular_corners = {
-        194: (1, 2), 195: (1, 2), 196: (1, 2),
+        194: (1, 2, 3), 195: (1, 2, 3), 196: (1, 2, 3),
         220: (0, 1, 2, 3),
+        292: (3,),
         374: (2, 3), 375: (2, 3),
         384: (1, 2, 3), 385: (1, 2, 3),
-        392: (2, 3), 395: (3,), 396: (2,), 397: (2,),
+        392: (2, 3), 394: (3,), 395: (3,), 396: (2, 3), 397: (2,),
         459: (3,), 507: (3,), 508: (1, 3),
     }
     if namespace in ("bz11k", "zone14"):

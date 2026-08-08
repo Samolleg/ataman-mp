@@ -5749,7 +5749,7 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
             snowRock.slotDefinitions.at(slot).signature;
         QCOMPARE(signature.northEast, qint32(20));
         QCOMPARE(signature.southEast, qint32(20));
-        QCOMPARE(signature.southWest, qint32(19));
+        QCOMPARE(signature.southWest, qint32(20));
     }
     for(const int slot : {374, 375, 392})
     {
@@ -5766,12 +5766,14 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
         QCOMPARE(signature.southEast, qint32(20));
         QCOMPARE(signature.southWest, qint32(20));
     }
-    for(const int slot : {395, 459, 507})
+    for(const int slot : {292, 394, 395, 459, 507})
         QCOMPARE(snowRock.slotDefinitions.at(slot).signature.southWest,
                  qint32(20));
     for(const int slot : {396, 397})
         QCOMPARE(snowRock.slotDefinitions.at(slot).signature.southEast,
                  qint32(20));
+    QCOMPARE(snowRock.slotDefinitions.at(396).signature.southWest,
+             qint32(20));
     const STerrainTransitionSignature reviewed508 =
         snowRock.slotDefinitions.at(508).signature;
     QCOMPARE(reviewed508.northEast, qint32(20));
