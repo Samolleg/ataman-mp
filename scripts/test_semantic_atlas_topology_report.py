@@ -89,13 +89,13 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         )
         report = build_report(catalog)
         self.assertEqual(38, report["namespaceCount"])
-        self.assertEqual(25, report["runtimeProfileCount"])
-        # R92 adds the separately reviewed Sand / Irregular artwork identity
-        # for the shared bz11k/Zone14 atlas. Its otherwise absent pair rows are
-        # reported honestly as zero-coverage topology, not hidden.
-        self.assertEqual(1514, report["totalPairCount"])
+        self.assertEqual(26, report["runtimeProfileCount"])
+        # R97 resolves the reviewed transition corners connected to Sand /
+        # Irregular. Zone9 also becomes distinct from bz3g after its separately
+        # reviewed slot476, so every real pair row remains visible.
+        self.assertEqual(1667, report["totalPairCount"])
         self.assertEqual(
-            {"0": 930, "1": 126, "2": 81, "3": 177, "4": 200},
+            {"0": 1035, "1": 134, "2": 89, "3": 197, "4": 212},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

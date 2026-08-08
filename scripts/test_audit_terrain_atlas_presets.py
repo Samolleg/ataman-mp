@@ -1857,9 +1857,9 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
 
     def test_r67_unifies_exact_cross_atlas_names_without_usage_changes(self) -> None:
         cases = {
-            "bz3g": {6: "Ground / Dark"},
-            "Zone6": {5: "Ground / Dark"},
-            "Zone6_2": {5: "Ground / Dark"},
+            "bz3g": {6: "Ground / Dead"},
+            "Zone6": {5: "Ground / Dead"},
+            "Zone6_2": {5: "Ground / Dead"},
             "bz5g": {
                 1: "Rock / Underwater emerald",
                 2: "Sand / Underwater",
@@ -2883,13 +2883,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 (52, 0): "Stone / Greenish", (189, 0): "Stone / Greenish",
             },
             "zone6": {
-                (28, 3): "Ground / Dark", (471, 0): "Grass / Sparse dark",
+                (28, 3): "Ground / Dead", (471, 0): "Grass / Sparse dark",
                 (71, 0): "Ground / Common", (278, 0): "Ground / Common",
-                (394, 0): "Ground / Common", (401, 3): "Ground / Dark",
-                (60, 3): "Ground / Dark",
+                (394, 0): "Ground / Common", (401, 3): "Ground / Dead",
+                (60, 3): "Ground / Dead",
             },
             "zone6_2": {
-                (28, 3): "Ground / Dark", (471, 0): "Grass / Sparse dark",
+                (28, 3): "Ground / Dead", (471, 0): "Grass / Sparse dark",
                 (394, 1): "Grass / Sparse dark",
                 (71, 0): "Ground / Common", (278, 0): "Ground / Common",
             },
@@ -3296,15 +3296,80 @@ class ReviewDocumentTests(unittest.TestCase):
                  "Grass / Sparse dark", "Stone / Grayish"],
                 signature(namespace, 416))
             self.assertEqual(
-                ["Stone / Grayish", "Ground / Dark",
-                 "Stone / Grayish", "Ground / Dark"],
+                ["Stone / Grayish", "Ground / Dead",
+                 "Stone / Grayish", "Ground / Dead"],
                 signature(namespace, 445),
-                "NE/SW remain pending; Ground / Dark is context, not confirmation")
+                "NE/SW retain the reviewed family renamed Ground / Dead")
             self.assertEqual(
-                ["Ground / Dark", "Stone / Grayish",
-                 "Ground / Dark", "Ground / Dark"],
+                ["Ground / Dead", "Stone / Grayish",
+                 "Ground / Dead", "Ground / Dead"],
                 signature(namespace, 468),
-                "NW/SE/SW remain pending; do not infer Ground / Brownish")
+                "NW/SE/SW retain the reviewed family renamed Ground / Dead")
+
+    def test_r97_syncs_reviewed_ground_and_sand_without_followup_guesses(self) -> None:
+        """R97 applies selectors; the three comment-only SW corners stay dark."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        def family_name(namespace: str, family_id: int) -> str:
+            return next(family["name"]
+                        for family in presets[namespace.casefold()]["families"]
+                        if int(family["id"]) == family_id)
+
+        def signature(namespace: str, slot: int) -> list[str]:
+            preset = presets[namespace.casefold()]
+            names = {int(family["id"]): family["name"]
+                     for family in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            return [names[value]
+                    for value in payload[slot * 4:slot * 4 + 4]]
+
+        for namespace, family_id in (
+                ("bz3g", 6), ("zone9", 6),
+                ("zone6", 5), ("zone6_2", 5)):
+            self.assertEqual("Ground / Dead",
+                             family_name(namespace, family_id))
+        for namespace in ("bz2g", "zone2"):
+            self.assertEqual("Ground / Dark", family_name(namespace, 15))
+
+        expected_ground = {
+            ("zone9", 163): ["Stone / Grayish", "Ground / Dead",
+                             "Ground / Dead", "Ground / Dead"],
+            ("zone9", 198): ["Ground / Dead", "Ground / Dead",
+                             "Stone / Grayish", "Ground / Dead"],
+            ("zone9", 297): ["Stone / Grayish", "Grass / Sparse dark",
+                             "Stone / Grayish", "Ground / Dead"],
+            ("zone9", 476): ["Stone / Grayish", "Grass / Sparse dark",
+                             "Ground / Dead", "Ground / Dead"],
+            ("bz3g", 163): ["Stone / Grayish", "Ground / Dead",
+                            "Ground / Dead", "Ground / Dead"],
+            ("bz3g", 198): ["Ground / Dead", "Ground / Dead",
+                            "Stone / Grayish", "Ground / Dead"],
+            ("bz3g", 297): ["Stone / Grayish", "Grass / Sparse dark",
+                            "Stone / Grayish", "Ground / Dead"],
+        }
+        for key, expected in expected_ground.items():
+            self.assertEqual(expected, signature(*key))
+
+        irregular = {
+            194: (1, 2), 195: (1, 2), 196: (1, 2),
+            220: (0, 1, 2, 3), 374: (2, 3), 375: (2, 3),
+            384: (1, 2, 3), 385: (1, 2, 3), 392: (2, 3),
+            395: (3,), 396: (2,), 397: (2,), 459: (3,),
+            507: (3,), 508: (1, 3),
+        }
+        self.assertEqual(29, sum(len(corners) for corners in irregular.values()))
+        for namespace in ("bz11k", "zone14"):
+            for slot, corners in irregular.items():
+                values = signature(namespace, slot)
+                for corner in corners:
+                    self.assertEqual("Sand / Irregular", values[corner])
+            for slot in (194, 195, 196):
+                self.assertEqual("Sand / Dark", signature(namespace, slot)[3])
 
     def test_questionnaire_layout_contract_is_locked(self) -> None:
         policy = (Path(__file__).resolve().parent.parent / "docs" /

@@ -2661,6 +2661,54 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     }
     corrections.update(r93_corrections.get(namespace, {}))
 
+    # R96 cross-atlas family review. The bz3g/Zone9 identity and its exact
+    # Zone6/Zone6_2 counterparts are the same dead-looking ground material.
+    # Zone2's visually distinct Ground / Dark binding was explicitly left
+    # unchanged. Flagged false-uniform tiles remain untouched until their four
+    # corners are reviewed; this block changes names only.
+    r96_renames = {
+        "bz3g": {6: "Ground / Dead"},
+        "zone9": {6: "Ground / Dead"},
+        "zone6": {5: "Ground / Dead"},
+        "zone6_2": {5: "Ground / Dead"},
+    }
+    family_renames.update(r96_renames.get(namespace, {}))
+
+    # R97/R98 focused review resolves every selector-backed corner from the
+    # Ground / Dead and Sand / Irregular questionnaire.  The three additional
+    # comment-only SW suggestions on sand slots 194/195/196 remain deliberately
+    # unchanged until the follow-up evidence audit confirms them.
+    r97_ground_corrections = {
+        "zone9": {
+            163: (3, 6, 6, 6),
+            198: (6, 6, 3, 6),
+            297: (3, 5, 3, 6),
+            476: (3, 5, 6, 6),
+        },
+        "bz3g": {
+            163: (3, 6, 6, 6),
+            198: (6, 6, 3, 6),
+            297: (3, 5, 3, 6),
+        },
+    }
+    for slot_index, family_ids in r97_ground_corrections.get(
+            namespace, {}).items():
+        for corner_index, family_id in enumerate(family_ids):
+            corrections[(slot_index, corner_index)] = family_id
+
+    r98_sand_irregular_corners = {
+        194: (1, 2), 195: (1, 2), 196: (1, 2),
+        220: (0, 1, 2, 3),
+        374: (2, 3), 375: (2, 3),
+        384: (1, 2, 3), 385: (1, 2, 3),
+        392: (2, 3), 395: (3,), 396: (2,), 397: (2,),
+        459: (3,), 507: (3,), 508: (1, 3),
+    }
+    if namespace in ("bz11k", "zone14"):
+        for slot_index, corner_indexes in r98_sand_irregular_corners.items():
+            for corner_index in corner_indexes:
+                corrections[(slot_index, corner_index)] = 20
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)
