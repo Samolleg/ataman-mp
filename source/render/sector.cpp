@@ -29,11 +29,13 @@ CSector::~CSector()
 }
 
 CSector::CSector(QDataStream& stream, float maxZ, int texCount,
-                 const QVector<SMaterial>* materials)
+                 const QVector<SMaterial>* materials,
+                 const QVector<SAnimTile>* animatedTiles)
     :m_indexBuf(QOpenGLBuffer::IndexBuffer)
     ,m_gridIndexBuf(QOpenGLBuffer::IndexBuffer)
     ,m_waterIndexBuf(QOpenGLBuffer::IndexBuffer)
     ,m_materials(materials)
+    ,m_animatedTiles(animatedTiles)
 {
     uint signature;
     stream >> signature;
@@ -781,6 +783,9 @@ void CSector::generateWaterVertexData()
                 ? &m_materials->at(materialIndex) : nullptr;
             const ei::SOverlayMaterialAnimation animation =
                 ei::overlayMaterialAnimation(material);
+            const ei::SOverlayTileAnimation tileAnimation =
+                ei::overlayTileAnimation(m_arrWater.at(row).at(col).tileIndex(),
+                                         m_animatedTiles);
             for(int vertex = 0; vertex < 9; ++vertex)
             {
                 const int index = (row * nTile + col) * 9 + vertex;
@@ -800,6 +805,8 @@ void CSector::generateWaterVertexData()
                 target.animation = QVector4D(animation.waveMultiplier,
                     animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
                     animation.animated ? 1.0f : 0.0f);
+                target.tileAnimation = QVector3D(float(tileAnimation.startSlot),
+                    float(tileAnimation.baseSlot), float(tileAnimation.frameCount));
                 target.grid = QVector2D(float(gridX), float(gridY));
                 target.emission = ei::terrainMaterialEmission(sharedMaterial);
                 target.opacity = ei::terrainMaterialOpacity(sharedMaterial);
@@ -1203,6 +1210,12 @@ void CSector::draw(QOpenGLShaderProgram* program)
         program->disableAttributeArray(animationLocation);
         program->setAttributeValue(animationLocation, QVector4D());
     }
+    const int tileAnimationLocation = program->attributeLocation("a_overlayTileAnimation");
+    if(tileAnimationLocation >= 0)
+    {
+        program->disableAttributeArray(tileAnimationLocation);
+        program->setAttributeValue(tileAnimationLocation, QVector3D());
+    }
     const int gridLocation = program->attributeLocation("a_overlayGrid");
     if(gridLocation >= 0)
     {
@@ -1273,6 +1286,14 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
                                     int(sizeof(SWaterVertexData)));
     }
     offset += int(sizeof(QVector4D));
+    const int tileAnimationLocation = program->attributeLocation("a_overlayTileAnimation");
+    if(tileAnimationLocation >= 0)
+    {
+        program->enableAttributeArray(tileAnimationLocation);
+        program->setAttributeBuffer(tileAnimationLocation, GL_FLOAT, offset, 3,
+                                    int(sizeof(SWaterVertexData)));
+    }
+    offset += int(sizeof(QVector3D));
     const int gridLocation = program->attributeLocation("a_overlayGrid");
     if(gridLocation >= 0)
     {

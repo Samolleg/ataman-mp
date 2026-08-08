@@ -282,6 +282,12 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
         program->disableAttributeArray(animationLocation);
         program->setAttributeValue(animationLocation, QVector4D());
     }
+    const int tileAnimationLocation = program->attributeLocation("a_overlayTileAnimation");
+    if(tileAnimationLocation >= 0)
+    {
+        program->disableAttributeArray(tileAnimationLocation);
+        program->setAttributeValue(tileAnimationLocation, QVector3D());
+    }
     const int gridLocation = program->attributeLocation("a_overlayGrid");
     if(gridLocation >= 0)
     {

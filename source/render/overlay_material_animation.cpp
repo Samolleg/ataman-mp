@@ -89,6 +89,27 @@ SOverlayMaterialAnimation overlayMaterialAnimation(const SMaterial* material)
     return result;
 }
 
+SOverlayTileAnimation overlayTileAnimation(int atlasSlot,
+                                           const QVector<SAnimTile>* animations)
+{
+    SOverlayTileAnimation result;
+    result.baseSlot = atlasSlot;
+    if(!animations)
+        return result;
+    for(const SAnimTile& animation : *animations)
+    {
+        // Sectors reference the first slot. Later sequence slots remain usable
+        // as ordinary static atlas tiles when they are authored directly.
+        if(int(animation.tileIndex) != atlasSlot || animation.nPhase < 2)
+            continue;
+        result.startSlot = int(animation.tileIndex);
+        result.frameCount = int(animation.nPhase);
+        result.animated = true;
+        break;
+    }
+    return result;
+}
+
 QVector3D terrainMaterialEmission(const SMaterial* material)
 {
     if(!material || material->selfIllumination <= 0.0f)

@@ -21,7 +21,9 @@ private slots:
     void derivesMaterialOpacity();
     void usesSharedOverlayVertexRules();
     void gatesUnderlayEmissionByPositiveDepth();
-    void mprSettingsUsesTopLevelWindowAndOverlaySlotShortcut();
+    void resolvesAuthoredOverlayTileAnimation();
+    void advancesAuthoredOverlayTileFrames();
+    void mprSettingsUsesTopLevelWindowAndOverlaySlotToggle();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -158,6 +160,10 @@ void OverlayMaterialAnimationTests::shaderContractsCoverDesktopAndAngle()
     const QByteArray fragment = fragmentFile.readAll();
     const QByteArray objectFragment = objectFragmentFile.readAll();
     QVERIFY(vertex.contains("attribute vec4 a_overlayAnimation"));
+    QVERIFY2(vertex.contains("attribute vec3 a_overlayTileAnimation"),
+             "Overlay vertices must carry the authored atlas start/base/count record");
+    QVERIFY2(vertex.contains("u_overlayAtlasGrid"),
+             "The shader must account for the complete multi-page terrain atlas");
     QVERIFY(vertex.contains("u_overlayMotionEnabled"));
     QVERIFY(vertex.contains("floor(logicalTime)"));
     QVERIFY(!vertex.contains("#version"));
@@ -171,6 +177,22 @@ void OverlayMaterialAnimationTests::shaderContractsCoverDesktopAndAngle()
     QVERIFY(fragment.contains("u_sunColor * sunDiffuse + v_materialEmission"));
     QVERIFY(objectFragment.contains("uniform vec3 u_materialEmission"));
     QVERIFY(objectFragment.contains("u_sunColor * sunDiffuse + u_materialEmission"));
+}
+
+void OverlayMaterialAnimationTests::advancesAuthoredOverlayTileFrames()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/sector.cpp") && repository.cdUp()) {}
+    QFile sectorFile(repository.absoluteFilePath("source/render/sector.cpp"));
+    QFile landscapeFile(repository.absoluteFilePath("source/render/landscape.cpp"));
+    QVERIFY(sectorFile.open(QIODevice::ReadOnly));
+    QVERIFY(landscapeFile.open(QIODevice::ReadOnly));
+    const QByteArray sector = sectorFile.readAll();
+    const QByteArray landscape = landscapeFile.readAll();
+    QVERIFY2(sector.contains("overlayTileAnimation("),
+             "Water vertices must resolve their authored atlas animation record");
+    QVERIFY2(landscape.contains("u_overlayAtlasGrid"),
+             "Water rendering must provide the atlas page geometry to the shader");
 }
 
 void OverlayMaterialAnimationTests::mapLifetimeResetsAnimationState()
@@ -269,7 +291,7 @@ void OverlayMaterialAnimationTests::gatesUnderlayEmissionByPositiveDepth()
     QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 2.75f), QVector3D());
 }
 
-void OverlayMaterialAnimationTests::mprSettingsUsesTopLevelWindowAndOverlaySlotShortcut()
+void OverlayMaterialAnimationTests::mprSettingsUsesTopLevelWindowAndOverlaySlotToggle()
 {
     QDir repository(QDir::current());
     while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
@@ -283,8 +305,33 @@ void OverlayMaterialAnimationTests::mprSettingsUsesTopLevelWindowAndOverlaySlotS
              "The Materials Editor must expose a direct overlay-slot inspection shortcut");
     QVERIFY2(view.contains("ELandscapeEditMode::OverlayPaint"),
              "The shortcut must activate Paint existing overlays rather than another landscape mode");
-    QVERIFY2(view.contains("setOverlayMaterialSlotLabelsVisible(true)"),
-             "The shortcut must explicitly enable per-cell material-slot labels");
+    QVERIFY2(view.contains("showMaterialSlots->setCheckable(true)"),
+             "The material-slot viewport control must expose its persistent on/off state");
+    QVERIFY2(view.contains("setOverlayMaterialSlotLabelsVisible(checked)"),
+             "The material-slot viewport control must both show and hide the labels");
+    QVERIFY2(view.contains("overlayMaterialSlotLabelsChanged"),
+             "The control must stay synchronized with Landscape Tools");
+}
+
+void OverlayMaterialAnimationTests::resolvesAuthoredOverlayTileAnimation()
+{
+    SAnimTile zoneFiveWater{};
+    zoneFiveWater.tileIndex = 64;
+    zoneFiveWater.nPhase = 32;
+    const QVector<SAnimTile> records{zoneFiveWater};
+
+    const ei::SOverlayTileAnimation active =
+        ei::overlayTileAnimation(64, &records);
+    QVERIFY(active.animated);
+    QCOMPARE(active.startSlot, 64);
+    QCOMPARE(active.baseSlot, 64);
+    QCOMPARE(active.frameCount, 32);
+
+    QVERIFY(!ei::overlayTileAnimation(65, &records).animated);
+    QVERIFY(!ei::overlayTileAnimation(64, nullptr).animated);
+    zoneFiveWater.nPhase = 1;
+    const QVector<SAnimTile> disabledRecords{zoneFiveWater};
+    QVERIFY(!ei::overlayTileAnimation(64, &disabledRecords).animated);
 }
 
 QTEST_APPLESS_MAIN(OverlayMaterialAnimationTests)

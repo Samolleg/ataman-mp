@@ -99,7 +99,7 @@ public:
     const QVector<ETileType>& tileTypes() const {return m_aTileTypes;}
     void setTileTypes(const QVector<ETileType>& arrType) {m_aTileTypes = arrType;}
     const QVector<SAnimTile>& animTiles() const {return m_aAnimTile;}
-    void setAnimTils(const QVector<SAnimTile>& arrAnimTile) {m_aAnimTile = arrAnimTile;}
+    void setAnimTils(const QVector<SAnimTile>& arrAnimTile);
     void updateSectorDrawData(int xSec, int ySec);
     bool previewCanonicalSector(int xSec, int ySec, const QByteArray& payload);
     bool previewCanonicalOverlaySector(int xSec, int ySec, const QByteArray& payload);
@@ -133,6 +133,7 @@ private:
     QVector<SMaterial> m_aMaterial; //use pointers instead refs?
     QVector<ETileType> m_aTileTypes; //array using tyle type on current map
     QVector<SAnimTile> m_aAnimTile;
+    int m_renderTextureCount{1};
     QVector<QVector<CSector*>> m_aSector;
     QOpenGLTexture* m_texture;
     QFileInfo m_filePath;

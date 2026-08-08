@@ -5,10 +5,12 @@ uniform bool u_overlayMotionEnabled;
 uniform float u_overlayTimeSeconds;
 uniform vec3 u_overlayWindDirection;
 uniform float u_overlayWindStrength;
+uniform vec2 u_overlayAtlasGrid;
 attribute vec4 a_position;
 attribute vec3 a_normal;
 attribute vec2 a_texture;
 attribute vec4 a_overlayAnimation;
+attribute vec3 a_overlayTileAnimation;
 attribute vec2 a_overlayGrid;
 attribute vec3 a_materialEmission;
 attribute float a_materialOpacity;
@@ -21,6 +23,18 @@ varying highp vec3 v_materialEmission;
 varying highp float v_materialOpacity;
 
 const float PI = 3.14159265358979323846;
+
+vec2 overlayTileOrigin(float slot)
+{
+  float tileSide = max(1.0, u_overlayAtlasGrid.y);
+  float slotsPerPage = tileSide * tileSide;
+  float page = floor(slot / slotsPerPage);
+  float localSlot = slot - page * slotsPerPage;
+  float column = mod(localSlot, tileSide);
+  float row = floor(localSlot / tileSide);
+  return vec2((page + column / tileSide) / max(1.0, u_overlayAtlasGrid.x),
+              (tileSide - 1.0 - row) / tileSide);
+}
 
 float tableSine(float angle)
 {
@@ -61,6 +75,14 @@ void main(void)
   v_viewDepth = max(0.0, -viewPosition.z);
   v_normal = normalize(vec3(u_modelMmatrix * vec4(a_normal, 0.0)));
   v_texture = a_texture;
+  if(u_overlayMotionEnabled && a_overlayTileAnimation.z > 1.0)
+  {
+    float logicalFrame = floor(max(0.0, u_overlayTimeSeconds) / 0.055);
+    float frameSlot = a_overlayTileAnimation.x
+        + mod(logicalFrame, a_overlayTileAnimation.z);
+    v_texture += overlayTileOrigin(frameSlot)
+        - overlayTileOrigin(a_overlayTileAnimation.y);
+  }
   v_materialEmission = a_materialEmission;
   v_materialOpacity = a_materialOpacity;
 }

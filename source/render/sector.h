@@ -40,7 +40,8 @@ class CSector
 public:
     CSector();
     CSector(QDataStream& stream, float maxZ, int texCount,
-            const QVector<SMaterial>* materials);
+            const QVector<SMaterial>* materials,
+            const QVector<SAnimTile>* animatedTiles);
     ~CSector();
     QByteArray serializeSector();
     void draw(QOpenGLShaderProgram* program);
@@ -94,6 +95,7 @@ private:
         QVector3D normal;
         QVector2D texCoord;
         QVector4D animation;
+        QVector3D tileAnimation;
         QVector2D grid;
         QVector3D emission;
         float opacity{1.0f};
@@ -116,6 +118,7 @@ private:
     QOpenGLBuffer m_waterIndexBuf;
     int m_waterIndexCount{0};
     const QVector<SMaterial>* m_materials{nullptr};
+    const QVector<SAnimTile>* m_animatedTiles{nullptr};
     QVector3D m_boundsCenter;
     float m_boundsRadius{0.0f};
 };

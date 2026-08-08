@@ -45,6 +45,7 @@ void CLandscape::unloadMpr()
     m_aMaterial.clear();
     m_aTileTypes.clear();
     m_aAnimTile.clear();
+    m_renderTextureCount = 1;
     m_bDirty = false;
     delete m_terrainShadowTexture;
     m_terrainShadowTexture = nullptr;
@@ -234,6 +235,7 @@ void CLandscape::readMap(const QFileInfo& path)
     int texCount;
     ei::setCrashContext("mpr/terrain-atlas/build:" + path.fileName());
     m_texture = CTextureList::getInstance()->buildLandTex(innerMapName, int(m_header.nTexture), texCount);
+    m_renderTextureCount = qMax(1, texCount);
     ei::log(eLogInfo, QString("MPR terrain atlas complete file:%1 textureCount:%2")
             .arg(path.fileName()).arg(texCount));
 
@@ -248,7 +250,8 @@ void CLandscape::readMap(const QFileInfo& path)
             secIndex.reset(x, y);
             QDataStream secStream(aComponent.take(innerMapName + genSectorSuffix(int(x), int(y)) + ".sec"));
             util::formatStream(secStream);
-            CSector* sector = new CSector(secStream, m_header.maxZ, texCount, &m_aMaterial);
+            CSector* sector = new CSector(secStream, m_header.maxZ, texCount,
+                                          &m_aMaterial, &m_aAnimTile);
             sector->setIndex(secIndex);
             xSec.append(sector);
             if(sector->existsTileIndices(m_arrIncorectTiles))
@@ -373,6 +376,12 @@ bool CLandscape::adoptCanonicalSave(const QFileInfo& path, const QByteArray& byt
 void CLandscape::setMaterials(const QVector<SMaterial>& arrMat)
 {
     m_aMaterial = arrMat;
+    m_materialDrawDataDirty = true;
+}
+
+void CLandscape::setAnimTils(const QVector<SAnimTile>& arrAnimTile)
+{
+    m_aAnimTile = arrAnimTile;
     m_materialDrawDataDirty = true;
 }
 
@@ -649,6 +658,8 @@ void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* fr
     refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
+    program->setUniformValue("u_overlayAtlasGrid",
+                             QVector2D(float(m_renderTextureCount), 8.0f));
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
         {

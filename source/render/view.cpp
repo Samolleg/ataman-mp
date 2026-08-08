@@ -9697,17 +9697,35 @@ void CView::openMapParameters()
         tr("Show material slots on overlay tiles"), materialsPage);
     showMaterialSlots->setObjectName(
         QStringLiteral("showOverlayMaterialSlotsFromMprSettings"));
+    showMaterialSlots->setCheckable(true);
     showMaterialSlots->setToolTip(tr(
-        "Open Landscape Tools in Paint existing overlays mode and label every active overlay cell "
-        "with the surface-material table slot it references."));
+        "Toggle labels showing the surface-material table slot referenced by every active overlay cell. "
+        "Enabling them also opens Landscape Tools in Paint existing overlays mode."));
+    const auto syncMaterialSlotToggle = [this, showMaterialSlots](bool visible)
+    {
+        const QSignalBlocker blocker(showMaterialSlots);
+        showMaterialSlots->setChecked(visible);
+        showMaterialSlots->setText(visible
+            ? tr("Hide material slots on overlay tiles")
+            : tr("Show material slots on overlay tiles"));
+    };
+    syncMaterialSlotToggle(m_landscapeTools
+        && m_landscapeTools->overlayMaterialSlotLabelsVisible());
+    if(m_landscapeTools)
+        connect(m_landscapeTools,
+                &CLandscapeTools::overlayMaterialSlotLabelsChanged,
+                showMaterialSlots, syncMaterialSlotToggle);
     materialsLayout->addWidget(showMaterialSlots);
-    connect(showMaterialSlots, &QPushButton::clicked, dock, [this]()
+    connect(showMaterialSlots, &QPushButton::toggled, dock, [this](bool checked)
     {
         if(!m_landscapeTools)
             return;
-        m_landscapeTools->activateMode(ELandscapeEditMode::OverlayPaint, false);
-        m_landscapeTools->setOverlayMaterialSlotLabelsVisible(true);
-        emit showLandscapeToolsSignal();
+        if(checked)
+        {
+            m_landscapeTools->activateMode(ELandscapeEditMode::OverlayPaint, false);
+            emit showLandscapeToolsSignal();
+        }
+        m_landscapeTools->setOverlayMaterialSlotLabelsVisible(checked);
         syncLandscapeToolState();
         update();
     });
@@ -9801,7 +9819,7 @@ void CView::openMapParameters()
     QLabel* animationExplanation = new QLabel(tr(
         "Each record animates consecutive atlas slots: Start atlas slot through Start + Frame count - 1. "
         "Frame count 0 disables the record. These are atlas-frame ranges, not liquid-wave settings. "
-        "Every inspected Base/JMV record is disabled, and the current Endurance viewport does not yet play this legacy tile animation."), animationGroup);
+        "The viewport plays active records at the terrain logical-tick cadence while viewport animation is enabled."), animationGroup);
     animationExplanation->setWordWrap(true);
     animationLayout->addWidget(animationExplanation);
     QTableWidget* animationTable = new QTableWidget(animationGroup);

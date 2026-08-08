@@ -30,7 +30,17 @@ struct SOverlayWindAnimation
     bool enabled{false};
 };
 
+struct SOverlayTileAnimation
+{
+    int startSlot{0};
+    int baseSlot{0};
+    int frameCount{0};
+    bool animated{false};
+};
+
 SOverlayMaterialAnimation overlayMaterialAnimation(const SMaterial* material);
+SOverlayTileAnimation overlayTileAnimation(int atlasSlot,
+                                           const QVector<SAnimTile>* animations);
 QVector3D terrainMaterialEmission(const SMaterial* material);
 float terrainMaterialOpacity(const SMaterial* material);
 int sharedOverlayMaterialIndex(const QVector<qint16>& tileMaterialIndices,
