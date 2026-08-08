@@ -15,9 +15,10 @@ struct SMobScriptReference
 class CScriptReferenceAnalyzer
 {
 public:
-    // Conservative by design: an exact standalone decimal token counts as a
-    // reference whether it appears in a helper call, a string, or a comment.
-    // The result is warning-only; Endurance never rewrites script text here.
+    // Only literal object lookups are references: GetObject(number) and
+    // GetObjectByID("number"). Comments, quoted prose, coordinates, flags, and
+    // unrelated numeric arguments are excluded. Endurance never rewrites script
+    // text here; dynamic lookup expressions remain a manual script-review case.
     static QVector<SMobScriptReference> findObjectIds(const QString& script,
                                                       const QVector<uint>& objectIds);
 };
