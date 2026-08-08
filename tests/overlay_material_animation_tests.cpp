@@ -328,6 +328,10 @@ void OverlayMaterialAnimationTests::mprMaterialEditorReloadsSelectionAndDoesNotS
              "Rebuilding a non-empty material table must also refresh the editor fields");
     QVERIFY2(view.contains("materialTable->selectRow(qBound(0, selected, draftMaterials->size() - 1));\n        loadSelectedMaterial();"),
              "The selected material values and type must reload even when the row number stays unchanged");
+    QVERIFY2(view.contains("Effective geometric amplitude is world Wind strength x 0.3 x this value"),
+             "Wave multiplier help must explain that zero world wind means zero geometric motion");
+    QVERIFY2(view.contains("does not control atlas-frame animation"),
+             "Wave multiplier help must distinguish geometry from authored tile-frame playback");
 }
 
 void OverlayMaterialAnimationTests::resolvesAuthoredOverlayTileAnimation()

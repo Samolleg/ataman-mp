@@ -9765,7 +9765,7 @@ void CView::openMapParameters()
     QDoubleSpinBox* materialBlue = makeMaterialFloat(0.0, 1.0, tr("Exact stored blue tint component (0-1)."));
     QDoubleSpinBox* materialOpacity = makeMaterialFloat(0.0, 1.0, tr("Exact stored surface opacity: 0 is transparent and 1 is opaque."));
     QDoubleSpinBox* materialIllumination = makeMaterialFloat(0.0, 1000000.0, tr("Exact stored scalar self-illumination. Emitted RGB is clamp(tint RGB x illumination, 0-1). It is a material property, not a lava-texture flag."));
-    QDoubleSpinBox* materialWave = makeMaterialFloat(0.0, 1000000.0, tr("Exact stored scalar multiplier for wind-driven water displacement. It is not a vector: wind direction and strength come from the world environment. It affects both displacement amplitude and apparent wave-phase speed."));
+    QDoubleSpinBox* materialWave = makeMaterialFloat(0.0, 1000000.0, tr("Exact stored scalar multiplier for wind-driven water displacement. Effective geometric amplitude is world Wind strength x 0.3 x this value, so Wind strength 0 produces no geometric motion. Wind direction and strength come from the loaded MOB's world environment. This also scales apparent wave-phase speed and does not control atlas-frame animation."));
     QDoubleSpinBox* materialWarp = makeMaterialFloat(-1000000.0, 1000000.0, tr("Exact stored scalar warp-speed value. The confirmed gameplay path ignores this authored value and uses a fixed 0.05 lateral-warp rate. Liquids can still appear to move at different speeds because Wave multiplier also scales their wave phase."));
     materialRed->setObjectName(QStringLiteral("mprMaterialRed"));
     materialGreen->setObjectName(QStringLiteral("mprMaterialGreen"));
