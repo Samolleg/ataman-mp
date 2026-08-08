@@ -9698,6 +9698,8 @@ void CView::openMapParameters()
     showMaterialSlots->setObjectName(
         QStringLiteral("showOverlayMaterialSlotsFromMprSettings"));
     showMaterialSlots->setCheckable(true);
+    showMaterialSlots->setAutoDefault(false);
+    showMaterialSlots->setDefault(false);
     showMaterialSlots->setToolTip(tr(
         "Toggle labels showing the surface-material table slot referenced by every active overlay cell. "
         "Enabling them also opens Landscape Tools in Paint existing overlays mode."));
@@ -9974,7 +9976,7 @@ void CView::openMapParameters()
         *materialUiLoading = false;
         if(!draftMaterials->isEmpty())
             materialTable->selectRow(qBound(0, selected, draftMaterials->size() - 1));
-        else loadSelectedMaterial();
+        loadSelectedMaterial();
         removeAnimation->setEnabled(animationTable->currentRow() >= 0);
     };
     connect(animationTable, &QTableWidget::currentCellChanged, dock, [=](int row, int, int, int) {

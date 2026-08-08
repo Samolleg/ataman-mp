@@ -24,6 +24,7 @@ private slots:
     void resolvesAuthoredOverlayTileAnimation();
     void advancesAuthoredOverlayTileFrames();
     void mprSettingsUsesTopLevelWindowAndOverlaySlotToggle();
+    void mprMaterialEditorReloadsSelectionAndDoesNotStealEnter();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -311,6 +312,22 @@ void OverlayMaterialAnimationTests::mprSettingsUsesTopLevelWindowAndOverlaySlotT
              "The material-slot viewport control must both show and hide the labels");
     QVERIFY2(view.contains("overlayMaterialSlotLabelsChanged"),
              "The control must stay synchronized with Landscape Tools");
+}
+
+void OverlayMaterialAnimationTests::mprMaterialEditorReloadsSelectionAndDoesNotStealEnter()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    const QByteArray view = viewFile.readAll();
+
+    QVERIFY2(view.contains("showMaterialSlots->setAutoDefault(false)"),
+             "Enter in a material editor must not activate or focus the slot-label toggle");
+    QVERIFY2(!view.contains("else loadSelectedMaterial();"),
+             "Rebuilding a non-empty material table must also refresh the editor fields");
+    QVERIFY2(view.contains("materialTable->selectRow(qBound(0, selected, draftMaterials->size() - 1));\n        loadSelectedMaterial();"),
+             "The selected material values and type must reload even when the row number stays unchanged");
 }
 
 void OverlayMaterialAnimationTests::resolvesAuthoredOverlayTileAnimation()
