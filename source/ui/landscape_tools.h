@@ -57,6 +57,8 @@ public:
     ETerrainTileBrushShape paintShape() const;
     bool manualTileSelectionEnabled() const;
     bool landFamiliesAllowedInOverlay() const;
+    bool overlayMaterialSlotLabelsVisible() const;
+    void setOverlayMaterialSlotLabelsVisible(bool visible);
     EOverlaySurfaceOperation overlaySurfaceOperation() const;
     qint16 overlayMaterialIndex(bool* selected = nullptr) const;
     void setOverlayMaterials(const QVector<SMaterial>& materials);
@@ -89,6 +91,7 @@ signals:
     void brushGeometryChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
     void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
+    void overlayMaterialSlotLabelsChanged(bool visible);
 
 private:
     bool m_editingActive{false};
@@ -109,6 +112,7 @@ private:
     QCheckBox* m_manualTileSelection;
     QCheckBox* m_showUnderwaterFamilies;
     QCheckBox* m_allowLandFamiliesInOverlay;
+    QCheckBox* m_showOverlayMaterialSlots;
     QComboBox* m_overlaySurfaceOperation;
     QComboBox* m_overlayMaterial;
     QLabel* m_overlaySurfaceOperationLabel;

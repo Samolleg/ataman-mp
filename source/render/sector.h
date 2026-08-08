@@ -85,6 +85,7 @@ private:
         QVector3D normal;
         QVector2D texCoord;
         QVector3D emission;
+        float opacity{1.0f};
     };
 
     struct SWaterVertexData
@@ -95,6 +96,7 @@ private:
         QVector4D animation;
         QVector2D grid;
         QVector3D emission;
+        float opacity{1.0f};
     };
 
     UI2 m_index;

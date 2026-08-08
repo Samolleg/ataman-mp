@@ -99,6 +99,11 @@ QVector3D terrainMaterialEmission(const SMaterial* material)
                      qBound(0.0f, material->B * strength, 1.0f));
 }
 
+float terrainMaterialOpacity(const SMaterial* material)
+{
+    return material ? qBound(0.0f, material->A, 1.0f) : 1.0f;
+}
+
 int sharedOverlayMaterialIndex(const QVector<qint16>& tileMaterialIndices,
                                int tileColumns,
                                int tileRows,

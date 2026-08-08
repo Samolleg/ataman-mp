@@ -43,7 +43,7 @@ class QLabel;
 class QComboBox;
 class QSlider;
 class QToolButton;
-class QDockWidget;
+class QDialog;
 class QResizeEvent;
 class CKeyManager;
 class CMob;
@@ -307,6 +307,8 @@ public:
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
     bool applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command, bool forward);
+    bool applyMprParametersPreview(const QVector<SMprMaterialRecord>& materials,
+                                   const QVector<SMprAnimatedTileRecord>& animatedTiles);
     void onLandscapeToolsShown();
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
@@ -337,6 +339,8 @@ private:
     CMagicTrap* trapCollectionOwner(const QList<CNode*>& selection) const;
     void closeMprSettingsDock();
     void refreshMprSettingsDock();
+    bool mprParametersDirty() const;
+    void syncMprDirtyState();
     bool saveLandscapeDocument(const QFileInfo& destination);
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
                                       bool adoptAsOpenBaseline);
@@ -348,6 +352,7 @@ private:
     void scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
                                            bool cameraMoving);
     void drawTestOverlaysOpenGl();
+    void rebuildOverlayMaterialSlotLabels();
     CNode* pickObject(QList<CNode*>& aNode, int x, int y);
     void applyParam(SParam& param);
     void getColorFromRect(const QRect& rect, QVector<SColor>& aColor);
@@ -611,7 +616,7 @@ private:
     bool m_landscapeVisible{true};
     bool m_bPreviewTile;
     CTileForm* m_pTileForm;
-    QPointer<QDockWidget> m_mprSettingsDock;
+    QPointer<QDialog> m_mprSettingsDock;
     std::function<void()> m_refreshMprSettingsDock;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
@@ -619,6 +624,8 @@ private:
     CLandscapeTools* m_landscapeTools;
     CMprDocument m_mprDocument;
     CTerrainEditModel m_terrainEdit;
+    QVector<SMprMaterialRecord> m_mprMaterials;
+    QVector<SMprAnimatedTileRecord> m_mprAnimatedTiles;
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
     STerrainAtlasProfile m_terrainAtlasProfile;
     QString m_lastAtlasReviewPromptBinding;
@@ -696,6 +703,12 @@ private:
     QVector<QImage> m_testEntranceLabelImages;
     QVector<GLuint> m_testEntranceLabelTextures;
     bool m_testEntranceLabelTexturesDirty{false};
+    QVector<QVector3D> m_overlayMaterialSlotLabelPositions;
+    QVector<int> m_overlayMaterialSlotLabelSlots;
+    QVector<QImage> m_overlayMaterialSlotLabelImages;
+    QVector<GLuint> m_overlayMaterialSlotLabelTextures;
+    bool m_overlayMaterialSlotLabelsDirty{true};
+    bool m_overlayMaterialSlotLabelTexturesDirty{true};
     int m_selectedTestEntrance{-1};
     QHash<CMob*, QSharedPointer<CSpatialGrid<CNode*>>> m_spatialIndices;
     QHash<CMob*, QVector<CNode*>> m_spatialOverflowNodes;

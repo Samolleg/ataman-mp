@@ -802,6 +802,7 @@ void CSector::generateWaterVertexData()
                     animation.animated ? 1.0f : 0.0f);
                 target.grid = QVector2D(float(gridX), float(gridY));
                 target.emission = ei::terrainMaterialEmission(sharedMaterial);
+                target.opacity = ei::terrainMaterialOpacity(sharedMaterial);
             }
         }
 
@@ -825,6 +826,7 @@ void CSector::generateWaterVertexData()
                         && sharedMaterialIndex < m_materials->size()
                     ? &m_materials->at(sharedMaterialIndex) : nullptr;
                 target.emission = QVector3D();
+                target.opacity = 1.0f;
                 if(sharedMaterial && hasWater)
                 {
                     const QVector3D overlayEmission =
@@ -949,6 +951,8 @@ void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
                     ? &m_materials->at(sharedMaterialIndex) : nullptr;
                 m_arrAnimatedWaterVrtData[index].emission =
                     ei::terrainMaterialEmission(sharedMaterial);
+                m_arrAnimatedWaterVrtData[index].opacity =
+                    ei::terrainMaterialOpacity(sharedMaterial);
                 if(index < m_arrLitLandVrtData.size())
                 {
                     const SVertexData& land = m_arrLandVrtData.at(index);
@@ -1186,6 +1190,13 @@ void CSector::draw(QOpenGLShaderProgram* program)
                                     int(sizeof(STerrainVertexData)));
     }
     offset += int(sizeof(QVector3D));
+    const int opacityLocation = program->attributeLocation("a_materialOpacity");
+    if(opacityLocation >= 0)
+    {
+        program->enableAttributeArray(opacityLocation);
+        program->setAttributeBuffer(opacityLocation, GL_FLOAT, offset, 1,
+                                    int(sizeof(STerrainVertexData)));
+    }
     const int animationLocation = program->attributeLocation("a_overlayAnimation");
     if(animationLocation >= 0)
     {
@@ -1277,6 +1288,15 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
         program->setAttributeBuffer(emissionLocation, GL_FLOAT, offset, 3,
                                     int(sizeof(SWaterVertexData)));
     }
+    offset += int(sizeof(QVector3D));
+    const int opacityLocation = program->attributeLocation("a_materialOpacity");
+    if(opacityLocation >= 0)
+    {
+        program->enableAttributeArray(opacityLocation);
+        program->setAttributeBuffer(opacityLocation, GL_FLOAT, offset, 1,
+                                    int(sizeof(SWaterVertexData)));
+    }
+
     m_waterIndexBuf.bind();
     ei::gl::DrawElements(GL_TRIANGLES, m_waterIndexCount, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();

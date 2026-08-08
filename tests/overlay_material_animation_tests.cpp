@@ -16,9 +16,12 @@ private slots:
     void noiseIsStableAndSectorPeriodic();
     void shaderContractsCoverDesktopAndAngle();
     void mapLifetimeResetsAnimationState();
+    void materialApplyInvalidatesSectorDrawData();
     void derivesGeneralTerrainEmission();
+    void derivesMaterialOpacity();
     void usesSharedOverlayVertexRules();
     void gatesUnderlayEmissionByPositiveDepth();
+    void mprSettingsUsesTopLevelWindowAndOverlaySlotShortcut();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -162,7 +165,9 @@ void OverlayMaterialAnimationTests::shaderContractsCoverDesktopAndAngle()
     QVERIFY(!fragment.contains("u_animateLiquid"));
     QVERIFY(!fragment.contains("sampledUv"));
     QVERIFY(vertex.contains("attribute vec3 a_materialEmission"));
+    QVERIFY(vertex.contains("attribute float a_materialOpacity"));
     QVERIFY(fragment.contains("v_materialEmission"));
+    QVERIFY(fragment.contains("resColor.a *= clamp(v_materialOpacity"));
     QVERIFY(fragment.contains("u_sunColor * sunDiffuse + v_materialEmission"));
     QVERIFY(objectFragment.contains("uniform vec3 u_materialEmission"));
     QVERIFY(objectFragment.contains("u_sunColor * sunDiffuse + u_materialEmission"));
@@ -178,6 +183,29 @@ void OverlayMaterialAnimationTests::mapLifetimeResetsAnimationState()
     QVERIFY(view.contains("m_overlayAnimationTimer.restart();"));
     QVERIFY(view.contains("m_overlayAnimationTimer.invalidate();"));
     QVERIFY(view.contains("m_landProgram.setUniformValue(\"u_overlayMotionEnabled\", false);"));
+}
+
+void OverlayMaterialAnimationTests::materialApplyInvalidatesSectorDrawData()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/landscape.cpp") && repository.cdUp()) {}
+    QFile headerFile(repository.absoluteFilePath("source/render/landscape.h"));
+    QFile sourceFile(repository.absoluteFilePath("source/render/landscape.cpp"));
+    QVERIFY(headerFile.open(QIODevice::ReadOnly));
+    QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+    const QByteArray header = headerFile.readAll();
+    const QByteArray source = sourceFile.readAll();
+
+    QVERIFY2(header.contains("void setMaterials(const QVector<SMaterial>& arrMat);"),
+             "Material assignment must be an invalidating operation, not an inline table swap");
+    QVERIFY2(source.contains("m_materialDrawDataDirty = true;"),
+             "Applying material edits must invalidate baked sector material data");
+    QVERIFY2(source.contains("refreshMaterialDrawDataIfNeeded();"),
+             "The render path must consume pending material invalidation under the active GL context");
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    QVERIFY2(!viewFile.readAll().contains("setUniformValue(\"transparency\", 0.3f)"),
+             "The viewport must use authored per-material opacity instead of a fixed overlay subtraction");
 }
 
 void OverlayMaterialAnimationTests::derivesGeneralTerrainEmission()
@@ -204,6 +232,18 @@ void OverlayMaterialAnimationTests::derivesGeneralTerrainEmission()
     QCOMPARE(ei::terrainMaterialEmission(nullptr), QVector3D());
 }
 
+void OverlayMaterialAnimationTests::derivesMaterialOpacity()
+{
+    SMaterial source = material(ETerrainType::eTerrainWater, 0.5f, 0.0f);
+    source.A = 0.35f;
+    QCOMPARE(ei::terrainMaterialOpacity(&source), 0.35f);
+    source.A = -1.0f;
+    QCOMPARE(ei::terrainMaterialOpacity(&source), 0.0f);
+    source.A = 4.0f;
+    QCOMPARE(ei::terrainMaterialOpacity(&source), 1.0f);
+    QCOMPARE(ei::terrainMaterialOpacity(nullptr), 1.0f);
+}
+
 void OverlayMaterialAnimationTests::usesSharedOverlayVertexRules()
 {
     const QVector<qint16> materials{
@@ -227,6 +267,24 @@ void OverlayMaterialAnimationTests::gatesUnderlayEmissionByPositiveDepth()
     QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 3.25f), red);
     QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 3.0f), QVector3D());
     QCOMPARE(ei::terrainUnderlayEmission(red, 3.0f, 2.75f), QVector3D());
+}
+
+void OverlayMaterialAnimationTests::mprSettingsUsesTopLevelWindowAndOverlaySlotShortcut()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    const QByteArray view = viewFile.readAll();
+
+    QVERIFY2(view.contains("QDialog(nullptr, Qt::Window | Qt::WindowSystemMenuHint"),
+             "MPR Settings must use the same independent top-level window path as minimap export");
+    QVERIFY2(view.contains("showOverlayMaterialSlotsFromMprSettings"),
+             "The Materials Editor must expose a direct overlay-slot inspection shortcut");
+    QVERIFY2(view.contains("ELandscapeEditMode::OverlayPaint"),
+             "The shortcut must activate Paint existing overlays rather than another landscape mode");
+    QVERIFY2(view.contains("setOverlayMaterialSlotLabelsVisible(true)"),
+             "The shortcut must explicitly enable per-cell material-slot labels");
 }
 
 QTEST_APPLESS_MAIN(OverlayMaterialAnimationTests)

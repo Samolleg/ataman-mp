@@ -143,7 +143,9 @@ back to the legacy rebuilding serializer; graph persistence remains explicit.
   share one atlas model.
 - [ ] Complete semantic-atlas coverage and the explicit **Finalize Atlas** flow;
   do not import experimental generated imagery.
-- [ ] Complete typed overlay-material editing and validated Base/JMV presets.
+- [x] Add typed overlay-material editing with live preview, lossless undoable
+  application, animation records, and per-cell material-slot inspection.
+- [ ] Add validated Base/JMV surface-material presets.
 - [ ] Runtime-confirm landscape edit-mode neutral geometry, overlay reset after
   unload/reload, traversal, liquid interaction, and changed-map save/load.
 - [ ] Offer explicit follow-up `map.txt` registration after new-MPR creation.

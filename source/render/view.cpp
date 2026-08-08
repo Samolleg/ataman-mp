@@ -393,6 +393,74 @@ private:
     bool m_skipInitialRedo{false};
 };
 
+class CMprParametersPreviewCommand : public QUndoCommand
+{
+public:
+    CMprParametersPreviewCommand(
+        CView* view,
+        const QVector<SMprMaterialRecord>& beforeMaterials,
+        const QVector<SMprAnimatedTileRecord>& beforeAnimatedTiles,
+        const QVector<SMprMaterialRecord>& afterMaterials,
+        const QVector<SMprAnimatedTileRecord>& afterAnimatedTiles)
+        : m_view(view), m_beforeMaterials(beforeMaterials),
+          m_beforeAnimatedTiles(beforeAnimatedTiles),
+          m_afterMaterials(afterMaterials), m_afterAnimatedTiles(afterAnimatedTiles)
+    {
+        setText(QObject::tr("Edit MPR surface materials and tile animations"));
+    }
+    void undo() override
+    {
+        m_view->applyMprParametersPreview(m_beforeMaterials, m_beforeAnimatedTiles);
+    }
+    void redo() override
+    {
+        m_view->applyMprParametersPreview(m_afterMaterials, m_afterAnimatedTiles);
+    }
+private:
+    CView* m_view;
+    QVector<SMprMaterialRecord> m_beforeMaterials;
+    QVector<SMprAnimatedTileRecord> m_beforeAnimatedTiles;
+    QVector<SMprMaterialRecord> m_afterMaterials;
+    QVector<SMprAnimatedTileRecord> m_afterAnimatedTiles;
+};
+
+QVector<SMaterial> renderMaterials(const QVector<SMprMaterialRecord>& records)
+{
+    QVector<SMaterial> result;
+    result.reserve(records.size());
+    for(const SMprMaterialRecord& record : records)
+    {
+        SMaterial material{};
+        material.type = ETerrainType(record.type);
+        material.R = record.red;
+        material.G = record.green;
+        material.B = record.blue;
+        material.A = record.opacity;
+        material.selfIllumination = record.selfIllumination;
+        material.waveMultiplier = record.waveMultiplier;
+        material.warpSpeed = record.warpSpeed;
+        material.reserved1 = record.reserved1;
+        material.reserved2 = record.reserved2;
+        material.reserved3 = record.reserved3;
+        result.append(material);
+    }
+    return result;
+}
+
+QVector<SAnimTile> renderAnimatedTiles(const QVector<SMprAnimatedTileRecord>& records)
+{
+    QVector<SAnimTile> result;
+    result.reserve(records.size());
+    for(const SMprAnimatedTileRecord& record : records)
+    {
+        SAnimTile tile{};
+        tile.tileIndex = record.tileIndex;
+        tile.nPhase = record.frameCount;
+        result.append(tile);
+    }
+    return result;
+}
+
 QString openGlErrorName(GLenum error)
 {
     switch(error)
@@ -857,6 +925,13 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
             setDrawLand(drawLand);
             setDrawWater(drawWater);
         });
+        connect(m_landscapeTools,
+                &CLandscapeTools::overlayMaterialSlotLabelsChanged,
+                this, [this](bool)
+        {
+            m_overlayMaterialSlotLabelsDirty = true;
+            update();
+        });
         m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
     }
 }
@@ -1157,6 +1232,13 @@ CView::~CView()
                          m_testEntranceLabelTextures.constData());
         m_testEntranceLabelTextures.clear();
         // Keep the context current for renderer member destruction below.
+    }
+    if(isValid() && !m_overlayMaterialSlotLabelTextures.isEmpty())
+    {
+        makeCurrent();
+        ei::gl::DeleteTextures(m_overlayMaterialSlotLabelTextures.size(),
+            m_overlayMaterialSlotLabelTextures.constData());
+        m_overlayMaterialSlotLabelTextures.clear();
     }
     m_aMob.clear();
 
@@ -3753,11 +3835,70 @@ void CView::rebuildAiGraphOverlayGeometry()
         }
 }
 
+void CView::rebuildOverlayMaterialSlotLabels()
+{
+    m_overlayMaterialSlotLabelPositions.clear();
+    m_overlayMaterialSlotLabelSlots.clear();
+    m_overlayMaterialSlotLabelImages.clear();
+
+    int maximumSlot = -1;
+    for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
+    {
+        for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
+        {
+            bool available = false;
+            const int slot = m_terrainEdit.overlayMaterialIndex(x, y, &available);
+            if(!available || slot < 0)
+                continue;
+            QVector3D center((float(x) + 0.5f) * 2.0f,
+                             (float(y) + 0.5f) * 2.0f, 0.0f);
+            if(!m_pLand->projectPt(center, false))
+                continue;
+            center.setZ(center.z() + 0.18f);
+            m_overlayMaterialSlotLabelPositions.append(center);
+            m_overlayMaterialSlotLabelSlots.append(slot);
+            maximumSlot = qMax(maximumSlot, slot);
+        }
+    }
+
+    const QFont labelFont = font();
+    const QFontMetrics metrics(labelFont);
+    const double scale = ei::uiScaleFactor();
+    const int horizontalPadding = qMax(4, qRound(4.0 * scale));
+    const int verticalPadding = qMax(2, qRound(2.0 * scale));
+    for(int slot = 0; slot <= maximumSlot; ++slot)
+    {
+        const QString label = QString::number(slot);
+        QImage image(metrics.horizontalAdvance(label) + horizontalPadding * 2,
+                     metrics.height() + verticalPadding * 2,
+                     QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(QColor(100, 225, 255, 235), qMax(1.0, scale)));
+        painter.setBrush(QColor(8, 42, 58, 205));
+        painter.drawRoundedRect(image.rect().adjusted(0, 0, -1, -1),
+                                qMax(3, qRound(3.0 * scale)),
+                                qMax(3, qRound(3.0 * scale)));
+        painter.setPen(QColor(245, 252, 255));
+        painter.drawText(image.rect(), Qt::AlignCenter, label);
+        m_overlayMaterialSlotLabelImages.append(image);
+    }
+    m_overlayMaterialSlotLabelsDirty = false;
+    m_overlayMaterialSlotLabelTexturesDirty = true;
+}
+
 void CView::drawTestOverlaysOpenGl()
 {
+    const bool showOverlayMaterialSlots = m_landscapeTools
+        && m_landscapeTools->editingEnabled()
+        && m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint
+        && m_landscapeTools->overlayMaterialSlotLabelsVisible()
+        && m_terrainEditAvailable;
     if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
         && !m_terrainPaintOutlineValid && !m_sculptOutlineValid
-        && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()))
+        && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid())
+        && !showOverlayMaterialSlots)
        || width() <= 0 || height() <= 0)
         return;
 
@@ -3938,6 +4079,70 @@ void CView::drawTestOverlaysOpenGl()
         }
         ei::gl::BindTexture(GL_TEXTURE_2D, 0);
         m_program.disableAttributeArray(texture);
+    }
+
+    if(showOverlayMaterialSlots)
+    {
+        if(m_overlayMaterialSlotLabelsDirty)
+            rebuildOverlayMaterialSlotLabels();
+        if(m_overlayMaterialSlotLabelTexturesDirty)
+        {
+            if(!m_overlayMaterialSlotLabelTextures.isEmpty())
+                ei::gl::DeleteTextures(m_overlayMaterialSlotLabelTextures.size(),
+                    m_overlayMaterialSlotLabelTextures.constData());
+            m_overlayMaterialSlotLabelTextures.clear();
+            for(const QImage& image : m_overlayMaterialSlotLabelImages)
+                m_overlayMaterialSlotLabelTextures.append(
+                    bindTexture(image, GL_TEXTURE_2D, GL_RGBA));
+            m_overlayMaterialSlotLabelTexturesDirty = false;
+        }
+        if(texture >= 0 && !m_overlayMaterialSlotLabelTextures.isEmpty())
+        {
+            m_program.enableAttributeArray(texture);
+            m_program.setUniformValue("u_viewMmatrix", identity);
+            m_program.setUniformValue("u_projMmatrix", identity);
+            m_program.setUniformValue("customColor", QVector4D(0, 0, 0, 0));
+            m_program.setUniformValue("qt_Texture0", 0);
+            ei::gl::Disable(GL_DEPTH_TEST);
+            const QRect viewport(0, 0, width(), height());
+            const CViewFrustum frustum(m_projection * m_cam->viewMatrix());
+            const QVector<QVector2D> textureCoordinates = {
+                QVector2D(0, 0), QVector2D(1, 0),
+                QVector2D(1, 1), QVector2D(0, 1)
+            };
+            for(int index = 0; index < m_overlayMaterialSlotLabelPositions.size(); ++index)
+            {
+                const QVector3D& center = m_overlayMaterialSlotLabelPositions.at(index);
+                if(!frustum.intersectsSphere(center, 1.5f))
+                    continue;
+                const int slot = m_overlayMaterialSlotLabelSlots.at(index);
+                if(slot < 0 || slot >= m_overlayMaterialSlotLabelImages.size()
+                   || slot >= m_overlayMaterialSlotLabelTextures.size())
+                    continue;
+                const QVector3D projected = center.project(
+                    m_cam->viewMatrix(), m_projection, viewport);
+                if(projected.z() < 0.0f || projected.z() > 1.0f)
+                    continue;
+                const QImage& image = m_overlayMaterialSlotLabelImages.at(slot);
+                const float centerX = (2.0f * projected.x() / float(width())) - 1.0f;
+                const float centerY = (2.0f * projected.y() / float(height())) - 1.0f;
+                const float halfWidth = float(image.width()) / float(width());
+                const float halfHeight = float(image.height()) / float(height());
+                const QVector<QVector3D> quad = {
+                    QVector3D(centerX - halfWidth, centerY - halfHeight, 0),
+                    QVector3D(centerX + halfWidth, centerY - halfHeight, 0),
+                    QVector3D(centerX + halfWidth, centerY + halfHeight, 0),
+                    QVector3D(centerX - halfWidth, centerY + halfHeight, 0)
+                };
+                ei::gl::BindTexture(GL_TEXTURE_2D,
+                    m_overlayMaterialSlotLabelTextures.at(slot));
+                m_program.setAttributeArray(position, quad.constData());
+                m_program.setAttributeArray(texture, textureCoordinates.constData());
+                ei::gl::DrawArrays(GL_TRIANGLE_FAN, 0, quad.size());
+            }
+            ei::gl::BindTexture(GL_TEXTURE_2D, 0);
+            m_program.disableAttributeArray(texture);
+        }
     }
 
     if(m_testSpawnMarkerValid)
@@ -6048,7 +6253,9 @@ void CView::draw()
         if (!m_landProgram.bind())
             close();
 
-        m_landProgram.setUniformValue("transparency", 0.3f);
+        // Overlay opacity is authored per material and carried in the sector
+        // vertex payload. Do not apply the inherited global 0.3 subtraction.
+        m_landProgram.setUniformValue("transparency", 0.0f);
         const CWorldSet* overlayWorldSet = m_environmentMob
             ? &m_environmentMob->worldSet() : nullptr;
         const QVector3D overlayWindDirection = overlayWorldSet
@@ -6306,6 +6513,10 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
     else
     {
+        m_mprMaterials = m_mprDocument.mapInfo().materials;
+        m_mprAnimatedTiles = m_mprDocument.mapInfo().animatedTiles;
+        m_pLand->setMaterials(renderMaterials(m_mprMaterials));
+        m_pLand->setAnimTils(renderAnimatedTiles(m_mprAnimatedTiles));
         ei::log(eLogInfo, QString("Canonical terrain preview ready: %1 x %2 vertices")
             .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
         bool hasCanonicalWarning = false;
@@ -6340,6 +6551,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
         m_mprModifyTimer->start();
     }
     m_pPreviewTile.reset(new CPreviewTile());
+    m_overlayMaterialSlotLabelsDirty = true;
     updateTileForm(true);
     rebuildTerrainAutoCatalog();
     refreshAiGraphPreviewSource();
@@ -6375,6 +6587,9 @@ void CView::unloadLand(bool promptForSave)
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_terrainEdit = CTerrainEditModel();
+    m_mprMaterials.clear();
+    m_mprAnimatedTiles.clear();
+    m_overlayMaterialSlotLabelsDirty = true;
     rebuildTerrainAutoCatalog();
     m_terrainSemanticSeed = 0;
     m_mprDocument = CMprDocument();
@@ -6489,7 +6704,9 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
     CMprEditTransaction transaction(tr("Stage current landscape for map test"));
     CValidationReport localReport;
     if(!m_terrainEdit.appendSectorEdits(&transaction, &localReport)
-       || !m_mprDocument.appendMaxZEdit(m_terrainEdit.maxZ(), &transaction, &localReport)
+       || !m_mprDocument.appendMapParametersEdit(
+              m_terrainEdit.maxZ(), m_mprMaterials, m_mprAnimatedTiles,
+              &transaction, &localReport)
        || localReport.hasErrors() || transaction.isEmpty())
     {
         if(report)
@@ -6563,8 +6780,9 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         : tr("Save canonical landscape copy"));
     CValidationReport transactionReport;
     if(!m_terrainEdit.appendSectorEdits(&transaction, &transactionReport)
-       || !m_mprDocument.appendMaxZEdit(m_terrainEdit.maxZ(), &transaction,
-                                        &transactionReport)
+       || !m_mprDocument.appendMapParametersEdit(
+              m_terrainEdit.maxZ(), m_mprMaterials, m_mprAnimatedTiles,
+              &transaction, &transactionReport)
        || transactionReport.hasErrors() || transaction.isEmpty())
     {
         ei::log(eLogFatal, QString("Refusing changed MPR save because the canonical transaction failed path:%1 findings:%2")
@@ -6672,7 +6890,12 @@ bool CView::adoptCommittedLandscapeBaseline(const QFileInfo& destination,
 
     m_mprDocument = reopenedDocument;
     m_terrainEdit = reopenedTerrain;
+    m_mprMaterials = reopenedDocument.mapInfo().materials;
+    m_mprAnimatedTiles = reopenedDocument.mapInfo().animatedTiles;
+    m_pLand->setMaterials(renderMaterials(m_mprMaterials));
+    m_pLand->setAnimTils(renderAnimatedTiles(m_mprAnimatedTiles));
     m_terrainEditAvailable = true;
+    m_overlayMaterialSlotLabelsDirty = true;
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
     rebuildTerrainAutoCatalog();
     m_pLand->setDirty(false);
@@ -9412,20 +9635,18 @@ void CView::openMapParameters()
         return;
     }
 
-    QMainWindow* host = qobject_cast<QMainWindow*>(window());
-    if(!host)
-        return;
-
-    QDockWidget* dock = new QDockWidget(tr("MPR Settings"), host);
+    QDialog* dock = new QDialog(nullptr, Qt::Window | Qt::WindowSystemMenuHint
+        | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint);
     m_mprSettingsDock = dock;
-    dock->setObjectName(QStringLiteral("mprSettingsDock"));
-    dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-    dock->setFeatures(QDockWidget::DockWidgetClosable |
-                      QDockWidget::DockWidgetMovable |
-                      QDockWidget::DockWidgetFloatable);
-    dock->setWindowFlags(dock->windowFlags() & ~Qt::WindowContextHelpButtonHint);
+    dock->setObjectName(QStringLiteral("mprSettingsWindow"));
+    dock->setWindowTitle(tr("MPR Settings"));
+    dock->setWindowIcon(QApplication::windowIcon());
+    dock->setModal(false);
+    dock->setAttribute(Qt::WA_DeleteOnClose);
     QWidget* container = new QWidget(dock);
-    dock->setWidget(container);
+    QVBoxLayout* windowLayout = new QVBoxLayout(dock);
+    windowLayout->setContentsMargins(0, 0, 0, 0);
+    windowLayout->addWidget(container);
     QVBoxLayout* containerLayout = new QVBoxLayout(container);
     QStackedWidget* statePages = new QStackedWidget(container);
     containerLayout->addWidget(statePages);
@@ -9455,7 +9676,7 @@ void CView::openMapParameters()
     summaryForm->addRow(tr("Dimensions"), dimensionsValue);
     summaryForm->addRow(tr("Height range"), rangeValue);
     summaryForm->addRow(tr("Vertical scale (maxZ)"), scaleValue);
-    summaryForm->addRow(tr("Atlas / liquid materials"), materialsValue);
+    summaryForm->addRow(tr("Atlas / surface materials"), materialsValue);
     QLabel* summaryScaleExplanation = new QLabel(tr(
         "maxZ maps the complete 0-65535 raw range into world height. Changing it either "
         "scales the landscape or requantizes every height. Use Vertical scale to choose "
@@ -9463,6 +9684,345 @@ void CView::openMapParameters()
     summaryScaleExplanation->setWordWrap(true);
     summaryForm->addRow(summaryScaleExplanation);
     tabs->addTab(summaryPage, tr("Summary"));
+
+    QWidget* materialsPage = new QWidget(tabs);
+    QVBoxLayout* materialsLayout = new QVBoxLayout(materialsPage);
+    QLabel* materialsExplanation = new QLabel(tr(
+        "Surface materials are MPR render records referenced by overlay cells. "
+        "They are separate from the terrain atlas texture/family selected in Landscape Tools, "
+        "and many cells or texture families may share one material slot."), materialsPage);
+    materialsExplanation->setWordWrap(true);
+    materialsLayout->addWidget(materialsExplanation);
+    QPushButton* showMaterialSlots = new QPushButton(
+        tr("Show material slots on overlay tiles"), materialsPage);
+    showMaterialSlots->setObjectName(
+        QStringLiteral("showOverlayMaterialSlotsFromMprSettings"));
+    showMaterialSlots->setToolTip(tr(
+        "Open Landscape Tools in Paint existing overlays mode and label every active overlay cell "
+        "with the surface-material table slot it references."));
+    materialsLayout->addWidget(showMaterialSlots);
+    connect(showMaterialSlots, &QPushButton::clicked, dock, [this]()
+    {
+        if(!m_landscapeTools)
+            return;
+        m_landscapeTools->activateMode(ELandscapeEditMode::OverlayPaint, false);
+        m_landscapeTools->setOverlayMaterialSlotLabelsVisible(true);
+        emit showLandscapeToolsSignal();
+        syncLandscapeToolState();
+        update();
+    });
+    QSplitter* materialsSplitter = new QSplitter(Qt::Horizontal, materialsPage);
+    QTableWidget* materialTable = new QTableWidget(materialsSplitter);
+    materialTable->setColumnCount(4);
+    materialTable->setHorizontalHeaderLabels({tr("Slot"), tr("Type"), tr("Used cells"), tr("Color")});
+    materialTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    materialTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    materialTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    materialTable->horizontalHeader()->setStretchLastSection(true);
+    QWidget* materialEditor = new QWidget(materialsSplitter);
+    QVBoxLayout* materialEditorLayout = new QVBoxLayout(materialEditor);
+    QFormLayout* materialForm = new QFormLayout;
+    QComboBox* materialType = new QComboBox(materialEditor);
+    materialType->setObjectName(QStringLiteral("mprMaterialType"));
+    materialType->addItem(tr("0 - Undefined / no special surface behavior"), 0);
+    materialType->addItem(tr("1 - Base surface / non-water"), 1);
+    materialType->addItem(tr("2 - Untextured water"), 2);
+    materialType->addItem(tr("3 - Textured water"), 3);
+    materialType->addItem(tr("4 - Textured grass"), 4);
+    materialType->setToolTip(tr("Stored material type. Types 2 and 3 receive wind-driven water motion; type 1 is the normal non-water surface type."));
+    materialForm->addRow(tr("Surface type"), materialType);
+    auto makeMaterialFloat = [materialEditor](double minimum, double maximum,
+                                               const QString& tooltip) {
+        QDoubleSpinBox* value = new QDoubleSpinBox(materialEditor);
+        value->setDecimals(6);
+        value->setRange(minimum, maximum);
+        value->setSingleStep(0.01);
+        value->setToolTip(tooltip);
+        return value;
+    };
+    QDoubleSpinBox* materialRed = makeMaterialFloat(0.0, 1.0, tr("Exact stored red tint component (0-1)."));
+    QDoubleSpinBox* materialGreen = makeMaterialFloat(0.0, 1.0, tr("Exact stored green tint component (0-1)."));
+    QDoubleSpinBox* materialBlue = makeMaterialFloat(0.0, 1.0, tr("Exact stored blue tint component (0-1)."));
+    QDoubleSpinBox* materialOpacity = makeMaterialFloat(0.0, 1.0, tr("Exact stored surface opacity: 0 is transparent and 1 is opaque."));
+    QDoubleSpinBox* materialIllumination = makeMaterialFloat(0.0, 1000000.0, tr("Exact stored scalar self-illumination. Emitted RGB is clamp(tint RGB x illumination, 0-1). It is a material property, not a lava-texture flag."));
+    QDoubleSpinBox* materialWave = makeMaterialFloat(0.0, 1000000.0, tr("Exact stored scalar multiplier for wind-driven water displacement. It is not a vector: wind direction and strength come from the world environment. It affects both displacement amplitude and apparent wave-phase speed."));
+    QDoubleSpinBox* materialWarp = makeMaterialFloat(-1000000.0, 1000000.0, tr("Exact stored scalar warp-speed value. The confirmed gameplay path ignores this authored value and uses a fixed 0.05 lateral-warp rate. Liquids can still appear to move at different speeds because Wave multiplier also scales their wave phase."));
+    materialRed->setObjectName(QStringLiteral("mprMaterialRed"));
+    materialGreen->setObjectName(QStringLiteral("mprMaterialGreen"));
+    materialBlue->setObjectName(QStringLiteral("mprMaterialBlue"));
+    materialOpacity->setObjectName(QStringLiteral("mprMaterialOpacity"));
+    materialIllumination->setObjectName(QStringLiteral("mprMaterialIllumination"));
+    materialWave->setObjectName(QStringLiteral("mprMaterialWaveMultiplier"));
+    materialWarp->setObjectName(QStringLiteral("mprMaterialStoredWarpSpeed"));
+    materialForm->addRow(tr("Red tint"), materialRed);
+    materialForm->addRow(tr("Green tint"), materialGreen);
+    materialForm->addRow(tr("Blue tint"), materialBlue);
+    materialForm->addRow(tr("Opacity"), materialOpacity);
+    materialForm->addRow(tr("Illumination"), materialIllumination);
+    materialForm->addRow(tr("Wave multiplier"), materialWave);
+    materialForm->addRow(tr("Stored warp speed"), materialWarp);
+    QPushButton* chooseMaterialColor = new QPushButton(tr("Choose tint color..."), materialEditor);
+    materialForm->addRow(QString(), chooseMaterialColor);
+    materialEditorLayout->addLayout(materialForm);
+    QLabel* materialEffect = new QLabel(materialEditor);
+    materialEffect->setWordWrap(true);
+    materialEffect->setFrameShape(QFrame::StyledPanel);
+    materialEditorLayout->addWidget(materialEffect);
+    QGroupBox* reservedGroup = new QGroupBox(tr("Advanced compatibility fields"), materialEditor);
+    QFormLayout* reservedForm = new QFormLayout(reservedGroup);
+    QDoubleSpinBox* reserved1 = makeMaterialFloat(-1000000.0, 1000000.0, tr("Unknown preserved float. No verified runtime behavior; editing is intentionally disabled."));
+    QDoubleSpinBox* reserved2 = makeMaterialFloat(-1000000.0, 1000000.0, reserved1->toolTip());
+    QDoubleSpinBox* reserved3 = makeMaterialFloat(-1000000.0, 1000000.0, reserved1->toolTip());
+    reserved1->setEnabled(false); reserved2->setEnabled(false); reserved3->setEnabled(false);
+    reservedForm->addRow(tr("Reserved 1"), reserved1);
+    reservedForm->addRow(tr("Reserved 2"), reserved2);
+    reservedForm->addRow(tr("Reserved 3"), reserved3);
+    materialEditorLayout->addWidget(reservedGroup);
+    materialEditorLayout->addStretch(1);
+    materialsSplitter->addWidget(materialTable);
+    materialsSplitter->addWidget(materialEditor);
+    materialsSplitter->setStretchFactor(0, 1);
+    materialsSplitter->setStretchFactor(1, 2);
+    materialsLayout->addWidget(materialsSplitter, 1);
+    QHBoxLayout* materialActions = new QHBoxLayout;
+    QPushButton* duplicateMaterial = new QPushButton(tr("Duplicate selected slot"), materialsPage);
+    QPushButton* removeMaterial = new QPushButton(tr("Remove last unused slot"), materialsPage);
+    QPushButton* resetMaterials = new QPushButton(tr("Reset draft"), materialsPage);
+    QPushButton* applyMaterials = new QPushButton(tr("Apply as one undoable change"), materialsPage);
+    materialActions->addWidget(duplicateMaterial);
+    materialActions->addWidget(removeMaterial);
+    materialActions->addStretch(1);
+    materialActions->addWidget(resetMaterials);
+    materialActions->addWidget(applyMaterials);
+    materialsLayout->addLayout(materialActions);
+
+    QGroupBox* animationGroup = new QGroupBox(tr("Atlas tile animation records"), materialsPage);
+    QVBoxLayout* animationLayout = new QVBoxLayout(animationGroup);
+    QLabel* animationExplanation = new QLabel(tr(
+        "Each record animates consecutive atlas slots: Start atlas slot through Start + Frame count - 1. "
+        "Frame count 0 disables the record. These are atlas-frame ranges, not liquid-wave settings. "
+        "Every inspected Base/JMV record is disabled, and the current Endurance viewport does not yet play this legacy tile animation."), animationGroup);
+    animationExplanation->setWordWrap(true);
+    animationLayout->addWidget(animationExplanation);
+    QTableWidget* animationTable = new QTableWidget(animationGroup);
+    animationTable->setColumnCount(3);
+    animationTable->setHorizontalHeaderLabels({tr("Start atlas slot"), tr("Frame count"), tr("Resolved range")});
+    animationTable->horizontalHeader()->setStretchLastSection(true);
+    animationLayout->addWidget(animationTable);
+    QHBoxLayout* animationActions = new QHBoxLayout;
+    QPushButton* addAnimation = new QPushButton(tr("Add animation record"), animationGroup);
+    QPushButton* removeAnimation = new QPushButton(tr("Remove selected record"), animationGroup);
+    animationActions->addWidget(addAnimation);
+    animationActions->addWidget(removeAnimation);
+    animationActions->addStretch(1);
+    animationLayout->addLayout(animationActions);
+    materialsLayout->addWidget(animationGroup);
+    tabs->addTab(materialsPage, tr("Materials Editor"));
+
+    auto draftMaterials = QSharedPointer<QVector<SMprMaterialRecord>>::create();
+    auto draftAnimations = QSharedPointer<QVector<SMprAnimatedTileRecord>>::create();
+    auto materialUiLoading = QSharedPointer<bool>::create(false);
+    auto materialDraftDirty = QSharedPointer<bool>::create(false);
+    auto materialUsage = QSharedPointer<QVector<int>>::create();
+    std::function<void()> refreshMaterialTables;
+    std::function<void()> loadSelectedMaterial;
+    const auto materialTypeName = [this](qint32 type) {
+        switch(type) {
+        case 0: return tr("Undefined");
+        case 1: return tr("Base surface");
+        case 2: return tr("Untextured water");
+        case 3: return tr("Textured water");
+        case 4: return tr("Textured grass");
+        default: return tr("Invalid (%1)").arg(type);
+        }
+    };
+    const auto updateMaterialEffect = [=]() {
+        const double r = qBound(0.0, materialRed->value() * materialIllumination->value(), 1.0);
+        const double g = qBound(0.0, materialGreen->value() * materialIllumination->value(), 1.0);
+        const double b = qBound(0.0, materialBlue->value() * materialIllumination->value(), 1.0);
+        materialEffect->setText(tr("Emitted RGB: %1, %2, %3. Stored warp speed: %4 (not used by the confirmed gameplay path; lateral warp uses 0.05). Wave multiplier also changes apparent wave-phase speed.")
+            .arg(r, 0, 'f', 4).arg(g, 0, 'f', 4).arg(b, 0, 'f', 4)
+            .arg(materialWarp->value(), 0, 'g', 8));
+    };
+    loadSelectedMaterial = [=]() {
+        const int row = materialTable->currentRow();
+        const bool valid = row >= 0 && row < draftMaterials->size();
+        materialEditor->setEnabled(valid);
+        duplicateMaterial->setEnabled(valid);
+        if(!valid) return;
+        *materialUiLoading = true;
+        const SMprMaterialRecord& value = draftMaterials->at(row);
+        materialType->setCurrentIndex(qBound(0, int(value.type), 4));
+        materialRed->setValue(value.red); materialGreen->setValue(value.green);
+        materialBlue->setValue(value.blue); materialOpacity->setValue(value.opacity);
+        materialIllumination->setValue(value.selfIllumination);
+        materialWave->setValue(value.waveMultiplier); materialWarp->setValue(value.warpSpeed);
+        reserved1->setValue(value.reserved1); reserved2->setValue(value.reserved2);
+        reserved3->setValue(value.reserved3);
+        *materialUiLoading = false;
+        updateMaterialEffect();
+        const int usage = row < materialUsage->size() ? materialUsage->at(row) : 0;
+        removeMaterial->setEnabled(row == draftMaterials->size() - 1 && usage == 0);
+    };
+    const auto commitMaterialEditorToDraft = [=]() {
+        if(*materialUiLoading) return;
+        const int row = materialTable->currentRow();
+        if(row < 0 || row >= draftMaterials->size()) return;
+        SMprMaterialRecord& value = (*draftMaterials)[row];
+        value.type = materialType->currentData().toInt();
+        value.red = float(materialRed->value()); value.green = float(materialGreen->value());
+        value.blue = float(materialBlue->value()); value.opacity = float(materialOpacity->value());
+        value.selfIllumination = float(materialIllumination->value());
+        value.waveMultiplier = float(materialWave->value()); value.warpSpeed = float(materialWarp->value());
+        *materialDraftDirty = true;
+        applyMaterials->setEnabled(true); resetMaterials->setEnabled(true);
+        materialTable->item(row, 1)->setText(materialTypeName(value.type));
+        materialTable->item(row, 3)->setBackground(QColor::fromRgbF(value.red, value.green, value.blue));
+        updateMaterialEffect();
+    };
+    const QList<QDoubleSpinBox*> materialFloats = {materialRed, materialGreen, materialBlue,
+        materialOpacity, materialIllumination, materialWave, materialWarp};
+    for(QDoubleSpinBox* value : materialFloats)
+        connect(value, QOverload<double>::of(&QDoubleSpinBox::valueChanged), dock,
+                [commitMaterialEditorToDraft](double) { commitMaterialEditorToDraft(); });
+    connect(materialType, QOverload<int>::of(&QComboBox::currentIndexChanged), dock,
+            [commitMaterialEditorToDraft](int) { commitMaterialEditorToDraft(); });
+    connect(chooseMaterialColor, &QPushButton::clicked, dock, [=]() {
+        const QColor initial = QColor::fromRgbF(materialRed->value(), materialGreen->value(), materialBlue->value());
+        const QColor selected = QColorDialog::getColor(initial, dock, tr("Choose surface tint"));
+        if(!selected.isValid()) return;
+        materialRed->setValue(selected.redF()); materialGreen->setValue(selected.greenF());
+        materialBlue->setValue(selected.blueF());
+    });
+    connect(materialTable, &QTableWidget::currentCellChanged, dock,
+            [loadSelectedMaterial](int, int, int, int) { loadSelectedMaterial(); });
+
+    refreshMaterialTables = [=]() {
+        *materialUiLoading = true;
+        const int selected = materialTable->currentRow();
+        materialTable->setRowCount(draftMaterials->size());
+        for(int row = 0; row < draftMaterials->size(); ++row)
+        {
+            const SMprMaterialRecord& value = draftMaterials->at(row);
+            materialTable->setItem(row, 0, new QTableWidgetItem(QString::number(row)));
+            materialTable->setItem(row, 1, new QTableWidgetItem(materialTypeName(value.type)));
+            materialTable->setItem(row, 2, new QTableWidgetItem(QString::number(
+                row < materialUsage->size() ? materialUsage->at(row) : 0)));
+            QTableWidgetItem* color = new QTableWidgetItem;
+            color->setBackground(QColor::fromRgbF(value.red, value.green, value.blue));
+            materialTable->setItem(row, 3, color);
+        }
+        materialTable->resizeColumnsToContents();
+        animationTable->setRowCount(draftAnimations->size());
+        for(int row = 0; row < draftAnimations->size(); ++row)
+        {
+            QSpinBox* start = new QSpinBox(animationTable);
+            start->setRange(0, qMax(0, int(m_mprDocument.mapInfo().tileCount) - 1));
+            start->setValue(draftAnimations->at(row).tileIndex);
+            start->setToolTip(tr("First atlas slot in the consecutive animation range."));
+            QSpinBox* count = new QSpinBox(animationTable);
+            count->setRange(0, qMax(0, int(m_mprDocument.mapInfo().tileCount)));
+            count->setValue(draftAnimations->at(row).frameCount);
+            count->setToolTip(tr("Number of consecutive atlas slots. Zero disables this record."));
+            animationTable->setCellWidget(row, 0, start);
+            animationTable->setCellWidget(row, 1, count);
+            const auto updateAnimation = [=]() {
+                SMprAnimatedTileRecord record;
+                record.tileIndex = quint16(start->value());
+                record.frameCount = quint16(count->value());
+                (*draftAnimations)[row] = record;
+                const int end = start->value() + count->value() - 1;
+                const bool valid = count->value() == 0
+                    || end < int(m_mprDocument.mapInfo().tileCount);
+                QTableWidgetItem* state = animationTable->item(row, 2);
+                if(!state) { state = new QTableWidgetItem; animationTable->setItem(row, 2, state); }
+                state->setText(count->value() == 0 ? tr("Disabled")
+                    : valid ? tr("Slots %1-%2").arg(start->value()).arg(end)
+                            : tr("Invalid: exceeds atlas"));
+                state->setForeground(valid ? QBrush() : QBrush(QColor(220, 80, 80)));
+                *materialDraftDirty = true;
+                applyMaterials->setEnabled(true); resetMaterials->setEnabled(true);
+            };
+            connect(start, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+                    [updateAnimation](int) { updateAnimation(); });
+            connect(count, QOverload<int>::of(&QSpinBox::valueChanged), dock,
+                    [updateAnimation](int) { updateAnimation(); });
+            const int end = start->value() + count->value() - 1;
+            animationTable->setItem(row, 2, new QTableWidgetItem(count->value() == 0
+                ? tr("Disabled") : end < int(m_mprDocument.mapInfo().tileCount)
+                    ? tr("Slots %1-%2").arg(start->value()).arg(end)
+                    : tr("Invalid: exceeds atlas")));
+        }
+        *materialUiLoading = false;
+        if(!draftMaterials->isEmpty())
+            materialTable->selectRow(qBound(0, selected, draftMaterials->size() - 1));
+        else loadSelectedMaterial();
+        removeAnimation->setEnabled(animationTable->currentRow() >= 0);
+    };
+    connect(animationTable, &QTableWidget::currentCellChanged, dock, [=](int row, int, int, int) {
+        removeAnimation->setEnabled(row >= 0);
+    });
+    connect(duplicateMaterial, &QPushButton::clicked, dock, [=]() {
+        const int row = materialTable->currentRow();
+        if(row < 0 || row >= draftMaterials->size()) return;
+        draftMaterials->append(draftMaterials->at(row));
+        materialUsage->append(0); *materialDraftDirty = true;
+        refreshMaterialTables(); materialTable->selectRow(draftMaterials->size() - 1);
+        applyMaterials->setEnabled(true); resetMaterials->setEnabled(true);
+    });
+    connect(removeMaterial, &QPushButton::clicked, dock, [=]() {
+        const int row = materialTable->currentRow();
+        if(row != draftMaterials->size() - 1 || row < 0
+           || (row < materialUsage->size() && materialUsage->at(row) != 0)) return;
+        draftMaterials->removeLast(); if(!materialUsage->isEmpty()) materialUsage->removeLast();
+        *materialDraftDirty = true; refreshMaterialTables();
+        applyMaterials->setEnabled(true); resetMaterials->setEnabled(true);
+    });
+    connect(addAnimation, &QPushButton::clicked, dock, [=]() {
+        draftAnimations->append(SMprAnimatedTileRecord()); *materialDraftDirty = true;
+        refreshMaterialTables(); animationTable->selectRow(draftAnimations->size() - 1);
+        applyMaterials->setEnabled(true); resetMaterials->setEnabled(true);
+    });
+    connect(removeAnimation, &QPushButton::clicked, dock, [=]() {
+        const int row = animationTable->currentRow();
+        if(row < 0 || row >= draftAnimations->size()) return;
+        draftAnimations->removeAt(row); *materialDraftDirty = true;
+        refreshMaterialTables(); applyMaterials->setEnabled(true); resetMaterials->setEnabled(true);
+    });
+    const auto resetMaterialDraft = [=]() {
+        *draftMaterials = m_mprMaterials; *draftAnimations = m_mprAnimatedTiles;
+        materialUsage->fill(0, draftMaterials->size());
+        for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
+            for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
+            {
+                bool available = false;
+                const int slot = m_terrainEdit.overlayMaterialIndex(x, y, &available);
+                if(available && slot >= 0 && slot < materialUsage->size())
+                    ++(*materialUsage)[slot];
+            }
+        *materialDraftDirty = false; applyMaterials->setEnabled(false);
+        resetMaterials->setEnabled(false); refreshMaterialTables();
+    };
+    connect(resetMaterials, &QPushButton::clicked, dock, resetMaterialDraft);
+    connect(applyMaterials, &QPushButton::clicked, dock, [=]() {
+        for(int row = 0; row < draftAnimations->size(); ++row)
+        {
+            const SMprAnimatedTileRecord& record = draftAnimations->at(row);
+            if(record.frameCount > 0
+               && quint32(record.tileIndex) + quint32(record.frameCount)
+                    > m_mprDocument.mapInfo().tileCount)
+            {
+                QMessageBox::warning(dock, tr("Invalid tile animation"),
+                    tr("Animation record %1 extends beyond the %2-slot atlas. Correct its start slot or frame count.")
+                        .arg(row).arg(m_mprDocument.mapInfo().tileCount));
+                return;
+            }
+        }
+        if(*draftMaterials == m_mprMaterials && *draftAnimations == m_mprAnimatedTiles)
+        { resetMaterialDraft(); return; }
+        m_pUndoStack->push(new CMprParametersPreviewCommand(
+            this, m_mprMaterials, m_mprAnimatedTiles, *draftMaterials, *draftAnimations));
+    });
 
     QWidget* heightsPage = new QWidget(tabs);
     QVBoxLayout* heightsLayout = new QVBoxLayout(heightsPage);
@@ -9922,10 +10482,10 @@ void CView::openMapParameters()
     });
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, panel);
-    QPushButton* atlas = buttons->addButton(tr("Open Atlas Tiles..."),
+    QPushButton* atlas = buttons->addButton(tr("Open Atlas Browser..."),
                                             QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::rejected, dock, &QDockWidget::hide);
+    connect(buttons, &QDialogButtonBox::rejected, dock, &QDialog::close);
     connect(atlas, &QPushButton::clicked, dock, [this]() { openAtlasTiles(); });
 
     const auto refreshSummary = [this, dimensionsValue, rangeValue, scaleValue,
@@ -9945,8 +10505,8 @@ void CView::openMapParameters()
         scaleValue->setText(tr("%1 world units; %2 per raw step")
             .arg(m_terrainEdit.maxZ(), 0, 'g', 8)
             .arg(range.worldUnitsPerRawStep, 0, 'g', 8));
-        materialsValue->setText(tr("%1 atlas slots; %2 liquid material record(s)")
-            .arg(map.tileCount).arg(map.materialCount));
+        materialsValue->setText(tr("%1 atlas slots; %2 surface material record(s); %3 tile animation record(s)")
+            .arg(map.tileCount).arg(map.materialCount).arg(map.animatedTileCount));
         flatten->setValue(range.minimumRaw);
         clampMinimum->setValue(range.minimumRaw);
         clampMaximum->setValue(range.maximumRaw);
@@ -10130,7 +10690,7 @@ void CView::openMapParameters()
                                 canvasHeight, canvasOffsetX, canvasOffsetY,
                                 createCompanionMob, removeOutsideMobObjects,
                                 canvasSourcePreview,
-                                refreshCanvasPreview]() {
+                                refreshCanvasPreview, resetMaterialDraft]() {
         const bool loaded = m_pLand->isMprLoad() && m_terrainEditAvailable;
         statePages->setCurrentIndex(loaded ? 1 : 0);
         panel->setEnabled(loaded);
@@ -10139,6 +10699,7 @@ void CView::openMapParameters()
         sourceValue->setText(m_pLand->filePath().absoluteFilePath());
         namespaceValue->setText(m_mprDocument.mapInfo().innerNamespace);
         refreshSummary();
+        resetMaterialDraft();
         refreshPreview();
         {
             const QSignalBlocker blocker(scaleTarget);
@@ -10178,8 +10739,15 @@ void CView::openMapParameters()
     connect(m_pUndoStack, &QUndoStack::indexChanged, dock,
             [this](int) { refreshMprSettingsDock(); });
     refreshMprSettingsDock();
-    host->addDockWidget(Qt::RightDockWidgetArea, dock);
-    dock->resize(620, 520);
+    connect(dock, &QDialog::finished, this, [this, dock](int)
+    {
+        QSettings().setValue(QStringLiteral("mpr/settingsGeometry"), dock->saveGeometry());
+        m_refreshMprSettingsDock = {};
+    });
+    const QByteArray savedGeometry = QSettings().value(
+        QStringLiteral("mpr/settingsGeometry")).toByteArray();
+    if(savedGeometry.isEmpty() || !dock->restoreGeometry(savedGeometry))
+        dock->resize(1080, 720);
     dock->show();
     dock->raise();
 }
@@ -10558,9 +11126,7 @@ void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)
     for(const STerrainTileDelta& delta : command.deltas)
         m_pLand->previewCanonicalTile(delta.globalX, delta.globalY,
             delta.layer == ETerrainTileLayer::Land, delta.after);
-    m_pLand->setDirty(m_terrainEdit.isDirty());
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                              m_terrainEdit.isDirty() ? "*" : "");
+    syncMprDirtyState();
     update();
 }
 
@@ -10746,9 +11312,7 @@ void CView::endTileBrushGroup()
                 "Terrain stroke safety invariant failed: stroke=%1 applied=%2 history=%3; no undo command was committed")
                     .arg(m_tileBrushCommandId).arg(m_tileStrokeApplied)
                     .arg(undoIndexBefore));
-        m_pLand->setDirty(m_terrainEdit.isDirty());
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                                  m_terrainEdit.isDirty() ? "*" : "");
+        syncMprDirtyState();
         emit updateMsg(tr("Terrain stroke: %1 stamp(s), %2 changed tile(s), %3 no-op, %4 refused.")
             .arg(m_tileStrokeActions).arg(m_tileStrokeChangedTiles)
             .arg(m_tileStrokeNoOps).arg(m_tileStrokeRefused));
@@ -10824,11 +11388,9 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
                 ei::log(eLogWarning, QString(
                     "Tile model changed but preview renderer rejected sector %1,%2")
                         .arg(sector.first).arg(sector.second));
-    m_pLand->setDirty(m_terrainEdit.isDirty());
+    syncMprDirtyState();
     if(!m_tileBrushStrokePolicy.isActive())
     {
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                                  m_terrainEdit.isDirty() ? "*" : "");
         emit updateMsg(command.semanticAudit.solverMode == QStringLiteral("manual-atlas")
             ? tr("Painted %1 atlas tile(s) manually.").arg(command.deltas.size())
             : tr("Painted %1 atlas tile(s), including bounded seam updates.")
@@ -10880,15 +11442,14 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
         m_overlayRenderNsecs += phaseTimer.nsecsElapsed();
         m_overlayPreviewSectorCount += command.sectors.size();
     }
-    m_pLand->setDirty(m_terrainEdit.isDirty());
+    syncMprDirtyState();
+    m_overlayMaterialSlotLabelsDirty = true;
     m_sculptOutlineGeometryDirty = true;
     m_terrainPaintOutlineGeometryDirty = true;
     m_aiGraphOverlayDirty = true;
     // Terrain sculpt already defers title/status work until stroke release.
     // Keep overlay stamps on the same hot-path contract.
     if(!m_sculptStrokeActive && !m_tileBrushStrokePolicy.isActive())
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                                  m_terrainEdit.isDirty() ? "*" : "");
     if(!m_terrainPreviewBatchActive)
         update();
     return true;
@@ -12062,14 +12623,13 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
         for(CMob* mob : m_aMob)
             mob->reprojectForCurrentTerrain();
     }
-    m_pLand->setDirty(m_terrainEdit.isDirty());
+    syncMprDirtyState();
+    m_overlayMaterialSlotLabelsDirty = true;
     m_sculptOutlineGeometryDirty = true;
     m_terrainPaintOutlineGeometryDirty = true;
     m_aiGraphOverlayDirty = true;
     if(!m_sculptStrokeActive)
     {
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                                  m_terrainEdit.isDirty() ? "*" : "");
         emit updateMsg(tr("Terrain preview changed %1 vertices in %2 sector(s); navigation data may need review.")
             .arg(command.deltas.size()).arg(sectors.size()));
     }
@@ -12118,10 +12678,8 @@ bool CView::applyTerrainVerticalScalePreview(
 
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
-    m_pLand->setDirty(m_terrainEdit.isDirty());
+    syncMprDirtyState();
     m_aiGraphOverlayDirty = true;
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                              m_terrainEdit.isDirty() ? "*" : "");
     emit updateMsg(tr("Vertical range changed to %1; %2 vertex/vertices were requantized and navigation data may need review.")
         .arg(m_terrainEdit.maxZ(), 0, 'g', 8)
         .arg(command.heights.deltas.size()));
@@ -12505,6 +13063,7 @@ void CView::refreshUiScale()
 {
     setTestEntranceOverlays(m_testEntranceRectangles, m_testEntranceLabels,
                             m_selectedTestEntrance);
+    m_overlayMaterialSlotLabelsDirty = true;
 }
 
 void CView::moveCameraToPoint(const QVector3D& position)
@@ -14320,11 +14879,47 @@ void CView::unHideAll()
 
 void CView::setDirtyMpr()
 {
-    const bool dirty = m_terrainEditAvailable ? m_terrainEdit.isDirty() : true;
+    const bool dirty = m_terrainEditAvailable
+        ? (m_terrainEdit.isDirty() || mprParametersDirty()) : true;
     m_pLand->setDirty(dirty);
     m_staticShadowFingerprint.clear();
     m_farStaticShadowFingerprint.clear();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, dirty ? "*" : "");
+}
+
+bool CView::mprParametersDirty() const
+{
+    if(!m_mprDocument.mapInfo().valid)
+        return false;
+    return m_mprMaterials != m_mprDocument.mapInfo().materials
+        || m_mprAnimatedTiles != m_mprDocument.mapInfo().animatedTiles;
+}
+
+void CView::syncMprDirtyState()
+{
+    if(!m_pLand->isMprLoad())
+        return;
+    const bool dirty = m_terrainEditAvailable
+        && (m_terrainEdit.isDirty() || mprParametersDirty());
+    m_pLand->setDirty(dirty);
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                               dirty ? "*" : "");
+}
+
+bool CView::applyMprParametersPreview(
+    const QVector<SMprMaterialRecord>& materials,
+    const QVector<SMprAnimatedTileRecord>& animatedTiles)
+{
+    if(!m_terrainEditAvailable || !m_pLand->isMprLoad())
+        return false;
+    m_mprMaterials = materials;
+    m_mprAnimatedTiles = animatedTiles;
+    m_pLand->setMaterials(renderMaterials(materials));
+    m_pLand->setAnimTils(renderAnimatedTiles(animatedTiles));
+    syncMprDirtyState();
+    refreshMprSettingsDock();
+    update();
+    return true;
 }
 
 void CView::finishSculptStroke()
@@ -14389,11 +14984,9 @@ void CView::finishSculptStroke()
         if(!overlayStroke)
             for(CMob* mob : m_aMob)
                 mob->reprojectForCurrentTerrain();
-        m_pLand->setDirty(m_terrainEdit.isDirty());
+        syncMprDirtyState();
         m_staticShadowFingerprint.clear();
         m_farStaticShadowFingerprint.clear();
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                                  m_terrainEdit.isDirty() ? "*" : "");
         if(overlayStroke)
         {
             emit updateMsg(tr("Overlay sculpt stroke: %1 stamp(s), %2 sector update(s); liquid navigation may need review.")

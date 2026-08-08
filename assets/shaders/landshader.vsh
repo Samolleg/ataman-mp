@@ -11,12 +11,14 @@ attribute vec2 a_texture;
 attribute vec4 a_overlayAnimation;
 attribute vec2 a_overlayGrid;
 attribute vec3 a_materialEmission;
+attribute float a_materialOpacity;
 varying highp vec4 v_position;
 varying highp vec3 v_normal;
 varying highp vec2 v_texture;
 varying highp vec3 v_worldPosition;
 varying highp float v_viewDepth;
 varying highp vec3 v_materialEmission;
+varying highp float v_materialOpacity;
 
 const float PI = 3.14159265358979323846;
 
@@ -60,4 +62,5 @@ void main(void)
   v_normal = normalize(vec3(u_modelMmatrix * vec4(a_normal, 0.0)));
   v_texture = a_texture;
   v_materialEmission = a_materialEmission;
+  v_materialOpacity = a_materialOpacity;
 }

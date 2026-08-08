@@ -32,6 +32,7 @@ struct SOverlayWindAnimation
 
 SOverlayMaterialAnimation overlayMaterialAnimation(const SMaterial* material);
 QVector3D terrainMaterialEmission(const SMaterial* material);
+float terrainMaterialOpacity(const SMaterial* material);
 int sharedOverlayMaterialIndex(const QVector<qint16>& tileMaterialIndices,
                                int tileColumns,
                                int tileRows,

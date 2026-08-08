@@ -244,8 +244,11 @@ enum EWsType
 
 enum ETerrainType : quint8
 {
-    eTerrainNoWater = 1 // ..001 ?
-    ,eTerrainWater = 3  // ..011 ?
+    eTerrainUndefined = 0
+    ,eTerrainNoWater = 1
+    ,eTerrainUntexturedWater = 2
+    ,eTerrainWater = 3
+    ,eTerrainTexturedGrass = 4
 };
 
 
