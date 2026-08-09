@@ -476,6 +476,7 @@ private slots:
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void overlayVirtualPaintAllowsSparseInactiveField();
     void collapsedUniformBaselineRecoversExactRotatedBlend();
+    void overlappingVirtualPaintDoesNotReplaceUnchangedEdgeBlendWithUniformPreview();
     void uniformStrokeDistributesPureVariantsAndRotationsDeterministically();
     void preservedLayerSlotsArePinnedAndRemapped();
     void inactiveOverlaySentinelSurvivesLandFinalization();
@@ -3240,6 +3241,98 @@ void TerrainVirtualAtlasTests::collapsedUniformBaselineRecoversExactRotatedBlend
         QVERIFY(decoded);
         QVERIFY(!(expected[corner] == signature(2, 2, 2, 2)));
     }
+}
+
+void TerrainVirtualAtlasTests::overlappingVirtualPaintDoesNotReplaceUnchangedEdgeBlendWithUniformPreview()
+{
+    CTerrainTransitionCatalog catalog;
+    for(int bits = 0; bits < 16; ++bits)
+    {
+        const auto material = [bits](int corner) {
+            return (bits & (1 << corner)) ? qint32(2) : qint32(1);
+        };
+        STerrainTransitionVariant variant;
+        variant.signature = signature(
+            material(0), material(1), material(2), material(3));
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(bits);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+
+    QByteArray payload;
+    QDataStream sec(&payload, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(16, 1), 0));
+
+    STerrainTileBrush firstBrush;
+    firstBrush.centerX = 8.0f;
+    firstBrush.centerY = 8.0f;
+    firstBrush.radius = 1.0f;
+    firstBrush.shape = ETerrainTileBrushShape::Circle;
+    const STerrainTileCommand firstPreview = model.makeVirtualMaterialPaint(
+        8, 8, firstBrush, ETerrainTileLayer::Land, 2,
+        catalog, 0x11112222u, &report, false);
+    QVERIFY2(!firstPreview.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(model.apply(firstPreview, true, &report));
+    const STerrainTileCommand firstResolution = model.makeVirtualStrokeResolution(
+        firstPreview, catalog, 0x11112222u, &report, false);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(model.apply(firstResolution, true, &report));
+
+    CTerrainVirtualMaterialField beforeOverlap;
+    QVERIFY(model.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &beforeOverlap));
+    bool expectedFound = false;
+    const STerrainTransitionSignature expected =
+        beforeOverlap.cellSignature(7, 7, &expectedFound);
+    QVERIFY(expectedFound);
+    QVERIFY(!(expected == signature(2, 2, 2, 2)));
+
+    // This overlapping stamp changes vertices to the east, but cell 7,7 is
+    // included only because an already-painted vertex lies inside the brush.
+    // Its semantic tuple does not change and must never receive the uniform
+    // live-preview tile that release resolution intentionally ignores.
+    STerrainTileBrush overlapBrush = firstBrush;
+    overlapBrush.centerX = 9.0f;
+    const STerrainTileCommand overlapPreview = model.makeVirtualMaterialPaint(
+        9, 8, overlapBrush, ETerrainTileLayer::Land, 2,
+        catalog, 0x33334444u, &report, false);
+    QVERIFY2(!overlapPreview.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(!overlapPreview.virtualVertices.isEmpty());
+    QVERIFY(model.apply(overlapPreview, true, &report));
+
+    bool available = false;
+    quint16 targetPacked = model.packedTile(
+        7, 7, ETerrainTileLayer::Land, &available);
+    QVERIFY(available);
+    bool decoded = false;
+    QCOMPARE(catalog.gridSignatureForPacked(targetPacked, &decoded), expected);
+    QVERIFY(decoded);
+
+    const STerrainTileCommand overlapResolution = model.makeVirtualStrokeResolution(
+        overlapPreview, catalog, 0x33334444u, &report, false);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(model.apply(overlapResolution, true, &report));
+    targetPacked = model.packedTile(
+        7, 7, ETerrainTileLayer::Land, &available);
+    QVERIFY(available);
+    QCOMPARE(catalog.gridSignatureForPacked(targetPacked, &decoded), expected);
+    QVERIFY(decoded);
 }
 
 void TerrainVirtualAtlasTests::uniformStrokeDistributesPureVariantsAndRotationsDeterministically()

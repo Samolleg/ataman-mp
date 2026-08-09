@@ -4460,6 +4460,9 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
         STerrainTransitionSignature exact;
         exact.northWest=desired.at(nw);exact.northEast=desired.at(ne);
         exact.southEast=desired.at(se);exact.southWest=desired.at(sw);
+        STerrainTransitionSignature current;
+        current.northWest=active.at(nw);current.northEast=active.at(ne);
+        current.southEast=active.at(se);current.southWest=active.at(sw);
         if(!pureFound)
         {
             if(report)report->add("terrain.virtual_paint_preview",EValidationSeverity::Error,
@@ -4470,9 +4473,17 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
         const bool exactUniform = exact.northWest == exact.northEast
             && exact.northWest == exact.southEast
             && exact.northWest == exact.southWest;
-        // A stroke that changes semantic vertices uses a uniform live preview
-        // until release. Repainting an already identical semantic field is a
-        // deliberate reroll and must select the exact existing signature now.
+        // A cell whose semantic tuple did not change must retain its exact
+        // packed blend while another part of the same overlapping stamp uses
+        // a temporary uniform preview. Release resolution intentionally visits
+        // only cells incident to changed vertices, so changing this collateral
+        // cell here would otherwise leave a permanent uniform hole at an edge.
+        // A wholly semantic-no-op stroke remains a deliberate variant reroll.
+        if(!command.virtualVertices.isEmpty() && exact == current)
+        {
+            command.semanticAudit.affectedCells.append(QPoint(x,y));
+            continue;
+        }
         const quint16 after = command.virtualVertices.isEmpty()
             ? (exactUniform
                 ? selectUniformInteriorTile(catalog, exact, x, y, paintSeed,
