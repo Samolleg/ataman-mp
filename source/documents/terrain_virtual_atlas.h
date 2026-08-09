@@ -214,6 +214,14 @@ public:
         int variation = 0, QString* provenance = nullptr,
         CValidationReport* report = nullptr,
         qint32 preferredPaintMaterial = 0) const;
+    // Returns one exact ownership input currently used while composing a
+    // three-/four-material generated junction. Unlike reviewBlendMask(), this
+    // deliberately exposes the legacy unreviewed canonical fallback so issue
+    // questionnaires can show the mask that actually produced a report.
+    QImage reviewGeneratedJunctionOwnershipMask(
+        const STerrainTransitionSignature& gridSignature,
+        qint32 ownerMaterial, int variation = 0,
+        QString* provenance = nullptr) const;
     const QVector<STerrainFinalizedTile>& generatedTiles() const
         { return m_generatedTiles; }
 

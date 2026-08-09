@@ -434,6 +434,7 @@ private slots:
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
     void generatesFourFamilyTupleWithOrientation();
+    void junctionReviewExposesExactCurrentOwnershipInputs();
     void generatedEdgesUseOnlyTheirTwoCornerMaterials();
     void generatedEdgesHaveSolidEndpointPlateaus();
     void generatedTransitionRetainsSourceTextureIdentity();
@@ -1541,6 +1542,42 @@ void TerrainVirtualAtlasTests::generatesFourFamilyTupleWithOrientation()
     QCOMPARE(image.pixelColor(7,0),fixture.images[2].pixelColor(7,0));
     QCOMPARE(image.pixelColor(7,7),fixture.images[1].pixelColor(7,7));
     QCOMPARE(image.pixelColor(0,7),fixture.images[0].pixelColor(0,7));
+}
+
+void TerrainVirtualAtlasTests::junctionReviewExposesExactCurrentOwnershipInputs()
+{
+    Fixture fixture;
+    for(QImage& image : fixture.images)
+        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Grass},
+        {2, ETerrainBlendStyle::Soil},
+        {3, ETerrainBlendStyle::Stone},
+        {4, ETerrainBlendStyle::Sand}
+    };
+    CTestTerrainVirtualAtlas atlas(
+        fixture.catalog, fixture.images, 0x4a4d5631u, {}, styles);
+    const STerrainTransitionSignature requested = signature(1, 2, 3, 4);
+    const QPoint gridCorners[4] = {{0, 0}, {63, 0}, {63, 63}, {0, 63}};
+    for(qint32 material = 1; material <= 4; ++material)
+    {
+        QString provenance;
+        QImage mask = atlas.reviewGeneratedJunctionOwnershipMask(
+            requested, material, 0, &provenance);
+        QVERIFY(!mask.isNull());
+        QCOMPARE(mask.size(), QSize(64, 64));
+        QVERIFY(provenance.startsWith(QStringLiteral("canonical-generated:")));
+        // The public review result is the exact physical compositor input.
+        // Cross into the questionnaire's visual grid layout once before
+        // checking NW,NE,SE,SW semantic ownership.
+        mask = mask.mirrored(false, true);
+        for(int corner = 0; corner < 4; ++corner)
+            QCOMPARE(mask.pixelColor(gridCorners[corner]).red(),
+                     corner + 1 == material ? 255 : 0);
+    }
+    QVERIFY(atlas.reviewGeneratedJunctionOwnershipMask(
+        signature(1, 1, 2, 2), 1).isNull());
 }
 
 void TerrainVirtualAtlasTests::generatedEdgesUseOnlyTheirTwoCornerMaterials()

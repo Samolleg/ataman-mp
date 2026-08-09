@@ -2362,6 +2362,23 @@ QImage CTerrainVirtualAtlas::reviewGeneratedBlendLinearLight(
                         provenance, report, true);
 }
 
+QImage CTerrainVirtualAtlas::reviewGeneratedJunctionOwnershipMask(
+    const STerrainTransitionSignature& gridSignature,
+    qint32 ownerMaterial, int variation, QString* provenance) const
+{
+    if(!m_valid || m_authoredTiles.isEmpty()) return {};
+    const STerrainTransitionSignature preview =
+        CTerrainTransitionCatalog::mirroredGridY(gridSignature);
+    const QVector<qint32> ids = corners(preview);
+    QSet<qint32> unique;
+    for(qint32 id : ids) unique.insert(id);
+    if(unique.size() < 3 || !unique.contains(ownerMaterial)) return {};
+    return canonicalGeneratedOwnershipMask(
+        m_authoredTiles.front().size(), preview, ownerMaterial,
+        m_materialBlendStyles.value(ownerMaterial,
+            ETerrainBlendStyle::Organic), qMax(0, variation), 0, provenance);
+}
+
 bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     const STerrainTransitionSignature& signature, const QImage& pixels,
     const QString& sourceLabel, CValidationReport* report)

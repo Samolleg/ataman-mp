@@ -1102,6 +1102,324 @@ QJsonObject buildMaskReviewOnly(const Atlas& sourceAtlas,
     return manifest;
 }
 
+QString junctionTopologyName(const STerrainTransitionSignature& signature,
+                             qint32 owner)
+{
+    const QVector<qint32> values = {
+        signature.northWest, signature.northEast,
+        signature.southEast, signature.southWest};
+    bool corners[4] = {false, false, false, false};
+    int count = 0;
+    for(int index = 0; index < 4; ++index)
+    {
+        corners[index] = values.at(index) == owner;
+        count += corners[index];
+    }
+    if(count == 1) return QStringLiteral("outer-1of4-v1");
+    if(count == 3) return QStringLiteral("inside-3of4-v1");
+    if(count == 2 && corners[0] == corners[2]
+       && corners[1] == corners[3])
+        return QStringLiteral("diagonal-2of4");
+    if(count == 2) return QStringLiteral("edge-2of4-v1");
+    return QStringLiteral("invalid");
+}
+
+QJsonObject issueSignatureJson(const STerrainTransitionSignature& signature,
+                               const QMap<qint32, QString>& names)
+{
+    QJsonObject result;
+    const auto corner = [&names](qint32 id) {
+        QJsonObject value;
+        value.insert(QStringLiteral("material_id"), id);
+        value.insert(QStringLiteral("material"), names.value(
+            id, QStringLiteral("Unknown material %1").arg(id)));
+        return value;
+    };
+    result.insert(QStringLiteral("northWest"), corner(signature.northWest));
+    result.insert(QStringLiteral("northEast"), corner(signature.northEast));
+    result.insert(QStringLiteral("southEast"), corner(signature.southEast));
+    result.insert(QStringLiteral("southWest"), corner(signature.southWest));
+    return result;
+}
+
+QJsonObject buildIssueJunctionMaskReview(
+    const Atlas& sourceAtlas, StockAssets* stockAssets,
+    const QString& issueReportPath, const QString& outputDirectory,
+    QString* error)
+{
+    QFile reportFile(issueReportPath);
+    if(!reportFile.open(QIODevice::ReadOnly))
+    {
+        if(error) *error = QStringLiteral("Could not read issue report %1")
+            .arg(issueReportPath);
+        return {};
+    }
+    QJsonParseError parseError;
+    const QJsonDocument reportDocument = QJsonDocument::fromJson(
+        reportFile.readAll(), &parseError);
+    if(parseError.error != QJsonParseError::NoError
+       || !reportDocument.isObject())
+    {
+        if(error) *error = QStringLiteral("Invalid issue report %1: %2")
+            .arg(issueReportPath, parseError.errorString());
+        return {};
+    }
+
+    CValidationReport report;
+    const QVector<STerrainGlobalMaterialFamily> materials =
+        CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+    QMap<qint32, QString> names;
+    QMap<qint32, ETerrainBlendStyle> styles;
+    QMap<qint32, qint32> runtimeTypes;
+    for(const STerrainGlobalMaterialFamily& material : materials)
+        if(material.layer == ETerrainAtlasLayer::Land)
+        {
+            names.insert(material.id, material.name);
+            styles.insert(material.id,
+                CTerrainVirtualAtlas::blendStyleForMaterialName(material.name));
+            if(material.runtimeTerrainType >= 0
+               && material.runtimeTerrainType < 16)
+                runtimeTypes.insert(material.id, material.runtimeTerrainType);
+        }
+    QJsonArray sourceManifest;
+    const QMap<qint32, QImage> externalSources = globalSources(
+        materials, stockAssets, sourceAtlas.tiles.front().size(),
+        &sourceManifest, error);
+    if(externalSources.size() != names.size()) return {};
+    const CTerrainTransitionCatalog catalog =
+        CTerrainAtlasPresetCatalog::globalizedCatalog(
+            sourceAtlas.profile, sourceAtlas.analysis.landCatalog);
+    QVector<qint32> sourceTypes(sourceAtlas.tiles.size(), 0);
+    CTerrainVirtualAtlas atlas(catalog, sourceAtlas.tiles, 0x4a4d5631u,
+        externalSources, styles, true, sourceTypes, runtimeTypes);
+    if(!atlas.isValid())
+    {
+        if(error) *error = atlas.error();
+        return {};
+    }
+
+    const QString imageDirectory = QDir(outputDirectory).filePath(
+        QStringLiteral("images"));
+    if(!QDir().mkpath(imageDirectory))
+    {
+        if(error) *error = QStringLiteral("Could not create %1")
+            .arg(imageDirectory);
+        return {};
+    }
+    QJsonArray examples;
+    QMap<QString, QJsonObject> groups;
+    QSet<QString> seenCells;
+    QSet<QString> seenNoBlendCells;
+    int uniformSignatureCells = 0;
+    int twoMaterialCells = 0;
+    const QJsonArray marks = reportDocument.object()
+        .value(QStringLiteral("marks")).toArray();
+    for(const QJsonValue& markValue : marks)
+    {
+        const QJsonObject mark = markValue.toObject();
+        if(mark.value(QStringLiteral("category")).toString()
+             != QStringLiteral("no-blend"))
+            continue;
+        QSet<QString> selected;
+        for(const QJsonValue& selectedValue :
+            mark.value(QStringLiteral("selectedCells")).toArray())
+        {
+            const QJsonObject cell = selectedValue.toObject();
+            selected.insert(QStringLiteral("%1:%2")
+                .arg(cell.value(QStringLiteral("x")).toInt())
+                .arg(cell.value(QStringLiteral("y")).toInt()));
+        }
+        for(const QJsonValue& snapshotValue :
+            mark.value(QStringLiteral("tileSnapshot")).toArray())
+        {
+            const QJsonObject snapshot = snapshotValue.toObject();
+            const int cellX = snapshot.value(QStringLiteral("x")).toInt();
+            const int cellY = snapshot.value(QStringLiteral("y")).toInt();
+            const QString cellKey = QStringLiteral("%1:%2")
+                .arg(cellX).arg(cellY);
+            if(!selected.contains(cellKey) || seenCells.contains(cellKey))
+                continue;
+            const QJsonObject corners = snapshot
+                .value(QStringLiteral("gridCorners")).toObject();
+            STerrainTransitionSignature signature;
+            signature.northWest = corners.value(QStringLiteral("x0y0")).toInt();
+            signature.northEast = corners.value(QStringLiteral("x1y0")).toInt();
+            signature.southEast = corners.value(QStringLiteral("x1y1")).toInt();
+            signature.southWest = corners.value(QStringLiteral("x0y1")).toInt();
+            QSet<qint32> unique;
+            unique << signature.northWest << signature.northEast
+                   << signature.southEast << signature.southWest;
+            if(!seenNoBlendCells.contains(cellKey))
+            {
+                seenNoBlendCells.insert(cellKey);
+                if(unique.size() == 1) ++uniformSignatureCells;
+                else if(unique.size() == 2) ++twoMaterialCells;
+            }
+            if(unique.size() < 3) continue;
+            seenCells.insert(cellKey);
+
+            const QString exampleId = QStringLiteral("mark-%1-cell-%2-%3")
+                .arg(mark.value(QStringLiteral("id")).toInt())
+                .arg(cellX).arg(cellY);
+            QString generatedProvenance;
+            CValidationReport generatedReport;
+            QImage generated = atlas.reviewGeneratedBlend(
+                signature, 0, &generatedProvenance, &generatedReport);
+            if(generated.isNull() || generatedReport.hasErrors())
+            {
+                if(error) *error = QStringLiteral(
+                    "Could not reproduce generated junction %1: %2")
+                    .arg(exampleId, generatedReport.toText());
+                return {};
+            }
+            // Questionnaires use visual NW NE / SW SE. Cross the physical
+            // atlas/engine-grid boundary exactly once for every displayed
+            // runtime image and ownership mask.
+            generated = generated.mirrored(false, true);
+            const QString generatedFile = exampleId
+                + QStringLiteral("-generated.png");
+            if(!generated.save(QDir(imageDirectory).filePath(generatedFile),
+                               "PNG"))
+            {
+                if(error) *error = QStringLiteral("Could not write %1")
+                    .arg(generatedFile);
+                return {};
+            }
+
+            QJsonArray components;
+            QList<qint32> ordered = unique.values();
+            std::sort(ordered.begin(), ordered.end());
+            for(qint32 owner : ordered)
+            {
+                QString maskProvenance;
+                QImage mask = atlas.reviewGeneratedJunctionOwnershipMask(
+                    signature, owner, 0, &maskProvenance);
+                if(mask.isNull())
+                {
+                    if(error) *error = QStringLiteral(
+                        "Could not reproduce junction ownership for %1/%2")
+                        .arg(exampleId).arg(owner);
+                    return {};
+                }
+                mask = mask.mirrored(false, true);
+                const QString style = CTerrainVirtualAtlas::blendStyleName(
+                    styles.value(owner, ETerrainBlendStyle::Organic));
+                const QString topology = junctionTopologyName(signature, owner);
+                const QString groupKey = QStringLiteral("%1-%2")
+                    .arg(style, topology);
+                const QString componentFile = QStringLiteral("%1-%2.png")
+                    .arg(exampleId, slug(names.value(owner)));
+                if(!mask.save(QDir(imageDirectory).filePath(componentFile),
+                              "PNG"))
+                {
+                    if(error) *error = QStringLiteral("Could not write %1")
+                        .arg(componentFile);
+                    return {};
+                }
+                const QString uniformFile = QStringLiteral("uniform-%1.png")
+                    .arg(owner);
+                const QString uniformPath = QDir(imageDirectory)
+                    .filePath(uniformFile);
+                if(!QFileInfo::exists(uniformPath)
+                   && !externalSources.value(owner).save(uniformPath, "PNG"))
+                {
+                    if(error) *error = QStringLiteral("Could not write %1")
+                        .arg(uniformFile);
+                    return {};
+                }
+                QJsonObject component;
+                component.insert(QStringLiteral("material_id"), owner);
+                component.insert(QStringLiteral("material"), names.value(owner));
+                component.insert(QStringLiteral("style"), style);
+                component.insert(QStringLiteral("topology"), topology);
+                component.insert(QStringLiteral("group_key"), groupKey);
+                component.insert(QStringLiteral("mask_file"),
+                    QStringLiteral("images/") + componentFile);
+                component.insert(QStringLiteral("mask_sha256"),
+                    QString::fromLatin1(reviewImageHash(mask)));
+                component.insert(QStringLiteral("uniform_file"),
+                    QStringLiteral("images/") + uniformFile);
+                component.insert(QStringLiteral("provenance"), maskProvenance);
+                components.append(component);
+
+                QJsonObject group = groups.value(groupKey);
+                if(group.isEmpty())
+                {
+                    group.insert(QStringLiteral("key"), groupKey);
+                    group.insert(QStringLiteral("style"), style);
+                    group.insert(QStringLiteral("topology"), topology);
+                    group.insert(QStringLiteral("examples"), QJsonArray());
+                }
+                QJsonArray groupExamples = group
+                    .value(QStringLiteral("examples")).toArray();
+                QJsonObject groupExample = component;
+                groupExample.insert(QStringLiteral("example_id"), exampleId);
+                groupExample.insert(QStringLiteral("mark_id"),
+                    mark.value(QStringLiteral("id")).toInt());
+                groupExample.insert(QStringLiteral("cell_x"), cellX);
+                groupExample.insert(QStringLiteral("cell_y"), cellY);
+                groupExample.insert(QStringLiteral("generated_file"),
+                    QStringLiteral("images/") + generatedFile);
+                groupExample.insert(QStringLiteral("signature"),
+                    issueSignatureJson(signature, names));
+                groupExamples.append(groupExample);
+                group.insert(QStringLiteral("examples"), groupExamples);
+                groups.insert(groupKey, group);
+            }
+            QJsonObject example;
+            example.insert(QStringLiteral("id"), exampleId);
+            example.insert(QStringLiteral("mark_id"),
+                mark.value(QStringLiteral("id")).toInt());
+            example.insert(QStringLiteral("cell_x"), cellX);
+            example.insert(QStringLiteral("cell_y"), cellY);
+            example.insert(QStringLiteral("unique_materials"), unique.size());
+            example.insert(QStringLiteral("signature"),
+                issueSignatureJson(signature, names));
+            example.insert(QStringLiteral("generated_file"),
+                QStringLiteral("images/") + generatedFile);
+            example.insert(QStringLiteral("generated_provenance"),
+                generatedProvenance);
+            example.insert(QStringLiteral("components"), components);
+            examples.append(example);
+        }
+    }
+    QJsonArray groupArray;
+    for(auto group = groups.constBegin(); group != groups.constEnd(); ++group)
+        groupArray.append(group.value());
+    const QString presetPath = QDir(QCoreApplication::applicationDirPath())
+        .absoluteFilePath(QStringLiteral(
+            "../../assets/resources/terrain_atlas_presets.json"));
+    QJsonObject manifest;
+    manifest.insert(QStringLiteral("schema"),
+                    QStringLiteral("ei-junction-mask-issue-review-v1"));
+    manifest.insert(QStringLiteral("issue_report"),
+                    QFileInfo(issueReportPath).fileName());
+    manifest.insert(QStringLiteral("issue_report_sha256"),
+                    QString::fromLatin1(fileSha256(issueReportPath)));
+    manifest.insert(QStringLiteral("semantic_preset_sha256"),
+                    QString::fromLatin1(fileSha256(presetPath)));
+    manifest.insert(QStringLiteral("display_corner_order"),
+                    QStringLiteral("NW,NE,SW,SE"));
+    manifest.insert(QStringLiteral("runtime_corner_order"),
+                    QStringLiteral("NW,NE,SE,SW"));
+    manifest.insert(QStringLiteral("physical_preview_mirrored_y_for_display"),
+                    true);
+    manifest.insert(QStringLiteral("selected_three_four_material_cells"),
+                    examples.size());
+    manifest.insert(QStringLiteral("selected_uniform_signature_cells"),
+                    uniformSignatureCells);
+    manifest.insert(QStringLiteral("selected_two_material_cells"),
+                    twoMaterialCells);
+    manifest.insert(QStringLiteral("mask_groups"), groupArray);
+    manifest.insert(QStringLiteral("examples"), examples);
+    manifest.insert(QStringLiteral("reviewed_pure_sources"), sourceManifest);
+    if(!writeBytes(QDir(outputDirectory).filePath(QStringLiteral("manifest.json")),
+                   QJsonDocument(manifest).toJson(QJsonDocument::Indented),
+                   error))
+        return {};
+    return manifest;
+}
+
 QJsonObject buildAuthoredMaskInventory(const Atlas& sourceAtlas,
                                        StockAssets* stockAssets,
                                        const QString& outputDirectory,
@@ -2565,9 +2883,9 @@ int main(int argc, char** argv)
     QCoreApplication application(argc, argv);
     QTextStream out(stdout);
     QTextStream err(stderr);
-    if(application.arguments().size() < 3 || application.arguments().size() > 4)
+    if(application.arguments().size() < 3 || application.arguments().size() > 5)
     {
-        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only|--runtime-lowres-only|--painted-only|--stripe-only|--mask-review-only|--authored-mask-inventory]\n";
+        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only|--runtime-lowres-only|--painted-only|--stripe-only|--mask-review-only|--authored-mask-inventory|--issue-mask-review <report.json>]\n";
         return 2;
     }
     const QString outputRoot = QDir::cleanPath(application.arguments().at(1));
@@ -2591,6 +2909,38 @@ int main(int argc, char** argv)
         QStringLiteral("--mask-review-only"));
     const bool authoredMaskInventory = application.arguments().contains(
         QStringLiteral("--authored-mask-inventory"));
+    const int issueMaskReviewIndex = application.arguments().indexOf(
+        QStringLiteral("--issue-mask-review"));
+    if(issueMaskReviewIndex >= 0)
+    {
+        if(issueMaskReviewIndex + 1 >= application.arguments().size())
+        {
+            err << "--issue-mask-review requires a paint issue report path\n";
+            return 2;
+        }
+        Atlas zone2 = assets.atlas(QStringLiteral("Zone2"), 512, &error);
+        if(!zone2.valid)
+        {
+            err << "Zone2 issue-mask-review source unavailable: "
+                << error << '\n';
+            return 4;
+        }
+        const QJsonObject review = buildIssueJunctionMaskReview(
+            zone2, &assets, application.arguments().at(issueMaskReviewIndex + 1),
+            outputRoot, &error);
+        if(review.isEmpty())
+        {
+            err << "issue-mask-review: " << error << '\n';
+            return 7;
+        }
+        QJsonObject summary;
+        summary.insert(QStringLiteral("selected_three_four_material_cells"),
+            review.value(QStringLiteral("selected_three_four_material_cells")));
+        summary.insert(QStringLiteral("mask_group_count"),
+            review.value(QStringLiteral("mask_groups")).toArray().size());
+        out << QJsonDocument(summary).toJson(QJsonDocument::Indented);
+        return 0;
+    }
     if(authoredMaskInventory)
     {
         Atlas zone2 = assets.atlas(QStringLiteral("Zone2"), 512, &error);
