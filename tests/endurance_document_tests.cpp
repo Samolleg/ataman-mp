@@ -5670,7 +5670,7 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
         "6752a5b4cefd3aedbd6889516b424f4e13afafe288e99406b500404aed62b014",
         512, &bz3gReport);
     QVERIFY2(bz3g.approved, qPrintable(bz3gReport.toText()));
-    QCOMPARE(bz3g.families.size(), 19);
+    QCOMPARE(bz3g.families.size(), 18);
     const auto bz3gFamily = [&bz3g](qint32 id) {
         return std::find_if(bz3g.families.cbegin(), bz3g.families.cend(),
             [id](const STerrainAtlasProfileFamily& family) {
@@ -6128,12 +6128,9 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Two remaining reviewed names currently have no visually verified pure
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
-    // R93 adds the explicitly reviewed bz11k/Zone14 Sand / Irregular family
-    // while preserving Zone7 Brownish, Dirt, and contextual Trampled. R96
-    // then separates the reviewed bz3g/Zone6 Ground / Dead material from
-    // Zone2's visually distinct Ground / Dark binding. R100 also separates
-    // the reviewed Zone5_1/Zone8 Grass / Swamp family from Grass / Irregular.
-    QCOMPARE(landFamilyCount, 76);
+    // R102 applies the explicit brush-inventory merges and names while leaving
+    // false-uniform and probable-family leads out of the paint palette.
+    QCOMPARE(landFamilyCount, 80);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
