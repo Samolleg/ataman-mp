@@ -418,6 +418,7 @@ private slots:
     void virtualFieldPaintIsUnboundedByAtlas();
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
+    void nonUniformResolveUsesAuthoredRotationOrGeneratesExact();
     void canonicalMasksAreAvailableWithoutStockTemplates();
     void authoredMapTransitionsDoNotPopulateObsoleteMaskPool();
     void canonicalMasksMeetQuarterCoverageAndCornerContract();
@@ -474,6 +475,7 @@ private slots:
     void workingPreviewPackageStagesSeveralGeneratedPages();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void overlayVirtualPaintAllowsSparseInactiveField();
+    void collapsedUniformBaselineRecoversExactRotatedBlend();
     void uniformStrokeDistributesPureVariantsAndRotationsDeterministically();
     void preservedLayerSlotsArePinnedAndRemapped();
     void inactiveOverlaySentinelSurvivesLandFinalization();
@@ -1041,6 +1043,60 @@ void TerrainVirtualAtlasTests::authoredGlobalBlendIsImportedBeforeGeneration()
         keptImportedPixels |= tile.authored && tile.sourceSlot < 0
             && tile.pixels == authoredBlend;
     QVERIFY(keptImportedPixels);
+}
+
+void TerrainVirtualAtlasTests::nonUniformResolveUsesAuthoredRotationOrGeneratesExact()
+{
+    Fixture fixture;
+    const STerrainTransitionSignature authored = signature(1, 2, 3, 4);
+    const int authoredSlot = fixture.images.size();
+    fixture.images.append(solid(qRgba(117, 83, 191, 255)));
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature = CTerrainTransitionCatalog::rotated(
+            authored, -rotation);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(authoredSlot);
+        packed.rotation = quint8(rotation);
+        variant.packedTile = packed.encode();
+        QVERIFY(fixture.catalog.addVariant(variant));
+    }
+
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0x45584143u);
+    const STerrainVirtualTile rotated = atlas.resolve(
+        CTerrainTransitionCatalog::rotated(authored, -1), 6, 9);
+    QVERIFY(rotated.authored);
+    QCOMPARE(SMprPackedTile::decode(rotated.authoredPacked).atlasSlot(),
+             authoredSlot);
+    QCOMPARE(SMprPackedTile::decode(rotated.authoredPacked).rotation,
+             quint8(1));
+    QCOMPARE(atlas.generatedTiles().size(), 0);
+
+    // No authored tile has this exact half/half signature. Uniform artwork for
+    // both materials exists, but it is not an acceptable blend substitute;
+    // the virtual resolver must synthesize the exact requested tuple.
+    const STerrainTransitionSignature missingBlend = signature(1, 1, 2, 2);
+    CValidationReport report;
+    const STerrainVirtualTile generated = atlas.resolve(
+        missingBlend, 11, 13, &report, 1);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(!generated.authored);
+    QVERIFY(!generated.importedAuthored);
+    QVERIFY(generated.generatedIndex >= 0);
+    const STerrainFinalizedTile generatedTile =
+        atlas.generatedTiles().at(generated.generatedIndex);
+    QVERIFY(generatedTile.canonicalGeneratedBlend);
+    const STerrainTransitionSignature canonical =
+        generatedTile.canonicalSignature;
+    QVERIFY(!(canonical.northWest == canonical.northEast
+              && canonical.northWest == canonical.southEast
+              && canonical.northWest == canonical.southWest));
+
+    const STerrainVirtualTile uniform = atlas.resolve(
+        signature(2, 2, 2, 2), 11, 13, &report, 2);
+    QVERIFY(uniform.authored);
+    QCOMPARE(SMprPackedTile::decode(uniform.authoredPacked).atlasSlot(), 1);
 }
 
 void TerrainVirtualAtlasTests::generatedReviewOutcomeUsesRuntimeBlendGenerator()
@@ -3101,6 +3157,88 @@ void TerrainVirtualAtlasTests::overlayVirtualPaintAllowsSparseInactiveField()
                     "active overlay cell %1,%2 lost its virtual material identity")
                     .arg(x).arg(y)));
             }
+    }
+}
+
+void TerrainVirtualAtlasTests::collapsedUniformBaselineRecoversExactRotatedBlend()
+{
+    CTerrainTransitionCatalog catalog;
+    const auto add = [&catalog](const STerrainTransitionSignature& value,
+                                quint16 packed) {
+        STerrainTransitionVariant variant;
+        variant.signature = value;
+        variant.packedTile = packed;
+        return catalog.addVariant(variant);
+    };
+    QVERIFY(add(signature(1, 1, 1, 1), 0));
+    QVERIFY(add(signature(2, 2, 2, 2), 1));
+    const STerrainTransitionSignature expected[4] = {
+        signature(2, 1, 1, 1), signature(1, 2, 1, 1),
+        signature(1, 1, 2, 1), signature(1, 1, 1, 2)};
+    for(int corner = 0; corner < 4; ++corner)
+    {
+        SMprPackedTile packed;
+        packed.tileIndex = 2;
+        packed.rotation = quint8(corner);
+        QVERIFY(add(expected[corner], packed.encode()));
+    }
+
+    QByteArray payload;
+    QDataStream sec(&payload, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = "CaveSet000000.SEC";
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    const QPoint requestedVertex[4] = {
+        QPoint(8, 8), QPoint(9, 8), QPoint(9, 9), QPoint(8, 9)};
+
+    for(int corner = 0; corner < 4; ++corner)
+    {
+        CTerrainEditModel model;
+        CValidationReport report;
+        QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                                  QVector<qint32>(16, 1), 0));
+        STerrainTileCommand collapsed;
+        STerrainTileDelta delta;
+        delta.globalX = 8;
+        delta.globalY = 8;
+        delta.layer = ETerrainTileLayer::Land;
+        delta.before = 0;
+        delta.after = 1;
+        collapsed.deltas.append(delta);
+        QVERIFY(model.apply(collapsed, true, &report));
+
+        STerrainTileBrush brush;
+        brush.centerX = requestedVertex[corner].x();
+        brush.centerY = requestedVertex[corner].y();
+        brush.radius = 0.0f;
+        const quint32 seed = 0x434F4E53u + quint32(corner);
+        const STerrainTileCommand preview = model.makeVirtualMaterialPaint(
+            8, 8, brush, ETerrainTileLayer::Land, 2, catalog,
+            seed, &report, false);
+        QVERIFY2(!preview.isEmpty(), qPrintable(report.toText()));
+        QVERIFY(model.apply(preview, true, &report));
+        const STerrainTileCommand resolution = model.makeVirtualStrokeResolution(
+            preview, catalog, seed, &report, false);
+        QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+        QVERIFY(model.apply(resolution, true, &report));
+
+        bool available = false;
+        const quint16 packed = model.packedTile(
+            8, 8, ETerrainTileLayer::Land, &available);
+        QVERIFY(available);
+        bool decoded = false;
+        QCOMPARE(catalog.gridSignatureForPacked(packed, &decoded),
+                 expected[corner]);
+        QVERIFY(decoded);
+        QVERIFY(!(expected[corner] == signature(2, 2, 2, 2)));
     }
 }
 

@@ -3327,9 +3327,16 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
         for(qint32 value : desired)
             if(value >= 0)
                 existingFamilies.insert(value);
-        bool found = false;
-        int bestCost = std::numeric_limits<int>::max();
-        STerrainTransitionSignature best;
+        const bool requestedUniform = std::all_of(
+            desired.cbegin(), desired.cend(), [materialId](qint32 value) {
+                return value == materialId;
+            });
+        bool foundTransition = false;
+        bool foundUniform = false;
+        int bestTransitionCost = std::numeric_limits<int>::max();
+        int bestUniformCost = std::numeric_limits<int>::max();
+        STerrainTransitionSignature bestTransition;
+        STerrainTransitionSignature bestUniform;
         for(const STerrainTransitionSignature& candidate : authored)
         {
             ++candidateChecks;
@@ -3351,16 +3358,36 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
                    && desired.at(corner) != materialId)
                     cost += 2;
             }
-            if(compatible && (!found || cost < bestCost))
+            if(!compatible)
+                continue;
+            const bool selectedUniform = values.at(0) == materialId
+                && values.at(1) == materialId
+                && values.at(2) == materialId
+                && values.at(3) == materialId;
+            if(selectedUniform)
             {
-                found = true;
-                bestCost = cost;
-                best = candidate;
+                // Uniform artwork is never a substitute for a requested
+                // blend. The virtual production path generates the exact
+                // missing tuple; this legacy helper must fail closed when it
+                // cannot find a non-uniform authored alternative.
+                if(requestedUniform
+                   && (!foundUniform || cost < bestUniformCost))
+                {
+                    foundUniform = true;
+                    bestUniformCost = cost;
+                    bestUniform = candidate;
+                }
+            }
+            else if(!foundTransition || cost < bestTransitionCost)
+            {
+                foundTransition = true;
+                bestTransitionCost = cost;
+                bestTransition = candidate;
             }
         }
-        if(found && selected)
-            *selected = best;
-        return found;
+        if(selected && (foundTransition || foundUniform))
+            *selected = foundTransition ? bestTransition : bestUniform;
+        return foundTransition || foundUniform;
     };
 
     for(const SVertexRequest& vertex : requestedVertices)

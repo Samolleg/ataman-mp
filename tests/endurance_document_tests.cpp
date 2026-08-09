@@ -362,6 +362,7 @@ private slots:
     void semanticAtlasPartialCatalogRejectsCrossLayerCornersInline();
     void cornerOnlyMaterialPaintUsesAuthoredContextAndStaysLocal();
     void vertexMaterialBrushPaintsCircleAndConstrainsCornerOnlyFamilies();
+    void semanticVertexPaintNeverUsesUniformForBlendFallback();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void overlayActivationDeactivationIsLosslessAndUndoable();
@@ -3899,6 +3900,66 @@ void EnduranceDocumentTests::vertexMaterialBrushPaintsCircleAndConstrainsCornerO
     QCOMPARE(zone1Paint.semanticAudit.solverMode, QStringLiteral("vertex-exact"));
     QCOMPARE(zone1Paint.semanticAudit.paintedVertices.size(), 13);
     QVERIFY(!zone1Paint.isEmpty());
+}
+
+void EnduranceDocumentTests::semanticVertexPaintNeverUsesUniformForBlendFallback()
+{
+    CTerrainTransitionCatalog catalog;
+    const auto add = [&catalog](const STerrainTransitionSignature& signature,
+                                quint16 packed) {
+        STerrainTransitionVariant variant;
+        variant.signature = signature;
+        variant.packedTile = packed;
+        return catalog.addVariant(variant);
+    };
+    STerrainTransitionSignature background;
+    background.northWest = background.northEast = 1;
+    background.southEast = background.southWest = 1;
+    STerrainTransitionSignature uniformPaint;
+    uniformPaint.northWest = uniformPaint.northEast = 2;
+    uniformPaint.southEast = uniformPaint.southWest = 2;
+    QVERIFY(add(background, 0));
+    QVERIFY(add(uniformPaint, 1));
+
+    // The exact requested tuple is absent. Every rotated authored alternative
+    // remains a blend, while the uniform tile is a tempting lower-cost hard
+    // edge. Modern painting must never substitute that uniform for a blend.
+    STerrainTransitionSignature authored;
+    authored.northWest = 2;
+    authored.northEast = 3;
+    authored.southEast = authored.southWest = 1;
+    for(int rotation = 0; rotation < 4; ++rotation)
+        QVERIFY(add(CTerrainTransitionCatalog::rotated(authored, rotation),
+                    quint16(2 + rotation)));
+
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(16)),
+        "immediate-never-uniform-for-blend.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+    STerrainTileBrush brush;
+    brush.centerX = 8.0f;
+    brush.centerY = 8.0f;
+    brush.radius = 0.0f;
+    CValidationReport report;
+    const STerrainTileCommand command = terrain.makeSemanticVertexPaint(
+        8, 8, brush, ETerrainTileLayer::Land, 2, catalog,
+        0x4E4F554Eu, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(!command.isEmpty());
+    for(const STerrainTileDelta& delta : command.deltas)
+    {
+        bool found = false;
+        const STerrainTransitionSignature actual =
+            catalog.gridSignatureForPacked(delta.after, &found);
+        QVERIFY(found);
+        const bool uniform = actual.northWest == 2
+            && actual.northEast == 2 && actual.southEast == 2
+            && actual.southWest == 2;
+        QVERIFY2(!uniform,
+            "Legacy immediate resolver substituted uniform artwork for a blend");
+    }
 }
 
 void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValues()
