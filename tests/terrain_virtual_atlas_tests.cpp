@@ -434,7 +434,7 @@ private slots:
     void generatesOneThreeTuple();
     void generatesTwoTwoTuple();
     void generatesFourFamilyTupleWithOrientation();
-    void junctionReviewExposesExactCurrentOwnershipInputs();
+    void multiFamilyJunctionsUseApprovedAuthoredOwnershipInputs();
     void generatedEdgesUseOnlyTheirTwoCornerMaterials();
     void generatedEdgesHaveSolidEndpointPlateaus();
     void generatedTransitionRetainsSourceTextureIdentity();
@@ -1544,40 +1544,88 @@ void TerrainVirtualAtlasTests::generatesFourFamilyTupleWithOrientation()
     QCOMPARE(image.pixelColor(0,7),fixture.images[0].pixelColor(0,7));
 }
 
-void TerrainVirtualAtlasTests::junctionReviewExposesExactCurrentOwnershipInputs()
+void TerrainVirtualAtlasTests::multiFamilyJunctionsUseApprovedAuthoredOwnershipInputs()
 {
     Fixture fixture;
     for(QImage& image : fixture.images)
-        image = image.scaled(64, 64, Qt::IgnoreAspectRatio,
+        image = image.scaled(256, 256, Qt::IgnoreAspectRatio,
                              Qt::FastTransformation);
-    const QMap<qint32, ETerrainBlendStyle> styles = {
-        {1, ETerrainBlendStyle::Grass},
-        {2, ETerrainBlendStyle::Soil},
-        {3, ETerrainBlendStyle::Stone},
-        {4, ETerrainBlendStyle::Sand}
+    const QMap<qint32, ETerrainBlendStyle> styleSets[] = {
+        {{1, ETerrainBlendStyle::Grass},
+         {2, ETerrainBlendStyle::Paving},
+         {3, ETerrainBlendStyle::Snow},
+         {4, ETerrainBlendStyle::Water}},
+        {{1, ETerrainBlendStyle::Soil},
+         {2, ETerrainBlendStyle::Stone},
+         {3, ETerrainBlendStyle::Sand},
+         {4, ETerrainBlendStyle::Gravel}}
     };
-    CTestTerrainVirtualAtlas atlas(
-        fixture.catalog, fixture.images, 0x4a4d5631u, {}, styles);
-    const STerrainTransitionSignature requested = signature(1, 2, 3, 4);
-    const QPoint gridCorners[4] = {{0, 0}, {63, 0}, {63, 63}, {0, 63}};
-    for(qint32 material = 1; material <= 4; ++material)
+    const STerrainTransitionSignature requests[] = {
+        signature(1, 2, 3, 4),
+        signature(1, 1, 2, 3),
+        signature(1, 2, 1, 3)
+    };
+    const QPoint gridCorners[4] = {
+        {0, 0}, {255, 0}, {255, 255}, {0, 255}
+    };
+    for(const QMap<qint32, ETerrainBlendStyle>& styles : styleSets)
     {
-        QString provenance;
-        QImage mask = atlas.reviewGeneratedJunctionOwnershipMask(
-            requested, material, 0, &provenance);
-        QVERIFY(!mask.isNull());
-        QCOMPARE(mask.size(), QSize(64, 64));
-        QVERIFY(provenance.startsWith(QStringLiteral("canonical-generated:")));
-        // The public review result is the exact physical compositor input.
-        // Cross into the questionnaire's visual grid layout once before
-        // checking NW,NE,SE,SW semantic ownership.
-        mask = mask.mirrored(false, true);
-        for(int corner = 0; corner < 4; ++corner)
-            QCOMPARE(mask.pixelColor(gridCorners[corner]).red(),
-                     corner + 1 == material ? 255 : 0);
+      CTestTerrainVirtualAtlas atlas(
+          fixture.catalog, fixture.images, 0x4a4d5631u, {}, styles);
+      for(const STerrainTransitionSignature& base : requests)
+        for(int rotation = 0; rotation < 4; ++rotation)
+        {
+        const STerrainTransitionSignature requested =
+            CTerrainTransitionCatalog::rotated(base, rotation);
+        QSet<qint32> materials;
+        materials << requested.northWest << requested.northEast
+                  << requested.southEast << requested.southWest;
+        QString generatedProvenance;
+        CValidationReport generatedReport;
+        const QImage generated = atlas.reviewGeneratedBlend(
+            requested, 0, &generatedProvenance, &generatedReport);
+        QVERIFY2(!generated.isNull(), qPrintable(generatedReport.toText()));
+        QVERIFY2(!generatedReport.hasErrors(),
+                 qPrintable(generatedReport.toText()));
+        for(qint32 material : materials)
+        {
+            QString provenance;
+            QImage mask = atlas.reviewGeneratedJunctionOwnershipMask(
+                requested, material, 0, &provenance);
+            QVERIFY(!mask.isNull());
+            QCOMPARE(mask.size(), QSize(256, 256));
+            QVERIFY2(provenance.contains(QStringLiteral("-approved")),
+                     qPrintable(provenance));
+            QVERIFY2(generatedProvenance.contains(provenance),
+                     qPrintable(generatedProvenance));
+
+            STerrainTransitionSignature collapsed = requested;
+            qint32* values[4] = {
+                &collapsed.northWest, &collapsed.northEast,
+                &collapsed.southEast, &collapsed.southWest};
+            for(qint32* value : values)
+                if(*value != material) *value = 99;
+            QString expectedProvenance;
+            const QImage expected = atlas.reviewBlendMask(
+                collapsed, material, 0, &expectedProvenance, material);
+            QVERIFY(!expected.isNull());
+            QCOMPARE(mask, expected);
+            QCOMPARE(provenance, expectedProvenance);
+
+            // Cross into the questionnaire's visual grid layout once before
+            // checking NW,NE,SE,SW semantic ownership.
+            mask = mask.mirrored(false, true);
+            const qint32 gridValues[4] = {
+                requested.northWest, requested.northEast,
+                requested.southEast, requested.southWest};
+            for(int corner = 0; corner < 4; ++corner)
+                QCOMPARE(mask.pixelColor(gridCorners[corner]).red(),
+                         gridValues[corner] == material ? 255 : 0);
+        }
+        }
+      QVERIFY(atlas.reviewGeneratedJunctionOwnershipMask(
+          signature(1, 1, 2, 2), 1).isNull());
     }
-    QVERIFY(atlas.reviewGeneratedJunctionOwnershipMask(
-        signature(1, 1, 2, 2), 1).isNull());
 }
 
 void TerrainVirtualAtlasTests::generatedEdgesUseOnlyTheirTwoCornerMaterials()
@@ -2252,24 +2300,64 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideBoundedDistinctVariants
 void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
 {
     Fixture fixture;
-    CTerrainVirtualMaterialField field;
-    QVERIFY(field.resize(2, 1, 1));
-    QVERIFY(field.setMaterial(0, 0, 1));
-    QVERIFY(field.setMaterial(1, 0, 2));
-    QVERIFY(field.setMaterial(2, 0, 1));
-    QVERIFY(field.setMaterial(0, 1, 4));
-    QVERIFY(field.setMaterial(1, 1, 3));
-    QVERIFY(field.setMaterial(2, 1, 4));
-    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
-    seedReviewedStockMasks(atlas, fixture);
-    const auto finalized = atlas.finalize(field, "PixelSeam", 512, {1,2,3,4});
-    QVERIFY2(finalized.success, qPrintable(finalized.error));
-    const QImage preview = renderFinalizedPreview(finalized, 2, 1);
-    QVERIFY(!preview.isNull());
-    const int seamLeft = preview.width() / 2 - 1;
-    const int seamRight = preview.width() / 2;
-    for(int y = 0; y < preview.height(); ++y)
-        QCOMPARE(preview.pixelColor(seamLeft, y), preview.pixelColor(seamRight, y));
+    for(QImage& image : fixture.images)
+        image = image.scaled(256, 256, Qt::IgnoreAspectRatio,
+                             Qt::FastTransformation);
+    const QVector<ETerrainBlendStyle> styleSets[] = {
+        {ETerrainBlendStyle::Grass, ETerrainBlendStyle::Paving,
+         ETerrainBlendStyle::Snow, ETerrainBlendStyle::Water},
+        {ETerrainBlendStyle::Soil, ETerrainBlendStyle::Stone,
+         ETerrainBlendStyle::Sand, ETerrainBlendStyle::Gravel}
+    };
+    // This 3x3 vertex pattern gives the four cells a four-family junction,
+    // a three-family adjacent repeat, and two three-family diagonal repeats.
+    // Rotating the style-to-material assignment exercises every approved mask
+    // family on every connection without rotating pixels independently of the
+    // semantic corner assignment.
+    const qint32 vertices[3][3] = {
+        {1, 2, 2}, {4, 3, 4}, {4, 1, 3}
+    };
+    for(const QVector<ETerrainBlendStyle>& styleSet : styleSets)
+      for(int styleRotation = 0; styleRotation < 4; ++styleRotation)
+      {
+        QMap<qint32, ETerrainBlendStyle> styles;
+        for(int material = 1; material <= 4; ++material)
+            styles.insert(material,
+                styleSet.at((material - 1 + styleRotation) % 4));
+        CTerrainVirtualMaterialField field;
+        QVERIFY(field.resize(2, 2, 1));
+        for(int y = 0; y < 3; ++y)
+            for(int x = 0; x < 3; ++x)
+                QVERIFY(field.setMaterial(x, y, vertices[y][x]));
+        CTestTerrainVirtualAtlas atlas(
+            fixture.catalog, fixture.images, 0x45494844u, {}, styles);
+        CValidationReport report;
+        const auto finalized = atlas.finalize(
+            field, "EiHdAllConnections", 512, {1, 2, 3, 4}, &report);
+        QVERIFY2(finalized.success,
+                 qPrintable(finalized.error + "\n" + report.toText()));
+        for(const STerrainFinalizedTile& tile : finalized.tiles)
+          if(tile.canonicalGeneratedBlend)
+          {
+            const QStringList components = tile.blendProvenance.split(
+                QStringLiteral("; "), QString::SkipEmptyParts);
+            QVERIFY2(!components.isEmpty(),
+                     qPrintable(tile.blendProvenance));
+            for(const QString& component : components)
+                QVERIFY2(component.contains(QStringLiteral("-approved")),
+                         qPrintable(tile.blendProvenance));
+          }
+        const QImage preview = renderFinalizedPreview(finalized, 2, 2);
+        QVERIFY(!preview.isNull());
+        const int tileSize = preview.width() / 2;
+        QCOMPARE(preview.height(), tileSize * 2);
+        for(int y = 0; y < preview.height(); ++y)
+            QCOMPARE(preview.pixelColor(tileSize - 1, y),
+                     preview.pixelColor(tileSize, y));
+        for(int x = 0; x < preview.width(); ++x)
+            QCOMPARE(preview.pixelColor(x, tileSize - 1),
+                     preview.pixelColor(x, tileSize));
+      }
 }
 
 void TerrainVirtualAtlasTests::rotationsDeduplicateButSemanticAliasesRemainDistinct()

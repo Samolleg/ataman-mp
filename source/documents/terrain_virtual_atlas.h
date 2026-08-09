@@ -215,9 +215,9 @@ public:
         CValidationReport* report = nullptr,
         qint32 preferredPaintMaterial = 0) const;
     // Returns one exact ownership input currently used while composing a
-    // three-/four-material generated junction. Unlike reviewBlendMask(), this
-    // deliberately exposes the legacy unreviewed canonical fallback so issue
-    // questionnaires can show the mask that actually produced a report.
+    // three-/four-material generated junction. Review tools use this to prove
+    // the approved authored family/topology asset, its legal rotation, and its
+    // resulting multi-material application all refer to the same mask.
     QImage reviewGeneratedJunctionOwnershipMask(
         const STerrainTransitionSignature& gridSignature,
         qint32 ownerMaterial, int variation = 0,

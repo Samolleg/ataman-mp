@@ -2199,17 +2199,19 @@ QImage CTerrainVirtualAtlas::generateTile(
     }
     else
     {
-        // Multi-family junctions use one canonical topology mask for every
-        // material's complete corner assignment. In particular, adjacent
-        // repeated corners remain one connected region instead of a union of
-        // unrelated one-corner source masks.
+        // Multi-family junctions use one complete topology mask for every
+        // material's corner assignment. The material itself owns the reviewed
+        // mask language, so the R44-R77 authored approvals remain active here
+        // exactly as they are for two-family blends. This also preserves one
+        // connected region for adjacent repeated corners instead of a union of
+        // unrelated one-corner masks.
         for(qint32 material : unique)
         {
             QString source;
             const QImage mask = canonicalGeneratedOwnershipMask(
                 m_authoredTiles.front().size(), preview, material,
                 m_materialBlendStyles.value(material, style), variation,
-                0,
+                material,
                 &source);
             if(mask.isNull())
             {
@@ -2376,7 +2378,8 @@ QImage CTerrainVirtualAtlas::reviewGeneratedJunctionOwnershipMask(
     return canonicalGeneratedOwnershipMask(
         m_authoredTiles.front().size(), preview, ownerMaterial,
         m_materialBlendStyles.value(ownerMaterial,
-            ETerrainBlendStyle::Organic), qMax(0, variation), 0, provenance);
+            ETerrainBlendStyle::Organic), qMax(0, variation), ownerMaterial,
+        provenance);
 }
 
 bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(

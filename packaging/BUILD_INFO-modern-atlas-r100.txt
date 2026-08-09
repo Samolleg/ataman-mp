@@ -1,0 +1,5 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: approved authored masks for three-/four-material junctions with R98 semantic catalog
+Preset SHA-256: 7C74A820A82AA8599152B627F605C75154765AD99700453ECB0438FD7CE6ED6F
+Package policy: finalized clean first-run folder; no options/settings, logs, saves, dumps, object files, generated Makefiles, or stale changelists
+Installed stock JMV assets are included only in isolated visual-test maps; EI-HD research assets are excluded.
