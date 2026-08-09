@@ -2710,6 +2710,87 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             for corner_index in corner_indexes:
                 corrections[(slot_index, corner_index)] = 20
 
+    # R100 consolidated paint-report review. Every row below is a direct
+    # four-corner user decision. Byte-identical atlas owners receive the same
+    # correction; visually related but distinct atlases do not. The swamp-like
+    # grass in Zone5_1 and the shared Zone8 atlas is explicitly distinct from
+    # BaseGipat's Grass / Irregular, so rename those existing coherent families
+    # rather than creating duplicate IDs inside each atlas.
+    if namespace == "zone5_1":
+        family_renames[4] = "Grass / Swamp"
+    if namespace in ("bz5g", "bz6g", "zone8"):
+        family_renames[8] = "Grass / Swamp"
+    r100_signatures = {
+        **{owner: {
+            77: ("Ground / Light", "Snow / Common", "Snow / Common", "Snow / Common"),
+            78: ("Ground / Light", "Snow / Common", "Snow / Common", "Snow / Common"),
+            79: ("Ground / Light", "Snow / Common", "Snow / Common", "Snow / Common"),
+            279: ("Ground / Light", "Snow / Common", "Snow / Common", "Snow / Common"),
+        } for owner in ("bz10k", "zone12")},
+        **{owner: {
+            5: (None, None, None, "Stone / Black"),
+            135: ("Ice / Common", "Ice / Common", "Ice / Common", "Stone / Black"),
+            166: ("Stone / Black", "Ice / Common", "Ice / Common", "Ice / Common"),
+            188: ("Stone / Black", "Stone / Black", "Sand / Irregular", "Sand / Irregular"),
+            189: ("Stone / Black", "Stone / Black", "Sand / Irregular", "Sand / Irregular"),
+            191: ("Stone / Black", "Ice / Common", "Ice / Common", "Ice / Common"),
+            192: ("Stone / Black", "Ice / Common", "Ice / Common", "Ice / Common"),
+            256: ("Ice / Common", "Ice / Common", "Stone / Black", "Ice / Common"),
+            300: ("Stone / Black", "Stone / Black", "Stone / Black", "Sand / Irregular"),
+            302: ("Stone / Black", "Stone / Black", "Stone / Black", "Sand / Irregular"),
+            351: ("Ice / Common", "Ice / Common", "Stone / Black", "Ice / Common"),
+            382: ("Ice / Common", "Ice / Common", "Ice / Common", "Stone / Black"),
+            383: ("Ice / Common", "Ice / Common", "Ice / Common", "Stone / Black"),
+        } for owner in ("bz11k", "zone14")},
+        **{owner: {
+            330: ("Ground / Red", "Ground / Red", "Ground / Red", "Stone / Weathered"),
+            336: ("Ground / Red", "Rubble / Orange", "Ground / Red", "Rubble / Orange"),
+            478: ("Sand / Yellow", "Rubble / Orange", "Sand / Yellow", "Sand / Common"),
+            484: ("Ground / Red", "Sand / Common", "Sand / Yellow", "Sand / Yellow"),
+        } for owner in ("bz13h", "zone15")},
+        **{owner: {
+            321: ("Rock / Lime", "Rock / Lime", "Rock / Lime", "Rock / Orange"),
+            322: ("Rock / Lime", "Rock / Lime", "Rock / Lime", "Rock / Orange"),
+            323: ("Rock / Lime", "Rock / Lime", "Rock / Lime", "Rock / Orange"),
+            324: ("Rock / Lime", "Rock / Lime", "Rock / Lime", "Rock / Orange"),
+            449: ("Rock / Orange", "Rock / Lime", "Rock / Lime", "Rock / Lime"),
+        } for owner in ("bz16h",)},
+        **{owner: {
+            198: ("Ground / Dark", "Ground / Brown", "Grass / Burnt", "Grass / Burnt"),
+            212: ("Stone / Lime", "Grass / Burnt", "Grass / Burnt", "Grass / Burnt"),
+            299: ("Ground / Brown", "Grass / Faded", "Grass / Burnt", "Grass / Burnt"),
+            412: ("Grass / Fresh", "Grass / Fresh", "Grass / Common", "Stone / Lime"),
+            493: ("Grass / Faded", "Ground / Dark", "Ground / Dark", "Grass / Burnt"),
+        } for owner in ("bz2g", "zone2")},
+        "zone20": {159: ("Slabs / Carved", "Slabs / Carved", "Stone / Greenish", "Stone / Black")},
+        "zone10": {460: ("Ground / Dirt", "Slabs / Carved", "Slabs / Carved", "Slabs / Carved")},
+        "zone13": {446: ("Snow / Common", "Snow / Dark", "Snow / Dark", "Snow / Dark")},
+        "zone5_1": {
+            104: ("Grass / Swamp",) * 4,
+            125: ("Grass / Swamp",) * 4,
+            145: ("Grass / Swamp",) * 4,
+        },
+        **{owner: {15: ("Grass / Swamp",) * 4}
+           for owner in ("bz5g", "bz6g", "zone8")},
+        **{owner: {506: ("Grass / Sparse light", "Ground / Common",
+                         "Stone / Lime", "Stone / Grayish")}
+           for owner in ("bz3g", "zone9")},
+    }
+    r100_available_names = {
+        family_renames.get(family["id"], family.get("suggestedName", "")).casefold()
+        for family in recipe["families"]
+        if family_renames.get(family["id"], family.get("suggestedName", ""))
+    }
+    for slot_index, names in r100_signatures.get(namespace, {}).items():
+        for corner_index, family_name in enumerate(names):
+            # Minimal focused fixtures intentionally omit semantic names. Do
+            # not let a later name-based R100 decision erase an earlier
+            # integer correction when that name cannot be resolved. Complete
+            # atlas recipes always expose the reviewed family name here.
+            if (family_name is not None
+                    and family_name.casefold() in r100_available_names):
+                corrections[(slot_index, corner_index)] = family_name
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)

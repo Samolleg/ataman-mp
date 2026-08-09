@@ -809,7 +809,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
         self.assertNotIn(14, {family["id"] for family in result["families"]})
         self.assertNotIn(20, {family["id"] for family in result["families"]})
         self.assertEqual(
-            "Grass / Irregular",
+            "Grass / Swamp",
             next(family for family in result["families"]
                  if family["id"] == 8)["suggestedName"])
 
@@ -829,7 +829,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             result["slots"][227]["signature"],
         )
 
-    def test_zone5_1_uses_reviewed_irregular_name(self) -> None:
+    def test_zone5_1_uses_reviewed_swamp_name(self) -> None:
         recipe = {
             "namespace": "Zone5_1",
             "slots": [{"slot": 0, "signature": {
@@ -840,7 +840,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
 
         result = reviewed_fragment_corrections(recipe)
 
-        self.assertEqual("Grass / Irregular",
+        self.assertEqual("Grass / Swamp",
                          result["families"][0]["suggestedName"])
 
     def test_bz4g_false_trampled_split_merges_into_ground_common(self) -> None:
@@ -3179,6 +3179,9 @@ class ReviewDocumentTests(unittest.TestCase):
                     for corner, family_name in enumerate(expected):
                         if family_name is None:
                             continue
+                        if owner in ("zone5_1", "zone8") \
+                                and family_name == "Grass / Irregular":
+                            family_name = "Grass / Swamp"
                         with self.subTest(namespace=namespace, slot=slot,
                                           corner=corner):
                             self.assertEqual(
@@ -3369,6 +3372,31 @@ class ReviewDocumentTests(unittest.TestCase):
                 values = signature(namespace, slot)
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
+
+    def test_r100_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the reviewed R100 catalog verbatim."""
+        root = Path(__file__).resolve().parent.parent
+        catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
+        payload = catalog_path.read_bytes()
+        self.assertEqual(
+            "351319b24481575a8be158cc8f2cd5c55fd70ea51939c16f65439cc9882488c2",
+            hashlib.sha256(payload).hexdigest(),
+        )
+        catalog = json.loads(payload.decode("utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+        for namespace in ("zone5_1", "bz5g", "bz6g", "zone8"):
+            self.assertIn(
+                "Grass / Swamp",
+                {family["name"] for family in presets[namespace]["families"]},
+            )
+        bz3g = base64.b64decode(presets["bz3g"]["signaturesBase64"])
+        zone9 = base64.b64decode(presets["zone9"]["signaturesBase64"])
+        self.assertEqual(
+            bz3g[506 * 4:507 * 4],
+            zone9[506 * 4:507 * 4],
+            "the exact slot-506 propagation must remain synchronized",
+        )
 
     def test_questionnaire_layout_contract_is_locked(self) -> None:
         policy = (Path(__file__).resolve().parent.parent / "docs" /

@@ -96,7 +96,7 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # every real pair row remains visible.
         self.assertEqual(1667, report["totalPairCount"])
         self.assertEqual(
-            {"0": 1034, "1": 135, "2": 90, "3": 196, "4": 212},
+            {"0": 1038, "1": 129, "2": 91, "3": 196, "4": 213},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):
