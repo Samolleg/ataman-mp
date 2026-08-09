@@ -57,6 +57,41 @@ from generate_terrain_atlas_presets import (
 )
 
 
+_R102_RENAMED_EXPECTATIONS = {
+    ("bz11k", "Ground / Trampled"): "Ground / Stony gray",
+    ("zone14", "Ground / Trampled"): "Ground / Stony gray",
+    ("bz13h", "Sand / Common"): "Sand / Common grayish",
+    ("zone15", "Sand / Common"): "Sand / Common grayish",
+    ("bz16h", "Sand / Common"): "Sand / Common grayish",
+    ("zone18", "Sand / Common"): "Sand / Common grayish",
+    ("zone13", "Sand / Common"): "Sand / Common grayish",
+    ("zone19", "Sand / Common"): "Sand / Common grayish",
+    ("bz4g", "Ground / Gravel"): "Ground / Gravel greenish",
+    ("zone4", "Ground / Gravel"): "Ground / Gravel greenish",
+    ("bz7g", "Stone / Black"): "Stone / Dark gray",
+    ("zone10", "Stone / Black"): "Stone / Dark gray",
+    ("zone20", "Stone / Black"): "Stone / Dark gray",
+    ("zone5_1", "Stone / Black"): "Stone / Dark gray",
+    ("zone7", "Ground / Cracked"): "Rubble / Gray",
+    ("bz16h", "Rock / Lime"): "Paving / Sand ruins",
+    ("bz16h", "Rock / Orange"): "Rubble / Dry",
+    ("zone18", "Rock / Orange"): "Rubble / Dry",
+    ("bz4g", "Sand / Dark"): "Sand / Dark pink",
+    ("zone4", "Sand / Dark"): "Sand / Dark pink",
+    ("bz3g", "Sand / Dark"): "Sand / Dark pink",
+    ("zone9", "Sand / Dark"): "Sand / Dark pink",
+    ("bz5g", "Sand / Dark"): "Sand / Dark pink",
+    ("bz6g", "Sand / Dark"): "Sand / Dark pink",
+    ("zone8", "Sand / Dark"): "Sand / Dark pink",
+}
+
+
+def r102_expected_name(namespace: str, historical_name: str) -> str:
+    """Translate an earlier reviewed label to its explicit R102 final name."""
+    return _R102_RENAMED_EXPECTATIONS.get(
+        (namespace.casefold(), historical_name), historical_name)
+
+
 class ExactPixelIdentityOwnershipTests(unittest.TestCase):
     def test_exact_local_pixels_cannot_overwrite_authored_transition(self) -> None:
         uniform = np.full((32, 32, 4), (40, 80, 120, 255), dtype=np.uint8)
@@ -1414,7 +1449,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
     def test_r59_global_confidence_applies_only_explicit_merges_and_corners(self) -> None:
         corner_names = ("northWest", "northEast", "southEast", "southWest")
         cases = {
-            "bz11k": ({18: 16}, {(235, 3): 16, (300, 3): 19}),
+            "bz11k": ({18: 16}, {(235, 3): 16, (300, 3): 20}),
             "bz13h": ({12: 1, 13: 2}, {(13, 0): 8}),
             "bz16h": ({}, {(95, 0): 6, (449, 0): 13}),
             "bz3g": ({}, {(265, 3): 10, (383, 0): 5}),
@@ -1490,7 +1525,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
 
         cases = (
             ("bz11k", "Zone14", {18: 16}, {
-                (235, 3): (17, 16), (300, 3): (20, 19),
+                (235, 3): (17, 16), (300, 3): (20, 20),
             }),
             ("bz13h", "Zone15", {12: 1, 13: 2}, {
                 (13, 0): (9, 8),
@@ -2120,16 +2155,10 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
                 self.assertEqual(
                     2, signature["southWest"],
                     "R71 explicitly resolved the former uncertain soil corner")
-                if namespace.casefold() == "zone18":
-                    self.assertEqual(
-                        "Paving / Sand ruins",
-                        next(family for family in result["families"]
-                             if family["id"] == 7)["suggestedName"])
-                else:
-                    self.assertEqual(
-                        "Rock / Lime",
-                        next(family for family in result["families"]
-                             if family["id"] == 7)["suggestedName"])
+                self.assertEqual(
+                    "Paving / Sand ruins",
+                    next(family for family in result["families"]
+                         if family["id"] == 7)["suggestedName"])
 
     def test_r71_applies_explicit_corners_names_and_exact_owners(self) -> None:
         def corrected(namespace: str, names: dict[int, str]) -> dict:
@@ -2328,7 +2357,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
                  for family in zone7["families"]}
         self.assertEqual("Rock / Underwater emerald", names[1])
         self.assertEqual("Sand / Underwater", names[4])
-        self.assertEqual("Ground / Cracked", names[14])
+        self.assertEqual("Rubble / Gray", names[14])
         self.assertEqual(17, zone7["slots"][412]["signature"]["southWest"])
         self.assertEqual(17, zone7["slots"][226]["signature"]["southWest"])
         self.assertEqual(13, zone7["slots"][329]["signature"]["northWest"])
@@ -2380,7 +2409,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
 
         self.assertEqual(
             (family_ids["Stone / Black"], family_ids["Stone / Black"],
-             family_ids["Ground / Trampled"], family_ids["Rock / Black"]),
+             family_ids["Ground / Stony gray"], family_ids["Rock / Black"]),
             signature(489))
         self.assertEqual(family_ids["Stone / Dark"], signature(56)[3])
         self.assertEqual(family_ids["Ground / Light"], signature(176)[0])
@@ -2399,7 +2428,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             "Ground / Mountainous", family_ids,
             "R75 reassigns the sole remaining corner to Ground / Trampled")
         self.assertEqual(
-            family_ids["Ground / Trampled"], signature(70)[3])
+            family_ids["Ground / Stony gray"], signature(70)[3])
         self.assertEqual(
             (family_ids["Stone / Dark"], family_ids["Ice / Common"],
              family_ids["Stone / Dark"], family_ids["Stone / Black"]),
@@ -2898,8 +2927,9 @@ class ReviewDocumentTests(unittest.TestCase):
             for (slot, corner_index), family_name in expected.items():
                 with self.subTest(namespace=namespace, slot=slot,
                                   corner=corner_index):
-                    self.assertEqual(
-                        family_name, corner_name(namespace, slot, corner_index))
+                        self.assertEqual(
+                            r102_expected_name(namespace, family_name),
+                            corner_name(namespace, slot, corner_index))
 
         # The non-HD semantic policy remains one identity per reviewed pair.
         for namespace in ("bz13h", "zone15", "bz15h", "zone17"):
@@ -3007,7 +3037,8 @@ class ReviewDocumentTests(unittest.TestCase):
                     with self.subTest(namespace=namespace, slot=slot,
                                       corner=corner):
                         self.assertEqual(
-                            expected, corner_name(namespace, slot, corner))
+                            r102_expected_name(namespace, expected),
+                            corner_name(namespace, slot, corner))
                         checked += 1
         self.assertEqual(133, checked)
         self.assertNotIn(
@@ -3065,7 +3096,8 @@ class ReviewDocumentTests(unittest.TestCase):
                     with self.subTest(namespace=namespace, slot=slot,
                                       corner=corner):
                         self.assertEqual(
-                            expected, corner_name(namespace, slot, corner))
+                            r102_expected_name(namespace, expected),
+                            corner_name(namespace, slot, corner))
                         checked += 1
         self.assertEqual(48, checked)
         # R82 deliberately left this comment-only ambiguity unresolved. R83's
@@ -3131,7 +3163,8 @@ class ReviewDocumentTests(unittest.TestCase):
                     with self.subTest(namespace=namespace, slot=slot,
                                       corner=corner):
                         self.assertEqual(
-                            expected, corner_name(namespace, slot, corner))
+                            r102_expected_name(namespace, expected),
+                            corner_name(namespace, slot, corner))
                         checked += 1
         self.assertEqual(53, checked)
 
@@ -3185,7 +3218,7 @@ class ReviewDocumentTests(unittest.TestCase):
                         with self.subTest(namespace=namespace, slot=slot,
                                           corner=corner):
                             self.assertEqual(
-                                family_name,
+                                r102_expected_name(namespace, family_name),
                                 names[payload[slot * 4 + corner]])
                             checked += 1
         self.assertEqual(492, checked)
@@ -3241,8 +3274,8 @@ class ReviewDocumentTests(unittest.TestCase):
         for namespace in ("bz11k", "zone14"):
             names, payload = names_and_payload(namespace)
             self.assertEqual(
-                ["Ground / Light", "Ground / Trampled",
-                 "Ground / Trampled", "Ground / Trampled"],
+                ["Ground / Light", "Ground / Stony gray",
+                 "Ground / Stony gray", "Ground / Stony gray"],
                 [names[value] for value in payload[462 * 4:462 * 4 + 4]])
             self.assertEqual("Sand / Irregular", names[20])
             for slot in (218, 219):
@@ -3263,7 +3296,7 @@ class ReviewDocumentTests(unittest.TestCase):
         for namespace, slot in (("bz13h", 10), ("bz4g", 6), ("zone4", 6)):
             names, payload = names_and_payload(namespace)
             self.assertEqual(
-                ["Sand / Dark"] * 4,
+                [r102_expected_name(namespace, "Sand / Dark")] * 4,
                 [names[value] for value in payload[slot * 4:slot * 4 + 4]])
 
     def test_r93_applies_resolved_corners_without_guessing_named_ground(self) -> None:
@@ -3373,13 +3406,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r100_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the reviewed R100 catalog verbatim."""
+    def test_r102_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the reviewed R102 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "351319b24481575a8be158cc8f2cd5c55fd70ea51939c16f65439cc9882488c2",
+            "0411d38de59c255d36448203f4522939b4d43191ad07e45eda882291aa09519b",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -3408,6 +3441,45 @@ class ReviewDocumentTests(unittest.TestCase):
                 "serialize as NW, NE, SE, SW",
                 "must not be redesigned without direct user authorization"):
             self.assertIn(required, policy)
+    def test_r102_applies_only_structured_brush_inventory_decisions(self) -> None:
+        """Every applied R102 change is enumerated; review leads stay data-only."""
+        root = Path(__file__).resolve().parent.parent
+        decisions = json.loads((root / "scripts" /
+            "semantic_atlas_r102_brush_inventory_decisions.json"
+        ).read_text(encoding="utf-8"))
+        catalog = json.loads((root / "assets" / "resources" /
+            "terrain_atlas_presets.json").read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        for namespace, renames in decisions["familyRenames"].items():
+            families = {int(row["id"]): row["name"]
+                        for row in presets[namespace]["families"]}
+            for family_id, expected in renames.items():
+                self.assertEqual(expected, families[int(family_id)])
+
+        for namespace, aliases in decisions["familyMerges"].items():
+            ids = {int(row["id"]) for row in presets[namespace]["families"]}
+            for source, target in aliases.items():
+                self.assertNotIn(int(source), ids)
+                self.assertIn(int(target), ids)
+
+        corner_indices = {"NW": 0, "NE": 1, "SE": 2, "SW": 3}
+        for namespace, slots in decisions["cornerCorrections"].items():
+            preset = presets[namespace]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            for slot, corners in slots.items():
+                for corner, expected in corners.items():
+                    self.assertEqual(
+                        expected,
+                        names[payload[int(slot) * 4 + corner_indices[corner]]])
+
+        self.assertEqual(42, sum(len(value) for value in
+                                decisions["falseUniformSlots"].values()))
+        self.assertEqual(34, sum(len(value) for value in
+                                decisions["reviewFamilies"].values()))
 
     def test_completed_questionnaire_excludes_only_follow_up_corners(self) -> None:
         root = Path(__file__).resolve().parent.parent

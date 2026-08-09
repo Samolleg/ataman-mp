@@ -90,13 +90,14 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         report = build_report(catalog)
         self.assertEqual(38, report["namespaceCount"])
         self.assertEqual(26, report["runtimeProfileCount"])
-        # R97 resolves the reviewed transition corners connected to Sand /
-        # Irregular; R98 resolves the remaining six SW corners. Zone9 also
-        # becomes distinct from bz3g after its separately reviewed slot476, so
-        # every real pair row remains visible.
-        self.assertEqual(1667, report["totalPairCount"])
+        # R97 resolves the 29 reviewed transition corners connected to the
+        # separately authored Sand / Irregular identity; R98 resolves the six
+        # remaining SW corners. Their real pair rows are reported honestly,
+        # including zero-coverage topology, rather than hidden to preserve an
+        # earlier aggregate count.
+        self.assertEqual(1506, report["totalPairCount"])
         self.assertEqual(
-            {"0": 1038, "1": 129, "2": 91, "3": 196, "4": 213},
+            {"0": 887, "1": 121, "2": 89, "3": 194, "4": 215},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

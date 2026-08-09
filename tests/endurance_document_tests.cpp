@@ -6016,13 +6016,12 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 58);
-    // R93 keeps the reviewed Zone7 identities distinct and restores the
-    // explicitly reviewed irregular Sand family in bz11k/Zone14.
-    QCOMPARE(totalFamilies, 457);
-    // Keep this count pinned to the reviewed semantic-atlas catalog. A change
-    // means a family crossed the paint-brush/transition-support boundary and
-    // must be visually audited before the palette consumes it.
-    QCOMPARE(transitionSupportFamilies, 46);
+    // R102 applies only the user's explicit brush-inventory family merges;
+    // every questioned uniform and probable identity remains review-only.
+    QCOMPARE(totalFamilies, 429);
+    // Transition-only families remain explicit support records until their
+    // queued corner reviews resolve or merge them.
+    QCOMPARE(transitionSupportFamilies, 25);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()

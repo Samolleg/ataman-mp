@@ -25,6 +25,12 @@ MMP_SIGNATURE = 0x00504D4D
 DXT1 = 0x31545844
 MMP_HEADER_SIZE = 76
 
+R102_BRUSH_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r102_brush_inventory_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+
 
 def res_index(path: Path) -> dict[str, dict]:
     with path.open("rb") as stream:
@@ -2790,6 +2796,24 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             if (family_name is not None
                     and family_name.casefold() in r100_available_names):
                 corrections[(slot_index, corner_index)] = family_name
+
+    # R102 brush-inventory review. Only unambiguous identity renames, exact
+    # family merges, and explicitly named corners are applied here. Every
+    # false-uniform, "probably", question-mark, and "no material here" lead
+    # remains in the R102 questionnaire and is not inferred by this generator.
+    r102_renames = R102_BRUSH_REVIEW["familyRenames"].get(namespace, {})
+    family_renames.update({int(key): value
+                           for key, value in r102_renames.items()})
+    r102_aliases = R102_BRUSH_REVIEW["familyMerges"].get(namespace, {})
+    family_aliases.update({int(key): int(value)
+                           for key, value in r102_aliases.items()})
+    for slot_text, corner_values in R102_BRUSH_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
 
     if not corrections and not family_renames and not family_aliases:
         return recipe
