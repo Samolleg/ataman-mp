@@ -105,6 +105,12 @@ struct STerrainAtlasProfileSlot
     STerrainTransitionSignature signature;
     bool assigned{true};
     bool ambiguous{false};
+    // Optional provenance for a compacted portable atlas slot. Several
+    // byte-identical authored source slots may alias one retained physical
+    // slot without losing their original identities after save/reopen.
+    QString sourceNamespace;
+    QVector<int> sourceSlotAliases;
+    QByteArray sourcePixelSha256;
 };
 
 // A profile is always scoped to both an MPR namespace and the exact decoded
@@ -112,7 +118,7 @@ struct STerrainAtlasProfileSlot
 // unresolved entries remain unassigned until a user fixes or excludes them.
 struct STerrainAtlasProfile
 {
-    int schemaVersion{7};
+    int schemaVersion{8};
     QString mprNamespace;
     QByteArray atlasPixelSha256;
     int atlasSlotCount{0};

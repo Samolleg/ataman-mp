@@ -7917,14 +7917,19 @@ void CView::finalizeVirtualTerrainAtlas()
             finalized.error+findings);
         return;
     }
+    QSet<int> retainedSourceOutputs;
+    for(auto remap=finalized.authoredSlotRemap.constBegin();
+        remap!=finalized.authoredSlotRemap.constEnd();++remap)
+        retainedSourceOutputs.insert(remap.value());
     int generatedCount=0;
     int importedStockCount=0;
-    for(const STerrainFinalizedTile& tile:finalized.tiles)
+    for(int slot=0;slot<finalized.tiles.size();++slot)
     {
+        const STerrainFinalizedTile& tile=finalized.tiles.at(slot);
         generatedCount+=!tile.authored;
-        importedStockCount+=tile.authored&&tile.sourceSlot<0;
+        importedStockCount+=tile.authored&&!retainedSourceOutputs.contains(slot);
     }
-    const int retainedAuthored=finalized.authoredSlotRemap.size();
+    const int retainedAuthored=retainedSourceOutputs.size();
     const int evictedAuthored=qMax(0,authoredImages.size()-retainedAuthored);
     QDialog preview(this);
     preview.setWindowTitle(tr("Review finalized map atlas"));
@@ -8006,7 +8011,7 @@ void CView::finalizeVirtualTerrainAtlas()
     for(int slot=0;slot<finalized.tiles.size();++slot)
     {
         const STerrainFinalizedTile& tile=finalized.tiles.at(slot);
-        if(tile.sourceSlot>=0)continue;
+        if(retainedSourceOutputs.contains(slot))continue;
         QToolButton* item=new QToolButton(addedPage);
         item->setIcon(QPixmap::fromImage(tile.pixels));
         item->setIconSize(QSize(96,96));
@@ -8102,11 +8107,17 @@ void CView::finalizeVirtualTerrainAtlas()
         QJsonObject item;item.insert(QStringLiteral("slot"),slot);
         item.insert(QStringLiteral("authored"),tile.authored);
         item.insert(QStringLiteral("sourceSlot"),tile.sourceSlot);
+        item.insert(QStringLiteral("sourceNamespace"), tile.sourceNamespace);
+        QJsonArray sourceAliases;
+        for(int sourceAlias : tile.sourceSlotAliases)
+            sourceAliases.append(sourceAlias);
+        item.insert(QStringLiteral("sourceSlotAliases"), sourceAliases);
         item.insert(QStringLiteral("pixelSha256"),QString::fromLatin1(tile.pixelSha256));
         item.insert(QStringLiteral("stockDerivedBlend"),tile.stockDerivedBlend);
         item.insert(QStringLiteral("canonicalGeneratedBlend"),
                     tile.canonicalGeneratedBlend);
-        item.insert(QStringLiteral("origin"),tile.sourceSlot>=0
+        item.insert(QStringLiteral("origin"),
+            retainedSourceOutputs.contains(slot)
             ?QStringLiteral("original-map")
             :(tile.authored?QStringLiteral("stock-jmv")
                            :QStringLiteral("generated-exact")));
@@ -11279,12 +11290,43 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
                 identity.insert(QStringLiteral("origin"), origin);
                 identity.insert(QStringLiteral("workingSlot"),
                                 workingIdentity.workingSlot);
-                identity.insert(QStringLiteral("sourceNamespace"),
+                QString identitySourceNamespace =
                     workingIdentity.origin ==
                             ETerrainWorkingTileOrigin::AuthoredMap
-                        ? namespaceName : workingIdentity.sourceNamespace);
+                        ? namespaceName : workingIdentity.sourceNamespace;
+                int identitySourceSlot = workingIdentity.sourceSlot;
+                const STerrainAtlasProfileSlot* profileSlot = nullptr;
+                if(workingIdentity.origin ==
+                   ETerrainWorkingTileOrigin::AuthoredMap)
+                    for(const STerrainAtlasProfileSlot& candidate :
+                        m_terrainAtlasProfile.slotDefinitions)
+                        if(candidate.slot == physicalSlot)
+                        {
+                            profileSlot = &candidate;
+                            break;
+                        }
+                if(profileSlot && !profileSlot->sourceSlotAliases.isEmpty())
+                {
+                    identitySourceNamespace = profileSlot->sourceNamespace;
+                    identitySourceSlot = profileSlot->sourceSlotAliases.front();
+                    QJsonArray aliases;
+                    for(int sourceSlot : profileSlot->sourceSlotAliases)
+                    {
+                        QJsonObject alias;
+                        alias.insert(QStringLiteral("sourceNamespace"),
+                                     profileSlot->sourceNamespace);
+                        alias.insert(QStringLiteral("sourceSlot"), sourceSlot);
+                        alias.insert(QStringLiteral("sourcePixelSha256"),
+                            QString::fromLatin1(
+                                profileSlot->sourcePixelSha256));
+                        aliases.append(alias);
+                    }
+                    identity.insert(QStringLiteral("sourceAliases"), aliases);
+                }
+                identity.insert(QStringLiteral("sourceNamespace"),
+                                identitySourceNamespace);
                 identity.insert(QStringLiteral("sourceSlot"),
-                                workingIdentity.sourceSlot);
+                                identitySourceSlot);
                 identity.insert(QStringLiteral("blendProvenance"),
                                 workingIdentity.blendProvenance);
                 identity.insert(QStringLiteral("stockDerivedBlend"),

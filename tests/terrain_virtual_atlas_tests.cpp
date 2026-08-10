@@ -286,7 +286,8 @@ void seedReviewedPairMasks(TAtlas& atlas, qint32 owner, qint32 other,
 }
 
 QByteArray portableMpr(bool withInactiveOverlay = false,
-                       bool withAnimatedRange = false)
+                       bool withAnimatedRange = false,
+                       quint16 landPacked = 0)
 {
     QByteArray mp;
     QDataStream stream(&mp,QIODevice::WriteOnly);
@@ -303,7 +304,11 @@ QByteArray portableMpr(bool withInactiveOverlay = false,
     sec.setByteOrder(QDataStream::LittleEndian);
     sec<<quint32(0xCF4BF774)<<quint8(withInactiveOverlay ? 3 : 0);
     sector.append(QByteArray(33*33*8*(withInactiveOverlay ? 2 : 1),'\0'));
-    sector.append(QByteArray(16*16*2,'\0'));
+    QByteArray landTiles(16 * 16 * 2, '\0');
+    for(int cell = 0; cell < 16 * 16; ++cell)
+        qToLittleEndian<quint16>(landPacked,
+            reinterpret_cast<uchar*>(landTiles.data() + cell * 2));
+    sector.append(landTiles);
     if(withInactiveOverlay)
     {
         sector.append(QByteArray(16*16*2, char(0xff)));
@@ -465,6 +470,9 @@ private slots:
     void workingAtlasCarriesGeneratedTerrainType();
     void stableHashesAndNamespaceAreDeterministic();
     void mapWideUsageAndUnusedCompaction();
+    void exactAuthoredDuplicatesAreRemappedBeforeCapacity();
+    void exactAuthoredDuplicateConflictFailsClosed();
+    void exactAuthoredDuplicateRemapPreservesPackedRotationsAfterReopen();
     void finalizesAtValidatedRuntimeCeilingBeyond512();
     void capacityRefusalNeverSubstitutes();
     void rawPageCompositionPreservesEveryUntouchedSlot();
@@ -2728,6 +2736,190 @@ void TerrainVirtualAtlasTests::mapWideUsageAndUnusedCompaction()
     QVERIFY(result.requiredSlots <= 2);
     QCOMPARE(result.packedCells.size(),4);
     QCOMPARE(result.tileTypes.size(),result.requiredSlots);
+}
+
+void TerrainVirtualAtlasTests::exactAuthoredDuplicatesAreRemappedBeforeCapacity()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images = {
+        solid(qRgba(40, 90, 150, 255)),
+        solid(qRgba(40, 90, 150, 255)),
+        solid(qRgba(180, 110, 35, 255)),
+    };
+    for(int slot = 0; slot < images.size(); ++slot)
+    {
+        STerrainTransitionVariant variant;
+        const qint32 material = slot < 2 ? 1 : 2;
+        variant.signature = signature(material, material, material, material);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1, 1));
+    SMprPackedTile duplicate;
+    duplicate.tileIndex = 1;
+    SMprPackedTile unique;
+    unique.tileIndex = 2;
+    SMprPackedTile primary;
+    primary.tileIndex = 0;
+    CTestTerrainVirtualAtlas atlas(
+        catalog, images, 0, {}, {}, true, {4, 4, 7}, {{1, 4}, {2, 7}});
+    CValidationReport report;
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("ExactDuplicateCapacity"), 2, {4, 4, 7},
+        &report, {duplicate.encode(), unique.encode()}, {}, {primary.encode()});
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
+    QCOMPARE(finalized.requiredSlots, 2);
+    QCOMPARE(finalized.authoredSlotRemap.value(0),
+             finalized.authoredSlotRemap.value(1));
+    QVERIFY(finalized.authoredSlotRemap.value(0)
+            != finalized.authoredSlotRemap.value(2));
+    const STerrainFinalizedTile& retained = finalized.tiles.at(
+        finalized.authoredSlotRemap.value(0));
+    QCOMPARE(retained.sourceNamespace,
+             QStringLiteral("ExactDuplicateCapacity"));
+    QCOMPARE(retained.sourceSlotAliases, QVector<int>({0, 1}));
+}
+
+void TerrainVirtualAtlasTests::exactAuthoredDuplicateConflictFailsClosed()
+{
+    CTerrainTransitionCatalog catalog;
+    const QImage shared = solid(qRgba(75, 115, 155, 255));
+    QVector<QImage> images = {shared, shared};
+    for(int slot = 0; slot < images.size(); ++slot)
+    {
+        STerrainTransitionVariant variant;
+        const qint32 material = slot + 1;
+        variant.signature = signature(material, material, material, material);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1, 1));
+    SMprPackedTile conflict;
+    conflict.tileIndex = 1;
+    CTestTerrainVirtualAtlas atlas(
+        catalog, images, 0, {}, {}, true, {4, 4}, {{1, 4}, {2, 4}});
+    CValidationReport report;
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("ExactDuplicateConflict"), 2, {4, 4},
+        &report, {conflict.encode()});
+    QVERIFY(!finalized.success);
+    QVERIFY(report.hasErrors());
+    QVERIFY(finalized.error.contains(QStringLiteral("conflict"),
+                                     Qt::CaseInsensitive));
+}
+
+void TerrainVirtualAtlasTests::exactAuthoredDuplicateRemapPreservesPackedRotationsAfterReopen()
+{
+    CTerrainTransitionCatalog catalog;
+    const STerrainTransitionSignature uniform = signature(1, 1, 1, 1);
+    const QImage shared = solid(qRgba(55, 125, 80, 255));
+    QVector<QImage> images = {shared, shared};
+    for(int slot = 0; slot < images.size(); ++slot)
+        for(int rotation = 0; rotation < 4; ++rotation)
+        {
+            STerrainTransitionVariant variant;
+            variant.signature = uniform;
+            SMprPackedTile packed;
+            packed.tileIndex = quint8(slot);
+            packed.rotation = quint8(rotation);
+            variant.packedTile = packed.encode();
+            QVERIFY(catalog.addVariant(variant));
+        }
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(16, 16, 1));
+    QVector<quint16> preferred;
+    preferred.reserve(16 * 16);
+    for(int y = 0; y < 16; ++y)
+        for(int x = 0; x < 16; ++x)
+        {
+            SMprPackedTile packed;
+            packed.tileIndex = quint8((x + y) & 1);
+            packed.rotation = quint8((x + y * 3) & 3);
+            preferred.append(packed.encode());
+        }
+    CTestTerrainVirtualAtlas atlas(
+        catalog, images, 0, {}, {}, true, {6, 6}, {{1, 6}});
+    CValidationReport report;
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("ExactDuplicateRoundTrip"), 64, {6, 6},
+        &report, {}, {}, preferred);
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
+    QCOMPARE(finalized.requiredSlots, 1);
+    QCOMPARE(finalized.authoredSlotRemap.value(0),
+             finalized.authoredSlotRemap.value(1));
+    QCOMPARE(finalized.tiles.at(0).sourceSlotAliases,
+             QVector<int>({0, 1}));
+    for(int cell = 0; cell < preferred.size(); ++cell)
+    {
+        const SMprPackedTile before = SMprPackedTile::decode(preferred.at(cell));
+        const SMprPackedTile after = SMprPackedTile::decode(
+            finalized.packedCells.at(cell));
+        QCOMPARE(after.atlasSlot(), 0);
+        QCOMPARE(after.rotation, before.rotation);
+    }
+
+    CMprDocument source;
+    QVERIFY2(source.loadBytes(portableMpr(), QStringLiteral("duplicate-source.mpr"),
+                              &report), qPrintable(report.toText()));
+    const STerrainPortableAtlasPackage package =
+        CTestTerrainVirtualAtlas::buildPortablePackage(
+            source, finalized, ETerrainTileLayer::Land, &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + QStringLiteral("\n") + report.toText()));
+    CMprDocument reopened;
+    QVERIFY2(reopened.loadBytes(package.mprBytes,
+                                QStringLiteral("duplicate-reopened.mpr"), &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(reopened, &report), qPrintable(report.toText()));
+    for(int y = 0; y < 16; ++y)
+        for(int x = 0; x < 16; ++x)
+        {
+            bool available = false;
+            QCOMPARE(terrain.packedTile(x, y, ETerrainTileLayer::Land,
+                                        &available),
+                     finalized.packedCells.at(y * 16 + x));
+            QVERIFY(available);
+        }
+
+    // The inactive layer is also remapped through the duplicate alias map.
+    // Its packed rotation is composed independently of the active grid.
+    SMprPackedTile pinnedLand;
+    pinnedLand.tileIndex = 1;
+    pinnedLand.rotation = 3;
+    CMprDocument layeredSource;
+    QVERIFY2(layeredSource.loadBytes(
+        portableMpr(true, false, pinnedLand.encode()),
+        QStringLiteral("duplicate-layered-source.mpr"), &report),
+        qPrintable(report.toText()));
+    const STerrainPortableAtlasPackage layeredPackage =
+        CTestTerrainVirtualAtlas::buildPortablePackage(
+            layeredSource, finalized, ETerrainTileLayer::Overlay, &report);
+    QVERIFY2(layeredPackage.success,
+             qPrintable(layeredPackage.error + QStringLiteral("\n")
+                        + report.toText()));
+    CMprDocument layeredReopened;
+    QVERIFY2(layeredReopened.loadBytes(
+        layeredPackage.mprBytes, QStringLiteral("duplicate-layered-result.mpr"),
+        &report), qPrintable(report.toText()));
+    CTerrainEditModel layeredTerrain;
+    QVERIFY2(layeredTerrain.load(layeredReopened, &report),
+             qPrintable(report.toText()));
+    bool landAvailable = false;
+    const SMprPackedTile remappedLand = SMprPackedTile::decode(
+        layeredTerrain.packedTile(0, 0, ETerrainTileLayer::Land,
+                                  &landAvailable));
+    QVERIFY(landAvailable);
+    QCOMPARE(remappedLand.atlasSlot(), 0);
+    QCOMPARE(remappedLand.rotation, quint8(3));
 }
 
 void TerrainVirtualAtlasTests::finalizesAtValidatedRuntimeCeilingBeyond512()

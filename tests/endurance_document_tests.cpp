@@ -5354,7 +5354,7 @@ void EnduranceDocumentTests::semanticAtlasInferenceUsesRendererOrientationAndPre
     QVERIFY2(STerrainAtlasProfile::fromJson(legacyJson, &migrated,
                                             &migrationReport),
              qPrintable(migrationReport.toText()));
-    QCOMPARE(migrated.schemaVersion, 7);
+    QCOMPARE(migrated.schemaVersion, 8);
     QCOMPARE(migrated.slotDefinitions.at(1).signature.northWest, signature.northWest);
     QCOMPARE(migrated.slotDefinitions.at(1).signature.southWest, signature.southWest);
     const auto detail = std::find_if(analysis.materials.cbegin(), analysis.materials.cend(),
@@ -5540,7 +5540,7 @@ void EnduranceDocumentTests::authoredAtlasProfileMatchesZone1Catalog()
     QVERIFY2(STerrainAtlasProfile::fromJson(legacyAuthored, &migratedAuthored,
                                             &migrationReport),
              qPrintable(migrationReport.toText()));
-    QCOMPARE(migratedAuthored.schemaVersion, 7);
+    QCOMPARE(migratedAuthored.schemaVersion, 8);
     QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.northWest,
              qint32(4));
     QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.southWest,
@@ -5902,7 +5902,7 @@ void EnduranceDocumentTests::authoredPresetSupportsZone18SharedLayers()
     for(const STerrainAtlasProfileFamily& family : reopened.families)
         reopenedSharedFamilies += family.landAllowed && family.overlayAllowed;
     QCOMPARE(reopenedSharedFamilies, 4);
-    QCOMPARE(reopened.schemaVersion, 7);
+    QCOMPARE(reopened.schemaVersion, 8);
     const STerrainAtlasAnalysis analysis = profile.approvedAnalysis(&report);
     QVERIFY2(analysis.usable, qPrintable(report.toText()));
     bool sharedSlot = false;
@@ -6484,6 +6484,11 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
         tile.sourceSlot = slot;
         tile.authored = true;
         tile.pixels = pixels;
+        tile.pixelSha256 = QByteArray(64, char('a' + slot));
+        tile.sourceNamespace = QStringLiteral("source");
+        tile.sourceSlotAliases.append(slot);
+        if(slot == 0)
+            tile.sourceSlotAliases.append(17);
         tile.canonicalSignature = source.slotDefinitions.at(slot).signature;
         finalized.tiles.append(tile);
     }
@@ -6527,6 +6532,13 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
                  &reopened, root.path(), nullptr, &report),
              qPrintable(report.toText()));
     QCOMPARE(reopened.assignedSlotCount(), 3);
+    QCOMPARE(reopened.schemaVersion, 8);
+    QCOMPARE(reopened.slotDefinitions.at(0).sourceNamespace,
+             QStringLiteral("source"));
+    QCOMPARE(reopened.slotDefinitions.at(0).sourceSlotAliases,
+             QVector<int>({0, 17}));
+    QCOMPARE(reopened.slotDefinitions.at(0).sourcePixelSha256,
+             QByteArray(64, 'a'));
 }
 
 void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()

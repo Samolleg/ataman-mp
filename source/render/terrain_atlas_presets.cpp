@@ -427,7 +427,7 @@ STerrainAtlasProfile CTerrainAtlasPresetCatalog::exactProfile(
             return {};
         }
         STerrainAtlasProfile profile;
-        profile.schemaVersion = 7;
+        profile.schemaVersion = 8;
         profile.mprNamespace = requestedNamespace;
         profile.atlasPixelSha256 = requestedHash;
         profile.atlasSlotCount = atlasSlotCount;

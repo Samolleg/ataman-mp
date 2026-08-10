@@ -258,7 +258,7 @@ bool uniform(const STerrainTransitionSignature& signature)
 QJsonObject STerrainAtlasProfile::toJson() const
 {
     QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 7);
+    root.insert(QStringLiteral("schemaVersion"), 8);
     root.insert(QStringLiteral("cornerSpace"),
                 QStringLiteral("tile-preview-nw-ne-se-sw-v1"));
     root.insert(QStringLiteral("mprNamespace"), mprNamespace);
@@ -298,6 +298,17 @@ QJsonObject STerrainAtlasProfile::toJson() const
         object.insert(QStringLiteral("signature"), signatureJson(slot.signature));
         object.insert(QStringLiteral("assigned"), slot.assigned);
         object.insert(QStringLiteral("ambiguous"), slot.ambiguous);
+        if(!slot.sourceSlotAliases.isEmpty())
+        {
+            object.insert(QStringLiteral("sourceNamespace"),
+                          slot.sourceNamespace);
+            QJsonArray aliases;
+            for(int sourceSlot : slot.sourceSlotAliases)
+                aliases.append(sourceSlot);
+            object.insert(QStringLiteral("sourceSlots"), aliases);
+            object.insert(QStringLiteral("sourcePixelSha256"),
+                          QString::fromLatin1(slot.sourcePixelSha256));
+        }
         slotArray.append(object);
     }
     root.insert(QStringLiteral("slots"), slotArray);
@@ -309,7 +320,7 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
                                     CValidationReport* report)
 {
     const int schemaVersion = object.value(QStringLiteral("schemaVersion")).toInt();
-    if(!profile || (schemaVersion < 1 || schemaVersion > 7)
+    if(!profile || (schemaVersion < 1 || schemaVersion > 8)
        || !object.value(QStringLiteral("families")).isArray()
        || !object.value(QStringLiteral("slots")).isArray())
     {
@@ -400,6 +411,42 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         slot.assigned = schemaVersion >= 2
             ? item.value(QStringLiteral("assigned")).toBool(!slot.ambiguous)
             : !slot.ambiguous;
+        if(schemaVersion >= 8
+           && item.value(QStringLiteral("sourceSlots")).isArray())
+        {
+            slot.sourceNamespace = item.value(
+                QStringLiteral("sourceNamespace")).toString().trimmed();
+            slot.sourcePixelSha256 = item.value(
+                QStringLiteral("sourcePixelSha256")).toString().toLatin1();
+            QSet<int> aliases;
+            for(const QJsonValue& aliasValue : item.value(
+                    QStringLiteral("sourceSlots")).toArray())
+            {
+                const int alias = aliasValue.toInt(-1);
+                if(alias < 0 || aliases.contains(alias))
+                {
+                    if(report) report->add(
+                        "terrain.atlas_profile_source_alias",
+                        EValidationSeverity::Error,
+                        "A finalized atlas provenance alias is invalid or duplicated");
+                    return false;
+                }
+                aliases.insert(alias);
+                slot.sourceSlotAliases.append(alias);
+            }
+            const bool hashValid = QRegularExpression(
+                QStringLiteral("^[0-9a-fA-F]{64}$")).match(
+                    QString::fromLatin1(slot.sourcePixelSha256)).hasMatch();
+            if(slot.sourceNamespace.isEmpty()
+               || slot.sourceSlotAliases.isEmpty() || !hashValid)
+            {
+                if(report) report->add(
+                    "terrain.atlas_profile_source_alias",
+                    EValidationSeverity::Error,
+                    "A finalized atlas provenance alias is incomplete");
+                return false;
+            }
+        }
         if(slot.slot < 0 || slot.slot >= parsed.atlasSlotCount || slotIds.contains(slot.slot)
            || !parseSignature(item.value(QStringLiteral("signature")).toObject(), &slot.signature)
            || !familyIds.contains(slot.signature.northWest)
@@ -443,7 +490,7 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
     }
     if(!parsed.normalizeMembership(report))
         return false;
-    parsed.schemaVersion = 7;
+    parsed.schemaVersion = 8;
     *profile = parsed;
     return true;
 }
@@ -890,6 +937,18 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
                 && definition.signature.northEast > 0
                 && definition.signature.southEast > 0
                 && definition.signature.southWest > 0;
+            QVector<int> aliases = tile.sourceSlotAliases;
+            if(aliases.isEmpty() && tile.sourceSlot >= 0)
+                aliases.append(tile.sourceSlot);
+            const QString aliasNamespace = tile.sourceNamespace.isEmpty()
+                ? sourceProfile.mprNamespace : tile.sourceNamespace;
+            if(tile.authored && !aliasNamespace.trimmed().isEmpty()
+               && !aliases.isEmpty() && tile.pixelSha256.size() == 64)
+            {
+                definition.sourceNamespace = aliasNamespace;
+                definition.sourceSlotAliases = aliases;
+                definition.sourcePixelSha256 = tile.pixelSha256;
+            }
             if(definition.assigned)
                 for(qint32 id : {definition.signature.northWest,
                                   definition.signature.northEast,

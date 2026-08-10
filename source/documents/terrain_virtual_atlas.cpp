@@ -2406,6 +2406,8 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     imported.authored = true;
     imported.sourceSlot = sourceSlot;
     imported.sourceNamespace = sourceNamespace;
+    if(sourceSlot >= 0)
+        imported.sourceSlotAliases.append(sourceSlot);
     imported.blendProvenance = sourceLabel;
     imported.stockDerivedBlend = true;
     const int generatedIndex = m_generatedTiles.size();
@@ -2729,6 +2731,84 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     QMap<int, int> authoredOutput;
     QMap<int, int> generatedOutput;
     QVector<QImage> denseImages;
+    QMap<QByteArray, QVector<int>> exactAuthoredOutputs;
+    const auto addAuthoredOutput = [&](int sourceSlot,
+                                       const QString& rangeError) -> bool
+    {
+        if(authoredOutput.contains(sourceSlot))
+            return true;
+        if(sourceSlot < 0 || sourceSlot >= m_authoredTiles.size())
+        {
+            result.error = rangeError;
+            return false;
+        }
+
+        STerrainFinalizedTile candidate;
+        candidate.authored = true;
+        candidate.sourceSlot = sourceSlot;
+        candidate.sourceNamespace = sourceNamespace;
+        candidate.sourceSlotAliases.append(sourceSlot);
+        candidate.pixels = m_authoredTiles.at(sourceSlot);
+        candidate.pixelSha256 = imageHash(candidate.pixels);
+        candidate.runtimeTerrainType = sourceSlot < sourceTileTypes.size()
+            ? sourceTileTypes.at(sourceSlot) : -1;
+        bool signatureFound = false;
+        SMprPackedTile basePacked;
+        basePacked.tileIndex = quint8(sourceSlot % 64);
+        basePacked.atlasIndex = quint8(sourceSlot / 64);
+        candidate.canonicalSignature = m_catalog.gridSignatureForPacked(
+            basePacked.encode(), &signatureFound);
+        const bool signatureAssigned = signatureFound
+            && candidate.canonicalSignature.northWest > 0
+            && candidate.canonicalSignature.northEast > 0
+            && candidate.canonicalSignature.southEast > 0
+            && candidate.canonicalSignature.southWest > 0;
+
+        const QVector<int> matchingHashes =
+            exactAuthoredOutputs.value(candidate.pixelSha256);
+        for(int outputSlot : matchingHashes)
+        {
+            const STerrainFinalizedTile& retained = result.tiles.at(outputSlot);
+            if(retained.pixels != candidate.pixels)
+                continue; // SHA-256 collision: preserve both physical tiles.
+            const bool semanticsAgree = signatureAssigned
+                && retained.canonicalSignature == candidate.canonicalSignature
+                && retained.runtimeTerrainType == candidate.runtimeTerrainType;
+            if(!semanticsAgree)
+            {
+                result.error = QStringLiteral(
+                    "Exact authored artwork conflict between source slots %1 and %2; "
+                    "their semantic corners or runtime terrain types differ. "
+                    "Finalization was refused pending semantic review.")
+                    .arg(retained.sourceSlot).arg(sourceSlot);
+                if(report) report->add(
+                    "terrain.finalized_authored_duplicate_conflict",
+                    EValidationSeverity::Error, result.error,
+                    QStringLiteral("pixel SHA-256 %1")
+                        .arg(QString::fromLatin1(candidate.pixelSha256)));
+                return false;
+            }
+
+            authoredOutput.insert(sourceSlot, outputSlot);
+            result.authoredSlotRemap.insert(sourceSlot, outputSlot);
+            QVector<int>& aliases = result.tiles[outputSlot].sourceSlotAliases;
+            if(!aliases.contains(sourceSlot))
+            {
+                aliases.append(sourceSlot);
+                std::sort(aliases.begin(), aliases.end());
+            }
+            result.tiles[outputSlot].sourceSlot = aliases.front();
+            return true;
+        }
+
+        const int outputSlot = denseImages.size();
+        authoredOutput.insert(sourceSlot, outputSlot);
+        result.authoredSlotRemap.insert(sourceSlot, outputSlot);
+        denseImages.append(candidate.pixels);
+        result.tiles.append(candidate);
+        exactAuthoredOutputs[candidate.pixelSha256].append(outputSlot);
+        return true;
+    };
     for(int y = 0; y < field.tileHeight(); ++y)
     {
         for(int x = 0; x < field.tileWidth(); ++x)
@@ -2779,31 +2859,9 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             {
                 const int sourceSlot = SMprPackedTile::decode(tile.authoredPacked).atlasSlot();
                 ++result.usage.authoredSlots[sourceSlot];
-                if(!authoredOutput.contains(sourceSlot))
-                {
-                    if(sourceSlot < 0 || sourceSlot >= m_authoredTiles.size())
-                    {
-                        result.error = QStringLiteral("An authored tile points outside the source atlas.");
-                        return result;
-                    }
-                    authoredOutput.insert(sourceSlot, denseImages.size());
-                    result.authoredSlotRemap.insert(sourceSlot,denseImages.size());
-                    denseImages.append(m_authoredTiles.at(sourceSlot));
-                    STerrainFinalizedTile output;
-                    output.authored = true;
-                    output.sourceSlot = sourceSlot;
-                    output.pixels = m_authoredTiles.at(sourceSlot);
-                    output.pixelSha256 = imageHash(output.pixels);
-                    output.runtimeTerrainType = sourceSlot < sourceTileTypes.size()
-                        ? sourceTileTypes.at(sourceSlot) : -1;
-                    bool found = false;
-                    SMprPackedTile basePacked;
-                    basePacked.tileIndex = quint8(sourceSlot % 64);
-                    basePacked.atlasIndex = quint8(sourceSlot / 64);
-                    output.canonicalSignature = m_catalog.gridSignatureForPacked(
-                        basePacked.encode(), &found);
-                    result.tiles.append(output);
-                }
+                if(!addAuthoredOutput(sourceSlot, QStringLiteral(
+                    "An authored tile points outside the source atlas.")))
+                    return result;
             }
             else
             {
@@ -2817,23 +2875,13 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             }
         }
     }
-    for(quint16 packed:pinnedPackedTiles)
+    for(quint16 packed : pinnedPackedTiles)
     {
-        const int sourceSlot=SMprPackedTile::decode(packed).atlasSlot();
+        const int sourceSlot = SMprPackedTile::decode(packed).atlasSlot();
         ++result.usage.authoredSlots[sourceSlot];
-        if(authoredOutput.contains(sourceSlot))continue;
-        if(sourceSlot<0||sourceSlot>=m_authoredTiles.size())
-        { result.error=QStringLiteral("A pinned layer tile points outside the source atlas.");return result; }
-        authoredOutput.insert(sourceSlot,denseImages.size());
-        result.authoredSlotRemap.insert(sourceSlot,denseImages.size());
-        denseImages.append(m_authoredTiles.at(sourceSlot));
-        STerrainFinalizedTile output;output.authored=true;output.sourceSlot=sourceSlot;
-        output.pixels=m_authoredTiles.at(sourceSlot);output.pixelSha256=imageHash(output.pixels);
-        output.runtimeTerrainType=sourceSlot<sourceTileTypes.size()
-            ?sourceTileTypes.at(sourceSlot):-1;
-        SMprPackedTile base;base.tileIndex=quint8(sourceSlot%64);base.atlasIndex=quint8(sourceSlot/64);
-        bool found=false;output.canonicalSignature=m_catalog.gridSignatureForPacked(base.encode(),&found);
-        result.tiles.append(output);
+        if(!addAuthoredOutput(sourceSlot, QStringLiteral(
+            "A pinned layer tile points outside the source atlas.")))
+            return result;
     }
     result.requiredSlots = denseImages.size();
     if(result.requiredSlots > capacityLimit)
@@ -2913,6 +2961,14 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         qToLittleEndian<qint32>(tile.runtimeTerrainType,
             reinterpret_cast<uchar*>(typeBytes));
         stable.addData(typeBytes, 4);
+        stable.addData(tile.sourceNamespace.toUtf8().toLower());
+        for(int sourceAlias : tile.sourceSlotAliases)
+        {
+            char aliasBytes[4];
+            qToLittleEndian<qint32>(sourceAlias,
+                reinterpret_cast<uchar*>(aliasBytes));
+            stable.addData(aliasBytes, 4);
+        }
     }
     for(quint16 packed : result.packedCells)
     {
