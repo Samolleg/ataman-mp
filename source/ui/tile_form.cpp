@@ -462,14 +462,25 @@ bool CTileForm::replaceTileImages(const QVector<QImage>& images)
     return true;
 }
 
-void CTileForm::selectTile(int index)
+bool CTileForm::selectTile(int index)
 {
+    // The modern painter can realize imported/generated artwork in working
+    // slots beyond the authored inspector table.  Right-click sampling must
+    // never use such a recyclable physical slot as an index into authored MPR
+    // metadata.
+    if(index < 0 || index >= m_tileImages.size()
+       || index >= m_tileTypes.size() || m_nTilePerRow <= 0)
+        return false;
     int row = index/m_nTilePerRow;
     int column = index%m_nTilePerRow;
+    if(row < 0 || row >= ui->tableTile->rowCount()
+       || column < 0 || column >= ui->tableTile->columnCount())
+        return false;
     ui->tableQuick->clearSelection();
     ui->tableTile->setCurrentCell(row, column);
     ui->comboTileType->setCurrentIndex(m_tileTypes[index]);
     //emit onSelect(tileWithRot(index));
+    return true;
 }
 
 void CTileForm::selectQuickAccessTile(int index)

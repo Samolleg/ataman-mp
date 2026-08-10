@@ -44,7 +44,7 @@ public:
 
     void fillTable(QString mapName, int textureAtlasNumber);
     void setTileTypes(const QVector<ETileType>& arrTileType) {m_tileTypes = arrTileType;}
-    void selectTile(int index);
+    bool selectTile(int index);
     void selectQuickAccessTile(int index);
     void clearTileSelection();
     int activeMaterialindex();

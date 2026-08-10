@@ -47,6 +47,7 @@
 #include "layout_components/tablemanager.h"
 #include "ui/landscape_tools.h"
 #include "ui/bodypartedit_form.h"
+#include "ui/tile_form.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "jmv_map_test_launcher.h"
@@ -1368,6 +1369,11 @@ int runHeadlessCommand(QApplication& app)
             && sessionMapZoneId == "zone7";
         sessionManager->reset();
 
+        CTileForm tileForm;
+        tileForm.setTileTypes(QVector<ETileType>(2, ETileType::eGrass));
+        const bool expandedWorkingTileSelectionRejected =
+            !tileForm.selectTile(1393);
+
         const bool passed = prefixesOnly && valueStable && focusCancel && escapeCancel
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
@@ -1420,11 +1426,12 @@ int runHeadlessCommand(QApplication& app)
             && generatedAtlasCountVisible
             && expandedAtlasCapacityIsYellow
             && unstableAtlasCapacityIsRedButInformational
-                && materialAtlasActionWorks
-                && paintIssueMarkerActivates
-                && paintIssueMarkerMutuallyExclusive
-                && paintIssueTemporarySelectPreservesEditing
-                && logicPointUndoAtomic && logicPointRedoAtomic;
+            && materialAtlasActionWorks
+            && paintIssueMarkerActivates
+            && paintIssueMarkerMutuallyExclusive
+            && paintIssueTemporarySelectPreservesEditing
+            && expandedWorkingTileSelectionRejected
+            && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
         output << "asset-picker prefixes=" << completions.join(",") << "\n"
                << "prefixesOnly=" << prefixesOnly
@@ -1527,6 +1534,8 @@ int runHeadlessCommand(QApplication& app)
                << paintIssueMarkerMutuallyExclusive
                << " paintIssueTemporarySelectPreservesEditing="
                << paintIssueTemporarySelectPreservesEditing
+               << " expandedWorkingTileSelectionRejected="
+               << expandedWorkingTileSelectionRejected
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic << "\n"
                << (passed ? "PASS" : "FAIL")

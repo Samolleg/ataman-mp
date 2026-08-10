@@ -1084,7 +1084,8 @@ void CView::ensureManualTileSelection()
         catalog.signatureForPacked(candidate.encode(), &found);
         if(!found)
             continue;
-        m_pTileForm->selectTile(slot);
+        if(!m_pTileForm->selectTile(slot))
+            continue;
         onChangeCursorTile(m_pTileForm->tileWithRot(slot));
         if(m_hasViewportMousePos)
         {
@@ -9769,8 +9770,12 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
         return;
 
-    m_pTileForm->selectTile(pTile->tileIndex());
-    m_pTileForm->setTileRotation(pTile->tileRotation());
+    // Imported and generated working-atlas slots are valid semantic paint
+    // results but do not exist in the authored atlas inspector.  The semantic
+    // sampler below owns those slots; update the legacy manual selection only
+    // when the physical index belongs to its bounded authored table.
+    if(m_pTileForm->selectTile(pTile->tileIndex()))
+        m_pTileForm->setTileRotation(pTile->tileRotation());
     if(m_landscapeTools && m_terrainEditAvailable)
     {
         const int globalX = tileLoc.xSec * 16 + tileLoc.col;
