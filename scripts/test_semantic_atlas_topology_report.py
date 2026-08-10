@@ -101,10 +101,14 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # R108 removes the three exhausted transition-only family records;
         # their 25 zero-coverage pair rows no longer inflate the denominator.
         # R109 removes the final Bz7g Ground / Common corner and prunes that
-        # now-unreferenced brush, removing five topology pairs.
-        self.assertEqual(1234, report["totalPairCount"])
+        # now-unreferenced brush, removing five topology pairs. R111 restores
+        # the reviewed transition-only Ground / Tan identity in bz15h and
+        # Zone17. R112 separates Zone10 slot 396 into one genuine uniform
+        # Slabs / Faces irregular family and moves three reviewed pair rows
+        # between topology-coverage buckets.
+        self.assertEqual(1206, report["totalPairCount"])
         self.assertEqual(
-            {"0": 658, "1": 89, "2": 73, "3": 193, "4": 221},
+            {"0": 637, "1": 83, "2": 72, "3": 192, "4": 222},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

@@ -50,6 +50,21 @@ R108_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r108_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R110_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r110_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R111_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r111_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R112_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r112_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -2890,10 +2905,6 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             "cornerCorrections"].get(namespace, {}).items():
         slot_index = int(slot_text)
         for corner_name, family_name in corner_values.items():
-            if (isinstance(family_name, str)
-                    and not any(family.get("suggestedName")
-                                for family in recipe["families"])):
-                continue
             corrections[(slot_index, {
                 "NW": 0, "NE": 1, "SE": 2, "SW": 3,
             }[corner_name])] = family_name
@@ -2909,6 +2920,47 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                     and not any(family.get("suggestedName")
                                 for family in recipe["families"])):
                 continue
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R110 applies only concrete submitted family values. Still-uncertain
+    # corners, ambiguous note alternatives, and the untouched BaseGipat row
+    # remain unchanged and are carried in the focused follow-up queue.
+    r110_renames = R110_CONSOLIDATED_REVIEW["familyRenames"].get(
+        namespace, {})
+    family_renames.update({int(key): value
+                           for key, value in r110_renames.items()})
+    for slot_text, corner_values in R110_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            if (isinstance(family_name, str)
+                    and not any(family.get("suggestedName")
+                                for family in recipe["families"])):
+                continue
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R111 closes the remaining explicit review queue. The grouped bz15h and
+    # Zone17 card intentionally assigns the same semantic mapping to distinct
+    # HD targets that share one byte-identical base-game original tile.
+    for slot_text, corner_values in R111_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R112 applies every provenance-qualified reported authored source card.
+    # Byte-identical aliases are expanded explicitly in the decision record;
+    # non-identical sibling atlases are never inferred here.
+    for slot_text, corner_values in R112_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
             corrections[(slot_index, {
                 "NW": 0, "NE": 1, "SE": 2, "SW": 3,
             }[corner_name])] = family_name
@@ -2954,6 +3006,58 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             if existing.get("suggestedName") != family_spec["name"]:
                 raise ValueError(
                     f"{result['namespace']}: R106 family ID {family_id} "
+                    f"already belongs to {existing.get('suggestedName')!r}")
+            continue
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    for family_spec in R111_CONSOLIDATED_REVIEW.get(
+            "newFamilies", {}).get(namespace, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        if any(family["id"] == family_id for family in result["families"]):
+            existing = next(family for family in result["families"]
+                            if family["id"] == family_id)
+            if existing.get("suggestedName") != family_spec["name"]:
+                raise ValueError(
+                    f"{result['namespace']}: R111 family ID {family_id} "
+                    f"already belongs to {existing.get('suggestedName')!r}")
+            continue
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    for family_spec in R112_CONSOLIDATED_REVIEW.get(
+            "newFamilies", {}).get(namespace, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        if any(family["id"] == family_id for family in result["families"]):
+            existing = next(family for family in result["families"]
+                            if family["id"] == family_id)
+            if existing.get("suggestedName") != family_spec["name"]:
+                raise ValueError(
+                    f"{result['namespace']}: R112 family ID {family_id} "
                     f"already belongs to {existing.get('suggestedName')!r}")
             continue
         template = copy.deepcopy(next(

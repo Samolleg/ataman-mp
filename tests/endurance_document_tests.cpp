@@ -6041,14 +6041,13 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     // R106 adds two explicit identities, then removes all family records whose
     // last authored corner was reassigned. Exact bz13h decisions propagate to
     // the byte-identical Zone15 atlas, removing its final dead family as well.
-    // R108 resolves the final Ground / Dry corners in bz4g/Zone4 and the
-    // final Ground / Trampled corner in Zone6, pruning those three exhausted
-    // transition-only records. The explicit R109 Bz7g slot143 correction then
-    // exhausts and prunes one additional obsolete family.
-    QCOMPARE(totalFamilies, 396);
+    // The pruned R111 authority contains 392 referenced families. R112 adds
+    // one reviewed, paint-selectable Zone10 Slabs / Faces irregular family
+    // for genuine uniform slot 396.
+    QCOMPARE(totalFamilies, 393);
     // A referenced family remains transition-only when it has neither a
     // uniform tile nor a one-on-three authored stamp.
-    QCOMPARE(transitionSupportFamilies, 17);
+    QCOMPARE(transitionSupportFamilies, 15);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -6156,8 +6155,9 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // anchor. Keep them as transition support rather than leaking a mixed
     // thumbnail into the brush palette.
     // R102 applies the explicit brush-inventory merges and names while leaving
-    // false-uniform and probable-family leads out of the paint palette.
-    QCOMPARE(landFamilyCount, 81);
+    // false-uniform and probable-family leads out of the paint palette. R112
+    // adds the reviewed Zone10 Slabs / Faces irregular uniform brush family.
+    QCOMPARE(landFamilyCount, 82);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);

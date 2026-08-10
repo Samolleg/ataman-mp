@@ -3426,13 +3426,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r110_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the safe reviewed R110 catalog verbatim."""
+    def test_r112_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the safe reviewed R112 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "ef9a8a92f1b9a6da6b0e1c3b7cca1de90c1039f99056ddf88336c11acdf80960",
+            "0c1997127002a3f903c8300fccddb1e8765b1c68db1cdefb211addb8ec85f78d",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -3805,6 +3805,17 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
         decisions = json.loads((
             root / "scripts" / "semantic_atlas_r106_consolidated_decisions.json"
         ).read_text(encoding="utf-8"))
+        later_reviews = [json.loads((
+            root / "scripts" / name
+        ).read_text(encoding="utf-8")) for name in (
+            "semantic_atlas_r110_consolidated_decisions.json",
+            "semantic_atlas_r111_consolidated_decisions.json",
+            "semantic_atlas_r112_consolidated_decisions.json",
+        )]
+        later_corrections = [{
+            key.casefold(): value
+            for key, value in review.get("cornerCorrections", {}).items()
+        } for review in later_reviews]
         presets = {entry["namespace"].casefold(): entry
                    for entry in catalog["presets"]}
 
@@ -3826,6 +3837,10 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
             for slot_text, corners in slots.items():
                 slot = int(slot_text)
                 for corner_name, expected in corners.items():
+                    for corrections in later_corrections:
+                        expected = corrections.get(
+                            namespace.casefold(), {}).get(
+                                slot_text, {}).get(corner_name, expected)
                     corner = {"NW": 0, "NE": 1, "SE": 2, "SW": 3}[
                         corner_name]
                     actual = names[payload[slot * 4 + corner]]
@@ -3934,6 +3949,45 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
                 self.assertNotIn(
                     "Ground / Trampled",
                     {row["name"] for row in preset["families"]})
+
+    def test_r112_applies_every_explicit_and_exact_alias_mapping(self) -> None:
+        """R112 is a complete replay of the 35 reviewed source groups."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r112_consolidated_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        self.assertEqual(35, decisions["counts"]["submittedCards"])
+        self.assertEqual(63, sum(len(slots) for slots in
+                                 decisions["cornerCorrections"].values()))
+        self.assertEqual(252, sum(
+            len(corners)
+            for slots in decisions["cornerCorrections"].values()
+            for corners in slots.values()))
+        for namespace, slots in decisions["cornerCorrections"].items():
+            preset = presets[namespace.casefold()]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            for slot_text, expected in slots.items():
+                offset = int(slot_text) * 4
+                actual = [names[value]
+                          for value in payload[offset:offset + 4]]
+                self.assertEqual(
+                    [expected[name] for name in ("NW", "NE", "SE", "SW")],
+                    actual, f"{namespace} slot {slot_text}")
+
+        zone10 = presets["zone10"]
+        irregular = next(row for row in zone10["families"]
+                         if row["name"] == "Slabs / Faces irregular")
+        self.assertEqual(8, irregular["id"])
+        self.assertEqual(396, irregular["thumbnailSlot"])
+        self.assertTrue(irregular["paintSelectable"])
 
 
 if __name__ == "__main__":
