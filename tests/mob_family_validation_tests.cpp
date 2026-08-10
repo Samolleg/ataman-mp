@@ -341,9 +341,10 @@ void MobFamilyValidationTests::authoredZeroNidIsCriticalAndBlocksRuntimePrefligh
     QCOMPARE(finding->nid, quint32(0));
     QCOMPARE(finding->locations.size(), 1);
     QVERIFY(finding->locations.first().startsWith(path + ":"));
-    QVERIFY(finding->message.contains("map unload removes only objects with positive IDs",
-                                      Qt::CaseInsensitive));
-    QVERIFY(finding->message.contains("Assign a unique positive NID"));
+    QVERIFY(finding->message.contains("Object \"unit\" in zero.mob has NID 0"));
+    QVERIFY(finding->message.contains("NID 0 is invalid for map objects"));
+    QVERIFY(finding->message.contains("may cause the game to crash"));
+    QVERIFY(finding->message.contains("unique positive NID"));
     QVERIFY(report.hasBlockingRuntimeFindings());
     QCOMPARE(report.blockingRuntimeFindings().size(), 1);
 }

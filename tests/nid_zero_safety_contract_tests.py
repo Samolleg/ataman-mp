@@ -19,6 +19,11 @@ def main() -> None:
     main_window = (ROOT / "source/app/main_window.cpp").read_text(encoding="utf-8")
     mob = (ROOT / "source/mob/mob.cpp").read_text(encoding="utf-8")
 
+    if 'QMessageBox::critical(nullptr, "Critical runtime compatibility notice"' in mob:
+        raise AssertionError("critical MOB findings must use the normal warning presentation")
+    if 'QMessageBox::warning(nullptr, "MOB validation warning"' not in mob:
+        raise AssertionError("critical MOB findings need the standard high-tier warning path")
+
     on_param = view[view.index("void CView::onParamChange("):]
     on_param = on_param[:on_param.index("bool CView::applyFamilyNidRepairs")]
     require_order(on_param, "isAuthorableObjectNid", "m_pUndoStack->beginMacro",

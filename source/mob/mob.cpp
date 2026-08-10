@@ -1025,8 +1025,9 @@ int CMob::readMob(QFileInfo &path)
         if(!criticalValidationMessages.isEmpty())
         {
             criticalValidationMessages.removeDuplicates();
-            QMessageBox::critical(nullptr, "Critical runtime compatibility notice",
-                QString("This MOB remains open so the affected records can be repaired.\n\n%1")
+            QMessageBox::warning(nullptr, "MOB validation warning",
+                QString("Validation found an issue that may cause crashes in game.\n\n%1\n\n"
+                        "Fix the affected object before testing this map.")
                     .arg(criticalValidationMessages.join("\n\n")));
         }
         const SBackupResult openBackup = CBackupManager().snapshotOnOpen(m_filePath);

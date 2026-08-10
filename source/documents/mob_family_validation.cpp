@@ -1309,15 +1309,18 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
             report.nidOwners[object.nid].append(owner);
             if(!isAuthorableObjectNid(object.nid))
             {
+                const QString objectLabel = object.name.trimmed().isEmpty()
+                    ? QString("Object at %1").arg(object.sectionPath)
+                    : QString("Object \"%1\"").arg(object.name);
                 SMobFamilyFinding finding;
                 finding.severity = EMobFamilyFindingSeverity::Critical;
                 finding.code = "nid.zero_reserved";
                 finding.category = "Object ID";
                 finding.message = QString(
-                    "Authored object NID 0 occupies the client-retained ID space. "
-                    "Map unload removes only objects with positive IDs, so this object can "
-                    "survive transitions with live resources. Assign a unique positive NID "
-                    "and review its references.");
+                    "%1 in %2 has NID 0. NID 0 is invalid for map objects and may cause "
+                    "the game to crash during map transitions. Assign this object a unique "
+                    "positive NID, then review any references to the old ID.")
+                    .arg(objectLabel, member.fileName);
                 finding.locations << member.path + ":" + object.sectionPath;
                 finding.hasNid = true;
                 finding.nid = object.nid;

@@ -941,7 +941,9 @@ void EnduranceDocumentTests::authoredZeroNidCanOpenAndSaveLosslessly()
         ++reservedFindings;
         QCOMPARE(finding.severity, EValidationSeverity::Critical);
         QVERIFY(finding.location.contains("OBJECT"));
-        QVERIFY(finding.message.contains("Map unload removes only objects with positive IDs"));
+        QVERIFY(finding.message.contains("Object \"legacy-zero\""));
+        QVERIFY(finding.message.contains("NID 0 is invalid for map objects"));
+        QVERIFY(finding.message.contains("may cause the game to crash"));
     }
     QCOMPARE(reservedFindings, 1);
 }

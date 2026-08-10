@@ -11776,9 +11776,10 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
         {
             ei::log(eLogWarning, "Rejected authored object NID 0 before property mutation");
             QMessageBox::warning(this, tr("Reserved object ID"), tr(
-                "Authored object NID 0 occupies the client-retained ID space. Map unload "
-                "removes only objects with positive IDs, so this object could survive map "
-                "transitions. Assign a unique positive NID instead."));
+                "Object \"%1\" has NID 0. NID 0 is invalid for map objects and may cause "
+                "the game to crash. Assign this object a unique positive NID instead.")
+                .arg(targets.first()->mapName().isEmpty()
+                    ? tr("unnamed object") : targets.first()->mapName()));
             return;
         }
     }
@@ -11941,7 +11942,8 @@ void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& prope
         {
             ei::log(eLogWarning, "Rejected property paste containing authored object NID 0");
             QMessageBox::warning(this, tr("Reserved object ID"), tr(
-                "Property paste was cancelled because authored object NID 0 is reserved. "
+                "Property paste was cancelled because NID 0 is invalid for map objects and "
+                "may cause the game to crash. Assign a unique positive NID instead. "
                 "Nothing was changed."));
             return;
         }

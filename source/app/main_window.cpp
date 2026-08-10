@@ -3481,10 +3481,9 @@ void MainWindow::launchCurrentMapTest()
             .arg(hotReloadRequested ? tr("Hot Reload Map") : tr("Test Current Map"),
                  validationWarningPreview(blockers)));
         QMessageBox::critical(this, tr("Map test blocked"), tr(
-            "The active runtime MOB family contains an authored object with NID 0. "
-            "Map unload removes only positive-ID objects, so testing this map could retain "
-            "the object across a transition. Assign a unique positive NID and review its "
-            "references first.\n\n%1").arg(validationWarningPreview(blockers)));
+            "This map contains an object with NID 0. NID 0 is invalid for map objects and "
+            "may cause the game to crash. Assign the affected object a unique positive NID "
+            "before testing the map.\n\n%1").arg(validationWarningPreview(blockers)));
         return;
     }
     notifyFamilyPreflight(hotReloadRequested ? tr("Hot Reload Map") : tr("Test Current Map"));

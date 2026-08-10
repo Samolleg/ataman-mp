@@ -2765,12 +2765,19 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
         {
             counts[object.nid] += 1;
             if(object.nid == 0 && report)
+            {
+                const QString objectLabel = object.name.trimmed().isEmpty()
+                    ? QString("Object at %1").arg(object.sectionPath)
+                    : QString("Object \"%1\"").arg(object.name);
+                const QString mobLabel = sourceInfo.fileName().isEmpty()
+                    ? sourcePath : sourceInfo.fileName();
                 report->add("nid.zero_reserved", EValidationSeverity::Critical,
-                    "Authored object NID 0 occupies the client-retained ID space. "
-                    "Map unload removes only objects with positive IDs, so this object can "
-                    "survive transitions with live resources. Assign a unique positive NID "
-                    "and review its references.",
+                    QString("%1 in %2 has NID 0. NID 0 is invalid for map objects and may "
+                            "cause the game to crash during map transitions. Assign this "
+                            "object a unique positive NID, then review any references to the old ID.")
+                        .arg(objectLabel, mobLabel),
                     sourcePath + ":" + object.sectionPath);
+            }
         }
     }
     for(auto countIt = counts.constBegin(); countIt != counts.constEnd(); ++countIt)
