@@ -40,6 +40,11 @@ R106_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r106_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R107_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r107_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -2859,6 +2864,23 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                     "newFamilies"].get(namespace, [])
             }
             if family_name in new_family_names and "bindings" not in recipe:
+                continue
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R107 resolves the remaining explicit corrections from the consolidated
+    # R106 follow-up. Confirmations that already match the catalog remain in
+    # the review record but do not manufacture redundant rewrites. Exact
+    # binding propagation is enumerated in the decision file; byte-distinct
+    # sibling atlases stay independent review targets.
+    for slot_text, corner_values in R107_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            if (isinstance(family_name, str)
+                    and not any(family.get("suggestedName")
+                                for family in recipe["families"])):
                 continue
             corrections[(slot_index, {
                 "NW": 0, "NE": 1, "SE": 2, "SW": 3,

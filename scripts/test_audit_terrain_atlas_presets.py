@@ -3412,13 +3412,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r106_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the reviewed R106 catalog verbatim."""
+    def test_r107_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the reviewed R107 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "178bce185b8bf2c5c787ef7f452b638096c2b4489f5a2ca25f361895a59f2d80",
+            "91a99f0337ac9b271665f01734e77673bdd6fb877fab5c3c2164e01cd118b639",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -3839,6 +3839,48 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
         # but the unreviewed duplicate slots were never mutated by propagation.
         self.assertNotIn("125", decisions["cornerCorrections"]["bz11k"])
         self.assertNotIn("172", decisions["cornerCorrections"]["bz5g"])
+
+    def test_r107_applies_only_explicit_correction_and_preserves_confirmations(self) -> None:
+        """R107 changes bz4g/Zone4 slot 280 NE and records confirmations."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r107_consolidated_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        expected = {
+            "bz16h:166": ["Ground / Red", "Ground / Plant soil",
+                           "Ground / Plant soil", "Ground / Plant soil"],
+            "zone3obr:8": ["Ground / Dry"] * 4,
+            "bz5g:173": ["Sand / Common", "Sand / Grainy",
+                          "Sand / Grainy", "Sand / Grainy"],
+            "zone7:133": ["Ground / Dark brown"] * 4,
+        }
+        for identity, names_expected in expected.items():
+            namespace, slot_text = identity.split(":")
+            preset = presets[namespace]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            slot = int(slot_text)
+            self.assertEqual(names_expected, [
+                names[value] for value in payload[slot * 4:slot * 4 + 4]
+            ])
+
+        for namespace in ("bz4g", "zone4"):
+            preset = presets[namespace]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            self.assertEqual("Ground / Common", names[payload[280 * 4 + 1]])
+        self.assertEqual({"bz4g", "zone4"}, {
+            namespace.casefold()
+            for namespace in decisions["cornerCorrections"]
+        })
 
 
 if __name__ == "__main__":
