@@ -2732,6 +2732,9 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     QMap<int, int> authoredOutput;
     QMap<int, int> generatedOutput;
     QVector<QImage> denseImages;
+    // Runtime terrain type is part of physical authored identity. Some stock
+    // atlases intentionally reuse identical pixels for distinct gameplay
+    // terrain classes, so those aliases must not be deduplicated together.
     QMap<QByteArray, QVector<int>> exactAuthoredOutputs;
     const CTerrainTransitionCatalog& decodeCatalog = authoredDecodeCatalog
         ? *authoredDecodeCatalog : m_catalog;
@@ -2767,8 +2770,10 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             && candidate.canonicalSignature.southEast > 0
             && candidate.canonicalSignature.southWest > 0;
 
-        const QVector<int> matchingHashes =
-            exactAuthoredOutputs.value(candidate.pixelSha256);
+        const QByteArray dedupeKey = candidate.pixelSha256
+            + QByteArray(1, '\0')
+            + QByteArray::number(candidate.runtimeTerrainType);
+        const QVector<int> matchingHashes = exactAuthoredOutputs.value(dedupeKey);
         for(int outputSlot : matchingHashes)
         {
             const STerrainFinalizedTile& retained = result.tiles.at(outputSlot);
@@ -2781,7 +2786,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             {
                 result.error = QStringLiteral(
                     "Exact authored artwork conflict between source slots %1 and %2; "
-                    "their semantic corners or runtime terrain types differ. "
+                    "their semantic corners differ despite matching pixels and "
+                    "runtime terrain type. "
                     "Finalization was refused pending semantic review.")
                     .arg(retained.sourceSlot).arg(sourceSlot);
                 if(report) report->add(
@@ -2809,7 +2815,7 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         result.authoredSlotRemap.insert(sourceSlot, outputSlot);
         denseImages.append(candidate.pixels);
         result.tiles.append(candidate);
-        exactAuthoredOutputs[candidate.pixelSha256].append(outputSlot);
+        exactAuthoredOutputs[dedupeKey].append(outputSlot);
         return true;
     };
     for(int y = 0; y < field.tileHeight(); ++y)

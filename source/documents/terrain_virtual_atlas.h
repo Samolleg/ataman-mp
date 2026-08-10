@@ -65,8 +65,10 @@ struct STerrainFinalizedTile
     int sourceSlot{-1};
     QString sourceNamespace;
     // Every authored physical slot represented by this retained artwork.
-    // Exact-pixel duplicates may share one finalized slot, but diagnostics
-    // and portable profiles keep the complete source identity set.
+    // Exact-pixel duplicates with the same runtime terrain type may share one
+    // finalized slot, but diagnostics and portable profiles keep the complete
+    // source identity set. Same-pixel aliases with different runtime types are
+    // distinct authored identities and must remain separate.
     QVector<int> sourceSlotAliases;
     // Empty for original map slots. Imported exact tiles and generated tiles
     // record their physical artwork provenance.

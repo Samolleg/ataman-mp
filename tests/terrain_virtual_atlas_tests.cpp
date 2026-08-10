@@ -473,6 +473,7 @@ private slots:
     void mapWideUsageAndUnusedCompaction();
     void exactAuthoredDuplicatesAreRemappedBeforeCapacity();
     void exactAuthoredDuplicatesUseCrossLayerDecodeCatalog();
+    void exactAuthoredDuplicatesWithDifferentRuntimeTypesRemainDistinct();
     void exactAuthoredDuplicateConflictFailsClosed();
     void exactAuthoredDuplicateRemapPreservesPackedRotationsAfterReopen();
     void finalizesAtValidatedRuntimeCeilingBeyond512();
@@ -2835,6 +2836,53 @@ void TerrainVirtualAtlasTests::exactAuthoredDuplicatesUseCrossLayerDecodeCatalog
     QCOMPARE(retained.sourceSlotAliases, QVector<int>({0, 1}));
     QCOMPARE(retained.runtimeTerrainType, qint32(14));
     QCOMPARE(retained.canonicalSignature, signature(2, 2, 2, 2));
+}
+
+void TerrainVirtualAtlasTests::exactAuthoredDuplicatesWithDifferentRuntimeTypesRemainDistinct()
+{
+    CTerrainTransitionCatalog catalog;
+    const QImage shared = solid(qRgba(135, 75, 55, 255));
+    QVector<QImage> images = {shared, shared};
+    for(int slot = 0; slot < images.size(); ++slot)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature = signature(1, 1, 1, 1);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1, 1));
+    SMprPackedTile stoneAlias;
+    stoneAlias.tileIndex = 0;
+    SMprPackedTile groundAlias;
+    groundAlias.tileIndex = 1;
+    CTestTerrainVirtualAtlas atlas(
+        catalog, images, 0, {}, {}, true, {2, 1}, {{1, 2}});
+    CValidationReport report;
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("RuntimeTypedDuplicate"), 2, {2, 1},
+        &report, {stoneAlias.encode(), groundAlias.encode()});
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n")
+                        + report.toText()));
+    QCOMPARE(finalized.requiredSlots, 2);
+    QVERIFY(finalized.authoredSlotRemap.value(0)
+            != finalized.authoredSlotRemap.value(1));
+    QCOMPARE(finalized.tiles.at(finalized.authoredSlotRemap.value(0))
+                 .runtimeTerrainType,
+             qint32(2));
+    QCOMPARE(finalized.tiles.at(finalized.authoredSlotRemap.value(1))
+                 .runtimeTerrainType,
+             qint32(1));
+    QCOMPARE(finalized.tiles.at(finalized.authoredSlotRemap.value(0))
+                 .sourceSlotAliases,
+             QVector<int>({0}));
+    QCOMPARE(finalized.tiles.at(finalized.authoredSlotRemap.value(1))
+                 .sourceSlotAliases,
+             QVector<int>({1}));
 }
 
 void TerrainVirtualAtlasTests::exactAuthoredDuplicateConflictFailsClosed()
