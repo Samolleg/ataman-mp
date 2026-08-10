@@ -3406,13 +3406,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r102_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the reviewed R102 catalog verbatim."""
+    def test_r105_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the reviewed R105 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "0411d38de59c255d36448203f4522939b4d43191ad07e45eda882291aa09519b",
+            "bd8f7c8d4fbd279c9be8adf56244219f0c456388b274333814aa0a86a23981dd",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -3664,6 +3664,61 @@ class ArchiveCoverageTests(unittest.TestCase):
 
         self.assertTrue(archive_contains_preset(complete, preset))
         self.assertFalse(archive_contains_preset(missing_middle, preset))
+
+
+class R105AuthoredBlendDecisionTests(unittest.TestCase):
+    def test_r105_applies_only_reviewed_authored_blend_corners(self) -> None:
+        """R105 replaces all six marked signatures in engine corner order."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        expected = {
+            ("bz3g", 204): ["Ground / Common", "Grass / Sparse light",
+                             "Stone / Lime", "Stone / Lime"],
+            ("bz3g", 218): ["Ground / Common", "Grass / Sparse light",
+                             "Grass / Sparse light", "Stone / Lime"],
+            ("bz3g", 281): ["Grass / Dark", "Stone / Grayish",
+                             "Grass / Sparse light", "Stone / Grayish"],
+            ("bz3g", 470): ["Grass / Sparse light", "Grass / Sparse light",
+                             "Grass / Sparse dark", "Stone / Lime"],
+            ("zone6_2", 390): ["Stone / Lime", "Grass / Common",
+                                "Ground / Dead", "Ground / Dead"],
+            ("zone7", 249): ["Ground / Brown", "Grass / Fresh",
+                              "Grass / Fresh", "Grass / Fresh"],
+        }
+        for (namespace, slot), names_expected in expected.items():
+            preset = presets[namespace]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            actual = [names[value]
+                      for value in payload[slot * 4:slot * 4 + 4]]
+            with self.subTest(namespace=namespace, slot=slot):
+                self.assertEqual(names_expected, actual)
+
+    def test_r105_does_not_propagate_across_nonidentical_bindings(self) -> None:
+        """Similar sibling maps are evidence leads, not exact propagation peers."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        def binding(namespace: str, variant: str) -> str:
+            return next(row["pixelSha256"] for row in presets[namespace]["bindings"]
+                        if row["variant"] == variant)
+
+        for left, right in (("bz3g", "zone9"),
+                            ("zone6_2", "zone6")):
+            for variant in ("hd", "original"):
+                with self.subTest(left=left, right=right, variant=variant):
+                    self.assertNotEqual(binding(left, variant),
+                                        binding(right, variant))
 
 
 if __name__ == "__main__":

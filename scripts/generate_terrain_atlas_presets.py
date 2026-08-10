@@ -30,6 +30,11 @@ R102_BRUSH_REVIEW = json.loads(
         "semantic_atlas_r102_brush_inventory_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R105_AUTHORED_BLEND_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r105_authored_blend_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -2808,6 +2813,20 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     family_aliases.update({int(key): int(value)
                            for key, value in r102_aliases.items()})
     for slot_text, corner_values in R102_BRUSH_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R105 exact authored-blend review. The source report records exact
+    # namespace, authored slot, pixel hash, and packed rotation. Answers are
+    # serialized in engine order NW,NE,SE,SW; the visual questionnaire's
+    # NW/NE over SW/SE layout does not change these indices. Similar sibling
+    # atlases with different HD/original binding hashes are deliberately not
+    # propagated.
+    for slot_text, corner_values in R105_AUTHORED_BLEND_REVIEW[
             "cornerCorrections"].get(namespace, {}).items():
         slot_index = int(slot_text)
         for corner_name, family_name in corner_values.items():
