@@ -63,6 +63,7 @@ struct STerrainFinalizedTile
     QByteArray pixelSha256;
     bool authored{false};
     int sourceSlot{-1};
+    QString sourceNamespace;
     // Empty for original map slots. Imported exact tiles and generated tiles
     // record their physical artwork provenance.
     QString blendProvenance;
@@ -101,6 +102,32 @@ struct STerrainAtlasFinalization
     QMap<int, int> authoredSlotRemap;
     STerrainAtlasUsage usage;
     QByteArray stableSha256;
+};
+
+enum class ETerrainWorkingTileOrigin
+{
+    Unknown,
+    AuthoredMap,
+    ImportedAuthored,
+    CanonicalGenerated
+};
+
+// Stable diagnostic identity for one physical slot in the live working
+// cache.  A working slot number is intentionally not source provenance: the
+// slot may be recycled while editing, so issue reports must capture this
+// record while the marked artwork is still live.
+struct STerrainWorkingTileIdentity
+{
+    ETerrainWorkingTileOrigin origin{ETerrainWorkingTileOrigin::Unknown};
+    int workingSlot{-1};
+    int sourceSlot{-1};
+    QString sourceNamespace;
+    STerrainTransitionSignature canonicalSignature;
+    QByteArray physicalPixelSha256;
+    QString blendProvenance;
+    bool stockDerivedBlend{false};
+    bool canonicalGeneratedBlend{false};
+    qint32 runtimeTerrainType{-1};
 };
 
 struct STerrainPortableAtlasPackage
@@ -168,7 +195,9 @@ public:
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
-        CValidationReport* report = nullptr);
+        CValidationReport* report = nullptr,
+        const QString& sourceNamespace = QString(),
+        int sourceSlot = -1);
     QVector<STerrainVirtualTile> authoredLibraryVariants(
         const STerrainTransitionSignature& signature,
         qint32 preferredPaintMaterial = 0,
@@ -327,6 +356,8 @@ public:
     QVector<QImage> activeTileImages() const;
     QVector<qint32> activeTileTypes() const;
     qint32 runtimeTerrainTypeForSlot(int slot) const;
+    bool tileIdentityForSlot(int slot,
+                             STerrainWorkingTileIdentity* identity) const;
     int capacityLimit() const { return m_capacityLimit; }
     int generatedTileCount() const;
     int activeTextureCount() const;
@@ -336,7 +367,9 @@ public:
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
-        CValidationReport* report = nullptr);
+        CValidationReport* report = nullptr,
+        const QString& sourceNamespace = QString(),
+        int sourceSlot = -1);
     bool addStockBlendMaskTemplate(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),

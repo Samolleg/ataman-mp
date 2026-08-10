@@ -263,7 +263,7 @@ QVector<quint16> pinnedOverlay(const CTerrainEditModel& terrain)
 QMap<qint32, QImage> globalSources(
     const QVector<STerrainGlobalMaterialFamily>& families,
     StockAssets* assets, const QSize& tileSize, QJsonArray* sourceManifest,
-    QString* error)
+    QString* error, const QString& preferredNamespace = QString())
 {
     QMap<qint32, QImage> result;
     for(const STerrainGlobalMaterialFamily& family : families)
@@ -274,7 +274,17 @@ QMap<qint32, QImage> globalSources(
         STerrainGlobalMaterialSource chosen;
         QSize chosenSourceSize;
         QJsonArray candidateSizes;
-        for(const STerrainGlobalMaterialSource& source : family.sources)
+        QVector<STerrainGlobalMaterialSource> orderedSources = family.sources;
+        std::stable_sort(orderedSources.begin(), orderedSources.end(),
+            [&preferredNamespace](const STerrainGlobalMaterialSource& left,
+                                  const STerrainGlobalMaterialSource& right) {
+                const bool leftPreferred = left.mprNamespace.compare(
+                    preferredNamespace, Qt::CaseInsensitive) == 0;
+                const bool rightPreferred = right.mprNamespace.compare(
+                    preferredNamespace, Qt::CaseInsensitive) == 0;
+                return leftPreferred && !rightPreferred;
+            });
+        for(const STerrainGlobalMaterialSource& source : orderedSources)
         {
             Atlas atlas = assets->atlas(source.mprNamespace,
                                         source.textureCount * 64, nullptr);
@@ -1182,9 +1192,11 @@ QJsonObject buildIssueJunctionMaskReview(
                 runtimeTypes.insert(material.id, material.runtimeTerrainType);
         }
     QJsonArray sourceManifest;
+    const QString reportNamespace = reportDocument.object()
+        .value(QStringLiteral("mprNamespace")).toString();
     const QMap<qint32, QImage> externalSources = globalSources(
         materials, stockAssets, sourceAtlas.tiles.front().size(),
-        &sourceManifest, error);
+        &sourceManifest, error, reportNamespace);
     if(externalSources.size() != names.size()) return {};
     const CTerrainTransitionCatalog catalog =
         CTerrainAtlasPresetCatalog::globalizedCatalog(
@@ -1210,6 +1222,7 @@ QJsonObject buildIssueJunctionMaskReview(
     QMap<QString, QJsonObject> groups;
     QSet<QString> seenCells;
     QSet<QString> seenNoBlendCells;
+    QSet<qint32> reportedMaterials;
     int uniformSignatureCells = 0;
     int twoMaterialCells = 0;
     const QJsonArray marks = reportDocument.object()
@@ -1249,6 +1262,7 @@ QJsonObject buildIssueJunctionMaskReview(
             QSet<qint32> unique;
             unique << signature.northWest << signature.northEast
                    << signature.southEast << signature.southWest;
+            reportedMaterials.unite(unique);
             if(!seenNoBlendCells.contains(cellKey))
             {
                 seenNoBlendCells.insert(cellKey);
@@ -1386,6 +1400,96 @@ QJsonObject buildIssueJunctionMaskReview(
     QJsonArray groupArray;
     for(auto group = groups.constBegin(); group != groups.constEnd(); ++group)
         groupArray.append(group.value());
+    QJsonArray reportedSourceManifest;
+    QVector<QJsonObject> reportedSourceCards;
+    for(const QJsonValue& sourceValue : sourceManifest)
+    {
+        QJsonObject source = sourceValue.toObject();
+        const qint32 materialId = qint32(source
+            .value(QStringLiteral("material_id")).toDouble());
+        if(!reportedMaterials.contains(materialId))
+            continue;
+        const QString imageFile = QStringLiteral("images/uniform-source-%1.png")
+            .arg(materialId);
+        const QString imagePath = QDir(outputDirectory).filePath(imageFile);
+        if(!externalSources.value(materialId).save(imagePath, "PNG"))
+        {
+            if(error) *error = QStringLiteral("Could not write %1")
+                .arg(imagePath);
+            return {};
+        }
+        source.insert(QStringLiteral("image_file"), imageFile);
+        source.insert(QStringLiteral("image_file_sha256"),
+                      QString::fromLatin1(fileSha256(imagePath)));
+        reportedSourceManifest.append(source);
+        reportedSourceCards.append(source);
+    }
+    std::sort(reportedSourceCards.begin(), reportedSourceCards.end(),
+        [](const QJsonObject& left, const QJsonObject& right) {
+            return left.value(QStringLiteral("material")).toString()
+                .localeAwareCompare(right.value(
+                    QStringLiteral("material")).toString()) < 0;
+        });
+    QByteArray sourceReviewHtml(
+        "<!doctype html><meta charset=\"utf-8\"><title>Reported uniform source audit</title>"
+        "<style>body{font-family:sans-serif;background:#181818;color:#eee;margin:20px}"
+        ".grid{display:grid;grid-template-columns:repeat(4,minmax(260px,1fr));gap:18px}"
+        ".card{background:#252525;padding:12px;border-radius:8px}img{width:256px;height:256px;"
+        "image-rendering:auto;display:block;margin:auto}.name{font-weight:700;margin-top:10px}"
+        ".source{color:#bbb;margin-top:4px}</style><h1>Uniform sources used by reported Zone 1 blends</h1>"
+        "<p>These are the exact preferred authored inputs selected by the same source-routing rule as the live painter.</p><div class=\"grid\">");
+    for(const QJsonObject& source : reportedSourceCards)
+    {
+        const QString card = QStringLiteral(
+            "<section class=\"card\"><img src=\"%1\"><div class=\"name\">%2</div>"
+            "<div class=\"source\">%3 slot %4</div></section>")
+            .arg(source.value(QStringLiteral("image_file")).toString(),
+                 source.value(QStringLiteral("material")).toString()
+                    .toHtmlEscaped(),
+                 source.value(QStringLiteral("source_namespace")).toString()
+                    .toHtmlEscaped())
+            .arg(source.value(
+                QStringLiteral("reviewed_pure_anchor_slot")).toInt());
+        sourceReviewHtml.append(card.toUtf8());
+    }
+    sourceReviewHtml.append("</div>");
+    const QString sourceReviewFile = QStringLiteral(
+        "reported-uniform-sources.html");
+    const QString sourceReviewPath = QDir(outputDirectory)
+        .filePath(sourceReviewFile);
+    if(!writeBytes(sourceReviewPath, sourceReviewHtml, error))
+        return {};
+    const int sourceColumns = 4;
+    const int sourceTileSize = 256;
+    const int sourceRows = (reportedSourceCards.size() + sourceColumns - 1)
+        / sourceColumns;
+    QImage sourceSheet(sourceColumns * sourceTileSize,
+                       qMax(1, sourceRows) * sourceTileSize,
+                       QImage::Format_RGB888);
+    sourceSheet.fill(QColor(28, 28, 28));
+    QPainter sourcePainter(&sourceSheet);
+    sourcePainter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    for(int index = 0; index < reportedSourceCards.size(); ++index)
+    {
+        const qint32 materialId = qint32(reportedSourceCards.at(index)
+            .value(QStringLiteral("material_id")).toDouble());
+        sourcePainter.drawImage(
+            QRect((index % sourceColumns) * sourceTileSize,
+                  (index / sourceColumns) * sourceTileSize,
+                  sourceTileSize, sourceTileSize),
+            externalSources.value(materialId));
+    }
+    sourcePainter.end();
+    const QString sourceSheetFile = QStringLiteral(
+        "reported-uniform-sources.png");
+    const QString sourceSheetPath = QDir(outputDirectory)
+        .filePath(sourceSheetFile);
+    if(!sourceSheet.save(sourceSheetPath, "PNG"))
+    {
+        if(error) *error = QStringLiteral("Could not write %1")
+            .arg(sourceSheetPath);
+        return {};
+    }
     const QString presetPath = QDir(QCoreApplication::applicationDirPath())
         .absoluteFilePath(QStringLiteral(
             "../../assets/resources/terrain_atlas_presets.json"));
@@ -1413,6 +1517,16 @@ QJsonObject buildIssueJunctionMaskReview(
     manifest.insert(QStringLiteral("mask_groups"), groupArray);
     manifest.insert(QStringLiteral("examples"), examples);
     manifest.insert(QStringLiteral("reviewed_pure_sources"), sourceManifest);
+    manifest.insert(QStringLiteral("reported_uniform_sources"),
+                    reportedSourceManifest);
+    manifest.insert(QStringLiteral("reported_uniform_source_review"),
+                    sourceReviewFile);
+    manifest.insert(QStringLiteral("reported_uniform_source_review_sha256"),
+                    QString::fromLatin1(fileSha256(sourceReviewPath)));
+    manifest.insert(QStringLiteral("reported_uniform_source_sheet"),
+                    sourceSheetFile);
+    manifest.insert(QStringLiteral("reported_uniform_source_sheet_sha256"),
+                    QString::fromLatin1(fileSha256(sourceSheetPath)));
     if(!writeBytes(QDir(outputDirectory).filePath(QStringLiteral("manifest.json")),
                    QJsonDocument(manifest).toJson(QJsonDocument::Indented),
                    error))

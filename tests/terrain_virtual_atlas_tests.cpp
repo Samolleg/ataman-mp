@@ -418,6 +418,7 @@ private slots:
     void virtualFieldPaintIsUnboundedByAtlas();
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
+    void workingAtlasReportsLiveImportedAndGeneratedProvenance();
     void nonUniformResolveUsesAuthoredRotationOrGeneratesExact();
     void canonicalMasksAreAvailableWithoutStockTemplates();
     void authoredMapTransitionsDoNotPopulateObsoleteMaskPool();
@@ -1044,6 +1045,69 @@ void TerrainVirtualAtlasTests::authoredGlobalBlendIsImportedBeforeGeneration()
         keptImportedPixels |= tile.authored && tile.sourceSlot < 0
             && tile.pixels == authoredBlend;
     QVERIFY(keptImportedPixels);
+}
+
+void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProvenance()
+{
+    Fixture fixture;
+    CTestTerrainWorkingAtlas working(
+        fixture.catalog, fixture.images, 47u, 32);
+    QVERIFY(working.isValid());
+
+    QMap<int, quint64> usage;
+    for(int slot = 0; slot < fixture.images.size(); ++slot)
+        usage.insert(slot, 1);
+
+    const STerrainTransitionSignature importedSignature =
+        signature(1, 2, 2, 2);
+    QImage importedPixels(8, 8, QImage::Format_RGBA8888);
+    importedPixels.fill(QColor(117, 83, 41));
+    QVERIFY(working.addAuthoredLibraryTransition(
+        importedSignature, importedPixels,
+        QStringLiteral("ZoneReview slot 137"), nullptr,
+        QStringLiteral("ZoneReview"), 137));
+    CValidationReport report;
+    QVERIFY(working.realizeAuthoredLibraryVariants(
+        importedSignature, &usage, {}, &report, 1));
+    bool generated = true;
+    const quint16 importedPacked = working.resolve(
+        importedSignature, 3, 5, &usage, {}, &generated, &report, 1);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(generated); // Imported artwork lives in the extension namespace.
+
+    STerrainWorkingTileIdentity importedIdentity;
+    QVERIFY(working.tileIdentityForSlot(
+        SMprPackedTile::decode(importedPacked).atlasSlot(),
+        &importedIdentity));
+    QCOMPARE(importedIdentity.origin,
+             ETerrainWorkingTileOrigin::ImportedAuthored);
+    QCOMPARE(importedIdentity.blendProvenance,
+             QStringLiteral("ZoneReview slot 137"));
+    QCOMPARE(importedIdentity.sourceNamespace,
+             QStringLiteral("ZoneReview"));
+    QCOMPARE(importedIdentity.sourceSlot, 137);
+    QVERIFY(!importedIdentity.physicalPixelSha256.isEmpty());
+    QVERIFY(importedIdentity.stockDerivedBlend);
+    QVERIFY(!importedIdentity.canonicalGeneratedBlend);
+
+    seedReviewedStockMasks(working, fixture);
+    const STerrainTransitionSignature generatedSignature =
+        signature(1, 2, 3, 4);
+    const quint16 generatedPacked = working.resolve(
+        generatedSignature, 8, 9, &usage, {}, &generated, &report, 1);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(generated);
+    STerrainWorkingTileIdentity generatedIdentity;
+    QVERIFY(working.tileIdentityForSlot(
+        SMprPackedTile::decode(generatedPacked).atlasSlot(),
+        &generatedIdentity));
+    QCOMPARE(generatedIdentity.origin,
+             ETerrainWorkingTileOrigin::CanonicalGenerated);
+    QVERIFY(generatedIdentity.blendProvenance.startsWith(
+        QStringLiteral("canonical-generated:")));
+    QVERIFY(!generatedIdentity.physicalPixelSha256.isEmpty());
+    QVERIFY(!generatedIdentity.stockDerivedBlend);
+    QVERIFY(generatedIdentity.canonicalGeneratedBlend);
 }
 
 void TerrainVirtualAtlasTests::nonUniformResolveUsesAuthoredRotationOrGeneratesExact()

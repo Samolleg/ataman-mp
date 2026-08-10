@@ -2384,7 +2384,8 @@ QImage CTerrainVirtualAtlas::reviewGeneratedJunctionOwnershipMask(
 
 bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     const STerrainTransitionSignature& signature, const QImage& pixels,
-    const QString& sourceLabel, CValidationReport* report)
+    const QString& sourceLabel, CValidationReport* report,
+    const QString& sourceNamespace, int sourceSlot)
 {
     if(!m_valid || pixels.isNull() || pixels.size() != m_authoredTiles.front().size())
     {
@@ -2403,7 +2404,8 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     imported.pixels = pixels.convertToFormat(QImage::Format_RGBA8888);
     imported.pixelSha256 = imageHash(imported.pixels);
     imported.authored = true;
-    imported.sourceSlot = -1;
+    imported.sourceSlot = sourceSlot;
+    imported.sourceNamespace = sourceNamespace;
     imported.blendProvenance = sourceLabel;
     imported.stockDerivedBlend = true;
     const int generatedIndex = m_generatedTiles.size();
@@ -3335,10 +3337,11 @@ int CTerrainWorkingAtlas::generatedTileCount() const
 
 bool CTerrainWorkingAtlas::addAuthoredLibraryTransition(
     const STerrainTransitionSignature& signature, const QImage& pixels,
-    const QString& sourceLabel, CValidationReport* report)
+    const QString& sourceLabel, CValidationReport* report,
+    const QString& sourceNamespace, int sourceSlot)
 {
     return m_resolver && m_resolver->addAuthoredLibraryTransition(
-        signature, pixels, sourceLabel, report);
+        signature, pixels, sourceLabel, report, sourceNamespace, sourceSlot);
 }
 
 bool CTerrainWorkingAtlas::addStockBlendMaskTemplate(
@@ -3400,6 +3403,57 @@ qint32 CTerrainWorkingAtlas::runtimeTerrainTypeForSlot(int slot) const
 {
     return slot >= 0 && slot < m_workingTileTypes.size()
         ? m_workingTileTypes.at(slot) : -1;
+}
+
+bool CTerrainWorkingAtlas::tileIdentityForSlot(
+    int slot, STerrainWorkingTileIdentity* identity) const
+{
+    if(!identity)
+        return false;
+    *identity = STerrainWorkingTileIdentity();
+    if(slot < 0 || slot >= m_workingImages.size()
+       || m_workingImages.at(slot).isNull())
+        return false;
+    const auto mapped = m_workingToVirtual.constFind(slot);
+    if(mapped == m_workingToVirtual.constEnd())
+        return false;
+
+    identity->workingSlot = slot;
+    identity->physicalPixelSha256 = imageHash(m_workingImages.at(slot));
+    identity->runtimeTerrainType = runtimeTerrainTypeForSlot(slot);
+    const bool extensionIdentity = mapped.value().first != 0;
+    const int sourceIndex = mapped.value().second;
+    if(!extensionIdentity)
+    {
+        if(sourceIndex < 0 || sourceIndex >= m_authoredImages.size())
+            return false;
+        identity->origin = ETerrainWorkingTileOrigin::AuthoredMap;
+        identity->sourceSlot = sourceIndex;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(sourceIndex % 64);
+        packed.atlasIndex = quint8(sourceIndex / 64);
+        bool found = false;
+        const STerrainTransitionVariant variant =
+            m_authoredCatalog.variantForPacked(packed.encode(), &found);
+        if(found)
+            identity->canonicalSignature = variant.signature;
+        return true;
+    }
+    if(!m_resolver || sourceIndex < 0
+       || sourceIndex >= m_resolver->generatedTiles().size())
+        return false;
+    const STerrainFinalizedTile& source =
+        m_resolver->generatedTiles().at(sourceIndex);
+    identity->origin = source.authored
+        ? ETerrainWorkingTileOrigin::ImportedAuthored
+        : ETerrainWorkingTileOrigin::CanonicalGenerated;
+    identity->sourceSlot = source.sourceSlot;
+    identity->sourceNamespace = source.sourceNamespace;
+    identity->canonicalSignature = source.canonicalSignature;
+    identity->blendProvenance = source.blendProvenance;
+    identity->stockDerivedBlend = source.stockDerivedBlend;
+    identity->canonicalGeneratedBlend = source.canonicalGeneratedBlend;
+    return true;
 }
 
 QSet<int> CTerrainWorkingAtlas::takeChangedSlots()

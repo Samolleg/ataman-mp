@@ -572,6 +572,8 @@ private:
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainGlobalMaterialFamily> m_terrainGlobalFamilies;
     QMap<qint32, QImage> m_terrainGlobalMaterialSources;
+    QMap<qint32, STerrainGlobalMaterialSource>
+        m_terrainGlobalMaterialSourceIdentities;
     QMap<QString, QImage> m_terrainGlobalUniformTileCache;
     QMultiMap<QByteArray, STerrainGlobalTransitionSource>
         m_terrainGlobalTransitionSources;

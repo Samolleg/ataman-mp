@@ -114,7 +114,8 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
                                QMap<QString, QByteArray>* encodedPageCache,
                                QSet<QString>* missingPageCache,
                                QMap<QString, QImage>* decodedTileCache,
-                               bool thumbnail = false)
+                               bool thumbnail = false,
+                               STerrainGlobalMaterialSource* selectedSource = nullptr)
 {
     QVector<STerrainGlobalMaterialSource> sources = thumbnail
         && !family.thumbnailSources.isEmpty()
@@ -129,6 +130,7 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
             return leftPreferred && !rightPreferred;
         });
     QImage fallback;
+    STerrainGlobalMaterialSource fallbackSource;
     for(const STerrainGlobalMaterialSource& source : sources)
     {
         const QStringList names = ei::terrainTextureResourceNames(
@@ -141,7 +143,10 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
             .arg(pageName).arg(source.uniformSlot % 64)
             .arg(requiredSize.width()).arg(requiredSize.height());
         if(decodedTileCache && decodedTileCache->contains(tileCacheKey))
+        {
+            if(selectedSource) *selectedSource = source;
             return decodedTileCache->value(tileCacheKey);
+        }
         const int localSlot = source.uniformSlot % 64;
         QImage tile;
         QString diagnostic;
@@ -161,15 +166,23 @@ QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
         {
             if(decodedTileCache)
                 decodedTileCache->insert(tileCacheKey, tile);
+            if(selectedSource) *selectedSource = source;
             return tile;
         }
-        if(fallback.isNull()) fallback = tile;
+        if(fallback.isNull())
+        {
+            fallback = tile;
+            fallbackSource = source;
+        }
     }
     // Material identity is independent of a map atlas's native tile
     // resolution. Prefer a same-size reviewed anchor above, but do not make a
     // valid stock JMV family unpaintable when only another resolution exists.
-    return fallback.isNull() ? QImage() : fallback.scaled(
-        requiredSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    if(fallback.isNull())
+        return QImage();
+    if(selectedSource) *selectedSource = fallbackSource;
+    return fallback.scaled(requiredSize, Qt::IgnoreAspectRatio,
+                           Qt::SmoothTransformation);
 }
 
 QMap<qint32, ETerrainBlendStyle> globalMaterialBlendStyles(
@@ -6924,6 +6937,7 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainMaterialRepresentatives.clear();
     m_terrainGlobalFamilies.clear();
     m_terrainGlobalMaterialSources.clear();
+    m_terrainGlobalMaterialSourceIdentities.clear();
     if(m_terrainAtlasAnalysis.usable)
     {
         m_terrainAtlasAnalysis.landCatalog = globalMaterialCatalog(
@@ -6953,10 +6967,11 @@ void CView::rebuildTerrainAutoCatalog()
         QSet<QString> missingGlobalPages;
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
+            STerrainGlobalMaterialSource selectedSource;
             const QImage source = loadGlobalUniformSource(
                 family, mprNamespace, requiredSize,
                 &encodedGlobalPages, &missingGlobalPages,
-                &m_terrainGlobalUniformTileCache);
+                &m_terrainGlobalUniformTileCache, false, &selectedSource);
             if(source.isNull())
             {
                 report.add("terrain.global_family_source",
@@ -6966,6 +6981,8 @@ void CView::rebuildTerrainAutoCatalog()
                 continue;
             }
             m_terrainGlobalMaterialSources.insert(family.id, source);
+            m_terrainGlobalMaterialSourceIdentities.insert(
+                family.id, selectedSource);
             STerrainPaintMaterialChoice choice;
             choice.id = family.id;
             choice.name = family.name;
@@ -7606,7 +7623,8 @@ bool CView::realizeWorkingTerrainSignature(
             const QString label = QStringLiteral("%1 slot %2")
                 .arg(source.mprNamespace).arg(source.slot);
             if(m_workingTerrainAtlas->addAuthoredLibraryTransition(
-                   source.signature, pixels, label, &libraryReport))
+                   source.signature, pixels, label, &libraryReport,
+                   source.mprNamespace, source.slot))
             {
                 importedAny = true;
                 m_importedTerrainTransitions.insert(
@@ -11150,7 +11168,7 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
         root = QJsonObject();
     root.insert(QStringLiteral("schema"),
                 QStringLiteral("ei-mapper-endurance-paint-issue-marks"));
-    root.insert(QStringLiteral("version"), 2);
+    root.insert(QStringLiteral("version"), 3);
     root.insert(QStringLiteral("mprFileName"), m_pLand->filePath().fileName());
     const QString applicationPath = QDir::cleanPath(
         QCoreApplication::applicationDirPath());
@@ -11234,8 +11252,97 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
             tile.insert(QStringLiteral("insideMark"), cells.contains(QPoint(x, y)));
             tile.insert(QStringLiteral("packed"), packedTerrainTileJson(packed));
             const int physicalSlot = SMprPackedTile::decode(packed).atlasSlot();
-            if(m_pTileForm && physicalSlot >= 0
-               && physicalSlot < m_pTileForm->tileImages().size())
+            STerrainWorkingTileIdentity workingIdentity;
+            const bool hasWorkingIdentity = !overlay && m_workingTerrainAtlas
+                && m_workingTerrainAtlas->tileIdentityForSlot(
+                    physicalSlot, &workingIdentity);
+            if(hasWorkingIdentity)
+            {
+                tile.insert(QStringLiteral("physicalPixelSha256"),
+                    QString::fromLatin1(workingIdentity.physicalPixelSha256));
+                QJsonObject identity;
+                QString origin = QStringLiteral("unknown");
+                if(workingIdentity.origin ==
+                   ETerrainWorkingTileOrigin::AuthoredMap)
+                    origin = QStringLiteral("authored-current-map");
+                else if(workingIdentity.origin ==
+                        ETerrainWorkingTileOrigin::ImportedAuthored)
+                    origin = QStringLiteral("authored-global");
+                else if(workingIdentity.origin ==
+                        ETerrainWorkingTileOrigin::CanonicalGenerated)
+                    origin = QStringLiteral("canonical-generated");
+                identity.insert(QStringLiteral("origin"), origin);
+                identity.insert(QStringLiteral("workingSlot"),
+                                workingIdentity.workingSlot);
+                identity.insert(QStringLiteral("sourceNamespace"),
+                    workingIdentity.origin ==
+                            ETerrainWorkingTileOrigin::AuthoredMap
+                        ? namespaceName : workingIdentity.sourceNamespace);
+                identity.insert(QStringLiteral("sourceSlot"),
+                                workingIdentity.sourceSlot);
+                identity.insert(QStringLiteral("blendProvenance"),
+                                workingIdentity.blendProvenance);
+                identity.insert(QStringLiteral("stockDerivedBlend"),
+                                workingIdentity.stockDerivedBlend);
+                identity.insert(QStringLiteral("canonicalGeneratedBlend"),
+                                workingIdentity.canonicalGeneratedBlend);
+                identity.insert(QStringLiteral("runtimeTerrainType"),
+                                workingIdentity.runtimeTerrainType);
+                identity.insert(QStringLiteral("canonicalGridCorners"),
+                    terrainGridSignatureJson(
+                        workingIdentity.canonicalSignature));
+                if(workingIdentity.origin ==
+                   ETerrainWorkingTileOrigin::CanonicalGenerated)
+                {
+                    QSet<qint32> addedMaterials;
+                    QJsonArray inputs;
+                    for(qint32 materialId : {
+                            workingIdentity.canonicalSignature.northWest,
+                            workingIdentity.canonicalSignature.northEast,
+                            workingIdentity.canonicalSignature.southEast,
+                            workingIdentity.canonicalSignature.southWest})
+                    {
+                        if(addedMaterials.contains(materialId))
+                            continue;
+                        addedMaterials.insert(materialId);
+                        const auto source =
+                            m_terrainGlobalMaterialSourceIdentities.constFind(
+                                materialId);
+                        if(source ==
+                           m_terrainGlobalMaterialSourceIdentities.constEnd())
+                            continue;
+                        QString materialName;
+                        for(const STerrainGlobalMaterialFamily& family :
+                                m_terrainGlobalFamilies)
+                            if(family.id == materialId)
+                            {
+                                materialName = family.name;
+                                break;
+                            }
+                        QJsonObject input;
+                        input.insert(QStringLiteral("materialId"), materialId);
+                        input.insert(QStringLiteral("material"), materialName);
+                        input.insert(QStringLiteral("sourceNamespace"),
+                                     source->mprNamespace);
+                        input.insert(QStringLiteral("sourceSlot"),
+                                     source->uniformSlot);
+                        input.insert(QStringLiteral("atlasIdentity"),
+                            QString::fromLatin1(source->atlasIdentity.toHex()));
+                        const auto pixels =
+                            m_terrainGlobalMaterialSources.constFind(materialId);
+                        if(pixels != m_terrainGlobalMaterialSources.constEnd())
+                            input.insert(QStringLiteral("physicalPixelSha256"),
+                                QString::fromLatin1(
+                                    terrainTilePixelSha256(pixels.value())));
+                        inputs.append(input);
+                    }
+                    identity.insert(QStringLiteral("inputUniformSources"),
+                                    inputs);
+                }
+                tile.insert(QStringLiteral("physicalIdentity"), identity);
+            }
+            else if(m_pTileForm && physicalSlot >= 0
+                    && physicalSlot < m_pTileForm->tileImages().size())
                 tile.insert(QStringLiteral("physicalPixelSha256"),
                     QString::fromLatin1(terrainTilePixelSha256(
                         m_pTileForm->tileImages().at(physicalSlot))));
