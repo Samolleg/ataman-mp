@@ -3426,13 +3426,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r108_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the reviewed R108 catalog verbatim."""
+    def test_r110_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the safe reviewed R110 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "33eb47045eb46336dbae80c73e75459b1db50b43757db571f3a74a4c33e57adf",
+            "ef9a8a92f1b9a6da6b0e1c3b7cca1de90c1039f99056ddf88336c11acdf80960",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
