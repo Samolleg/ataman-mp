@@ -18,11 +18,19 @@ start with:
 This is a thread-targeting error, not a damaged repository. Do not retry the
 same projectless worktree operation.
 
-## Correct creation workflow
+## Correct creation workflows
+
+There are two supported workflows. Prefer the native project worktree when the
+Endurance repository is saved as its own Codex project. When only the parent
+`EI` workspace is saved, use the established explicit-worktree fallback used by
+the existing Endurance sibling tasks.
+
+### A. Native saved-project worktree
 
 1. Call `list_projects`.
-2. Select the saved project whose repository root is the
-   `ei-mapper-endurance` checkout. Do not select the parent workspace.
+2. If present, select the saved project whose repository root is the
+   `ei-mapper-endurance` checkout. Do not ask the parent workspace to create a
+   worktree because the parent is not a Git repository.
 3. Call `create_thread` with:
    - `target.type: project`;
    - the returned Endurance `projectId`;
@@ -57,6 +65,34 @@ wait until worker/worktree setup completes
 
 Do not manually invent a `projectId`, derive it from a path, or call a worktree
 fork merely because the current thread can read repository files.
+
+### B. Existing-worktree thread through the saved parent project
+
+Use this fallback when `list_projects` exposes the saved parent `EI` workspace
+but no separately saved `ei-mapper-endurance` project. This is how the existing
+Endurance sibling implementation tasks were started.
+
+1. From the real `ei-mapper-endurance` repository, verify the intended starting
+   commit and that the destination path and branch do not already exist.
+2. Create the isolated worktree explicitly with Git, for example:
+
+   ```text
+   git worktree add -b feature/<task> <workspace>/worktrees/<task> main
+   ```
+
+   Use an existing branch instead of `-b` only when resuming that branch. Never
+   create the worktree from the non-repository parent workspace.
+3. Call `create_thread` against the saved parent `EI` project with
+   `environment: local`, not `environment: worktree`.
+4. In the initial prompt, assign exclusive ownership of the exact worktree path
+   and branch, record the expected starting commit, and forbid edits to the main
+   checkout or other worktrees.
+5. Wait for the thread to start, then confirm from its report that `git status`,
+   branch, and `HEAD` match the assigned worktree before implementation begins.
+
+This is still an isolated implementation thread: isolation comes from the Git
+worktree created in step 2. The Codex thread's displayed project/cwd may remain
+the saved parent workspace, so the explicit path in the prompt is mandatory.
 
 ## Choosing isolation
 
@@ -99,8 +135,8 @@ worker must not **modify** live files while read-only inspection is authorized.
 ## Recovery after a failed creation
 
 1. Leave or archive the failed projectless thread; it has no usable worktree.
-2. Call `list_projects` and verify the Endurance repository project exists.
-3. Create a new project-scoped worktree thread with the workflow above.
-4. If the Endurance project is absent, add/open the repository as a Codex
-   project first. Do not work around the problem by treating the parent
-   workspace as a repository.
+2. Call `list_projects` and determine whether the Endurance repository itself or
+   only the parent `EI` workspace is saved.
+3. Use workflow A for a saved Endurance project, or workflow B for the saved
+   parent project.
+4. Do not retry automatic worktree creation against the parent workspace.
