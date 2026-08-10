@@ -5705,7 +5705,9 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(darkGround->thumbnailSlot, 7);
     for(const qint32 removedId : {7, 13, 15, 16, 18, 22, 23})
         QCOMPARE(bz3gFamily(removedId), bz3g.families.cend());
-    QCOMPARE(bz3g.slotDefinitions.at(108).signature.northWest, qint32(6));
+    // R114 explicitly reclassifies this reviewed corner from Ground / Dead
+    // to Grass / Sparse dark; bz3g does not propagate to byte-distinct Zone9.
+    QCOMPARE(bz3g.slotDefinitions.at(108).signature.northWest, qint32(5));
     QCOMPARE(bz3g.slotDefinitions.at(298).signature.northWest, qint32(2));
     QCOMPARE(bz3g.slotDefinitions.at(450).signature.northEast, qint32(5));
     QCOMPARE(bz3g.slotDefinitions.at(450).signature.southEast, qint32(2));

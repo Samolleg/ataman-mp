@@ -70,6 +70,11 @@ R113_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r113_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R114_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r114_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -2974,6 +2979,17 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     # Stone / Lime tile. Both byte-identical owners are explicit; no broader
     # sibling propagation is inferred.
     for slot_text, corner_values in R113_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R114 applies the user's 50 reviewed audit disagreements plus the one
+    # explicit comment assignment. Exact bz2g/Zone2 and bz4g/Zone4 owners are
+    # enumerated; bz3g is not inferred onto its non-identical Zone9 sibling.
+    for slot_text, corner_values in R114_CONSOLIDATED_REVIEW[
             "cornerCorrections"].get(namespace, {}).items():
         slot_index = int(slot_text)
         for corner_name, family_name in corner_values.items():

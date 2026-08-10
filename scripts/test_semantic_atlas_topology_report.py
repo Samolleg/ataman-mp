@@ -106,9 +106,12 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # Zone17. R112 separates Zone10 slot 396 into one genuine uniform
         # Slabs / Faces irregular family and moves three reviewed pair rows
         # between topology-coverage buckets.
+        # R114 changes only reviewed corner ownership. It retains the same
+        # family/pair denominator while moving seven pair rows among topology
+        # coverage buckets.
         self.assertEqual(1206, report["totalPairCount"])
         self.assertEqual(
-            {"0": 637, "1": 83, "2": 72, "3": 192, "4": 222},
+            {"0": 639, "1": 81, "2": 73, "3": 190, "4": 223},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

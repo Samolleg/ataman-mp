@@ -707,7 +707,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
                 389: {"northWest": 3, "northEast": 5,
                       "southEast": 3, "southWest": 3},
                 330: {"northWest": 1, "northEast": 5,
-                      "southEast": 5, "southWest": 5},
+                      "southEast": 6, "southWest": 5},
             },
         }
         original_families = {
@@ -2902,7 +2902,8 @@ class ReviewDocumentTests(unittest.TestCase):
                 (337, 0): "Grass / Winter normal",
                 (326, 0): "Ground / Light", (327, 0): "Ground / Light",
             },
-            "bz3g": {(186, 1): "Ground / Gravel"},
+            # R114's focused audit review supersedes the older R80 choice.
+            "bz3g": {(186, 1): "Ground / Common"},
             "zone10": {(471, 3): "Slabs / Square"},
             "zone13": {
                 (112, 0): "Ground / Light", (279, 3): "Sand / Common",
@@ -3426,13 +3427,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r113_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the safe reviewed R113 catalog verbatim."""
+    def test_r114_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the safe reviewed R114 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "d0b7a80c6785d0ae1d51d0214c88b439f6f8434ca5bbbd2f49fceb6caa120736",
+            "1e45b37801fc3144770802909ef6f1e6480764222482917785fb282239178ef2",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -4012,6 +4013,50 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
             actual = [names[value]
                       for value in payload[237 * 4:237 * 4 + 4]]
             self.assertEqual(["Stone / Lime"] * 4, actual, namespace)
+
+    def test_r114_applies_all_explicit_audit_reviews_to_exact_owners(self) -> None:
+        """R114 applies 50 changed corners plus one explicit comment safely."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r114_consolidated_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        self.assertEqual(48, decisions["counts"]["submittedCards"])
+        self.assertEqual(50, decisions["counts"]["questionnaireChangedCorners"])
+        self.assertEqual(1, decisions["counts"]["commentExplicitCorners"])
+        self.assertEqual(66, decisions["counts"]["expandedOwnerCornerRows"])
+        self.assertNotIn("zone9", {
+            namespace.casefold()
+            for namespace in decisions["cornerCorrections"]})
+
+        applied = 0
+        for namespace, slots in decisions["cornerCorrections"].items():
+            preset = presets[namespace.casefold()]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            for slot_text, corners in slots.items():
+                slot = int(slot_text)
+                for corner, expected in corners.items():
+                    index = {"NW": 0, "NE": 1, "SE": 2, "SW": 3}[corner]
+                    self.assertEqual(expected, names[payload[slot * 4 + index]],
+                                     f"{namespace} slot {slot} {corner}")
+                    applied += 1
+        self.assertEqual(66, applied)
+
+        for left, right in (("bz2g", "Zone2"), ("bz4g", "Zone4")):
+            left_bindings = {
+                (row["variant"], row["pixelSha256"])
+                for row in presets[left.casefold()]["bindings"]}
+            right_bindings = {
+                (row["variant"], row["pixelSha256"])
+                for row in presets[right.casefold()]["bindings"]}
+            self.assertEqual(left_bindings, right_bindings)
 
 
 if __name__ == "__main__":
