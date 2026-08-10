@@ -123,7 +123,9 @@ def source_aliases(identity: dict[str, Any]) -> list[dict[str, Any]]:
             {
                 "namespace": identity["sourceNamespace"],
                 "slot": int(identity["sourceSlot"]),
-                "sourcePixelSha256": "",
+                "sourcePixelSha256": identity.get(
+                    "sourcePixelSha256", ""
+                ).lower(),
             }
         )
     return result
@@ -252,7 +254,7 @@ def reconcile(
                     "report": report_path.name,
                     "markId": int(mark.get("id", -1)),
                     "category": mark.get("category", "unknown"),
-                    "layer": mark.get("layer", ""),
+                    "layer": cell.get("layer", mark.get("layer", "")),
                     "x": coordinate[0],
                     "y": coordinate[1],
                     "packedSlot": int(cell.get("packed", {}).get("atlasSlot", -1)),

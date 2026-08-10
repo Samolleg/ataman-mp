@@ -255,7 +255,10 @@ void CSelect::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
 
 void CSelect::wheelEvent(COperation *pOp, QWheelEvent* pEvent)
 {
-    pOp->camera()->enlarge(pEvent->delta() > 0);
+    const int step = landscapeWheelStep(pEvent->angleDelta().y(),
+                                        pEvent->delta(), pEvent->pixelDelta().y());
+    if(step != 0)
+        pOp->camera()->enlarge(step > 0);
 }
 
 CMoveAxis::CMoveAxis(CView *pView, EOperateAxis ax)
@@ -1306,5 +1309,5 @@ void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
         pEvent->accept();
         return;
     }
-    pOp->camera()->enlarge(pEvent->delta() > 0);
+    pOp->camera()->enlarge(step > 0);
 }

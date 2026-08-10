@@ -283,6 +283,8 @@ private slots:
     void persistentPaintOperationSurvivesDocumentTransition();
     void landscapeLayerChangesResetBrushSelection();
     void landscapeWheelDirectionUsesAvailableDelta();
+    void paintIssueReportCapturesEveryAvailableLayer();
+    void paintIssueMarkingKeepsCameraNavigation();
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
@@ -461,6 +463,25 @@ void EnduranceDocumentTests::landscapeWheelDirectionUsesAvailableDelta()
     QCOMPARE(landscapeWheelStep(0, 0, 7), 1);
     QCOMPARE(landscapeWheelStep(0, 0, -7), -1);
     QCOMPARE(landscapeWheelStep(0, 0, 0), 0);
+}
+
+void EnduranceDocumentTests::paintIssueReportCapturesEveryAvailableLayer()
+{
+    const STerrainPaintIssueCapturePlan fromLand =
+        terrainPaintIssueCapturePlan(ELandscapeEditMode::TilePaint);
+    QVERIFY(fromLand.land);
+    QVERIFY(fromLand.overlay);
+
+    const STerrainPaintIssueCapturePlan fromOverlay =
+        terrainPaintIssueCapturePlan(ELandscapeEditMode::OverlayPaint);
+    QVERIFY(fromOverlay.land);
+    QVERIFY(fromOverlay.overlay);
+}
+
+void EnduranceDocumentTests::paintIssueMarkingKeepsCameraNavigation()
+{
+    QVERIFY(terrainPaintIssueMarkerConsumesMouseMove(false));
+    QVERIFY(!terrainPaintIssueMarkerConsumesMouseMove(true));
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

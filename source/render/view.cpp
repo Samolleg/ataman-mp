@@ -76,6 +76,7 @@
 #include "mob_script_window.h"
 #include "script_reference_analyzer.h"
 #include "landscape_tools.h"
+#include "landscape_edit_policy.h"
 #include "endurance_document.h"
 #include "staged_save_validator.h"
 #include "terrain_atlas_analyzer.h"
@@ -11185,7 +11186,7 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
         root = QJsonObject();
     root.insert(QStringLiteral("schema"),
                 QStringLiteral("ei-mapper-endurance-paint-issue-marks"));
-    root.insert(QStringLiteral("version"), 3);
+    root.insert(QStringLiteral("version"), 4);
     root.insert(QStringLiteral("mprFileName"), m_pLand->filePath().fileName());
     const QString applicationPath = QDir::cleanPath(
         QCoreApplication::applicationDirPath());
@@ -11200,22 +11201,22 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
         : QString());
     root.insert(QStringLiteral("semanticProfileProvenance"),
                 m_terrainAtlasProfile.provenance);
-    const bool overlay = m_landscapeTools
-        && (m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint
-            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface);
-    const ETerrainTileLayer layer = overlay
-        ? ETerrainTileLayer::Overlay : ETerrainTileLayer::Land;
-    const CTerrainTransitionCatalog& catalog = overlay
-        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
-        : (m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
-                                 : m_terrainAtlasAnalysis.landCatalog);
+    const ELandscapeEditMode activeMode = m_landscapeTools
+        ? m_landscapeTools->editMode() : ELandscapeEditMode::TilePaint;
+    const bool activeOverlay = activeMode == ELandscapeEditMode::OverlayPaint
+        || activeMode == ELandscapeEditMode::OverlaySurface;
+    const STerrainPaintIssueCapturePlan capturePlan =
+        terrainPaintIssueCapturePlan(activeMode);
+    QVector<ETerrainTileLayer> captureLayers;
+    if(capturePlan.land) captureLayers.append(ETerrainTileLayer::Land);
+    if(capturePlan.overlay) captureLayers.append(ETerrainTileLayer::Overlay);
     bool materialSelected = false;
     const qint32 selectedMaterial = m_landscapeTools
         ? m_landscapeTools->paintTerrainType(&materialSelected) : -1;
     QString selectedMaterialName;
     for(const STerrainAtlasMaterial& material : m_terrainAtlasAnalysis.materials)
         if(material.id == selectedMaterial
-           && ((material.layer == ETerrainAtlasLayer::Overlay) == overlay))
+           && ((material.layer == ETerrainAtlasLayer::Overlay) == activeOverlay))
         {
             selectedMaterialName = material.name;
             break;
@@ -11225,8 +11226,11 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
     mark.insert(QStringLiteral("timestampUtc"),
                 QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     mark.insert(QStringLiteral("category"), category);
-    mark.insert(QStringLiteral("layer"), overlay ? QStringLiteral("overlay")
-                                                  : QStringLiteral("land"));
+    mark.insert(QStringLiteral("layer"), QStringLiteral("all-available"));
+    mark.insert(QStringLiteral("activeEditLayer"), activeOverlay
+        ? QStringLiteral("overlay") : QStringLiteral("land"));
+    mark.insert(QStringLiteral("capturePolicy"),
+                QStringLiteral("all-available-layers"));
     mark.insert(QStringLiteral("selectedMaterialId"),
                 materialSelected ? selectedMaterial : -1);
     mark.insert(QStringLiteral("selectedMaterial"), selectedMaterialName);
@@ -11252,25 +11256,37 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
     }
     mark.insert(QStringLiteral("selectedCells"), selectedCells);
     QJsonArray tiles;
+    QSet<QString> capturedLayerNames;
     const QRect snapshot = markedBounds.adjusted(-1, -1, 1, 1).intersected(
         QRect(0, 0, m_terrainEdit.tileCountX(), m_terrainEdit.tileCountY()));
-    for(int y = snapshot.top(); y <= snapshot.bottom(); ++y)
-        for(int x = snapshot.left(); x <= snapshot.right(); ++x)
-        {
+    for(ETerrainTileLayer layer : captureLayers)
+    {
+        const bool snapshotOverlay = layer == ETerrainTileLayer::Overlay;
+        const QString layerName = snapshotOverlay
+            ? QStringLiteral("overlay") : QStringLiteral("land");
+        const CTerrainTransitionCatalog& catalog = snapshotOverlay
+            ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+            : (m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
+                                     : m_terrainAtlasAnalysis.landCatalog);
+        for(int y = snapshot.top(); y <= snapshot.bottom(); ++y)
+            for(int x = snapshot.left(); x <= snapshot.right(); ++x)
+            {
             bool available = false;
             const quint16 packed = m_terrainEdit.packedTile(x, y, layer, &available);
             if(!available) continue;
+            capturedLayerNames.insert(layerName);
             bool recognized = false;
             const STerrainTransitionSignature signature =
                 catalog.gridSignatureForPacked(packed, &recognized);
             QJsonObject tile;
             tile.insert(QStringLiteral("x"), x);
             tile.insert(QStringLiteral("y"), y);
+            tile.insert(QStringLiteral("layer"), layerName);
             tile.insert(QStringLiteral("insideMark"), cells.contains(QPoint(x, y)));
             tile.insert(QStringLiteral("packed"), packedTerrainTileJson(packed));
             const int physicalSlot = SMprPackedTile::decode(packed).atlasSlot();
             STerrainWorkingTileIdentity workingIdentity;
-            const bool hasWorkingIdentity = !overlay && m_workingTerrainAtlas
+            const bool hasWorkingIdentity = !snapshotOverlay && m_workingTerrainAtlas
                 && m_workingTerrainAtlas->tileIdentityForSlot(
                     physicalSlot, &workingIdentity);
             if(hasWorkingIdentity)
@@ -11391,15 +11407,78 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
             }
             else if(m_pTileForm && physicalSlot >= 0
                     && physicalSlot < m_pTileForm->tileImages().size())
+            {
+                const QByteArray currentPixelSha256 = terrainTilePixelSha256(
+                    m_pTileForm->tileImages().at(physicalSlot));
                 tile.insert(QStringLiteral("physicalPixelSha256"),
-                    QString::fromLatin1(terrainTilePixelSha256(
-                        m_pTileForm->tileImages().at(physicalSlot))));
+                    QString::fromLatin1(currentPixelSha256));
+                // Tiles outside the generated land working atlas (notably
+                // overlays) are still exact authored current-map slots. Record
+                // their source identity instead of leaving a pixel hash that
+                // later review cannot connect back to semantic authority.
+                QJsonObject identity;
+                identity.insert(QStringLiteral("origin"),
+                                QStringLiteral("authored-current-map"));
+                identity.insert(QStringLiteral("workingSlot"), physicalSlot);
+                QString sourceNamespace = namespaceName;
+                int sourceSlot = physicalSlot;
+                QByteArray sourcePixelSha256 = currentPixelSha256;
+                const STerrainAtlasProfileSlot* profileSlot = nullptr;
+                for(const STerrainAtlasProfileSlot& candidate :
+                    m_terrainAtlasProfile.slotDefinitions)
+                    if(candidate.slot == physicalSlot)
+                    {
+                        profileSlot = &candidate;
+                        break;
+                    }
+                if(profileSlot && !profileSlot->sourceSlotAliases.isEmpty())
+                {
+                    if(!profileSlot->sourceNamespace.isEmpty())
+                        sourceNamespace = profileSlot->sourceNamespace;
+                    sourceSlot = profileSlot->sourceSlotAliases.front();
+                    if(!profileSlot->sourcePixelSha256.isEmpty())
+                        sourcePixelSha256 = profileSlot->sourcePixelSha256;
+                    QJsonArray aliases;
+                    for(int aliasSlot : profileSlot->sourceSlotAliases)
+                    {
+                        QJsonObject alias;
+                        alias.insert(QStringLiteral("sourceNamespace"),
+                                     sourceNamespace);
+                        alias.insert(QStringLiteral("sourceSlot"), aliasSlot);
+                        alias.insert(QStringLiteral("sourcePixelSha256"),
+                            QString::fromLatin1(sourcePixelSha256));
+                        aliases.append(alias);
+                    }
+                    identity.insert(QStringLiteral("sourceAliases"), aliases);
+                }
+                identity.insert(QStringLiteral("sourceNamespace"), sourceNamespace);
+                identity.insert(QStringLiteral("sourceSlot"), sourceSlot);
+                identity.insert(QStringLiteral("sourcePixelSha256"),
+                                QString::fromLatin1(sourcePixelSha256));
+                identity.insert(QStringLiteral("blendProvenance"),
+                                QStringLiteral("original map atlas"));
+                identity.insert(QStringLiteral("stockDerivedBlend"), false);
+                identity.insert(QStringLiteral("canonicalGeneratedBlend"), false);
+                qint32 runtimeType = -1;
+                if(!snapshotOverlay && m_pLand
+                   && physicalSlot < m_pLand->tileTypes().size())
+                    runtimeType = qint32(m_pLand->tileTypes().at(physicalSlot));
+                identity.insert(QStringLiteral("runtimeTerrainType"), runtimeType);
+                tile.insert(QStringLiteral("physicalIdentity"), identity);
+            }
             tile.insert(QStringLiteral("catalogRecognized"), recognized);
             if(recognized)
                 tile.insert(QStringLiteral("gridCorners"),
                             terrainGridSignatureJson(signature));
             tiles.append(tile);
         }
+    }
+    QJsonArray capturedLayers;
+    if(capturedLayerNames.contains(QStringLiteral("land")))
+        capturedLayers.append(QStringLiteral("land"));
+    if(capturedLayerNames.contains(QStringLiteral("overlay")))
+        capturedLayers.append(QStringLiteral("overlay"));
+    mark.insert(QStringLiteral("capturedLayers"), capturedLayers);
     mark.insert(QStringLiteral("tileSnapshot"), tiles);
     QJsonArray relatedActions;
     const QRect related = markedBounds.adjusted(-2, -2, 2, 2);
@@ -11841,7 +11920,9 @@ void CView::mouseMoveEvent(QMouseEvent* event)
                 == ETerrainTileInformationAction::Hide)
             QToolTip::hideText();
     }
-    if(m_landscapeTools && m_landscapeTools->paintIssueMarkingEnabled())
+    if(m_landscapeTools && m_landscapeTools->paintIssueMarkingEnabled()
+       && terrainPaintIssueMarkerConsumesMouseMove(
+           (event->buttons() & Qt::MiddleButton) != 0))
     {
         QPoint cell;
         if(terrainCellAtViewport(event->pos(), &cell))
