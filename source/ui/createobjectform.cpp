@@ -33,19 +33,19 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(QList<QSharedPointer<IPropertyBase>>)),
                      this, SLOT(onPropertiesChange(QList<QSharedPointer<IPropertyBase>>)));
 
-    setWindowTitle("Creating object dialog");
+    setWindowTitle(tr("Create object"));
     setWindowFlag(Qt::WindowContextHelpButtonHint, false);
 
 
-    m_objType[eWorldObject] = "World object";
-    m_objType[eUnit] = "Unit";
-    m_objType[eTorch] = "Torch";
-    m_objType[eMagicTrap] = "Magic trap";
-    m_objType[eLever] = "Lever";
-    m_objType[eLight] = "Light source";
-    m_objType[eSound] = "Sound source";
-    m_objType[eParticle] = "Particle source";
-    ui->comboObjectType->initComboItem("<choose object type>", m_objType.values());
+    m_objType[eWorldObject] = tr("World object");
+    m_objType[eUnit] = tr("Unit");
+    m_objType[eTorch] = tr("Torch");
+    m_objType[eMagicTrap] = tr("Magic trap");
+    m_objType[eLever] = tr("Lever");
+    m_objType[eLight] = tr("Light source");
+    m_objType[eSound] = tr("Sound source");
+    m_objType[eParticle] = tr("Particle source");
+    ui->comboObjectType->initComboItem(tr("<choose object type>"), m_objType.values());
 
     QObject::connect(ui->comboObjectType, SIGNAL(currentIndexChangedOut(QString&)), this, SLOT(onObjectChoose(QString&)));
 }
@@ -271,11 +271,11 @@ void CCreateObjectForm::on_buttonCreate_clicked()
         rawTemplate = selected.front();
     if(!rawTemplate)
     {
-        QMessageBox::information(this, "Select a creation template",
-            "To preserve complete MOB data, select one existing object of the same type "
+        QMessageBox::information(this, tr("Select a creation template"),
+            tr("To preserve complete MOB data, select one existing object of the same type "
             "before opening Create Object. Endurance will use its complete raw record as "
             "the template and apply the values entered here. You can also copy and paste "
-            "an existing object.");
+            "an existing object."));
         return;
     }
     pMob->clearSelect();

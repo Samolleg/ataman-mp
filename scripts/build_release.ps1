@@ -54,6 +54,9 @@ $qtDirectory = Resolve-ToolDirectory $QtBin "qmake.exe" "qmake.exe"
 if (-not (Test-Path -LiteralPath (Join-Path $qtDirectory "uic.exe") -PathType Leaf)) {
     throw "uic.exe was not found in Qt bin directory '$qtDirectory'."
 }
+if (-not (Test-Path -LiteralPath (Join-Path $qtDirectory "lrelease.exe") -PathType Leaf)) {
+    throw "lrelease.exe was not found in Qt bin directory '$qtDirectory'."
+}
 $mingwDirectory = Resolve-ToolDirectory $MinGwBin "mingw32-make.exe" "mingw32-make.exe"
 
 # qmake, uic, moc and rcc are dynamically linked Windows programs. Merely
@@ -70,6 +73,7 @@ New-Item -ItemType Directory -Force -Path $buildPath | Out-Null
 $buildPath = (Resolve-Path -LiteralPath $buildPath).Path
 
 $qmake = Join-Path $qtDirectory "qmake.exe"
+$lrelease = Join-Path $qtDirectory "lrelease.exe"
 $make = Join-Path $mingwDirectory "mingw32-make.exe"
 $project = Join-Path $repositoryRoot "ei_maper.pro"
 
@@ -114,6 +118,11 @@ if ($temporaryDrive) { Write-Host "ASCII root: $executionRoot" }
 
 Push-Location $executionBuildPath
 try {
+    $translationSource = Join-Path $executionRoot 'translations\ei_mapper_ru.ts'
+    $translationBinary = Join-Path $executionRoot 'translations\ei_mapper_ru.qm'
+    & $lrelease $translationSource -qm $translationBinary
+    if ($LASTEXITCODE -ne 0) { throw "lrelease failed with exit code $LASTEXITCODE." }
+
     # Qt 5.12's Windows qmake misdecodes non-ASCII absolute command-line
     # paths. Resolve the project relative to the shadow directory so builds
     # work when the repository lives under a Cyrillic (or other Unicode) path.

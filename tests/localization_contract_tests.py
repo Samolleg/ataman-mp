@@ -1,0 +1,140 @@
+import json
+import re
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def require(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+
+def placeholders(text):
+    return sorted(re.findall(r"%(?:L?\d+|[A-Za-z])", text or ""))
+
+
+def tags(text):
+    return sorted(re.findall(
+        r"</?(?:b|span|i|br|p|ul|li|strong|em)\b[^>]*>", text or "",
+        flags=re.IGNORECASE))
+
+
+def main():
+    project = (ROOT / "ei_maper.pro").read_text(encoding="utf-8")
+    startup = (ROOT / "source/app/main.cpp").read_text(encoding="utf-8")
+    settings = (ROOT / "source/app/settings.cpp").read_text(encoding="utf-8")
+    properties = (ROOT / "source/layout_components/tablemanager.cpp").read_text(
+        encoding="utf-8")
+    main_window = (ROOT / "source/app/main_window.cpp").read_text(encoding="utf-8")
+    build = (ROOT / "scripts/build_release.ps1").read_text(encoding="utf-8")
+    catalog_path = ROOT / "translations/ei_mapper_ru.ts"
+
+    require("TRANSLATIONS" in project and "ei_mapper_ru.ts" in project,
+            "qmake must own the Russian catalog")
+    require("installApplicationTranslator" in startup,
+            "startup must install the translator before constructing UI")
+    require('new COptString("language", "en")' in settings,
+            "English must be the persisted default/fallback language")
+    require(catalog_path.is_file(), "Russian TS catalog is missing")
+    require("lrelease.exe" in build and "ei_mapper_ru.qm" in build,
+            "release builds must compile the catalog")
+    require("translations.qrc" in project,
+            "compiled catalog must be deployed as an application resource")
+    require('QT_TRANSLATE_NOOP("QPlatformTheme", "Cancel")' in
+            (ROOT / "source/app/localization.cpp").read_text(encoding="utf-8"),
+            "Qt standard dialog buttons must use the application catalog")
+    require(startup.index("runHeadlessCommand(app)") <
+            startup.index("installApplicationTranslator(app)"),
+            "headless diagnostics must remain English")
+    require(not re.search(r"m_aRow(?:Name|ToolTip)\[[^]]+\]\s*=\s*\"", properties),
+            "dynamic property metadata must use translation lookups")
+    require("QT_TRANSLATE_NOOP(\"MobFamilyValidation\"" in main_window and
+            "localizedMobFamilyText(finding.message)" in main_window,
+            "validation findings must be localized only at presentation")
+
+    visible_literal_patterns = (
+        re.compile(r"set(?:Text|ToolTip|StatusTip|WindowTitle|PlaceholderText)\(\s*\"([^\"]*)\""),
+        re.compile(r"Q(?:Label|PushButton|CheckBox|GroupBox|Action)\(\s*\"([^\"]*)\""),
+        re.compile(r"QFileDialog::\w+\([^\n]*,\s*\"([^\"]*)\""),
+        re.compile(r"QMessageBox::\w+\([^\n]*,\s*\"([^\"]*)\""),
+    )
+    for folder in ("source/app", "source/ui", "source/mob", "source/layout_components"):
+        for source_path in (ROOT / folder).glob("*.cpp"):
+            if source_path.name == "main.cpp":
+                continue  # This file contains the headless widget fixture itself.
+            for line_number, line in enumerate(
+                    source_path.read_text(encoding="utf-8").splitlines(), 1):
+                if line.lstrip().startswith("//"):
+                    continue
+                for pattern in visible_literal_patterns:
+                    match = pattern.search(line)
+                    if match and match.group(1) and not re.fullmatch(r"[\d.]+", match.group(1)):
+                        raise AssertionError(
+                            f"raw user-visible literal at {source_path.relative_to(ROOT)}:"
+                            f"{line_number}: {match.group(1)!r}")
+
+    root = ET.parse(catalog_path).getroot()
+    require(root.attrib.get("language") == "ru_RU", "catalog language must be ru_RU")
+    translations = {}
+    unchanged_allowlist = {
+        "EI Mapper", "RGB", "ICO", "Esc", "Ctrl+R", "Ctrl+Tab", "Ctrl+V",
+        "Ctrl+Z", "Ctrl+Y", "Ctrl+X", "Ctrl+D", "Ctrl+H", "Ctrl+F5",
+        "Ctrl+S", "Shift+Esc", "MPR:", "MOB", "MPR", "MOB %1", "MPR %1",
+        "MPR (*.mpr)", "NID %1 (%2): %3", "NID %1 — %2", "NID %1: %2",
+    }
+    technical_tokens = ("MOB", "MPR", "JMV", "NID")
+    shortcut_re = re.compile(
+        r"^(?:[A-Z]|Del|Esc|F\d+|(?:(?:Ctrl|Alt|Shift|Meta)\+)+(?:[A-Z]|F\d+|Esc|Tab|Wheel)|(?:Ctrl|Alt|Shift|Meta) \+ Mouse Wheel)$")
+    message_count = 0
+    for message in root.findall(".//message"):
+        source = message.findtext("source", default="")
+        translation = message.find("translation")
+        require(translation is not None, f"translation node missing: {source!r}")
+        require(translation.attrib.get("type") != "unfinished",
+                f"unfinished translation: {source!r}")
+        translated = "".join(translation.itertext())
+        require(translated != "", f"empty translation: {source!r}")
+        require(placeholders(source) == placeholders(translated),
+                f"placeholder mismatch: {source!r} -> {translated!r}")
+        require(tags(source) == tags(translated),
+                f"rich-text tag mismatch: {source!r} -> {translated!r}")
+        require(source.count("\n") == translated.count("\n"),
+                f"line-break mismatch: {source!r} -> {translated!r}")
+        for token in technical_tokens:
+            require(token not in source or token in translated,
+                    f"technical token changed: {token} in {source!r}")
+        if source == translated and re.search(r"[A-Za-z]{3}", source):
+            require(source in unchanged_allowlist or shortcut_re.fullmatch(source),
+                    f"untranslated user-visible source: {source!r}")
+        translations[source] = translated
+        message_count += 1
+
+    require(message_count >= 2000,
+            f"catalog coverage unexpectedly fell to {message_count} messages")
+
+    expected = {
+        "&File": "&Файл",
+        "Settings": "Настройки",
+        "Object Properties": "Свойства объекта",
+        "MOB Family Validation": "Проверка семейства MOB",
+        "Initializing editor...": "Инициализация редактора...",
+    }
+    for source, translated in expected.items():
+        require(translations.get(source) == translated,
+                f"representative translation missing: {source!r}")
+
+    require("Language" in settings and "restart" in settings.lower(),
+            "settings must explain the language restart behavior")
+    print(json.dumps({"messages": len(translations), "status": "PASS"}))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except AssertionError as error:
+        print(f"FAIL: {error}", file=sys.stderr)
+        raise SystemExit(1)

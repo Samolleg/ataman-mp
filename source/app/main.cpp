@@ -5,8 +5,10 @@
 #include <QIcon>
 #include <QCommandLineParser>
 #include <QDialog>
+#include <QMessageBox>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontMetrics>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -67,10 +69,12 @@
 #include "ui/dock_hidden_tab.h"
 #include "ui/viewport_minimap_widget.h"
 #include "ui/minimap_export_dialog.h"
+#include "ui/resource_setup_dialog.h"
 #include "objects/object_base.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "endurance_ui_scale.h"
+#include "localization.h"
 #include "jmv_map_test_launcher.h"
 #include "view.h"
 #include "render_scheduling.h"
@@ -1829,6 +1833,12 @@ int runHeadlessCommand(QApplication& app)
         bool settingsSaveCloseWorks = false;
         bool settingsButtonLayoutWorks = false;
         bool settingsApplySignal = false;
+        bool languageSettingsPersist = false;
+        bool russianCatalogLoads = false;
+        bool qtStandardDialogsTranslate = false;
+        bool russianFallbackWorks = false;
+        bool validationTemplatesTranslate = false;
+        bool russianLayoutsFit = false;
         bool renderOptionsRegistered = false;
         bool terrainShadowToggleApplies = false;
         {
@@ -1866,6 +1876,7 @@ int runHeadlessCommand(QApplication& app)
                 QLineEdit* autosaveInterval = settingsWindow.findChild<QLineEdit*>("autosaveIntervalMinutes");
                 QComboBox* cameraWheelGesture = settingsWindow.findChild<QComboBox*>(
                     "cameraSpeedWheelGesture");
+                QComboBox* language = settingsWindow.findChild<QComboBox*>("language");
                 QSlider* uiScale = settingsWindow.findChild<QSlider*>("uiScalePercent");
                 QLabel* uiScaleValue = settingsWindow.findChild<QLabel*>(
                     "uiScalePercentValue");
@@ -1909,6 +1920,8 @@ int runHeadlessCommand(QApplication& app)
                         autosaveInterval->setText("1");
                     if(cameraWheelGesture)
                         cameraWheelGesture->setCurrentIndex(2);
+                    if(language)
+                        language->setCurrentIndex(language->findData("ru"));
                     if(uiScale)
                         uiScale->setValue(150);
                     if(renderTerrainShadowsCheck)
@@ -1930,6 +1943,13 @@ int runHeadlessCommand(QApplication& app)
                             && savedAutosaveInterval && savedAutosaveInterval->value() == 1;
                     COptString* savedCameraGesture = dynamic_cast<COptString*>(
                         settingsWindow.opt(eOptSetKeyBinding, "cameraSpeedWheelGesture"));
+                    COptString* savedLanguage = dynamic_cast<COptString*>(
+                        settingsWindow.opt(eOptSetGeneral, "language"));
+                    languageSettingsPersist = language && language->count() == 2
+                        && language->itemData(0).toString() == "en"
+                        && language->itemData(1).toString() == "ru"
+                        && savedLanguage && savedLanguage->value() == "ru"
+                        && ei::persistedApplicationLanguage() == "ru";
                     COptDouble* savedCameraMultiplier = dynamic_cast<COptDouble*>(
                         settingsWindow.opt(eOptSetGeneral, "cameraSpeedMultiplier"));
                     cameraSpeedSettingsPersist = cameraWheelGesture
@@ -1952,6 +1972,85 @@ int runHeadlessCommand(QApplication& app)
                         && saveCloseButton->text() == "Save && Close"
                         && applyButton->geometry().left() < saveCloseButton->geometry().left();
                 }
+            }
+            QDir::setCurrent(previousDirectory);
+        }
+        russianCatalogLoads = ei::installApplicationTranslator(app, QStringLiteral("ru"))
+            && QCoreApplication::translate("MainWindow", "Settings") == QString::fromUtf8("Настройки");
+        {
+            QMessageBox standardButtonProbe;
+            standardButtonProbe.setStandardButtons(QMessageBox::Yes | QMessageBox::No
+                                                   | QMessageBox::Cancel);
+            qtStandardDialogsTranslate = standardButtonProbe.button(QMessageBox::Yes)
+                    && standardButtonProbe.button(QMessageBox::Yes)->text().contains(
+                        QRegularExpression(QString::fromUtf8("[А-Яа-яЁё]")))
+                && standardButtonProbe.button(QMessageBox::No)
+                    && standardButtonProbe.button(QMessageBox::No)->text().contains(
+                        QRegularExpression(QString::fromUtf8("[А-Яа-яЁё]")))
+                && standardButtonProbe.button(QMessageBox::Cancel)
+                    && standardButtonProbe.button(QMessageBox::Cancel)->text().contains(
+                        QRegularExpression(QString::fromUtf8("[А-Яа-яЁё]")));
+        }
+        const QByteArray fallbackProbe = QByteArrayLiteral("Uncatalogued ")
+            + QByteArrayLiteral("fallback probe");
+        russianFallbackWorks = QCoreApplication::translate(
+            "MainWindow", fallbackProbe.constData()) == QString::fromLatin1(fallbackProbe);
+        validationTemplatesTranslate = localizedMobFamilyUiText(
+            "NID 7 is used by 2 objects in map.mob").contains(QString::fromUtf8("объект"));
+        {
+            const QString previousDirectory = QDir::currentPath();
+            QTemporaryDir russianLayoutDirectory;
+            if(russianLayoutDirectory.isValid())
+                QDir::setCurrent(russianLayoutDirectory.path());
+            {
+            CSettings russianSettings(&primaryWindow);
+            russianSettings.setAttribute(Qt::WA_DontShowOnScreen);
+            russianSettings.show();
+            CResourceSetupDialog russianSetup;
+            russianSetup.setAttribute(Qt::WA_DontShowOnScreen);
+            russianSetup.show();
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            QComboBox* russianLanguage = russianSettings.findChild<QComboBox*>("language");
+            QPushButton* russianApply = russianSettings.findChild<QPushButton*>("buttonApply");
+            QPushButton* russianSaveClose = russianSettings.findChild<QPushButton*>("buttonSaveClose");
+            QTableWidget russianProperties;
+            CTableManager russianPropertyManager(&russianProperties);
+            QList<QSharedPointer<IPropertyBase>> russianPropertyValues;
+            russianPropertyValues << QSharedPointer<IPropertyBase>(
+                new propStr(eObjParam_TEMPLATE, "model_name"));
+            russianPropertyManager.setNewData(russianPropertyValues);
+            russianProperties.resizeColumnToContents(0);
+            const QTableWidgetItem* russianPropertyLabel = russianProperties.item(0, 0);
+            russianLayoutsFit = russianLanguage && russianApply && russianSaveClose
+                && russianLanguage->width() >= QFontMetrics(russianLanguage->font())
+                    .horizontalAdvance(russianLanguage->currentText()) + 28
+                && russianApply->width() >= russianApply->sizeHint().width()
+                && russianSaveClose->width() >= russianSaveClose->sizeHint().width()
+                && russianSettings.sizeHint().width() <= 1280
+                && russianSettings.sizeHint().height() <= 900
+                && russianSetup.sizeHint().width() <= 1280
+                && russianSetup.sizeHint().height() <= 900
+                && russianPropertyLabel
+                && russianPropertyLabel->text() != "Model"
+                && russianPropertyLabel->text().contains(
+                    QRegularExpression(QString::fromUtf8("[А-Яа-яЁё]")))
+                && russianProperties.columnWidth(0) <= 260;
+            QTextStream(stdout) << "russianLayout language="
+                << (russianLanguage ? russianLanguage->width() : -1) << "/"
+                << (russianLanguage ? QFontMetrics(russianLanguage->font())
+                    .horizontalAdvance(russianLanguage->currentText()) + 28 : -1)
+                << " apply=" << (russianApply ? russianApply->width() : -1) << "/"
+                << (russianApply ? russianApply->sizeHint().width() : -1)
+                << " saveClose=" << (russianSaveClose ? russianSaveClose->width() : -1) << "/"
+                << (russianSaveClose ? russianSaveClose->sizeHint().width() : -1)
+                << " settings=" << russianSettings.sizeHint().width() << "x"
+                << russianSettings.sizeHint().height()
+                << " setup=" << russianSetup.sizeHint().width() << "x"
+                << russianSetup.sizeHint().height()
+                << " property=" << (russianPropertyLabel ? russianPropertyLabel->text() : QString())
+                << "/" << russianProperties.columnWidth(0) << "\n";
+            russianSettings.close();
+            russianSetup.close();
             }
             QDir::setCurrent(previousDirectory);
         }
@@ -2320,6 +2419,10 @@ int runHeadlessCommand(QApplication& app)
                 && uiScaleExistingWindowApplied
                 && settingsApplyKeepsOpen && settingsSaveCloseWorks
                 && settingsButtonLayoutWorks
+                && languageSettingsPersist && russianCatalogLoads && qtStandardDialogsTranslate
+                && russianFallbackWorks
+                && validationTemplatesTranslate
+                && russianLayoutsFit
                 && sessionIdentityRoundTrip
                 && renderOptionsRegistered
                 && terrainShadowToggleApplies
@@ -2454,6 +2557,12 @@ int runHeadlessCommand(QApplication& app)
                << " settingsApplyKeepsOpen=" << settingsApplyKeepsOpen
                << " settingsSaveCloseWorks=" << settingsSaveCloseWorks
                << " settingsButtonLayoutWorks=" << settingsButtonLayoutWorks
+               << " languageSettingsPersist=" << languageSettingsPersist
+               << " russianCatalogLoads=" << russianCatalogLoads
+               << " qtStandardDialogsTranslate=" << qtStandardDialogsTranslate
+               << " russianFallbackWorks=" << russianFallbackWorks
+               << " validationTemplatesTranslate=" << validationTemplatesTranslate
+               << " russianLayoutsFit=" << russianLayoutsFit
                << " sessionIdentityRoundTrip=" << sessionIdentityRoundTrip
                << " settingsApplySignal=" << settingsApplySignal
                << " renderOptionsRegistered=" << renderOptionsRegistered
@@ -2805,6 +2914,10 @@ int main(int argc, char *argv[])
     const int commandResult = runHeadlessCommand(app);
     if(commandResult >= 0)
         return commandResult;
+
+    // Install the selected UI catalog before constructing any visible widget.
+    // Headless validation and runtime diagnostics deliberately stay English.
+    ei::installApplicationTranslator(app);
 
     qApp->setStyle(new CEnduranceStyle(QStyleFactory::create("Fusion")));
 

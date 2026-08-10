@@ -1025,150 +1025,150 @@ bool CTableManager::eventFilter(QObject* watched, QEvent* event)
 
 void CTableManager::initRowName()
 {
-    m_aRowName[eObjParam_BODYPARTS] = "Model parts";
-    m_aRowName[eObjParam_PLAYER] = "Player group";
-    m_aRowName[eObjParam_NID] = "Map ID";
-    m_aRowName[eObjParam_TYPE] = "Unit category";
-    m_aRowName[eObjParam_OBJECT_TYPE] = "Object type";
-    m_aRowName[eObjParam_NAME] = "Name";
-    m_aRowName[eObjParam_TEMPLATE] = "Model";
-    m_aRowName[eObjParam_PARENT_TEMPLATE] = "Parent template";
-    m_aRowName[eObjParam_PRIM_TXTR] = "Primary texture";
-    m_aRowName[eObjParam_SEC_TXTR] = "Secondary texture";
-    m_aRowName[eObjParam_COMMENTS] = "Comments";
-    m_aRowName[eObjParam_POSITION] = "Position";
-    m_aRowName[eObjParam_ROTATION] = "Rotation";
-    m_aRowName[eObjParam_USE_IN_SCRIPT] = "Available to scripts";
-    m_aRowName[eObjParam_IS_SHADOW] = "Cast shadow";
-    m_aRowName[eObjParam_PARENT_ID] = "Parent ID";
-    m_aRowName[eObjParam_QUEST_INFO] = "Attached quest variable";
-    m_aRowName[eObjParam_COMPLECTION] = "Scale";
-    m_aRowName[eObjParam_TORCH_PTLINK] = "Light and effect offset";
-    m_aRowName[eObjParam_TORCH_STRENGHT] = "Light power";
-    m_aRowName[eObjParam_TORCH_SOUND] = "Sound";
-    m_aRowName[eObjParam_RANGE] = "Radius";
-    m_aRowName[eObjParam_LIGHT_RADIUS] = "Radius";
-    m_aRowName[eObjParam_SOUND_INNER_RADIUS] = "Inner radius";
-    m_aRowName[eObjParam_SOUND_RANGE] = "Outer radius";
-    m_aRowName[eObjParam_SOUND_MIN] = "Minimum delay";
-    m_aRowName[eObjParam_SOUND_MAX] = "Maximum delay";
-    m_aRowName[eObjParam_SOUND_RESNAME] = "Sound files";
-    m_aRowName[eObjParam_SOUND_AMBIENT] = "Ambient";
-    m_aRowName[eObjParam_SOUND_IS_MUSIC] = "Music";
-    m_aRowName[eObjParam_LIGHT_SHADOW] = "Cast shadows";
-    m_aRowName[eObjParam_LIGHT_COLOR] = "Color";
-    m_aRowName[eObjParam_PARTICL_TYPE] = "Particle type";
-    m_aRowName[eObjParam_PARTICL_SCALE] = "Particle scale";
-    m_aRowName[eObjParam_LEVER_SCIENCE_STATS_Type_Open] = "Allowed interaction";
-    m_aRowName[eObjParam_LEVER_SCIENCE_STATS_Key_ID] = "Required key number";
-    m_aRowName[eObjParam_LEVER_SCIENCE_STATS_Hands_Sleight] = "Required Science skill";
-    m_aRowName[eObjParam_LEVER_CUR_STATE] = "Current state";
-    m_aRowName[eObjParam_LEVER_TOTAL_STATE] = "Number of states";
-    m_aRowName[eObjParam_LEVER_IS_CYCLED] = "Repeatable";
-    m_aRowName[eObjParam_LEVER_IS_DOOR] = "Door interaction";
-    m_aRowName[eObjParam_LEVER_RECALC_GRAPH] = "Recalculate navigation graph";
-    m_aRowName[eObjParam_TRAP_DIPLOMACY] = "Stored target mask (legacy)";
-    m_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Will attack";
-    m_aRowName[eObjParam_TRAP_SPELL] = "Spell";
-    m_aRowName[eObjParam_TRAP_AREA_RADIUS] = "Activation radius";
-    m_aRowName[eObjParam_TRAP_CAST_INTERVAL] = "Cast interval";
-    m_aRowName[eObjParam_TRAP_CAST_ONCE] = "Nearest unit only";
-    m_aRowName[eObjParam_UNIT_NEED_IMPORT] = "Use MOB unit values";
-    m_aRowName[eObjParam_UNIT_PROTOTYPE] = "Database prototype";
-    m_aRowName[eObjParam_UNIT_ARMORS] = "Equipped armor";
-    m_aRowName[eObjParam_UNIT_WEAPONS] = "Equipped weapons";
-    m_aRowName[eObjParam_UNIT_SPELLS] = "Spells";
-    m_aRowName[eObjParam_UNIT_QUICK_ITEMS] = "Quick items";
-    m_aRowName[eObjParam_UNIT_QUEST_ITEMS] = "Quest items";
-    m_aRowName[eObjParam_UNIT_STATS] = "Unit parameters";
-    m_aRowName[eObjParam_ALWAYS_ACTIVE] = "Always active";
-    m_aRowName[eObjParam_GUARD_PLACE] = "Guard position";
-    m_aRowName[eObjParam_GUARD_RADIUS] = "Guard radius";
-    m_aRowName[eObjParam_GUARD_ALARM] = "Call-for-help radius";
-    m_aRowName[eObjParam_LOGIC_BEHAVIOUR] = "Behavior";
-    m_aRowName[eObjParam_AGRESSION_MODE] = "Aggression mode";
-    m_aRowName[eObjParam_LOGIC_USE] = "Logic enabled";
-    m_aRowName[eObjParam_LOGIC_CYCLIC] = "Patrol route repeats";
-    m_aRowName[eObjParam_LOGIC_WAIT] = "Guard idle time";
-    m_aRowName[eObjParam_LOGIC_ALARM_CONDITION] = "Alarm condition";
-    m_aRowName[eObjParam_LOGIC_ALARM_NUMBER] = "Alarm raised";
-    m_aRowName[eObjParam_VIEW_WAIT] = "Wait time";
-    m_aRowName[eObjParam_VIEW_TURN_SPEED] = "Turn speed";
-    m_aRowName[eObjParam_VIEW_FLAGS] = "Action flags";
+    m_aRowName[eObjParam_BODYPARTS] = tr("Model parts");
+    m_aRowName[eObjParam_PLAYER] = tr("Player group");
+    m_aRowName[eObjParam_NID] = tr("Map ID");
+    m_aRowName[eObjParam_TYPE] = tr("Unit category");
+    m_aRowName[eObjParam_OBJECT_TYPE] = tr("Object type");
+    m_aRowName[eObjParam_NAME] = tr("Name");
+    m_aRowName[eObjParam_TEMPLATE] = tr("Model");
+    m_aRowName[eObjParam_PARENT_TEMPLATE] = tr("Parent template");
+    m_aRowName[eObjParam_PRIM_TXTR] = tr("Primary texture");
+    m_aRowName[eObjParam_SEC_TXTR] = tr("Secondary texture");
+    m_aRowName[eObjParam_COMMENTS] = tr("Comments");
+    m_aRowName[eObjParam_POSITION] = tr("Position");
+    m_aRowName[eObjParam_ROTATION] = tr("Rotation");
+    m_aRowName[eObjParam_USE_IN_SCRIPT] = tr("Available to scripts");
+    m_aRowName[eObjParam_IS_SHADOW] = tr("Cast shadow");
+    m_aRowName[eObjParam_PARENT_ID] = tr("Parent ID");
+    m_aRowName[eObjParam_QUEST_INFO] = tr("Attached quest variable");
+    m_aRowName[eObjParam_COMPLECTION] = tr("Scale");
+    m_aRowName[eObjParam_TORCH_PTLINK] = tr("Light and effect offset");
+    m_aRowName[eObjParam_TORCH_STRENGHT] = tr("Light power");
+    m_aRowName[eObjParam_TORCH_SOUND] = tr("Sound");
+    m_aRowName[eObjParam_RANGE] = tr("Radius");
+    m_aRowName[eObjParam_LIGHT_RADIUS] = tr("Radius");
+    m_aRowName[eObjParam_SOUND_INNER_RADIUS] = tr("Inner radius");
+    m_aRowName[eObjParam_SOUND_RANGE] = tr("Outer radius");
+    m_aRowName[eObjParam_SOUND_MIN] = tr("Minimum delay");
+    m_aRowName[eObjParam_SOUND_MAX] = tr("Maximum delay");
+    m_aRowName[eObjParam_SOUND_RESNAME] = tr("Sound files");
+    m_aRowName[eObjParam_SOUND_AMBIENT] = tr("Ambient");
+    m_aRowName[eObjParam_SOUND_IS_MUSIC] = tr("Music");
+    m_aRowName[eObjParam_LIGHT_SHADOW] = tr("Cast shadows");
+    m_aRowName[eObjParam_LIGHT_COLOR] = tr("Color");
+    m_aRowName[eObjParam_PARTICL_TYPE] = tr("Particle type");
+    m_aRowName[eObjParam_PARTICL_SCALE] = tr("Particle scale");
+    m_aRowName[eObjParam_LEVER_SCIENCE_STATS_Type_Open] = tr("Allowed interaction");
+    m_aRowName[eObjParam_LEVER_SCIENCE_STATS_Key_ID] = tr("Required key number");
+    m_aRowName[eObjParam_LEVER_SCIENCE_STATS_Hands_Sleight] = tr("Required Science skill");
+    m_aRowName[eObjParam_LEVER_CUR_STATE] = tr("Current state");
+    m_aRowName[eObjParam_LEVER_TOTAL_STATE] = tr("Number of states");
+    m_aRowName[eObjParam_LEVER_IS_CYCLED] = tr("Repeatable");
+    m_aRowName[eObjParam_LEVER_IS_DOOR] = tr("Door interaction");
+    m_aRowName[eObjParam_LEVER_RECALC_GRAPH] = tr("Recalculate navigation graph");
+    m_aRowName[eObjParam_TRAP_DIPLOMACY] = tr("Stored target mask (legacy)");
+    m_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = tr("Will attack");
+    m_aRowName[eObjParam_TRAP_SPELL] = tr("Spell");
+    m_aRowName[eObjParam_TRAP_AREA_RADIUS] = tr("Activation radius");
+    m_aRowName[eObjParam_TRAP_CAST_INTERVAL] = tr("Cast interval");
+    m_aRowName[eObjParam_TRAP_CAST_ONCE] = tr("Nearest unit only");
+    m_aRowName[eObjParam_UNIT_NEED_IMPORT] = tr("Use MOB unit values");
+    m_aRowName[eObjParam_UNIT_PROTOTYPE] = tr("Database prototype");
+    m_aRowName[eObjParam_UNIT_ARMORS] = tr("Equipped armor");
+    m_aRowName[eObjParam_UNIT_WEAPONS] = tr("Equipped weapons");
+    m_aRowName[eObjParam_UNIT_SPELLS] = tr("Spells");
+    m_aRowName[eObjParam_UNIT_QUICK_ITEMS] = tr("Quick items");
+    m_aRowName[eObjParam_UNIT_QUEST_ITEMS] = tr("Quest items");
+    m_aRowName[eObjParam_UNIT_STATS] = tr("Unit parameters");
+    m_aRowName[eObjParam_ALWAYS_ACTIVE] = tr("Always active");
+    m_aRowName[eObjParam_GUARD_PLACE] = tr("Guard position");
+    m_aRowName[eObjParam_GUARD_RADIUS] = tr("Guard radius");
+    m_aRowName[eObjParam_GUARD_ALARM] = tr("Call-for-help radius");
+    m_aRowName[eObjParam_LOGIC_BEHAVIOUR] = tr("Behavior");
+    m_aRowName[eObjParam_AGRESSION_MODE] = tr("Aggression mode");
+    m_aRowName[eObjParam_LOGIC_USE] = tr("Logic enabled");
+    m_aRowName[eObjParam_LOGIC_CYCLIC] = tr("Patrol route repeats");
+    m_aRowName[eObjParam_LOGIC_WAIT] = tr("Guard idle time");
+    m_aRowName[eObjParam_LOGIC_ALARM_CONDITION] = tr("Alarm condition");
+    m_aRowName[eObjParam_LOGIC_ALARM_NUMBER] = tr("Alarm raised");
+    m_aRowName[eObjParam_VIEW_WAIT] = tr("Wait time");
+    m_aRowName[eObjParam_VIEW_TURN_SPEED] = tr("Turn speed");
+    m_aRowName[eObjParam_VIEW_FLAGS] = tr("Action flags");
 
-    m_aRowToolTip[eObjParam_NID] = "Object identifier used by the map and scripts.";
-    m_aRowToolTip[eObjParam_OBJECT_TYPE] = "Determines how the game handles this object. Use an explicit conversion command to change it.";
-    m_aRowToolTip[eObjParam_PLAYER] = "Ownership and diplomacy group used by this object.";
-    m_aRowToolTip[eObjParam_NAME] = "Name stored with this object in the MOB.";
-    m_aRowToolTip[eObjParam_TEMPLATE] = "Model used to render this object.";
-    m_aRowToolTip[eObjParam_BODYPARTS] = "Model parts stored for this object. WARNING: An empty list enables every model part; incompatible combinations can crash the game, especially on units.";
-    m_aRowToolTip[eObjParam_PARENT_TEMPLATE] = "Preserved object-template value. Normal units use Database prototype instead.";
-    m_aRowToolTip[eObjParam_PRIM_TXTR] = "Texture used by the model's primary texture set.";
-    m_aRowToolTip[eObjParam_SEC_TXTR] = "Texture used by the model's second texture set, when the model has one.";
-    m_aRowToolTip[eObjParam_POSITION] = "Object position on the map.";
-    m_aRowToolTip[eObjParam_ROTATION] = "Object orientation.";
-    m_aRowToolTip[eObjParam_COMPLECTION] = "Object size along each axis. 1, 1, 1 is the model's original size.";
-    m_aRowToolTip[eObjParam_USE_IN_SCRIPT] = "Keep this object available to scripts that modify it during play.";
-    m_aRowToolTip[eObjParam_IS_SHADOW] = "Allow this object to cast a shadow.";
-    m_aRowToolTip[eObjParam_QUEST_INFO] = "Zone-local quest variable. Value 1 shows the active quest marker.";
-    m_aRowToolTip[eObjParam_COMMENTS] = "Editor notes. The game does not use this text.";
+    m_aRowToolTip[eObjParam_NID] = tr("Object identifier used by the map and scripts.");
+    m_aRowToolTip[eObjParam_OBJECT_TYPE] = tr("Determines how the game handles this object. Use an explicit conversion command to change it.");
+    m_aRowToolTip[eObjParam_PLAYER] = tr("Ownership and diplomacy group used by this object.");
+    m_aRowToolTip[eObjParam_NAME] = tr("Name stored with this object in the MOB.");
+    m_aRowToolTip[eObjParam_TEMPLATE] = tr("Model used to render this object.");
+    m_aRowToolTip[eObjParam_BODYPARTS] = tr("Model parts stored for this object. WARNING: An empty list enables every model part; incompatible combinations can crash the game, especially on units.");
+    m_aRowToolTip[eObjParam_PARENT_TEMPLATE] = tr("Preserved object-template value. Normal units use Database prototype instead.");
+    m_aRowToolTip[eObjParam_PRIM_TXTR] = tr("Texture used by the model's primary texture set.");
+    m_aRowToolTip[eObjParam_SEC_TXTR] = tr("Texture used by the model's second texture set, when the model has one.");
+    m_aRowToolTip[eObjParam_POSITION] = tr("Object position on the map.");
+    m_aRowToolTip[eObjParam_ROTATION] = tr("Object orientation.");
+    m_aRowToolTip[eObjParam_COMPLECTION] = tr("Object size along each axis. 1, 1, 1 is the model's original size.");
+    m_aRowToolTip[eObjParam_USE_IN_SCRIPT] = tr("Keep this object available to scripts that modify it during play.");
+    m_aRowToolTip[eObjParam_IS_SHADOW] = tr("Allow this object to cast a shadow.");
+    m_aRowToolTip[eObjParam_QUEST_INFO] = tr("Zone-local quest variable. Value 1 shows the active quest marker.");
+    m_aRowToolTip[eObjParam_COMMENTS] = tr("Editor notes. The game does not use this text.");
 
-    m_aRowToolTip[eObjParam_TYPE] = "Serialized unit category.";
-    m_aRowToolTip[eObjParam_UNIT_NEED_IMPORT] = "On uses the equipment, inventory, spells, and parameters stored in this MOB. Off uses the Database prototype.";
-    m_aRowToolTip[eObjParam_UNIT_PROTOTYPE] = "Unit definition used by the game.";
-    m_aRowToolTip[eObjParam_UNIT_ARMORS] = "Armor stored directly in this MOB. Used when Use MOB unit values is on.";
-    m_aRowToolTip[eObjParam_UNIT_WEAPONS] = "Weapons stored directly in this MOB. Used when Use MOB unit values is on.";
-    m_aRowToolTip[eObjParam_UNIT_SPELLS] = "Spells stored directly in this MOB. Used when Use MOB unit values is on.";
-    m_aRowToolTip[eObjParam_UNIT_QUICK_ITEMS] = "Quick-use items stored directly in this MOB. Used when Use MOB unit values is on.";
-    m_aRowToolTip[eObjParam_UNIT_QUEST_ITEMS] = "Quest inventory stored directly in this MOB. Used when Use MOB unit values is on.";
-    m_aRowToolTip[eObjParam_UNIT_STATS] = "Unit parameters stored directly in this MOB. Used when Use MOB unit values is on.";
+    m_aRowToolTip[eObjParam_TYPE] = tr("Serialized unit category.");
+    m_aRowToolTip[eObjParam_UNIT_NEED_IMPORT] = tr("On uses the equipment, inventory, spells, and parameters stored in this MOB. Off uses the Database prototype.");
+    m_aRowToolTip[eObjParam_UNIT_PROTOTYPE] = tr("Unit definition used by the game.");
+    m_aRowToolTip[eObjParam_UNIT_ARMORS] = tr("Armor stored directly in this MOB. Used when Use MOB unit values is on.");
+    m_aRowToolTip[eObjParam_UNIT_WEAPONS] = tr("Weapons stored directly in this MOB. Used when Use MOB unit values is on.");
+    m_aRowToolTip[eObjParam_UNIT_SPELLS] = tr("Spells stored directly in this MOB. Used when Use MOB unit values is on.");
+    m_aRowToolTip[eObjParam_UNIT_QUICK_ITEMS] = tr("Quick-use items stored directly in this MOB. Used when Use MOB unit values is on.");
+    m_aRowToolTip[eObjParam_UNIT_QUEST_ITEMS] = tr("Quest inventory stored directly in this MOB. Used when Use MOB unit values is on.");
+    m_aRowToolTip[eObjParam_UNIT_STATS] = tr("Unit parameters stored directly in this MOB. Used when Use MOB unit values is on.");
 
-    m_aRowToolTip[eObjParam_LOGIC_USE] = "For Logic 1-4, allow this setup to activate when its corresponding world alarm is raised. Logic 0 is the default enabled slot and ignores this setting.";
-    m_aRowToolTip[eObjParam_LOGIC_BEHAVIOUR] = "Controls how the unit moves and guards while this logic is active.";
-    m_aRowToolTip[eObjParam_GUARD_ALARM] = "Distance within which allied units can respond for help.";
-    m_aRowToolTip[eObjParam_GUARD_RADIUS] = "Maximum roaming distance for Guard area and Alarm guard. The unit moves to random points inside this radius.";
-    m_aRowToolTip[eObjParam_GUARD_PLACE] = "Center of random roaming for Guard area. Alarm guard ignores this value and uses the active alarm coordinates.";
-    m_aRowToolTip[eObjParam_ALWAYS_ACTIVE] = "Keep this unit's AI running regardless of distance. Otherwise it activates within twice the player's maximum vision range plus 20 metres.";
-    m_aRowToolTip[eObjParam_AGRESSION_MODE] = "Controls how the unit reacts to enemies.";
-    m_aRowToolTip[eObjParam_LOGIC_ALARM_CONDITION] = "Event that makes this unit raise its configured alarm.";
-    m_aRowToolTip[eObjParam_LOGIC_CYCLIC] = "On returns from the last patrol point to the first. Off follows the route back in reverse.";
-    m_aRowToolTip[eObjParam_LOGIC_WAIT] = "Stored and preserved in the MOB. The audited unit AI does not use this value.";
-    m_aRowToolTip[eObjParam_LOGIC_ALARM_NUMBER] = "World alarm this unit raises when its alarm condition occurs. 0 raises no alarm.";
-    m_aRowToolTip[eObjParam_VIEW_WAIT] = "Time spent looking toward this point. 15 ticks equal one second.";
-    m_aRowToolTip[eObjParam_VIEW_TURN_SPEED] = "How quickly the unit turns toward this point. 0 turns immediately.";
-    m_aRowToolTip[eObjParam_VIEW_FLAGS] = "0 uses normal behavior. 1 rests at the point.";
+    m_aRowToolTip[eObjParam_LOGIC_USE] = tr("For Logic 1-4, allow this setup to activate when its corresponding world alarm is raised. Logic 0 is the default enabled slot and ignores this setting.");
+    m_aRowToolTip[eObjParam_LOGIC_BEHAVIOUR] = tr("Controls how the unit moves and guards while this logic is active.");
+    m_aRowToolTip[eObjParam_GUARD_ALARM] = tr("Distance within which allied units can respond for help.");
+    m_aRowToolTip[eObjParam_GUARD_RADIUS] = tr("Maximum roaming distance for Guard area and Alarm guard. The unit moves to random points inside this radius.");
+    m_aRowToolTip[eObjParam_GUARD_PLACE] = tr("Center of random roaming for Guard area. Alarm guard ignores this value and uses the active alarm coordinates.");
+    m_aRowToolTip[eObjParam_ALWAYS_ACTIVE] = tr("Keep this unit's AI running regardless of distance. Otherwise it activates within twice the player's maximum vision range plus 20 metres.");
+    m_aRowToolTip[eObjParam_AGRESSION_MODE] = tr("Controls how the unit reacts to enemies.");
+    m_aRowToolTip[eObjParam_LOGIC_ALARM_CONDITION] = tr("Event that makes this unit raise its configured alarm.");
+    m_aRowToolTip[eObjParam_LOGIC_CYCLIC] = tr("On returns from the last patrol point to the first. Off follows the route back in reverse.");
+    m_aRowToolTip[eObjParam_LOGIC_WAIT] = tr("Stored and preserved in the MOB. The audited unit AI does not use this value.");
+    m_aRowToolTip[eObjParam_LOGIC_ALARM_NUMBER] = tr("World alarm this unit raises when its alarm condition occurs. 0 raises no alarm.");
+    m_aRowToolTip[eObjParam_VIEW_WAIT] = tr("Time spent looking toward this point. 15 ticks equal one second.");
+    m_aRowToolTip[eObjParam_VIEW_TURN_SPEED] = tr("How quickly the unit turns toward this point. 0 turns immediately.");
+    m_aRowToolTip[eObjParam_VIEW_FLAGS] = tr("0 uses normal behavior. 1 rests at the point.");
 
-    m_aRowToolTip[eObjParam_LEVER_SCIENCE_STATS_Type_Open] = "Ways the player may operate this lever.";
-    m_aRowToolTip[eObjParam_LEVER_SCIENCE_STATS_Key_ID] = "Key number required when Key is an allowed interaction.";
-    m_aRowToolTip[eObjParam_LEVER_SCIENCE_STATS_Hands_Sleight] = "Minimum Science skill required for manual interaction.";
-    m_aRowToolTip[eObjParam_LEVER_CUR_STATE] = "State active when the map loads.";
-    m_aRowToolTip[eObjParam_LEVER_TOTAL_STATE] = "Number of states available to this lever.";
-    m_aRowToolTip[eObjParam_LEVER_IS_CYCLED] = "Allow the lever to be operated repeatedly.";
-    m_aRowToolTip[eObjParam_LEVER_IS_DOOR] = "Treat this lever as a door approached from its usable sides.";
-    m_aRowToolTip[eObjParam_LEVER_RECALC_GRAPH] = "Update AI navigation when this object's state changes. Enable it when states change passability.";
+    m_aRowToolTip[eObjParam_LEVER_SCIENCE_STATS_Type_Open] = tr("Ways the player may operate this lever.");
+    m_aRowToolTip[eObjParam_LEVER_SCIENCE_STATS_Key_ID] = tr("Key number required when Key is an allowed interaction.");
+    m_aRowToolTip[eObjParam_LEVER_SCIENCE_STATS_Hands_Sleight] = tr("Minimum Science skill required for manual interaction.");
+    m_aRowToolTip[eObjParam_LEVER_CUR_STATE] = tr("State active when the map loads.");
+    m_aRowToolTip[eObjParam_LEVER_TOTAL_STATE] = tr("Number of states available to this lever.");
+    m_aRowToolTip[eObjParam_LEVER_IS_CYCLED] = tr("Allow the lever to be operated repeatedly.");
+    m_aRowToolTip[eObjParam_LEVER_IS_DOOR] = tr("Treat this lever as a door approached from its usable sides.");
+    m_aRowToolTip[eObjParam_LEVER_RECALC_GRAPH] = tr("Update AI navigation when this object's state changes. Enable it when states change passability.");
 
-    m_aRowToolTip[eObjParam_TRAP_DIPLOMACY] = "Serialized 32-bit player-group mask. Normal map loading replaces it using Player group and the MOB diplomacy table.";
-    m_aRowToolTip[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Groups marked War in this trap's Player group row of the containing MOB's diplomacy table. This is the target mask the game calculates when the map loads.";
-    m_aRowToolTip[eObjParam_TRAP_SPELL] = "Spell cast when the trap activates.";
-    m_aRowToolTip[eObjParam_TRAP_CAST_INTERVAL] = "Delay before the trap can cast again. 15 ticks equal one second.";
-    m_aRowToolTip[eObjParam_TRAP_CAST_ONCE] = "For unit-targeted spells, affect only the nearest eligible unit. Off affects all eligible units.";
-    m_aRowToolTip[eObjParam_TRAP_AREA_RADIUS] = "Radius checked around this activation center.";
+    m_aRowToolTip[eObjParam_TRAP_DIPLOMACY] = tr("Serialized 32-bit player-group mask. Normal map loading replaces it using Player group and the MOB diplomacy table.");
+    m_aRowToolTip[eObjParam_TRAP_EFFECTIVE_TARGETS] = tr("Groups marked War in this trap's Player group row of the containing MOB's diplomacy table. This is the target mask the game calculates when the map loads.");
+    m_aRowToolTip[eObjParam_TRAP_SPELL] = tr("Spell cast when the trap activates.");
+    m_aRowToolTip[eObjParam_TRAP_CAST_INTERVAL] = tr("Delay before the trap can cast again. 15 ticks equal one second.");
+    m_aRowToolTip[eObjParam_TRAP_CAST_ONCE] = tr("For unit-targeted spells, affect only the nearest eligible unit. Off affects all eligible units.");
+    m_aRowToolTip[eObjParam_TRAP_AREA_RADIUS] = tr("Radius checked around this activation center.");
 
-    m_aRowToolTip[eObjParam_TORCH_PTLINK] = "Position of the torch's light and particle effect relative to the object.";
-    m_aRowToolTip[eObjParam_TORCH_STRENGHT] = "Strength of the torch light and effect.";
-    m_aRowToolTip[eObjParam_TORCH_SOUND] = "Sound played by this torch.";
-    m_aRowToolTip[eObjParam_LIGHT_SHADOW] = "Allow this light to cast shadows.";
-    m_aRowToolTip[eObjParam_LIGHT_COLOR] = "Light color.";
-    m_aRowToolTip[eObjParam_LIGHT_RADIUS] = "Distance affected by the light. Negative values darken instead.";
-    m_aRowToolTip[eObjParam_SOUND_INNER_RADIUS] = "Area where the sound plays at full volume.";
-    m_aRowToolTip[eObjParam_SOUND_RANGE] = "Distance where the sound fades to silence.";
-    m_aRowToolTip[eObjParam_SOUND_RESNAME] = "Sound resources used by this source.";
-    m_aRowToolTip[eObjParam_SOUND_MIN] = "Shortest stored delay between ambient playbacks.";
-    m_aRowToolTip[eObjParam_SOUND_MAX] = "Longest stored delay between ambient playbacks.";
-    m_aRowToolTip[eObjParam_SOUND_AMBIENT] = "Play this source repeatedly using its delay range.";
-    m_aRowToolTip[eObjParam_SOUND_IS_MUSIC] = "Stored and preserved in the MOB. No confirmed runtime audio behavior uses this flag.";
-    m_aRowToolTip[eObjParam_PARTICL_TYPE] = "Effect generated by this particle source.";
-    m_aRowToolTip[eObjParam_PARTICL_SCALE] = "Size multiplier for the particle effect.";
+    m_aRowToolTip[eObjParam_TORCH_PTLINK] = tr("Position of the torch's light and particle effect relative to the object.");
+    m_aRowToolTip[eObjParam_TORCH_STRENGHT] = tr("Strength of the torch light and effect.");
+    m_aRowToolTip[eObjParam_TORCH_SOUND] = tr("Sound played by this torch.");
+    m_aRowToolTip[eObjParam_LIGHT_SHADOW] = tr("Allow this light to cast shadows.");
+    m_aRowToolTip[eObjParam_LIGHT_COLOR] = tr("Light color.");
+    m_aRowToolTip[eObjParam_LIGHT_RADIUS] = tr("Distance affected by the light. Negative values darken instead.");
+    m_aRowToolTip[eObjParam_SOUND_INNER_RADIUS] = tr("Area where the sound plays at full volume.");
+    m_aRowToolTip[eObjParam_SOUND_RANGE] = tr("Distance where the sound fades to silence.");
+    m_aRowToolTip[eObjParam_SOUND_RESNAME] = tr("Sound resources used by this source.");
+    m_aRowToolTip[eObjParam_SOUND_MIN] = tr("Shortest stored delay between ambient playbacks.");
+    m_aRowToolTip[eObjParam_SOUND_MAX] = tr("Longest stored delay between ambient playbacks.");
+    m_aRowToolTip[eObjParam_SOUND_AMBIENT] = tr("Play this source repeatedly using its delay range.");
+    m_aRowToolTip[eObjParam_SOUND_IS_MUSIC] = tr("Stored and preserved in the MOB. No confirmed runtime audio behavior uses this flag.");
+    m_aRowToolTip[eObjParam_PARTICL_TYPE] = tr("Effect generated by this particle source.");
+    m_aRowToolTip[eObjParam_PARTICL_SCALE] = tr("Size multiplier for the particle effect.");
 }
 
 bool CTableManager::isValidValue(const EObjParam param, const QString &value)
@@ -1865,7 +1865,7 @@ CValueItem::CValueItem(const QSharedPointer<IPropertyBase>& prop):
         QRegExpValidator *validator = new QRegExpValidator(re, this);
         setValidator(validator);
     }
-    setPlaceholderText("undefined/different");
+    setPlaceholderText(tr("undefined/different"));
     //setFrame(false); //with frames look nicer
 
     QString value;
@@ -1907,7 +1907,7 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     }
     else
     {
-        lineEdit()->setPlaceholderText("undefined/different");
+        lineEdit()->setPlaceholderText(tr("undefined/different"));
         m_committedText.clear();
     }
     // A proxy-model refresh may highlight its first row. Only a deliberate
@@ -2364,7 +2364,7 @@ CMultiLineButtonItem::CMultiLineButtonItem(const QSharedPointer<IPropertyBase> &
     {
         QStringList list;
         m_pValue.reset(new propStrAr(prop->type(), list)); //todo: display value dif
-        setText("undefined/different");
+        setText(tr("undefined/different"));
     }
     QObject::connect(this, SIGNAL(clicked()), this, SLOT(onTextEditOpen()));
 }
@@ -2443,7 +2443,7 @@ void CMultiLineButtonItem::onTextEdit(QString str)
 CUnitStatItem::CUnitStatItem(const QSharedPointer<IPropertyBase> &prop)
 {
     setFocusPolicy(Qt::StrongFocus);
-    setText("Edit Unit stats");
+    setText(tr("Edit unit parameters"));
     if(prop->type() != eObjParam_UNIT_STATS)
     {
         Q_ASSERT(false && "check caller");
@@ -2499,7 +2499,7 @@ void CUnitStatItem::_onParamChange(const QSharedPointer<IPropertyBase>& prop)
 CBodyPartItem::CBodyPartItem(const QSharedPointer<IPropertyBase>& prop)
 {
     setFocusPolicy(Qt::StrongFocus);
-    setText("Edit parts");
+    setText(tr("Edit model parts"));
     m_pValue.reset(prop->clone());
     QObject::connect(this, SIGNAL(clicked()), this, SLOT(onPartEditOpen()));
 }

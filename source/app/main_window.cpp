@@ -63,6 +63,7 @@
 #include <QImage>
 #include <QImageReader>
 #include <QRegularExpressionValidator>
+#include <QRegularExpression>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <cmath>
@@ -123,6 +124,107 @@ constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
 constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
 constexpr int kLoadedMapMob = 2;
+
+const char* const kMobFamilyUiTemplates[] = {
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Family %1: %2 MOB(s), %3 critical, %4 warning, %5 incomplete"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Workspace context %1: %2 active-family MOB(s), %3 other loaded MOB(s), %4 critical, %5 warning, %6 incomplete"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Source ambiguity"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Incomplete family"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Diplomacy"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "ID range"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Workspace composition"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Mixed loaded map sets"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Character model parts"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Object ID"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Duplicate object ID"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Cross-family workspace range overlap"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Legacy range overlap"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Cross-family workspace NID collision"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Known static alias"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "NID collision"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "in-memory workspace"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "collection"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "opened workspace"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "workspace dependency"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "profile-wide"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "installed fallback"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "explicit seed"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "map.txt primary"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "loaded primary overlay"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "profile-wide autorun"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "AddMob at line %1"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Multiple opened MOBs use logical name %1; %2 is authoritative"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "MOB file \"%1\" was not found. Referenced by %2 script line %3: %4"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "MOB file \"%1\" was not found. Requested as %2"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 could not be parsed structurally"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 has %2 directional diplomacy pair(s). One-way relations are supported and are not normalized, but confirm they are intentional: %3"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 has %2 non-Ally self-relation(s). Self-relations are supported and are preserved, but are unusual; confirm they are intentional: %3"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Could not resolve AddMob expression at line %1: %2"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 declares no ID ranges"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 primary SC_OBJECT_DB_FILE MOBs are loaded; map ownership and Test Current Map are ambiguous"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 loaded MOB(s) are outside active runtime family %2; overlaps with them are workspace-context findings"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 contains magic trap NID %2 but no MOB diplomacy table. Runtime derives trap hostility from that table, so the trap may have no valid victims. Copy the intended diplomacy from the primary/source MOB in MOB Parameters."),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 declares reversed range %2-%3"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "Character '%1' doesn't have a valid tables.lua entry."),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 in %2 has NID 0. NID 0 is invalid for map objects and may cause the game to crash during map transitions. Assign this object a unique positive NID, then review any references to the old ID."),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "NID %1 in %2 is outside that MOB's effective ranges"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "NID %1 is used by %2 objects in %3"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1 %2-%3 overlaps %4 %5-%6%7"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "NID %1 is owned by %2 objects across separately loaded map sets; they are not one %3 runtime family"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "NID %1 is owned by %2 objects across the runtime family"),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1: body-part token '%2' is duplicated %3 times."),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1: mutually overlapping parts are enabled for '%2': %3."),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1: missing '%3' may show hair with helmet %2."),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1: OBJBODYPARTS is missing, so every assembly member is enabled."),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1: OBJBODYPARTS is unreadable and cannot be classified safely."),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1: empty body-part list enables every assembly member, including overlapping alternatives."),
+    QT_TRANSLATE_NOOP("MobFamilyValidation", "%1: missing standard anatomy part(s): %2."),
+};
+
+QString localizedMobFamilyText(const QString& english)
+{
+    for(const char* source : kMobFamilyUiTemplates)
+    {
+        const QString sourceText = QString::fromUtf8(source);
+        if(!sourceText.contains(QRegularExpression(QStringLiteral("%[1-9]"))))
+        {
+            if(english == sourceText)
+                return QCoreApplication::translate("MobFamilyValidation", source);
+            continue;
+        }
+
+        QString pattern = QStringLiteral("^");
+        QMap<int, int> captureByArgument;
+        int cursor = 0;
+        int capture = 0;
+        QRegularExpression placeholder(QStringLiteral("%([1-9])"));
+        QRegularExpressionMatchIterator matches = placeholder.globalMatch(sourceText);
+        while(matches.hasNext())
+        {
+            const QRegularExpressionMatch match = matches.next();
+            pattern += QRegularExpression::escape(sourceText.mid(cursor,
+                match.capturedStart() - cursor));
+            pattern += QStringLiteral("(.*?)");
+            ++capture;
+            if(!captureByArgument.contains(match.captured(1).toInt()))
+                captureByArgument.insert(match.captured(1).toInt(), capture);
+            cursor = match.capturedEnd();
+        }
+        pattern += QRegularExpression::escape(sourceText.mid(cursor)) + QStringLiteral("$");
+        const QRegularExpressionMatch match = QRegularExpression(
+            pattern, QRegularExpression::DotMatchesEverythingOption).match(english);
+        if(!match.hasMatch())
+            continue;
+
+        QString translated = QCoreApplication::translate("MobFamilyValidation", source);
+        const int maximumArgument = captureByArgument.isEmpty()
+            ? 0 : captureByArgument.lastKey();
+        for(int argument = 1; argument <= maximumArgument; ++argument)
+            translated = translated.arg(match.captured(captureByArgument.value(argument)));
+        return translated;
+    }
+    return english;
+}
 
 class CElidedPathLabel final : public QLabel
 {
@@ -405,7 +507,8 @@ QString conciseValidationLine(const SMobFamilyFinding& finding)
     case EMobFamilyFindingSeverity::Incomplete: severity = "INCOMPLETE"; break;
     case EMobFamilyFindingSeverity::Info: severity = "INFO"; break;
     }
-    const QString line = QString("%1: %2").arg(severity, finding.message.simplified());
+    const QString line = QString("%1: %2").arg(severity,
+        localizedMobFamilyText(finding.message).simplified());
     return QFontMetrics(QApplication::font()).elidedText(line, Qt::ElideRight, 960);
 }
 
@@ -435,6 +538,11 @@ void configureBlockingProgress(QProgressDialog* progress)
     progress->setAutoClose(false);
     progress->setAutoReset(false);
 }
+}
+
+QString localizedMobFamilyUiText(const QString& english)
+{
+    return localizedMobFamilyText(english);
 }
 
 void testFunc()
@@ -4772,7 +4880,7 @@ void MainWindow::updateMobFamilyValidationPanel()
         m_validationSummary->setText(tr("No active MOB family."));
         return;
     }
-    m_validationSummary->setText(m_familyValidation.summary());
+    m_validationSummary->setText(localizedMobFamilyText(m_familyValidation.summary()));
     QTreeWidgetItem* membersRoot = new QTreeWidgetItem(m_validationTree,
         QStringList() << tr("INFO") << tr("Family members")
                       << QString() << tr("%1 MOB(s)").arg(m_familyValidation.members.size()));
@@ -4783,12 +4891,15 @@ void MainWindow::updateMobFamilyValidationPanel()
                                        : (member.inMemory ? tr("in-memory") : tr("disk")));
         QTreeWidgetItem* item = new QTreeWidgetItem(membersRoot,
             QStringList() << status.toUpper() << member.fileName << member.path
-                          << QString("%1; %2").arg(member.sourceRole, member.inclusionReason));
+                          << QString("%1; %2").arg(
+                                 localizedMobFamilyText(member.sourceRole),
+                                 localizedMobFamilyText(member.inclusionReason)));
         item->setData(0, kValidationPathRole, member.path);
         item->setData(0, kValidationCopyRole,
                       QString("%1\nSource: %2\nRole: %3\nReason: %4")
-                          .arg(member.fileName, member.path, member.sourceRole,
-                               member.inclusionReason));
+                          .arg(member.fileName, member.path,
+                               localizedMobFamilyText(member.sourceRole),
+                               localizedMobFamilyText(member.inclusionReason)));
         item->setToolTip(2, member.path + (member.requestedBy.isEmpty()
             ? QString() : QString("\nRequested by: %1").arg(member.requestedBy))
             + (member.sourceSha256.isEmpty() ? QString()
@@ -4822,16 +4933,17 @@ void MainWindow::updateMobFamilyValidationPanel()
             severity = tr("INFO"); color = QColor(130, 160, 190); break;
         }
         QTreeWidgetItem* item = new QTreeWidgetItem(m_validationTree,
-            QStringList() << severity << finding.category
+            QStringList() << severity << localizedMobFamilyText(finding.category)
                           << (finding.locations.isEmpty() ? QString() : finding.locations.first())
-                          << finding.message);
+                          << localizedMobFamilyText(finding.message));
         item->setForeground(0, QBrush(color));
         item->setToolTip(2, finding.locations.join('\n'));
         item->setData(0, kValidationPathRole,
                       finding.locations.isEmpty() ? QString() : finding.locations.first());
         item->setData(0, kValidationCopyRole,
                       QString("%1 %2\n%3\n%4")
-                          .arg(severity, finding.category, finding.message,
+                          .arg(severity, localizedMobFamilyText(finding.category),
+                               localizedMobFamilyText(finding.message),
                                finding.locations.join('\n')));
         if(finding.hasNid)
         {
@@ -6344,7 +6456,7 @@ void MainWindow::on_actionOpen_triggered()
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     Q_ASSERT(opt);
 
-    QFileInfo fileName = QFileDialog::getOpenFileName(this, "Open MPR or MOB", opt->value(),
+    QFileInfo fileName = QFileDialog::getOpenFileName(this, tr("Open MPR or MOB"), opt->value(),
                                                        tr("Evil Islands maps (*.mpr *.mob);;MPR (*.mpr);;MOB (*.mob)"));
 
     if(!fileName.path().isEmpty())
@@ -6813,7 +6925,7 @@ void MainWindow::on_actionOpen_MPR_triggered()
 {
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     Q_ASSERT(opt);
-    QFileInfo fileName = QFileDialog::getOpenFileName(this, "Open MPR", opt->value(), tr("MPR (*.mpr)"));
+    QFileInfo fileName = QFileDialog::getOpenFileName(this, tr("Open MPR"), opt->value(), tr("MPR (*.mpr)"));
     if(fileName.fileName().isEmpty())
         return;
     opt->setValue(fileName.dir().path());
@@ -7534,7 +7646,8 @@ void MainWindow::on_actionOpen_MOB_triggered()
 {
     COptString* opt = dynamic_cast<COptString*>(m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
     Q_ASSERT(opt);
-    const QStringList paths = QFileDialog::getOpenFileNames(this, "Open one or more MOB files", opt->value(), tr("MOB (*.mob)"));
+    const QStringList paths = QFileDialog::getOpenFileNames(this,
+        tr("Open one or more MOB files"), opt->value(), tr("MOB (*.mob)"));
     m_pView->prepareDocumentTransition();
     for(const QString& path : paths)
     {

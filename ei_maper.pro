@@ -57,3 +57,6 @@ RESOURCES += \
     assets/resources/data.qrc \
     assets/resources/shaders.qrc \
     assets/resources/textures.qrc
+
+TRANSLATIONS += translations/ei_mapper_ru.ts
+RESOURCES += translations/translations.qrc

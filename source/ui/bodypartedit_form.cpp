@@ -70,7 +70,7 @@ CBodyPartEditForm::CBodyPartEditForm(QWidget *parent) :
   ,m_clipboardFile(QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("bodypart_buffer.json"))
 {
     ui->setupUi(this);
-    setWindowTitle("Bodypart visibility");
+    setWindowTitle(tr("Model part visibility"));
     const QSize savedSize = QSettings().value(
         "ui/bodyPartEditorSize", QSize(384, 559)).toSize();
     if(savedSize.isValid()) resize(savedSize);

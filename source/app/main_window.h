@@ -67,6 +67,10 @@ class CMinimapExportDialog;
 class CMessageLogPanel;
 class CDockHiddenTab;
 
+// Localizes formatted validation presentation while preserving the report's
+// English source text for logs and machine-readable output.
+QString localizedMobFamilyUiText(const QString& english);
+
 struct SWindowTitle
 {
     QString mpr;

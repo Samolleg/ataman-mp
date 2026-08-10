@@ -9,6 +9,8 @@
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QSlider>
+#include <QComboBox>
+#include <QLabel>
 
 #include "settings.h"
 #include "ui_settings.h"
@@ -36,9 +38,22 @@ CSettings::CSettings(QWidget *parent) :
     // UI owns the first six rows plus the inactive polling row and spacer;
     // move those two before adding Endurance's dynamic controls.
     ui->gridLayout->removeItem(ui->horizontalLayout_8);
-    ui->gridLayout->addLayout(ui->horizontalLayout_8, 8, 0);
+    ui->gridLayout->addLayout(ui->horizontalLayout_8, 9, 0);
     ui->gridLayout->removeItem(ui->verticalSpacer_2);
-    ui->gridLayout->addItem(ui->verticalSpacer_2, 13, 0, 1, 2);
+    ui->gridLayout->addItem(ui->verticalSpacer_2, 15, 0, 1, 2);
+
+    QLabel* languageLabel = new QLabel(tr("Language"), ui->tabGeneral);
+    languageLabel->setToolTip(tr(
+        "Select the editor interface language. Restart the editor to apply a language change."));
+    QComboBox* language = new QComboBox(ui->tabGeneral);
+    language->setObjectName("language");
+    language->addItem(tr("English"), QStringLiteral("en"));
+    language->addItem(tr("Russian"), QStringLiteral("ru"));
+    language->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    language->setMinimumWidth(language->sizeHint().width());
+    language->setToolTip(languageLabel->toolTip());
+    ui->gridLayout->addWidget(languageLabel, 6, 0);
+    ui->gridLayout->addWidget(language, 6, 1);
 
     QLabel* uiScaleLabel = new QLabel(tr("UI scale"), ui->tabGeneral);
     uiScaleLabel->setToolTip(tr(
@@ -58,8 +73,8 @@ CSettings::CSettings(QWidget *parent) :
     QHBoxLayout* uiScaleControls = new QHBoxLayout;
     uiScaleControls->addWidget(uiScale, 1);
     uiScaleControls->addWidget(uiScaleValue);
-    ui->gridLayout->addWidget(uiScaleLabel, 6, 0);
-    ui->gridLayout->addLayout(uiScaleControls, 6, 1);
+    ui->gridLayout->addWidget(uiScaleLabel, 7, 0);
+    ui->gridLayout->addLayout(uiScaleControls, 7, 1);
     connect(uiScale, &QSlider::valueChanged, this, [uiScaleValue](int value)
     {
         uiScaleValue->setText(QStringLiteral("%1%").arg(value));
@@ -77,22 +92,22 @@ CSettings::CSettings(QWidget *parent) :
     editorControls->addWidget(editorPath, 1);
     editorControls->addWidget(browseEditor);
     editorControls->addWidget(clearEditor);
-    ui->gridLayout->addWidget(editorLabel, 7, 0);
-    ui->gridLayout->addLayout(editorControls, 7, 1);
+    ui->gridLayout->addWidget(editorLabel, 8, 0);
+    ui->gridLayout->addLayout(editorControls, 8, 1);
     QCheckBox* openLastSession = new QCheckBox(tr("Open last session on startup"),
                                                ui->tabGeneral);
     openLastSession->setObjectName("openLastSessionOnStartup");
     openLastSession->setToolTip(tr(
         "Automatically invokes File > Open Last Session after startup. "
         "Disabled by default; missing files are reported and skipped by the existing session loader."));
-    ui->gridLayout->addWidget(openLastSession, 9, 0, 1, 2);
+    ui->gridLayout->addWidget(openLastSession, 10, 0, 1, 2);
     QCheckBox* autosaveEnabled = new QCheckBox(tr("Periodic recovery autosave"),
                                                ui->tabGeneral);
     autosaveEnabled->setObjectName("autosaveEnabled");
     autosaveEnabled->setToolTip(tr(
         "Writes validated, versioned recovery copies under the Endurance backup folder. "
         "It never replaces the open MOB/MPR or marks it saved."));
-    ui->gridLayout->addWidget(autosaveEnabled, 10, 0, 1, 2);
+    ui->gridLayout->addWidget(autosaveEnabled, 11, 0, 1, 2);
     QLabel* autosaveIntervalLabel = new QLabel(tr("Autosave interval (minutes)"),
                                                 ui->tabGeneral);
     autosaveIntervalLabel->setToolTip(tr(
@@ -101,8 +116,8 @@ CSettings::CSettings(QWidget *parent) :
     autosaveInterval->setObjectName("autosaveIntervalMinutes");
     autosaveInterval->setValidator(new QIntValidator(1, 120, autosaveInterval));
     autosaveInterval->setToolTip(autosaveIntervalLabel->toolTip());
-    ui->gridLayout->addWidget(autosaveIntervalLabel, 11, 0);
-    ui->gridLayout->addWidget(autosaveInterval, 11, 1);
+    ui->gridLayout->addWidget(autosaveIntervalLabel, 12, 0);
+    ui->gridLayout->addWidget(autosaveInterval, 12, 1);
     QPushButton* autosaveNow = new QPushButton(tr("Autosave Now"), ui->tabGeneral);
     autosaveNow->setToolTip(tr("Immediately create recovery generations for all dirty documents."));
     QPushButton* openBackupFolder = new QPushButton(tr("Open Backup Folder"), ui->tabGeneral);
@@ -111,7 +126,7 @@ CSettings::CSettings(QWidget *parent) :
     autosaveActions->addWidget(autosaveNow);
     autosaveActions->addWidget(openBackupFolder);
     autosaveActions->addStretch(1);
-    ui->gridLayout->addLayout(autosaveActions, 12, 0, 1, 2);
+    ui->gridLayout->addLayout(autosaveActions, 13, 0, 1, 2);
     QLabel* visualCacheLimitLabel = new QLabel(tr("Character cache limit (MiB)"),
                                                 ui->tabGeneral);
     visualCacheLimitLabel->setToolTip(tr(
@@ -122,8 +137,8 @@ CSettings::CSettings(QWidget *parent) :
     visualCacheLimit->setObjectName("visualCacheLimitMiB");
     visualCacheLimit->setValidator(new QIntValidator(0, 1048576, visualCacheLimit));
     visualCacheLimit->setToolTip(visualCacheLimitLabel->toolTip());
-    ui->gridLayout->addWidget(visualCacheLimitLabel, 13, 0);
-    ui->gridLayout->addWidget(visualCacheLimit, 13, 1);
+    ui->gridLayout->addWidget(visualCacheLimitLabel, 14, 0);
+    ui->gridLayout->addWidget(visualCacheLimit, 14, 1);
     connect(autosaveNow, &QPushButton::clicked, this, &CSettings::autosaveRequested);
     connect(openBackupFolder, &QPushButton::clicked, this, &CSettings::backupFolderRequested);
     connect(browseEditor, &QPushButton::clicked, this, [this, editorPath]()
@@ -477,6 +492,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptString("gameRoot", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("lastVisitedFolder", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("externalEditorPath", "")));
+    aOpt.append(QSharedPointer<COpt>(new COptString("language", "en")));
     aOpt.append(QSharedPointer<COpt>(new COptStringList("recentFiles", {})));
 
     //init default options for bools
@@ -791,7 +807,8 @@ void CSettings::persistOptions()
 void CSettings::on_figPathAdd_clicked()
 {
     COptString* option = dynamic_cast<COptString*>(opt(eOptSetGeneral, "lastVisitedFolder"));
-    const QString directory = QFileDialog::getExistingDirectory(this, "Choose legacy figure resource directory", option->value());
+    const QString directory = QFileDialog::getExistingDirectory(this,
+        tr("Choose legacy figure resource directory"), option->value());
     if(!directory.isEmpty())
     {
         ui->figPaths->addItem(directory);
@@ -803,7 +820,8 @@ void CSettings::on_figPathAdd_clicked()
 void CSettings::on_texPathAdd_clicked()
 {
     COptString* option = dynamic_cast<COptString*>(opt(eOptSetGeneral, "lastVisitedFolder"));
-    const QString directory = QFileDialog::getExistingDirectory(this, "Choose legacy texture resource directory", option->value());
+    const QString directory = QFileDialog::getExistingDirectory(this,
+        tr("Choose legacy texture resource directory"), option->value());
     if(!directory.isEmpty())
     {
         ui->texPaths->addItem(directory);

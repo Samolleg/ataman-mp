@@ -19,20 +19,20 @@ CRandomizeForm::~CRandomizeForm()
 void CRandomizeForm::init()
 {
     setWindowFlags(Qt::Dialog | Qt::MSWindowsFixedSizeDialogHint);
-    setWindowTitle("Randomize parameters");
+    setWindowTitle(tr("Randomize parameters"));
 
-    m_typeMap["Complection Z"] = eObjParam_COMPLECTION_Z;
-    m_typeMap["Complection X"] = eObjParam_COMPLECTION_X;
-    m_typeMap["Complection Y"] = eObjParam_COMPLECTION_Y;
-    m_typeMap["Rotation X"] = eObjParam_ROTATION_X;
-    m_typeMap["Rotation Y"] = eObjParam_ROTATION_Y;
-    m_typeMap["Rotation Z"] = eObjParam_ROTATION_Z;
-    m_typeMap["Position X"] = eObjParam_POSITION_X;
-    m_typeMap["Position Y"] = eObjParam_POSITION_Y;
-    m_typeMap["Position Z"] = eObjParam_POSITION_Z;
+    m_typeMap[tr("Scale Z")] = eObjParam_COMPLECTION_Z;
+    m_typeMap[tr("Scale X")] = eObjParam_COMPLECTION_X;
+    m_typeMap[tr("Scale Y")] = eObjParam_COMPLECTION_Y;
+    m_typeMap[tr("Rotation X")] = eObjParam_ROTATION_X;
+    m_typeMap[tr("Rotation Y")] = eObjParam_ROTATION_Y;
+    m_typeMap[tr("Rotation Z")] = eObjParam_ROTATION_Z;
+    m_typeMap[tr("Position X")] = eObjParam_POSITION_X;
+    m_typeMap[tr("Position Y")] = eObjParam_POSITION_Y;
+    m_typeMap[tr("Position Z")] = eObjParam_POSITION_Z;
     //textures? models?
     ui->combo_setType->addItems(m_typeMap.keys());
-    ui->combo_setType->setCurrentText(m_typeMap.key(eObjParam_COMPLECTION_Z, "undefined"));
+    ui->combo_setType->setCurrentText(m_typeMap.key(eObjParam_COMPLECTION_Z, tr("undefined")));
     propFloat fl(eObjParam_COMPLECTION_Z);
     ui->lineEdit_Min->setText("0");
     ui->lineEdit_Max->setText("1");

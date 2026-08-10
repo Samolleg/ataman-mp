@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/i18n">
+        <file alias="ei_mapper_ru.qm">ei_mapper_ru.qm</file>
+    </qresource>
+</RCC>

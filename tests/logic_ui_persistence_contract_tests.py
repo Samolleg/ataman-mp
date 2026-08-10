@@ -112,7 +112,7 @@ def main() -> int:
     require(table_manager, "EBehaviourType::eGuardAlaram",
             "Guard radius is visible for Alarm guard as well as Guard area")
     require(table_manager,
-            'm_aRowName[eObjParam_LOGIC_BEHAVIOUR] = "Behavior";',
+            'm_aRowName[eObjParam_LOGIC_BEHAVIOUR] = tr("Behavior");',
             "American-English Behavior property label")
     for relative in (
         "source/layout_components/tablemanager.cpp",
@@ -124,7 +124,7 @@ def main() -> int:
         text = source(relative)
         if '"Behaviour' in text or ' behaviour"' in text or ' behaviour setup' in text:
             raise AssertionError(f"user-visible British-English spelling remains: {relative}")
-    require(table_manager, 'm_aRowName[eObjParam_LOGIC_ALARM_NUMBER] = "Alarm raised";',
+    require(table_manager, 'm_aRowName[eObjParam_LOGIC_ALARM_NUMBER] = tr("Alarm raised");',
             "outbound alarm label")
     require(table_manager, "Logic 0 is the default enabled slot and ignores this setting.",
             "default-slot Logic enabled explanation")

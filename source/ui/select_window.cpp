@@ -42,17 +42,18 @@ void CSelectForm::init()
 {
     setWindowFlags(Qt::Dialog | Qt::MSWindowsFixedSizeDialogHint);
 
-    m_loc["Id range"] = {eSelectType_Id_range, "Start Id", "End Id", true};//QStringList{, "Start Id", "End Id"};
-    m_loc["Map name"] = {eSelectType_Map_name, "Map name", "", false};
-    m_loc["Texture name"] = {eSelectType_Texture_name, "Texture name", "", false};
-    m_loc["Model name"] = {eSelectType_Model_name, "Model name", "", false};
+    m_loc[tr("ID range")] = {eSelectType_Id_range, tr("Start ID"), tr("End ID"), true};
+    m_loc[tr("Map name")] = {eSelectType_Map_name, tr("Map name"), "", false};
+    m_loc[tr("Texture name")] = {eSelectType_Texture_name, tr("Texture name"), "", false};
+    m_loc[tr("Model name")] = {eSelectType_Model_name, tr("Model name"), "", false};
     //m_loc["Mob file"] = {eSelectType_Mob_file, "Mob name", ""};
-    m_loc["Diplomacy group"] = {eSelectType_Diplomacy_group, "Start group number", "End group number", true};
+    m_loc[tr("Diplomacy group")] = {eSelectType_Diplomacy_group,
+        tr("Start group number"), tr("End group number"), true};
     //TODO
     //m_loc["Position (circle)"] = {eSelectType_Position_circle, "Center point", "Radius"};
     //m_loc["Position (rectangle)"] = {eSelectType_Position_rectangle, "Left down corner", "Right up corner"};
-    m_loc["Database name"] = {eSelectType_Database_name, "Database name", "", false};
-    m_loc["Template"] = {eSelectType_Template, "Template", "", false};
+    m_loc[tr("Database name")] = {eSelectType_Database_name, tr("Database name"), "", false};
+    m_loc[tr("Template")] = {eSelectType_Template, tr("Template"), "", false};
     //m_loc["Object type"] = {eSelectType_ObjectType, "Object type", ""};
 
     for (const auto& pair : m_loc.toStdMap())
@@ -94,7 +95,7 @@ void CSelectForm::updateLabels(const QString &type)
 
 void CSelectForm::updateTotal()
 {
-    ui->label_total->setText("Selected objects count:"+ QString::number(m_selected_num));
+    ui->label_total->setText(tr("Selected objects: %1").arg(m_selected_num));
 }
 
 void CSelectForm::on_combo_SelType_currentIndexChanged(const QString &arg1)

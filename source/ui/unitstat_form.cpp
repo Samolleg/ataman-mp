@@ -8,7 +8,7 @@ CUnitStatForm::CUnitStatForm(QWidget *parent) :
     ui(new Ui::CUnitStatForm)
 {
     ui->setupUi(this);
-    setWindowTitle("Unit stats");
+    setWindowTitle(tr("Unit parameters"));
     ui->tableUnitStat->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
 }
 

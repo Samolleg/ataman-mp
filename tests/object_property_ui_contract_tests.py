@@ -60,17 +60,17 @@ def main() -> int:
     )
     require(
         table_cpp,
-        'm_aRowToolTip[eObjParam_GUARD_PLACE] = "Center of random roaming for Guard area. Alarm guard ignores this value and uses the active alarm coordinates.";',
+        'm_aRowToolTip[eObjParam_GUARD_PLACE] = tr("Center of random roaming for Guard area. Alarm guard ignores this value and uses the active alarm coordinates.");',
         "guard-position tooltip distinguishes Guard area from Alarm guard",
     )
     require(
         table_cpp,
-        'm_aRowToolTip[eObjParam_LOGIC_WAIT] = "Stored and preserved in the MOB. The audited unit AI does not use this value.";',
+        'm_aRowToolTip[eObjParam_LOGIC_WAIT] = tr("Stored and preserved in the MOB. The audited unit AI does not use this value.");',
         "unused guard-idle value remains editable but is explained",
     )
     require(
         table_cpp,
-        'm_aRowToolTip[eObjParam_SOUND_IS_MUSIC] = "Stored and preserved in the MOB. No confirmed runtime audio behavior uses this flag.";',
+        'm_aRowToolTip[eObjParam_SOUND_IS_MUSIC] = tr("Stored and preserved in the MOB. No confirmed runtime audio behavior uses this flag.");',
         "unconfirmed Music flag remains editable but is explained",
     )
     require(table_cpp, "m_magicTrapPropertyContext",

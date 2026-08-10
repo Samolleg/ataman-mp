@@ -11,6 +11,7 @@
 #include <QSaveFile>
 #include <QCryptographicHash>
 #include <QElapsedTimer>
+#include <QCoreApplication>
 
 #include "mob.h"
 #include "utils.h"
@@ -997,8 +998,10 @@ int CMob::readMob(QFileInfo &path)
         {
             ei::log(eLogFatal, QString("Refusing MOB open after strict structural validation failed path:%1 findings:%2")
                 .arg(m_filePath.absoluteFilePath(), structuralReport.toText().trimmed()));
-            QMessageBox::critical(nullptr, "Invalid MOB structure",
-                QString("Endurance could not account for the complete MOB structure. The file was not opened.\n\n%1")
+            QMessageBox::critical(nullptr,
+                QCoreApplication::translate("CMob", "Invalid MOB structure"),
+                QCoreApplication::translate("CMob",
+                    "Endurance could not account for the complete MOB structure. The file was not opened.\n\n%1")
                     .arg(structuralReport.toText().trimmed()));
             file.close();
             return 3;
@@ -1025,9 +1028,11 @@ int CMob::readMob(QFileInfo &path)
         if(!criticalValidationMessages.isEmpty())
         {
             criticalValidationMessages.removeDuplicates();
-            QMessageBox::warning(nullptr, "MOB validation warning",
-                QString("Validation found an issue that may cause crashes in game.\n\n%1\n\n"
-                        "Fix the affected object before testing this map.")
+            QMessageBox::warning(nullptr,
+                QCoreApplication::translate("CMob", "MOB validation warning"),
+                QCoreApplication::translate("CMob",
+                    "Validation found an issue that may cause crashes in game.\n\n%1\n\n"
+                    "Fix the affected object before testing this map.")
                     .arg(criticalValidationMessages.join("\n\n")));
         }
         const SBackupResult openBackup = CBackupManager().snapshotOnOpen(m_filePath);
@@ -1035,18 +1040,22 @@ int CMob::readMob(QFileInfo &path)
         {
             ei::log(eLogWarning, QString("MOB opened without recovery snapshot:%1 error:%2")
                 .arg(m_filePath.absoluteFilePath(), openBackup.error));
-            QMessageBox::warning(nullptr, "Endurance backup warning",
-                QString("The MOB was opened, but its recovery snapshot could not be created.\n\n%1\n\n"
-                        "Do not edit or save this file until the backup location is writable.")
+            QMessageBox::warning(nullptr,
+                QCoreApplication::translate("CMob", "Endurance backup warning"),
+                QCoreApplication::translate("CMob",
+                    "The MOB was opened, but its recovery snapshot could not be created.\n\n%1\n\n"
+                    "Do not edit or save this file until the backup location is writable.")
                     .arg(openBackup.error));
         }
         if(!deserialize(m_originalData))
         {
             ei::log(eLogFatal, QString("Legacy MOB projection stopped before completing path:%1")
                 .arg(m_filePath.absoluteFilePath()));
-            QMessageBox::critical(nullptr, "Unsupported MOB projection",
-                "The MOB is structurally valid, but the current editor projection could not interpret it completely. "
-                "No editable document was opened; details are in logs/workflow.log.");
+            QMessageBox::critical(nullptr,
+                QCoreApplication::translate("CMob", "Unsupported MOB projection"),
+                QCoreApplication::translate("CMob",
+                    "The MOB is structurally valid, but the current editor projection could not interpret it completely. "
+                    "No editable document was opened; details are in logs/workflow.log."));
             file.close();
             return 4;
         }

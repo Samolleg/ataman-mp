@@ -14,7 +14,7 @@ CRangeDialog::CRangeDialog(QWidget *parent) :
     ui->setupUi(this);
     m_pParentWidget = dynamic_cast<CMobParameters*>(parent);
     Q_ASSERT(m_pParentWidget);
-    setWindowTitle("Range changes dialog");
+    setWindowTitle(tr("Change ID range"));
     setWindowFlags(Qt::Dialog | Qt::MSWindowsFixedSizeDialogHint);
     // remove question mark from the title bar
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
@@ -65,7 +65,8 @@ bool CRangeDialog::isValidValue()
                  );
     if(!bRes)
     {
-        QMessageBox::warning(this, "Warning", "Max and min ranges must not be 0 and max must be more then min");
+        QMessageBox::warning(this, tr("Warning"),
+            tr("Minimum and maximum IDs must be positive, and the maximum must be greater than the minimum."));
     }
     return bRes;
 }
@@ -83,7 +84,9 @@ bool CRangeDialog::hasIntersection()
         if((min >= m_arrRange[i].minRange && min <= m_arrRange[i].maxRange)
             || (max >= m_arrRange[i].minRange && max <= m_arrRange[i].maxRange))
         {
-            QMessageBox::warning(this, "Warning", "Has intersection with range: " + QString::number(m_arrRange[i].minRange) + " - " + QString::number(m_arrRange[i].maxRange));
+            QMessageBox::warning(this, tr("Warning"),
+                tr("Intersects range: %1 - %2")
+                    .arg(m_arrRange[i].minRange).arg(m_arrRange[i].maxRange));
             return true;
         }
     }
