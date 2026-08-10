@@ -410,6 +410,7 @@ private slots:
     void landscapeWheelDirectionUsesAvailableDelta();
     void sculptCadenceIsIndependentOfSpatialInterpolation();
     void unchangedMobIsByteIdentical();
+    void authoredZeroNidCanOpenAndSaveLosslessly();
     void mobGraphRemovalPreservesAllOtherTopLevelBytes();
     void mobGraphReplacementAndInsertionAreExact();
     void mobGraphOwnershipReplacementClosesRaceCheckBeforeCommit();
@@ -913,6 +914,36 @@ void EnduranceDocumentTests::unchangedMobIsByteIdentical()
     QVERIFY(document.load(QFileInfo(file.fileName()), &report));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!document.isDirty());
+}
+
+void EnduranceDocumentTests::authoredZeroNidCanOpenAndSaveLosslessly()
+{
+    QTemporaryFile file;
+    QVERIFY(file.open());
+    const QByteArray bytes = validMob(section(0xB000, object(0, "legacy-zero")));
+    QCOMPARE(file.write(bytes), qint64(bytes.size()));
+    file.flush();
+
+    CMobDocument document;
+    CValidationReport report;
+    QVERIFY(document.load(QFileInfo(file.fileName()), &report));
+    QCOMPARE(document.objects().size(), 1);
+    QVERIFY(document.objects().first().hasNid);
+    QCOMPARE(document.objects().first().nid, quint32(0));
+    QCOMPARE(document.serialize(), bytes);
+    QVERIFY(!document.isDirty());
+    QVERIFY(!report.hasErrors());
+    int reservedFindings = 0;
+    for(const SValidationFinding& finding : report.findings())
+    {
+        if(finding.code != "nid.zero_reserved")
+            continue;
+        ++reservedFindings;
+        QCOMPARE(finding.severity, EValidationSeverity::Critical);
+        QVERIFY(finding.location.contains("OBJECT"));
+        QVERIFY(finding.message.contains("Map unload removes only objects with positive IDs"));
+    }
+    QCOMPARE(reservedFindings, 1);
 }
 
 void EnduranceDocumentTests::duplicateMobIdsAreWarningsOnly()

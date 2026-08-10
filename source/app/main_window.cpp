@@ -993,7 +993,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateMobFamily = new QAction(tr("Validate Active MOB Family"), this);
     QAction* validateCurrentMob = new QAction(tr("Validate Current MOB Only"), this);
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
-    QAction* repairMobFamily = new QAction(tr("Review and Repair NID Collisions..."), this);
+    QAction* repairMobFamily = new QAction(tr("Review and Repair Object IDs..."), this);
     QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
     QAction* generateMinimapAction = new QAction(tr("Export Minimap..."), this);
     QAction* persistAiGraphAction = new QAction(tr("Bake / Export AI Graph..."), this);
@@ -3466,6 +3466,27 @@ void MainWindow::launchCurrentMapTest()
             tr("Load one MPR and at least one MOB before starting a test."));
         return;
     }
+    const SMobFamilyValidationRequest runtimePreflightRequest = mobFamilyValidationRequest();
+    const CMobFamilyValidationReport runtimePreflight =
+        CMobFamilyValidator::validate(runtimePreflightRequest);
+    ++m_validationGeneration;
+    m_hasPendingValidation = false;
+    m_lastValidationRequestDigest = mobFamilyRequestDigest(runtimePreflightRequest);
+    applyMobFamilyValidationReport(runtimePreflight);
+    if(runtimePreflight.hasBlockingRuntimeFindings())
+    {
+        const QVector<SMobFamilyFinding> blockers =
+            runtimePreflight.blockingRuntimeFindings();
+        ei::log(eLogFatal, QString("Blocked %1 because authored object NID 0 is present:\n%2")
+            .arg(hotReloadRequested ? tr("Hot Reload Map") : tr("Test Current Map"),
+                 validationWarningPreview(blockers)));
+        QMessageBox::critical(this, tr("Map test blocked"), tr(
+            "The active runtime MOB family contains an authored object with NID 0. "
+            "Map unload removes only positive-ID objects, so testing this map could retain "
+            "the object across a transition. Assign a unique positive NID and review its "
+            "references first.\n\n%1").arg(validationWarningPreview(blockers)));
+        return;
+    }
     notifyFamilyPreflight(hotReloadRequested ? tr("Hot Reload Map") : tr("Test Current Map"));
     QScopedPointer<QProgressDialog> progress(new QProgressDialog(
         hotReloadRequested ? tr("Preparing hot reload...") : tr("Preparing map test..."),
@@ -4677,7 +4698,8 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
     QSet<QString> currentRisks;
     for(const SMobFamilyFinding& finding : m_familyValidation.findings)
     {
-        if(finding.code != "nid.collision" && finding.code != "nid.workspace_collision"
+        if(finding.code != "nid.zero_reserved"
+           && finding.code != "nid.collision" && finding.code != "nid.workspace_collision"
            && finding.code != "range.legacy_overlap" && finding.code != "range.workspace_overlap")
             continue;
         QStringList locations = finding.locations;
@@ -4849,7 +4871,7 @@ void MainWindow::updateMobFamilyValidationPanel()
                 QString detail = tr("NID %1 — %2")
                     .arg(owner.nid)
                     .arg(owner.objectName.isEmpty() ? owner.sectionPath : owner.objectName);
-                if(finding.code == "nid.collision")
+                if(finding.code == "nid.collision" || finding.code == "nid.zero_reserved")
                     detail += tr("; use Review and Repair to calculate a replacement");
                 QTreeWidgetItem* ownerItem = new QTreeWidgetItem(item,
                     QStringList() << QString() << tr("Object") << owner.mobPath << detail);
@@ -5127,11 +5149,17 @@ void MainWindow::selectValidationObject(QTreeWidgetItem* item)
 
 void MainWindow::reviewAndRepairNidCollisions()
 {
-    refreshMobFamilyValidation();
-    QVector<SMobNidOwner> rows;
+    ++m_validationGeneration;
+    m_hasPendingValidation = false;
+    const SMobFamilyValidationRequest request = mobFamilyValidationRequest();
+    m_lastValidationRequestDigest = mobFamilyRequestDigest(request);
+    applyMobFamilyValidationReport(CMobFamilyValidator::validate(request));
+    QVector<SMobNidOwner> rows = m_familyValidation.nidOwners.value(0);
     for(auto it = m_familyValidation.nidOwners.constBegin();
         it != m_familyValidation.nidOwners.constEnd(); ++it)
     {
+        if(it.key() == 0)
+            continue;
         if(it.value().size() < 2)
             continue;
         bool critical = false;
@@ -5147,7 +5175,7 @@ void MainWindow::reviewAndRepairNidCollisions()
     if(rows.isEmpty())
     {
         QMessageBox::information(this, tr("NID repair"),
-            tr("No repairable critical NID collision is present in the active runtime family."));
+            tr("No repairable reserved object ID or critical NID collision is present in the active runtime family."));
         return;
     }
 
@@ -5158,13 +5186,14 @@ void MainWindow::reviewAndRepairNidCollisions()
     const QString primaryPath = QDir::cleanPath(m_mapTestEntry.mobPath).toLower();
 
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("Review and Repair NID Collisions"));
+    dialog.setWindowTitle(tr("Review and Repair Object IDs"));
     dialog.resize(1080, 520);
     QVBoxLayout* layout = new QVBoxLayout(&dialog);
     QLabel* explanation = new QLabel(tr(
         "Nothing is changed automatically. Select the newly added/edited owners to renumber. "
-        "Endurance preserves the map-table primary by default and refuses automatic repair when "
-        "a script or typed ParentID reference is ambiguous. Save and Test Current Map remain available."),
+        "Endurance preserves the established collision owner by default and refuses automatic repair when "
+        "a script or typed ParentID reference is ambiguous. Ordinary save remains available for legacy "
+        "data, but Test Current Map is blocked while an authored NID 0 remains."),
         &dialog);
     explanation->setWordWrap(true);
     layout->addWidget(explanation);
@@ -5196,13 +5225,14 @@ void MainWindow::reviewAndRepairNidCollisions()
             for(const SMobScriptReference& reference : references)
                 blockers.append(tr("script %1:%2").arg(member.fileName).arg(reference.line));
             for(const SMobObjectSnapshot& object : member.objects)
-                if(object.hasParentId && object.parentId == owner.nid)
+                if(owner.nid != 0 && object.hasParentId && object.parentId == owner.nid)
                     blockers.append(tr("ParentID in %1:%2").arg(member.fileName, object.sectionPath));
         }
         if(!loaded)
             blockers.prepend(tr("MOB is not loaded for editing"));
         const bool safe = blockers.isEmpty();
-        check->setCheckState(safe && ownerPath != primaryPath ? Qt::Checked : Qt::Unchecked);
+        check->setCheckState(safe && (owner.nid == 0 || ownerPath != primaryPath)
+            ? Qt::Checked : Qt::Unchecked);
         if(!safe)
             check->setFlags(Qt::NoItemFlags);
         table->setItem(row, 0, check);
@@ -5258,6 +5288,12 @@ void MainWindow::reviewAndRepairNidCollisions()
             return;
         }
         const quint32 replacement = quint32(parsed);
+        if(!CMobFamilyValidator::isAuthorableObjectNid(replacement))
+        {
+            QMessageBox::warning(this, tr("NID repair"),
+                tr("Replacement object IDs must be positive; NID 0 is reserved."));
+            return;
+        }
         if(replacements.contains(replacement) || m_familyValidation.nidOwners.contains(replacement))
         {
             QMessageBox::warning(this, tr("NID repair"),
@@ -5265,7 +5301,8 @@ void MainWindow::reviewAndRepairNidCollisions()
             return;
         }
         replacements.insert(replacement);
-        selectedPerCollision[rows.at(row).nid] += 1;
+        if(rows.at(row).nid != 0)
+            selectedPerCollision[rows.at(row).nid] += 1;
         CView::SNidRepair repair;
         repair.mobPath = rows.at(row).mobPath;
         repair.sectionPath = rows.at(row).sectionPath;

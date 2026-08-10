@@ -109,6 +109,8 @@ public:
     int warningCount() const;
     int incompleteCount() const;
     bool hasActionableFindings() const;
+    QVector<SMobFamilyFinding> blockingRuntimeFindings() const;
+    bool hasBlockingRuntimeFindings() const;
     QString summary() const;
     QString toText(int findingLimit = -1) const;
     QByteArray findingDigest() const;
@@ -121,6 +123,7 @@ public:
 class CMobFamilyValidator
 {
 public:
+    static bool isAuthorableObjectNid(quint32 nid);
     static CMobFamilyValidationReport validate(const SMobFamilyValidationRequest& request);
 };
 

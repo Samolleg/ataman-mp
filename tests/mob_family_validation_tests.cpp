@@ -167,6 +167,14 @@ QString writeMob(const QString& directory, const QString& name, const QByteArray
     return QFileInfo(path).absoluteFilePath();
 }
 
+QByteArray mobWithObjectAndParent(quint32 nid, quint32 parentId)
+{
+    const QByteArray object = section(0xB001,
+        section(0xB002, u32(nid)) + section(0xB003, u32(50))
+        + section(0xB004, QByteArray("unit")) + section(0xB012, u32(parentId)));
+    return section(0xA000, section(0xC000) + section(0xB000, object));
+}
+
 QByteArray mobWithDiplomacy(const QVector<QVector<quint32>>& values)
 {
     QByteArray data;
@@ -279,6 +287,9 @@ class MobFamilyValidationTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void authoredZeroNidIsCriticalAndBlocksRuntimePreflight();
+    void positiveNidWithNoParentSentinelIsClean();
+    void authoringPolicyAndReplacementSuggestionsRejectZero();
     void workspaceCopyShadowsInstalledLogicalMob();
     void renamedLoadedPrimaryReplacesInstalledCatalogPrimary();
     void differentLogicalNamesRemainIndependent();
@@ -304,6 +315,80 @@ private slots:
     void databaseCreatureResolutionSuppressesWearableMaskRules();
     void jmvUnitPerkTableFailuresAreCritical();
 };
+
+void MobFamilyValidationTests::authoredZeroNidIsCriticalAndBlocksRuntimePreflight()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = writeMob(directory.path(), "zero.mob",
+                                  mobWithObjectAndParent(0, 0));
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "zero-nid";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item) { return item.code == "nid.zero_reserved"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Critical);
+    QCOMPARE(finding->category, QString("Object ID"));
+    QVERIFY(finding->hasNid);
+    QCOMPARE(finding->nid, quint32(0));
+    QCOMPARE(finding->locations.size(), 1);
+    QVERIFY(finding->locations.first().startsWith(path + ":"));
+    QVERIFY(finding->message.contains("map unload removes only objects with positive IDs",
+                                      Qt::CaseInsensitive));
+    QVERIFY(finding->message.contains("Assign a unique positive NID"));
+    QVERIFY(report.hasBlockingRuntimeFindings());
+    QCOMPARE(report.blockingRuntimeFindings().size(), 1);
+}
+
+void MobFamilyValidationTests::positiveNidWithNoParentSentinelIsClean()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = writeMob(directory.path(), "positive.mob",
+                                  mobWithObjectAndParent(48, 0));
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "positive-nid";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item) { return item.code == "nid.zero_reserved"; }));
+    QVERIFY(!report.hasBlockingRuntimeFindings());
+    QVERIFY(report.nidOwners.contains(48));
+    QVERIFY(!report.nidOwners.contains(0));
+}
+
+void MobFamilyValidationTests::authoringPolicyAndReplacementSuggestionsRejectZero()
+{
+    QVERIFY(!CMobFamilyValidator::isAuthorableObjectNid(0));
+    QVERIFY(CMobFamilyValidator::isAuthorableObjectNid(1));
+
+    CMobFamilyValidationReport report;
+    SMobFamilyMember member;
+    member.path = QFileInfo("zero-range.mob").absoluteFilePath();
+    SMobIdRangeSnapshot range;
+    range.minimum = 0;
+    range.maximum = 2;
+    range.effective = true;
+    member.ranges.append(range);
+    report.members.append(member);
+    quint32 suggestion = 0;
+    QVERIFY(report.suggestReplacementNid(member.path, &suggestion));
+    QCOMPARE(suggestion, quint32(1));
+}
 
 void MobFamilyValidationTests::jmvUnitPerkTableFailuresAreCritical()
 {

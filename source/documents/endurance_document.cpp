@@ -2760,8 +2760,19 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
     addMobSemanticWarnings(m_sections, sourcePath, report);
     QMap<quint32, int> counts;
     for(const SMobObjectSnapshot& object : m_objects)
+    {
         if(object.hasNid)
+        {
             counts[object.nid] += 1;
+            if(object.nid == 0 && report)
+                report->add("nid.zero_reserved", EValidationSeverity::Critical,
+                    "Authored object NID 0 occupies the client-retained ID space. "
+                    "Map unload removes only objects with positive IDs, so this object can "
+                    "survive transitions with live resources. Assign a unique positive NID "
+                    "and review its references.",
+                    sourcePath + ":" + object.sectionPath);
+        }
+    }
     for(auto countIt = counts.constBegin(); countIt != counts.constEnd(); ++countIt)
     {
         if(countIt.value() > 1)

@@ -838,13 +838,19 @@ CNode* CMob::createNode(QJsonObject data)
         Q_ASSERT("Failed to create new node" && false);
     }
 
-    addNode(pNode);
-    logicNodesUpdate();
-
     if(nullptr == pNode)
         return nullptr;
 
-    pNode->setMapId(freeMapId());
+    const uint newMapId = freeMapId();
+    if(newMapId == 0)
+    {
+        ei::log(eLogFatal, "Object creation aborted because no positive map ID was available");
+        delete pNode;
+        return nullptr;
+    }
+    pNode->setMapId(newMapId);
+    addNode(pNode);
+    logicNodesUpdate();
     pNode->setState(ENodeState::eSelect);
     const QByteArray sourceDocumentSha256 = QByteArray::fromHex(
         enduranceProvenance.value("sourceDocumentSha256").toString().toLatin1());
@@ -1326,9 +1332,17 @@ uint CMob::freeMapId()
     {
         ei::log(ELogMessageType::eLogFatal, "Cant find suit ID for object");
         Q_ASSERT(false);
+        return 0;
     }
     if(m_view)
         id = m_view->suggestFamilyNid(this, id);
+    if(id == 0)
+    {
+        ei::log(ELogMessageType::eLogFatal,
+                "Family allocation rejected every positive object ID");
+        Q_ASSERT(false);
+        return 0;
+    }
     return id;
 }
 
@@ -1673,12 +1687,18 @@ void CMob::createNode(CNode *pNode)
     {
         Q_ASSERT("Failed to create new node" && false);
     }
-    addNode(pNewNode);
-
     if(nullptr == pNewNode)
         return;
 
-    pNewNode->setMapId(freeMapId());
+    const uint newMapId = freeMapId();
+    if(newMapId == 0)
+    {
+        ei::log(eLogFatal, "Object duplication aborted because no positive map ID was available");
+        delete pNewNode;
+        return;
+    }
+    pNewNode->setMapId(newMapId);
+    addNode(pNewNode);
     pNewNode->setState(ENodeState::eSelect);
 
 

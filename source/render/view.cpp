@@ -82,6 +82,7 @@
 #include "script_reference_analyzer.h"
 #include "landscape_tools.h"
 #include "endurance_document.h"
+#include "mob_family_validation.h"
 #include "staged_save_validator.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
@@ -9609,10 +9610,30 @@ void CView::resetSelectedId()
         }
     }
 
+    if(startId == 0)
+    {
+        ei::log(eLogWarning, "Reset IDs aborted because no positive object-ID run was available");
+        QMessageBox::warning(this, tr("Reset object IDs"),
+            tr("No positive object-ID run is available for the selected objects. "
+               "Nothing was changed."));
+        return;
+    }
+
     QMap<uint, uint> reconnectId;
     for(int i(0); i<nElem; ++i)
     {
-        reconnectId[arrNodes[i]] = startId;
+        const quint32 familyAwareId = suggestFamilyNid(m_activeMob, startId);
+        if(!CMobFamilyValidator::isAuthorableObjectNid(familyAwareId)
+           || reconnectId.values().contains(familyAwareId))
+        {
+            ei::log(eLogWarning,
+                    "Reset IDs aborted because family-aware allocation returned no unique positive ID");
+            QMessageBox::warning(this, tr("Reset object IDs"), tr(
+                "No unique positive family-aware object ID is available for every selected "
+                "object. Nothing was changed."));
+            return;
+        }
+        reconnectId[arrNodes[i]] = familyAwareId;
         ++startId;
     }
     for(auto pair: reconnectId.toStdMap())
@@ -11746,6 +11767,21 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
                              "One identifier cannot be assigned to multiple objects.");
         return;
     }
+    if(prop->type() == eObjParam_NID)
+    {
+        const propUint* id = dynamic_cast<const propUint*>(prop.get());
+        if(id && id->value() == targets.first()->mapId())
+            return;
+        if(!id || !CMobFamilyValidator::isAuthorableObjectNid(id->value()))
+        {
+            ei::log(eLogWarning, "Rejected authored object NID 0 before property mutation");
+            QMessageBox::warning(this, tr("Reserved object ID"), tr(
+                "Authored object NID 0 occupies the client-retained ID space. Map unload "
+                "removes only objects with positive IDs, so this object could survive map "
+                "transitions. Assign a unique positive NID instead."));
+            return;
+        }
+    }
 
     const bool grouped = targets.size() > 1;
     if(grouped)
@@ -11823,6 +11859,11 @@ bool CView::applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* e
     QSet<quint32> replacements;
     for(const SNidRepair& repair : repairs)
     {
+        if(!CMobFamilyValidator::isAuthorableObjectNid(repair.newNid))
+        {
+            if(error) *error = tr("Replacement object IDs must be positive; NID 0 is reserved.");
+            return false;
+        }
         if(repair.oldNid == repair.newNid || replacements.contains(repair.newNid))
         {
             if(error) *error = tr("The repair contains a duplicate or unchanged replacement ID.");
@@ -11865,7 +11906,7 @@ bool CView::applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* e
         return false;
     }
 
-    m_pUndoStack->beginMacro(tr("Repair %1 family NID collision(s)").arg(resolved.size()));
+    m_pUndoStack->beginMacro(tr("Repair %1 object ID(s)").arg(resolved.size()));
     for(const ResolvedRepair& item : resolved)
     {
         QSharedPointer<IPropertyBase> value(new propUint(eObjParam_NID, item.repair.newNid));
@@ -11891,6 +11932,20 @@ void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& prope
 {
     if(properties.isEmpty() || !m_pUndoStack)
         return;
+    for(const QSharedPointer<IPropertyBase>& property : properties)
+    {
+        if(!property || property->type() != eObjParam_NID)
+            continue;
+        const propUint* id = dynamic_cast<const propUint*>(property.get());
+        if(!id || !CMobFamilyValidator::isAuthorableObjectNid(id->value()))
+        {
+            ei::log(eLogWarning, "Rejected property paste containing authored object NID 0");
+            QMessageBox::warning(this, tr("Reserved object ID"), tr(
+                "Property paste was cancelled because authored object NID 0 is reserved. "
+                "Nothing was changed."));
+            return;
+        }
+    }
     if(properties.size() > 1)
         m_pUndoStack->beginMacro(QString("Paste %1 properties").arg(properties.size()));
     for(const QSharedPointer<IPropertyBase>& property : properties)

@@ -828,6 +828,38 @@ bool CMobFamilyValidationReport::suggestReplacementNid(const QString& owningMobP
     return false;
 }
 
+QVector<SMobFamilyFinding> CMobFamilyValidationReport::blockingRuntimeFindings() const
+{
+    QVector<SMobFamilyFinding> result;
+    for(const SMobFamilyFinding& finding : findings)
+    {
+        if(finding.code != "nid.zero_reserved")
+            continue;
+        bool active = false;
+        for(const SMobNidOwner& owner : nidOwners.value(finding.nid))
+        {
+            if(!owner.activeRuntimeFamily)
+                continue;
+            for(const QString& location : finding.locations)
+                active = active || location.startsWith(owner.mobPath + ":",
+                                                         Qt::CaseInsensitive);
+        }
+        if(active)
+            result.append(finding);
+    }
+    return result;
+}
+
+bool CMobFamilyValidationReport::hasBlockingRuntimeFindings() const
+{
+    return !blockingRuntimeFindings().isEmpty();
+}
+
+bool CMobFamilyValidator::isAuthorableObjectNid(quint32 nid)
+{
+    return nid > 0;
+}
+
 CMobFamilyValidationReport CMobFamilyValidator::validate(
     const SMobFamilyValidationRequest& request)
 {
@@ -1275,6 +1307,22 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
             owner.hasParentId = object.hasParentId;
             owner.parentId = object.parentId;
             report.nidOwners[object.nid].append(owner);
+            if(!isAuthorableObjectNid(object.nid))
+            {
+                SMobFamilyFinding finding;
+                finding.severity = EMobFamilyFindingSeverity::Critical;
+                finding.code = "nid.zero_reserved";
+                finding.category = "Object ID";
+                finding.message = QString(
+                    "Authored object NID 0 occupies the client-retained ID space. "
+                    "Map unload removes only objects with positive IDs, so this object can "
+                    "survive transitions with live resources. Assign a unique positive NID "
+                    "and review its references.");
+                finding.locations << member.path + ":" + object.sectionPath;
+                finding.hasNid = true;
+                finding.nid = object.nid;
+                report.findings.append(finding);
+            }
             bool inside = effective.isEmpty();
             for(const SMobIdRangeSnapshot& range : effective)
                 inside = inside || rangeContains(range, object.nid);
@@ -1356,7 +1404,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     {
         if(member.missing || !member.error.isEmpty()) continue;
         for(const SMobObjectSnapshot& object : member.objects)
-            if(object.hasParentId)
+            if(object.hasParentId && object.parentId != 0)
                 typedReferences.insert(object.parentId);
         for(const SMobScriptReference& reference :
             CScriptReferenceAnalyzer::findObjectIds(member.script, collidingIds))
