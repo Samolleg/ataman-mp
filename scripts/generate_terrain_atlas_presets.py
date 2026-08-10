@@ -65,6 +65,11 @@ R112_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r112_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R113_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r113_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -2958,6 +2963,17 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     # Byte-identical aliases are expanded explicitly in the decision record;
     # non-identical sibling atlases are never inferred here.
     for slot_text, corner_values in R112_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R113 confirms the exact bz2g/Zone2 slot-237 artwork as a uniform
+    # Stone / Lime tile. Both byte-identical owners are explicit; no broader
+    # sibling propagation is inferred.
+    for slot_text, corner_values in R113_CONSOLIDATED_REVIEW[
             "cornerCorrections"].get(namespace, {}).items():
         slot_index = int(slot_text)
         for corner_name, family_name in corner_values.items():

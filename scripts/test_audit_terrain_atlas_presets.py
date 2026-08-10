@@ -3426,13 +3426,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r112_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the safe reviewed R112 catalog verbatim."""
+    def test_r113_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the safe reviewed R113 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "0c1997127002a3f903c8300fccddb1e8765b1c68db1cdefb211addb8ec85f78d",
+            "d0b7a80c6785d0ae1d51d0214c88b439f6f8434ca5bbbd2f49fceb6caa120736",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -3988,6 +3988,30 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
         self.assertEqual(8, irregular["id"])
         self.assertEqual(396, irregular["thumbnailSlot"])
         self.assertTrue(irregular["paintSelectable"])
+
+    def test_r113_confirms_slot237_uniform_stone_lime_for_exact_owners(self) -> None:
+        """R113 applies the user's uniform decision to bz2g and Zone2 only."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r113_consolidated_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        self.assertEqual(1, decisions["counts"]["submittedCards"])
+        self.assertEqual(2, decisions["counts"]["exactArtworkOwners"])
+        self.assertEqual(8, decisions["counts"]["explicitCorners"])
+        for namespace in ("bz2g", "Zone2"):
+            preset = presets[namespace.casefold()]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            actual = [names[value]
+                      for value in payload[237 * 4:237 * 4 + 4]]
+            self.assertEqual(["Stone / Lime"] * 4, actual, namespace)
 
 
 if __name__ == "__main__":
