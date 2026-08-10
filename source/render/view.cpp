@@ -7908,7 +7908,8 @@ void CView::finalizeVirtualTerrainAtlas()
     const STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,
         kMprPackedTerrainAtlasSlotLimit,
-        authoredTypes,&report,pinned,placedCellTypes,placedPackedCells);
+        authoredTypes,&report,pinned,placedCellTypes,placedPackedCells,{},
+        &m_terrainAtlasAnalysis.overlayCompatibleCatalog);
     if(!finalized.success)
     {
         const QString findings=report.findings().isEmpty()

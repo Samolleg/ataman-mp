@@ -1769,6 +1769,10 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     const CTerrainTransitionCatalog catalog =
         CTerrainAtlasPresetCatalog::globalizedCatalog(
             sourceAtlas.profile, sourceAtlas.analysis.landCatalog);
+    const CTerrainTransitionCatalog authoredDecodeCatalog =
+        CTerrainAtlasPresetCatalog::globalizedCatalog(
+            sourceAtlas.profile,
+            sourceAtlas.analysis.overlayCompatibleCatalog);
     if(stampIds.isEmpty())
     {
         result.error = QStringLiteral("No paintable material identities were selected.");
@@ -1940,7 +1944,7 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
         preferredCellTypes.append(runtimeTypes.value(material, -1));
     const STerrainAtlasFinalization finalized = atlas.finalize(
         field, nameSpace, 16384, document.mapInfo().tileTypes, &report, pinned,
-        preferredCellTypes, {}, paintedMaterial);
+        preferredCellTypes, {}, paintedMaterial, &authoredDecodeCatalog);
     if(!finalized.success)
     {
         result.error = finalized.error + QLatin1Char('\n') + report.toText();

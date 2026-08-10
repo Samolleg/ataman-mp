@@ -2707,7 +2707,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     CValidationReport* report,const QVector<quint16>& pinnedPackedTiles,
     const QVector<qint32>& preferredCellTypes,
     const QVector<quint16>& preferredPackedCells,
-    const QVector<qint32>& preferredPaintMaterials)
+    const QVector<qint32>& preferredPaintMaterials,
+    const CTerrainTransitionCatalog* authoredDecodeCatalog)
 {
     STerrainAtlasFinalization result;
     result.capacityLimit = capacityLimit;
@@ -2732,6 +2733,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     QMap<int, int> generatedOutput;
     QVector<QImage> denseImages;
     QMap<QByteArray, QVector<int>> exactAuthoredOutputs;
+    const CTerrainTransitionCatalog& decodeCatalog = authoredDecodeCatalog
+        ? *authoredDecodeCatalog : m_catalog;
     const auto addAuthoredOutput = [&](int sourceSlot,
                                        const QString& rangeError) -> bool
     {
@@ -2756,7 +2759,7 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         SMprPackedTile basePacked;
         basePacked.tileIndex = quint8(sourceSlot % 64);
         basePacked.atlasIndex = quint8(sourceSlot / 64);
-        candidate.canonicalSignature = m_catalog.gridSignatureForPacked(
+        candidate.canonicalSignature = decodeCatalog.gridSignatureForPacked(
             basePacked.encode(), &signatureFound);
         const bool signatureAssigned = signatureFound
             && candidate.canonicalSignature.northWest > 0

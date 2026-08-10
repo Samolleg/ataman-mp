@@ -142,7 +142,8 @@ public:
         const QVector<quint16>& pinnedPackedTiles = {},
         const QVector<qint32>& preferredCellTypes = {},
         const QVector<quint16>& preferredPackedCells = {},
-        const QVector<qint32>& preferredPaintMaterials = {})
+        const QVector<qint32>& preferredPaintMaterials = {},
+        const CTerrainTransitionCatalog* authoredDecodeCatalog = nullptr)
     {
         QVector<qint32> cellTypes = preferredCellTypes;
         if(cellTypes.isEmpty())
@@ -159,7 +160,7 @@ public:
             field, sourceNamespace, capacityLimit,
             sourceTileTypes.isEmpty() ? m_testSourceTypes : sourceTileTypes,
             report, pinnedPackedTiles, cellTypes, preferredPackedCells,
-            preferredPaintMaterials);
+            preferredPaintMaterials, authoredDecodeCatalog);
     }
 
 private:
@@ -471,6 +472,7 @@ private slots:
     void stableHashesAndNamespaceAreDeterministic();
     void mapWideUsageAndUnusedCompaction();
     void exactAuthoredDuplicatesAreRemappedBeforeCapacity();
+    void exactAuthoredDuplicatesUseCrossLayerDecodeCatalog();
     void exactAuthoredDuplicateConflictFailsClosed();
     void exactAuthoredDuplicateRemapPreservesPackedRotationsAfterReopen();
     void finalizesAtValidatedRuntimeCeilingBeyond512();
@@ -2782,6 +2784,57 @@ void TerrainVirtualAtlasTests::exactAuthoredDuplicatesAreRemappedBeforeCapacity(
     QCOMPARE(retained.sourceNamespace,
              QStringLiteral("ExactDuplicateCapacity"));
     QCOMPARE(retained.sourceSlotAliases, QVector<int>({0, 1}));
+}
+
+void TerrainVirtualAtlasTests::exactAuthoredDuplicatesUseCrossLayerDecodeCatalog()
+{
+    CTerrainTransitionCatalog landCatalog;
+    CTerrainTransitionCatalog decodeCatalog;
+    const QImage shared = solid(qRgba(40, 90, 150, 255));
+    QVector<QImage> images = {
+        shared,
+        shared,
+        solid(qRgba(180, 110, 35, 255)),
+    };
+    for(int slot = 0; slot < images.size(); ++slot)
+    {
+        STerrainTransitionVariant variant;
+        const qint32 material = slot < 2 ? 2 : 1;
+        variant.signature = signature(material, material, material, material);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot);
+        variant.packedTile = packed.encode();
+        QVERIFY(decodeCatalog.addVariant(variant));
+        if(slot == 2)
+            QVERIFY(landCatalog.addVariant(variant));
+    }
+
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1, 1));
+    SMprPackedTile firstOverlay;
+    firstOverlay.tileIndex = 0;
+    SMprPackedTile secondOverlay;
+    secondOverlay.tileIndex = 1;
+    CTestTerrainVirtualAtlas atlas(
+        landCatalog, images, 0, {}, {}, true,
+        {14, 14, 1}, {{1, 1}});
+    CValidationReport report;
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("CrossLayerDuplicate"), 2,
+        {14, 14, 1}, &report,
+        {firstOverlay.encode(), secondOverlay.encode()}, {}, {}, {},
+        &decodeCatalog);
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n")
+                        + report.toText()));
+    QCOMPARE(finalized.requiredSlots, 2);
+    QCOMPARE(finalized.authoredSlotRemap.value(0),
+             finalized.authoredSlotRemap.value(1));
+    const STerrainFinalizedTile& retained = finalized.tiles.at(
+        finalized.authoredSlotRemap.value(0));
+    QCOMPARE(retained.sourceSlotAliases, QVector<int>({0, 1}));
+    QCOMPARE(retained.runtimeTerrainType, qint32(14));
+    QCOMPARE(retained.canonicalSignature, signature(2, 2, 2, 2));
 }
 
 void TerrainVirtualAtlasTests::exactAuthoredDuplicateConflictFailsClosed()
