@@ -49,11 +49,13 @@ def load_catalog(path: Path) -> dict[tuple[str, int], dict[str, Any]]:
     return slots
 
 
-def load_inventory_manifests(paths: list[Path]) -> tuple[dict, dict]:
+def load_inventory_manifests(paths: list[Path]) -> tuple[dict, dict, dict]:
     aliases: dict[tuple[str, int], dict[str, Any]] = {}
     material_names: dict[int, str] = {}
+    fixtures: dict[str, dict[str, Any]] = {}
     for path in paths:
         manifest = json.loads(path.read_text(encoding="utf-8"))
+        cards_by_slot: dict[int, dict[str, Any]] = {}
         for card in manifest.get("artwork_cards", []):
             material_id = int(card["material_id"])
             material_names[material_id] = card["material"]
@@ -75,7 +77,23 @@ def load_inventory_manifests(paths: list[Path]) -> tuple[dict, dict]:
             }
             for alias in common["equivalentAliases"]:
                 aliases[(alias["namespace"].casefold(), alias["slot"])] = common
-    return aliases, material_names
+            cards_by_slot[int(card["physical_slot"])] = {
+                **common,
+                "physicalSlot": int(card["physical_slot"]),
+            }
+        mpr_path = path.parent / manifest.get("mpr_file", "")
+        if mpr_path.is_file():
+            fixtures[sha256(mpr_path)] = {
+                "manifestPath": str(path),
+                "manifestSha256": sha256(path),
+                "mprPath": str(mpr_path),
+                "mprSha256": sha256(mpr_path),
+                "width": int(manifest["packed_cell_width"]),
+                "height": int(manifest["packed_cell_height"]),
+                "packed": base64.b64decode(manifest["packed_cells_le16_base64"]),
+                "cardsBySlot": cards_by_slot,
+            }
+    return aliases, material_names, fixtures
 
 
 def corner_values(corners: dict[str, Any] | None) -> list[int]:
@@ -117,7 +135,7 @@ def reconcile(
     inventory_paths: list[Path],
 ) -> dict[str, Any]:
     catalog = load_catalog(catalog_path)
-    inventory, material_names = load_inventory_manifests(inventory_paths)
+    inventory, material_names, fixtures = load_inventory_manifests(inventory_paths)
     groups: dict[tuple, dict[str, Any]] = {}
     generated_blends = []
     unresolved = []
@@ -125,6 +143,7 @@ def reconcile(
     total_marks = 0
     total_selected = 0
     captured_selected = 0
+    recovered_selected = 0
 
     def queue_source(
         alias: dict[str, Any],
@@ -206,9 +225,11 @@ def reconcile(
 
     for report_path in sorted(report_dir.glob("*-paint-issues.json")):
         report = json.loads(report_path.read_text(encoding="utf-8"))
+        fixture = fixtures.get(report.get("sourceMprSha256", "").lower())
         marks = report.get("marks", [])
         report_selected = 0
         report_captured = 0
+        report_recovered = 0
         for mark in marks:
             total_marks += 1
             selected = {
@@ -305,6 +326,48 @@ def reconcile(
                         }
                     )
             for x, y in sorted(selected - captured_coordinates):
+                recovered = False
+                if fixture and 0 <= x < fixture["width"] and 0 <= y < fixture["height"]:
+                    offset = (y * fixture["width"] + x) * 2
+                    packed = fixture["packed"][offset] | (
+                        fixture["packed"][offset + 1] << 8
+                    )
+                    physical_slot = packed & 0x3FFF
+                    rotation = (packed >> 14) & 3
+                    card = fixture["cardsBySlot"].get(physical_slot)
+                    if card:
+                        evidence = {
+                            "report": report_path.name,
+                            "markId": int(mark.get("id", -1)),
+                            "category": mark.get("category", "unknown"),
+                            "layerRecordedByMarker": mark.get("layer", ""),
+                            "x": x,
+                            "y": y,
+                            "packedSlot": physical_slot,
+                            "packedRotation": rotation,
+                            "physicalPixelSha256": card["sourcePixelSha256"],
+                            "origin": "exact-inventory-manifest-recovery",
+                            "recoveredFromManifest": fixture["manifestPath"],
+                            "manifestSha256": fixture["manifestSha256"],
+                            "matchedSourceMprSha256": fixture["mprSha256"],
+                        }
+                        for alias in card["equivalentAliases"]:
+                            queue_source(
+                                {
+                                    **alias,
+                                    "sourcePixelSha256": card["sourcePixelSha256"],
+                                },
+                                "reported-authored-tile-recovered-from-exact-inventory",
+                                evidence,
+                                card["material"],
+                                card["materialId"],
+                                card["runtimeTerrainType"],
+                            )
+                        recovered_selected += 1
+                        report_recovered += 1
+                        recovered = True
+                if recovered:
+                    continue
                 unresolved.append(
                     {
                         "reason": "selected cell has no captured tile snapshot",
@@ -326,6 +389,7 @@ def reconcile(
                 "marks": len(marks),
                 "selectedCells": report_selected,
                 "capturedSelectedCells": report_captured,
+                "recoveredSelectedCells": report_recovered,
             }
         )
 
@@ -371,6 +435,10 @@ def reconcile(
             "marks": total_marks,
             "selectedCells": total_selected,
             "capturedSelectedCells": captured_selected,
+            "recoveredSelectedCells": recovered_selected,
+            "provenanceQualifiedSelectedCells": (
+                captured_selected + recovered_selected
+            ),
             "generatedBlendOccurrences": len(generated_blends),
             "automaticReviewGroups": len(review_groups),
             "uniformReviewGroups": uniform_groups,
