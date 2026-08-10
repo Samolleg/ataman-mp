@@ -2316,6 +2316,517 @@ bool writeMapCollection(const QString& collectionPath,
         QJsonDocument(built->manifest).toJson(QJsonDocument::Indented), error);
 }
 
+struct SUniformInventoryAlias
+{
+    QString nameSpace;
+    int slot{-1};
+};
+
+struct SUniformInventoryArtwork
+{
+    qint32 materialId{0};
+    QString material;
+    qint32 runtimeTerrainType{-1};
+    QImage pixels;
+    QByteArray pixelSha256;
+    QVector<SUniformInventoryAlias> aliases;
+    int physicalSlot{-1};
+    int x0{-1};
+    int y0{-1};
+};
+
+QByteArray exactRgbaSha256(const QImage& source)
+{
+    const QImage image = source.convertToFormat(QImage::Format_RGBA8888);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(int y = 0; y < image.height(); ++y)
+        hash.addData(reinterpret_cast<const char*>(image.constScanLine(y)),
+                     image.width() * 4);
+    return hash.result().toHex();
+}
+
+BuiltMap buildUniformBrushInventory(
+    const QString& sourcePath, const Atlas& sourceAtlas,
+    StockAssets* stockAssets, const QString& outputDirectory)
+{
+    BuiltMap result;
+    if(!stockAssets || !sourceAtlas.valid || sourceAtlas.tiles.isEmpty())
+    {
+        result.error = QStringLiteral("Uniform inventory source assets are unavailable.");
+        return result;
+    }
+    const QString sourceNamespace = sourceAtlas.profile.mprNamespace;
+    QFile sourceFile(sourcePath);
+    CValidationReport report;
+    CMprDocument document;
+    if(!sourceFile.open(QIODevice::ReadOnly)
+       || !document.loadBytes(sourceFile.readAll(), sourcePath, &report))
+    {
+        result.error = QStringLiteral("Could not load the uniform inventory source MPR.\n%1")
+            .arg(report.toText());
+        return result;
+    }
+
+    const int width = int(document.mapInfo().sectorCountX) * 16;
+    const int height = int(document.mapInfo().sectorCountY) * 16;
+    const int pitch = 3;
+    const int columns = width / pitch;
+    const int rows = height / pitch;
+    if(width <= 0 || height <= 0 || columns <= 0 || rows <= 0)
+    {
+        result.error = QStringLiteral("The uniform inventory source map has invalid dimensions.");
+        return result;
+    }
+
+    QVector<SUniformInventoryArtwork> artworks;
+    QMap<QByteArray, int> artworkByKey;
+    QMap<qint32, QString> materialNames;
+    QJsonArray excludedSizeAliases;
+    int catalogAliases = 0;
+    int authorizedAliases = 0;
+    const QVector<STerrainGlobalMaterialFamily> families =
+        CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+    for(const STerrainGlobalMaterialFamily& family : families)
+    {
+        if(family.layer != ETerrainAtlasLayer::Land)
+            continue;
+        materialNames.insert(family.id, family.name);
+        for(const STerrainGlobalMaterialSource& source : family.sources)
+        {
+            ++catalogAliases;
+            Atlas sourceBinding = stockAssets->atlas(
+                source.mprNamespace, source.textureCount * 64, nullptr);
+            if(!sourceBinding.valid || source.uniformSlot < 0
+               || source.uniformSlot >= sourceBinding.tiles.size())
+            {
+                result.error = QStringLiteral(
+                    "Reviewed uniform source %1:%2 could not be loaded.")
+                    .arg(source.mprNamespace).arg(source.uniformSlot);
+                return result;
+            }
+            const QImage pixels = sourceBinding.tiles.at(source.uniformSlot)
+                .convertToFormat(QImage::Format_RGBA8888);
+            if(pixels.size() != sourceAtlas.tiles.front().size())
+            {
+                // Exact authored transitions are reusable only inside a
+                // working atlas with the same physical tile dimensions. Keep
+                // lower-resolution reviewed aliases visible in the coverage
+                // report, but never resample them into a purported exact
+                // artwork inventory.
+                QJsonObject excluded;
+                excluded.insert(QStringLiteral("material"), family.name);
+                excluded.insert(QStringLiteral("runtime_terrain_type"),
+                                family.runtimeTerrainType);
+                excluded.insert(QStringLiteral("namespace"),
+                                source.mprNamespace);
+                excluded.insert(QStringLiteral("slot"), source.uniformSlot);
+                excluded.insert(QStringLiteral("source_width"), pixels.width());
+                excluded.insert(QStringLiteral("source_height"), pixels.height());
+                excluded.insert(QStringLiteral("target_width"),
+                                sourceAtlas.tiles.front().width());
+                excluded.insert(QStringLiteral("target_height"),
+                                sourceAtlas.tiles.front().height());
+                excludedSizeAliases.append(excluded);
+                continue;
+            }
+            const QByteArray pixelSha256 = exactRgbaSha256(pixels);
+            const QByteArray key = QByteArray::number(family.id) + ':'
+                + QByteArray::number(family.runtimeTerrainType) + ':'
+                + pixelSha256;
+            int artworkIndex = artworkByKey.value(key, -1);
+            if(artworkIndex < 0)
+            {
+                SUniformInventoryArtwork artwork;
+                artwork.materialId = family.id;
+                artwork.material = family.name;
+                artwork.runtimeTerrainType = family.runtimeTerrainType;
+                artwork.pixels = pixels;
+                artwork.pixelSha256 = pixelSha256;
+                artworkIndex = artworks.size();
+                artworks.append(artwork);
+                artworkByKey.insert(key, artworkIndex);
+            }
+            SUniformInventoryAlias alias;
+            alias.nameSpace = source.mprNamespace;
+            alias.slot = source.uniformSlot;
+            artworks[artworkIndex].aliases.append(alias);
+            ++authorizedAliases;
+        }
+    }
+    if(report.hasErrors() || artworks.isEmpty())
+    {
+        result.error = QStringLiteral("The reviewed uniform catalog did not compile.\n%1")
+            .arg(report.toText());
+        return result;
+    }
+    std::sort(artworks.begin(), artworks.end(),
+        [](const SUniformInventoryArtwork& left,
+           const SUniformInventoryArtwork& right) {
+            const int byName = left.material.compare(
+                right.material, Qt::CaseInsensitive);
+            if(byName != 0) return byName < 0;
+            if(left.runtimeTerrainType != right.runtimeTerrainType)
+                return left.runtimeTerrainType < right.runtimeTerrainType;
+            return left.pixelSha256 < right.pixelSha256;
+        });
+    for(SUniformInventoryArtwork& artwork : artworks)
+        std::sort(artwork.aliases.begin(), artwork.aliases.end(),
+            [](const SUniformInventoryAlias& left,
+               const SUniformInventoryAlias& right) {
+                const int byNamespace = left.nameSpace.compare(
+                    right.nameSpace, Qt::CaseInsensitive);
+                return byNamespace != 0 ? byNamespace < 0
+                                        : left.slot < right.slot;
+            });
+    if(artworks.size() > columns * rows)
+    {
+        result.error = QStringLiteral(
+            "%1 exact uniform artworks exceed the %2-card capacity of the %3x%4 map.")
+            .arg(artworks.size()).arg(columns * rows).arg(width).arg(height);
+        return result;
+    }
+
+    STerrainAtlasFinalization finalized;
+    finalized.capacityLimit = 16384;
+    const QVector<qint32>& sourceTypes = document.mapInfo().tileTypes;
+    QMap<int, STerrainAtlasProfileSlot> sourceDefinitions;
+    for(const STerrainAtlasProfileSlot& definition :
+            sourceAtlas.profile.slotDefinitions)
+        sourceDefinitions.insert(definition.slot, definition);
+    if(sourceTypes.size() < sourceAtlas.tiles.size())
+    {
+        result.error = QStringLiteral(
+            "The %1 runtime terrain-type table is shorter than its authored atlas.")
+            .arg(sourceNamespace);
+        return result;
+    }
+    for(int slot = 0; slot < sourceAtlas.tiles.size(); ++slot)
+    {
+        STerrainFinalizedTile tile;
+        tile.pixels = sourceAtlas.tiles.at(slot)
+            .convertToFormat(QImage::Format_RGBA8888);
+        tile.pixelSha256 = exactRgbaSha256(tile.pixels);
+        tile.authored = true;
+        tile.sourceSlot = slot;
+        tile.sourceNamespace = sourceAtlas.profile.mprNamespace;
+        tile.sourceSlotAliases.append(slot);
+        tile.runtimeTerrainType = sourceTypes.at(slot);
+        if(sourceDefinitions.contains(slot))
+            tile.canonicalSignature = CTerrainTransitionCatalog::mirroredGridY(
+                sourceDefinitions.value(slot).signature);
+        finalized.authoredSlotRemap.insert(slot, slot);
+        finalized.tiles.append(tile);
+        finalized.tileTypes.append(tile.runtimeTerrainType);
+    }
+
+    for(int index = 0; index < artworks.size(); ++index)
+    {
+        SUniformInventoryArtwork& artwork = artworks[index];
+        artwork.physicalSlot = finalized.tiles.size();
+        artwork.x0 = (index % columns) * pitch;
+        artwork.y0 = (index / columns) * pitch;
+        STerrainFinalizedTile tile;
+        tile.canonicalSignature.northWest = artwork.materialId;
+        tile.canonicalSignature.northEast = artwork.materialId;
+        tile.canonicalSignature.southEast = artwork.materialId;
+        tile.canonicalSignature.southWest = artwork.materialId;
+        tile.pixels = artwork.pixels;
+        tile.pixelSha256 = artwork.pixelSha256;
+        tile.authored = true;
+        // Imported provenance aliases are deliberately carried without a
+        // sourceSlot value so portable profile compilation uses the global
+        // canonical signature rather than an unrelated local source slot.
+        tile.sourceSlot = -1;
+        tile.sourceNamespace = artwork.aliases.front().nameSpace;
+        for(const SUniformInventoryAlias& alias : artwork.aliases)
+            if(alias.nameSpace.compare(tile.sourceNamespace,
+                   Qt::CaseInsensitive) == 0)
+                tile.sourceSlotAliases.append(alias.slot);
+        tile.blendProvenance = QStringLiteral("%1:%2")
+            .arg(artwork.aliases.front().nameSpace)
+            .arg(artwork.aliases.front().slot);
+        tile.stockDerivedBlend = true;
+        tile.runtimeTerrainType = artwork.runtimeTerrainType;
+        finalized.tiles.append(tile);
+        finalized.tileTypes.append(tile.runtimeTerrainType);
+    }
+
+    finalized.requiredSlots = finalized.tiles.size();
+    if(finalized.requiredSlots > finalized.capacityLimit)
+    {
+        result.error = QStringLiteral("Uniform inventory exceeds the validated atlas limit.");
+        return result;
+    }
+    const int backgroundSlot = artworks.front().physicalSlot;
+    finalized.packedCells.fill(0, width * height);
+    for(int cell = 0; cell < finalized.packedCells.size(); ++cell)
+    {
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(backgroundSlot % 64);
+        packed.atlasIndex = quint8(backgroundSlot / 64);
+        finalized.packedCells[cell] = packed.encode();
+    }
+    const int rotations[4] = {0, 1, 3, 2};
+    for(const SUniformInventoryArtwork& artwork : artworks)
+        for(int offset = 0; offset < 4; ++offset)
+        {
+            const int x = artwork.x0 + (offset % 2);
+            const int y = artwork.y0 + (offset / 2);
+            SMprPackedTile packed;
+            packed.tileIndex = quint8(artwork.physicalSlot % 64);
+            packed.atlasIndex = quint8(artwork.physicalSlot / 64);
+            packed.rotation = quint8(rotations[offset]);
+            finalized.packedCells[y * width + x] = packed.encode();
+        }
+
+    QVector<QImage> denseImages;
+    denseImages.reserve(finalized.tiles.size());
+    for(const STerrainFinalizedTile& tile : finalized.tiles)
+        denseImages.append(tile.pixels);
+    const int tileSize = denseImages.front().width();
+    finalized.textureCount = (denseImages.size() + 63) / 64;
+    for(int page = 0; page < finalized.textureCount; ++page)
+    {
+        const QImage image = CTerrainVirtualAtlas::composePage(
+            denseImages, page * 64, tileSize);
+        QString diagnostic;
+        const QByteArray payload = ei::encodeMmpDxt1(
+            image, true, &diagnostic);
+        if(payload.isEmpty())
+        {
+            result.error = QStringLiteral("Could not encode uniform inventory page: %1")
+                .arg(diagnostic);
+            return result;
+        }
+        finalized.pages.append(image);
+        finalized.pageMmpPayloads.append(payload);
+    }
+
+    QCryptographicHash stable(QCryptographicHash::Sha256);
+    stable.addData(sourceNamespace.toLower().toUtf8());
+    stable.addData("-uniform-brush-inventory-v1", 27);
+    for(const STerrainFinalizedTile& tile : finalized.tiles)
+    {
+        stable.addData(tile.pixelSha256);
+        char typeBytes[4];
+        qToLittleEndian<qint32>(tile.runtimeTerrainType,
+            reinterpret_cast<uchar*>(typeBytes));
+        stable.addData(typeBytes, 4);
+        stable.addData(tile.sourceNamespace.toLower().toUtf8());
+    }
+    for(quint16 packed : finalized.packedCells)
+    {
+        char bytes[2];
+        qToLittleEndian<quint16>(packed, reinterpret_cast<uchar*>(bytes));
+        stable.addData(bytes, 2);
+    }
+    finalized.stableSha256 = stable.result().toHex();
+    QString safeNamespace = sourceNamespace.toLower();
+    safeNamespace.replace(QRegExp(QStringLiteral("[^a-z0-9]+")),
+                          QStringLiteral("_"));
+    finalized.isolatedNamespace = QStringLiteral("%1_uniform_inventory_%2")
+        .arg(safeNamespace,
+             QString::fromLatin1(finalized.stableSha256.left(12)));
+    finalized.success = true;
+
+    CValidationReport packageReport;
+    const STerrainPortableAtlasPackage package =
+        CTerrainVirtualAtlas::buildPortablePackage(
+            document, finalized, ETerrainTileLayer::Land, &packageReport);
+    if(!package.success)
+    {
+        result.error = package.error + QLatin1Char('\n')
+            + packageReport.toText();
+        return result;
+    }
+    if(!QDir().mkpath(outputDirectory))
+    {
+        result.error = QStringLiteral("Could not create %1").arg(outputDirectory);
+        return result;
+    }
+    const QString baseName = finalized.isolatedNamespace;
+    if(!writeBytes(QDir(outputDirectory).filePath(
+            baseName + QStringLiteral(".mpr")), package.mprBytes, &result.error)
+       || !writeBytes(QDir(outputDirectory).filePath(
+            baseName + QStringLiteral("-atlas.res")),
+            package.resourceArchiveBytes, &result.error))
+        return result;
+
+    QVector<QImage> physicalTiles;
+    if(!CTerrainVirtualAtlas::decodePhysicalTileImages(
+           finalized, &physicalTiles, &packageReport))
+    {
+        result.error = packageReport.toText();
+        return result;
+    }
+    const STerrainAtlasProfile portableProfile =
+        CTerrainAtlasProfileStore::portableFinalizedProfile(
+            finalized, physicalTiles, sourceAtlas.profile,
+            ETerrainAtlasLayer::Land, materialNames, &packageReport);
+    if(portableProfile.assignedSlotCount() != finalized.tiles.size()
+       || !CTerrainAtlasProfileStore::save(
+           portableProfile, outputDirectory, &packageReport))
+    {
+        result.error = QStringLiteral(
+            "Could not save the uniform inventory semantic profile.\n%1")
+            .arg(packageReport.toText());
+        return result;
+    }
+    STerrainAtlasProfile reopenedProfile;
+    if(!CTerrainAtlasProfileStore::loadExplicitOverride(
+           baseName, portableProfile.atlasPixelSha256, physicalTiles.size(),
+           &reopenedProfile, outputDirectory, nullptr, &packageReport)
+       || reopenedProfile.assignedSlotCount()
+            != portableProfile.assignedSlotCount())
+    {
+        result.error = QStringLiteral(
+            "Uniform inventory semantic profile failed exact reopen.\n%1")
+            .arg(packageReport.toText());
+        return result;
+    }
+
+    QJsonArray identities;
+    for(int slot = 0; slot < finalized.tiles.size(); ++slot)
+    {
+        const STerrainFinalizedTile& tile = finalized.tiles.at(slot);
+        QJsonObject identity;
+        identity.insert(QStringLiteral("physical_slot"), slot);
+        identity.insert(QStringLiteral("kind"),
+            slot < sourceAtlas.tiles.size()
+                ? QStringLiteral("pinned-source-authored")
+                : QStringLiteral("imported-uniform-artwork"));
+        identity.insert(QStringLiteral("source_namespace"),
+                        tile.sourceNamespace);
+        identity.insert(QStringLiteral("source_slot"), tile.sourceSlot);
+        identity.insert(QStringLiteral("pixel_sha256"),
+                        QString::fromLatin1(tile.pixelSha256));
+        identity.insert(QStringLiteral("runtime_terrain_type"),
+                        tile.runtimeTerrainType);
+        QJsonObject signature;
+        signature.insert(QStringLiteral("northWest"),
+                         tile.canonicalSignature.northWest);
+        signature.insert(QStringLiteral("northEast"),
+                         tile.canonicalSignature.northEast);
+        signature.insert(QStringLiteral("southEast"),
+                         tile.canonicalSignature.southEast);
+        signature.insert(QStringLiteral("southWest"),
+                         tile.canonicalSignature.southWest);
+        identity.insert(QStringLiteral("canonical_signature"), signature);
+        identities.append(identity);
+    }
+
+    QJsonArray cards;
+    QByteArray csv("card,material,material_id,runtime_terrain_type,physical_slot,x0,y0,pixel_sha256,source_aliases\n");
+    for(int index = 0; index < artworks.size(); ++index)
+    {
+        const SUniformInventoryArtwork& artwork = artworks.at(index);
+        QJsonArray aliases;
+        QStringList aliasLabels;
+        for(const SUniformInventoryAlias& alias : artwork.aliases)
+        {
+            QJsonObject item;
+            item.insert(QStringLiteral("namespace"), alias.nameSpace);
+            item.insert(QStringLiteral("slot"), alias.slot);
+            aliases.append(item);
+            aliasLabels.append(QStringLiteral("%1:%2")
+                .arg(alias.nameSpace).arg(alias.slot));
+        }
+        QJsonObject card;
+        card.insert(QStringLiteral("card"), index);
+        card.insert(QStringLiteral("material"), artwork.material);
+        card.insert(QStringLiteral("material_id"), artwork.materialId);
+        card.insert(QStringLiteral("runtime_terrain_type"),
+                    artwork.runtimeTerrainType);
+        card.insert(QStringLiteral("physical_slot"), artwork.physicalSlot);
+        card.insert(QStringLiteral("x0"), artwork.x0);
+        card.insert(QStringLiteral("y0"), artwork.y0);
+        card.insert(QStringLiteral("pixel_sha256"),
+                    QString::fromLatin1(artwork.pixelSha256));
+        card.insert(QStringLiteral("source_aliases"), aliases);
+        cards.append(card);
+        const auto quoted = [](QString value) {
+            value.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+            return QByteArray("\"") + value.toUtf8() + QByteArray("\"");
+        };
+        csv += QByteArray::number(index) + ',' + quoted(artwork.material) + ','
+            + QByteArray::number(artwork.materialId) + ','
+            + QByteArray::number(artwork.runtimeTerrainType) + ','
+            + QByteArray::number(artwork.physicalSlot) + ','
+            + QByteArray::number(artwork.x0) + ','
+            + QByteArray::number(artwork.y0) + ','
+            + artwork.pixelSha256 + ',' + quoted(aliasLabels.join('|')) + '\n';
+    }
+    if(!writeBytes(QDir(outputDirectory).filePath(
+           QStringLiteral("uniform-artwork-index.csv")), csv, &result.error))
+        return result;
+
+    QByteArray packedBytes;
+    packedBytes.resize(finalized.packedCells.size() * int(sizeof(quint16)));
+    for(int index = 0; index < finalized.packedCells.size(); ++index)
+        qToLittleEndian<quint16>(finalized.packedCells.at(index),
+            reinterpret_cast<uchar*>(packedBytes.data()
+                + index * int(sizeof(quint16))));
+
+    QJsonObject manifest;
+    manifest.insert(QStringLiteral("schema"),
+                    QStringLiteral("ei-modern-atlas-uniform-inventory-v1"));
+    manifest.insert(QStringLiteral("layout"),
+        QStringLiteral("uniform-brush-inventory-2x2-four-rotations"));
+    manifest.insert(QStringLiteral("source_namespace"), sourceNamespace);
+    manifest.insert(QStringLiteral("source_mpr"),
+                    QFileInfo(sourcePath).fileName());
+    manifest.insert(QStringLiteral("isolated_namespace"), baseName);
+    manifest.insert(QStringLiteral("catalog_uniform_source_aliases"),
+                    catalogAliases);
+    manifest.insert(QStringLiteral("authorized_uniform_source_aliases"),
+                    authorizedAliases);
+    manifest.insert(QStringLiteral("excluded_nonmatching_tile_size_aliases"),
+                    excludedSizeAliases);
+    manifest.insert(QStringLiteral("excluded_nonmatching_tile_size_count"),
+                    excludedSizeAliases.size());
+    manifest.insert(QStringLiteral("distinct_exact_artworks"), artworks.size());
+    manifest.insert(QStringLiteral("displayed_exact_artworks"), artworks.size());
+    manifest.insert(QStringLiteral("displayed_packed_rotations"),
+                    artworks.size() * 4);
+    manifest.insert(QStringLiteral("coverage_status"), QStringLiteral("pass"));
+    manifest.insert(QStringLiteral("dedupe_key"),
+        QStringLiteral("semantic material + runtime terrain type + exact decoded RGBA SHA-256"));
+    manifest.insert(QStringLiteral("rotation_layout"),
+        QStringLiteral("visual NW/NE/SW/SE cells contain packed rotations 0/1/3/2"));
+    manifest.insert(QStringLiteral("baseline_pinned_source_slots"),
+                    sourceAtlas.tiles.size());
+    manifest.insert(QStringLiteral("total_active_slots"),
+                    finalized.requiredSlots);
+    manifest.insert(QStringLiteral("physical_slots"), physicalTiles.size());
+    manifest.insert(QStringLiteral("texture_pages"), finalized.textureCount);
+    manifest.insert(QStringLiteral("packed_cell_width"), width);
+    manifest.insert(QStringLiteral("packed_cell_height"), height);
+    manifest.insert(QStringLiteral("packed_cells_le16_base64"),
+                    QString::fromLatin1(packedBytes.toBase64()));
+    manifest.insert(QStringLiteral("artwork_cards"), cards);
+    manifest.insert(QStringLiteral("physical_tile_identities"), identities);
+    manifest.insert(QStringLiteral("visual_review_index"),
+                    QStringLiteral("uniform-artwork-index.csv"));
+    manifest.insert(QStringLiteral("visual_review_status"),
+                    QStringLiteral("pending-human-review"));
+    manifest.insert(QStringLiteral("semantic_profile"),
+        QDir(outputDirectory).relativeFilePath(
+            CTerrainAtlasProfileStore::profilePath(baseName, outputDirectory)));
+    manifest.insert(QStringLiteral("stable_sha256"),
+                    QString::fromLatin1(finalized.stableSha256));
+    manifest.insert(QStringLiteral("mpr_file"),
+                    baseName + QStringLiteral(".mpr"));
+    manifest.insert(QStringLiteral("atlas_file"),
+                    baseName + QStringLiteral("-atlas.res"));
+    if(!writeBytes(QDir(outputDirectory).filePath(QStringLiteral("manifest.json")),
+           QJsonDocument(manifest).toJson(QJsonDocument::Indented),
+           &result.error))
+        return result;
+    result.manifest = manifest;
+    result.success = true;
+    return result;
+}
+
 BuiltMap buildExpandedRuntimeProbe(
     const QString& sourcePath, const QString& sourceMobPath,
     const QString& nameSpace, int targetPages,
@@ -3003,7 +3514,7 @@ int main(int argc, char** argv)
     QTextStream err(stderr);
     if(application.arguments().size() < 3 || application.arguments().size() > 5)
     {
-        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only|--runtime-lowres-only|--painted-only|--stripe-only|--mask-review-only|--authored-mask-inventory|--issue-mask-review <report.json>]\n";
+        err << "usage: modern_atlas_real_map_builder <output> <JamaisVu135-root> [--runtime-only|--runtime-lowres-only|--painted-only|--stripe-only|--uniform-inventory-only|--mask-review-only|--authored-mask-inventory|--issue-mask-review <report.json>]\n";
         return 2;
     }
     const QString outputRoot = QDir::cleanPath(application.arguments().at(1));
@@ -3023,6 +3534,8 @@ int main(int argc, char** argv)
         QStringLiteral("--runtime-lowres-only"));
     const bool stripeOnly = application.arguments().contains(
         QStringLiteral("--stripe-only"));
+    const bool uniformInventoryOnly = application.arguments().contains(
+        QStringLiteral("--uniform-inventory-only"));
     const bool maskReviewOnly = application.arguments().contains(
         QStringLiteral("--mask-review-only"));
     const bool authoredMaskInventory = application.arguments().contains(
@@ -3099,6 +3612,113 @@ int main(int argc, char** argv)
             return 7;
         }
         out << QJsonDocument(review).toJson(QJsonDocument::Indented);
+        return 0;
+    }
+    if(uniformInventoryOnly)
+    {
+        struct InventoryTarget
+        {
+            const char* nameSpace;
+            const char* mapFile;
+            int slotCount;
+        };
+        const InventoryTarget targets[] = {
+            {"Zone2", "zone2.mpr", 512},
+            {"Zone5_1", "zone5_1.mpr", 192},
+            {"Zone16", "zone16.mpr", 256},
+            {"Zone1", "zone1.mpr", 512},
+            {"Zone17", "zone17.mpr", 256},
+            {"Zone11", "zone11.mpr", 512},
+            {"Zone18", "zone18.mpr", 512}
+        };
+        QJsonArray inventories;
+        QSet<int> emittedTileSizes;
+        int catalogAliases = 0;
+        int displayedAliases = 0;
+        int exactArtworks = 0;
+        for(const InventoryTarget& target : targets)
+        {
+            Atlas sourceAtlas = assets.atlas(
+                QString::fromLatin1(target.nameSpace), target.slotCount,
+                &error);
+            const QString sourceMpr = QDir(jmvRoot).filePath(
+                QStringLiteral("Maps/")
+                + QString::fromLatin1(target.mapFile));
+            if(!sourceAtlas.valid || !QFileInfo::exists(sourceMpr))
+            {
+                err << target.nameSpace
+                    << " uniform inventory source unavailable: "
+                    << error << '\n';
+                return 4;
+            }
+            const int tileSize = sourceAtlas.tiles.front().width();
+            if(emittedTileSizes.contains(tileSize))
+                continue;
+            emittedTileSizes.insert(tileSize);
+            const QString baseName = QStringLiteral(
+                "uniform-brush-inventory-%1px").arg(tileSize);
+            const QString inventoryDirectory = QDir(outputRoot).filePath(
+                baseName);
+            BuiltMap inventory = buildUniformBrushInventory(
+                sourceMpr, sourceAtlas, &assets, inventoryDirectory);
+            if(!inventory.success)
+            {
+                err << baseName << ": " << inventory.error << '\n';
+                return 7;
+            }
+            const QString collectionPath = QDir(outputRoot).filePath(
+                baseName + QStringLiteral(".collection"));
+            if(!writeMapCollection(
+                   collectionPath, inventoryDirectory, &inventory,
+                   QStringLiteral("Every reviewed %1px uniform brush artwork - %2 environment")
+                       .arg(tileSize).arg(target.nameSpace),
+                   QString::fromLatin1(target.mapFile).replace(
+                       QStringLiteral(".mpr"), QStringLiteral(".mob"),
+                       Qt::CaseInsensitive), &error))
+            {
+                err << baseName << " collection: " << error << '\n';
+                return 9;
+            }
+            QJsonObject summary = inventory.manifest;
+            summary.insert(QStringLiteral("collection_file"),
+                           QFileInfo(collectionPath).fileName());
+            inventories.append(summary);
+            if(catalogAliases == 0)
+                catalogAliases = inventory.manifest.value(
+                    QStringLiteral("catalog_uniform_source_aliases")).toInt();
+            displayedAliases += inventory.manifest.value(
+                QStringLiteral("authorized_uniform_source_aliases")).toInt();
+            exactArtworks += inventory.manifest.value(
+                QStringLiteral("distinct_exact_artworks")).toInt();
+        }
+        QJsonObject root;
+        root.insert(QStringLiteral("schema"),
+                    QStringLiteral("ei-modern-atlas-uniform-inventory-set-v1"));
+        root.insert(QStringLiteral("inventories"), inventories);
+        root.insert(QStringLiteral("catalog_uniform_source_aliases"),
+                    catalogAliases);
+        root.insert(QStringLiteral("displayed_uniform_source_aliases"),
+                    displayedAliases);
+        root.insert(QStringLiteral("distinct_exact_artworks"),
+                    exactArtworks);
+        root.insert(QStringLiteral("coverage_status"),
+            displayedAliases == catalogAliases
+                ? QStringLiteral("pass-per-physical-resolution")
+                : QStringLiteral("fail"));
+        if(displayedAliases != catalogAliases)
+        {
+            err << "Uniform inventory resolution set covers "
+                << displayedAliases << " of " << catalogAliases
+                << " reviewed source aliases.\n";
+            return 7;
+        }
+        if(!writeBytes(QDir(outputRoot).filePath(QStringLiteral("manifest.json")),
+               QJsonDocument(root).toJson(QJsonDocument::Indented), &error))
+        {
+            err << error << '\n';
+            return 10;
+        }
+        out << QJsonDocument(root).toJson(QJsonDocument::Indented);
         return 0;
     }
     if(stripeOnly)
@@ -3437,6 +4057,8 @@ int main(int argc, char** argv)
         {"Zone18", "zone18.mpr", 512}
     };
     Atlas zone2;
+    Atlas zone16;
+    Atlas zone17;
     Atlas zone18;
     QMap<qint32, QImage> zone2External;
     QJsonArray outputs;
@@ -3452,6 +4074,12 @@ int main(int argc, char** argv)
         const bool isZone2 = QString::fromLatin1(zone.nameSpace).compare(
             QStringLiteral("Zone2"), Qt::CaseInsensitive) == 0;
         if(isZone2) zone2 = sourceAtlas;
+        const bool isZone16 = QString::fromLatin1(zone.nameSpace).compare(
+            QStringLiteral("Zone16"), Qt::CaseInsensitive) == 0;
+        if(isZone16) zone16 = sourceAtlas;
+        const bool isZone17 = QString::fromLatin1(zone.nameSpace).compare(
+            QStringLiteral("Zone17"), Qt::CaseInsensitive) == 0;
+        if(isZone17) zone17 = sourceAtlas;
         const bool isZone18 = QString::fromLatin1(zone.nameSpace).compare(
             QStringLiteral("Zone18"), Qt::CaseInsensitive) == 0;
         if(isZone18) zone18 = sourceAtlas;
@@ -3524,6 +4152,66 @@ int main(int argc, char** argv)
         return 9;
     }
     outputs.append(full.manifest);
+    QJsonArray uniformInventories;
+    int uniformInventoryCatalogAliases = 0;
+    int uniformInventoryDisplayedAliases = 0;
+    int uniformInventoryExactArtworks = 0;
+    struct FullInventoryTarget
+    {
+        const Atlas* atlas;
+        QString sourceMpr;
+        QString mob;
+    };
+    const FullInventoryTarget inventoryTargets[] = {
+        {&zone2, fullSource, QStringLiteral("zone2.mob")},
+        {&zone16, QDir(jmvRoot).filePath(QStringLiteral("Maps/zone16.mpr")),
+         QStringLiteral("zone16.mob")},
+        {&zone17, QDir(jmvRoot).filePath(QStringLiteral("Maps/zone17.mpr")),
+         QStringLiteral("zone17.mob")},
+        {&zone18, QDir(jmvRoot).filePath(QStringLiteral("Maps/zone18.mpr")),
+         QStringLiteral("zone18.mob")}
+    };
+    QSet<int> emittedInventoryTileSizes;
+    for(const FullInventoryTarget& target : inventoryTargets)
+    {
+        const int tileSize = target.atlas->tiles.front().width();
+        if(emittedInventoryTileSizes.contains(tileSize))
+            continue;
+        emittedInventoryTileSizes.insert(tileSize);
+        const QString inventoryName = QStringLiteral(
+            "uniform-brush-inventory-%1px").arg(tileSize);
+        const QString inventoryDirectory = QDir(outputRoot).filePath(
+            inventoryName);
+        BuiltMap inventory = buildUniformBrushInventory(
+            target.sourceMpr, *target.atlas, &assets, inventoryDirectory);
+        if(!inventory.success)
+        {
+            err << inventoryName << ": " << inventory.error << '\n';
+            return 7;
+        }
+        const QString inventoryCollectionPath = QDir(outputRoot).filePath(
+            inventoryName + QStringLiteral(".collection"));
+        if(!writeMapCollection(
+               inventoryCollectionPath, inventoryDirectory, &inventory,
+               QStringLiteral("Every reviewed %1px uniform brush artwork - %2 environment")
+                   .arg(tileSize).arg(target.atlas->profile.mprNamespace),
+               target.mob, &error))
+        {
+            err << inventoryName << " collection: " << error << '\n';
+            return 9;
+        }
+        QJsonObject inventoryManifest = inventory.manifest;
+        inventoryManifest.insert(QStringLiteral("collection_file"),
+                                 QFileInfo(inventoryCollectionPath).fileName());
+        uniformInventories.append(inventoryManifest);
+        if(uniformInventoryCatalogAliases == 0)
+            uniformInventoryCatalogAliases = inventory.manifest.value(
+                QStringLiteral("catalog_uniform_source_aliases")).toInt();
+        uniformInventoryDisplayedAliases += inventory.manifest.value(
+            QStringLiteral("authorized_uniform_source_aliases")).toInt();
+        uniformInventoryExactArtworks += inventory.manifest.value(
+            QStringLiteral("distinct_exact_artworks")).toInt();
+    }
     const QString stripeDirectory = QDir(outputRoot).filePath(
         QStringLiteral("final-material-stripes"));
     BuiltMap stripes = buildMap(fullSource, QStringLiteral("Zone2"),
@@ -3602,6 +4290,8 @@ int main(int argc, char** argv)
         QStringLiteral("Installed stock JMV assets used directly; separate EI-HD assets excluded."));
     root.insert(QStringLiteral("reviewed_pure_sources"), sourceManifest);
     root.insert(QStringLiteral("maps"), outputs);
+    root.insert(QStringLiteral("uniform_brush_inventories"),
+                uniformInventories);
     root.insert(QStringLiteral("runtime_atlas_probes"), runtimeProbes);
     root.insert(QStringLiteral("full_family_material_count"), globalLandIds.size());
     root.insert(QStringLiteral("full_family_required_slots"),
@@ -3620,6 +4310,16 @@ int main(int argc, char** argv)
                 circles.manifest.value(QStringLiteral("generated_exact_tiles")));
     root.insert(QStringLiteral("circle_test_global_stock_blends_reused"),
                 circles.manifest.value(QStringLiteral("global_stock_blends_reused")));
+    root.insert(QStringLiteral("uniform_inventory_authorized_aliases"),
+                uniformInventoryCatalogAliases);
+    root.insert(QStringLiteral("uniform_inventory_displayed_aliases"),
+                uniformInventoryDisplayedAliases);
+    root.insert(QStringLiteral("uniform_inventory_exact_artworks"),
+                uniformInventoryExactArtworks);
+    root.insert(QStringLiteral("uniform_inventory_coverage_status"),
+        uniformInventoryDisplayedAliases == uniformInventoryCatalogAliases
+            ? QStringLiteral("pass-per-physical-resolution")
+            : QStringLiteral("fail"));
     root.insert(QStringLiteral("unresolved_cells"), 0);
     QDir().mkpath(outputRoot);
     if(!writeBytes(QDir(outputRoot).filePath(QStringLiteral("manifest.json")),
@@ -3639,7 +4339,9 @@ int main(int argc, char** argv)
         "stripes so stock transition reuse and generated exact blends can be compared "
         "visually. `all-material-circles` applies every final brush as an isolated "
         "radius-3 circle so transition rings and uniform interior variation can be "
-        "reviewed at normal painting scale.\n\n"
+        "reviewed at normal painting scale. `uniform-brush-inventory` contains one "
+        "2x2 card for every exact reviewed uniform artwork, with packed rotations "
+        "0/1/2/3 and provenance aliases retained in its CSV/JSON index.\n\n"
         "Every visual manifest must report `unresolved_cells: 0`, which proves "
         "exact semantic corner resolution only. It is not a visual pass. Each map "
         "therefore starts with `visual_review_status: pending-human-review` and includes "
@@ -3658,5 +4360,11 @@ int main(int argc, char** argv)
         << " slots=" << full.manifest.value("total_active_slots").toInt()
         << " generated=" << full.manifest.value("generated_exact_tiles").toInt()
         << " unresolved=0\n";
+    out << "uniform-inventory: aliases="
+        << uniformInventoryDisplayedAliases << '/'
+        << uniformInventoryCatalogAliases
+        << " artworks="
+        << uniformInventoryExactArtworks
+        << " coverage=pass\n";
     return 0;
 }
