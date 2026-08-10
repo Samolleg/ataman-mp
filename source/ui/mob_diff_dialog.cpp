@@ -1,6 +1,7 @@
 #include "mob_diff_dialog.h"
 
 #include <QDialogButtonBox>
+#include <QCoreApplication>
 #include <QFileDialog>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -19,6 +20,29 @@
 #include "endurance_document.h"
 
 namespace {
+const char* const kDiffTerms[] = {
+    QT_TRANSLATE_NOOP("MobDiffTerms", "added"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "removed"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "modified"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "moved"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "ambiguous"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "unchanged"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "exact-subtree-hash"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "unique-family-nid"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "unique-type-prototype-name"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "non-unique-type-prototype-name"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "unmatched"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "script"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "old-script"),
+    QT_TRANSLATE_NOOP("MobDiffTerms", "document-section")
+};
+
+QString localizedDiffTerm(const QString& value)
+{
+    Q_UNUSED(kDiffTerms);
+    return QCoreApplication::translate("MobDiffTerms", value.toUtf8().constData());
+}
+
 QString objectLabel(const QJsonObject& object)
 {
     QStringList parts;
@@ -38,7 +62,8 @@ QString summaryText(const QJsonObject& summary)
     QStringList parts;
     for(const QString& key : order)
         if(summary.contains(key))
-            parts << QString("%1: %2").arg(key).arg(summary.value(key).toInt());
+            parts << QString("%1: %2").arg(localizedDiffTerm(key))
+                .arg(summary.value(key).toInt());
     return parts.join("   ");
 }
 }
@@ -104,8 +129,10 @@ CMobDiffDialog::CMobDiffDialog(const QFileInfo& baseline, const QFileInfo& candi
     for(int row = 0; row < entries.size(); ++row)
     {
         const QJsonObject entry = entries.at(row).toObject();
-        m_table->setItem(row, 0, new QTableWidgetItem(entry.value("kind").toString()));
-        m_table->setItem(row, 1, new QTableWidgetItem(entry.value("matchMethod").toString()));
+        m_table->setItem(row, 0, new QTableWidgetItem(
+            localizedDiffTerm(entry.value("kind").toString())));
+        m_table->setItem(row, 1, new QTableWidgetItem(
+            localizedDiffTerm(entry.value("matchMethod").toString())));
         m_table->setItem(row, 2, new QTableWidgetItem(QString::number(entry.value("confidence").toDouble(), 'f', 2)));
         m_table->setItem(row, 3, new QTableWidgetItem(objectLabel(entry.value("baseline").toObject())));
         m_table->setItem(row, 4, new QTableWidgetItem(objectLabel(entry.value("candidate").toObject())));
@@ -116,10 +143,12 @@ CMobDiffDialog::CMobDiffDialog(const QFileInfo& baseline, const QFileInfo& candi
     {
         const int row = entries.size() + index;
         const QJsonObject entry = documentEntries.at(index).toObject();
-        QTableWidgetItem* kind = new QTableWidgetItem(entry.value("kind").toString());
+        QTableWidgetItem* kind = new QTableWidgetItem(
+            localizedDiffTerm(entry.value("kind").toString()));
         kind->setData(Qt::UserRole, entry.value("details").toString());
         m_table->setItem(row, 0, kind);
-        m_table->setItem(row, 1, new QTableWidgetItem(entry.value("category").toString()));
+        m_table->setItem(row, 1, new QTableWidgetItem(
+            localizedDiffTerm(entry.value("category").toString())));
         m_table->setItem(row, 2, new QTableWidgetItem(QString()));
         const QString path = entry.value("path").toString();
         m_table->setItem(row, 3, new QTableWidgetItem(entry.value("kind").toString() == "added" ? QString() : path));

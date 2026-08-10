@@ -1,4 +1,5 @@
 #include "trap_diplomacy.h"
+#include <QCoreApplication>
 
 namespace ei {
 
@@ -13,14 +14,15 @@ STrapTargetSummary deriveTrapTargetSummary(
     result.playerGroup = playerGroup;
     if(playerGroup < 0 || playerGroup >= 32)
     {
-        result.display = QString("Unavailable — invalid Player group %1")
+        result.display = QCoreApplication::translate(
+            "TrapDiplomacy", "Unavailable — invalid Player group %1")
             .arg(playerGroup);
         return result;
     }
     if(diplomacy.size() <= playerGroup || diplomacy.at(playerGroup).size() < 32)
     {
-        result.display = QString(
-            "Unavailable — no complete diplomacy row for Player group %1")
+        result.display = QCoreApplication::translate(
+            "TrapDiplomacy", "Unavailable — no complete diplomacy row for Player group %1")
             .arg(playerGroup);
         return result;
     }
@@ -46,9 +48,10 @@ STrapTargetSummary deriveTrapTargetSummary(
     }
 
     const QString targetText = targets.isEmpty()
-        ? QString("none (no groups marked War)")
+        ? QCoreApplication::translate("TrapDiplomacy", "none (no groups marked War)")
         : targets.join(", ");
-    result.display = QString("Player group %1 → %2")
+    result.display = QCoreApplication::translate(
+        "TrapDiplomacy", "Player group %1 → %2")
         .arg(playerGroup).arg(targetText);
     return result;
 }

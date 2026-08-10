@@ -1834,6 +1834,7 @@ int runHeadlessCommand(QApplication& app)
         bool settingsButtonLayoutWorks = false;
         bool settingsApplySignal = false;
         bool languageSettingsPersist = false;
+        bool languageRestartPromptShown = false;
         bool russianCatalogLoads = false;
         bool qtStandardDialogsTranslate = false;
         bool russianFallbackWorks = false;
@@ -1926,6 +1927,18 @@ int runHeadlessCommand(QApplication& app)
                         uiScale->setValue(150);
                     if(renderTerrainShadowsCheck)
                         renderTerrainShadowsCheck->setChecked(false);
+                    QTimer::singleShot(0, [&languageRestartPromptShown]()
+                    {
+                        for(QWidget* widget : QApplication::topLevelWidgets())
+                        {
+                            QMessageBox* prompt = qobject_cast<QMessageBox*>(widget);
+                            if(prompt && prompt->windowTitle() == "Restart required")
+                            {
+                                languageRestartPromptShown = true;
+                                prompt->accept();
+                            }
+                        }
+                    });
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
                     settingsApplyKeepsOpen = settingsWindow.isVisible();
                     terrainShadowToggleApplies = renderTerrainShadows
@@ -2419,7 +2432,8 @@ int runHeadlessCommand(QApplication& app)
                 && uiScaleExistingWindowApplied
                 && settingsApplyKeepsOpen && settingsSaveCloseWorks
                 && settingsButtonLayoutWorks
-                && languageSettingsPersist && russianCatalogLoads && qtStandardDialogsTranslate
+                && languageSettingsPersist && languageRestartPromptShown
+                && russianCatalogLoads && qtStandardDialogsTranslate
                 && russianFallbackWorks
                 && validationTemplatesTranslate
                 && russianLayoutsFit
@@ -2558,6 +2572,7 @@ int runHeadlessCommand(QApplication& app)
                << " settingsSaveCloseWorks=" << settingsSaveCloseWorks
                << " settingsButtonLayoutWorks=" << settingsButtonLayoutWorks
                << " languageSettingsPersist=" << languageSettingsPersist
+               << " languageRestartPromptShown=" << languageRestartPromptShown
                << " russianCatalogLoads=" << russianCatalogLoads
                << " qtStandardDialogsTranslate=" << qtStandardDialogsTranslate
                << " russianFallbackWorks=" << russianFallbackWorks

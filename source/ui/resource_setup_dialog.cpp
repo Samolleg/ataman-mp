@@ -10,7 +10,42 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QVBoxLayout>
+
+namespace {
+QString localizedSetupMessage(const QString& message)
+{
+    if(message == "The selected folder does not contain game.exe.")
+        return CResourceSetupDialog::tr("The selected folder does not contain game.exe.");
+    const struct { const char* prefix; const char* source; } prefixes[] = {
+        {"Missing resource directory: ", "Missing resource directory: %1"},
+        {"No RES archives found in: ", "No RES archives found in: %1"},
+        {"Optional map directory not found: ", "Optional map directory not found: %1"},
+        {"Missing runtime component: ", "Missing runtime component: %1"}
+    };
+    for(const auto& item : prefixes)
+    {
+        const QString prefix = QString::fromLatin1(item.prefix);
+        if(message.startsWith(prefix))
+            return CResourceSetupDialog::tr(item.source).arg(message.mid(prefix.size()));
+    }
+    const QRegularExpression profileMissing(
+        "^(.+) was not found below the selected game installation\\.$");
+    QRegularExpressionMatch match = profileMissing.match(message);
+    if(match.hasMatch())
+        return CResourceSetupDialog::tr(
+            "%1 was not found below the selected game installation.").arg(match.captured(1));
+    const QRegularExpression hashMismatch(
+        "^Runtime hash mismatch \\[([^]]+)\\]: (.+) \\(SHA-256 ([^)]+)\\)$");
+    match = hashMismatch.match(message);
+    if(match.hasMatch())
+        return CResourceSetupDialog::tr(
+            "Runtime hash mismatch [%1]: %2 (SHA-256 %3)")
+            .arg(match.captured(1), match.captured(2), match.captured(3));
+    return message;
+}
+}
 
 CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot,
                                            const QString& initialProfileId,
@@ -119,29 +154,30 @@ void CResourceSetupDialog::refresh(bool chooseRecommendedProfile)
     m_evaluation = evaluateResourceProfile(m_gameRoot->text(), m_profiles[index]);
 
     QStringList lines;
-    lines.append(QString("Profile: %1").arg(m_evaluation.profileName));
+    lines.append(tr("Profile: %1").arg(m_evaluation.profileName));
     if(!m_evaluation.modRoot.isEmpty())
-        lines.append(QString("Mod: %1").arg(m_evaluation.modRoot));
-    lines.append(QString("RES archives: %1").arg(m_evaluation.archiveCount));
+        lines.append(tr("Mod: %1").arg(m_evaluation.modRoot));
+    lines.append(tr("RES archives: %1").arg(m_evaluation.archiveCount));
     if(!m_evaluation.resourceDirectories.isEmpty())
     {
-        lines.append("\nResource priority (highest first):");
+        lines.append(tr("\nResource priority (highest first):"));
         for(const QString& directory : m_evaluation.resourceDirectories)
             lines.append("  " + directory);
     }
     if(!m_evaluation.mapDirectories.isEmpty())
     {
-        lines.append("\nMap locations:");
+        lines.append(tr("\nMap locations:"));
         for(const QString& directory : m_evaluation.mapDirectories)
             lines.append("  " + directory);
     }
     if(!m_evaluation.messages.isEmpty())
     {
-        lines.append("\nNotices:");
+        lines.append(tr("\nNotices:"));
         for(const QString& message : m_evaluation.messages)
-            lines.append("  " + message);
+            lines.append("  " + localizedSetupMessage(message));
     }
-    lines.append(m_evaluation.valid ? "\nReady to apply." : "\nSelect a valid installation or another preset.");
+    lines.append(m_evaluation.valid ? tr("\nReady to apply.")
+                                    : tr("\nSelect a valid installation or another preset."));
     m_summary->setPlainText(lines.join('\n'));
     m_buttons->button(QDialogButtonBox::Ok)->setEnabled(m_evaluation.valid);
 }

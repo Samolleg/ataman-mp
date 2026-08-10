@@ -9498,7 +9498,7 @@ void CView::setRandomComplection(const EObjParam param, const float min, const f
         return;
     const bool grouped = targets.size() > 1;
     if(grouped)
-        m_pUndoStack->beginMacro(QString("Randomize %1 objects").arg(targets.size()));
+        m_pUndoStack->beginMacro(tr("Randomize %1 objects").arg(targets.size()));
 
     CNode* pNode = nullptr;
     foreach(pNode, targets)
@@ -11786,7 +11786,7 @@ void CView::onParamChange(const QSharedPointer<IPropertyBase>& prop)
 
     const bool grouped = targets.size() > 1;
     if(grouped)
-        m_pUndoStack->beginMacro(QString("Change %1 objects").arg(targets.size()));
+        m_pUndoStack->beginMacro(tr("Change %1 objects").arg(targets.size()));
 
     CNode* pNode = nullptr;
     foreach(pNode, targets)
@@ -11949,7 +11949,7 @@ void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& prope
         }
     }
     if(properties.size() > 1)
-        m_pUndoStack->beginMacro(QString("Paste %1 properties").arg(properties.size()));
+        m_pUndoStack->beginMacro(tr("Paste %1 properties").arg(properties.size()));
     for(const QSharedPointer<IPropertyBase>& property : properties)
         onParamChange(property);
     if(properties.size() > 1)
@@ -13758,9 +13758,8 @@ void CView::operationApply(EOperationAxisType operationType)
     const bool committingBehaviorPaste = !m_pendingBehaviorPasteNodes.isEmpty();
     if(committingPaste)
     {
-        m_pUndoStack->beginMacro(QString("Paste %1 object%2")
-                .arg(m_pendingPasteNodes.size())
-                .arg(m_pendingPasteNodes.size() == 1 ? "" : "s"));
+        m_pUndoStack->beginMacro(tr("Paste objects: %1")
+                .arg(m_pendingPasteNodes.size()));
         for(CNode* node : m_pendingPasteNodes)
         {
             CCreateNodeCommand* create = new CCreateNodeCommand(this, m_pendingPasteMob, node);
@@ -13770,7 +13769,7 @@ void CView::operationApply(EOperationAxisType operationType)
         }
         m_pUndoStack->push(new CSelectionCommand(this, m_pendingPasteOriginalSelection,
                                                   m_pendingPasteNodes,
-                                                  "Select pasted objects"));
+                                                  tr("Select pasted objects")));
     }
     if(committingBehaviorPaste)
     {
@@ -13793,14 +13792,15 @@ void CView::operationApply(EOperationAxisType operationType)
             && m_operationBackup.size() > 1;
     if(grouped)
     {
-        QString action = "Transform";
+        QString action = tr("Transform");
         if(operationType == EOperationAxisType::eMove)
-            action = "Move";
+            action = tr("Move");
         else if(operationType == EOperationAxisType::eRotate)
-            action = "Rotate";
+            action = tr("Rotate");
         else if(operationType == EOperationAxisType::eScale)
-            action = "Scale";
-        m_pUndoStack->beginMacro(QString("%1 %2 objects").arg(action).arg(m_operationBackup.size()));
+            action = tr("Scale");
+        m_pUndoStack->beginMacro(tr("%1 objects: %2")
+            .arg(action).arg(m_operationBackup.size()));
     }
     if(!committingBehaviorPaste)
     for(auto& pair : m_operationBackup.toStdMap())
@@ -14065,7 +14065,7 @@ void CView::deleteSelectedNodes()
 
     const bool grouped = targets.size() > 1;
     if(grouped)
-        m_pUndoStack->beginMacro(QString("Delete %1 objects").arg(targets.size()));
+        m_pUndoStack->beginMacro(tr("Delete %1 objects").arg(targets.size()));
 
     QVector<uint> arrMapId;
     CNode* pNode = nullptr;
@@ -15371,8 +15371,8 @@ void CView::addLogicPoint(bool bLookPoint)
     {
         if(createdCount == 0)
             m_pUndoStack->beginMacro(targets.size() > 1
-                ? QString("Create and place logic points on %1 objects").arg(targets.size())
-                : QString("Create and place logic point"));
+                ? tr("Create and place logic points on %1 objects").arg(targets.size())
+                : tr("Create and place logic point"));
         ++createdCount;
     };
 

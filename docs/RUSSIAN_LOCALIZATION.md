@@ -14,6 +14,7 @@ A restart is required. Endurance creates long-lived generated models, property
 metadata, secondary windows, and viewport overlays. Retrofitting every one of
 those objects on `LanguageChange` would be error-prone, so the translator is
 installed once before the splash and first visible widget are constructed.
+Saving a different language shows a restart-required dialog immediately.
 Headless validation runs before translator installation and remains English.
 
 ## Translation sources

@@ -8,6 +8,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -23,6 +24,35 @@ enum EMapItemData
     eCollectionPath,
     eSourceArchive
 };
+
+QString localizedMapCatalogMessage(const QString& message)
+{
+    if(message == "No texts.res was found in the active resource profile.")
+        return CMapsBrowser::tr("No texts.res was found in the active resource profile.");
+    if(message == "The selected texts.res does not contain map.txt.")
+        return CMapsBrowser::tr("The selected texts.res does not contain map.txt.");
+    if(message == "map.txt did not contain any zones with an MPR/MOB resource pair.")
+        return CMapsBrowser::tr(
+            "map.txt did not contain any zones with an MPR/MOB resource pair.");
+    QRegularExpressionMatch match = QRegularExpression(
+        "^Could not read (.+): (.+)$").match(message);
+    if(match.hasMatch())
+        return CMapsBrowser::tr("Could not read %1: %2")
+            .arg(match.captured(1), match.captured(2));
+    match = QRegularExpression("^(.+): missing (.+)$").match(message);
+    if(match.hasMatch())
+        return CMapsBrowser::tr("%1: not found: %2")
+            .arg(match.captured(1), match.captured(2));
+    return message;
+}
+
+QString localizedMapCatalogMessages(const QStringList& messages)
+{
+    QStringList localized;
+    for(const QString& message : messages)
+        localized.append(localizedMapCatalogMessage(message));
+    return localized.join('\n');
+}
 }
 
 CMapsBrowser::CMapsBrowser(QWidget* parent)
@@ -100,14 +130,14 @@ void CMapsBrowser::refresh(const SMapCatalogResult& result,
         m_collectionPaths.append(file.absoluteFilePath());
     rebuildTree();
     if(result.sourceArchive.isEmpty())
-        m_status->setText(result.messages.join('\n'));
+        m_status->setText(localizedMapCatalogMessages(result.messages));
     else
     {
         const int complete = std::count_if(m_entries.constBegin(), m_entries.constEnd(),
             [](const SMapCatalogEntry& entry) { return entry.isComplete(); });
         m_status->setText(tr("%1 of %2 maps available\n%3")
             .arg(complete).arg(m_entries.size()).arg(result.sourceArchive));
-        m_status->setToolTip(result.messages.join('\n'));
+        m_status->setToolTip(localizedMapCatalogMessages(result.messages));
     }
 }
 

@@ -19,7 +19,8 @@ CMobScriptWindow::CMobScriptWindow(CMob* mob, CView* view, QWidget* parent)
 {
     setAttribute(Qt::WA_DeleteOnClose);
     setAttribute(Qt::WA_QuitOnClose, false);
-    setWindowTitle(QString("MOB Script: %1").arg(mob ? mob->filePath().absoluteFilePath() : QString()));
+    setWindowTitle(tr("MOB Script: %1").arg(
+        mob ? mob->filePath().absoluteFilePath() : QString()));
     resize(900, 650);
 
     QVBoxLayout* layout = new QVBoxLayout(this);
@@ -94,7 +95,7 @@ bool CMobScriptWindow::applyCurrentText()
     if(stored != m_mob->script())
         m_view->commitMobScriptEdit(m_mob, stored, tr("Edit MOB script"));
     m_committedDisplayScript = m_editor->toPlainText();
-    setWindowTitle(QString("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
+    setWindowTitle(tr("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
     m_editor->document()->setModified(false);
     return true;
 }
@@ -121,7 +122,7 @@ void CMobScriptWindow::onMobScriptChanged(CMob* mob, const QString& display)
     if(normalizedDisplay == canonicalScriptText(m_editor->toPlainText()))
     {
         m_committedDisplayScript = m_editor->toPlainText();
-        setWindowTitle(QString("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
+        setWindowTitle(tr("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
         m_editor->document()->setModified(false);
         return;
     }
@@ -131,13 +132,13 @@ void CMobScriptWindow::onMobScriptChanged(CMob* mob, const QString& display)
         // this editor has its own unapplied text. Preserve both: the document
         // becomes the new base and the local text remains available to apply.
         m_committedDisplayScript = normalizedDisplay;
-        setWindowTitle(QString("MOB Script: %1 [unapplied local text retained]")
+        setWindowTitle(tr("MOB Script: %1 [unapplied local text retained]")
                        .arg(m_mob->filePath().absoluteFilePath()));
         return;
     }
     m_editor->setPlainText(normalizedDisplay);
     m_committedDisplayScript = m_editor->toPlainText();
-    setWindowTitle(QString("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
+    setWindowTitle(tr("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
     m_editor->document()->setModified(false);
 }
 
@@ -149,7 +150,7 @@ void CMobScriptWindow::onExternalMobScriptImported(CMob* mob, const QString& dis
     const QString normalizedDisplay = canonicalScriptText(display);
     m_editor->setPlainText(normalizedDisplay);
     m_committedDisplayScript = m_editor->toPlainText();
-    setWindowTitle(QString("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
+    setWindowTitle(tr("MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));
     m_editor->document()->setModified(false);
 }
 

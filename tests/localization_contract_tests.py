@@ -30,6 +30,11 @@ def main():
     properties = (ROOT / "source/layout_components/tablemanager.cpp").read_text(
         encoding="utf-8")
     main_window = (ROOT / "source/app/main_window.cpp").read_text(encoding="utf-8")
+    script_window = (ROOT / "source/ui/mob_script_window.cpp").read_text(encoding="utf-8")
+    diff_dialog = (ROOT / "source/ui/mob_diff_dialog.cpp").read_text(encoding="utf-8")
+    setup_dialog = (ROOT / "source/ui/resource_setup_dialog.cpp").read_text(encoding="utf-8")
+    diplomacy = (ROOT / "source/core/trap_diplomacy.cpp").read_text(encoding="utf-8")
+    maps_browser = (ROOT / "source/ui/maps_browser.cpp").read_text(encoding="utf-8")
     build = (ROOT / "scripts/build_release.ps1").read_text(encoding="utf-8")
     catalog_path = ROOT / "translations/ei_mapper_ru.ts"
 
@@ -55,6 +60,18 @@ def main():
     require("QT_TRANSLATE_NOOP(\"MobFamilyValidation\"" in main_window and
             "localizedMobFamilyText(finding.message)" in main_window,
             "validation findings must be localized only at presentation")
+    require("Restart required" in settings and "languageChanged" in settings,
+            "saving a changed language must show a restart-required prompt")
+    require('setWindowTitle(QString("MOB Script:' not in script_window,
+            "MOB script window titles must use translation lookup")
+    require("localizedDiffTerm" in diff_dialog,
+            "MOB comparison enum values must be translated at presentation")
+    require('lines.append(QString("Profile:' not in setup_dialog,
+            "setup summary labels must use translation lookup")
+    require('result.display = QString("' not in diplomacy,
+            "diplomacy display text must use translation lookup")
+    require("localizedMapCatalogMessages(result.messages)" in maps_browser,
+            "map catalog diagnostics must be translated at presentation")
 
     visible_literal_patterns = (
         re.compile(r"set(?:Text|ToolTip|StatusTip|WindowTitle|PlaceholderText)\(\s*\"([^\"]*)\""),
@@ -113,6 +130,23 @@ def main():
         translations[source] = translated
         message_count += 1
 
+    forbidden_machine_phrases = {
+        "Дифференциал", "Выносливость", "невыполнимое действие",
+        "слот Логика", "предварительный просмотр заказа",
+        "Сохранить отзыв PNG", "внешний вид к последнему патрулю",
+        "Test Current Map", "Apply Raw Source", "Companion MOB",
+        "Primary MOB", "Bake or Switch", "Stop Test",
+        "зафиксир", "канонич", "транзакц", "мутац",
+        "поставщик услуг", "промежуточн",
+    }
+    combined_russian = "\n".join(translations.values())
+    combined_russian_folded = combined_russian.casefold()
+    for phrase in forbidden_machine_phrases:
+        require(phrase.casefold() not in combined_russian_folded,
+                f"machine-literal Russian wording remains: {phrase!r}")
+    require(not re.search(r"\([ыяи]\)", combined_russian),
+            "slash-style machine plural remains in Russian UI text")
+
     require(message_count >= 2000,
             f"catalog coverage unexpectedly fell to {message_count} messages")
 
@@ -122,6 +156,9 @@ def main():
         "Object Properties": "Свойства объекта",
         "MOB Family Validation": "Проверка семейства MOB",
         "Initializing editor...": "Инициализация редактора...",
+        "Diff loaded / regenerated": "Сравнение загружено / обновлено",
+        "Perspective MOB Diff - Details": "Сравнение MOB — подробности",
+        "Regenerate preview": "Обновить предпросмотр",
     }
     for source, translated in expected.items():
         require(translations.get(source) == translated,

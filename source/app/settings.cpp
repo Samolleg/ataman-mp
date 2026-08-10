@@ -11,6 +11,7 @@
 #include <QSlider>
 #include <QComboBox>
 #include <QLabel>
+#include <QMessageBox>
 
 #include "settings.h"
 #include "ui_settings.h"
@@ -779,6 +780,10 @@ void CSettings::on_buttonSaveClose_clicked()
 
 void CSettings::applyUiOptions()
 {
+    const COptString* storedLanguage = dynamic_cast<const COptString*>(
+        opt(eOptSetGeneral, "language"));
+    const QString previousLanguage = storedLanguage
+        ? storedLanguage->value() : QStringLiteral("en");
     updateOptFromUi();
     const COptBool* autosaveEnabled = dynamic_cast<const COptBool*>(
         opt(eOptSetGeneral, "autosaveEnabled"));
@@ -797,6 +802,15 @@ void CSettings::applyUiOptions()
     emit settingsApplied();
     emit renderSettingsChanged();
     saveOptions();
+    const COptString* selectedLanguage = dynamic_cast<const COptString*>(
+        opt(eOptSetGeneral, "language"));
+    const bool languageChanged = selectedLanguage
+        && selectedLanguage->value() != previousLanguage;
+    if(languageChanged)
+    {
+        QMessageBox::information(this, tr("Restart required"),
+            tr("Restart EI Mapper to apply the new interface language."));
+    }
 }
 
 void CSettings::persistOptions()

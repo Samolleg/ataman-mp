@@ -10,6 +10,7 @@
 #include "property.h"
 #include "layout_components/tree_view.h"
 #include <QElapsedTimer>
+#include <QCoreApplication>
 
 
 //CChangeModelParam::CChangeModelParam(CView* pView, uint nodeId, EObjParam &objParam, QString value, QUndoCommand *parent):
@@ -71,7 +72,8 @@ void CDeleteNodeCommand::redo()
         ei::log(eLogWarning, QString("Delete redo skipped because exact node %1 is unavailable").arg(m_nodeId));
         return;
     }
-    setText(QString("Delete node ID: %1").arg(pNode->mapId()));
+    setText(QCoreApplication::translate("UndoCommands", "Delete object ID: %1")
+            .arg(pNode->mapId()));
     ei::log(eLogInfo, "Delete node ID: " + QString::number(pNode->mapId()));
     m_pMob->deleteNode(pNode);
     emit deleteNodeSignal(m_nodeId);
@@ -173,7 +175,8 @@ void CCreateNodeCommand::redo()
         m_rawTemplateSubtreeSha256 = pNode->rawSourceSubtreeSha256();
     }
     pNode->setState(ENodeState::eSelect);
-    setText("Node created ID: " + QString::number(m_createdNodeId));
+    setText(QCoreApplication::translate("UndoCommands", "Created object ID: %1")
+            .arg(m_createdNodeId));
     m_pView->setDurty(m_pMob);
     if(!adoptingExistingNode)
         emit addNodeSignal(pNode);
@@ -198,7 +201,8 @@ CConvertWorldObjectToLeverCommand::CConvertWorldObjectToLeverCommand(
       m_index(mob && worldObject ? mob->nodes().indexOf(worldObject) : -1),
       m_selected(worldObject && worldObject->nodeState() == ENodeState::eSelect)
 {
-    setText(QString("Convert world object ID %1 to lever")
+    setText(QCoreApplication::translate("UndoCommands",
+            "Convert world object ID %1 to lever")
             .arg(worldObject ? worldObject->mapId() : 0));
 }
 
@@ -350,7 +354,8 @@ void CChangeLogicParam::redo()
                       || m_newValue->type() == eObjParam_LOGIC_BEHAVIOUR))
         m_pView->refreshLogicSlotOutliner();
     m_pView->setDurty(m_pMob);
-    setText("Change value to " + m_newValue->toString());
+    setText(QCoreApplication::translate("UndoCommands", "Change value to %1")
+            .arg(m_newValue->toString()));
 }
 
 CChangeMobParametersCommand::CChangeMobParametersCommand(
@@ -359,7 +364,7 @@ CChangeMobParametersCommand::CChangeMobParametersCommand(
     : QUndoCommand(parent), m_view(view), m_mob(mob), m_before(before),
       m_after(after), m_firstRedo(true)
 {
-    setText("Edit MOB parameters");
+    setText(QCoreApplication::translate("UndoCommands", "Edit MOB parameters"));
 }
 
 void CChangeMobParametersCommand::apply(const SMobParameterState& state)
@@ -483,8 +488,10 @@ void CCreatePatrolCommand::redo()
     if(!m_mob)
         return;
     m_mob->createPatrolByHash(m_pointHash, m_logicSlot);
-    setText(m_switchesToPath ? "Create first patrol point and enable Path behavior"
-                             : "Create patrol point");
+    setText(m_switchesToPath
+        ? QCoreApplication::translate("UndoCommands",
+            "Create first patrol point and enable Path behavior")
+        : QCoreApplication::translate("UndoCommands", "Create patrol point"));
     m_pView->collectObjectTreeData();
     m_pView->viewParameters();
     m_pView->setDurty(m_mob);
@@ -575,7 +582,9 @@ CAppendBehaviorPointCommand::CAppendBehaviorPointCommand(
         else if(CLogic* logic = unit->logicAt(m_logicSlot))
             m_previousIndex = logic->patrolPoints().size() - 1;
     }
-    setText(m_lookPoint ? "Paste look point" : "Paste patrol point");
+    setText(m_lookPoint
+        ? QCoreApplication::translate("UndoCommands", "Paste look point")
+        : QCoreApplication::translate("UndoCommands", "Paste patrol point"));
 }
 
 void CAppendBehaviorPointCommand::refresh()
@@ -635,7 +644,7 @@ CBehaviorPasteCommand::CBehaviorPasteCommand(
       m_pastedNodes(pastedNodes), m_originalSelection(originalSelection),
       m_firstRedo(true)
 {
-    setText(QString("Paste %1 %2")
+    setText(QCoreApplication::translate("UndoCommands", "Paste %1 %2")
         .arg(m_pastedNodes.size()).arg(pointKind));
 }
 
@@ -676,7 +685,9 @@ CMoveBehaviorPointCommand::CMoveBehaviorPointCommand(
       m_logicSlot(logicSlot), m_patrol(patrol), m_from(from), m_to(to),
       m_lookPoint(lookPoint)
 {
-    setText(m_lookPoint ? "Reorder look point" : "Reorder patrol point");
+    setText(m_lookPoint
+        ? QCoreApplication::translate("UndoCommands", "Reorder look point")
+        : QCoreApplication::translate("UndoCommands", "Reorder patrol point"));
 }
 
 void CMoveBehaviorPointCommand::apply(int from, int to)
@@ -726,7 +737,9 @@ CMoveTrapPointCommand::CMoveTrapPointCommand(
     : QUndoCommand(parent), m_view(view), m_mob(mob), m_trapId(trapId),
       m_from(from), m_to(to), m_castTarget(castTarget)
 {
-    setText(m_castTarget ? "Reorder cast target" : "Reorder activation area");
+    setText(m_castTarget
+        ? QCoreApplication::translate("UndoCommands", "Reorder cast target")
+        : QCoreApplication::translate("UndoCommands", "Reorder activation area"));
 }
 
 void CMoveTrapPointCommand::apply(int from, int to)
@@ -779,8 +792,10 @@ CReplaceLogicSlotsCommand::CReplaceLogicSlotsCommand(
         replacement.alternate = new CLogic(unit);
         replacement.alternate->replaceFromJson(replacement.after);
     }
-    setText(replacements.size() == 1 ? "Paste Logic slot"
-        : QString("Paste Logic slot to %1 units").arg(replacements.size()));
+    setText(replacements.size() == 1
+        ? QCoreApplication::translate("UndoCommands", "Paste Logic slot")
+        : QCoreApplication::translate("UndoCommands", "Paste Logic slot to %1 units")
+            .arg(replacements.size()));
 }
 
 CReplaceLogicSlotsCommand::~CReplaceLogicSlotsCommand()
@@ -889,7 +904,7 @@ void CDeleteLogicPoint::redo()
         CTrapCastPoint* pCast = m_pMob->trapCastById(list[0].toInt(), list[4].toInt());
         pCast->markAsDeleted(true);
     }
-    setText("Point deleted");
+    setText(QCoreApplication::translate("UndoCommands", "Point deleted"));
     m_pMob->logicNodesUpdate();
     m_pView->collectObjectTreeData();
     m_pView->viewParameters();
@@ -911,7 +926,8 @@ void CRoundMobCommand::undo()
 void CRoundMobCommand::redo()
 {
     m_pView->roundActiveMob();
-    setText("Switch Mob to " + m_pView->currentMob()->mobName());
+    setText(QCoreApplication::translate("UndoCommands", "Switch MOB to %1")
+            .arg(m_pView->currentMob()->mobName()));
 }
 
 CSwitchToQuestMobCommand::CSwitchToQuestMobCommand(CMob* pMob, QUndoCommand *parent):
@@ -959,7 +975,9 @@ void CSwitchToQuestMobCommand::redo()
         m_pMob->clearDiplomacyTable();
 
     m_pMob->setQuestMob(!m_bQuestMob);
-    setText(m_bQuestMob ? "Quest MOB to Base" : "Base MOB to Quest");
+    setText(m_bQuestMob
+        ? QCoreApplication::translate("UndoCommands", "Quest MOB to Base")
+        : QCoreApplication::translate("UndoCommands", "Base MOB to Quest"));
     emit switchQuestMobSignal();
 }
 
@@ -986,7 +1004,8 @@ void CChangeWorldSetCommand::redo()
     CWorldSet ws = m_pMob->worldSet();
     ws.setData(m_paramType, m_newValue);
     m_pMob->setWorldSet(ws);
-    setText("Changes value to" + m_newValue);
+    setText(QCoreApplication::translate("UndoCommands", "Change value to %1")
+            .arg(m_newValue));
     emit changeWsSignal();
 }
 
@@ -1024,19 +1043,22 @@ void CChangeRangeCommand::redo()
     {
         if(m_newRange.isEmpty())
         {
-            setText("Deleted range " + QString::number(m_oldRange.minRange) + " - " + QString::number(m_oldRange.maxRange));
+            setText(QCoreApplication::translate("UndoCommands", "Deleted range %1–%2")
+                    .arg(m_oldRange.minRange).arg(m_oldRange.maxRange));
             arrRanges.takeAt(m_index);
         }
         else
         {
-            setText("Changed range to " + QString::number(m_newRange.minRange) + " - " + QString::number(m_newRange.maxRange));
+            setText(QCoreApplication::translate("UndoCommands", "Changed range to %1–%2")
+                    .arg(m_newRange.minRange).arg(m_newRange.maxRange));
             arrRanges[m_index] = m_newRange;
         }
     }
     else
     {
         arrRanges.append(m_newRange);
-        setText("Added range " + QString::number(m_newRange.minRange) + " - " + QString::number(m_newRange.maxRange));
+        setText(QCoreApplication::translate("UndoCommands", "Added range %1–%2")
+                .arg(m_newRange.minRange).arg(m_newRange.maxRange));
     }
     m_pMob->setRanges(!m_pMob->isQuestMob(), arrRanges);
     emit changeRangeSignal();
@@ -1092,7 +1114,8 @@ void CChangeDiplomacyTableItem::redo()
         dipTable[m_column][m_row] = value;
         emit changeDipGroup(m_column, m_row);
     }
-    setText("Dip group (" + QString::number(m_row) + ", " + QString::number(m_column) + ") changed to " + QString::number(value));
+    setText(QCoreApplication::translate("UndoCommands",
+        "Diplomacy group (%1, %2) changed to %3").arg(m_row).arg(m_column).arg(value));
 }
 
 CReplaceDiplomacyTableCommand::CReplaceDiplomacyTableCommand(
@@ -1143,7 +1166,8 @@ void CChangeActiveMobCommand::undo()
 void CChangeActiveMobCommand::redo()
 {
     m_pView->changeCurrentMob(m_mobName);
-    setText("Change MOB to:" + m_mobName);
+    setText(QCoreApplication::translate("UndoCommands", "Change MOB to: %1")
+            .arg(m_mobName));
 }
 
 CChangeProp::CChangeProp(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand* parent):
@@ -1199,7 +1223,8 @@ void CChangeProp::undo()
 
 void CChangeProp::redo()
 {
-    setText("Change value to " + m_newValue->toString());
+    setText(QCoreApplication::translate("UndoCommands", "Change value to %1")
+            .arg(m_newValue->toString()));
     auto pNode = m_pNode;
     if(!pNode)
         return;
@@ -1301,7 +1326,8 @@ void CResetIdCommand::undo()
 
 void CResetIdCommand::redo()
 {
-    setText("reset IDs for "+QString::number(m_reconnectId.size())+" elems");
+    setText(QCoreApplication::translate("UndoCommands", "Reset IDs for %1 objects")
+            .arg(m_reconnectId.size()));
     CNode* pNode = nullptr;
     foreach(pNode, m_pView->currentMob()->nodes())
     {
@@ -1331,7 +1357,8 @@ void CBrushTileCommand::undo()
 
 void CBrushTileCommand::redo()
 {
-    setText("Brush tiles ("+QString::number(m_arrTileBrushNew.size())+")");
+    setText(QCoreApplication::translate("UndoCommands", "Paint tiles (%1)")
+            .arg(m_arrTileBrushNew.size()));
     m_pView->setTile(m_arrTileBrushNew);
     m_pView->setDirtyMpr();
 }
@@ -1346,7 +1373,8 @@ bool CBrushTileCommand::mergeWith(const QUndoCommand* command)
             m_arrTileBrushNew[otherCmd->m_tileLoc] = otherCmd->m_tileInfoNew;
             m_arrTileBrushOld[otherCmd->m_tileLoc] = otherCmd->m_tileInfoOld;
         }
-        setText("Brush tiles ("+QString::number(m_arrTileBrushNew.size())+")");
+        setText(QCoreApplication::translate("UndoCommands", "Paint tiles (%1)")
+                .arg(m_arrTileBrushNew.size()));
         return true;
     }
     return false;
