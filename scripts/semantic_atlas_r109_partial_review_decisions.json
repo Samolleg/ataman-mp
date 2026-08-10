@@ -1,0 +1,39 @@
+{
+  "schema": "ei-semantic-atlas-r109-partial-review-decisions-v1",
+  "reviewedQuestionCutoff": 22,
+  "sourceAttachment": "fc41be34-13e4-4c33-83b8-3d7381a11180/pasted-text.txt",
+  "explicitCornerChanges": {
+    "Bz7g:143": [
+      "Ground / Dirt",
+      "Stone / Greenish",
+      "Stone / Greenish",
+      "Stone / Greenish"
+    ]
+  },
+  "confirmedCurrentQuestionKeys": [
+    "r109-zone7-slot133",
+    "r109-zone7-slot134",
+    "r109-zone7-slot335",
+    "r109-zone7-slot257",
+    "r109-bz16h-slot462",
+    "r109-bz16h-slot504",
+    "r109-zone18-slot462",
+    "r109-zone18-slot504"
+  ],
+  "unresolvedBecauseEvidenceWasMissing": [
+    "r109-zone18-slot320",
+    "r109-bz15h-slot248",
+    "r109-zone17-slot248",
+    "r109-bz16h-slot320",
+    "r109-bz16h-slot321",
+    "r109-bz16h-slot322",
+    "r109-bz16h-slot323",
+    "r109-bz16h-slot324",
+    "r109-bz16h-slot449",
+    "r109-zone18-slot321",
+    "r109-zone18-slot322",
+    "r109-zone18-slot323",
+    "r109-zone18-slot324"
+  ],
+  "unreviewedAfterCutoff": "All R109 questions after item 22 remain queued regardless of exported defaults."
+}

@@ -113,6 +113,12 @@ class QuestionnaireContractTests(unittest.TestCase):
         self.assertTrue(any("Family / B" in row and "original" in row
                             for row in self.validate(broken)))
 
+    def test_explicitly_unavailable_original_reference_passes(self) -> None:
+        page = GOOD_HTML.replace(
+            'data-source-key="atlas:2:original"\n   data-option="Family / B" data-trusted="true" data-variant="original"',
+            'data-source-key="atlas:2:missing-original"\n   data-option="Family / B" data-trusted="false" data-evidence-unavailable="true" data-variant="original"')
+        self.assertEqual([], self.validate(page))
+
     def test_variant_specific_answer_field_fails(self) -> None:
         broken = GOOD_HTML.replace('data-field="NW"', 'data-field="hd-NW"')
         self.assertTrue(any("asset variant" in row for row in self.validate(broken)))

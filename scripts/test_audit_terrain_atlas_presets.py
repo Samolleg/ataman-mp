@@ -2989,6 +2989,20 @@ class ReviewDocumentTests(unittest.TestCase):
                 (194, 2): "Ground / Desert algae",
                 (194, 3): "Ground / Desert algae",
             }),
+            (("zone18",), {
+                (244, 0): "Ground / Red",
+                (244, 1): "Ground / Desert algae",
+                (244, 2): "Ground / Desert algae",
+                (244, 3): "Ground / Desert algae",
+                (248, 0): "Ground / Red",
+                (248, 1): "Ground / Desert algae",
+                (248, 2): "Ground / Desert algae",
+                (248, 3): "Ground / Desert algae",
+                (249, 0): "Ground / Red",
+                (249, 1): "Ground / Desert algae",
+                (249, 2): "Ground / Desert algae",
+                (249, 3): "Ground / Desert algae",
+            }),
             (("bz13h", "zone15"), {
                 (257, 0): "Ground / Red", (257, 1): "Stone / Orange",
                 (257, 2): "Stone / Orange", (257, 3): "Stone / Orange",
@@ -3046,7 +3060,7 @@ class ReviewDocumentTests(unittest.TestCase):
                             r102_expected_name(namespace, expected),
                             corner_name(namespace, slot, corner))
                         checked += 1
-        self.assertEqual(133, checked)
+        self.assertEqual(145, checked)
         self.assertNotIn(
             "Stone / Grayish",
             [family["name"] for family in presets["zone20"]["families"]])
@@ -3227,7 +3241,7 @@ class ReviewDocumentTests(unittest.TestCase):
                                 r102_expected_name(namespace, family_name),
                                 names[payload[slot * 4 + corner]])
                             checked += 1
-        self.assertEqual(492, checked)
+        self.assertEqual(504, checked)
 
     def test_r89_preserves_distinct_zone7_ground_families(self) -> None:
         """R89 renames slot405 without swallowing Dirt or Trampled fragments."""
@@ -3462,6 +3476,12 @@ class ReviewDocumentTests(unittest.TestCase):
             families = {int(row["id"]): row["name"]
                         for row in presets[namespace]["families"]}
             for family_id, expected in renames.items():
+                # R109 explicitly reassigns the sole remaining Bz7g
+                # Ground / Common corner, so its formerly renamed family 7 is
+                # correctly pruned instead of surviving as a dead brush.
+                if namespace == "bz7g" and int(family_id) == 7:
+                    self.assertNotIn(7, families)
+                    continue
                 self.assertEqual(expected, families[int(family_id)])
 
         for namespace, aliases in decisions["familyMerges"].items():

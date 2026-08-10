@@ -100,9 +100,11 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # pairs. Pruning them changes only the honest denominator.
         # R108 removes the three exhausted transition-only family records;
         # their 25 zero-coverage pair rows no longer inflate the denominator.
-        self.assertEqual(1239, report["totalPairCount"])
+        # R109 removes the final Bz7g Ground / Common corner and prunes that
+        # now-unreferenced brush, removing five topology pairs.
+        self.assertEqual(1234, report["totalPairCount"])
         self.assertEqual(
-            {"0": 662, "1": 90, "2": 73, "3": 193, "4": 221},
+            {"0": 658, "1": 89, "2": 73, "3": 193, "4": 221},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

@@ -203,6 +203,7 @@ def validate_questionnaire(html_path: Path, manifest_path: Path,
         and row.attributes.get("data-source-key")
     }
     references_by_scope: dict[tuple[str, str], set[str]] = {}
+    unavailable_by_scope: dict[tuple[str, str], set[str]] = {}
     for figure in parser.figures:
         attrs = figure.attributes
         role = attrs.get("data-role")
@@ -212,7 +213,8 @@ def validate_questionnaire(html_path: Path, manifest_path: Path,
             errors.append(f"{figure.question}/{figure.row} figure has no image")
             continue
         caption = " ".join(part.strip() for part in figure.text if part.strip())
-        if "Uniform:" not in caption and "NW:" not in caption:
+        unavailable = attrs.get("data-evidence-unavailable") == "true"
+        if not unavailable and "Uniform:" not in caption and "NW:" not in caption:
             errors.append(
                 f"{figure.question}/{figure.row} comparison tile lacks visible uniform/corner mapping")
         if "Native " not in caption or "displayed 256x256" not in caption:
@@ -243,6 +245,13 @@ def validate_questionnaire(html_path: Path, manifest_path: Path,
                 errors.append(f"trusted reference {attrs.get('data-source-key')} lacks data-option")
             references_by_scope.setdefault(
                 (figure.question, figure.section, attrs.get("data-variant", "")), set()).add(option)
+        elif role == "reference" and unavailable:
+            option = attrs.get("data-option", "")
+            if not option:
+                errors.append(
+                    f"unavailable reference {attrs.get('data-source-key')} lacks data-option")
+            unavailable_by_scope.setdefault(
+                (figure.question, figure.section, attrs.get("data-variant", "")), set()).add(option)
 
     for select in parser.selects:
         if not select.field:
@@ -254,16 +263,19 @@ def validate_questionnaire(html_path: Path, manifest_path: Path,
             errors.append(f"{select.question}/{select.field} offers fewer than two concrete choices")
         for variant in ("hd", "original"):
             visible = references_by_scope.get((select.question, select.section, variant), set())
+            unavailable = unavailable_by_scope.get(
+                (select.question, select.section, variant), set())
             if select.review_kind == "assignment":
                 if not select.current_option:
                     errors.append(f"{select.question}/{select.field} lacks data-current-option")
                 elif (is_concrete_option(select.current_option)
-                      and select.current_option not in visible):
+                      and select.current_option not in visible
+                      and select.current_option not in unavailable):
                     errors.append(
                         f"{select.question}/{select.field} current assignment {select.current_option!r} "
                         f"has no visible trusted {variant} reference")
             for option in concrete:
-                if option not in visible:
+                if option not in visible and option not in unavailable:
                     errors.append(
                         f"{select.question}/{select.field} option {option!r} has no visible trusted {variant} reference")
 

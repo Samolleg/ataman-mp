@@ -2608,6 +2608,13 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         },
         "zone18": {
             190: ("Ground / Red", "Ground / Red", "Ground / Desert algae", "Ground / Desert algae"),
+            # These three authored aliases are byte-identical and have the
+            # same Ground runtime type. Their visible NW quadrant is Red; the
+            # remaining quadrants are Desert algae. Keeping 248/249 nominally
+            # uniform made exact-pixel dedupe semantically contradictory.
+            244: ("Ground / Red", "Ground / Desert algae", "Ground / Desert algae", "Ground / Desert algae"),
+            248: ("Ground / Red", "Ground / Desert algae", "Ground / Desert algae", "Ground / Desert algae"),
+            249: ("Ground / Red", "Ground / Desert algae", "Ground / Desert algae", "Ground / Desert algae"),
         },
         "zone5_1": {
             157: ("Ground / Dirt", "Grass / Irregular", "Grass / Irregular", "Stone / Greenish"),
