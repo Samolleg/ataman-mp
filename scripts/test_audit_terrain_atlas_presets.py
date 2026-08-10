@@ -1450,6 +1450,8 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
         corner_names = ("northWest", "northEast", "southEast", "southWest")
         cases = {
             "bz11k": ({18: 16}, {(235, 3): 16, (300, 3): 20}),
+            # This historical fixture has IDs but deliberately no semantic
+            # names, so later name-based R106 corrections do not apply here.
             "bz13h": ({12: 1, 13: 2}, {(13, 0): 8}),
             "bz16h": ({}, {(95, 0): 6, (449, 0): 13}),
             "bz3g": ({}, {(265, 3): 10, (383, 0): 5}),
@@ -2363,11 +2365,13 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
         self.assertEqual(13, zone7["slots"][329]["signature"]["northWest"])
         self.assertEqual(13, zone7["slots"][329]["signature"]["southEast"])
         self.assertEqual(17, zone7["slots"][329]["signature"]["southWest"])
-        self.assertEqual(13, zone7["slots"][335]["signature"]["southEast"])
+        self.assertEqual(16, zone7["slots"][335]["signature"]["southEast"])
         self.assertEqual(17, zone7["slots"][480]["signature"]["southWest"])
         self.assertIn(16, {family["id"] for family in zone7["families"]})
         self.assertIn(21, {family["id"] for family in zone7["families"]})
-        self.assertNotIn(22, {family["id"] for family in zone7["families"]})
+        self.assertNotIn(
+            22, {family["id"] for family in zone7["families"]},
+            "focused recipes without binding provenance must not invent R106 families")
 
         zone19 = reviewed_fragment_corrections(recipe("Zone19"))
         self.assertEqual(
@@ -2803,7 +2807,7 @@ class ReviewDocumentTests(unittest.TestCase):
         self.assertEqual((13, 13, 17), (
             corner("Zone7", 329, 0), corner("Zone7", 329, 2),
             corner("Zone7", 329, 3)))
-        self.assertEqual(13, corner("Zone7", 335, 2))
+        self.assertEqual(16, corner("Zone7", 335, 2))
         self.assertEqual(17, corner("Zone7", 480, 3))
         self.assertEqual(3, corner("Zone13", 164, 0))
         self.assertEqual(4, corner("Zone13", 164, 1))
@@ -2818,8 +2822,10 @@ class ReviewDocumentTests(unittest.TestCase):
         self.assertNotIn(19, family_ids["Zone6"])
         self.assertNotIn(19, family_ids["Zone6_2"])
         self.assertIn(16, family_ids["Zone7"])
-        self.assertIn(21, family_ids["Zone7"])
-        self.assertNotIn(22, family_ids["Zone7"])
+        # R106 reassigns the final Trampled corner, so the dead family record
+        # is removed instead of surviving as an unreferenced support row.
+        self.assertNotIn(21, family_ids["Zone7"])
+        self.assertIn(22, family_ids["Zone7"])
 
     def test_shipped_catalog_contains_exact_r80_corner_decisions(self) -> None:
         """R80 keeps explicit human choices and no longer trusts false uniforms."""
@@ -3238,9 +3244,9 @@ class ReviewDocumentTests(unittest.TestCase):
         payload = base64.b64decode(zone7["signaturesBase64"])
         self.assertEqual("Ground / Dirt", names[16])
         self.assertEqual("Ground / Brownish", names[17])
-        self.assertEqual("Ground / Trampled", names[21])
+        self.assertNotIn(21, names)
         self.assertEqual(16, payload[257 * 4 + 3])
-        self.assertEqual(21, payload[335 * 4 + 3])
+        self.assertEqual(22, payload[335 * 4 + 3])
         self.assertEqual(
             17, payload[480 * 4 + 3],
             "R92 resolved the provisional corner as Ground / Brownish")
@@ -3406,13 +3412,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r105_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the reviewed R105 catalog verbatim."""
+    def test_r106_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the reviewed R106 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "bd8f7c8d4fbd279c9be8adf56244219f0c456388b274333814aa0a86a23981dd",
+            "178bce185b8bf2c5c787ef7f452b638096c2b4489f5a2ca25f361895a59f2d80",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -3719,6 +3725,120 @@ class R105AuthoredBlendDecisionTests(unittest.TestCase):
                 with self.subTest(left=left, right=right, variant=variant):
                     self.assertNotEqual(binding(left, variant),
                                         binding(right, variant))
+
+
+class R106ConsolidatedDecisionTests(unittest.TestCase):
+    def test_every_catalog_family_is_referenced_and_brush_expressible(self) -> None:
+        """Dead R106 records cannot survive as empty or misleading brushes."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+
+        for preset in catalog["presets"]:
+            payload = base64.b64decode(
+                preset["signaturesBase64"], validate=True)
+            signatures = [tuple(payload[offset:offset + 4])
+                          for offset in range(0, len(payload), 4)]
+            referenced = set(payload)
+            for family in preset["families"]:
+                family_id = int(family["id"])
+                with self.subTest(namespace=preset["namespace"],
+                                  family=family["name"]):
+                    self.assertIn(family_id, referenced)
+                    expressible = any(
+                        corners.count(family_id) == 4
+                        or (corners.count(family_id) == 1
+                            and len(set(corners) - {family_id}) == 1)
+                        for corners in signatures)
+                    self.assertEqual(bool(family["paintSelectable"]),
+                                     expressible)
+
+    def test_byte_identical_bindings_share_semantic_identity(self) -> None:
+        """One physical atlas cannot compile to two corner interpretations."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        by_binding = {}
+        for preset in catalog["presets"]:
+            identity = (
+                preset["signaturesBase64"],
+                tuple((int(family["id"]), family["name"],
+                       int(family["thumbnailSlot"]),
+                       bool(family["paintSelectable"]))
+                      for family in preset["families"]),
+            )
+            for binding in preset["bindings"]:
+                key = (binding["variant"], binding["pixelSha256"],
+                       int(preset["slotCount"]))
+                previous = by_binding.setdefault(key, identity)
+                with self.subTest(namespace=preset["namespace"], binding=key):
+                    self.assertEqual(previous, identity)
+
+    def test_r106_catalog_matches_every_explicit_and_safe_duplicate_decision(self) -> None:
+        """R106 replays changed corners plus only conflict-free exact duplicates."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r106_consolidated_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        self.assertEqual(249, decisions["counts"]["submittedRows"])
+        self.assertEqual(482, decisions["counts"][
+            "explicitAndPropagatedCorners"])
+        self.assertEqual(5, decisions["counts"][
+            "exactArtworkGroupsPropagated"])
+        self.assertEqual(12, decisions["counts"][
+            "exactBindingCornersPropagated"])
+        self.assertEqual(2, decisions["counts"][
+            "exactArtworkConflictGroupsQueued"])
+
+        for namespace, slots in decisions["cornerCorrections"].items():
+            preset = presets[namespace.casefold()]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            for slot_text, corners in slots.items():
+                slot = int(slot_text)
+                for corner_name, expected in corners.items():
+                    corner = {"NW": 0, "NE": 1, "SE": 2, "SW": 3}[
+                        corner_name]
+                    actual = names[payload[slot * 4 + corner]]
+                    with self.subTest(namespace=namespace, slot=slot,
+                                      corner=corner_name):
+                        self.assertEqual(expected, actual)
+
+        zone7 = presets["zone7"]
+        dark_brown = [row for row in zone7["families"]
+                      if row["name"] == "Ground / Dark brown"]
+        self.assertEqual(1, len(dark_brown))
+        self.assertEqual(133, dark_brown[0]["thumbnailSlot"])
+        self.assertTrue(dark_brown[0]["paintSelectable"])
+
+    def test_r106_exact_artwork_mapping_conflicts_remain_unpropagated(self) -> None:
+        """Identical pixels do not erase a known semantic mapping conflict."""
+        root = Path(__file__).resolve().parent.parent
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r106_consolidated_decisions.json"
+        ).read_text(encoding="utf-8"))
+
+        self.assertEqual({
+            (("bz11k", "Zone14"), (122, 125)),
+            (("bz5g", "bz6g", "Zone8"), (172, 173)),
+        }, {
+            (tuple(row["owners"]), tuple(row["slots"]))
+            for row in decisions["exactArtworkMappingConflicts"]
+        })
+
+        # The submitted source rows may incidentally resolve the old conflict,
+        # but the unreviewed duplicate slots were never mutated by propagation.
+        self.assertNotIn("125", decisions["cornerCorrections"]["bz11k"])
+        self.assertNotIn("172", decisions["cornerCorrections"]["bz5g"])
 
 
 if __name__ == "__main__":

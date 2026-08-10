@@ -5670,7 +5670,7 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
         "6752a5b4cefd3aedbd6889516b424f4e13afafe288e99406b500404aed62b014",
         512, &bz3gReport);
     QVERIFY2(bz3g.approved, qPrintable(bz3gReport.toText()));
-    QCOMPARE(bz3g.families.size(), 18);
+    QCOMPARE(bz3g.families.size(), 15);
     const auto bz3gFamily = [&bz3g](qint32 id) {
         return std::find_if(bz3g.families.cbegin(), bz3g.families.cend(),
             [id](const STerrainAtlasProfileFamily& family) {
@@ -5682,7 +5682,7 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(darkGround->name, QStringLiteral("Ground / Dead"));
     QCOMPARE(darkGround->tileType, qint32(1));
     QCOMPARE(darkGround->thumbnailSlot, 7);
-    for(const qint32 removedId : {7, 13, 16, 18})
+    for(const qint32 removedId : {7, 13, 15, 16, 18, 22, 23})
         QCOMPARE(bz3gFamily(removedId), bz3g.families.cend());
     QCOMPARE(bz3g.slotDefinitions.at(108).signature.northWest, qint32(6));
     QCOMPARE(bz3g.slotDefinitions.at(298).signature.northWest, qint32(2));
@@ -5999,10 +5999,11 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
                 }
                 expressibleBrush |= count == 4 || (count == 1 && others.size() == 1);
             }
-            // A semantically uniform tuple is necessary, but visual review may
-            // still reject its imagery as a mixed transition. Such a family
-            // remains transition support and must not become a brush.
-            QVERIFY(!family.paintSelectable || expressibleBrush);
+            // R106 removes dead records and normalizes brush authority: a
+            // family is selectable exactly when it has a uniform tile or a
+            // one-on-three authored stamp.
+            QVERIFY2(family.paintSelectable == expressibleBrush,
+                     qPrintable(nameSpace + QStringLiteral(": ") + family.name));
             transitionSupportFamilies += !family.paintSelectable;
         }
         for(const QJsonValue& familyValue : preset.value(QStringLiteral("families")).toArray())
@@ -6016,12 +6017,13 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 58);
-    // R102 applies only the user's explicit brush-inventory family merges;
-    // every questioned uniform and probable identity remains review-only.
-    QCOMPARE(totalFamilies, 429);
-    // Transition-only families remain explicit support records until their
-    // queued corner reviews resolve or merge them.
-    QCOMPARE(transitionSupportFamilies, 25);
+    // R106 adds two explicit identities, then removes all family records whose
+    // last authored corner was reassigned. Exact bz13h decisions propagate to
+    // the byte-identical Zone15 atlas, removing its final dead family as well.
+    QCOMPARE(totalFamilies, 400);
+    // A referenced family remains transition-only when it has neither a
+    // uniform tile nor a one-on-three authored stamp.
+    QCOMPARE(transitionSupportFamilies, 20);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -6130,7 +6132,7 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // thumbnail into the brush palette.
     // R102 applies the explicit brush-inventory merges and names while leaving
     // false-uniform and probable-family leads out of the paint palette.
-    QCOMPARE(landFamilyCount, 80);
+    QCOMPARE(landFamilyCount, 81);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);

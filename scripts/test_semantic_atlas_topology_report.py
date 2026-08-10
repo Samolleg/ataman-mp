@@ -91,13 +91,16 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         self.assertEqual(38, report["namespaceCount"])
         self.assertEqual(26, report["runtimeProfileCount"])
         # R97/R98 resolve the reviewed Sand / Irregular transition corners.
-        # R105 then corrects six provenance-qualified authored blend
-        # signatures. Their real pair rows are reported honestly, including
-        # zero-coverage topology, rather than hidden to preserve an earlier
-        # aggregate count.
-        self.assertEqual(1506, report["totalPairCount"])
+        # R105 corrects six provenance-qualified authored blend signatures;
+        # R106 then applies the completed 249-card review and one explicit new
+        # Zone7 material identity. Their real pair rows are reported honestly,
+        # including zero-coverage topology, rather than hidden to preserve an
+        # earlier aggregate count.
+        # R106's 30 dead family rows previously fabricated 269 zero-coverage
+        # pairs. Pruning them changes only the honest denominator.
+        self.assertEqual(1264, report["totalPairCount"])
         self.assertEqual(
-            {"0": 888, "1": 120, "2": 88, "3": 195, "4": 215},
+            {"0": 687, "1": 90, "2": 73, "3": 193, "4": 221},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

@@ -35,6 +35,11 @@ R105_AUTHORED_BLEND_REVIEW = json.loads(
         "semantic_atlas_r105_authored_blend_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R106_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r106_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -2834,6 +2839,31 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                 "NW": 0, "NE": 1, "SE": 2, "SW": 3,
             }[corner_name])] = family_name
 
+    # R106 consolidates the completed 249-card review. The normalized record
+    # contains only changed corners, exact-binding propagation, and exact
+    # artwork duplicates whose pre-review mappings agreed. Byte-identical
+    # artwork with conflicting mappings remains in the follow-up queue.
+    for slot_text, corner_values in R106_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            if (isinstance(family_name, str)
+                    and not any(family.get("suggestedName")
+                                for family in recipe["families"])):
+                # Focused historical fixtures intentionally omit semantic
+                # names. Do not let a later name-based decision shadow an
+                # earlier numeric correction that the fixture can resolve.
+                continue
+            new_family_names = {
+                row["name"] for row in R106_CONSOLIDATED_REVIEW[
+                    "newFamilies"].get(namespace, [])
+            }
+            if family_name in new_family_names and "bindings" not in recipe:
+                continue
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)
@@ -2860,6 +2890,35 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             family["uniformSlots"] = []
             family["memberSlots"] = [thumbnail]
             result["families"].append(family)
+        result["families"].sort(key=lambda family: family["id"])
+    for family_spec in R106_CONSOLIDATED_REVIEW[
+            "newFamilies"].get(namespace, []):
+        # Focused historical unit recipes deliberately contain placeholder
+        # family IDs and omit binding provenance. New reviewed families are
+        # created only for complete fingerprinted atlas recipes.
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        if any(family["id"] == family_id for family in result["families"]):
+            existing = next(family for family in result["families"]
+                            if family["id"] == family_id)
+            if existing.get("suggestedName") != family_spec["name"]:
+                raise ValueError(
+                    f"{result['namespace']}: R106 family ID {family_id} "
+                    f"already belongs to {existing.get('suggestedName')!r}")
+            continue
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        result["families"].append(template)
         result["families"].sort(key=lambda family: family["id"])
     if (namespace in ("bz11k", "zone14")
             and any(family["id"] == 19 for family in result["families"])
