@@ -45,6 +45,11 @@ R107_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r107_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R108_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r108_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -2875,6 +2880,21 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     # binding propagation is enumerated in the decision file; byte-distinct
     # sibling atlases stay independent review targets.
     for slot_text, corner_values in R107_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            if (isinstance(family_name, str)
+                    and not any(family.get("suggestedName")
+                                for family in recipe["families"])):
+                continue
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R108 resolves the final Ground / Dry and Ground / Trampled references.
+    # The normal post-correction prune below removes the exhausted family
+    # records so no empty brush can survive the reviewed corner changes.
+    for slot_text, corner_values in R108_CONSOLIDATED_REVIEW[
             "cornerCorrections"].get(namespace, {}).items():
         slot_index = int(slot_text)
         for corner_name, family_name in corner_values.items():

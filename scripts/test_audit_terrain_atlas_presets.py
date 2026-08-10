@@ -3412,13 +3412,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r107_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the reviewed R107 catalog verbatim."""
+    def test_r108_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the reviewed R108 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "91a99f0337ac9b271665f01734e77673bdd6fb877fab5c3c2164e01cd118b639",
+            "33eb47045eb46336dbae80c73e75459b1db50b43757db571f3a74a4c33e57adf",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -3881,6 +3881,39 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
             namespace.casefold()
             for namespace in decisions["cornerCorrections"]
         })
+
+    def test_r108_exhausts_dry_and_trampled_without_empty_brushes(self) -> None:
+        """R108 reassigns the last reviewed corners and prunes dead families."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+        for namespace, slot in (("bz4g", 405), ("zone4", 405),
+                                ("zone6", 389), ("zone6_2", 389)):
+            preset = presets[namespace]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            signature = [names[value]
+                         for value in payload[slot * 4:slot * 4 + 4]]
+            if namespace in ("bz4g", "zone4"):
+                self.assertEqual([
+                    "Sand / Dark pink", "Ground / Common",
+                    "Grass / Irregular", "Grass / Irregular",
+                ], signature)
+                self.assertNotIn(
+                    "Ground / Dry",
+                    {row["name"] for row in preset["families"]})
+            else:
+                self.assertEqual([
+                    "Grass / Sparse dark", "Ground / Common",
+                    "Stone / Lime", "Stone / Lime",
+                ], signature)
+                self.assertNotIn(
+                    "Ground / Trampled",
+                    {row["name"] for row in preset["families"]})
 
 
 if __name__ == "__main__":

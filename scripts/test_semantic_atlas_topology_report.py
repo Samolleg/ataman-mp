@@ -98,9 +98,11 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # earlier aggregate count.
         # R106's 30 dead family rows previously fabricated 269 zero-coverage
         # pairs. Pruning them changes only the honest denominator.
-        self.assertEqual(1264, report["totalPairCount"])
+        # R108 removes the three exhausted transition-only family records;
+        # their 25 zero-coverage pair rows no longer inflate the denominator.
+        self.assertEqual(1239, report["totalPairCount"])
         self.assertEqual(
-            {"0": 687, "1": 90, "2": 73, "3": 193, "4": 221},
+            {"0": 662, "1": 90, "2": 73, "3": 193, "4": 221},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

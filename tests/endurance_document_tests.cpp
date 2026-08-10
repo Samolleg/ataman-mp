@@ -6020,10 +6020,13 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     // R106 adds two explicit identities, then removes all family records whose
     // last authored corner was reassigned. Exact bz13h decisions propagate to
     // the byte-identical Zone15 atlas, removing its final dead family as well.
-    QCOMPARE(totalFamilies, 400);
+    // R108 resolves the final Ground / Dry corners in bz4g/Zone4 and the
+    // final Ground / Trampled corner in Zone6, pruning those three exhausted
+    // transition-only records.
+    QCOMPARE(totalFamilies, 397);
     // A referenced family remains transition-only when it has neither a
     // uniform tile nor a one-on-three authored stamp.
-    QCOMPARE(transitionSupportFamilies, 20);
+    QCOMPARE(transitionSupportFamilies, 17);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()

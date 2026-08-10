@@ -1,0 +1,50 @@
+{
+  "schema": "ei-semantic-atlas-r108-consolidated-decisions-v1",
+  "sourceCatalogSha256": "91A99F0337AC9B271665F01734E77673BDD6FB877FAB5C3C2164E01CD118B639",
+  "cornerOrder": ["NW", "NE", "SE", "SW"],
+  "cornerCorrections": {
+    "bz4g": {
+      "405": {"NE": "Ground / Common"}
+    },
+    "zone4": {
+      "405": {"NE": "Ground / Common"}
+    },
+    "zone6": {
+      "389": {"NE": "Ground / Common"}
+    }
+  },
+  "confirmedMappings": {
+    "zone6_2:389": {
+      "NW": "Grass / Sparse dark",
+      "NE": "Ground / Common",
+      "SE": "Stone / Lime",
+      "SW": "Stone / Lime"
+    }
+  },
+  "exhaustedFamilies": [
+    {
+      "owners": ["bz4g", "Zone4"],
+      "name": "Ground / Dry",
+      "lastReferences": ["405 NE"],
+      "result": "removed after explicit R108 reassignment"
+    },
+    {
+      "owners": ["Zone6"],
+      "name": "Ground / Trampled",
+      "lastReferences": ["389 NE"],
+      "result": "removed after explicit R108 reassignment"
+    },
+    {
+      "owners": ["Zone6_2"],
+      "name": "Ground / Trampled",
+      "lastReferences": [],
+      "result": "already absent before R108"
+    }
+  ],
+  "counts": {
+    "changedCorners": 3,
+    "confirmedCorners": 4,
+    "familiesExhaustedByChanges": 3,
+    "remainingRequestedReviewCorners": 0
+  }
+}
