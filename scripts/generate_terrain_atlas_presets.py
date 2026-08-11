@@ -105,6 +105,16 @@ R120_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r120_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R122_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r122_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R123_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r123_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -417,6 +427,7 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     removed_ids: set[int] = set()
     family_renames: dict[int, str] = {}
     family_aliases: dict[int, int] = {}
+    family_metadata_corrections: dict[str, dict] = {}
 
     if namespace == "zone2":
         corrections = {
@@ -3093,7 +3104,51 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                 "NW": 0, "NE": 1, "SE": 2, "SW": 3,
             }[corner_name])] = family_name
 
-    if not corrections and not family_renames and not family_aliases:
+    # R122 applies only the twelve explicitly submitted RC artwork cards.
+    # Exact byte-identical owners are enumerated in the decision record. The
+    # two untouched generated-input uniform cards remain context only.
+    r122_key = next((key for key in R122_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R122_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r122_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+    rename_key = next((key for key in R122_CONSOLIDATED_REVIEW.get(
+        "familyRenames", {}) if key.casefold() == namespace), namespace)
+    requested_renames = R122_CONSOLIDATED_REVIEW.get(
+        "familyRenames", {}).get(rename_key, {})
+    for old_name, new_name in requested_renames.items():
+        matches = [family["id"] for family in recipe["families"]
+                   if family_renames.get(
+                       family["id"], family.get("suggestedName", "")
+                   ).casefold() == old_name.casefold()]
+        if len(matches) != 1:
+            raise ValueError(
+                f"{recipe['namespace']}: R122 rename {old_name!r} "
+                f"resolved to {matches}")
+        family_renames[matches[0]] = new_name
+    metadata_key = next((key for key in R122_CONSOLIDATED_REVIEW.get(
+        "familyMetadataCorrections", {}) if key.casefold() == namespace), namespace)
+    family_metadata_corrections = R122_CONSOLIDATED_REVIEW.get(
+        "familyMetadataCorrections", {}).get(metadata_key, {})
+
+    # R123 resolves the five exact BaseGipat Water corners reviewed after the
+    # exhaustive all-rotation audit. Untouched corners remain R122 context.
+    r123_key = next((key for key in R123_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R123_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r123_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    if (not corrections and not family_renames and not family_aliases
+            and not family_metadata_corrections):
         return recipe
     result = copy.deepcopy(recipe)
     if namespace == "zone7" and any(
@@ -3280,6 +3335,34 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         template["paintSelectable"] = bool(family_spec["paintSelectable"])
         result["families"].append(template)
         result["families"].sort(key=lambda family: family["id"])
+    for family_spec in R123_CONSOLIDATED_REVIEW.get(
+            "newFamilies", {}).get(result["namespace"], []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        if any(family["id"] == family_id for family in result["families"]):
+            existing = next(family for family in result["families"]
+                            if family["id"] == family_id)
+            if existing.get("suggestedName") != family_spec["name"]:
+                raise ValueError(
+                    f"{result['namespace']}: R123 family ID {family_id} "
+                    f"already belongs to {existing.get('suggestedName')!r}")
+            continue
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]
+            or family_renames.get(family["id"]) == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        template["paintSelectable"] = bool(family_spec["paintSelectable"])
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
     if (namespace in ("bz11k", "zone14")
             and any(family["id"] == 19 for family in result["families"])
             and not any(family["id"] == 20 for family in result["families"])):
@@ -3363,6 +3446,11 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     for family in result["families"]:
         if family["id"] in family_renames:
             family["suggestedName"] = family_renames[family["id"]]
+        effective_name = family.get("suggestedName", "")
+        if effective_name in family_metadata_corrections:
+            for field, value in family_metadata_corrections[
+                    effective_name].items():
+                family[field] = copy.deepcopy(value)
     if namespace == "zone2":
         irregular = next(family for family in result["families"]
                          if family["id"] == 9)

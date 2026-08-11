@@ -127,6 +127,7 @@ struct STerrainWorkingTileIdentity
     ETerrainWorkingTileOrigin origin{ETerrainWorkingTileOrigin::Unknown};
     int workingSlot{-1};
     int sourceSlot{-1};
+    QVector<int> sourceSlotAliases;
     QString sourceNamespace;
     STerrainTransitionSignature canonicalSignature;
     QByteArray physicalPixelSha256;
@@ -134,6 +135,13 @@ struct STerrainWorkingTileIdentity
     bool stockDerivedBlend{false};
     bool canonicalGeneratedBlend{false};
     qint32 runtimeTerrainType{-1};
+};
+
+struct STerrainWorkingFinalizationOrigins
+{
+    QSet<int> retainedMapOutputs;
+    QSet<int> importedAuthoredOutputs;
+    QSet<int> canonicalGeneratedOutputs;
 };
 
 struct STerrainPortableAtlasPackage
@@ -283,6 +291,10 @@ public:
     static STerrainPortableAtlasPackage buildPortablePackage(
         const CMprDocument& source, const STerrainAtlasFinalization& finalization,
         ETerrainTileLayer layer, CValidationReport* report = nullptr);
+    static STerrainPortableAtlasPackage buildPortablePackage(
+        const CMprDocument& source, const CTerrainEditModel& editedTerrain,
+        const STerrainAtlasFinalization& finalization,
+        ETerrainTileLayer layer, CValidationReport* report = nullptr);
     static STerrainPortableAtlasPackage buildWorkingPreviewPackage(
         const CMprDocument& source, const QVector<QImage>& activeTiles,
         const QVector<qint32>& activeTileTypes,
@@ -365,6 +377,13 @@ public:
     qint32 runtimeTerrainTypeForSlot(int slot) const;
     bool tileIdentityForSlot(int slot,
                              STerrainWorkingTileIdentity* identity) const;
+    bool restoreFinalizedProvenance(
+        STerrainAtlasFinalization* finalization,
+        STerrainWorkingFinalizationOrigins* origins,
+        const QString& sourceNamespace,
+        const QByteArray& materialFieldSha256,
+        const QVector<quint16>& pinnedPackedTiles = {},
+        CValidationReport* report = nullptr) const;
     int capacityLimit() const { return m_capacityLimit; }
     int generatedTileCount() const;
     int activeTextureCount() const;

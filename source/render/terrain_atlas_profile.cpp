@@ -928,7 +928,12 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
         if(definition.assigned)
         {
             const STerrainFinalizedTile& tile = finalization.tiles.at(slot);
-            if(tile.sourceSlot >= 0 && sourceDefinitions.contains(tile.sourceSlot))
+            const bool belongsToSourceProfile = tile.sourceNamespace.isEmpty()
+                || tile.sourceNamespace.compare(
+                       sourceProfile.mprNamespace,
+                       Qt::CaseInsensitive) == 0;
+            if(belongsToSourceProfile && tile.sourceSlot >= 0
+               && sourceDefinitions.contains(tile.sourceSlot))
                 definition.signature = sourceDefinitions.value(tile.sourceSlot).signature;
             else
                 definition.signature = CTerrainTransitionCatalog::mirroredGridY(

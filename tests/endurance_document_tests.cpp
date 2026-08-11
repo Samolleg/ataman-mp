@@ -356,7 +356,7 @@ private slots:
     void globalAuthoredTransitionLibraryIndexesRealStockBlends();
     void multiRowTerrainAtlasKeepsAuthoredPagesInPlace();
     void zone2TransitionOnlyGrassMapsToGlobalUniformFamily();
-    void authoredPresetSupportsZone18SharedLayers();
+    void authoredPresetSeparatesZone18ReviewedLayers();
     void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
     void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
@@ -5911,7 +5911,7 @@ void EnduranceDocumentTests::semanticAtlasInferenceAssignsExactRepeatedPhysicalS
         QVERIFY(slot.assigned);
 }
 
-void EnduranceDocumentTests::authoredPresetSupportsZone18SharedLayers()
+void EnduranceDocumentTests::authoredPresetSeparatesZone18ReviewedLayers()
 {
     CValidationReport report;
     const STerrainAtlasProfile profile = CTerrainAtlasPresetCatalog::exactProfile(
@@ -5921,16 +5921,31 @@ void EnduranceDocumentTests::authoredPresetSupportsZone18SharedLayers()
     QVERIFY2(profile.approved, qPrintable(report.toText()));
     QCOMPARE(profile.assignedSlotCount(), 512);
     int sharedFamilies = 0;
+    int reviewedLandOnlyFamilies = 0;
+    const QStringList reviewedLandOnly = {
+        QStringLiteral("Sand / Dark"),
+        QStringLiteral("Stone / Orange"),
+        QStringLiteral("Stone / Weathered")
+    };
     for(const STerrainAtlasProfileFamily& family : profile.families)
+    {
         sharedFamilies += family.landAllowed && family.overlayAllowed;
-    QCOMPARE(sharedFamilies, 4);
+        if(reviewedLandOnly.contains(family.name))
+        {
+            QVERIFY(family.landAllowed);
+            QVERIFY(!family.overlayAllowed);
+            ++reviewedLandOnlyFamilies;
+        }
+    }
+    QCOMPARE(sharedFamilies, 1);
+    QCOMPARE(reviewedLandOnlyFamilies, 3);
     STerrainAtlasProfile reopened;
     QVERIFY2(STerrainAtlasProfile::fromJson(profile.toJson(), &reopened, &report),
              qPrintable(report.toText()));
     int reopenedSharedFamilies = 0;
     for(const STerrainAtlasProfileFamily& family : reopened.families)
         reopenedSharedFamilies += family.landAllowed && family.overlayAllowed;
-    QCOMPARE(reopenedSharedFamilies, 4);
+    QCOMPARE(reopenedSharedFamilies, 1);
     QCOMPARE(reopened.schemaVersion, 8);
     const STerrainAtlasAnalysis analysis = profile.approvedAnalysis(&report);
     QVERIFY2(analysis.usable, qPrintable(report.toText()));
@@ -5945,7 +5960,7 @@ void EnduranceDocumentTests::authoredPresetSupportsZone18SharedLayers()
         analysis.overlayCatalog.gridSignatureForPacked(packed.encode(), &overlay);
         sharedSlot |= land && overlay;
     }
-    QVERIFY(sharedSlot);
+    QVERIFY(!sharedSlot);
 }
 
 void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
@@ -6053,8 +6068,9 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     // one reviewed, paint-selectable Zone10 Slabs / Faces irregular family.
     // R115 adds three honest transition-only rows. R117-R120 then add four
     // reviewed local identities while later authored evidence makes the two
-    // exact Zone2 Ground / Dirt brushes structurally paint-selectable.
-    QCOMPARE(totalFamilies, 400);
+    // exact Zone2 Ground / Dirt brushes structurally paint-selectable. R123
+    // separates BaseGipat's lighter Water / Still artwork from Still dark.
+    QCOMPARE(totalFamilies, 401);
     // A referenced family remains transition-only when it has neither a
     // uniform tile nor a one-on-three authored stamp.
     QCOMPARE(transitionSupportFamilies, 17);
@@ -6541,6 +6557,21 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
         tile.canonicalSignature = source.slotDefinitions.at(slot).signature;
         finalized.tiles.append(tile);
     }
+    QImage foreignPixels(8, 8, QImage::Format_RGBA8888);
+    foreignPixels.fill(QColor(210, 80, 35));
+    active.append(foreignPixels);
+    STerrainFinalizedTile foreignTile;
+    foreignTile.sourceSlot = 1; // Deliberately collides with a local slot.
+    foreignTile.authored = true;
+    foreignTile.pixels = foreignPixels;
+    foreignTile.pixelSha256 = QByteArray(64, 'f');
+    foreignTile.sourceNamespace = QStringLiteral("foreign-zone");
+    foreignTile.sourceSlotAliases.append(1);
+    foreignTile.canonicalSignature.northWest = 1;
+    foreignTile.canonicalSignature.northEast = 2;
+    foreignTile.canonicalSignature.southEast = 3;
+    foreignTile.canonicalSignature.southWest = 1;
+    finalized.tiles.append(foreignTile);
     QString diagnostic;
     finalized.pageMmpPayloads.append(ei::encodeMmpDxt1(
         CTerrainVirtualAtlas::composePage(active, 0, 8), true, &diagnostic));
@@ -6556,7 +6587,12 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
             finalized, physical, source, ETerrainAtlasLayer::Land, {}, &report);
     QCOMPARE(portable.atlasSlotCount, 64);
     QCOMPARE(portable.slotDefinitions.size(), 64);
-    QCOMPARE(portable.assignedSlotCount(), 3);
+    QCOMPARE(portable.assignedSlotCount(), 4);
+    QCOMPARE(portable.slotDefinitions.at(3).signature,
+             CTerrainTransitionCatalog::mirroredGridY(
+                 foreignTile.canonicalSignature));
+    QCOMPARE(portable.slotDefinitions.at(3).sourceNamespace,
+             QStringLiteral("foreign-zone"));
     QVERIFY(portable.validateBinding(
         finalized.isolatedNamespace,
         CTerrainAtlasProfileInference::pixelSha256(physical), 64, &report));
@@ -6580,7 +6616,7 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
                  finalized.isolatedNamespace, portable.atlasPixelSha256, 64,
                  &reopened, root.path(), nullptr, &report),
              qPrintable(report.toText()));
-    QCOMPARE(reopened.assignedSlotCount(), 3);
+    QCOMPARE(reopened.assignedSlotCount(), 4);
     QCOMPARE(reopened.schemaVersion, 8);
     QCOMPARE(reopened.slotDefinitions.at(0).sourceNamespace,
              QStringLiteral("source"));

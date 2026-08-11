@@ -1818,7 +1818,7 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
         self.assertNotIn(10, {family["id"] for family in result["families"]})
         water = next(family for family in result["families"]
                      if family["id"] == 5)
-        self.assertEqual("Water / Still", water["suggestedName"])
+        self.assertEqual("Water / Still dark", water["suggestedName"])
         by_slot = {slot["slot"]: slot for slot in result["slots"]}
         self.assertEqual(5, by_slot[180]["signature"]["northWest"])
         self.assertEqual(5, by_slot[180]["signature"]["northEast"])
@@ -3435,13 +3435,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r120_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the fully resolved R120 catalog verbatim."""
+    def test_r123_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the reviewed R123 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "cfc41cec99f70a96fda09b52df576ef150b29e67a6689f65a34c6605cad3e5c2",
+            "1b8493a9cc562603d57b4bde97f069534b94afe9a85d1f901c0af7941b1e6d7a",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -3459,6 +3459,30 @@ class ReviewDocumentTests(unittest.TestCase):
             zone9[506 * 4:507 * 4],
             "the exact slot-506 propagation must remain synchronized",
         )
+        base = presets["basegipat"]
+        base_names = {int(row["id"]): row["name"]
+                      for row in base["families"]}
+        base_payload = base64.b64decode(base["signaturesBase64"])
+        decisions = json.loads((root / "scripts" /
+            "semantic_atlas_r123_consolidated_decisions.json"
+        ).read_text(encoding="utf-8"))
+        for slot_text, corners in decisions["cornerCorrections"][
+                "BaseGipat"].items():
+            for corner, expected in corners.items():
+                index = ("NW", "NE", "SE", "SW").index(corner)
+                self.assertEqual(
+                    expected,
+                    base_names[base_payload[int(slot_text) * 4 + index]],
+                )
+        water = next(row for row in base["families"]
+                     if row["name"] == "Water / Still")
+        self.assertTrue(water["paintSelectable"])
+        self.assertEqual(6, water["tileType"])
+        self.assertEqual(["overlay"], water["allowedLayers"])
+        zone18 = {row["name"]: row for row in
+                  presets["zone18"]["families"]}
+        for family in ("Sand / Dark", "Stone / Orange", "Stone / Weathered"):
+            self.assertEqual(["land"], zone18[family]["allowedLayers"])
 
     def test_questionnaire_layout_contract_is_locked(self) -> None:
         policy = (Path(__file__).resolve().parent.parent / "docs" /

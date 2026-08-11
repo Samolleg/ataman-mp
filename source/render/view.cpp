@@ -7813,6 +7813,11 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
     const ETerrainTileLayer layer=landActive?ETerrainTileLayer::Land:ETerrainTileLayer::Overlay;
+    // Finalization is a save operation. Commit any live drag preview before
+    // taking the terrain snapshot so sculpted heights and the last paint stroke
+    // cannot be omitted from the portable MPR.
+    finishSculptStroke();
+    endTileBrushGroup();
     QProgressDialog finalizeProgress(
         tr("Preparing map-specific terrain atlas..."),QString(),0,0,this);
     finalizeProgress.setWindowTitle(tr("Finalizing terrain atlas"));
@@ -7835,23 +7840,14 @@ void CView::finalizeVirtualTerrainAtlas()
     QVector<quint16> pinned;
     const ETerrainTileLayer preserved=layer==ETerrainTileLayer::Land
         ?ETerrainTileLayer::Overlay:ETerrainTileLayer::Land;
-    CTerrainEditModel originalTerrain;
-    CValidationReport originalReport;
     finalizeProgress.setLabelText(tr(
         "Auditing preserved terrain references and unused slots..."));
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    if(!originalTerrain.load(m_mprDocument,&originalReport))
-    {
-        QMessageBox::critical(this,tr("Atlas finalization refused"),
-            tr("The preserved layer could not be reconstructed from the original MPR.\n\n%1")
-                .arg(originalReport.toText()));
-        return;
-    }
     for(int y=0;y<m_terrainEdit.tileCountY();++y)
         for(int x=0;x<m_terrainEdit.tileCountX();++x)
         {
             bool available=false;
-            const quint16 packed=originalTerrain.packedTile(x,y,preserved,&available);
+            const quint16 packed=m_terrainEdit.packedTile(x,y,preserved,&available);
             // 0xffff is the inactive-overlay sentinel, not atlas slot 16383.
             // Pinning it caused valid land finalization to fail with the
             // misleading "slot 16383 was not pinned" error.
@@ -7906,7 +7902,7 @@ void CView::finalizeVirtualTerrainAtlas()
             placedCellTypes.append(typeFound?type:-1);
             placedPackedCells.append(available?packed:quint16(0));
         }
-    const STerrainAtlasFinalization finalized=atlas.finalize(
+    STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,
         kMprPackedTerrainAtlasSlotLimit,
         authoredTypes,&report,pinned,placedCellTypes,placedPackedCells,{},
@@ -7920,9 +7916,25 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
     QSet<int> retainedSourceOutputs;
-    for(auto remap=finalized.authoredSlotRemap.constBegin();
-        remap!=finalized.authoredSlotRemap.constEnd();++remap)
-        retainedSourceOutputs.insert(remap.value());
+    if(m_workingTerrainAtlas)
+    {
+        STerrainWorkingFinalizationOrigins origins;
+        if(!m_workingTerrainAtlas->restoreFinalizedProvenance(
+               &finalized, &origins,
+               m_mprDocument.mapInfo().innerNamespace,
+               field.stableSha256(), pinned, &report))
+        {
+            QMessageBox::critical(this,tr("Atlas finalization refused"),
+                tr("The working atlas provenance could not be restored after compaction. "
+                   "No package was written.\n\n%1").arg(report.toText()));
+            return;
+        }
+        retainedSourceOutputs=origins.retainedMapOutputs;
+    }
+    else
+        for(auto remap=finalized.authoredSlotRemap.constBegin();
+            remap!=finalized.authoredSlotRemap.constEnd();++remap)
+            retainedSourceOutputs.insert(remap.value());
     int generatedCount=0;
     int importedStockCount=0;
     for(int slot=0;slot<finalized.tiles.size();++slot)
@@ -7932,15 +7944,17 @@ void CView::finalizeVirtualTerrainAtlas()
         importedStockCount+=tile.authored&&!retainedSourceOutputs.contains(slot);
     }
     const int retainedAuthored=retainedSourceOutputs.size();
-    const int evictedAuthored=qMax(0,authoredImages.size()-retainedAuthored);
+    const int originalSourceSlotCount=m_workingTerrainAtlas
+        ?m_authoredTerrainTileImages.size():authoredImages.size();
+    const int evictedAuthored=qMax(0,originalSourceSlotCount-retainedAuthored);
     QDialog preview(this);
     preview.setWindowTitle(tr("Review finalized map atlas"));
     preview.resize(900,700);
     QVBoxLayout* previewLayout=new QVBoxLayout(&preview);
     QLabel* summary=new QLabel(tr(
         "Final atlas: %1 slots (%2 pages)\n"
-        "Retained source tiles: %3  |  Evicted unused source tiles: %4\n"
-        "Added stock JMV blends: %5  |  Newly generated exact blends: %6")
+        "Retained original-map tiles: %3  |  Evicted/merged original-map tiles: %4\n"
+        "Included stock JMV blends: %5  |  Included generated exact blends: %6")
         .arg(finalized.requiredSlots).arg(finalized.textureCount)
         .arg(retainedAuthored).arg(evictedAuthored)
         .arg(importedStockCount).arg(generatedCount),&preview);
@@ -7948,9 +7962,10 @@ void CView::finalizeVirtualTerrainAtlas()
     previewLayout->addWidget(summary);
     QLabel* saveExplanation=new QLabel(tr(
         "Save result: one edited .mpr plus its required map-specific .res atlas "
-        "and review manifest, stored together. Open or stage the new .mpr; do not "
-        "save the original map over it afterward. The .res is texture data used by "
-        "that MPR, not a second map."),&preview);
+        "and review manifest, stored together. The MPR includes every current "
+        "landscape edit, including sculpted heights and the latest paint stroke. "
+        "After validation you will explicitly choose whether to open the finalized "
+        "copy. The .res is texture data used by that MPR, not a second map."),&preview);
     saveExplanation->setWordWrap(true);
     saveExplanation->setStyleSheet(QStringLiteral(
         "QLabel { background: #263746; border: 1px solid #4d718c; padding: 7px; }"));
@@ -7986,7 +8001,8 @@ void CView::finalizeVirtualTerrainAtlas()
         previewLayout->addWidget(warning);
     }
     QLabel* addedHeading=new QLabel(tr(
-        "Tiles added to this isolated atlas (stock reuse first, generated only when missing):"),
+        "Non-original tiles written to this isolated atlas "
+        "(stock reuse first, generated only when missing):"),
         &preview);
     addedHeading->setWordWrap(true);
     previewLayout->addWidget(addedHeading);
@@ -8043,7 +8059,9 @@ void CView::finalizeVirtualTerrainAtlas()
         ++addedIndex;
     }
     if(addedIndex==0)
-        addedGrid->addWidget(new QLabel(tr("No tiles are added; this finalization only compacts existing usage."),addedPage),0,0);
+        addedGrid->addWidget(new QLabel(tr(
+            "No non-original tiles are needed; the isolated atlas contains only "
+            "compacted artwork from the original map."),addedPage),0,0);
     addedGrid->setAlignment(Qt::AlignTop);
     addedScroll->setWidget(addedPage);
     previewLayout->addWidget(addedScroll,1);
@@ -8057,7 +8075,7 @@ void CView::finalizeVirtualTerrainAtlas()
     finalizeProgress.hide();
     if(preview.exec()!=QDialog::Accepted)return;
     const STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
-        m_mprDocument,finalized,layer,&report);
+        m_mprDocument,m_terrainEdit,finalized,layer,&report);
     if(!package.success)
     {
         const QString findings=report.findings().isEmpty()
@@ -8230,17 +8248,28 @@ void CView::finalizeVirtualTerrainAtlas()
     }
     emit updateMsg(tr("Validated map-specific atlas package written: %1")
         .arg(QDir::toNativeSeparators(folderPath)));
-    QMessageBox::information(this,tr("Edited MPR and atlas ready"),tr(
-        "The edited map and its isolated terrain atlas were saved together.\n\n"
-        "MPR to open or stage:\n%1\n\nRequired atlas resource:\n%2\n\n"
+    QMessageBox ready(QMessageBox::Information,tr("Edited MPR and atlas ready"),tr(
+        "The edited map and its isolated terrain atlas were saved and reopened "
+        "from disk successfully. All current landscape edits are in this MPR.\n\n"
+        "MPR:\n%1\n\nRequired atlas resource:\n%2\n\n"
         "Namespace: %3\nUsed tiles: %4 / %5\nTexture pages: %6\n\n"
-        "Keep the MPR and RES together. The current editor tab still represents "
-        "the original editing session; reopen the MPR above to continue from the finalized package. "
+        "The editor has NOT reloaded it yet. Keep the MPR and RES together. "
         "The original MPR and shared atlas resources were not modified.")
         .arg(QDir::toNativeSeparators(mprPath),
              QDir::toNativeSeparators(resPath),finalized.isolatedNamespace)
         .arg(finalized.requiredSlots).arg(finalized.capacityLimit)
-        .arg(finalized.textureCount));
+        .arg(finalized.textureCount),QMessageBox::NoButton,this);
+    QAbstractButton* openFinalized=ready.addButton(
+        tr("Open finalized MPR now"),QMessageBox::AcceptRole);
+    ready.addButton(tr("Keep original editing session open"),
+                    QMessageBox::RejectRole);
+    ready.setDefaultButton(qobject_cast<QPushButton*>(openFinalized));
+    ready.exec();
+    if(ready.clickedButton()==openFinalized)
+    {
+        unloadLand(false);
+        loadLandscape(QFileInfo(mprPath));
+    }
 }
 
 void CView::onChangeCursorTile(QPixmap ico)
@@ -11336,6 +11365,22 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
                         alias.insert(QStringLiteral("sourcePixelSha256"),
                             QString::fromLatin1(
                                 profileSlot->sourcePixelSha256));
+                        aliases.append(alias);
+                    }
+                    identity.insert(QStringLiteral("sourceAliases"), aliases);
+                }
+                else if(!workingIdentity.sourceSlotAliases.isEmpty())
+                {
+                    QJsonArray aliases;
+                    for(int sourceSlot : workingIdentity.sourceSlotAliases)
+                    {
+                        QJsonObject alias;
+                        alias.insert(QStringLiteral("sourceNamespace"),
+                                     identitySourceNamespace);
+                        alias.insert(QStringLiteral("sourceSlot"), sourceSlot);
+                        alias.insert(QStringLiteral("sourcePixelSha256"),
+                            QString::fromLatin1(
+                                workingIdentity.physicalPixelSha256));
                         aliases.append(alias);
                     }
                     identity.insert(QStringLiteral("sourceAliases"), aliases);

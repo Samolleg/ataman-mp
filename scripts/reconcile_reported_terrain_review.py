@@ -238,11 +238,26 @@ def reconcile(
                 (int(cell["x"]), int(cell["y"]))
                 for cell in mark.get("selectedCells", [])
             }
+            # New reports deliberately capture every available terrain layer so
+            # an overlay can be audited even while Ground is the active edit
+            # target (and vice versa).  A mark, however, is evidence about the
+            # layer the user was looking at.  Treating the contextual layer as a
+            # second reported tile silently queues unrelated authored artwork.
+            active_layer = mark.get("activeEditLayer", "")
+            if active_layer not in ("land", "overlay"):
+                recorded_layer = mark.get("layer", "")
+                active_layer = (
+                    recorded_layer
+                    if recorded_layer in ("land", "overlay")
+                    else ""
+                )
             total_selected += len(selected)
             report_selected += len(selected)
             captured_coordinates = set()
             for cell in mark.get("tileSnapshot", []):
                 if not cell.get("insideMark"):
+                    continue
+                if active_layer and cell.get("layer", "") != active_layer:
                     continue
                 coordinate = (int(cell["x"]), int(cell["y"]))
                 captured_coordinates.add(coordinate)

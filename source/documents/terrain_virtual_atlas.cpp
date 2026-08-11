@@ -786,6 +786,33 @@ struct SReviewedCanonicalMask
 const SReviewedCanonicalMask* reviewedCanonicalMask(
     ETerrainBlendStyle style, const QString& topology)
 {
+    // R123 explicitly reviewed Lava against the real approved-HD Red and
+    // Orange uniforms. Lava has no authored transition family, so reuse only
+    // the selected, already-approved ownership mattes instead of reaching the
+    // obsolete procedural geometry fallback.
+    static const SReviewedCanonicalMask r123Masks[] = {
+        {ETerrainBlendStyle::Lava, "outer-1of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/water-outer-1of4-v1-r75-authored.png",
+         "8bbcc4762db352ace282d7f98e179d34430b498c3c042774d0a85114a2db7394",
+         "canonical-generated:lava-flow:outer-1of4-v1:r123-approved-liquid-flow"},
+        {ETerrainBlendStyle::Lava, "edge-2of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-edge-2of4-v1-r76-adjusted.png",
+         "1ba9c2e33295d6f400f577a7615a8100963be76de753705f421ea27be436e7a7",
+         "canonical-generated:lava-flow:edge-2of4-v1:r123-approved-fracture-flow"},
+        {ETerrainBlendStyle::Lava, "diagonal-2of4",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-diagonal-2of4-r76-adjusted.png",
+         "dbb729aca28b033be78a2f603d95b5f7ee3ad9936b28ddc9de6a3dc0eb73ffc0",
+         "canonical-generated:lava-flow:diagonal-2of4:r123-approved-fracture-flow"},
+        {ETerrainBlendStyle::Lava, "inside-3of4-v1",
+         ":/terrain_blend_masks/terrain_blend_masks/ice-inside-3of4-v1-r76-adjusted.png",
+         "47f439119039111046f1aa7bc40b4d404dab03fdf47934707cdb5c39667d15c1",
+         "canonical-generated:lava-flow:inside-3of4-v1:r123-approved-fracture-flow"}
+    };
+    for(const SReviewedCanonicalMask& mask : r123Masks)
+        if(mask.style == style
+           && topology == QString::fromLatin1(mask.topology))
+            return &mask;
+
     static const SReviewedCanonicalMask r77Masks[] = {
         {ETerrainBlendStyle::Paving, "edge-2of4-v2",
          ":/terrain_blend_masks/terrain_blend_masks/paving-edge-2of4-v2-r77-adjusted.png",
@@ -1371,6 +1398,55 @@ QImage canonicalGeneratedOwnershipMask(
             .arg(CTerrainVirtualAtlas::blendStyleName(style))
             .arg(canonicalMaskTopologyName(ownerCount, diagonal, variation));
     return result;
+}
+
+void refreshFinalizationStableIdentity(
+    STerrainAtlasFinalization* finalization,
+    const QString& sourceNamespace,
+    const QByteArray& materialFieldSha256,
+    const QVector<quint16>& pinnedPackedTiles)
+{
+    if(!finalization)
+        return;
+    QCryptographicHash stable(QCryptographicHash::Sha256);
+    stable.addData(sourceNamespace.toUtf8().toLower());
+    stable.addData(materialFieldSha256);
+    for(const STerrainFinalizedTile& tile : finalization->tiles)
+    {
+        stable.addData(tile.pixelSha256);
+        char typeBytes[4];
+        qToLittleEndian<qint32>(tile.runtimeTerrainType,
+            reinterpret_cast<uchar*>(typeBytes));
+        stable.addData(typeBytes, 4);
+        stable.addData(tile.sourceNamespace.toUtf8().toLower());
+        for(int sourceAlias : tile.sourceSlotAliases)
+        {
+            char aliasBytes[4];
+            qToLittleEndian<qint32>(sourceAlias,
+                reinterpret_cast<uchar*>(aliasBytes));
+            stable.addData(aliasBytes, 4);
+        }
+    }
+    for(quint16 packed : finalization->packedCells)
+    {
+        char bytes[2];
+        qToLittleEndian<quint16>(packed, reinterpret_cast<uchar*>(bytes));
+        stable.addData(bytes, 2);
+    }
+    for(quint16 packed : pinnedPackedTiles)
+    {
+        char bytes[2];
+        qToLittleEndian<quint16>(packed, reinterpret_cast<uchar*>(bytes));
+        stable.addData(bytes, 2);
+    }
+    finalization->stableSha256 = stable.result().toHex();
+    QString safeBase = sourceNamespace.toLower();
+    safeBase.replace(
+        QRegularExpression(QStringLiteral("[^a-z0-9_]+")),
+        QStringLiteral("_"));
+    finalization->isolatedNamespace = QStringLiteral("%1_eime_%2")
+        .arg(safeBase.isEmpty() ? QStringLiteral("terrain") : safeBase,
+             QString::fromLatin1(finalization->stableSha256.left(12)));
 }
 
 bool sameOwnerPattern(const STerrainTransitionSignature& first,
@@ -2960,43 +3036,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         result.pageMmpPayloads.append(mmp);
     }
 
-    QCryptographicHash stable(QCryptographicHash::Sha256);
-    stable.addData(sourceNamespace.toUtf8().toLower());
-    stable.addData(field.stableSha256());
-    for(const STerrainFinalizedTile& tile : result.tiles)
-    {
-        stable.addData(tile.pixelSha256);
-        char typeBytes[4];
-        qToLittleEndian<qint32>(tile.runtimeTerrainType,
-            reinterpret_cast<uchar*>(typeBytes));
-        stable.addData(typeBytes, 4);
-        stable.addData(tile.sourceNamespace.toUtf8().toLower());
-        for(int sourceAlias : tile.sourceSlotAliases)
-        {
-            char aliasBytes[4];
-            qToLittleEndian<qint32>(sourceAlias,
-                reinterpret_cast<uchar*>(aliasBytes));
-            stable.addData(aliasBytes, 4);
-        }
-    }
-    for(quint16 packed : result.packedCells)
-    {
-        char bytes[2];
-        qToLittleEndian<quint16>(packed, reinterpret_cast<uchar*>(bytes));
-        stable.addData(bytes, 2);
-    }
-    for(quint16 packed:pinnedPackedTiles)
-    {
-        char bytes[2];
-        qToLittleEndian<quint16>(packed,reinterpret_cast<uchar*>(bytes));
-        stable.addData(bytes,2);
-    }
-    result.stableSha256 = stable.result().toHex();
-    const QString safeBase = sourceNamespace.toLower().replace(
-        QRegularExpression(QStringLiteral("[^a-z0-9_]+")), QStringLiteral("_"));
-    result.isolatedNamespace = QStringLiteral("%1_eime_%2")
-        .arg(safeBase.isEmpty() ? QStringLiteral("terrain") : safeBase,
-             QString::fromLatin1(result.stableSha256.left(12)));
+    refreshFinalizationStableIdentity(
+        &result, sourceNamespace, field.stableSha256(), pinnedPackedTiles);
     result.success = true;
     return result;
 }
@@ -3173,6 +3214,64 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
             return result;
         }
     result.resourceArchiveBytes=archiveBytes;result.success=true;return result;
+}
+
+STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
+    const CMprDocument& source, const CTerrainEditModel& editedTerrain,
+    const STerrainAtlasFinalization& finalization,
+    ETerrainTileLayer layer, CValidationReport* report)
+{
+    STerrainPortableAtlasPackage result;
+    CValidationReport stageReport;
+    CMprEditTransaction transaction(QStringLiteral(
+        "Stage every live terrain edit before atlas finalization"));
+    if(!editedTerrain.appendSectorEdits(&transaction, &stageReport)
+       || !source.appendMaxZEdit(editedTerrain.maxZ(), &transaction,
+                                 &stageReport)
+       || stageReport.hasErrors())
+    {
+        if(report)
+            for(const SValidationFinding& finding : stageReport.findings())
+                report->add(finding.code, finding.severity,
+                            finding.message, finding.location);
+        result.error = QStringLiteral(
+            "The live sculpt, material, and terrain edits could not be staged before atlas finalization.");
+        return result;
+    }
+    if(transaction.isEmpty())
+        return buildPortablePackage(source, finalization, layer, report);
+
+    QByteArray stagedBytes;
+    if(!source.applyTransaction(transaction, &stagedBytes, &stageReport))
+    {
+        if(report)
+            for(const SValidationFinding& finding : stageReport.findings())
+                report->add(finding.code, finding.severity,
+                            finding.message, finding.location);
+        result.error = QStringLiteral(
+            "The complete live terrain edit failed its provenance-checked staging transaction.");
+        return result;
+    }
+    CMprDocument stagedSource;
+    if(!stagedSource.loadBytes(
+           stagedBytes,
+           QStringLiteral("edited-terrain-before-atlas-finalization.mpr"),
+           &stageReport)
+       || stageReport.hasErrors())
+    {
+        if(report)
+            for(const SValidationFinding& finding : stageReport.findings())
+                report->add(finding.code, finding.severity,
+                            finding.message, finding.location);
+        result.error = QStringLiteral(
+            "The complete live terrain edit failed fresh reopen before atlas finalization.");
+        return result;
+    }
+    if(report)
+        for(const SValidationFinding& finding : stageReport.findings())
+            report->add(finding.code, finding.severity,
+                        finding.message, finding.location);
+    return buildPortablePackage(stagedSource, finalization, layer, report);
 }
 
 STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
@@ -3494,6 +3593,7 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
             return false;
         identity->origin = ETerrainWorkingTileOrigin::AuthoredMap;
         identity->sourceSlot = sourceIndex;
+        identity->sourceSlotAliases = {sourceIndex};
         SMprPackedTile packed;
         packed.tileIndex = quint8(sourceIndex % 64);
         packed.atlasIndex = quint8(sourceIndex / 64);
@@ -3513,11 +3613,147 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
         ? ETerrainWorkingTileOrigin::ImportedAuthored
         : ETerrainWorkingTileOrigin::CanonicalGenerated;
     identity->sourceSlot = source.sourceSlot;
+    identity->sourceSlotAliases = source.sourceSlotAliases;
+    if(identity->sourceSlotAliases.isEmpty() && source.sourceSlot >= 0)
+        identity->sourceSlotAliases.append(source.sourceSlot);
     identity->sourceNamespace = source.sourceNamespace;
     identity->canonicalSignature = source.canonicalSignature;
     identity->blendProvenance = source.blendProvenance;
     identity->stockDerivedBlend = source.stockDerivedBlend;
     identity->canonicalGeneratedBlend = source.canonicalGeneratedBlend;
+    return true;
+}
+
+bool CTerrainWorkingAtlas::restoreFinalizedProvenance(
+    STerrainAtlasFinalization* finalization,
+    STerrainWorkingFinalizationOrigins* origins,
+    const QString& sourceNamespace,
+    const QByteArray& materialFieldSha256,
+    const QVector<quint16>& pinnedPackedTiles,
+    CValidationReport* report) const
+{
+    if(!finalization || !origins || !finalization->success)
+        return false;
+    *origins = STerrainWorkingFinalizationOrigins();
+    QMap<int, QVector<STerrainWorkingTileIdentity>> identitiesByOutput;
+    for(auto remap = finalization->authoredSlotRemap.constBegin();
+        remap != finalization->authoredSlotRemap.constEnd(); ++remap)
+    {
+        const int outputSlot = remap.value();
+        STerrainWorkingTileIdentity identity;
+        if(outputSlot < 0 || outputSlot >= finalization->tiles.size()
+           || !tileIdentityForSlot(remap.key(), &identity))
+        {
+            if(report) report->add(
+                QStringLiteral("terrain.finalized_working_provenance"),
+                EValidationSeverity::Error,
+                QStringLiteral("A retained working-atlas slot has no stable physical provenance."),
+                QStringLiteral("working slot %1 -> finalized slot %2")
+                    .arg(remap.key()).arg(outputSlot));
+            return false;
+        }
+        identitiesByOutput[outputSlot].append(identity);
+    }
+
+    for(int outputSlot = 0; outputSlot < finalization->tiles.size(); ++outputSlot)
+    {
+        STerrainFinalizedTile& tile = finalization->tiles[outputSlot];
+        const QVector<STerrainWorkingTileIdentity> identities =
+            identitiesByOutput.value(outputSlot);
+        QVector<STerrainWorkingTileIdentity> retained;
+        QVector<STerrainWorkingTileIdentity> imported;
+        QVector<STerrainWorkingTileIdentity> generated;
+        for(const STerrainWorkingTileIdentity& identity : identities)
+        {
+            if(identity.origin == ETerrainWorkingTileOrigin::AuthoredMap)
+                retained.append(identity);
+            else if(identity.origin == ETerrainWorkingTileOrigin::ImportedAuthored)
+                imported.append(identity);
+            else if(identity.origin == ETerrainWorkingTileOrigin::CanonicalGenerated)
+                generated.append(identity);
+        }
+        if(!retained.isEmpty())
+        {
+            tile.authored = true;
+            tile.sourceNamespace = sourceNamespace;
+            tile.blendProvenance.clear();
+            tile.stockDerivedBlend = false;
+            tile.canonicalGeneratedBlend = false;
+            tile.sourceSlotAliases.clear();
+            for(const STerrainWorkingTileIdentity& identity : retained)
+                if(identity.sourceSlot >= 0
+                   && !tile.sourceSlotAliases.contains(identity.sourceSlot))
+                    tile.sourceSlotAliases.append(identity.sourceSlot);
+            std::sort(tile.sourceSlotAliases.begin(), tile.sourceSlotAliases.end());
+            tile.sourceSlot = tile.sourceSlotAliases.isEmpty()
+                ? -1 : tile.sourceSlotAliases.front();
+            origins->retainedMapOutputs.insert(outputSlot);
+            continue;
+        }
+        if(!imported.isEmpty())
+        {
+            std::sort(imported.begin(), imported.end(),
+                [](const STerrainWorkingTileIdentity& left,
+                   const STerrainWorkingTileIdentity& right)
+                {
+                    const int namespaceOrder = QString::compare(
+                        left.sourceNamespace, right.sourceNamespace,
+                        Qt::CaseInsensitive);
+                    return namespaceOrder != 0
+                        ? namespaceOrder < 0 : left.sourceSlot < right.sourceSlot;
+                });
+            const STerrainWorkingTileIdentity& selected = imported.front();
+            tile.authored = true;
+            tile.sourceNamespace = selected.sourceNamespace;
+            tile.sourceSlot = selected.sourceSlot;
+            tile.sourceSlotAliases.clear();
+            for(const STerrainWorkingTileIdentity& identity : imported)
+                if(identity.sourceNamespace.compare(selected.sourceNamespace,
+                       Qt::CaseInsensitive) == 0)
+                    for(int alias : identity.sourceSlotAliases)
+                        if(alias >= 0 && !tile.sourceSlotAliases.contains(alias))
+                            tile.sourceSlotAliases.append(alias);
+            if(tile.sourceSlot >= 0
+               && !tile.sourceSlotAliases.contains(tile.sourceSlot))
+                tile.sourceSlotAliases.append(tile.sourceSlot);
+            std::sort(tile.sourceSlotAliases.begin(), tile.sourceSlotAliases.end());
+            tile.blendProvenance = selected.blendProvenance;
+            tile.stockDerivedBlend = selected.stockDerivedBlend;
+            tile.canonicalGeneratedBlend = false;
+            origins->importedAuthoredOutputs.insert(outputSlot);
+            continue;
+        }
+        if(!generated.isEmpty() || !tile.authored)
+        {
+            if(!generated.isEmpty())
+            {
+                const STerrainWorkingTileIdentity& selected = generated.front();
+                tile.sourceNamespace = selected.sourceNamespace;
+                tile.blendProvenance = selected.blendProvenance;
+                tile.stockDerivedBlend = selected.stockDerivedBlend;
+                tile.canonicalGeneratedBlend = true;
+            }
+            tile.authored = false;
+            tile.sourceSlot = -1;
+            tile.sourceSlotAliases.clear();
+            origins->canonicalGeneratedOutputs.insert(outputSlot);
+            continue;
+        }
+        // A tile generated directly by the clean finalizer does not have a
+        // working-slot remap, but already carries its complete provenance.
+        if(tile.authored && !tile.sourceNamespace.isEmpty())
+            origins->importedAuthoredOutputs.insert(outputSlot);
+        else
+            origins->retainedMapOutputs.insert(outputSlot);
+    }
+
+    // The clean finalizer initially sees every live working slot as authored.
+    // Its first hash therefore describes that flattened cache identity. Once
+    // the real source/generated provenance is restored, rebuild the identity
+    // through the same byte contract used by finalize().
+    refreshFinalizationStableIdentity(
+        finalization, sourceNamespace, materialFieldSha256,
+        pinnedPackedTiles);
     return true;
 }
 

@@ -1,0 +1,33 @@
+{
+  "schema": "ei-semantic-atlas-r123-consolidated-decisions-v1",
+  "source": "semantic_atlas_r123_user_answers.txt",
+  "counts": {
+    "submittedCards": 5,
+    "changedCardCorners": 7,
+    "serializedOwnerCornerRows": 7
+  },
+  "cornerCorrections": {
+    "BaseGipat": {
+      "180": {"NW": "Water / Still", "NE": "Water / Still"},
+      "182": {"NW": "Water / Still", "NE": "Water / Still"},
+      "377": {"NW": "Water / Still"},
+      "378": {"NW": "Water / Still"},
+      "380": {"NW": "Water / Still"}
+    }
+  },
+  "newFamilies": {
+    "BaseGipat": [
+      {
+        "id": 10,
+        "name": "Water / Still",
+        "templateFamily": "Water / Still dark",
+        "sourceFamily": "reviewed/water/still",
+        "thumbnailSlot": 180,
+        "uniformSlots": [],
+        "memberSlots": [180, 182, 377, 378, 380],
+        "paintSelectable": true
+      }
+    ]
+  },
+  "scopePolicy": "Only the five explicitly submitted BaseGipat cards are authoritative. The new Water / Still identity is transition-only in BaseGipat because this atlas has no reviewed local four-corner uniform for it."
+}

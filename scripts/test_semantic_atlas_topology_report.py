@@ -119,7 +119,7 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # connection disagreement through R117-R120.
         self.assertEqual(1282, report["totalPairCount"])
         self.assertEqual(
-            {"0": 696, "1": 95, "2": 69, "3": 192, "4": 230},
+            {"0": 698, "1": 93, "2": 69, "3": 192, "4": 230},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

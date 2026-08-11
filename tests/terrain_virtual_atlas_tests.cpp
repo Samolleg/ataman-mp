@@ -427,6 +427,7 @@ private slots:
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
     void nonUniformResolveUsesAuthoredRotationOrGeneratesExact();
     void canonicalMasksAreAvailableWithoutStockTemplates();
+    void lavaUsesOnlyExplicitR123ReviewedMaskRoutes();
     void authoredMapTransitionsDoNotPopulateObsoleteMaskPool();
     void canonicalMasksMeetQuarterCoverageAndCornerContract();
     void canonicalMasksAreExactComplementsAndRotationCovariant();
@@ -483,6 +484,7 @@ private slots:
     void namespacesAreIsolated();
     void exactOnlyNoOpPreservesPixels();
     void portablePackageRemapsNamespaceAndReopens();
+    void portablePackageStagesLiveSculptBeforeAtlasFinalization();
     void workingPreviewPackagePreservesAuthoredPagesAndAppendsExtensions();
     void workingPreviewPackageStagesSeveralGeneratedPages();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
@@ -1100,6 +1102,8 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     QVERIFY(!importedIdentity.physicalPixelSha256.isEmpty());
     QVERIFY(importedIdentity.stockDerivedBlend);
     QVERIFY(!importedIdentity.canonicalGeneratedBlend);
+    const int importedSlot = SMprPackedTile::decode(importedPacked).atlasSlot();
+    ++usage[importedSlot];
 
     seedReviewedStockMasks(working, fixture);
     const STerrainTransitionSignature generatedSignature =
@@ -1119,6 +1123,41 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     QVERIFY(!generatedIdentity.physicalPixelSha256.isEmpty());
     QVERIFY(!generatedIdentity.stockDerivedBlend);
     QVERIFY(generatedIdentity.canonicalGeneratedBlend);
+
+    // The UI finalizer rebuilds from the flattened working images/catalog.
+    // Before provenance restoration that makes extension artwork look like
+    // retained map-authored slots, producing a false zero-added preview.
+    STerrainAtlasFinalization flattened;
+    flattened.success = true;
+    flattened.tiles.resize(3);
+    for(STerrainFinalizedTile& tile : flattened.tiles)
+        tile.authored = true;
+    const int generatedSlot = SMprPackedTile::decode(generatedPacked).atlasSlot();
+    flattened.authoredSlotRemap.insert(0, 0);
+    flattened.authoredSlotRemap.insert(importedSlot, 1);
+    flattened.authoredSlotRemap.insert(generatedSlot, 2);
+    STerrainWorkingFinalizationOrigins origins;
+    QVERIFY2(working.restoreFinalizedProvenance(
+                 &flattened, &origins, QStringLiteral("CaveSet"),
+                 QByteArray("material-field-sha"), {}, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(origins.retainedMapOutputs, QSet<int>({0}));
+    QCOMPARE(origins.importedAuthoredOutputs, QSet<int>({1}));
+    QCOMPARE(origins.canonicalGeneratedOutputs, QSet<int>({2}));
+    QVERIFY(flattened.tiles.at(0).authored);
+    QCOMPARE(flattened.tiles.at(0).sourceNamespace,
+             QStringLiteral("CaveSet"));
+    QVERIFY(flattened.tiles.at(1).authored);
+    QCOMPARE(flattened.tiles.at(1).sourceNamespace,
+             QStringLiteral("ZoneReview"));
+    QCOMPARE(flattened.tiles.at(1).sourceSlot, 137);
+    QVERIFY(!flattened.tiles.at(2).authored);
+    QVERIFY(flattened.tiles.at(2).canonicalGeneratedBlend);
+    QVERIFY(flattened.tiles.at(2).blendProvenance.startsWith(
+        QStringLiteral("canonical-generated:")));
+    QCOMPARE(flattened.stableSha256.size(), 64);
+    QVERIFY(flattened.isolatedNamespace.startsWith(
+        QStringLiteral("caveset_eime_")));
 }
 
 void TerrainVirtualAtlasTests::nonUniformResolveUsesAuthoredRotationOrGeneratesExact()
@@ -1223,6 +1262,66 @@ void TerrainVirtualAtlasTests::canonicalMasksAreAvailableWithoutStockTemplates()
         signature(1, 2, 2, 2), 1, 0, &provenance);
     QVERIFY(!mask.isNull());
     QVERIFY(provenance.startsWith(QStringLiteral("canonical-generated:")));
+}
+
+void TerrainVirtualAtlasTests::lavaUsesOnlyExplicitR123ReviewedMaskRoutes()
+{
+    struct LavaCase
+    {
+        STerrainTransitionSignature signature;
+        const char* pixelSha256;
+        const char* provenance;
+    };
+    const LavaCase cases[] = {
+        {signature(1, 2, 2, 2),
+         "8bbcc4762db352ace282d7f98e179d34430b498c3c042774d0a85114a2db7394",
+         "canonical-generated:lava-flow:outer-1of4-v1:r123-approved-liquid-flow"},
+        {signature(1, 1, 2, 2),
+         "1ba9c2e33295d6f400f577a7615a8100963be76de753705f421ea27be436e7a7",
+         "canonical-generated:lava-flow:edge-2of4-v1:r123-approved-fracture-flow"},
+        {signature(1, 2, 1, 2),
+         "dbb729aca28b033be78a2f603d95b5f7ee3ad9936b28ddc9de6a3dc0eb73ffc0",
+         "canonical-generated:lava-flow:diagonal-2of4:r123-approved-fracture-flow"},
+        {signature(1, 1, 1, 2),
+         "47f439119039111046f1aa7bc40b4d404dab03fdf47934707cdb5c39667d15c1",
+         "canonical-generated:lava-flow:inside-3of4-v1:r123-approved-fracture-flow"}
+    };
+
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    images << QImage(256, 256, QImage::Format_RGBA8888)
+           << QImage(256, 256, QImage::Format_RGBA8888);
+    images[0].fill(QColor(210, 55, 20));
+    images[1].fill(QColor(100, 85, 65));
+    for(int material = 1; material <= 2; ++material)
+    {
+        STerrainTransitionVariant uniform;
+        uniform.signature = signature(material, material, material, material);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(material - 1);
+        uniform.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(uniform));
+    }
+    const QMap<qint32, ETerrainBlendStyle> styles = {
+        {1, ETerrainBlendStyle::Lava}, {2, ETerrainBlendStyle::Organic}
+    };
+    CTestTerrainVirtualAtlas atlas(catalog, images, 0x123u, {}, styles);
+    for(const LavaCase& item : cases)
+    {
+        QString provenance;
+        const QImage mask = atlas.reviewBlendMask(
+            item.signature, 1, 0, &provenance, 1);
+        QVERIFY2(!mask.isNull(), item.provenance);
+        QCOMPARE(grayscalePixelHash(mask.mirrored(false, true)),
+                 QByteArray(item.pixelSha256));
+        QCOMPARE(provenance, QString::fromLatin1(item.provenance));
+
+        const STerrainTransitionSignature rotated =
+            CTerrainTransitionCatalog::rotated(item.signature, 1);
+        QCOMPARE(atlas.reviewBlendMask(rotated, 1, 0, nullptr, 1),
+                 mask.transformed(QTransform().rotate(-90.0),
+                                  Qt::FastTransformation));
+    }
 }
 
 void TerrainVirtualAtlasTests::authoredMapTransitionsDoNotPopulateObsoleteMaskPool()
@@ -3380,6 +3479,45 @@ void TerrainVirtualAtlasTests::portablePackageRemapsNamespaceAndReopens()
     QVERIFY(resources.loadBytes(package.resourceArchiveBytes,"portable-atlas.res",&errors));
     QCOMPARE(package.resourceMembers.size(),finalization.textureCount);
     QVERIFY(!resources.memberPayload(package.resourceMembers.front()).isEmpty());
+}
+
+void TerrainVirtualAtlasTests::portablePackageStagesLiveSculptBeforeAtlasFinalization()
+{
+    CMprDocument source;
+    CValidationReport report;
+    QVERIFY2(source.loadBytes(portableMpr(), "sculpt-source.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel edited;
+    QVERIFY2(edited.load(source, &report), qPrintable(report.toText()));
+    STerrainBrush point;
+    point.centerX = 8.0f;
+    point.centerY = 8.0f;
+    point.radius = 0.0f;
+    point.falloff = ETerrainBrushFalloff::Constant;
+    QVERIFY2(edited.apply(edited.makeRaiseLower(point, 100.0f), true, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(edited.height(8, 8), quint16(100));
+
+    Fixture fixture;
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(16, 16, 1));
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("SculptedZone"), 512, {1, 2, 3, 4}, &report);
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
+
+    const STerrainPortableAtlasPackage package =
+        CTestTerrainVirtualAtlas::buildPortablePackage(
+            source, edited, finalized, ETerrainTileLayer::Land, &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + QStringLiteral("\n") + report.toText()));
+    CMprDocument reopened;
+    QVERIFY2(reopened.loadBytes(package.mprBytes, "sculpt-result.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel reopenedTerrain;
+    QVERIFY2(reopenedTerrain.load(reopened, &report), qPrintable(report.toText()));
+    QCOMPARE(reopenedTerrain.height(8, 8), quint16(100));
 }
 
 void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity()
