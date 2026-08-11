@@ -5646,17 +5646,19 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     const auto pink = zone2Family(QStringLiteral("Stone / Pink"));
     const auto mossy = zone2Family(QStringLiteral("Stone / Mossy"));
     const auto irregular = zone2Family(QStringLiteral("Grass / Irregular"));
+    const auto dirt = zone2Family(QStringLiteral("Ground / Dirt"));
     QVERIFY(lime != zone2.families.cend());
     QVERIFY(pink != zone2.families.cend());
     QVERIFY(mossy != zone2.families.cend());
     QVERIFY(irregular != zone2.families.cend());
+    QVERIFY(dirt != zone2.families.cend());
+    QVERIFY(!dirt->paintSelectable);
     for(const QString& removed : {
             QStringLiteral("Ground / Light"),
             QStringLiteral("Grass / Winter normal"),
             QStringLiteral("Ground / Common"),
             QStringLiteral("Grass / Winter faded"),
             QStringLiteral("Ground / Trampled"),
-            QStringLiteral("Ground / Dirt"),
             QStringLiteral("Grass / Irregular dark"),
             QStringLiteral("Ground / Dry")})
         QVERIFY2(zone2Family(removed) == zone2.families.cend(), qPrintable(removed));
@@ -5665,6 +5667,7 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QCOMPARE(zone2.slotDefinitions.at(393).signature.northWest, lime->id);
     QCOMPARE(zone2.slotDefinitions.at(416).signature.southWest, pink->id);
     QCOMPARE(zone2.slotDefinitions.at(285).signature.northWest, mossy->id);
+    QCOMPARE(zone2.slotDefinitions.at(448).signature.southEast, dirt->id);
 
     CValidationReport zone8Report;
     const STerrainAtlasProfile zone8 = CTerrainAtlasPresetCatalog::exactProfile(
@@ -6044,12 +6047,13 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     // last authored corner was reassigned. Exact bz13h decisions propagate to
     // the byte-identical Zone15 atlas, removing its final dead family as well.
     // The pruned R111 authority contains 392 referenced families. R112 adds
-    // one reviewed, paint-selectable Zone10 Slabs / Faces irregular family
-    // for genuine uniform slot 396.
-    QCOMPARE(totalFamilies, 393);
+    // one reviewed, paint-selectable Zone10 Slabs / Faces irregular family.
+    // R115 adds three honest transition-only rows: Ground / Dirt for the two
+    // exact Zone2 owners and Sand / Dark pink for Zone7.
+    QCOMPARE(totalFamilies, 396);
     // A referenced family remains transition-only when it has neither a
     // uniform tile nor a one-on-three authored stamp.
-    QCOMPARE(transitionSupportFamilies, 15);
+    QCOMPARE(transitionSupportFamilies, 18);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()

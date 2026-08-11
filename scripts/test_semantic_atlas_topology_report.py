@@ -109,9 +109,14 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # R114 changes only reviewed corner ownership. It retains the same
         # family/pair denominator while moving seven pair rows among topology
         # coverage buckets.
-        self.assertEqual(1206, report["totalPairCount"])
+        # R115 adds two honest transition-only identities where the reviewed
+        # cross-atlas family was absent locally (bz2g/Zone2 Ground / Dirt and
+        # Zone7 Sand / Dark pink), then applies 158 exact-owner corrections.
+        # The two exact bz2g/Zone2 bindings each add 12 relationships and the
+        # Zone7 family adds four, for 28 additional pair rows.
+        self.assertEqual(1234, report["totalPairCount"])
         self.assertEqual(
-            {"0": 639, "1": 81, "2": 73, "3": 190, "4": 223},
+            {"0": 662, "1": 84, "2": 80, "3": 186, "4": 222},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

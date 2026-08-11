@@ -3047,7 +3047,7 @@ class ReviewDocumentTests(unittest.TestCase):
                 (187, 3): "Stone / Black", (188, 0): "Stone / Greenish",
             }),
             (("bz2g", "zone2"), {
-                (448, 1): "Ground / Brown", (448, 2): "Ground / Brown",
+                (448, 1): "Ground / Brown", (448, 2): "Ground / Dirt",
                 (448, 3): "Ground / Brown", (502, 0): "Ground / Brown",
             }),
         ]
@@ -3427,13 +3427,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r114_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the safe reviewed R114 catalog verbatim."""
+    def test_r115_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the safe reviewed R115 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "1e45b37801fc3144770802909ef6f1e6480764222482917785fb282239178ef2",
+            "606f738fb948137c4aa9101fbc9d326a2523c89edeca31d9f9873a06eebe5df2",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -4057,6 +4057,64 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
                 (row["variant"], row["pixelSha256"])
                 for row in presets[right.casefold()]["bindings"]}
             self.assertEqual(left_bindings, right_bindings)
+
+    def test_r115_applies_supported_changes_and_holds_audit_conflicts(self) -> None:
+        """R115 applies 133 logical changes and preserves five conflicts."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r115_consolidated_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        self.assertEqual(138, decisions["logicalChangedCorners"])
+        self.assertEqual(133, decisions["appliedLogicalChangedCorners"])
+        self.assertEqual(158, decisions["propagatedCornerCorrections"])
+        self.assertEqual(5, len(decisions["heldConflicts"]))
+
+        applied = 0
+        for namespace, slots in decisions["cornerCorrections"].items():
+            preset = presets[namespace.casefold()]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            for slot_text, corners in slots.items():
+                slot = int(slot_text)
+                for corner, expected in corners.items():
+                    index = {"NW": 0, "NE": 1, "SE": 2, "SW": 3}[corner]
+                    self.assertEqual(expected, names[payload[slot * 4 + index]],
+                                     f"{namespace} slot {slot} {corner}")
+                    applied += 1
+        self.assertEqual(158, applied)
+
+        def mapping(namespace: str, slot: int) -> list[str]:
+            preset = presets[namespace.casefold()]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            return [names[value] for value in payload[slot * 4:slot * 4 + 4]]
+
+        # Held conflicts retain the R114 assignments.
+        for namespace in ("bz2g", "Zone2"):
+            self.assertEqual("Ground / Brown", mapping(namespace, 448)[1])
+            self.assertEqual("Ground / Dirt", mapping(namespace, 448)[2])
+            self.assertEqual("Ground / Brown", mapping(namespace, 448)[3])
+        for namespace in ("bz4g", "Zone4"):
+            self.assertEqual("Ground / Common", mapping(namespace, 351)[0])
+        self.assertEqual("Ground / Gravel", mapping("bz5g", 465)[3])
+        self.assertEqual("Ground / Gravel", mapping("zone9", 388)[0])
+
+        # Audit-supported cross-atlas families remain transition-only here.
+        for namespace in ("bz2g", "Zone2"):
+            family = next(row for row in presets[namespace.casefold()]["families"]
+                          if row["name"] == "Ground / Dirt")
+            self.assertFalse(family["paintSelectable"])
+        pink = next(row for row in presets["zone7"]["families"]
+                    if row["name"] == "Sand / Dark pink")
+        self.assertFalse(pink["paintSelectable"])
 
 
 if __name__ == "__main__":
