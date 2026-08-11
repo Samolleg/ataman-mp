@@ -168,9 +168,9 @@ void CBodyPartEditForm::reset()
     ui->tablePart->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tablePart->setSelectionMode(QAbstractItemView::ExtendedSelection);
     QStringList header;
-    header.append("Part");
-    header.append("Enabled");
-    header.append("Source");
+    header.append(tr("Part"));
+    header.append(tr("Enabled"));
+    header.append(tr("Source"));
     ui->tablePart->setHorizontalHeaderLabels(header);
     ui->tablePart->horizontalHeader()->setVisible(true);
     QHeaderView* headerView = ui->tablePart->horizontalHeader();

@@ -341,7 +341,7 @@ CORRECTIONS.update({
     "Load an MPR with canonical terrain data first.":
         "Сначала загрузите MPR с полными данными рельефа.",
     "The canonical terrain dimensions cannot produce a runtime AI graph.":
-        "Размеры рельефа не позволяют создать игровой граф AI.",
+        "Размеры рельефа не позволяют создать игровой граф ИИ.",
     "Canonical terrain ownership is unavailable.": "Полные данные рельефа недоступны.",
     "Canonical terrain ownership is unavailable for this map. No destination was changed.":
         "Для этой карты недоступны полные данные рельефа. Файлы не изменены.",
@@ -358,6 +358,100 @@ CORRECTIONS.update({
         "Авто: кисть подбирает подходящие плитки и швы; если перехода нет, остаётся резкая граница. Вручную: рисуется выбранная плитка без смешивания. ПКМ берёт образец с карты. Alt+колесо — размер кисти; Shift+колесо — материал или поворот; обычное колесо — масштаб камеры. Режим поверхности добавляет или удаляет покрытие. Материал рельефа выбирает текстуру атласа, а материал поверхности задаёт цвет, прозрачность, свет, волны и искажение.",
     "World-space height represented by raw height 65535. Raw 0 is world height 0; raw 32768 is approximately half of maxZ. Increase maxZ for taller elevation differences without changing the 0-65535 raw precision.":
         "Высота мира при исходном значении 65535. При 0 высота равна 0, при 32768 — примерно половине maxZ. Увеличьте maxZ для более высокого рельефа без потери точности диапазона 0–65535.",
+})
+
+# Follow-up review for compact controls and Russian-player terminology. Keep
+# format/resource identifiers intact, but do not leave ordinary UI vocabulary
+# in English or use infinitives where the control is a filter field.
+CORRECTIONS.update({
+    "English": "Английский",
+    "Filter parts...": "Фильтр частей...",
+    "Filter zones, types, islands, resources, comments...":
+        "Фильтр: зоны, типы, острова, ресурсы, комментарии...",
+    "Filter maps...": "Фильтр карт...",
+    "Filter messages...": "Фильтр сообщений...",
+    "Filter kind, match method, NID, name, prototype, or section path...":
+        "Фильтр: тип, способ, NID, имя, прототип или раздел...",
+    "Filter objects (name, ID, model, texture, database...)":
+        "Фильтр объектов (имя, ID, модель, текстура, база...)",
+    "Edit Endurance Collection": "Изменить коллекцию",
+    "No map.txt mapping": "Нет привязки к map.txt",
+    "map.txt mapping:": "Привязка к map.txt:",
+    "Add MOB(s)...": "Добавить MOB...",
+    "Ordered MOB files (main first, then Auto/supplemental):":
+        "Файлы MOB по порядку (сначала основной, затем Auto и дополнительные):",
+    "Evil Islands MPR (*.mpr)": "MPR «Проклятых земель» (*.mpr)",
+    "Evil Islands MOB (*.mob)": "MOB «Проклятых земель» (*.mob)",
+    "Evil Islands maps (*.mpr *.mob);;MPR (*.mpr);;MOB (*.mob)":
+        "Карты «Проклятых земель» (*.mpr *.mob);;MPR (*.mpr);;MOB (*.mob)",
+    "Evil Islands resource archive (*.res)":
+        "Архив ресурсов «Проклятых земель» (*.res)",
+    "Import hand-edited map.txt": "Импорт map.txt после ручной правки",
+    "Endurance can verify basic map.txt structure and preserve the imported bytes, but it cannot prove that profile-specific tags, resource names, travel links, or script references are correct for the game. Import replaces the current in-memory catalog; no RES file is changed until you use Save Verified RES As.\n\nContinue?":
+        "Endurance проверит основную структуру map.txt и сохранит импортированные байты, но не сможет проверить имена ресурсов, переходы и ссылки в скриптах. Импорт заменит каталог в памяти; RES изменится только после команды «Сохранить проверенный RES как».\n\nПродолжить?",
+    "No .collection files were found. Create one from File > Collections.":
+        "Файлы .collection не найдены. Создайте коллекцию: Файл → Коллекции.",
+    "No passable spawn was found near that point. Pick another location.":
+        "Рядом нет проходимой точки появления. Выберите другое место.",
+    "Select a valid map.txt entrance before choosing a custom spawn.":
+        "Сначала выберите допустимую точку входа из map.txt.",
+    "Delete collection '%1'?\n\n%2\n\nMap files referenced by it will not be deleted.":
+        "Удалить коллекцию «%1»?\n\n%2\n\nФайлы карт не будут удалены.",
+    "map.txt primary": "Основной в map.txt",
+    "Hide map.txt entrance areas and labels in the viewport.":
+        "Скрыть области входа из map.txt и их метки в окне карты.",
+    "Show map.txt entrance areas and labels in the viewport.":
+        "Показать области входа из map.txt и их метки в окне карты.",
+    "Parameter": "Параметр",
+    "Value": "Значение",
+    "Part": "Часть",
+    "Enabled": "Включена",
+    "Source": "Источник",
+    "Visible": "Видимость",
+    "Severity": "Уровень",
+    "Source path": "Источник",
+    "Kind": "Тип",
+    "Match": "Сопоставление",
+    "Confidence": "Надёжность",
+    "Baseline": "Исходный",
+    "Candidate": "Новый",
+    "Baseline SHA-256": "SHA-256 исходного",
+    "Candidate SHA-256": "SHA-256 нового",
+    "AI navigation graph": "Навигация ИИ",
+    "Minimize AI navigation graph": "Свернуть навигацию ИИ",
+    "Expand AI navigation graph": "Развернуть навигацию ИИ",
+    "No graph source loaded": "Граф не загружен",
+    "Regenerate preview": "Обновить граф",
+    "Diff loaded / regenerated": "Сравнить графы",
+    "Graph: Loaded": "Граф: загруженный",
+    "Graph: Generated": "Граф: созданный",
+    "Graph: Embedded": "Граф: встроенный",
+    "Graph: External": "Граф: внешний",
+    "Bake / Export...": "Сохранить / экспорт...",
+    "Bake / Export AI Graph...": "Сохранить / экспорт графа ИИ...",
+    "Bake / Export AI Graph": "Сохранение графа ИИ",
+    "AI graph difference": "Сравнение графов ИИ",
+    "Loaded": "Загруженный",
+    "Regenerated": "Созданный",
+    "Layer": "Слой",
+    "Total": "Итого",
+    "Missing links": "Нет связей",
+    "Extra links": "Лишние связи",
+    "Changed weights": "Изменённые веса",
+    "Changed positions": "Изменённые позиции",
+    "Counts are directional link records. Component labels are intentionally ignored.":
+        "Учитываются направленные связи; метки компонентов игнорируются.",
+    "Flying / levitating": "Полёт / левитация",
+    "Narrow / prone": "Узкий / лёжа",
+    "Narrow / crawling": "Узкий / ползком",
+    "Narrow / human-sized": "Узкий / в рост человека",
+    "Narrow / tall": "Узкий / высокий",
+    "Wide / low": "Широкий / низкий",
+    "Wide / tall": "Широкий / высокий",
+    "Very large": "Очень крупный",
+    "Unknown": "Неизвестно",
+    "Selected graph source: %1\n\nBake into Primary MOB uses exactly this selected graph. Bake and Switch MOB to External .grp save the primary MOB immediately, create a backup, establish a new clean baseline, and cannot be reversed through Edit > Undo.":
+        "Источник графа: %1\n\n«Встроить в основной MOB» использует именно этот граф. Встраивание и переключение на внешний .grp сразу сохраняют основной MOB, создают резервную копию и не отменяются через «Правка → Отменить».",
 })
 
 SHORTCUT_RE = re.compile(
@@ -464,6 +558,14 @@ def main():
             text = text.replace("Gold указывает", "Золотым выделена")
             text = text.replace("Золото указывает", "Золотым выделена")
             text = text.replace("Золото обозначает", "Золотым выделена")
+            text = re.sub(r"\bAI\b", "ИИ", text)
+            text = text.replace("English (английский)", "Английский")
+            text = text.replace("Островов Зла", "Проклятых земель")
+            text = text.replace("Evil Islands", "«Проклятые земли»")
+            text = text.replace("Map.txt", "map.txt")
+            text = text.replace("Map файлы", "Файлы карт")
+            text = text.replace("вьюпорте", "окне карты")
+            text = text.replace("Вьюпорте", "Окне карты")
             text = re.sub(r"\bмоб(?:а|у|ом|е|ы|ов|ами|ах)?\b", "MOB",
                           text, flags=re.IGNORECASE)
             if "graph" in source.lower():

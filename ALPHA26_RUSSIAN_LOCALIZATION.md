@@ -12,6 +12,10 @@
   literal machine translations. Previously missed script-window titles, setup
   summaries, comparison values, undo-history labels, diplomacy help, and map
   catalog notices are now localized.
+- Replaced infinitive search placeholders with compact `Фильтр ...` labels.
+  Added translation lookups for property, body-part, and unit-stat table
+  columns. AI graph controls, layer names, source choices, comparison columns,
+  and persistence notices now use concise Russian UI terminology.
 - Kept diagnostic logs, command-line/headless output, serialized values,
   resource and object names, identifiers, file formats, and scripts in their
   original language.

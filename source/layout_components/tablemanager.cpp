@@ -532,8 +532,8 @@ void CTableManager::reset()
     m_pTable->setColumnCount(2);
     m_pTable->setRowCount(0);
     QStringList header;
-    header.append("Parameter");
-    header.append("Value");
+    header.append(tr("Parameter"));
+    header.append(tr("Value"));
     m_pTable->setHorizontalHeaderLabels(header);
     m_pTable->horizontalHeader()->setVisible(true);
     m_pTable->verticalHeader()->setSectionResizeMode(QHeaderView::Interactive);

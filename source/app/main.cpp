@@ -1927,19 +1927,30 @@ int runHeadlessCommand(QApplication& app)
                         uiScale->setValue(150);
                     if(renderTerrainShadowsCheck)
                         renderTerrainShadowsCheck->setChecked(false);
-                    QTimer::singleShot(0, [&languageRestartPromptShown]()
+                    QTimer restartPromptDismissTimer;
+                    QObject::connect(&restartPromptDismissTimer, &QTimer::timeout,
+                        [&languageRestartPromptShown]()
                     {
                         for(QWidget* widget : QApplication::topLevelWidgets())
                         {
                             QMessageBox* prompt = qobject_cast<QMessageBox*>(widget);
-                            if(prompt && prompt->windowTitle() == "Restart required")
+                            if(!prompt)
+                                continue;
+                            const QString title = QCoreApplication::translate(
+                                "CSettings", "Restart required");
+                            const QString body = QCoreApplication::translate(
+                                "CSettings",
+                                "Restart EI Mapper to apply the new interface language.");
+                            if(prompt->windowTitle() == title && prompt->text() == body)
                             {
                                 languageRestartPromptShown = true;
-                                prompt->accept();
                             }
+                            prompt->accept();
                         }
                     });
+                    restartPromptDismissTimer.start(10);
                     QMetaObject::invokeMethod(&settingsWindow, "on_buttonApply_clicked", Qt::DirectConnection);
+                    restartPromptDismissTimer.stop();
                     settingsApplyKeepsOpen = settingsWindow.isVisible();
                     terrainShadowToggleApplies = renderTerrainShadows
                         && !renderTerrainShadows->value();

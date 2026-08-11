@@ -4240,7 +4240,12 @@ void MainWindow::persistAiGraph()
     const QString sharedWarning = aiGraphSharedMobWarning(
         primaryMob->filePath().fileName(), mapOwners);
 
-    QString detail = aiGraphPersistenceActionNotice(graphSource) + tr(
+    QString detail = tr(
+        "Selected graph source: %1\n\n"
+        "Bake into Primary MOB uses exactly this selected graph. "
+        "Bake and Switch MOB to External .grp save the primary MOB immediately, "
+        "create a backup, establish a new clean baseline, and cannot be reversed "
+        "through Edit > Undo.").arg(graphSource) + tr(
         "\n\nActive MPR: %1\n"
         "Runtime external graph: %2\n"
         "Primary MOB: %3\n\n"

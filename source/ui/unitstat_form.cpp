@@ -40,8 +40,8 @@ void CUnitStatForm::reset()
     ui->tableUnitStat->setColumnCount(2);
     ui->tableUnitStat->setRowCount(0);
     QStringList header;
-    header.append("Parameter");
-    header.append("Value");
+    header.append(tr("Parameter"));
+    header.append(tr("Value"));
     ui->tableUnitStat->setHorizontalHeaderLabels(header);
     ui->tableUnitStat->horizontalHeader()->setVisible(true);
     ui->tableUnitStat->verticalHeader()->hide();

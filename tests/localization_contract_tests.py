@@ -35,6 +35,9 @@ def main():
     setup_dialog = (ROOT / "source/ui/resource_setup_dialog.cpp").read_text(encoding="utf-8")
     diplomacy = (ROOT / "source/core/trap_diplomacy.cpp").read_text(encoding="utf-8")
     maps_browser = (ROOT / "source/ui/maps_browser.cpp").read_text(encoding="utf-8")
+    body_parts = (ROOT / "source/ui/bodypartedit_form.cpp").read_text(encoding="utf-8")
+    unit_stats = (ROOT / "source/ui/unitstat_form.cpp").read_text(encoding="utf-8")
+    view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
     build = (ROOT / "scripts/build_release.ps1").read_text(encoding="utf-8")
     catalog_path = ROOT / "translations/ei_mapper_ru.ts"
 
@@ -72,6 +75,13 @@ def main():
             "diplomacy display text must use translation lookup")
     require("localizedMapCatalogMessages(result.messages)" in maps_browser,
             "map catalog diagnostics must be translated at presentation")
+    require('header.append("Part")' not in body_parts and
+            'header.append("Parameter")' not in unit_stats and
+            'header.append("Parameter")' not in properties,
+            "object/property table column titles must use translation lookup")
+    require("localizedAiGraphLayerLabel" in view and
+            "<th>Missing links</th>" not in view,
+            "AI graph layer names and comparison columns must be translated")
 
     visible_literal_patterns = (
         re.compile(r"set(?:Text|ToolTip|StatusTip|WindowTitle|PlaceholderText)\(\s*\"([^\"]*)\""),
@@ -138,12 +148,16 @@ def main():
         "Primary MOB", "Bake or Switch", "Stop Test",
         "зафиксир", "канонич", "транзакц", "мутац",
         "поставщик услуг", "промежуточн",
+        "Фильтровать", "Части фильтра", "English", "Evil Islands",
+        "Островов Зла", "Map файл", "вьюпорт",
     }
     combined_russian = "\n".join(translations.values())
     combined_russian_folded = combined_russian.casefold()
     for phrase in forbidden_machine_phrases:
         require(phrase.casefold() not in combined_russian_folded,
                 f"machine-literal Russian wording remains: {phrase!r}")
+    require(not re.search(r"\bAI\b", combined_russian),
+            "English AI abbreviation remains in Russian UI text")
     require(not re.search(r"\([ыяи]\)", combined_russian),
             "slash-style machine plural remains in Russian UI text")
 
@@ -156,9 +170,12 @@ def main():
         "Object Properties": "Свойства объекта",
         "MOB Family Validation": "Проверка семейства MOB",
         "Initializing editor...": "Инициализация редактора...",
-        "Diff loaded / regenerated": "Сравнение загружено / обновлено",
+        "Diff loaded / regenerated": "Сравнить графы",
         "Perspective MOB Diff - Details": "Сравнение MOB — подробности",
-        "Regenerate preview": "Обновить предпросмотр",
+        "Regenerate preview": "Обновить граф",
+        "Filter parts...": "Фильтр частей...",
+        "Filter maps...": "Фильтр карт...",
+        "English": "Английский",
     }
     for source, translated in expected.items():
         require(translations.get(source) == translated,

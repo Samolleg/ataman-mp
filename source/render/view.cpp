@@ -94,6 +94,36 @@
 class CLogic;
 
 namespace {
+
+QString localizedAiGraphLayerLabel(int layer)
+{
+    switch(layer)
+    {
+        case 0: return QCoreApplication::translate("CView", "Flying / levitating");
+        case 1: return QCoreApplication::translate("CView", "Narrow / prone");
+        case 2: return QCoreApplication::translate("CView", "Narrow / crawling");
+        case 3: return QCoreApplication::translate("CView", "Narrow / human-sized");
+        case 4: return QCoreApplication::translate("CView", "Narrow / tall");
+        case 5: return QCoreApplication::translate("CView", "Wide / low");
+        case 6: return QCoreApplication::translate("CView", "Wide / tall");
+        case 7: return QCoreApplication::translate("CView", "Very large");
+        default: return QCoreApplication::translate("CView", "Unknown");
+    }
+}
+
+QString localizedAiGraphPreviewSelectionLabel(bool usesLoadedSource,
+                                               const QString& loadedSourceLabel)
+{
+    const QString source = aiGraphPreviewSelectionLabel(usesLoadedSource,
+                                                         loadedSourceLabel);
+    if(source == QStringLiteral("Preview graph: Generated"))
+        return QCoreApplication::translate("CView", "Graph: Generated");
+    if(source == QStringLiteral("Preview graph: Embedded"))
+        return QCoreApplication::translate("CView", "Graph: Embedded");
+    if(source == QStringLiteral("Preview graph: External"))
+        return QCoreApplication::translate("CView", "Graph: External");
+    return QCoreApplication::translate("CView", "Graph: Loaded");
+}
 class CCanvasResizePreview final : public QGraphicsView
 {
 public:
@@ -1684,7 +1714,7 @@ void CView::initAiGraphPreviewWidget()
         "Compare loaded and regenerated connectivity, link weights, and node positions without changing either graph."));
     m_aiGraphSourceSelectorButton = new QToolButton(m_aiGraphPreviewBody);
     m_aiGraphSourceSelectorButton->setCheckable(true);
-    m_aiGraphSourceSelectorButton->setText(tr("Preview graph: Loaded"));
+    m_aiGraphSourceSelectorButton->setText(tr("Graph: Loaded"));
     m_aiGraphSourceSelectorButton->setToolTip(tr(
         "Switch between the graph loaded from the map and the generated graph. "
         "Test Current Map and Hot Reload stage the graph named on this button."));
@@ -1755,15 +1785,16 @@ void CView::initAiGraphPreviewWidget()
                 "<tr><td>%1 - %2</td><td align='right'>%3</td>"
                 "<td align='right'>%4</td><td align='right'>%5</td>"
                 "<td align='right'>%6</td></tr>")
-                .arg(layer).arg(CAiGraphDocument::layerLabel(layer).toHtmlEscaped())
+                .arg(layer).arg(localizedAiGraphLayerLabel(layer).toHtmlEscaped())
                 .arg(value.missingLinks).arg(value.extraLinks)
                 .arg(value.changedWeights).arg(value.changedPositions);
         }
         const SAiGraphLayerDifference total = difference.total();
         rows += QStringLiteral(
-            "<tr><th align='left'>Total</th><th align='right'>%1</th>"
-            "<th align='right'>%2</th><th align='right'>%3</th>"
-            "<th align='right'>%4</th></tr>")
+            "<tr><th align='left'>%1</th><th align='right'>%2</th>"
+            "<th align='right'>%3</th><th align='right'>%4</th>"
+            "<th align='right'>%5</th></tr>")
+            .arg(tr("Total").toHtmlEscaped())
             .arg(total.missingLinks).arg(total.extraLinks)
             .arg(total.changedWeights).arg(total.changedPositions);
         QMessageBox report(QMessageBox::Information, tr("AI graph difference"),
@@ -1772,13 +1803,21 @@ void CView::initAiGraphPreviewWidget()
                 : tr("The loaded and regenerated navigation planes differ."),
             QMessageBox::Ok, this);
         report.setInformativeText(QStringLiteral(
-            "<p><b>Loaded:</b> %1<br><b>Regenerated:</b> %2</p>"
-            "<table cellspacing='8'><tr><th align='left'>Layer</th>"
-            "<th>Missing links</th><th>Extra links</th>"
-            "<th>Changed weights</th><th>Changed positions</th></tr>%3</table>"
-            "<p>Counts are directional link records. Component labels are intentionally ignored.</p>")
-            .arg(m_aiGraphLoadedSource.toHtmlEscaped(),
-                 m_aiGraphRegeneratedSource.toHtmlEscaped(), rows));
+            "<p><b>%1:</b> %2<br><b>%3:</b> %4</p>"
+            "<table cellspacing='8'><tr><th align='left'>%5</th>"
+            "<th>%6</th><th>%7</th><th>%8</th><th>%9</th></tr>%10</table>"
+            "<p>%11</p>")
+            .arg(tr("Loaded").toHtmlEscaped())
+            .arg(m_aiGraphLoadedSource.toHtmlEscaped())
+            .arg(tr("Regenerated").toHtmlEscaped())
+            .arg(m_aiGraphRegeneratedSource.toHtmlEscaped())
+            .arg(tr("Layer").toHtmlEscaped())
+            .arg(tr("Missing links").toHtmlEscaped())
+            .arg(tr("Extra links").toHtmlEscaped())
+            .arg(tr("Changed weights").toHtmlEscaped())
+            .arg(tr("Changed positions").toHtmlEscaped())
+            .arg(rows)
+            .arg(tr("Counts are directional link records. Component labels are intentionally ignored.").toHtmlEscaped()));
         report.setTextFormat(Qt::RichText);
         report.setTextInteractionFlags(Qt::TextSelectableByMouse);
         report.exec();
@@ -1843,7 +1882,7 @@ void CView::syncAiGraphPreviewWidget()
     const QColor profileColor = QColor::fromRgbF(color.x(), color.y(), color.z());
     m_aiGraphLayerLabel->setText(tr("Layer %1 - <b><span style=\"color:%2\">%3</span></b> (%4 m)")
         .arg(layer).arg(profileColor.name())
-        .arg(CAiGraphDocument::layerLabel(layer).toHtmlEscaped())
+        .arg(localizedAiGraphLayerLabel(layer).toHtmlEscaped())
         .arg(CAiGraphDocument::canonicalHeight(layer), 0, 'f', 1));
     const bool available = m_aiGraphDocument.isValid();
     m_aiGraphLayerSlider->setEnabled(available);
@@ -1869,8 +1908,8 @@ void CView::syncAiGraphPreviewWidget()
         m_aiGraphSourceSelectorButton->setChecked(
             !m_aiGraphPreviewUsesLoadedSource);
         m_aiGraphSourceSelectorButton->setText(
-            aiGraphPreviewSelectionLabel(m_aiGraphPreviewUsesLoadedSource,
-                                         m_aiGraphLoadedSource));
+            localizedAiGraphPreviewSelectionLabel(m_aiGraphPreviewUsesLoadedSource,
+                                                  m_aiGraphLoadedSource));
         m_aiGraphSourceSelectorButton->setEnabled(
             m_aiGraphLoadedDocument.isValid()
             && m_aiGraphRegeneratedDocument.isValid());
