@@ -121,7 +121,7 @@ def main():
         "EI Mapper", "RGB", "ICO", "Esc", "Ctrl+R", "Ctrl+Tab", "Ctrl+V",
         "Ctrl+Z", "Ctrl+Y", "Ctrl+X", "Ctrl+D", "Ctrl+H", "Ctrl+F5",
         "Ctrl+S", "Shift+Esc", "MPR:", "MOB", "MPR", "MOB %1", "MPR %1",
-        "MPR (*.mpr)", "NID %1 (%2): %3", "NID %1 — %2", "NID %1: %2",
+        "MPR (*.mpr)", "MOB (*.mob)", "NID %1 (%2): %3", "NID %1 — %2", "NID %1: %2",
     }
     technical_tokens = ("MOB", "MPR", "JMV", "NID")
     shortcut_re = re.compile(
@@ -154,7 +154,15 @@ def main():
         "Дифференциал", "Выносливость", "невыполнимое действие",
         "слот Логика", "предварительный просмотр заказа",
         "Сохранить отзыв PNG", "внешний вид к последнему патрулю",
-        "Test Current Map", "Apply Raw Source", "Companion MOB",
+        "Test Current Map", "Apply Raw Source", "Companion MOB", "Хюэ",
+        "ВИЭ", "Орфографическая", "среда выполнения", "среды выполнения",
+        "время выполнения", "времени выполнения", "видовой экран",
+        "Стол дипломатии", "дипломатического стола", "Кастинг целей",
+        "Заказать/выбрать", "Смотри %1", "грязных документов",
+        "поколения восстановления", "Сериализованная", "сериализованный",
+        "игровое владение", "затенён встроенным графом", "принадлежащий хешу",
+        "прокси-серверов столкновений", "Карта горячей перезагрузки",
+        "Рандомизировать", "неотменяемое изменение", "Неполная семья",
         "Primary MOB", "Bake or Switch", "Stop Test",
         "зафиксир", "канонич", "транзакц", "мутац",
         "поставщик услуг", "промежуточн",
@@ -171,7 +179,7 @@ def main():
     require(not re.search(r"\([ыяи]\)", combined_russian),
             "slash-style machine plural remains in Russian UI text")
 
-    require(message_count >= 2000,
+    require(message_count >= 2200,
             f"catalog coverage unexpectedly fell to {message_count} messages")
 
     expected = {
@@ -191,6 +199,19 @@ def main():
         "Simple shading": "Простой",
         "Full environment": "Полный",
         "Sculpt terrain": "Правка рельефа",
+        "Hue": "Оттенок",
+        "Destination RES": "Целевой RES",
+        "Children": "Дочерние точки",
+        "Cast targets": "Цели заклинания",
+        "Diplomacy table": "Таблица дипломатии",
+        "Vertical synchronization (restart required)":
+            "Вертикальная синхронизация (требуется перезапуск)",
+        "Play from Here": "Играть отсюда",
+        "Export Runtime .grp": "Экспортировать игровой .grp",
+        "\n\nIt is currently shadowed by the primary MOB's embedded graph.":
+            "\n\nСейчас игра использует встроенный граф основного MOB вместо этого файла.",
+        "Orthographic game orientation: world +X is right and world +Y is down":
+            "Ортографическая ориентация: +X вправо, +Y вниз",
     }
     for source, translated in expected.items():
         require(translations.get(source) == translated,
@@ -211,7 +232,9 @@ def main():
 
     require("Language" in settings and "restart" in settings.lower(),
             "settings must explain the language restart behavior")
-    print(json.dumps({"messages": len(translations), "status": "PASS"}))
+    print(json.dumps({"messages": message_count,
+                      "unique_sources": len(translations),
+                      "status": "PASS"}))
 
 
 if __name__ == "__main__":

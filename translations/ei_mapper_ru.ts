@@ -5,7 +5,7 @@
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="369" />
             <source>Patrol route — Logic %1 — %2 patrols — %3 looks</source>
-            <translation>Маршрут патрулирования — Логика %1 — Патрули %2 — %3 выглядит</translation>
+            <translation>Маршрут — логика %1 — патрульных точек: %2 — точек обзора: %3</translation>
         </message>
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="375" />
@@ -35,12 +35,12 @@
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="385" />
             <source>Children</source>
-            <translation>Дети</translation>
+            <translation>Дочерние точки</translation>
         </message>
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="385" />
             <source>Order / select</source>
-            <translation>Заказать/выбрать</translation>
+            <translation>Порядок / выбор</translation>
         </message>
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="400" />
@@ -66,7 +66,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="460" />
             <source>Look %1</source>
-            <translation>Смотри %1</translation>
+            <translation>Точка обзора %1</translation>
         </message>
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="502" />
@@ -96,7 +96,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="533" />
             <source>Select in outliner and viewport</source>
-            <translation>Выбрать в планировщике и в окне карты</translation>
+            <translation>Выбрать в иерархии и на карте</translation>
         </message>
     </context>
     <context>
@@ -139,22 +139,22 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/bodypartedit_form.cpp" line="146" />
             <source>Serialized</source>
-            <translation>сериализованный</translation>
+            <translation>Сохранено в MOB</translation>
         </message>
         <message>
             <location filename="../source/ui/bodypartedit_form.cpp" line="147" />
             <source>Serialized x%1</source>
-            <translation>Серийный номер x%1</translation>
+            <translation>Сохранено в MOB, повторов: %1</translation>
         </message>
         <message>
             <location filename="../source/ui/bodypartedit_form.cpp" line="148" />
             <source>Unknown serialized</source>
-            <translation>Неизвестный сериализованный</translation>
+            <translation>Неизвестное сохранённое значение</translation>
         </message>
         <message>
             <location filename="../source/ui/bodypartedit_form.cpp" line="149" />
             <source>Unknown serialized x%1</source>
-            <translation>Неизвестный номер x%1</translation>
+            <translation>Неизвестное сохранённое значение, повторов: %1</translation>
         </message>
         <message>
             <location filename="../source/ui/bodypartedit_form.cpp" line="151" />
@@ -293,7 +293,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="2016" />
             <source>Prototype is not present in the active profile database. The value is preserved.</source>
-            <translation>Прототип отсутствует в базе данных активного профиля. Ценность сохраняется.</translation>
+            <translation>Прототип отсутствует в базе данных активного профиля. Значение сохраняется.</translation>
         </message>
     </context>
     <context>
@@ -331,7 +331,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/createobjectform.cpp" line="40" />
             <source>World object</source>
-            <translation>Мировой объект</translation>
+            <translation>Объект мира</translation>
         </message>
         <message>
             <location filename="../source/ui/createobjectform.cpp" line="41" />
@@ -346,7 +346,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/createobjectform.cpp" line="43" />
             <source>Magic trap</source>
-            <translation>Волшебная ловушка</translation>
+            <translation>Магическая ловушка</translation>
         </message>
         <message>
             <location filename="../source/ui/createobjectform.cpp" line="44" />
@@ -389,7 +389,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="24" />
             <source>Raise/lower step</source>
-            <translation>Поднять/опустить ступеньку</translation>
+            <translation>Шаг подъёма/опускания</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="25" />
@@ -409,7 +409,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="31" />
             <source>Manual atlas tile mode (no blending)</source>
-            <translation>Ручной режим листов атласа (без смешивания)</translation>
+            <translation>Ручной выбор тайла атласа (без смешивания)</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="32" />
@@ -419,12 +419,12 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="34" />
             <source>Allow land-family tiles on overlays</source>
-            <translation>Разрешить размещение плиток семейства земель на наложениях</translation>
+            <translation>Разрешить тайлы суши на поверхностях</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="36" />
             <source>Show surface material slot numbers on tiles</source>
-            <translation>Отображать номера слотов для материалов поверхности на плитках</translation>
+            <translation>Показывать номера материалов поверхности на тайлах</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="39" />
@@ -449,12 +449,12 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="43" />
             <source>Terrain materials are loaded from the MPR namespace template.</source>
-            <translation>Материалы ландшафта загружаются из шаблона пространства имен MPR.</translation>
+            <translation>Материалы рельефа загружаются из шаблона ресурсов MPR.</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="48" />
             <source>Terrain edits are undoable. Changed MPR saves use staged validation, backup, and atomic replacement.</source>
-            <translation>Редактирование ландшафта невозможно отменить. Измененные сохранения MPR используют поэтапную проверку, резервное копирование и атомарную замену.</translation>
+            <translation>Правки рельефа можно отменить. Перед сохранением MPR проверяется, резервируется и заменяется целиком.</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="58" />
@@ -464,17 +464,17 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="59" />
             <source>Paint land tiles</source>
-            <translation>Покрасить плитку земли</translation>
+            <translation>Рисовать тайлы суши</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="60" />
             <source>Add / remove overlay surfaces</source>
-            <translation>Добавить/удалить наложенные поверхности</translation>
+            <translation>Добавлять / удалять поверхности</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="61" />
             <source>Paint existing overlays</source>
-            <translation>Покрасьте существующие наложения</translation>
+            <translation>Рисовать по существующим поверхностям</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="62" />
@@ -524,7 +524,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="127" />
             <source>Radius (vertices)</source>
-            <translation>Радиус (вершины)</translation>
+            <translation>Радиус (в вершинах)</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="128" />
@@ -539,7 +539,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="143" />
             <source>Automatic mode always covers the brush core, uses an exact or constrained nearest authored seam when available, and otherwise leaves a hard edge. Manual mode paints the selected existing atlas tile and rotation without blending. Size 1 paints one core tile. Right-click samples from the map. Alt+Wheel changes brush size. Shift+Wheel selects the automatic material or rotates the manual tile; Wheel keeps camera zoom. Overlay surface mode adds/removes coverage. Its Terrain material selects the atlas texture; its Surface material independently controls tint, opacity, illumination, waves, and texture warp. Overlay painting only changes the atlas texture on cells that already exist.</source>
-            <translation>Авто: кисть подбирает подходящие плитки и швы; если перехода нет, остаётся резкая граница. Вручную: рисуется выбранная плитка без смешивания. ПКМ берёт образец с карты. Alt+колесо — размер кисти; Shift+колесо — материал или поворот; обычное колесо — масштаб камеры. Режим поверхности добавляет или удаляет покрытие. Материал рельефа выбирает текстуру атласа, а материал поверхности задаёт цвет, прозрачность, свет, волны и искажение.</translation>
+            <translation>Авто: кисть подбирает подходящие тайлы и швы; если перехода нет, остаётся резкая граница. Вручную рисуется выбранный тайл без смешивания. ПКМ берёт образец с карты. Alt+колесо — размер кисти; Shift+колесо — материал или поворот; обычное колесо — масштаб камеры. Режим поверхности добавляет или удаляет покрытие. Материал рельефа выбирает текстуру атласа, а материал поверхности задаёт цвет, прозрачность, свечение, волны и искажение.</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="157" />
@@ -569,12 +569,12 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="165" />
             <source>Atlas texture material</source>
-            <translation>Текстурный материал Атласа</translation>
+            <translation>Материал текстуры атласа</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="166" />
             <source>Brush size (tiles)</source>
-            <translation>Размер кисти (плитки)</translation>
+            <translation>Размер кисти (в тайлах)</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="167" />
@@ -589,22 +589,22 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="180" />
             <source>Inspect atlas / choose tile...</source>
-            <translation>Осмотреть атлас/выбрать плитку...</translation>
+            <translation>Открыть атлас / выбрать тайл...</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="182" />
             <source>Convert / review semantic atlas...</source>
-            <translation>Преобразование/проверка семантического атласа...</translation>
+            <translation>Настроить материалы атласа...</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="183" />
             <source>Infer a namespace-scoped semantic profile, review every ambiguity, and explicitly approve it. This does not edit atlas images or MPR resources.</source>
-            <translation>Определите семантический профиль в области пространства имен, просмотрите все двусмысленности и явно утвердите его. При этом изображения атласа или ресурсы MPR не редактируются.</translation>
+            <translation>Определить назначение материалов для этого набора ресурсов атласа, проверить спорные места и подтвердить результат. Изображения атласа и MPR при этом не изменяются.</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="187" />
             <source>Export paint diagnostic...</source>
-            <translation>Экспортная диагностика краски...</translation>
+            <translation>Экспортировать диагностику рисования...</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="191" />
@@ -634,7 +634,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="436" />
             <source>%1 — %2; RGB %3/%4/%5, opacity %6%, light %7, wave %8, warp %9</source>
-            <translation>%1 — %2; RGB %3/%4/%5, непрозрачность %6%, светлый %7, волна %8, деформация %9</translation>
+            <translation>%1 — %2; RGB %3/%4/%5, непрозрачность %6%, свечение %7, волна %8, искажение %9</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="534" />
@@ -644,7 +644,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="535" />
             <source>Namespace template ready: %1 material(s) for this layer.</source>
-            <translation>Готовый шаблон пространства имен: материалы %1 для этого слоя.</translation>
+            <translation>Шаблон ресурсов готов: материалов для этого слоя — %1.</translation>
         </message>
     </context>
     <context>
@@ -657,17 +657,17 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="75" />
             <source>Open texts.res Copy...</source>
-            <translation>Открыть texts.res Копировать...</translation>
+            <translation>Открыть копию texts.res...</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="76" />
             <source>Import map.txt...</source>
-            <translation>Импортировать файл карты.txt...</translation>
+            <translation>Импортировать map.txt...</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="77" />
             <source>Export map.txt...</source>
-            <translation>Экспортировать файл карты.txt...</translation>
+            <translation>Экспортировать map.txt...</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="80" />
@@ -677,7 +677,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="87" />
             <source>Edits are staged into map.txt only. Unknown tags and all other RES members are preserved. Save creates a verified backup before replacing an existing destination.</source>
-            <translation>Изменения вносятся только в файл map.txt. Неизвестные теги и все остальные члены RES сохраняются. Сохранить создает проверенную резервную копию перед заменой существующего места назначения.</translation>
+            <translation>Изменения готовятся только для map.txt. Неизвестные теги и все остальные ресурсы RES сохраняются. Перед заменой существующего файла создаётся проверенная резервная копия.</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="101" />
@@ -712,7 +712,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="127" />
             <source>Allod / island ID</source>
-            <translation>Аллод/идентификатор острова</translation>
+            <translation>ID аллода / острова</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="128" />
@@ -732,7 +732,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="131" />
             <source>Resource names are archive namespaces, normally written without .mpr/.mob extensions. Values are never generated automatically.</source>
-            <translation>Имена ресурсов — это пространства имен архивов, обычно записываемые без расширений .mpr/.mob. Значения никогда не генерируются автоматически.</translation>
+            <translation>Имена ресурсов задаются так, как они записаны в архивах, обычно без расширений .mpr/.mob. Редактор не заполняет их автоматически.</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="136" />
@@ -762,12 +762,12 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="161" />
             <source>Map sectors X</source>
-            <translation>Карта секторов X</translation>
+            <translation>Секторов по X</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="162" />
             <source>Map sectors Y</source>
-            <translation>Карта секторов Y</translation>
+            <translation>Секторов по Y</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="163" />
@@ -797,17 +797,17 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="178" />
             <source>Destination</source>
-            <translation>Место назначения</translation>
+            <translation>Зона назначения</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="178" />
             <source>Dest exit</source>
-            <translation>Конечный выход</translation>
+            <translation>Выход назначения</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="179" />
             <source>Deploy X1</source>
-            <translation>Развертывание X1</translation>
+            <translation>Вход X1</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="179" />
@@ -830,12 +830,12 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="180" />
             <source>Remove X1</source>
-            <translation>Удалить X1</translation>
+            <translation>Выход X1</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="181" />
             <source>Pass time</source>
-            <translation>Провести время</translation>
+            <translation>Время перехода</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="181" />
@@ -845,7 +845,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="181" />
             <source>Deploy angle</source>
-            <translation>Угол развертывания</translation>
+            <translation>Направление при входе</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="185" />
@@ -875,7 +875,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="209" />
             <source>Apply Raw Source</source>
-            <translation>Применить исходный источник</translation>
+            <translation>Применить исходный текст</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="210" />
@@ -885,12 +885,12 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="215" />
             <source>Raw Source Span</source>
-            <translation>Диапазон исходных источников</translation>
+            <translation>Исходный текст зоны</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="222" />
             <source>Save Verified RES As...</source>
-            <translation>Сохранить проверенные источники энергии как...</translation>
+            <translation>Сохранить проверенный RES как...</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="224" />
@@ -905,7 +905,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="303" />
             <source>Open a copied or mod-profile texts.res</source>
-            <translation>Откройте скопированный или модифицированный профиль texts.res.</translation>
+            <translation>Открыть копию texts.res или архив из профиля мода</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="303" />
@@ -916,7 +916,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="331" />
             <source>Archive contains more than one case-insensitive map.txt member.</source>
-            <translation>Архив содержит более одного элемента файла map.txt без учета регистра.</translation>
+            <translation>В архиве найдено несколько ресурсов с именем map.txt, отличающихся только регистром.</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="339" />
@@ -931,7 +931,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="371" />
             <source>Zone '%1' was not found in the loaded map.txt.</source>
-            <translation>Зона «%1» не найдена в загруженном файле карты.txt.</translation>
+            <translation>Зона «%1» не найдена в загруженном map.txt.</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="425" />
@@ -946,7 +946,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="458" />
             <source>Unsupported source value; choose game, brief, or edge before verified RES save.</source>
-            <translation>Неподдерживаемое исходное значение; выберите игру, задание или преимущество перед подтверждением сохранения RES.</translation>
+            <translation>Недопустимое значение source: перед сохранением RES выберите game, brief или edge.</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="532" />
@@ -995,7 +995,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="654" />
             <source>New registration preview is created only after every required value is supplied. No weather, sky, camera, figure, cage, or LOD metadata will be invented.</source>
-            <translation>Новый предпросмотр регистрации создается только после указания всех необходимых значений. Никакие метаданные о погоде, небе, камере, фигуре, клетке или уровне детализации придуманы не будут.</translation>
+            <translation>Предпросмотр новой зоны появится после заполнения обязательных полей. Редактор не создаёт автоматически данные погоды, неба, камеры, figure, cage или LOD.</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="659" />
@@ -1010,7 +1010,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="681" />
             <source>Structured metadata was copied from %1. The new Zone ID is intentionally blank. Unknown tags, comments, and raw source ownership were not copied; review every resource and entrance before registering.</source>
-            <translation>Структурированные метаданные были скопированы из %1. Новый идентификатор зоны намеренно пуст. Неизвестные теги, комментарии и права собственности на исходный источник не копировались; просмотрите каждый ресурс и вход перед регистрацией.</translation>
+            <translation>Структурированные данные скопированы из %1. ID новой зоны намеренно оставлен пустым. Неизвестные теги, комментарии и исходный текст не копировались; перед регистрацией проверьте все ресурсы и входы.</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="687" />
@@ -1076,7 +1076,7 @@ Continue?</source>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="837" />
             <source>Import map.txt</source>
-            <translation>Импортировать карту.txt</translation>
+            <translation>Импортировать map.txt</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="853" />
@@ -1091,7 +1091,7 @@ Continue?</source>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="861" />
             <source>Imported %1 zones into memory; the RES archive is unchanged until verified save.</source>
-            <translation>Импортированы зоны %1 в память; Архив RES не изменяется до тех пор, пока не будет проверено сохранение.</translation>
+            <translation>Зон импортировано: %1. Архив RES не изменится до проверенного сохранения.</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="871" />
@@ -1106,7 +1106,7 @@ Continue?</source>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="883" />
             <source>Save verified texts.res</source>
-            <translation>Сохранить проверенные тексты.res</translation>
+            <translation>Сохранить проверенный texts.res</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="898" />
@@ -1121,12 +1121,12 @@ Continue?</source>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="925" />
             <source>Destination already matches; no write was needed.</source>
-            <translation>Пункт назначения уже соответствует; писать не нужно было.</translation>
+            <translation>Целевой файл уже совпадает; запись не потребовалась.</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="926" />
             <source>Verified RES saved. Backup: %1</source>
-            <translation>Подтвержденный RES сохранен. Резервная копия: %1</translation>
+            <translation>RES сохранён и проверен. Резервная копия: %1</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="927" />
@@ -1146,12 +1146,12 @@ Continue?</source>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="956" />
             <source>%1 is not reviewable: %2</source>
-            <translation>%1 не подлежит проверке: %2</translation>
+            <translation>Не удалось открыть %1 для проверки: %2</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="961" />
             <source>Existing minimap — %1</source>
-            <translation>Существующая миникарта — %1</translation>
+            <translation>Встроенная миникарта — %1</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="963" />
@@ -1162,8 +1162,8 @@ Authored mip levels: %5
 SHA-256: %6</source>
             <translation>Источник профиля: %1
 Формат: %2
-Размеры: %3 × %4
-Авторские уровни mip: %5
+Размер: %3 × %4
+Уровней детализации: %5
 SHA-256: %6</translation>
         </message>
         <message>
@@ -1174,7 +1174,7 @@ SHA-256: %6</translation>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="998" />
             <source>Minimap reference staged. Review it, then use Save As to publish the verified catalog update.</source>
-            <translation>Отсылка к мини-карте подготовлена. Просмотрите его, затем используйте «Сохранить как», чтобы опубликовать проверенное обновление каталога.</translation>
+            <translation>Ссылка на миникарту подготовлена. Проверьте её и выберите «Сохранить как», чтобы записать изменения каталога.</translation>
         </message>
     </context>
     <context>
@@ -1342,7 +1342,7 @@ Could not read collection metadata: %2</source>
             <location filename="../source/ui/message_log_panel.cpp" line="42" />
             <location filename="../source/ui/message_log_panel.cpp" line="115" />
             <source>Debug</source>
-            <translation>Отлаживать</translation>
+            <translation>Отладка</translation>
         </message>
         <message>
             <location filename="../source/ui/message_log_panel.cpp" line="48" />
@@ -1416,37 +1416,37 @@ Could not read collection metadata: %2</source>
 Output: %5
 Framing: %6
 Orientation: %7</source>
-            <translation>Обзор: %1 x %2 (сектора %3 x %4)
-Вывод: %5
-Кадр: %6
+            <translation>Просмотр: %1 × %2 (%3 × %4 секторов)
+Результат: %5
+Кадрирование: %6
 Ориентация: %7</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="262" />
             <source>Generated</source>
-            <translation>Сгенерировано</translation>
+            <translation>Созданная</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="269" />
             <location filename="../source/ui/minimap_export_dialog.cpp" line="561" />
             <source>Embedded - no embedded minimap found</source>
-            <translation>Встроенная — встроенная мини-карта не найдена</translation>
+            <translation>Встроенная — текстура не найдена</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="270" />
             <location filename="../source/ui/minimap_export_dialog.cpp" line="562" />
             <source>Embedded: %1</source>
-            <translation>Встроен: %1</translation>
+            <translation>Встроенная: %1</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="283" />
             <source>%1 x %1 game texture - mouse wheel zooms; drag to pan</source>
-            <translation>Игровая текстура %1 x %1 — масштабирование колесиком мыши; перетащите для панорамирования</translation>
+            <translation>Игровая текстура %1 × %1 — колесо меняет масштаб, перетаскивание сдвигает изображение</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="285" />
             <source>Fit</source>
-            <translation>Соответствовать</translation>
+            <translation>Вместить</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="287" />
@@ -1457,12 +1457,12 @@ Orientation: %7</source>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="289" />
             <location filename="../source/ui/minimap_export_dialog.cpp" line="327" />
             <source>Linked views</source>
-            <translation>Связанные представления</translation>
+            <translation>Связать виды</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="293" />
             <source>Keep generated and embedded minimaps at the same zoom and position</source>
-            <translation>Сохраняйте сгенерированные и встроенные мини-карты с одинаковым масштабом и положением.</translation>
+            <translation>Сохранять одинаковый масштаб и положение созданной и встроенной миникарт</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="295" />
@@ -1472,12 +1472,12 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="298" />
             <source>Regenerate</source>
-            <translation>Регенерировать</translation>
+            <translation>Обновить</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="328" />
             <source>Independent views</source>
-            <translation>Независимые взгляды</translation>
+            <translation>Раздельные виды</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="364" />
@@ -1502,13 +1502,13 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="372" />
             <source>Hue</source>
-            <translation>Хюэ</translation>
+            <translation>Оттенок</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="384" />
             <location filename="../source/ui/minimap_export_dialog.cpp" line="534" />
             <source>Apply &amp;&amp; Lock</source>
-            <translation>Применить блокировку &amp;&amp;</translation>
+            <translation>Применить и заблокировать</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="400" />
@@ -1528,7 +1528,7 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="410" />
             <source>Destination RES</source>
-            <translation>Направление ВИЭ</translation>
+            <translation>Целевой RES</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="414" />
@@ -1550,7 +1550,7 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="430" />
             <source>Save review PNG...</source>
-            <translation>Сохранить PNG...</translation>
+            <translation>Сохранить PNG для проверки...</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="431" />
@@ -1565,12 +1565,12 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="489" />
             <source>Regenerated using current object visibility.</source>
-            <translation>Восстановлено с использованием текущей видимости объекта.</translation>
+            <translation>Обновлено с учётом видимости объектов.</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="516" />
             <source>This graded minimap is applied and locked. Use Unlock in the viewport minimap to permit regeneration.</source>
-            <translation>Эта градуированная мини-карта будет применена и заблокирована. Используйте «Разблокировать» на мини-карте видового экрана, чтобы разрешить регенерацию.</translation>
+            <translation>Настройки изображения применены, миникарта заблокирована. Чтобы обновлять её, нажмите «Разблокировать» на панели миникарты.</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="533" />
@@ -1605,7 +1605,7 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="643" />
             <source>Save full-resolution minimap review</source>
-            <translation>Сохранить обзор мини-карты в полном разрешении</translation>
+            <translation>Сохранить полноразмерную миникарту для проверки</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="644" />
@@ -1615,7 +1615,7 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="647" />
             <source>Save minimap review</source>
-            <translation>Сохранить обзор миникарты</translation>
+            <translation>Сохранить миникарту для проверки</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="647" />
@@ -1635,17 +1635,17 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="681" />
             <source>Large RES export</source>
-            <translation>Крупный экспорт ВИЭ</translation>
+            <translation>Большой экспорт RES</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="681" />
             <source>%1 is %2 MiB. The verified rebuild needs temporary disk space and may take time. Continue?</source>
-            <translation>%1 — это %2 MiB. Для проверенной перестройки требуется временное дисковое пространство и это может занять некоторое время. Продолжать?</translation>
+            <translation>%1 занимает %2 МиБ. Для безопасной пересборки понадобится дополнительное место и время. Продолжить?</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="689" />
             <source>Inspecting destination RES</source>
-            <translation>Проверка назначения РЭС</translation>
+            <translation>Проверка целевого RES</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="690" />
@@ -1655,7 +1655,7 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="714" />
             <source>Could not inspect destination: %1</source>
-            <translation>Не удалось проверить пункт назначения: %1.</translation>
+            <translation>Не удалось проверить целевой RES: %1</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="720" />
@@ -1665,7 +1665,7 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="721" />
             <source>%1 already exists in %2. Replace that member after creating a verified backup?</source>
-            <translation>%1 уже существует в %2. Заменить этого участника после создания проверенной резервной копии?</translation>
+            <translation>%1 уже есть в %2. Создать резервную копию и заменить этот ресурс?</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="736" />
@@ -1675,7 +1675,7 @@ Orientation: %7</source>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="737" />
             <source>Backing up, rebuilding, and validating the destination RES...</source>
-            <translation>Резервное копирование, восстановление и проверка целевого RES...</translation>
+            <translation>Создание резервной копии, пересборка и проверка целевого RES...</translation>
         </message>
         <message>
             <location filename="../source/ui/minimap_export_dialog.cpp" line="742" />
@@ -1722,7 +1722,7 @@ Backup: %1</source>
             <source>Endurance could not account for the complete MOB structure. The file was not opened.
 
 %1</source>
-            <translation>Endurance не могла объяснить полную структуру MOB. Файл не открылся.
+            <translation>Endurance не удалось полностью разобрать структуру MOB. Файл не открыт.
 
 %1</translation>
         </message>
@@ -1756,11 +1756,11 @@ Fix the affected object before testing this map.</source>
 %1
 
 Do not edit or save this file until the backup location is writable.</source>
-            <translation>MOB был открыт, но его снимок для восстановления создать не удалось.
+            <translation>MOB открыт, но резервную копию для восстановления создать не удалось.
 
 %1
 
- Не редактируйте и не сохраняйте этот файл, пока расположение резервной копии не станет доступным для записи.</translation>
+Не редактируйте и не сохраняйте файл, пока папка резервных копий недоступна для записи.</translation>
         </message>
         <message>
             <location filename="../source/mob/mob.cpp" line="1055" />
@@ -1770,7 +1770,7 @@ Do not edit or save this file until the backup location is writable.</source>
         <message>
             <location filename="../source/mob/mob.cpp" line="1056" />
             <source>The MOB is structurally valid, but the current editor projection could not interpret it completely. No editable document was opened; details are in logs/workflow.log.</source>
-            <translation>MOB структурно действителен, но текущая проекция редактора не может интерпретировать его полностью. Ни один редактируемый документ не был открыт; подробности находятся в logs/workflow.log.</translation>
+            <translation>Структура MOB допустима, но редактор не смог полностью представить все данные. Документ не открыт для редактирования; подробности — в logs/workflow.log.</translation>
         </message>
     </context>
     <context>
@@ -1784,8 +1784,8 @@ Do not edit or save this file until the backup location is writable.</source>
             <location filename="../source/ui/mob_diff_dialog.cpp" line="81" />
             <source>Baseline: %1
 Candidate: %2</source>
-            <translation>Базовый уровень: %1
-Кандидат: %2</translation>
+            <translation>Исходный: %1
+Сравниваемый: %2</translation>
         </message>
         <message>
             <location filename="../source/ui/mob_diff_dialog.cpp" line="94" />
@@ -1841,7 +1841,7 @@ Candidate: %2</source>
         <message>
             <location filename="../source/ui/mob_diff_dialog.cpp" line="167" />
             <source>Select a script or document-section change to see its readable diff.</source>
-            <translation>Выберите изменение сценария или раздела документа, чтобы увидеть его читаемые различия.</translation>
+            <translation>Выберите изменение скрипта или раздела документа, чтобы увидеть различия.</translation>
         </message>
         <message>
             <location filename="../source/ui/mob_diff_dialog.cpp" line="172" />
@@ -1878,7 +1878,7 @@ Candidate: %2</source>
             <location filename="../source/ui/mob_diff_dialog.cpp" line="220" />
             <source>Could not write the report:
 %1</source>
-            <translation>Не удалось написать отчет:
+            <translation>Не удалось сохранить отчёт:
 %1</translation>
         </message>
     </context>
@@ -1892,7 +1892,7 @@ Candidate: %2</source>
         <message>
             <location filename="../source/mob/mob_parameters.ui" line="37" />
             <source>is Quest Mob?</source>
-            <translation>такое квест MOB?</translation>
+            <translation>Квестовый MOB</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.ui" line="56" />
@@ -1912,7 +1912,7 @@ Candidate: %2</source>
         <message>
             <location filename="../source/mob/mob_parameters.ui" line="162" />
             <source>Diplomacy table</source>
-            <translation>Стол дипломатии</translation>
+            <translation>Таблица дипломатии</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.ui" line="190" />
@@ -1942,7 +1942,7 @@ Candidate: %2</source>
         <message>
             <location filename="../source/mob/mob_parameters.ui" line="225" />
             <source>Ambient</source>
-            <translation>Окружающий</translation>
+            <translation>Фоновый свет</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.ui" line="250" />
@@ -1982,7 +1982,7 @@ Candidate: %2</source>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="43" />
             <source>Edit or initialize this MOB's 32-player diplomacy table. Magic-trap hostility is derived from this table at runtime; the trap's stored diplomacy value is not sufficient.</source>
-            <translation>Отредактируйте или инициализируйте таблицу дипломатии этого MOB на 32 игрока. Враждебность магической ловушки выводится из этой таблицы в игре; сохраненной дипломатической ценности ловушки недостаточно.</translation>
+            <translation>Изменить или создать таблицу дипломатии MOB для 32 групп. В игре цели магических ловушек определяются по этой таблице; сохранённого в ловушке значения недостаточно.</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="48" />
@@ -2027,17 +2027,17 @@ Unchecked: edit only the selected row-to-column relationship. Directional relati
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="109" />
             <source>Rows are the acting faction; columns are the faction being treated. Self-relations and one-way relations are supported, but validation warns so unusual values can be confirmed.</source>
-            <translation>Ряды — действующая фракция; столбцы — это рассматриваемая фракция. Поддерживаются внутренние и односторонние отношения, но проверка предупреждает, поэтому могут быть подтверждены необычные значения.</translation>
+            <translation>Строка — действующая группа, столбец — группа, к которой она относится. Допустимы отношения к себе и односторонние отношения; проверка лишь предупреждает о необычных значениях.</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="355" />
             <source>No diplomacy table</source>
-            <translation>Нет дипломатического стола</translation>
+            <translation>Таблица дипломатии отсутствует</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="355" />
             <source>This MOB has no diplomacy table. Use the arrow menu to copy the intended table from a loaded source MOB, or create a neutral table.</source>
-            <translation>У этого MOB нет стола дипломатии. Используйте меню со стрелками, чтобы скопировать нужную таблицу из загруженного исходного MOB или создать нейтральную таблицу.</translation>
+            <translation>В этом MOB нет таблицы дипломатии. Скопируйте нужную таблицу из загруженного исходного MOB через меню со стрелкой или создайте нейтральную.</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="390" />
@@ -2066,7 +2066,7 @@ It contains no hostile relations, so it does not make magic traps hostile. For a
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="426" />
             <source>No other loaded MOB has a complete diplomacy table. Load the primary/source MOB, then try again.</source>
-            <translation>Ни один другой загруженный MOB не имеет полной таблицы дипломатии. Загрузите основной/исходный MOB и повторите попытку.</translation>
+            <translation>Ни в одном другом загруженном MOB нет полной таблицы дипломатии. Загрузите основной или исходный MOB и повторите.</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="433" />
@@ -2201,7 +2201,7 @@ It contains no hostile relations, so it does not make magic traps hostile. For a
         <message>
             <location filename="../source/ui/randomize_form.ui" line="28" />
             <source>Param Type</source>
-            <translation>Тип параметра</translation>
+            <translation>Параметр</translation>
         </message>
         <message>
             <location filename="../source/ui/randomize_form.ui" line="49" />
@@ -2216,7 +2216,7 @@ It contains no hostile relations, so it does not make magic traps hostile. For a
         <message>
             <location filename="../source/ui/randomize_form.ui" line="99" />
             <source>Randomize</source>
-            <translation>Рандомизировать</translation>
+            <translation>Задать случайно</translation>
         </message>
         <message>
             <location filename="../source/ui/randomize_form.ui" line="119" />
@@ -2226,7 +2226,7 @@ It contains no hostile relations, so it does not make magic traps hostile. For a
         <message>
             <location filename="../source/ui/randomize_form.cpp" line="22" />
             <source>Randomize parameters</source>
-            <translation>Рандомизировать параметры</translation>
+            <translation>Случайные параметры</translation>
         </message>
         <message>
             <location filename="../source/ui/randomize_form.cpp" line="24" />
@@ -2330,7 +2330,7 @@ It contains no hostile relations, so it does not make magic traps hostile. For a
         <message>
             <location filename="../source/mob/range_dialog.cpp" line="88" />
             <source>Intersects range: %1 - %2</source>
-            <translation>Диапазон пересечений: %1 - %2</translation>
+            <translation>Пересекается с диапазоном %1–%2</translation>
         </message>
     </context>
     <context>
@@ -2439,7 +2439,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/resource_setup_dialog.cpp" line="191" />
             <source>The selected installation and preset are not valid yet.</source>
-            <translation>Выбранная установка и предустановка еще недействительны.</translation>
+            <translation>Выбранная папка игры не подходит для этого профиля.</translation>
         </message>
     </context>
     <context>
@@ -2470,12 +2470,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/select_window.ui" line="42" />
             <source>Param 1</source>
-            <translation>Парам 1</translation>
+            <translation>Параметр 1</translation>
         </message>
         <message>
             <location filename="../source/ui/select_window.ui" line="56" />
             <source>Param 2</source>
-            <translation>Парам 2</translation>
+            <translation>Параметр 2</translation>
         </message>
         <message>
             <location filename="../source/ui/select_window.ui" line="68" />
@@ -2485,12 +2485,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/select_window.ui" line="103" />
             <source>Add to select</source>
-            <translation>Добавить, чтобы выбрать</translation>
+            <translation>Добавить к выделению</translation>
         </message>
         <message>
             <location filename="../source/ui/select_window.ui" line="110" />
             <source>Select</source>
-            <translation>Выбирать</translation>
+            <translation>Выбрать</translation>
         </message>
         <message>
             <location filename="../source/ui/select_window.ui" line="117" />
@@ -2510,12 +2510,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/select_window.cpp" line="45" />
             <source>Start ID</source>
-            <translation>Стартовый идентификатор</translation>
+            <translation>Начальный ID</translation>
         </message>
         <message>
             <location filename="../source/ui/select_window.cpp" line="45" />
             <source>End ID</source>
-            <translation>Конечный идентификатор</translation>
+            <translation>Конечный ID</translation>
         </message>
         <message>
             <location filename="../source/ui/select_window.cpp" line="46" />
@@ -2540,12 +2540,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/select_window.cpp" line="51" />
             <source>Start group number</source>
-            <translation>Номер стартовой группы</translation>
+            <translation>Начальная группа</translation>
         </message>
         <message>
             <location filename="../source/ui/select_window.cpp" line="51" />
             <source>End group number</source>
-            <translation>Номер конечной группы</translation>
+            <translation>Конечная группа</translation>
         </message>
         <message>
             <location filename="../source/ui/select_window.cpp" line="55" />
@@ -2578,7 +2578,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="53" />
             <source>Controls detail written to the workflow log: 0 Off, 1 Fatal errors, 2 Warnings, 3 Information, 4 Debug. Use Information for normal testing and Debug when reproducing a problem.</source>
-            <translation>Подробности элементов управления записываются в журнал рабочего процесса: 0 Выкл., 1 Неустранимые ошибки, 2 Предупреждения, 3 Информация, 4 Отладка. Используйте информацию для обычного тестирования и отладки при воспроизведении проблемы.</translation>
+            <translation>Подробность журнала: 0 — выкл., 1 — критические ошибки, 2 — предупреждения, 3 — информация, 4 — отладка. Для обычной проверки выберите «Информация», для воспроизведения проблемы — «Отладка».</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="56" />
@@ -2588,13 +2588,13 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="63" />
             <source>0 Off; 1 Fatal errors; 2 Warnings; 3 Information; 4 Debug. Information is recommended for testing; Debug produces the most diagnostic detail.</source>
-            <translation>0 Выкл.; 1 Фатальные ошибки; 2 предупреждения; 3 Информация; 4 Отладка. Информация рекомендована к тестированию; Отладка выдает больше всего диагностических деталей.</translation>
+            <translation>0 — выкл.; 1 — критические ошибки; 2 — предупреждения; 3 — информация; 4 — отладка. Для обычной проверки рекомендуется «Информация», максимум сведений даёт «Отладка».</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="80" />
             <location filename="../source/app/settings.ui" line="90" />
             <source>Maximum number of editor commands retained for Undo and Redo, including selection changes. The default is 512. Applied after restarting the editor.</source>
-            <translation>Максимальное количество команд редактора сохраняется для «Отменить» и «Повторить», включая изменения выбора. По умолчанию — 512. Применяется после перезапуска редактора.</translation>
+            <translation>Максимальное число действий в истории отмены и повтора, включая изменение выделения. По умолчанию — 512. Применяется после перезапуска редактора.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="83" />
@@ -2609,7 +2609,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="102" />
             <source>Two-way diplomacy changes</source>
-            <translation>Изменения в двусторонней дипломатии</translation>
+            <translation>Изменять дипломатию в обе стороны</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="117" />
@@ -2625,12 +2625,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="176" />
             <source>Size of a newly added MOB object-ID range. The new range starts after the highest existing range and ends at start plus this value.</source>
-            <translation>Размер вновь добавленного диапазона идентификаторов объектов MOB. Новый диапазон начинается после самого высокого существующего диапазона и заканчивается в начале плюс это значение.</translation>
+            <translation>Размер нового диапазона ID объектов MOB. Он начинается после последнего существующего диапазона и заканчивается на значении «начало + размер».</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="179" />
             <source>New ID range size</source>
-            <translation>Новый размер диапазона идентификаторов</translation>
+            <translation>Размер нового диапазона ID</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="186" />
@@ -2651,7 +2651,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="233" />
             <source>Reserved for polling externally modified MPR files. This feature is currently disabled, so this value has no effect.</source>
-            <translation>Зарезервировано для опроса файлов MPR, модифицированных извне. Эта функция в настоящее время отключена, поэтому это значение не имеет никакого эффекта.</translation>
+            <translation>Зарезервировано для опроса файлов MPR, модифицированных извне. Эта функция сейчас отключена, поэтому это значение не имеет никакого эффекта.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="236" />
@@ -2661,7 +2661,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="246" />
             <source>Currently inactive. Intended polling interval in milliseconds for detecting MPR changes made by another program.</source>
-            <translation>В настоящее время неактивен. Предполагаемый интервал опроса в миллисекундах для обнаружения изменений MPR, внесенных другой программой.</translation>
+            <translation>Сейчас неактивен. Предполагаемый интервал опроса в миллисекундах для обнаружения изменений MPR, внесенных другой программой.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="275" />
@@ -2671,7 +2671,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="320" />
             <source>Shows unit patrol routes and other unit logic even when their owning unit is not selected.</source>
-            <translation>Показывает маршруты патрулирования отрядов и другую логику отрядов, даже если отряд-владелец не выбран.</translation>
+            <translation>Показывает маршруты патрулирования и другую логику существ, даже если соответствующее существо не выбрано.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="323" />
@@ -2706,7 +2706,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="353" />
             <source>Draw help radius in logic mode</source>
-            <translation>Нарисовать радиус помощи в логическом режиме</translation>
+            <translation>Показывать радиус помощи в режиме логики</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="360" />
@@ -2716,7 +2716,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="363" />
             <source>Frustum culling</source>
-            <translation>Отбраковка усеченного конуса</translation>
+            <translation>Не рисовать объекты за пределами камеры</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="373" />
@@ -2736,7 +2736,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="389" />
             <source>Vertical synchronization (restart required)</source>
-            <translation>Вертикальная синхронизация (требуется перезагрузка)</translation>
+            <translation>Вертикальная синхронизация (требуется перезапуск)</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="401" />
@@ -2746,7 +2746,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="408" />
             <source>Limits viewport updates per second. Zero is unlimited; VSync may still limit presentation.</source>
-            <translation>Ограничивает обновления области просмотра в секунду. Ноль неограничен; VSync все еще может ограничивать представление.</translation>
+            <translation>Ограничивает частоту обновления окна карты. 0 — без ограничений; VSync всё равно может ограничивать частоту кадров.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="417" />
@@ -2771,7 +2771,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="454" />
             <source>Scene point lights</source>
-            <translation>точечное освещение сцены</translation>
+            <translation>Точечные источники света</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="455" />
@@ -2786,7 +2786,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="462" />
             <source>Off</source>
-            <translation>Выключенный</translation>
+            <translation>Выкл.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="465" />
@@ -2806,7 +2806,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="483" />
             <source>Maximum caster distance in world units (1-1024). Raising it expands shadow-map reach; 1 is useful for verifying the cutoff.</source>
-            <translation>Максимальная дистанция заклинания в мировых единицах (1-1024). Подняв его, вы расширяете охват карты теней; 1 полезен для проверки отсечки.</translation>
+            <translation>Максимальная дальность объектов, отбрасывающих тень (1–1024). Большее значение увеличивает охват карт теней; 1 удобно для проверки границы.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="484" />
@@ -2821,7 +2821,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="493" />
             <source>Applies the game's heightfield-based hill and cliff self-shadowing to terrain. This is separate from object and point-light shadows, updates after Apply or Save/Close, and is unavailable on the ANGLE compatibility renderer.</source>
-            <translation>Применяет к местности самозатенение холмов и скал на основе поля высот. Это отделено от теней объектов и точечных источников света, обновляется после применения или сохранения/закрытия и недоступно в средстве визуализации совместимости ANGLE.</translation>
+            <translation>Добавляет рельефу игровое самозатенение холмов и обрывов по карте высот. Оно не связано с тенями объектов и точечных источников, обновляется после «Применить» или «Сохранить и закрыть» и недоступно в режиме совместимости ANGLE.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="499" />
@@ -3117,7 +3117,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="933" />
             <source>Open MOB script externally</source>
-            <translation>Открыть скрипт MOB извне</translation>
+            <translation>Открыть скрипт MOB во внешнем редакторе</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="938" />
@@ -3132,7 +3132,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="944" />
             <source>Shows or hides the Maps and Collections browser dock.</source>
-            <translation>Показывает или скрывает док-станцию ​​браузера «Карты и коллекции».</translation>
+            <translation>Показывает или скрывает панель «Карты и коллекции».</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="945" />
@@ -3172,7 +3172,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="968" />
             <source>Stages unique temporary map copies and launches the validated JMV runtime. This capability is experimental.</source>
-            <translation>Выполняет копирование уникальных временных карт и запускает проверенную среду выполнения JMV. Эта возможность является экспериментальной.</translation>
+            <translation>Создаёт уникальные временные копии карты и запускает их в проверенной версии JMV. Возможность экспериментальная.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="969" />
@@ -3237,7 +3237,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="1003" />
             <source>Adjust camera speed</source>
-            <translation>Отрегулируйте скорость камеры</translation>
+            <translation>Изменение скорости камеры</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="1008" />
@@ -3369,12 +3369,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="1167" />
             <source>Tile brush operations</source>
-            <translation>Операции с щеткой для плитки</translation>
+            <translation>Работа кистью тайлов</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="1174" />
             <source>Draw|Hide land</source>
-            <translation>Нарисовать|Спрятать землю</translation>
+            <translation>Показать / скрыть сушу</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="1181" />
@@ -3384,7 +3384,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="1188" />
             <source>Draw|Hide water</source>
-            <translation>Нарисовать|Спрятать воду</translation>
+            <translation>Показать / скрыть воду</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="1195" />
@@ -3405,7 +3405,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="1236" />
             <source>Legacy figure folders (advanced)</source>
-            <translation>Устаревшие папки с фигурками (дополнительно)</translation>
+            <translation>Дополнительные папки моделей (для совместимости)</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="1266" />
@@ -3440,7 +3440,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.ui" line="1301" />
             <source>Legacy texture folders (advanced)</source>
-            <translation>Устаревшие папки с текстурами (дополнительно)</translation>
+            <translation>Дополнительные папки текстур (для совместимости)</translation>
         </message>
         <message>
             <location filename="../source/app/settings.ui" line="1370" />
@@ -3515,7 +3515,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.cpp" line="98" />
             <source>Open last session on startup</source>
-            <translation>Открыть последний сеанс при запуске</translation>
+            <translation>Открывать последний сеанс при запуске</translation>
         </message>
         <message>
             <location filename="../source/app/settings.cpp" line="101" />
@@ -3525,7 +3525,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.cpp" line="105" />
             <source>Periodic recovery autosave</source>
-            <translation>Автосохранение периодического восстановления</translation>
+            <translation>Периодическое резервное автосохранение</translation>
         </message>
         <message>
             <location filename="../source/app/settings.cpp" line="108" />
@@ -3540,17 +3540,17 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.cpp" line="114" />
             <source>How often Endurance snapshots dirty documents. Identical document states are deduplicated.</source>
-            <translation>Как часто Endurance делает снимки грязных документов. Идентичные состояния документов дедуплицируются.</translation>
+            <translation>Как часто Endurance создаёт резервные копии изменённых документов. Одинаковые состояния повторно не сохраняются.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.cpp" line="122" />
             <source>Autosave Now</source>
-            <translation>Автосохранение сейчас</translation>
+            <translation>Создать резервные копии сейчас</translation>
         </message>
         <message>
             <location filename="../source/app/settings.cpp" line="123" />
             <source>Immediately create recovery generations for all dirty documents.</source>
-            <translation>Немедленно создайте поколения восстановления для всех грязных документов.</translation>
+            <translation>Немедленно создать резервные копии всех изменённых документов.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.cpp" line="124" />
@@ -3565,17 +3565,17 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/settings.cpp" line="131" />
             <source>Character cache limit (MiB)</source>
-            <translation>Ограничение кэша символов (МиБ)</translation>
+            <translation>Ограничение кэша персонажей (МиБ)</translation>
         </message>
         <message>
             <location filename="../source/app/settings.cpp" line="133" />
             <source>Maximum combined size of persistent character plans, decoded atlases, composites, and animations beside the editor. Oldest entries are removed first. The default is 4096 MiB; enter 0 for no limit.</source>
-            <translation>Максимальный совокупный размер сохраняемых планов персонажей, декодированных атласов, композиций и анимаций рядом с редактором. Сначала удаляются самые старые записи. По умолчанию — 4096 МБ; введите 0, чтобы не было ограничений.</translation>
+            <translation>Максимальный общий размер кэша моделей персонажей, распакованных атласов, готовых текстур и анимаций. Сначала удаляются самые старые записи. По умолчанию — 4096 МиБ; 0 снимает ограничение.</translation>
         </message>
         <message>
             <location filename="../source/app/settings.cpp" line="148" />
             <source>Select external script editor</source>
-            <translation>Выберите внешний редактор сценариев</translation>
+            <translation>Выбрать внешний редактор скриптов</translation>
         </message>
         <message>
             <location filename="../source/app/settings.cpp" line="149" />
@@ -3625,7 +3625,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/app/main.cpp" line="206" />
             <source>Endurance Edition</source>
-            <translation>Редакция Endurance</translation>
+            <translation>Издание Endurance</translation>
         </message>
         <message>
             <location filename="../source/app/main.cpp" line="213" />
@@ -3648,27 +3648,27 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="581" />
             <source>This object belongs to a locked MOB. Activate its owner to edit it.</source>
-            <translation>Этот объект принадлежит заблокированному MOBу. Активируйте его владельца, чтобы редактировать его.</translation>
+            <translation>Объект находится в неактивном MOB. Сделайте этот MOB активным, чтобы изменить объект.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="583" />
             <source>Logic 0 is the default setup and is always enabled. Its stored flag is preserved but not editable.</source>
-            <translation>Логический 0 является настройкой по умолчанию и всегда включен. Его сохраненный флаг сохраняется, но не доступен для редактирования.</translation>
+            <translation>Логика 0 используется по умолчанию и всегда включена. Сохранённый флаг остаётся в MOB, но не редактируется.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="691" />
             <source>Controls only whether the torch/campfire model casts its own silhouette. It does not disable shadows produced by the embedded point light; TORCH records have no separate shadow flag for that light.</source>
-            <translation>Управляет только тем, создает ли модель факела/костра собственный силуэт. Он не отключает тени, создаваемые встроенным точечным источником света; Записи TORCH не имеют отдельного теневого флага для этого света.</translation>
+            <translation>Определяет, отбрасывает ли тень модель факела или костра. Не влияет на тени от встроенного источника света: отдельного флага для него в MOB нет.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="695" />
             <source>Look-at position stored in the MOB. X and Y determine the facing direction; Z is stored but is not used when the look angle is calculated.</source>
-            <translation>Позиция просмотра сохранена в MOB. X и Y определяют направление взгляда; Z сохраняется, но не используется при расчете угла обзора.</translation>
+            <translation>Точка, куда смотрит существо. X и Y задают направление; Z сохраняется в MOB, но при расчёте поворота не используется.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="710" />
             <source>Preserved in the MOB, but no confirmed native magic-trap behavior or visualization uses this value.</source>
-            <translation>Сохранено в MOB, но ни одна подтвержденная нативная магическая ловушка или визуализация не используют это значение.</translation>
+            <translation>Значение сохраняется в MOB, но подтверждённого применения для магической ловушки нет.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="819" />
@@ -3688,7 +3688,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="836" />
             <source>Effective trap targets are read-only and derived from Player group and MOB diplomacy.</source>
-            <translation>Эффективные цели-ловушки доступны только для чтения и определяются на основе дипломатии группы игроков и MOB.</translation>
+            <translation>Цели ловушки нельзя изменить здесь: игра вычисляет их по группе игрока и таблице дипломатии MOB.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="846" />
@@ -3739,12 +3739,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1029" />
             <source>Player group</source>
-            <translation>Группа игроков</translation>
+            <translation>Группа игрока</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1030" />
             <source>Map ID</source>
-            <translation>Идентификатор карты</translation>
+            <translation>ID объекта</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1031" />
@@ -3769,17 +3769,17 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1035" />
             <source>Parent template</source>
-            <translation>Родительский шаблон</translation>
+            <translation>Исходный шаблон</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1036" />
             <source>Primary texture</source>
-            <translation>Первичная текстура</translation>
+            <translation>Основная текстура</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1037" />
             <source>Secondary texture</source>
-            <translation>Вторичная текстура</translation>
+            <translation>Дополнительная текстура</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1038" />
@@ -3799,7 +3799,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1041" />
             <source>Available to scripts</source>
-            <translation>Доступно для скриптов</translation>
+            <translation>Доступен для скриптов</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1042" />
@@ -3814,12 +3814,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1044" />
             <source>Attached quest variable</source>
-            <translation>Прикрепленная переменная квеста</translation>
+            <translation>Привязанная переменная квеста</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1045" />
             <source>Scale</source>
-            <translation>Масштабировать</translation>
+            <translation>Масштаб</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1046" />
@@ -3870,7 +3870,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1056" />
             <source>Ambient</source>
-            <translation>Окружающий</translation>
+            <translation>Фоновый звук</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1057" />
@@ -3900,7 +3900,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1062" />
             <source>Allowed interaction</source>
-            <translation>Разрешенное взаимодействие</translation>
+            <translation>Способ открытия</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1063" />
@@ -3925,12 +3925,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1067" />
             <source>Repeatable</source>
-            <translation>Повторяемый</translation>
+            <translation>Можно использовать повторно</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1068" />
             <source>Door interaction</source>
-            <translation>Взаимодействие дверей</translation>
+            <translation>Считать дверью</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1069" />
@@ -3940,7 +3940,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1070" />
             <source>Stored target mask (legacy)</source>
-            <translation>Сохраненная целевая маска (устаревшая версия)</translation>
+            <translation>Сохранённая маска целей (устаревшая)</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1071" />
@@ -3960,7 +3960,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1074" />
             <source>Cast interval</source>
-            <translation>Интервал каста</translation>
+            <translation>Пауза между срабатываниями</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1075" />
@@ -4015,12 +4015,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1085" />
             <source>Guard position</source>
-            <translation>Позиция охранника</translation>
+            <translation>Позиция охраны</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1086" />
             <source>Guard radius</source>
-            <translation>Радиус защиты</translation>
+            <translation>Радиус охраны</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1087" />
@@ -4055,12 +4055,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1093" />
             <source>Alarm condition</source>
-            <translation>Состояние тревоги</translation>
+            <translation>Условие тревоги</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1094" />
             <source>Alarm raised</source>
-            <translation>Поднята тревога</translation>
+            <translation>Поднимаемая тревога</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1095" />
@@ -4090,7 +4090,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1101" />
             <source>Ownership and diplomacy group used by this object.</source>
-            <translation>Группа владения и дипломатии, используемая этим объектом.</translation>
+            <translation>Группа объекта, определяющая принадлежность и дипломатию.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1102" />
@@ -4110,7 +4110,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1105" />
             <source>Preserved object-template value. Normal units use Database prototype instead.</source>
-            <translation>Сохраняемое значение шаблона объекта. Вместо этого обычные устройства используют прототип базы данных.</translation>
+            <translation>Сохранённое значение шаблона. Обычные существа используют вместо него прототип из базы.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1106" />
@@ -4205,7 +4205,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1126" />
             <source>For Logic 1-4, allow this setup to activate when its corresponding world alarm is raised. Logic 0 is the default enabled slot and ignores this setting.</source>
-            <translation>Для логики 1–4 разрешите этой настройке активироваться при срабатывании соответствующей мировой тревоги. Логический 0 — это слот, включенный по умолчанию, и этот параметр игнорируется.</translation>
+            <translation>Для логики 1–4 разрешает включение при соответствующей мировой тревоге. Логика 0 всегда включена и не учитывает этот параметр.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1127" />
@@ -4215,7 +4215,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1128" />
             <source>Distance within which allied units can respond for help.</source>
-            <translation>Расстояние, в пределах которого союзные подразделения могут прийти на помощь.</translation>
+            <translation>Расстояние, с которого союзные существа могут прийти на помощь.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1129" />
@@ -4230,7 +4230,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1131" />
             <source>Keep this unit's AI running regardless of distance. Otherwise it activates within twice the player's maximum vision range plus 20 metres.</source>
-            <translation>Поддерживайте работу ИИ этого отряда независимо от расстояния. В противном случае он активируется в пределах двойной максимальной дальности обзора игрока плюс 20 метров.</translation>
+            <translation>Не отключать ИИ существа на расстоянии. Иначе ИИ работает в пределах двойной дальности зрения игрока плюс 20 метров.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1132" />
@@ -4250,7 +4250,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1135" />
             <source>Stored and preserved in the MOB. The audited unit AI does not use this value.</source>
-            <translation>Хранится и сохраняется в MOB. ИИ проверяемого подразделения не использует это значение.</translation>
+            <translation>Значение сохраняется в MOB, но игра его не использует.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1136" />
@@ -4260,17 +4260,17 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1137" />
             <source>Time spent looking toward this point. 15 ticks equal one second.</source>
-            <translation>Время, потраченное на поиск этой точки. 15 тиков равны одной секунде.</translation>
+            <translation>Время взгляда в эту точку. 15 тактов равны одной секунде.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1138" />
             <source>How quickly the unit turns toward this point. 0 turns immediately.</source>
-            <translation>Насколько быстро отряд поворачивает к этой точке. 0 поворотов сразу.</translation>
+            <translation>Скорость поворота к точке. 0 — повернуться мгновенно.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1139" />
             <source>0 uses normal behavior. 1 rests at the point.</source>
-            <translation>0 использует нормальное поведение. 1 стоит в точке.</translation>
+            <translation>0 — обычное поведение; 1 — отдыхать в точке.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1141" />
@@ -4285,7 +4285,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1143" />
             <source>Minimum Science skill required for manual interaction.</source>
-            <translation>Минимальные научные навыки, необходимые для ручного взаимодействия.</translation>
+            <translation>Минимальный навык «Наука» для ручного открытия.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1144" />
@@ -4305,22 +4305,22 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1147" />
             <source>Treat this lever as a door approached from its usable sides.</source>
-            <translation>Рассматривайте этот рычаг как дверь, подходящую с его пригодных для использования сторон.</translation>
+            <translation>Считать рычаг дверью, к которой подходят с доступных сторон.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1148" />
             <source>Update AI navigation when this object's state changes. Enable it when states change passability.</source>
-            <translation>Обновляйте навигацию ИИ при изменении состояния этого объекта. Включайте его, когда состояния меняют проходимость.</translation>
+            <translation>Пересчитывать навигацию при смене состояния объекта. Включите, если состояния меняют проходимость.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1150" />
             <source>Serialized 32-bit player-group mask. Normal map loading replaces it using Player group and the MOB diplomacy table.</source>
-            <translation>Сериализованная 32-битная маска группы игроков. Обычная загрузка карты заменяет ее с помощью группы игроков и таблицы дипломатии MOB.</translation>
+            <translation>Сохранённая 32-битная маска групп. При загрузке карты игра заменяет её значением, вычисленным по группе игрока и таблице дипломатии MOB.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1151" />
             <source>Groups marked War in this trap's Player group row of the containing MOB's diplomacy table. This is the target mask the game calculates when the map loads.</source>
-            <translation>Группы помечали Войну в строке группы игроков этой ловушки таблицы дипломатии MOB. Это целевая маска, которую игра рассчитывает при загрузке карты.</translation>
+            <translation>Группы со значением «Война» в строке дипломатии MOB для группы игрока. Именно эти цели игра назначает ловушке при загрузке карты.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1152" />
@@ -4340,7 +4340,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1155" />
             <source>Radius checked around this activation center.</source>
-            <translation>Радиус проверил вокруг этого центра активации.</translation>
+            <translation>Радиус поиска целей вокруг центра области активации.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1157" />
@@ -4365,7 +4365,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1161" />
             <source>Light color.</source>
-            <translation>Светлый цвет.</translation>
+            <translation>Цвет света.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1162" />
@@ -4400,12 +4400,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1168" />
             <source>Play this source repeatedly using its delay range.</source>
-            <translation>Повторно воспроизводите этот источник, используя его диапазон задержки.</translation>
+            <translation>Повторять звук с задержкой в указанном диапазоне.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1169" />
             <source>Stored and preserved in the MOB. No confirmed runtime audio behavior uses this flag.</source>
-            <translation>Хранится и сохраняется в MOB. Ни одно подтвержденное поведение звука в игре не использует этот флаг.</translation>
+            <translation>Флаг сохраняется в MOB, но подтверждённого влияния на звук в игре нет.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="1170" />
@@ -4423,7 +4423,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="42" />
             <source>Approve and save</source>
-            <translation>Одобрить и сохранить</translation>
+            <translation>Подтвердить и сохранить</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="43" />
@@ -4433,7 +4433,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="45" />
             <source>Review semantic terrain atlas</source>
-            <translation>Обзор семантического атласа местности</translation>
+            <translation>Проверка материалов атласа рельефа</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="48" />
@@ -4443,7 +4443,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="55" />
             <source>Namespace: %1   Slots: %2   Decoded atlas SHA-256: %3</source>
-            <translation>Пространство имен: %1 Слоты: %2 Декодированный атлас SHA-256: %3</translation>
+            <translation>Набор ресурсов: %1   Слотов: %2   SHA-256 распакованного атласа: %3</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="59" />
@@ -4453,7 +4453,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="68" />
             <source>Material families</source>
-            <translation>Материальные семьи</translation>
+            <translation>Семейства материалов</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="71" />
@@ -4489,12 +4489,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="84" />
             <source>Split selected slots...</source>
-            <translation>Разделить выбранные слоты...</translation>
+            <translation>Отделить выбранные слоты...</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="85" />
             <source>Merge selected families...</source>
-            <translation>Объединить выбранные семьи...</translation>
+            <translation>Объединить выбранные семейства...</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="92" />
@@ -4509,7 +4509,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="94" />
             <source>Corner families (NW / NE / SE / SW)</source>
-            <translation>Угловые семьи (СЗ/СВ/ЮВ/ЮЗ)</translation>
+            <translation>Материалы углов (СЗ / СВ / ЮВ / ЮЗ)</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="95" />
@@ -4519,12 +4519,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="107" />
             <source>Mark selected Reviewed</source>
-            <translation>Отметить выбранное Проверено</translation>
+            <translation>Отметить выбранные как проверенные</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="108" />
             <source>Mark selected Needs review</source>
-            <translation>Отметить выбранное Требуется проверка</translation>
+            <translation>Отметить выбранные для проверки</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="123" />
@@ -4559,7 +4559,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="385" />
             <source>Split material family</source>
-            <translation>Разделенное семейство материалов</translation>
+            <translation>Разделить семейство материалов</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="386" />
@@ -4569,12 +4569,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="386" />
             <source>Split family</source>
-            <translation>Разделенная семья</translation>
+            <translation>Разделить семейство</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="391" />
             <source>Cannot split family</source>
-            <translation>Не могу разделить семью</translation>
+            <translation>Не удалось разделить семейство</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="401" />
@@ -4589,12 +4589,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="402" />
             <source>Merged family</source>
-            <translation>Объединенная семья</translation>
+            <translation>Объединённое семейство</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="407" />
             <source>Cannot merge families</source>
-            <translation>Не могу объединить семьи</translation>
+            <translation>Не удалось объединить семейства</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="418" />
@@ -4606,27 +4606,27 @@ Select a valid installation or another preset.</source>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="419" />
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="436" />
             <source>Select one or more slot rows first.</source>
-            <translation>Сначала выберите один или несколько рядов слотов.</translation>
+            <translation>Сначала выберите одну или несколько строк слотов.</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="460" />
             <source>Export semantic atlas profile copy</source>
-            <translation>Экспортировать копию профиля семантического атласа</translation>
+            <translation>Экспортировать копию профиля материалов атласа</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="461" />
             <source>Semantic atlas profiles (*.semantic-atlas.json);;JSON files (*.json)</source>
-            <translation>Профили семантического атласа (*.semantic-atlas.json);;файлы JSON (*.json)</translation>
+            <translation>Профили материалов атласа (*.semantic-atlas.json);;Файлы JSON (*.json)</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="467" />
             <source>Could not export semantic atlas profile</source>
-            <translation>Не удалось экспортировать профиль семантического атласа.</translation>
+            <translation>Не удалось экспортировать профиль материалов атласа</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="470" />
             <source>Semantic atlas profile exported</source>
-            <translation>Профиль семантического атласа экспортирован.</translation>
+            <translation>Профиль материалов атласа экспортирован</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="471" />
@@ -4639,7 +4639,7 @@ Select a valid installation or another preset.</source>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="481" />
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="498" />
             <source>Atlas review incomplete</source>
-            <translation>Обзор Атласа неполный</translation>
+            <translation>Проверка атласа не завершена</translation>
         </message>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="482" />
@@ -4654,7 +4654,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/terrain_atlas_review_dialog.cpp" line="508" />
             <source>Atlas profile cannot be approved</source>
-            <translation>Профиль Атласа не может быть одобрен</translation>
+            <translation>Профиль атласа нельзя подтвердить</translation>
         </message>
     </context>
     <context>
@@ -4662,32 +4662,32 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/tile_form.ui" line="14" />
             <source>Tiles Parameters</source>
-            <translation>Параметры плитки</translation>
+            <translation>Параметры тайлов</translation>
         </message>
         <message>
             <location filename="../source/ui/tile_form.ui" line="24" />
             <source>Tiles</source>
-            <translation>Плитка</translation>
+            <translation>Тайлы</translation>
         </message>
         <message>
             <location filename="../source/ui/tile_form.ui" line="46" />
             <source>Tile type</source>
-            <translation>Тип плитки</translation>
+            <translation>Тип тайла</translation>
         </message>
         <message>
             <location filename="../source/ui/tile_form.ui" line="56" />
             <source>Active liquid material id</source>
-            <translation>Идентификатор активного жидкого материала</translation>
+            <translation>ID активного материала жидкости</translation>
         </message>
         <message>
             <location filename="../source/ui/tile_form.ui" line="81" />
             <source>Quick access tiles table (hotkey 1-8)</source>
-            <translation>Таблица плиток быстрого доступа (горячая клавиша 1-8)</translation>
+            <translation>Тайлы быстрого доступа (клавиши 1–8)</translation>
         </message>
         <message>
             <location filename="../source/ui/tile_form.ui" line="98" />
             <source>Available texture tiles table</source>
-            <translation>Таблица доступных текстурных плиток</translation>
+            <translation>Доступные тайлы текстуры</translation>
         </message>
         <message>
             <location filename="../source/ui/tile_form.ui" line="111" />
@@ -4759,7 +4759,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/tile_form.ui" line="341" />
             <source>Start tile index</source>
-            <translation>Начальный индекс плитки</translation>
+            <translation>Начальный индекс тайла</translation>
         </message>
         <message>
             <location filename="../source/ui/tile_form.ui" line="348" />
@@ -4780,7 +4780,7 @@ Select a valid installation or another preset.</source>
             <location filename="../source/ui/tile_form.cpp" line="24" />
             <location filename="../source/ui/tile_form.cpp" line="380" />
             <source>MPR Atlas Tiles</source>
-            <translation>MPR Атлас Плитки</translation>
+            <translation>Тайлы атласа MPR</translation>
         </message>
         <message>
             <location filename="../source/ui/tile_form.cpp" line="25" />
@@ -4805,7 +4805,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/tile_form.cpp" line="381" />
             <source>MPR Atlas Tiles — %1</source>
-            <translation>Плитки Атласа MPR — %1</translation>
+            <translation>Тайлы атласа MPR — %1</translation>
         </message>
     </context>
     <context>
@@ -4813,7 +4813,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="304" />
             <source>Magic trap points — %1 activation areas — %2 cast targets</source>
-            <translation>Точки магических ловушек — области активации %1 — цели применения %2</translation>
+            <translation>Точки ловушки — областей активации: %1 — целей заклинания: %2</translation>
         </message>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="310" />
@@ -4828,12 +4828,12 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="315" />
             <source>+ Cast target</source>
-            <translation>+ Применить цель</translation>
+            <translation>+ Цель заклинания</translation>
         </message>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="316" />
             <source>Append a cast target to this trap.</source>
-            <translation>Добавьте к этой ловушке цель применения.</translation>
+            <translation>Добавить точку, в которую ловушка применяет заклинание.</translation>
         </message>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="326" />
@@ -4853,7 +4853,7 @@ Select a valid installation or another preset.</source>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="327" />
             <source>Order / select</source>
-            <translation>Заказать/выбрать</translation>
+            <translation>Порядок / выбор</translation>
         </message>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="341" />
@@ -4891,17 +4891,17 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="391" />
             <source>Cast targets</source>
-            <translation>Кастинг целей</translation>
+            <translation>Цели заклинания</translation>
         </message>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="392" />
             <source>Independent 2D destination points. The MOB stores no target rotation or height.</source>
-            <translation>Независимые 2D-точки назначения. MOB не сохраняет значение вращения или высоты цели.</translation>
+            <translation>Независимые точки назначения на плоскости. Поворот и высота цели в MOB не хранятся.</translation>
         </message>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="405" />
             <source>Cast target %1</source>
-            <translation>Применить цель %1</translation>
+            <translation>Цель заклинания %1</translation>
         </message>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="430" />
@@ -4926,7 +4926,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="454" />
             <source>Select in outliner and viewport</source>
-            <translation>Выбрать в планировщике и в окне карты</translation>
+            <translation>Выбрать в иерархии и на карте</translation>
         </message>
     </context>
     <context>
@@ -4949,7 +4949,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="2573" />
             <source>Trap targets</source>
-            <translation>Цели-ловушки</translation>
+            <translation>Цели ловушки</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="2577" />
@@ -4959,7 +4959,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="2584" />
             <source>Player group %1 attacks factions marked War in its diplomacy row.</source>
-            <translation>Группа игроков %1 атакует фракции, помеченные как Война в ряду дипломатии.</translation>
+            <translation>Группа игрока %1 атакует группы, для которых в её строке дипломатии указана «Война».</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="2588" />
@@ -4992,7 +4992,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/layout_components/tree_view.cpp" line="303" />
             <source>Paste Logic slot at original world positions</source>
-            <translation>Вставить слот логики в исходные позиции мира.</translation>
+            <translation>Вставить логику в исходных координатах</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tree_view.cpp" line="372" />
@@ -5081,7 +5081,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="2446" />
             <source>Edit unit parameters</source>
-            <translation>Редактировать параметры объекта</translation>
+            <translation>Изменить параметры существа</translation>
         </message>
     </context>
     <context>
@@ -5098,12 +5098,12 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
             <location filename="../source/render/view.cpp" line="1007" />
             <location filename="../source/render/view.cpp" line="1086" />
             <source>Land tile painting enabled. Choose an atlas tile in Landscape Tools.</source>
-            <translation>Включена покраска тайлов земли. Выберите плитку атласа в Инструментах ландшафта.</translation>
+            <translation>Включено рисование тайлов суши. Выберите тайл атласа в инструментах ландшафта.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1081" />
             <source>Landscape sculpt mode enabled.</source>
-            <translation>Режим ландшафтной скульптуры включен.</translation>
+            <translation>Включена правка рельефа.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1091" />
@@ -5113,12 +5113,12 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="1096" />
             <source>Overlay painting enabled for existing overlay cells only.</source>
-            <translation>Наложение изображения включено только для существующих ячеек наложения.</translation>
+            <translation>Включено рисование по существующим поверхностям.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1105" />
             <source>Overlay-only sculpting enabled for active surfaces.</source>
-            <translation>Для активных поверхностей включена скульптура только с наложением.</translation>
+            <translation>Включена правка высоты активных поверхностей.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1539" />
@@ -5158,7 +5158,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="1578" />
             <source>Set the editor time of day. When changed, this time is also applied to JMV Test Current Map and hot reload.</source>
-            <translation>Установите время суток в редакторе. При изменении это время также применяется к карте тока тестирования JMV и горячей перезагрузке.</translation>
+            <translation>Установить время суток в редакторе. Оно также используется при тесте карты и горячей перезагрузке JMV.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1666" />
@@ -5192,7 +5192,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="1709" />
             <source>Build a non-saving diagnostic graph from current terrain and static-object collision proxies.</source>
-            <translation>Постройте несохраняемый диагностический граф на основе текущей местности и прокси-серверов столкновений статических объектов.</translation>
+            <translation>Построить временный граф по текущему рельефу и границам неподвижных объектов, не сохраняя его.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1712" />
@@ -5202,7 +5202,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="1713" />
             <source>Compare loaded and regenerated connectivity, link weights, and node positions without changing either graph.</source>
-            <translation>Сравните загруженные и восстановленные соединения, веса ссылок и положения узлов, не меняя ни одного графа.</translation>
+            <translation>Сравнить связи, их веса и положения узлов загруженного и созданного графов, не изменяя их.</translation>
         </message>
         <message>
             <source>Preview graph: Loaded</source>
@@ -5277,7 +5277,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="1718" />
             <source>Switch between the graph loaded from the map and the generated graph. Test Current Map and Hot Reload stage the graph named on this button.</source>
-            <translation>Переключение между графом, загруженным с карты, и сгенерированным графом. Проверка текущей карты и горячая перезагрузка создают граф, указанный на этой кнопке.</translation>
+            <translation>Переключить показ между графом карты и созданным графом. При тесте и горячей перезагрузке используется граф, указанный на кнопке.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1722" />
@@ -5287,7 +5287,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="1723" />
             <source>Persist the selected loaded or regenerated graph as an exact runtime .grp, embed it into the primary MOB, or switch the primary MOB to external graph ownership.</source>
-            <translation>Сохраните выбранный загруженный или восстановленный граф как точный .grp среды выполнения, встройте его в основной MOB или переключите основной MOB на владение внешним графом.</translation>
+            <translation>Сохранить выбранный граф во внешний .grp, встроить его в основной MOB или перевести MOB на уже существующий внешний .grp.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1743" />
@@ -5391,23 +5391,23 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="1901" />
             <source>Regeneration queued</source>
-            <translation>Регенерация поставлена ​​в очередь</translation>
+            <translation>Повторное построение поставлено в очередь</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1902" />
             <location filename="../source/render/view.cpp" line="2368" />
             <source>Regenerate again</source>
-            <translation>Регенерировать снова</translation>
+            <translation>Построить ещё раз</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1918" />
             <source>Showing the graph loaded from the map. Click to show the generated graph. Test Current Map and Hot Reload stage the graph named here.</source>
-            <translation>Показан граф, загруженный с карты. Нажмите, чтобы отобразить созданный граф. Тестирование текущей карты и горячая перезагрузка создают граф, указанный здесь.</translation>
+            <translation>Показан граф карты. Нажмите, чтобы показать созданный граф. При тесте и горячей перезагрузке используется показанный здесь граф.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1919" />
             <source>Showing the generated graph. Click to show the graph loaded from the map. Test Current Map and Hot Reload stage the graph named here.</source>
-            <translation>Показ сгенерированного графа. Нажмите, чтобы отобразить граф, загруженный с карты. Тестирование текущей карты и горячая перезагрузка создают граф, указанный здесь.</translation>
+            <translation>Показан созданный граф. Нажмите, чтобы показать граф карты. При тесте и горячей перезагрузке используется показанный здесь граф.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2005" />
@@ -5422,7 +5422,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="2153" />
             <source>No generated AI graph output buffer was provided.</source>
-            <translation>Не был предоставлен выходной буфер сгенерированного графа ИИ.</translation>
+            <translation>Не удалось получить данные созданного графа ИИ.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2162" />
@@ -5432,7 +5432,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="2201" />
             <source>Freshly regenerated graph</source>
-            <translation>Свежерегенерированный граф</translation>
+            <translation>Новый созданный граф</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2209" />
@@ -5443,12 +5443,12 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="2223" />
             <source>The selected loaded AI graph is structurally incompatible with this map. Regenerate the preview or choose another graph: %1</source>
-            <translation>Выбранный загруженный граф ИИ структурно несовместим с этой картой. Перегенерируйте предпросмотр или выберите другой граф: %1</translation>
+            <translation>Загруженный граф ИИ не подходит к этой карте. Постройте новый граф или выберите другой: %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2240" />
             <source>Generated AI graph failed fresh validation: %1</source>
-            <translation>Сгенерированный граф ИИ не прошел новую проверку: %1</translation>
+            <translation>Созданный граф ИИ не прошёл проверку: %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2251" />
@@ -5463,17 +5463,17 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="2330" />
             <source>AI graph preview regeneration failed: %1</source>
-            <translation>Не удалось восстановить предпросмотр графа ИИ: %1</translation>
+            <translation>Не удалось построить граф ИИ: %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2338" />
             <source>Regenerated: %1/%2 authored collision parts, %3 bridge cells, %4 water samples</source>
-            <translation>Регенерированы: исходные детали столкновений %1/%2, мостовые ячейки %3, образцы воды %4.</translation>
+            <translation>Граф создан: частей столкновений — %1/%2; ячеек мостов — %3; образцов воды — %4</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2369" />
             <source>Regenerating diagnostic graph...</source>
-            <translation>Регенерация диагностического графа...</translation>
+            <translation>Построение временного графа...</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2412" />
@@ -5515,7 +5515,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="6352" />
             <source>Orthographic game orientation: world +X is right and world +Y is down</source>
-            <translation>Орфографическая ориентация игры: мир +X справа, мир +Y внизу.</translation>
+            <translation>Ортографическая ориентация: +X вправо, +Y вниз</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6356" />
@@ -5530,7 +5530,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="6369" />
             <source>The viewport renderer is not initialized.</source>
-            <translation>Средство визуализации видового экрана не инициализировано.</translation>
+            <translation>Окно карты ещё не готово к отрисовке.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6379" />
@@ -5560,7 +5560,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="6516" />
             <source>Excluded %1 dynamic unit(s).</source>
-            <translation>Исключены динамические блоки %1.</translation>
+            <translation>Исключено динамических существ: %1.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6518" />
@@ -5570,7 +5570,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="6569" />
             <source>MPR opened with pre-existing terrain warnings. Editing remains available; review the workflow log before saving.</source>
-            <translation>MPR начался с уже существующих предупреждений о местности. Редактирование остается доступным; просмотрите журнал рабочего процесса перед сохранением.</translation>
+            <translation>MPR открыт с предупреждениями о рельефе. Редактирование доступно; перед сохранением проверьте журнал работы.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6668" />
@@ -5639,33 +5639,33 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
             <source>Endurance could not represent the complete terrain edit as provenance-checked sector patches. No destination was changed.
 
 %1</source>
-            <translation>В Endurance не удалось отобразить полное редактирование ландшафта в виде секторных исправлений, проверенных по происхождению. Пункт назначения не был изменен.
+            <translation>Endurance не удалось безопасно представить все правки рельефа как изменения секторов. Целевой файл не изменён.
 
 %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6835" />
             <source>Validating staged MPR candidate...</source>
-            <translation>Проверка кандидата на поэтапный MPR...</translation>
+            <translation>Проверка подготовленного MPR...</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6843" />
             <source>Staged MPR validation failed</source>
-            <translation>Поэтапная проверка MPR не удалась</translation>
+            <translation>Подготовленный MPR не прошёл проверку</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6844" />
             <source>The temporary candidate failed validation. No destination was changed.
 
 %1</source>
-            <translation>Временный кандидат не прошел проверку. Пункт назначения не был изменен.
+            <translation>Временный MPR не прошёл проверку. Целевой файл не изменён.
 
 %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6848" />
             <source>Creating backup and committing atomically...</source>
-            <translation>Создание резервной копии и атомарная фиксация...</translation>
+            <translation>Создание резервной копии и сохранение...</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6861" />
@@ -5695,17 +5695,17 @@ Backup: %3</source>
         <message>
             <location filename="../source/render/view.cpp" line="6869" />
             <source>Reopening and adopting validated terrain...</source>
-            <translation>Повторное открытие и принятие проверенной местности...</translation>
+            <translation>Повторное открытие проверенного рельефа...</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6886" />
             <source>Validated MPR saved: %1</source>
-            <translation>Подтвержденный MPR сохранен: %1</translation>
+            <translation>Проверенный MPR сохранён: %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6890" />
             <source>Validated changed MPR copy written: %1</source>
-            <translation>Подтвержденная измененная копия MPR записана: %1</translation>
+            <translation>Проверенная копия изменённого MPR сохранена: %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="6903" />
@@ -5740,7 +5740,7 @@ Backup: %3</source>
         <message>
             <location filename="../source/render/view.cpp" line="7851" />
             <source>%1 (%2 natural variant(s))</source>
-            <translation>%1 (естественный вариант (варианты) %2))</translation>
+            <translation>%1 (вариантов: %2)</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7856" />
@@ -5750,7 +5750,7 @@ Backup: %3</source>
         <message>
             <location filename="../source/render/view.cpp" line="7859" />
             <source>No approved semantic profile is available for namespace '%1'. Automatic painting is disabled; manual atlas tile mode remains available.</source>
-            <translation>Для пространства имен «%1» утвержденный семантический профиль недоступен. Автоматическая покраска отключена; ручной режим мозаики атласа остается доступным.</translation>
+            <translation>Для набора ресурсов «%1» нет подтверждённого профиля материалов. Автоматическое рисование отключено, но тайлы атласа можно выбирать вручную.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7862" />
@@ -5760,42 +5760,42 @@ Backup: %3</source>
         <message>
             <location filename="../source/render/view.cpp" line="7865" />
             <source>Approved semantic profile loaded: %1 land and %2 overlay materials.</source>
-            <translation>Загружен утвержденный семантический профиль: земля %1 и материалы наложения %2.</translation>
+            <translation>Загружен подтверждённый профиль материалов: суша — %1, поверхности — %2.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7868" />
             <source> A saved auto-inferred profile is obsolete or failed its namespace/hash/slot binding; review the new proposal before use.</source>
-            <translation>Сохраненный автоматически определяемый профиль устарел или не удалось привязать пространство имен/хэш/слот; просмотрите новое предложение перед использованием.</translation>
+            <translation> Сохранённый автоматически созданный профиль устарел или не совпадает с набором ресурсов, хешем либо слотами. Перед использованием проверьте новое предложение.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7870" />
             <source> An inference proposal is ready for review.</source>
-            <translation>Предложение по заключению готово к рассмотрению.</translation>
+            <translation> Предложение по материалам готово к проверке.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7882" />
             <source>This atlas layout is not registered; semantic terrain painting is disabled.</source>
-            <translation>Этот макет атласа не зарегистрирован; семантическая прорисовка ландшафта отключена.</translation>
+            <translation>Для этого атласа не зарегистрировано назначение материалов; автоматическое рисование рельефа отключено.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7913" />
             <source>Load an MPR and its complete terrain atlas before reviewing semantic conversion.</source>
-            <translation>Загрузите MPR и его полный атлас местности, прежде чем просматривать семантическое преобразование.</translation>
+            <translation>Перед настройкой материалов загрузите MPR и полный атлас рельефа.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7933" />
             <source>Could not save semantic atlas profile</source>
-            <translation>Не удалось сохранить профиль семантического атласа.</translation>
+            <translation>Не удалось сохранить профиль материалов атласа</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7939" />
             <source>The reviewed semantic atlas profile is approved and automatic painting is enabled. Saved to %1</source>
-            <translation>Проверенный профиль семантического атласа утвержден, и включена автоматическая прорисовка. Сохранено в %1.</translation>
+            <translation>Профиль материалов атласа подтверждён, автоматическое рисование включено. Сохранено: %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7941" />
             <source>Semantic atlas draft saved to %1. Automatic painting remains disabled until approval.</source>
-            <translation>Черновик семантического атласа сохранен в %1. Автоматическая покраска остается отключенной до утверждения.</translation>
+            <translation>Черновик профиля материалов сохранён: %1. Автоматическое рисование останется отключённым до подтверждения.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7960" />
@@ -5819,17 +5819,17 @@ NW/NE/SE/SW: %2
         <message>
             <location filename="../source/render/view.cpp" line="7965" />
             <source>semantic profile approved</source>
-            <translation>семантический профиль одобрен</translation>
+            <translation>профиль материалов подтверждён</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7966" />
             <source>authored semantic template active</source>
-            <translation>исходный семантический шаблон активен</translation>
+            <translation>используется готовый шаблон материалов</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7967" />
             <source>semantic profile draft — automatic paint disabled</source>
-            <translation>черновик семантического профиля — автоматическая прорисовка отключена</translation>
+            <translation>черновик профиля материалов — автоматическое рисование отключено</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="7975" />
@@ -5849,12 +5849,12 @@ NW/NE/SE/SW: %2
         <message>
             <location filename="../source/render/view.cpp" line="8220" />
             <source>Paint diagnostic</source>
-            <translation>Диагностика краски</translation>
+            <translation>Диагностика рисования</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="8221" />
             <source>Could not write %1: %2</source>
-            <translation>Не удалось написать %1: %2</translation>
+            <translation>Не удалось сохранить %1: %2</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="8225" />
@@ -5894,7 +5894,7 @@ NW/NE/SE/SW: %2
         <message>
             <location filename="../source/render/view.cpp" line="8923" />
             <source>Saving all MOBs</source>
-            <translation>Сохранение всех MOBов</translation>
+            <translation>Сохранение всех MOB</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="8950" />
@@ -5984,7 +5984,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="9735" />
             <source>Embedded namespace</source>
-            <translation>Встроенное пространство имен</translation>
+            <translation>Имя ресурсов атласа</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9736" />
@@ -6009,7 +6009,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="9740" />
             <source>maxZ maps the complete 0-65535 raw range into world height. Changing it either scales the landscape or requantizes every height. Use Vertical scale to choose the migration policy explicitly.</source>
-            <translation>maxZ отображает весь исходный диапазон 0-65535 в высоту мира. Его изменение либо масштабирует ландшафт, либо переквантует каждую высоту. Используйте вертикальную шкалу, чтобы явно выбрать политику миграции.</translation>
+            <translation>maxZ переводит исходный диапазон 0–65535 в высоту мира. При его изменении можно либо масштабировать рельеф, либо пересчитать все исходные значения, сохранив высоту в мире. Выберите нужный способ в разделе «Вертикальный масштаб».</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9746" />
@@ -6025,7 +6025,7 @@ Do you want to save changes?</source>
             <location filename="../source/render/view.cpp" line="9757" />
             <location filename="../source/render/view.cpp" line="9772" />
             <source>Show material slots on overlay tiles</source>
-            <translation>Показывать слоты материалов на наложенных плитках</translation>
+            <translation>Показывать материалы на тайлах поверхности</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9763" />
@@ -6035,7 +6035,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="9771" />
             <source>Hide material slots on overlay tiles</source>
-            <translation>Скрыть слоты материалов на наложенных плитках</translation>
+            <translation>Скрыть материалы на тайлах поверхности</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9797" />
@@ -6115,17 +6115,17 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="9827" />
             <source>Exact stored scalar self-illumination. Emitted RGB is clamp(tint RGB x illumination, 0-1). It is a material property, not a lava-texture flag.</source>
-            <translation>Точное сохраненное скалярное самосвечение. Излучаемый RGB является фиксированным (оттенок RGB x освещение, 0-1). Это материальное свойство, а не флаг текстуры лавы.</translation>
+            <translation>Сохранённая яркость самосвечения. Итоговый RGB ограничивается диапазоном 0–1 после умножения оттенка на яркость. Это свойство материала, а не признак текстуры лавы.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9828" />
             <source>Exact stored scalar multiplier for wind-driven water displacement. Effective geometric amplitude is world Wind strength x 0.3 x this value, so Wind strength 0 produces no geometric motion. Wind direction and strength come from the loaded MOB's world environment. This also scales apparent wave-phase speed and does not control atlas-frame animation.</source>
-            <translation>Точный сохраненный скалярный множитель для вытеснения воды ветром. Эффективная геометрическая амплитуда равна силе мирового ветра x 0,3 x этого значения, поэтому сила ветра 0 не вызывает геометрического движения. Направление и сила ветра определяются окружающей средой загруженного MOB. Это также масштабирует видимую скорость фазы волны и не управляет анимацией кадров атласа.</translation>
+            <translation>Сохранённый множитель колебания воды от ветра. Амплитуда = сила ветра в мире × 0,3 × это значение; при силе 0 геометрия не движется. Направление и сила ветра берутся из настроек мира загруженного MOB. Параметр также меняет видимую скорость волны, но не анимацию кадров атласа.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9829" />
             <source>Exact stored scalar warp-speed value. The confirmed gameplay path ignores this authored value and uses a fixed 0.05 lateral-warp rate. Liquids can still appear to move at different speeds because Wave multiplier also scales their wave phase.</source>
-            <translation>Точное сохраненное значение скалярной скорости деформации. Подтвержденный игровой путь игнорирует это авторское значение и использует фиксированную скорость бокового искажения 0,05. Жидкости по-прежнему могут казаться движущимися с разной скоростью, поскольку множитель волны также масштабирует фазу их волны.</translation>
+            <translation>Сохранённая скорость искажения. Игра не использует это значение и применяет постоянную боковую скорость 0,05. Жидкости всё же могут двигаться с разной скоростью, потому что множитель волны влияет и на её фазу.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9837" />
@@ -6210,12 +6210,12 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="9871" />
             <source>Apply as one undoable change</source>
-            <translation>Применить как одно неотменяемое изменение</translation>
+            <translation>Применить одним отменяемым действием</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9879" />
             <source>Atlas tile animation records</source>
-            <translation>Записи анимации плиток Атласа</translation>
+            <translation>Анимации тайлов атласа</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9881" />
@@ -6225,7 +6225,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="9889" />
             <source>Start atlas slot</source>
-            <translation>Запустить слот атласа</translation>
+            <translation>Начальный слот атласа</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9889" />
@@ -6235,7 +6235,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="9889" />
             <source>Resolved range</source>
-            <translation>Разрешенный диапазон</translation>
+            <translation>Диапазон слотов</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9893" />
@@ -6285,7 +6285,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="9923" />
             <source>Emitted RGB: %1, %2, %3. Stored warp speed: %4 (not used by the confirmed gameplay path; lateral warp uses 0.05). Wave multiplier also changes apparent wave-phase speed.</source>
-            <translation>Излучаемый RGB: %1, %2, %3. Сохраненная скорость деформации: %4 (не используется в подтвержденном игровом пути; для боковой деформации используется значение 0,05). Волновой множитель также изменяет кажущуюся скорость фазы волны.</translation>
+            <translation>Итоговый RGB: %1, %2, %3. Сохранённая скорость искажения: %4 (игра её не использует; боковая скорость равна 0,05). Множитель волны также меняет видимую скорость её фазы.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="9972" />
@@ -6307,7 +6307,7 @@ Do you want to save changes?</source>
             <location filename="../source/render/view.cpp" line="10032" />
             <location filename="../source/render/view.cpp" line="15247" />
             <source>Disabled</source>
-            <translation>Неполноценный</translation>
+            <translation>Отключено</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10020" />
@@ -6324,7 +6324,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10095" />
             <source>Invalid tile animation</source>
-            <translation>Неверная анимация плитки</translation>
+            <translation>Недопустимая анимация тайлов</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10096" />
@@ -6344,12 +6344,12 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10113" />
             <source>Clamp to range</source>
-            <translation>Зажим по диапазону</translation>
+            <translation>Ограничить диапазоном</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10114" />
             <source>Normalize / remap range</source>
-            <translation>Нормализовать/переназначить диапазон</translation>
+            <translation>Растянуть значения на новый диапазон</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10115" />
@@ -6359,12 +6359,12 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10123" />
             <source>Raw height delta</source>
-            <translation>Необработанная дельта высоты</translation>
+            <translation>Изменение исходной высоты</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10130" />
             <source>Target raw height</source>
-            <translation>Целевая необработанная высота</translation>
+            <translation>Целевая исходная высота</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10139" />
@@ -6394,7 +6394,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10166" />
             <source>Apply undoable operation</source>
-            <translation>Применить отмену операции</translation>
+            <translation>Применить операцию</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10169" />
@@ -6404,7 +6404,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10179" />
             <source>Scale terrain with vertical range</source>
-            <translation>Масштабируйте местность с помощью вертикального диапазона</translation>
+            <translation>Масштабировать рельеф вместе с высотой</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10180" />
@@ -6414,27 +6414,27 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10182" />
             <source>Allow vertices above the new range to clamp</source>
-            <translation>Разрешить зажим вершинам выше нового диапазона</translation>
+            <translation>Ограничить вершины выше нового диапазона</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10183" />
             <source>New maxZ</source>
-            <translation>Новый МаксЗ</translation>
+            <translation>Новое maxZ</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10184" />
             <source>Policy</source>
-            <translation>Политика</translation>
+            <translation>Способ пересчёта</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10187" />
             <source>Scale terrain keeps every raw sample and changes world-space heights. Preserve world heights requantizes raw samples and may introduce rounding. Clamping is never accepted silently.</source>
-            <translation>Масштабируемый ландшафт сохраняет каждый исходный образец и изменяет высоту мирового пространства. Функция «Сохранить мировые высоты» повторно квантует исходные выборки и может привести к округлению. Зажимы никогда не принимаются молча.</translation>
+            <translation>«Масштабировать рельеф» сохраняет исходные значения и меняет высоту в мире. «Сохранить высоты в мире» пересчитывает исходные значения с возможным округлением. Выход за новый диапазон всегда требует явного разрешения.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10198" />
             <source>Apply undoable scale migration</source>
-            <translation>Применить отменую масштабируемую миграцию</translation>
+            <translation>Применить изменение масштаба</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10201" />
@@ -6446,7 +6446,7 @@ Do you want to save changes?</source>
             <location filename="../source/render/view.cpp" line="10215" />
             <location filename="../source/render/view.cpp" line="10221" />
             <source> tiles</source>
-            <translation>плитка</translation>
+            <translation> тайлов</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10217" />
@@ -6486,17 +6486,17 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10232" />
             <source>Remove objects whose origin lies outside the new canvas</source>
-            <translation>Удалите объекты, происхождение которых находится за пределами нового холста.</translation>
+            <translation>Удалить объекты, опорная точка которых находится за границами новой карты</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10237" />
             <source>Crop/expand is a structural Save As operation. Position the original map directly on the resulting tile grid; right-drag the map in the preview or enter its left/top tile offsets. Sector-aligned retained SEC payloads stay byte-identical; other offsets are re-tiled and freshly validated. Expansion projects the nearest land boundary and does not invent overlays. Closed edges are explicitly lossy and deactivate overlays in the taper band. The preview uses generated MPR terrain only; embedded minimaps and MOB geometry are excluded. A companion MOB is always a new file; its objects are shifted with the map, optionally clipped by object origin, and its stale embedded AI graph is omitted. The 32 x 32 ceiling corresponds to the runtime's 256 x 256 navigation-grid limit.</source>
-            <translation>Обрезать/развернуть — это структурная операция «Сохранить как». Поместите исходную карту непосредственно на полученную сетку плиток; перетащите карту правой кнопкой мыши в предпросмотре или введите смещение ее левого/верхнего фрагмента. Сохраненные полезные данные SEC, выровненные по секторам, остаются байт-идентичными; другие смещения повторно выложены и вновь проверены. При расширении проецируется ближайшая сухопутная граница и не создаются наложения. Закрытые края явно содержат потери и деактивируют наложения в полосе сужения. В предпросмотре используется только сгенерированный ландшафт MPR; встроенные миникарты и геометрия MOB исключены. Сопутствующий MOB — это всегда новый файл; его объекты смещаются вместе с картой, при необходимости обрезаются по источнику объекта, а устаревший встроенный граф ИИ опускается. Потолок 32 x 32 соответствует пределу навигационной сетки среды выполнения 256 x 256.</translation>
+            <translation>Обрезка и расширение всегда сохраняют новый MPR. Расположите исходную карту на сетке тайлов: перетащите её ПКМ в предпросмотре или задайте смещения слева и сверху. При смещении на целые сектора данные SEC сохраняются без изменений; в остальных случаях тайлы перестраиваются и проверяются заново. Расширение продолжает ближайший край суши, но не создаёт новые поверхности. Сглаживание внешнего края меняет данные и отключает поверхности в этой полосе. Предпросмотр показывает только рельеф MPR, без встроенной миникарты и объектов MOB. Связанный MOB всегда создаётся как новый файл: объекты сдвигаются вместе с картой, при необходимости удаляются за её границами, а устаревший встроенный граф ИИ не копируется. Максимум 32 × 32 сектора соответствует игровому пределу навигационной сетки 256 × 256.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10258" />
             <source>Resize canvas and Save As...</source>
-            <translation>Измените размер холста и сохраните как...</translation>
+            <translation>Изменить размер карты и сохранить как...</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10260" />
@@ -6506,12 +6506,12 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10307" />
             <source>Original map offset: X %1, Y %2 tiles. Retain %3 x %4 (%5) source tile(s). World bounds become %6 x %7 units.%8 Output is a new MPR; the source is not overwritten.</source>
-            <translation>Исходное смещение карты: плитки X %1, Y %2. Сохраните исходные фрагменты %3 x %4 (%5). Мировые границы становятся единицами %6 x %7. %8 Выход — новый MPR; источник не перезаписывается.</translation>
+            <translation>Смещение исходной карты: X %1, Y %2 тайлов. Сохраняется область %3 × %4 (%5 тайлов). Размер мира станет %6 × %7 единиц.%8 Результат записывается в новый MPR; исходный файл не изменяется.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10314" />
             <source> The outer %1 tile(s) will be tapered to raw 0.</source>
-            <translation>Внешние плитки %1 будут сужены до исходного 0.</translation>
+            <translation> Внешних тайлов, сглаживаемых до исходной высоты 0: %1.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10401" />
@@ -6552,7 +6552,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10440" />
             <source>Landscape (*.mpr)</source>
-            <translation>Пейзаж (*.mpr)</translation>
+            <translation>MPR (*.mpr)</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10452" />
@@ -6565,10 +6565,10 @@ Do you want to save changes?</source>
 %1
 
 Choose another resized MPR name. No file was changed.</source>
-            <translation>Сопутствующая операция никогда не перезаписывает существующий MOB:
+            <translation>Связанный MOB никогда не перезаписывает существующий файл:
 %1
 
-Выберите другое имя MPR с измененным размером. Ни один файл не был изменен.</translation>
+Выберите другое имя для изменённого MPR. Файлы не изменены.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10458" />
@@ -6599,7 +6599,7 @@ Loaded MOB files will be ignored. Their files and object coordinates will remain
 Create the separately named output now? Retained data will be staged, freshly reopened, backed up if the MPR destination exists, and replaced atomically.</source>
             <translation>%1%2%3
 
-Создать сейчас вывод с отдельным именем? Сохраненные данные будут проиндексированы, вновь открыты, зарезервированы, если существует место назначения MPR, и заменены атомарно.</translation>
+Создать новый файл с отдельным именем? Данные будут подготовлены и повторно проверены; если целевой MPR уже существует, будет создана резервная копия, после чего файл безопасно заменится.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10487" />
@@ -6621,7 +6621,7 @@ Companion MOB: %1 (%2 translated, %3 removed; %4 on the closed-edge band; stale 
         <message>
             <location filename="../source/render/view.cpp" line="10495" />
             <source>Building resized MPR candidate...</source>
-            <translation>Создание кандидата MPR измененного размера...</translation>
+            <translation>Создание MPR нового размера...</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10509" />
@@ -6697,12 +6697,12 @@ Companion MOB: %1 (%2)</source>
         <message>
             <location filename="../source/render/view.cpp" line="10565" />
             <source>Open Atlas Browser...</source>
-            <translation>Откройте браузер Атлас...</translation>
+            <translation>Открыть атлас...</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10577" />
             <source>%1 x %2 sectors; %3 x %4 tiles; %5 x %6 vertices</source>
-            <translation>сектора %1 x %2; плитки %3 x %4; Вершины %5 x %6</translation>
+            <translation>%1 × %2 секторов; %3 × %4 тайлов; %5 × %6 вершин</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10581" />
@@ -6717,12 +6717,12 @@ Companion MOB: %1 (%2)</source>
         <message>
             <location filename="../source/render/view.cpp" line="10588" />
             <source>%1 atlas slots; %2 surface material record(s); %3 tile animation record(s)</source>
-            <translation>Слотов атласа: %1; материалов поверхности: %2; анимаций плиток: %3</translation>
+            <translation>Слотов атласа: %1; материалов поверхности: %2; анимаций тайлов: %3</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10613" />
             <source>The requested migration is invalid.</source>
-            <translation>Запрошенная миграция недействительна.</translation>
+            <translation>Такое изменение масштаба недопустимо.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10620" />
@@ -6758,7 +6758,7 @@ The MP maxZ field and derived SEC normals change; terrain and navigation scale v
         <message>
             <location filename="../source/render/view.cpp" line="10690" />
             <source>The requested operation would exceed the current raw range. It is refused until you choose an explicit clamp or maxZ migration policy.</source>
-            <translation>Запрошенная операция выйдет за пределы текущего исходного диапазона. В этом отказано до тех пор, пока вы не выберете явное ограничение или политику миграции maxZ.</translation>
+            <translation>Операция выйдет за текущий диапазон исходных высот. Выберите ограничение значений или способ изменения maxZ.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10696" />
@@ -6786,7 +6786,7 @@ This changes the terrain preview immediately and is one undoable action.</source
         <message>
             <location filename="../source/render/view.cpp" line="10755" />
             <source>Raw height samples remain unchanged; world heights scale with maxZ and derived SEC normals are rebuilt.</source>
-            <translation>Необработанные образцы высоты остаются неизменными; мировая шкала высот с maxZ и производными нормалями SEC перестроены.</translation>
+            <translation>Исходные значения высоты не меняются; высота в мире масштабируется по maxZ, нормали SEC пересчитываются.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10756" />
@@ -6796,7 +6796,7 @@ This changes the terrain preview immediately and is one undoable action.</source
         <message>
             <location filename="../source/render/view.cpp" line="10759" />
             <source>Apply vertical-scale migration</source>
-            <translation>Применить вертикальную миграцию</translation>
+            <translation>Применить изменение вертикального масштаба</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10760" />
@@ -6805,11 +6805,11 @@ This changes the terrain preview immediately and is one undoable action.</source
 %3
 
 This is one undoable action and will be saved through staged MPR validation.</source>
-            <translation>Измените maxZ с %1 на %2?
+            <translation>Изменить maxZ с %1 на %2?
 
 %3
 
-Это одно действие можно отменить, которое будет сохранено посредством поэтапной проверки MPR.</translation>
+Это одно отменяемое действие. При сохранении MPR будет проверен.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10898" />
@@ -6824,12 +6824,12 @@ This is one undoable action and will be saved through staged MPR validation.</so
         <message>
             <location filename="../source/render/view.cpp" line="10903" />
             <source>This is a transition tile; sample a uniform tile to choose one material.</source>
-            <translation>Это переходная плитка; образец однородной плитки, чтобы выбрать один материал.</translation>
+            <translation>Это переходный тайл. Возьмите образец однородного тайла, чтобы выбрать один материал.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10997" />
             <source>Adding an overlay requires an existing liquid material and atlas tile family.</source>
-            <translation>Для добавления наложения требуется существующий жидкий материал и семейство плиток атласа.</translation>
+            <translation>Для добавления поверхности нужен существующий материал жидкости и семейство тайлов атласа.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11020" />
@@ -6844,7 +6844,7 @@ This is one undoable action and will be saved through staged MPR validation.</so
         <message>
             <location filename="../source/render/view.cpp" line="11050" />
             <source>Choose an atlas tile before painting in manual mode.</source>
-            <translation>Прежде чем рисовать в ручном режиме, выберите плитку атласа.</translation>
+            <translation>Перед рисованием вручную выберите тайл атласа.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11063" />
@@ -6859,7 +6859,7 @@ This is one undoable action and will be saved through staged MPR validation.</so
         <message>
             <location filename="../source/render/view.cpp" line="11070" />
             <source>Paint manual atlas tiles</source>
-            <translation>Покраска плитки из атласа вручную</translation>
+            <translation>Рисовать тайлами атласа вручную</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11090" />
@@ -6869,7 +6869,7 @@ This is one undoable action and will be saved through staged MPR validation.</so
         <message>
             <location filename="../source/render/view.cpp" line="11091" />
             <source>No authored slot template is registered for this atlas namespace.</source>
-            <translation>Для этого пространства имен атласа не зарегистрирован ни один исходный шаблон слота.</translation>
+            <translation>Для этого набора ресурсов атласа не зарегистрирован готовый шаблон слотов.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11119" />
@@ -6885,36 +6885,36 @@ This is one undoable action and will be saved through staged MPR validation.</so
             <location filename="../source/render/view.cpp" line="11170" />
             <location filename="../source/render/view.cpp" line="11426" />
             <source>Paint terrain tiles</source>
-            <translation>Раскрашивайте плитки ландшафта</translation>
+            <translation>Рисовать тайлы рельефа</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11315" />
             <source>Prepare terrain materials</source>
-            <translation>Подготовьте материалы для ландшафта.</translation>
+            <translation>Подготовить материалы рельефа</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11315" />
             <source>This map's atlas does not yet have an approved semantic material profile. Automatic terrain and overlay painting will remain unavailable; manual atlas-tile painting still works.
 
 Generate the review proposal now? The review process only describes existing atlas tiles and does not modify the MPR or texture resources.</source>
-            <translation>Атлас этой карты еще не имеет утвержденного профиля семантического материала. Автоматическое рисование ландшафта и наложение останутся недоступными; ручная покраска атласной плитки все еще работает.
+            <translation>Для атласа этой карты ещё не подтверждено назначение материалов. Автоматическое рисование рельефа и поверхностей пока недоступно, но тайлы атласа можно выбирать вручную.
 
-Сформировать предложение по обзору сейчас? Процесс проверки описывает только существующие фрагменты атласа и не изменяет MPR или ресурсы текстур.</translation>
+Подготовить список материалов для проверки? Он только описывает существующие тайлы и не изменяет MPR или текстуры.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11396" />
             <source>Terrain stroke: %1 stamp(s), %2 changed tile(s), %3 no-op, %4 refused.</source>
-            <translation>Мазок рельефа: шагов %1; плиток изменено %2; без изменений %3; отклонено %4.</translation>
+            <translation>Мазок рельефа: шагов — %1; тайлов изменено — %2; без изменений — %3; отклонено — %4.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11475" />
             <source>Painted %1 atlas tile(s) manually.</source>
-            <translation>Окрашены плитки атласа %1 вручную.</translation>
+            <translation>Нарисовано тайлов атласа вручную: %1.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11476" />
             <source>Painted %1 atlas tile(s), including bounded seam updates.</source>
-            <translation>Окрашенные плитки атласа %1, включая обновления ограниченных швов.</translation>
+            <translation>Нарисовано тайлов атласа с обновлением соседних швов: %1.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11817" />
@@ -6960,7 +6960,7 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="11936" />
             <source>Could not map NID %1 at %2 onto a loaded raw object.</source>
-            <translation>Не удалось сопоставить NID %1 по адресу %2 с загруженным необработанным объектом.</translation>
+            <translation>Не удалось сопоставить NID %1 по адресу %2 с загруженной исходной записью объекта.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="11945" />
@@ -7010,7 +7010,7 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12043" />
             <source>disabled</source>
-            <translation>неполноценный</translation>
+            <translation>отключено</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12045" />
@@ -7025,7 +7025,7 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12058" />
             <source>Behavior setup %1: %2; default enabled; %3 patrol points. Logic 0 ignores its stored enabled setting.</source>
-            <translation>Настройка поведения %1: %2; по умолчанию включено; %3 точки патрулирования. Логический 0 игнорирует сохраненную настройку включения.</translation>
+            <translation>Настройка поведения %1: %2; всегда включена; патрульных точек — %3. Логика 0 не учитывает сохранённый флаг включения.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12060" />
@@ -7036,13 +7036,13 @@ Generate the review proposal now? The review process only describes existing atl
             <location filename="../source/render/view.cpp" line="12071" />
             <location filename="../source/render/view.cpp" line="12354" />
             <source>Patrol point %1</source>
-            <translation>Патрульный пункт %1</translation>
+            <translation>Патрульная точка %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12087" />
             <location filename="../source/render/view.cpp" line="12367" />
             <source>Look point %1</source>
-            <translation>Посмотрите точку %1</translation>
+            <translation>Точка обзора %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12103" />
@@ -7060,13 +7060,13 @@ Generate the review proposal now? The review process only describes existing atl
             <location filename="../source/render/view.cpp" line="12121" />
             <location filename="../source/render/view.cpp" line="12407" />
             <source>Cast targets (%1)</source>
-            <translation>Кастинг целей (%1)</translation>
+            <translation>Цели заклинания (%1)</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12130" />
             <location filename="../source/render/view.cpp" line="12406" />
             <source>Cast target %1</source>
-            <translation>Применить цель %1</translation>
+            <translation>Цель заклинания %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12144" />
@@ -7098,7 +7098,7 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12236" />
             <source>LMB: Select</source>
-            <translation>ЛКМ: Выбрать</translation>
+            <translation>ЛКМ: выбрать</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12236" />
@@ -7108,22 +7108,22 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12237" />
             <source>MMB: Rotate camera</source>
-            <translation>MMB: повернуть камеру</translation>
+            <translation>СКМ: вращать камеру</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12237" />
             <source>G: Move</source>
-            <translation>Г: Двигайся</translation>
+            <translation>G: перемещение</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12240" />
             <source>T: Scale</source>
-            <translation>Т: Масштаб</translation>
+            <translation>T: масштаб</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12240" />
             <source>R: Rotate</source>
-            <translation>Р: повернуть</translation>
+            <translation>R: вращение</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12241" />
@@ -7143,7 +7143,7 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12278" />
             <source>L: Add look to last patrol</source>
-            <translation>L: точка обзора в последний патруль</translation>
+            <translation>L: добавить точку обзора к последней патрульной точке</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12281" />
@@ -7153,12 +7153,12 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12281" />
             <source>L: Add look</source>
-            <translation>Л: Добавить образ</translation>
+            <translation>L: добавить точку обзора</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12283" />
             <source>L: Add look after selected</source>
-            <translation>L: точка обзора после выбранной</translation>
+            <translation>L: добавить точку обзора после выбранной</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12285" />
@@ -7168,7 +7168,7 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12285" />
             <source>L: Add cast target</source>
-            <translation>L: Добавить цель применения</translation>
+            <translation>L: добавить цель заклинания</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12286" />
@@ -7183,12 +7183,12 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12394" />
             <source>Cast targets</source>
-            <translation>Кастинг целей</translation>
+            <translation>Цели заклинания</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12470" />
             <source>Sampled %1 raw height %2 as the Flatten target.</source>
-            <translation>В качестве цели выравнивания выбрана необработанная высота %1 %2.</translation>
+            <translation>Для выравнивания выбрана исходная высота %2 (%1).</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12472" />
@@ -7256,7 +7256,7 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12827" />
             <source>Raw MPR height for black (0-65535):</source>
-            <translation>Необработанная высота MPR для черного цвета (0-65535):</translation>
+            <translation>Исходная высота MPR для чёрного (0–65535):</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12830" />
@@ -7266,7 +7266,7 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12831" />
             <source>Raw MPR height for white (0-65535):</source>
-            <translation>Необработанная высота MPR для белого цвета (0-65535):</translation>
+            <translation>Исходная высота MPR для белого (0–65535):</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12835" />
@@ -7304,11 +7304,11 @@ Orientation: %5
 Raw range: %6 to %7
 
 This is undoable and can be committed through the validated MPR save path.</source>
-            <translation>Растянуть образцы %1 x %2 по вершинам ландшафта %3 x %4?
+            <translation>Растянуть изображение %1 × %2 на %3 × %4 вершины рельефа?
 Ориентация: %5
-Диапазон исходных данных: от %6 до %7
+Исходный диапазон: %6–%7
 
-Это можно отменить и можно сохранить с помощью проверенного пути сохранения MPR.</translation>
+Изменение можно отменить; при сохранении MPR будет проверен.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12916" />
@@ -7318,7 +7318,7 @@ This is undoable and can be committed through the validated MPR save path.</sour
         <message>
             <location filename="../source/render/view.cpp" line="12919" />
             <source>%1 | Raw: %2</source>
-            <translation>%1 | Сырой: %2</translation>
+            <translation>%1 | Исходное: %2</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="13315" />
@@ -7338,7 +7338,7 @@ This is undoable and can be committed through the validated MPR save path.</sour
         <message>
             <location filename="../source/render/view.cpp" line="13333" />
             <source>Sculpt strength: %1</source>
-            <translation>Сила скульптуры: %1</translation>
+            <translation>Сила кисти: %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="13339" />
@@ -7373,7 +7373,7 @@ This is undoable and can be committed through the validated MPR save path.</sour
         <message>
             <location filename="../source/render/view.cpp" line="13840" />
             <source>Scale</source>
-            <translation>Масштабировать</translation>
+            <translation>Масштаб</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="13841" />
@@ -7398,7 +7398,7 @@ This is undoable and can be committed through the validated MPR save path.</sour
         <message>
             <location filename="../source/render/view.cpp" line="14265" />
             <source>Select one or more units as Logic-slot destinations.</source>
-            <translation>Выберите одно или несколько устройств в качестве мест назначения логического слота.</translation>
+            <translation>Выберите одно или несколько существ, которым нужно вставить логику.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="14298" />
@@ -7500,7 +7500,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/render/view.cpp" line="15237" />
             <source>Convert object ID %1 (%2) using the proven Base/JMV lever layout. The original common and opaque object records remain byte-identical. The conversion is one undoable edit.</source>
-            <translation>Преобразуйте идентификатор объекта %1 (%2), используя проверенную схему рычага Base/JMV. Исходные общие и непрозрачные записи объектов остаются байтово-идентичными. Преобразование представляет собой одно изменение с возможностью отмены.</translation>
+            <translation>Преобразовать объект ID %1 (%2) в рычаг по проверенной структуре базовой ПЗ/JMV. Общие и неизвестные записи объекта останутся без изменений. Преобразование можно отменить одним действием.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="15246" />
@@ -7571,12 +7571,12 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/render/view.cpp" line="15285" />
             <source>Endurance could not verify the selected object's lossless raw provenance.</source>
-            <translation>Endurance не удалось проверить исходное происхождение выбранного объекта без потерь.</translation>
+            <translation>Endurance не удалось подтвердить, что исходную запись выбранного объекта можно сохранить без потерь.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="15308" />
             <source>The selected object's raw structure could not be converted safely. See the workflow log.</source>
-            <translation>Необработанную структуру выбранного объекта невозможно безопасно преобразовать. Смотрите журнал рабочего процесса.</translation>
+            <translation>Исходную структуру выбранного объекта нельзя безопасно преобразовать. Подробности — в журнале работы.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="15413" />
@@ -7604,17 +7604,17 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="183" />
             <source>Review and export the current generated minimap</source>
-            <translation>Просмотрите и экспортируйте текущую созданную мини-карту.</translation>
+            <translation>Проверить и экспортировать созданную миникарту</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="187" />
             <source>Regenerate now using current object visibility</source>
-            <translation>Восстановить сейчас, используя текущую видимость объекта.</translation>
+            <translation>Обновить с учётом видимости объектов</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="194" />
             <source>Lock or unlock generated minimap regeneration</source>
-            <translation>Заблокировать или разблокировать генерируемую регенерацию мини-карты</translation>
+            <translation>Разрешить или запретить обновление миникарты</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="197" />
@@ -7624,7 +7624,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="198" />
             <source>Use a smaller minimap</source>
-            <translation>Используйте меньшую миникарту</translation>
+            <translation>Уменьшить миникарту</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="201" />
@@ -7634,7 +7634,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="202" />
             <source>Use a larger minimap</source>
-            <translation>Используйте большую миникарту</translation>
+            <translation>Увеличить миникарту</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="206" />
@@ -7656,7 +7656,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="333" />
             <source>Locked: click to enable regeneration</source>
-            <translation>Заблокировано: нажмите, чтобы включить регенерацию.</translation>
+            <translation>Заблокировано: нажмите, чтобы разрешить обновление</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="334" />
@@ -7666,28 +7666,28 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="337" />
             <source>Applied and locked; unlock before regenerating.</source>
-            <translation>Применено и заблокировано; разблокируйте перед регенерацией.</translation>
+            <translation>Применено и заблокировано; перед обновлением разблокируйте.</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="368" />
             <source>Embedded: %1</source>
-            <translation>Встроен: %1</translation>
+            <translation>Встроенная: %1</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="370" />
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="389" />
             <source>Generated preview</source>
-            <translation>Предпросмотр</translation>
+            <translation>Созданная</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="372" />
             <source>No minimap available</source>
-            <translation>Нет доступной мини-карты</translation>
+            <translation>Миникарта недоступна</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="388" />
             <source>Generated (MPR-only: no MOB source is loaded)</source>
-            <translation>Сгенерировано (только для MPR: источник MOB не загружен)</translation>
+            <translation>Созданная (только MPR, MOB не загружен)</translation>
         </message>
         <message>
             <location filename="../source/ui/viewport_minimap_widget.cpp" line="396" />
@@ -7796,7 +7796,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.ui" line="363" />
             <source>Select</source>
-            <translation>Выбирать</translation>
+            <translation>Выбрать</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.ui" line="380" />
@@ -7974,7 +7974,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.ui" line="597" />
             <source>Randomize Parameter</source>
-            <translation>Рандомизировать параметр</translation>
+            <translation>Случайные параметры</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.ui" line="605" />
@@ -7999,7 +7999,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.ui" line="625" />
             <source>Tiles Parameters</source>
-            <translation>Параметры плитки</translation>
+            <translation>Параметры тайлов</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="621" />
@@ -8030,7 +8030,7 @@ Do you want to %3?</source>
             <location filename="../source/app/main_window.cpp" line="666" />
             <location filename="../source/app/main_window.cpp" line="2065" />
             <source>Logic 0 (default)</source>
-            <translation>Логический 0 (по умолчанию)</translation>
+            <translation>Логика 0 (по умолчанию)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="667" />
@@ -8055,7 +8055,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="671" />
             <source>The unit's normal behavior setup.</source>
-            <translation>Настройка нормального поведения устройства.</translation>
+            <translation>Обычная настройка поведения существа.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="674" />
@@ -8065,7 +8065,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="676" />
             <source>Select which of the unit's five behavior setups is shown and edited. The first setup is the default; the others activate from world alarms 1 to 4.</source>
-            <translation>Выберите, какая из пяти настроек поведения устройства отображается и редактируется. Первая настройка — настройка по умолчанию; остальные активируются в соответствии с мировыми сигналами тревоги от 1 до 4.</translation>
+            <translation>Выберите одну из пяти настроек поведения существа. Первая используется по умолчанию, остальные включаются мировыми тревогами 1–4.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="687" />
@@ -8075,7 +8075,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="688" />
             <source>Select owning object</source>
-            <translation>Выберите объект-владелец</translation>
+            <translation>Выбрать объект-владелец</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="691" />
@@ -8165,7 +8165,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="870" />
             <source>Unload MOBs</source>
-            <translation>Выгрузить MOBов</translation>
+            <translation>Выгрузить MOB</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="871" />
@@ -8255,12 +8255,12 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="993" />
             <source>Show Terrain Tile Grid</source>
-            <translation>Показать сетку плитки ландшафта</translation>
+            <translation>Показать сетку тайлов рельефа</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="995" />
             <source>Draw the 2 x 2 terrain-tile boundaries over the landscape.</source>
-            <translation>Нарисуйте границы плитки местности 2 x 2 поверх ландшафта.</translation>
+            <translation>Показывать на рельефе границы тайлов 2 × 2.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1027" />
@@ -8316,7 +8316,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="1075" />
             <source>Open Collection...</source>
-            <translation>Открытая коллекция...</translation>
+            <translation>Открыть коллекцию...</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1076" />
@@ -8342,7 +8342,7 @@ Do you want to %3?</source>
             <location filename="../source/app/main_window.cpp" line="5510" />
             <location filename="../source/app/main_window.cpp" line="5516" />
             <source>Open Collection</source>
-            <translation>Открытая коллекция</translation>
+            <translation>Открыть коллекцию</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1085" />
@@ -8387,22 +8387,22 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="1099" />
             <source>Show Selected Unit Final Texture...</source>
-            <translation>Показать окончательную текстуру выбранного объекта...</translation>
+            <translation>Показать итоговую текстуру выбранного существа...</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1100" />
             <source>Capture Shadow Diagnostics...</source>
-            <translation>Захват теневой диагностики...</translation>
+            <translation>Собрать диагностику теней...</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1101" />
             <source>Validate Active MOB Family</source>
-            <translation>Подтвердить активное семейство MOB</translation>
+            <translation>Проверить семейство активного MOB</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1102" />
             <source>Validate Current MOB Only</source>
-            <translation>Подтвердить только текущий MOB</translation>
+            <translation>Проверить только текущий MOB</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1103" />
@@ -8440,7 +8440,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="1109" />
             <source>Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. JMV uses hash-owned temporary aliases in the mod Maps directory; source maps are never overwritten.</source>
-            <translation>Создает уникальные временные копии MPR/MOB и запускает активный проверенный профиль запуска. JMV использует временные псевдонимы, принадлежащие хешу, в каталоге Maps мода; исходные карты никогда не перезаписываются.</translation>
+            <translation>Создаёт уникальные временные копии MPR/MOB и запускает их с проверенным игровым профилем. Для JMV временная пара получает случайное имя в папке Maps мода; исходные карты не перезаписываются.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1110" />
@@ -8462,7 +8462,7 @@ Do you want to %3?</source>
             <location filename="../source/app/main_window.cpp" line="1705" />
             <location filename="../source/app/main_window.cpp" line="5155" />
             <source>Endurance backups</source>
-            <translation>Резервные копии на надежность</translation>
+            <translation>Резервные копии Endurance</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1158" />
@@ -8525,7 +8525,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="1205" />
             <source>Select candidate MOB</source>
-            <translation>Выбрать кандидата MOB</translation>
+            <translation>Выберите сравниваемый MOB</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1222" />
@@ -8610,11 +8610,11 @@ Do you want to %3?</source>
 %1
 
 Close it now? Any unsaved progress in that game process will be lost. If you leave it running, Endurance will monitor it and clean up automatically after it exits.</source>
-            <translation>Компания Endurance обнаружила подтвержденный игровой процесс, оставшийся после прерванного сеанса тестирования карты.
+            <translation>Endurance обнаружил игровой процесс, оставшийся после прерванного теста карты.
 
 %1
 
-Закрыть сейчас? Любой несохраненный прогресс в этом игровом процессе будет потерян. Если вы оставите его включенным, Endurance будет отслеживать его и автоматически очищать после выхода.</translation>
+Закрыть его сейчас? Несохранённый прогресс в игре будет потерян. Если оставить процесс запущенным, Endurance дождётся его завершения и автоматически удалит временные файлы.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1425" />
@@ -8624,7 +8624,7 @@ Close it now? Any unsaved progress in that game process will be lost. If you lea
         <message>
             <location filename="../source/app/main_window.cpp" line="1426" />
             <source>Leave Running</source>
-            <translation>Оставьте бег</translation>
+            <translation>Оставить запущенной</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1432" />
@@ -8639,12 +8639,12 @@ Close it now? Any unsaved progress in that game process will be lost. If you lea
         <message>
             <location filename="../source/app/main_window.cpp" line="1484" />
             <source>Generated minimap preview will be staged automatically for Test Current Map.</source>
-            <translation>Сгенерированный предпросмотр мини-карты будет автоматически настроен для проверки текущей карты.</translation>
+            <translation>Созданная миникарта будет автоматически использована при тесте карты.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1485" />
             <source>Embedded minimap selected; Test Current Map will use the active profile texture.</source>
-            <translation>Выбрана встроенная мини-карта; Тестовая текущая карта будет использовать текстуру активного профиля.</translation>
+            <translation>Выбрана встроенная миникарта; при тесте карты будет использована текстура активного профиля.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1523" />
@@ -8669,7 +8669,7 @@ Close it now? Any unsaved progress in that game process will be lost. If you lea
         <message>
             <location filename="../source/app/main_window.cpp" line="1583" />
             <source>Every available ID in %1's effective range is also declared by another runtime-family MOB. Endurance selected unused NID %2 and will continue, but the family ranges should eventually be reviewed.</source>
-            <translation>Каждый доступный идентификатор в эффективном диапазоне %1 также объявляется другим MOB семейства времени выполнения. Компания Endurance выбрала неиспользуемый NID %2 и продолжит работу, но со временем линейки семейства должны быть пересмотрены.</translation>
+            <translation>Весь рабочий диапазон ID %1 также объявлен другим MOB игрового семейства. Endurance выбрал свободный NID %2 и продолжит работу, но диапазоны семейства следует проверить.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="1591" />
@@ -8713,7 +8713,7 @@ Close it now? Any unsaved progress in that game process will be lost. If you lea
         <message>
             <location filename="../source/app/main_window.cpp" line="1934" />
             <source>Part UV projections</source>
-            <translation>Частичные УФ-проекции</translation>
+            <translation>UV-развёртки частей</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2008" />
@@ -8723,12 +8723,12 @@ Close it now? Any unsaved progress in that game process will be lost. If you lea
         <message>
             <location filename="../source/app/main_window.cpp" line="2066" />
             <source>The normal behavior and the reset target for alarm 0. Logic 0 is enabled by default and ignores the Logic enabled setting.</source>
-            <translation>Нормальное поведение и цель сброса для сигнала тревоги 0. Логический 0 включен по умолчанию и игнорирует настройку «Включена логика».</translation>
+            <translation>Обычное поведение и исходное состояние для тревоги 0. Логика 0 всегда включена и не учитывает параметр «Логика включена».</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2085" />
             <source>disabled</source>
-            <translation>неполноценный</translation>
+            <translation>отключено</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2086" />
@@ -8738,22 +8738,22 @@ Close it now? Any unsaved progress in that game process will be lost. If you lea
         <message>
             <location filename="../source/app/main_window.cpp" line="2086" />
             <source>mixed</source>
-            <translation>смешанный</translation>
+            <translation>разные значения</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2088" />
             <source>Logic %1 (alarm %1; selection: %2)</source>
-            <translation>Логика %1 (аварийный сигнал %1; выбор: %2)</translation>
+            <translation>Логика %1 (тревога %1; выделение: %2)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2089" />
             <source>Responds to world alarm %1. Unit selection: %2.</source>
-            <translation>Реагирует на мировой сигнал тревоги %1. Выбор единицы измерения: %2.</translation>
+            <translation>Реагирует на мировую тревогу %1. Выделение существ: %2.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2095" />
             <source>Logic %1 (alarm %1)</source>
-            <translation>Логика %1 (аварийный сигнал %1)</translation>
+            <translation>Логика %1 (тревога %1)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2097" />
@@ -8768,7 +8768,7 @@ Close it now? Any unsaved progress in that game process will be lost. If you lea
         <message>
             <location filename="../source/app/main_window.cpp" line="2171" />
             <source>Final character texture — %1</source>
-            <translation>Финальная текстура персонажа — %1.</translation>
+            <translation>Итоговая текстура персонажа — %1</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2175" />
@@ -8783,8 +8783,8 @@ Visible layers: %4 / %5
 UV projection: renderer-effective QImage upload, Repeat wrapping</source>
             <translation>Модель: %1
 Размер: %2 × %3
-Видимые слои: %4 / %5
-UV проекция: эффективная для рендеринга загрузка QImage, повторная упаковка</translation>
+Видимых слоёв: %4 / %5
+UV-развёртка: итоговая текстура с повторением по краям</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2299" />
@@ -8849,12 +8849,12 @@ UV проекция: эффективная для рендеринга загр
         <message>
             <location filename="../source/app/main_window.cpp" line="2800" />
             <source>Choose map.txt identity...</source>
-            <translation>Выберите идентификатор файла map.txt...</translation>
+            <translation>Выбрать зону из map.txt...</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2814" />
             <source>none</source>
-            <translation>никто</translation>
+            <translation>нет</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2815" />
@@ -8864,7 +8864,7 @@ UV проекция: эффективная для рендеринга загр
         <message>
             <location filename="../source/app/main_window.cpp" line="2821" />
             <source>No valid #deploy entrances</source>
-            <translation>Нет действительных входов #deploy</translation>
+            <translation>Нет подходящих входов #deploy</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2843" />
@@ -8881,12 +8881,12 @@ UV проекция: эффективная для рендеринга загр
             <location filename="../source/app/main_window.cpp" line="3005" />
             <location filename="../source/app/main_window.cpp" line="3214" />
             <source>Entrance spawn</source>
-            <translation>Входной спаун</translation>
+            <translation>Точка появления у входа</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2969" />
             <source>Borrow map.txt identity</source>
-            <translation>Заимствовать идентификатор файла map.txt</translation>
+            <translation>Использовать данные другой зоны из map.txt</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="2970" />
@@ -8896,7 +8896,7 @@ UV проекция: эффективная для рендеринга загр
         <message>
             <location filename="../source/app/main_window.cpp" line="2983" />
             <source>Borrowed map identity: %1. Runtime metadata and scripts belong to that registered zone.</source>
-            <translation>Заимствованный идентификатор карты: %1. Метаданные и сценарии среды выполнения принадлежат этой зарегистрированной зоне.</translation>
+            <translation>Используются данные зоны %1. Игровые метаданные и скрипты принадлежат этой зарегистрированной зоне.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3017" />
@@ -8927,12 +8927,12 @@ UV проекция: эффективная для рендеринга загр
             <location filename="../source/app/main_window.cpp" line="3047" />
             <location filename="../source/app/main_window.cpp" line="3204" />
             <source>Play from Here</source>
-            <translation>Играйте отсюда</translation>
+            <translation>Играть отсюда</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3193" />
             <source>Selects the map.txt entrance used to initialize the runtime session.</source>
-            <translation>Выбирает вход в файл map.txt, используемый для инициализации сеанса среды выполнения.</translation>
+            <translation>Выбирает вход из map.txt, с которого начнётся тест в игре.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3206" />
@@ -8947,12 +8947,12 @@ UV проекция: эффективная для рендеринга загр
         <message>
             <location filename="../source/app/main_window.cpp" line="3209" />
             <source>Centers the editor camera on the selected map.txt deploy area.</source>
-            <translation>Центрирует камеру редактора в выбранной области развертывания файла map.txt.</translation>
+            <translation>Перемещает камеру редактора к выбранной области входа из map.txt.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3210" />
             <source>Godmode</source>
-            <translation>Режим Бога</translation>
+            <translation>Режим бессмертия</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3211" />
@@ -8988,14 +8988,14 @@ UV проекция: эффективная для рендеринга загр
             <location filename="../source/app/main_window.cpp" line="3420" />
             <location filename="../source/app/main_window.cpp" line="3657" />
             <source>Play from Here, Godmode, and time override are unavailable for this loaded MOB set. Test Current Map and Hot Reload remain available.</source>
-            <translation>Для этого загруженного набора MOB недоступны режим «Игра отсюда», режим Бога и переопределение времени. Тестовая текущая карта и горячая перезагрузка остаются доступными.</translation>
+            <translation>Для этого набора MOB недоступны «Играть отсюда», режим бессмертия и изменение времени. Тест карты и горячая перезагрузка остаются доступными.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3447" />
             <location filename="../source/app/main_window.cpp" line="3589" />
             <location filename="../source/app/main_window.cpp" line="3597" />
             <source>Hot Reload Map</source>
-            <translation>Карта горячей перезагрузки</translation>
+            <translation>Перезагрузить карту</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3457" />
@@ -9009,7 +9009,7 @@ UV проекция: эффективная для рендеринга загр
 Runtime state: %1
 Save generation: %2</source>
             <translation>Перезапустите точную пару редакторов и перезагрузите ее в процессе JMV, принадлежащем Endurance (Ctrl+F5).
-Состояние времени выполнения: %1
+Состояние игры: %1
 Создание сохранения: %2</translation>
         </message>
         <message>
@@ -9030,7 +9030,7 @@ Save generation: %2</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="3498" />
             <source>Endurance is waiting for an interrupted test game to finish exiting and for hash-owned cleanup to complete.</source>
-            <translation>Endurance ожидает завершения прерванной тестовой игры и завершения очистки, принадлежащей хешу.</translation>
+            <translation>Endurance ждёт завершения прерванного теста и удаления принадлежащих ему временных файлов.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3499" />
@@ -9069,7 +9069,7 @@ Save generation: %2</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="3517" />
             <source>This loose MPR/MOB pair has no map.txt identity. Place Play from Here, or explicitly borrow a registered map identity.</source>
-            <translation>Эта свободная пара MPR/MOB не имеет идентификатора map.txt. Разместите игру отсюда или явно заимствуйте зарегистрированный идентификатор карты.</translation>
+            <translation>Эта отдельная пара MPR/MOB не привязана к зоне из map.txt. Задайте точку «Играть отсюда» или явно выберите данные зарегистрированной зоны.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3518" />
@@ -9084,7 +9084,7 @@ Save generation: %2</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="3523" />
             <source>Runs the exact-hash Base EI direct-launch feasibility probe (Ctrl+F5).</source>
-            <translation>Запускает проверку осуществимости прямого запуска Base EI с точным хэшем (Ctrl+F5).</translation>
+            <translation>Запускает проверку прямого старта базовой «Проклятой земли» для точно совпадающей версии игры (Ctrl+F5).</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3524" />
@@ -9145,7 +9145,7 @@ Save generation: %2</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="3610" />
             <source>Validating the active runtime profile...</source>
-            <translation>Проверка активного профиля времени выполнения...</translation>
+            <translation>Проверка активного профиля игры...</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3619" />
@@ -9156,12 +9156,12 @@ Save generation: %2</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="3620" />
             <source>Hot reload is currently available only for an Endurance-owned JMV test process.</source>
-            <translation>Горячая перезагрузка в настоящее время доступна только для процесса тестирования JMV, принадлежащего Endurance.</translation>
+            <translation>Горячая перезагрузка сейчас доступна только для процесса тестирования JMV, принадлежащего Endurance.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3628" />
             <source>The active installation does not match an exact supported or experimental runtime manifest. Run Game and Mod Setup again and review its diagnostics.</source>
-            <translation>Активная установка не соответствует точному поддерживаемому или экспериментальному манифесту среды выполнения. Снова запустите настройку игры и мода и просмотрите результаты диагностики.</translation>
+            <translation>Установленная версия игры не совпадает ни с одним поддерживаемым или экспериментальным профилем. Повторно откройте настройку игры и мода и проверьте диагностику.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3629" />
@@ -9170,11 +9170,11 @@ Save generation: %2</source>
 %1
 
 Run Game and Mod Setup again if this is not the intended installation.</source>
-            <translation>Активная установка не соответствует точному поддерживаемому или экспериментальному манифесту среды выполнения.
+            <translation>Установленная версия игры не совпадает ни с одним поддерживаемым или экспериментальным профилем.
 
 %1
 
-Запустите настройку игры и модов еще раз, если это не предполагаемая установка.</translation>
+Если выбрана не та папка игры, повторно откройте настройку игры и мода.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3633" />
@@ -9206,7 +9206,7 @@ Run Game and Mod Setup again if this is not the intended installation.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="3683" />
             <source>The active profile has no valid gameplay map.txt entrance that can initialize a temporary player session.</source>
-            <translation>Активный профиль не имеет действующего входа в файл gamemap.txt, который мог бы инициализировать временный сеанс игрока.</translation>
+            <translation>В активном профиле нет подходящего игрового входа из map.txt для временного игрока.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3695" />
@@ -9216,25 +9216,25 @@ Run Game and Mod Setup again if this is not the intended installation.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="3698" />
             <source>Choosing a safe map-table entrance...</source>
-            <translation>Выбор безопасного входа в виде таблицы с картой...</translation>
+            <translation>Выбор подходящего входа из map.txt...</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3704" />
             <location filename="../source/app/main_window.cpp" line="3890" />
             <source>Base EI feasibility probe</source>
-            <translation>Базовое исследование осуществимости EI</translation>
+            <translation>Проверка прямого запуска базовой ПЗ</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3705" />
             <source>The Base probe currently accepts exactly one MOB. Supplemental MOB redirection is JMV-only.</source>
-            <translation>Базовый зонд в настоящее время принимает ровно один MOB. Дополнительное перенаправление MOB доступно только для JMV.</translation>
+            <translation>Базовый зонд сейчас принимает ровно один MOB. Дополнительное перенаправление MOB доступно только для JMV.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3719" />
             <source>No deploy rectangle was found in the selected zone's map-table entrances. Endurance will not invent a player entrance.
 
 %1</source>
-            <translation>Во входах в таблицу карты выбранной зоны не обнаружено прямоугольника развертывания. Endurance не будет изобретать вход для игрока.
+            <translation>У выбранной зоны в map.txt нет области входа #deploy. Endurance не будет создавать вход игрока автоматически.
 
 %1</translation>
         </message>
@@ -9280,9 +9280,9 @@ Run Game and Mod Setup again if this is not the intended installation.</source>
             <source>The run-local MOB copy could not be prepared for the generated AI graph:
 
 %1</source>
-            <translation>Не удалось подготовить локальную копию MOB для сгенерированного графа ИИ:
+            <translation>Не удалось подготовить временную копию MOB для созданного графа ИИ:
 
-%1.</translation>
+%1</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3786" />
@@ -9312,13 +9312,13 @@ JMV initializes one normal player through map-table zone %1 and hand-placed entr
 Source maps, JMV configuration, and live campaign saves are not changed. Complete payloads remain under Endurance AppData; the proven JMV loader also uses one randomly named, hash-owned MPR/MOB alias in the mod Maps directory and removes it on guarded cleanup. Every save/load path is redirected into a persistent profile-specific AppData folder shared by Endurance test runs. Intro movies are hidden only for the test process. Returning to the menu or travelling away may use original installed maps; use Stop Test when finished.
 
 Start the direct JMV map test?</source>
-            <translation>Этот экспериментальный тест только для JMV обрабатывает точную текущую пару MPR/MOB, включая несохраненные изменения в памяти, под уникальным временным именем. После того, как JMV завершает обычную загрузку меню, Endurance вызывает путь к новой игре для одиночной игры с отпечатками пальцев в игровом потоке и предоставляет временную пару. Никакие консольные/серверные команды или фиксированная задержка не используются.
+            <translation>Этот экспериментальный тест JMV запускает точное текущее состояние MPR/MOB, включая несохранённые правки, под уникальным временным именем. После загрузки обычного меню Endurance запускает одиночную «Новую игру» и передаёт подготовленную карту. Консольные команды и фиксированные задержки не используются.
 
-JMV инициализирует одного обычного игрока через зону таблицы карт %1 и размещенный вручную вход %2; %3.
+JMV создаёт обычного игрока в зоне %1 у вручную заданного входа %2; %3.
 
-Исходные карты, конфигурация JMV и сохранения активной кампании не изменяются. Полные данные остаются в разделе Endurance AppData; проверенный загрузчик JMV также использует один псевдоним MPR/MOB со случайным именем, принадлежащий хешу, в каталоге карт мода и удаляет его при защищенной очистке. Каждый путь сохранения/загрузки перенаправляется в постоянную папку AppData для конкретного профиля, совместно используемую при выполнении тестов на Endurance. Вступительные ролики скрыты только для тестового процесса. Возврат в меню или путешествие могут использовать оригинальные установленные карты; по завершении используйте Остановить тест.
+Исходные карты, настройки JMV и сохранения кампании не изменяются. Полные временные данные хранятся в AppData Endurance. Для загрузки также создаётся случайно названная временная пара MPR/MOB в папке Maps мода; она удаляется после завершения теста. Сохранения тестов направляются в отдельную постоянную папку AppData этого профиля. Вступительные ролики скрываются только для тестового процесса. После возврата в меню или перехода в другую зону игра может загрузить установленные карты; по завершении нажмите «Остановить тест».
 
-Начать прямой тест карты JMV?</translation>
+Запустить прямой тест карты JMV?</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3805" />
@@ -9327,18 +9327,18 @@ JMV инициализирует одного обычного игрока че
 Run the probe levels in order. Source maps and the Base game installation are not modified.
 
 Continue to probe-level selection?</source>
-            <translation>Эта проверка осуществимости Base EI с точным хэшем использует 32-битный хост, принадлежащий редактору. Он приостанавливает базовый файл game.exe, загружает мост локального запуска только в этот принадлежащий ему процесс, вызывает его явный инициализатор вне DllMain и возобновляет работу только после прохождения защиты отпечатков пальцев и байтов.
+            <translation>Эта экспериментальная проверка прямого запуска работает только с точно распознанной версией базовой игры. Endurance запускает собственный 32-битный процесс game.exe в приостановленном состоянии, проверяет версию и ожидаемые данные, подключает временный модуль только к этому процессу и лишь затем продолжает запуск.
 
-Запустите уровни проверки по порядку. Исходные карты и установка базовой игры не изменяются.
+Проходите уровни проверки по порядку. Исходные карты и установленная базовая игра не изменяются.
 
-Продолжить выбор уровня проверки?</translation>
+Перейти к выбору уровня?</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3807" />
             <source>LOOSE MAP WARNING: this MPR/MOB pair has no map.txt entry. Endurance will create a process-local synthetic zone with the loaded MPR dimensions and the Play from Here point as its only entrance. It has no inherited minimap, travel zones, or registered quest identity. The installed map table and source files are not changed.
 
 </source>
-            <translation>ПРЕДУПРЕЖДЕНИЕ О СВОБОДНОЙ КАРТЕ: эта пара MPR/MOB не имеет записи в файле map.txt. Endurance создаст локальную для процесса синтетическую зону с загруженными размерами MPR и точкой «Играть отсюда» в качестве единственного входа. У него нет унаследованной мини-карты, зон перемещения или зарегистрированного идентификатора квеста. Установленная таблица карт и исходные файлы не изменяются.
+            <translation>ПРЕДУПРЕЖДЕНИЕ: эта пара MPR/MOB не зарегистрирована в map.txt. Только для тестового процесса Endurance создаст временную зону размером с загруженный MPR и единственным входом в точке «Играть отсюда». У неё не будет миникарты, переходов и зарегистрированных квестовых данных. Установленный map.txt и исходные файлы не изменяются.
 
 </translation>
         </message>
@@ -9385,12 +9385,12 @@ Continue to probe-level selection?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="3884" />
             <source>2 - Pass-through hooks (start Base New Game manually)</source>
-            <translation>2 — Сквозные крючки (запустите Base Новая игра вручную)</translation>
+            <translation>2 — проверить перехват без перенаправления (запустить «Новую игру» вручную)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3885" />
             <source>3 - Byte-identical staged redirect</source>
-            <translation>3 — поэтапное перенаправление с идентичным байтом</translation>
+            <translation>3 — временная копия без изменения данных</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3886" />
@@ -9405,7 +9405,7 @@ Continue to probe-level selection?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="3924" />
             <source>Applying the staged map generation in the game...</source>
-            <translation>Применение поэтапной генерации карт в игре...</translation>
+            <translation>Применение подготовленной карты в игре...</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="3926" />
@@ -9447,18 +9447,18 @@ Continue to probe-level selection?</source>
             <location filename="../source/app/main_window.cpp" line="4147" />
             <source>Generated: %1 static objects; %2 hidden; %3 units excluded
 %4</source>
-            <translation>Сгенерировано: статические объекты %1; %2 скрыт; Блоки %3 исключены
+            <translation>Создано: статических объектов — %1; скрытых — %2; исключено существ — %3
 %4</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4165" />
             <source>Generated minimap locked; automatic regeneration is paused.</source>
-            <translation>Сгенерированная мини-карта заблокирована; автоматическая регенерация приостановлена.</translation>
+            <translation>Созданная миникарта заблокирована; автоматическое обновление приостановлено.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4166" />
             <source>Generated minimap unlocked; automatic regeneration is enabled.</source>
-            <translation>Сгенерированная мини-карта разблокирована; автоматическая регенерация включена.</translation>
+            <translation>Созданная миникарта разблокирована; автоматическое обновление включено.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4202" />
@@ -9478,14 +9478,14 @@ Continue to probe-level selection?</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="4210" />
             <source>Load the primary MOB before baking or exporting an AI graph.</source>
-            <translation>Загрузите основной MOB перед запеканием или экспортом графа ИИ.</translation>
+            <translation>Загрузите основной MOB перед встраиванием или экспортом графа ИИ.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4221" />
             <source>Endurance could not prepare a runtime-compatible AI graph:
 
 %1</source>
-            <translation>Endurance не удалось подготовить граф ИИ, совместимый со средой выполнения:
+            <translation>Endurance не удалось подготовить граф ИИ для игры:
 
 %1</translation>
         </message>
@@ -9510,10 +9510,10 @@ Runtime priority is the primary MOB's embedded graph first, then the exact activ
             <translation>
 
 Активный MPR: %1
-Внешний граф времени выполнения: %2
+Внешний .grp для игры: %2
 Основной MOB: %3
 
-Приоритетом времени выполнения сначала является встроенный граф основного MOB, а затем точный родственный файл активного MPR .grp.</translation>
+Игра сначала использует граф, встроенный в основной MOB. Если его нет — внешний .grp с именем активного MPR.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4256" />
@@ -9522,7 +9522,7 @@ Runtime priority is the primary MOB's embedded graph first, then the exact activ
 The primary MOB currently has an embedded graph. Export Runtime .grp writes the selected graph. Switch MOB to External .grp never writes the existing .grp; it only validates that file and removes embedded ownership from the MOB.</source>
             <translation>
 
-Основной MOB в настоящее время имеет встроенный граф. Экспорт игрового .grp записывает выбранный граф. Переключение MOB на внешний .grp никогда не записывает существующий .grp; он только проверяет этот файл и удаляет встроенное право собственности из MOB.</translation>
+В основном MOB уже есть встроенный граф. «Экспортировать игровой .grp» записывает выбранный граф. «Переключить MOB на внешний .grp» не изменяет существующий .grp: команда проверяет файл и удаляет встроенный граф из MOB.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4258" />
@@ -9531,17 +9531,17 @@ The primary MOB currently has an embedded graph. Export Runtime .grp writes the 
 The primary MOB has unsaved edits. Bake or Switch will commit those edits together with the graph through the verified MOB save path.</source>
             <translation>
 
-У основного MOB есть несохраненные изменения. Встроить или переключить сохранит эти изменения вместе с графом через проверенный путь сохранения MOB.</translation>
+В основном MOB есть несохранённые изменения. При встраивании или переключении они будут сохранены вместе с графом после проверки MOB.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4265" />
             <source>Choose how '%1' should be persisted.</source>
-            <translation>Выберите способ сохранения «%1».</translation>
+            <translation>Выберите, как сохранить граф «%1».</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4268" />
             <source>Export Runtime .grp</source>
-            <translation>Экспортировать среду выполнения .grp</translation>
+            <translation>Экспортировать игровой .grp</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4270" />
@@ -9561,7 +9561,7 @@ The primary MOB has unsaved edits. Bake or Switch will commit those edits togeth
         <message>
             <location filename="../source/app/main_window.cpp" line="4294" />
             <source>Staging and validating %1...</source>
-            <translation>Постановка и проверка %1...</translation>
+            <translation>Подготовка и проверка %1...</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4308" />
@@ -9569,24 +9569,24 @@ The primary MOB has unsaved edits. Bake or Switch will commit those edits togeth
 
 Phase: %1
 %2</source>
-            <translation>.grp среды выполнения не был изменен.
+            <translation>Игровой .grp не изменён.
 
-Фаза: %1
+Этап: %1
 %2</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4313" />
             <source>The exact runtime .grp already contained the selected graph:
 %1</source>
-            <translation>Точный .grp времени выполнения уже содержал выбранный граф:
+            <translation>В игровом .grp уже находится выбранный граф:
 %1</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4315" />
             <source>Exported and freshly validated the exact runtime .grp:
 %1</source>
-            <translation>Экспортировано и заново проверено точное время выполнения .grp:
-%1.</translation>
+            <translation>Игровой .grp экспортирован и повторно проверен:
+%1</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4318" />
@@ -9595,7 +9595,7 @@ Phase: %1
 It is currently shadowed by the primary MOB's embedded graph.</source>
             <translation>
 
-В настоящее время он затенен встроенным графом основного MOB.</translation>
+Сейчас игра использует встроенный граф основного MOB вместо этого файла.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4324" />
@@ -9609,7 +9609,7 @@ It is currently shadowed by the primary MOB's embedded graph.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="4327" />
             <source>Baked the selected graph into %1. It now has runtime priority over any sibling .grp.</source>
-            <translation>Запеченный выбранный граф в %1. Теперь он имеет приоритет в игре над любым родственным .grp.</translation>
+            <translation>Выбранный граф встроен в %1. Теперь игра использует его вместо внешнего .grp с именем MPR.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4332" />
@@ -9630,7 +9630,7 @@ It is currently shadowed by the primary MOB's embedded graph.</source>
             <source>The embedded graph was left untouched because no valid existing runtime .grp is available. Export a graph first, then retry the ownership switch.
 
 %1</source>
-            <translation>Внедренный граф остался нетронутым, поскольку существующий файл .grp среды выполнения недоступен. Сначала экспортируйте граф, а затем повторите попытку переключения владельца.
+            <translation>Встроенный граф не изменён: подходящий внешний .grp не найден или не прошёл проверку. Сначала экспортируйте граф, затем повторите переключение.
 
 %1</translation>
         </message>
@@ -9639,14 +9639,14 @@ It is currently shadowed by the primary MOB's embedded graph.</source>
             <source>The existing runtime .grp was not changed, but the embedded graph could not be removed. The MOB still shadows the external file, so runtime ownership has not changed.
 
 %1</source>
-            <translation>Существующий .grp среды выполнения не был изменен, но встроенный граф невозможно было удалить. MOB по-прежнему скрывает внешний файл, поэтому право собственности в игре не изменилось.
+            <translation>Внешний .grp не изменён, но удалить встроенный граф из MOB не удалось. Поэтому игра по-прежнему использует встроенный граф.
 
 %1</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4352" />
             <source>Preserved the existing runtime graph %1 unchanged and removed the embedded graph from %2. The active MPR now resolves that sibling .grp at runtime.</source>
-            <translation>Существующий граф времени выполнения %1 сохранен без изменений и удален встроенный граф из %2. Активный MPR теперь разрешает этот родственный .grp в игре.</translation>
+            <translation>Внешний граф %1 оставлен без изменений, а встроенный граф удалён из %2. Теперь игра использует .grp с именем активного MPR.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4356" />
@@ -9672,7 +9672,7 @@ Existing graph warning: %1</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="4427" />
             <source>Applied and locked generated texture</source>
-            <translation>Применена и заблокирована сгенерированная текстура.</translation>
+            <translation>Созданная текстура применена и заблокирована</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4428" />
@@ -9682,7 +9682,7 @@ Existing graph warning: %1</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="4476" />
             <source>Generated minimap applied and locked.</source>
-            <translation>Сгенерированная мини-карта применена и заблокирована.</translation>
+            <translation>Созданная миникарта применена и заблокирована.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4492" />
@@ -9742,12 +9742,12 @@ Reload Now uses the normal unsaved-change checks. Keep Working preserves the cur
         <message>
             <location filename="../source/app/main_window.cpp" line="4731" />
             <source>Validating runtime MOB family…</source>
-            <translation>Проверка семейства MOB среды выполнения…</translation>
+            <translation>Проверка игрового семейства MOB…</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4792" />
             <source>Unit visual</source>
-            <translation>Визуализация единицы</translation>
+            <translation>Внешний вид существа</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4793" />
@@ -9762,7 +9762,7 @@ Reload Now uses the normal unsaved-change checks. Keep Working preserves the cur
         <message>
             <location filename="../source/app/main_window.cpp" line="4840" />
             <source>New family ID risk</source>
-            <translation>Риск нового семейного удостоверения личности</translation>
+            <translation>Риск ID в новом семействе</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4890" />
@@ -9773,7 +9773,7 @@ Reload Now uses the normal unsaved-change checks. Keep Working preserves the cur
         <message>
             <location filename="../source/app/main_window.cpp" line="4890" />
             <source>Family members</source>
-            <translation>Члены семьи</translation>
+            <translation>Файлы семейства</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4891" />
@@ -9803,18 +9803,18 @@ Reload Now uses the normal unsaved-change checks. Keep Working preserves the cur
         <message>
             <location filename="../source/app/main_window.cpp" line="4915" />
             <source>SHADOWED</source>
-            <translation>ЗАТЕНЕННЫЙ</translation>
+            <translation>НЕ ИСПОЛЬЗУЕТСЯ</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4916" />
             <source>Not collision-checked; workspace source overrides it</source>
-            <translation>Не проверяется столкновение; источник рабочей области переопределяет его</translation>
+            <translation>Не проверено: вместо этого источника используется файл из рабочей области</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="4919" />
             <source>Shadowed source for %1
 %2</source>
-            <translation>Скрытый источник для %1
+            <translation>Неиспользуемый источник для %1
 %2</translation>
         </message>
         <message>
@@ -9883,7 +9883,7 @@ Reload Now uses the normal unsaved-change checks. Keep Working preserves the cur
             <source>
 Requested: %1 / entrance %2   Runtime: %3 / entrance %4</source>
             <translation>
-Запрошено: %1 / вход %2 Время выполнения: %3 / вход %4</translation>
+Запрошено: %1 / вход %2 Время игры: %3 / вход %4</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5083" />
@@ -9893,7 +9893,7 @@ Requested: %1 / entrance %2   Runtime: %3 / entrance %4</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="5124" />
             <source>Dismiss</source>
-            <translation>Увольнять</translation>
+            <translation>Закрыть</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5148" />
@@ -9923,7 +9923,7 @@ Requested: %1 / entrance %2   Runtime: %3 / entrance %4</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="5257" />
             <source>Object NID %1 is not selectable: its provenance is ambiguous or no longer present.</source>
-            <translation>Объект NID %1 не может быть выбран: его происхождение неоднозначно или больше не существует.</translation>
+            <translation>Нельзя выбрать объект NID %1: его исходная запись неоднозначна или уже отсутствует.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5263" />
@@ -9939,12 +9939,12 @@ Requested: %1 / entrance %2   Runtime: %3 / entrance %4</source>
             <location filename="../source/app/main_window.cpp" line="5437" />
             <location filename="../source/app/main_window.cpp" line="5444" />
             <source>NID repair</source>
-            <translation>ремонт NID</translation>
+            <translation>Исправление NID</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5294" />
             <source>No repairable reserved object ID or critical NID collision is present in the active runtime family.</source>
-            <translation>В активном семействе среды выполнения нет идентификатора зарезервированного объекта, поддающегося исправлению, или критического конфликта NID.</translation>
+            <translation>В активном игровом семействе нет исправляемого зарезервированного ID объекта или критического конфликта NID.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5305" />
@@ -9954,12 +9954,12 @@ Requested: %1 / entrance %2   Runtime: %3 / entrance %4</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="5308" />
             <source>Nothing is changed automatically. Select the newly added/edited owners to renumber. Endurance preserves the established collision owner by default and refuses automatic repair when a script or typed ParentID reference is ambiguous. Ordinary save remains available for legacy data, but Test Current Map is blocked while an authored NID 0 remains.</source>
-            <translation>Автоматически ничего не меняется. Выберите вновь добавленных/отредактированных владельцев для изменения нумерации. Endurance по умолчанию сохраняет установленного владельца коллизии и отказывается от автоматического восстановления, если сценарий или введенная ссылка ParentID неоднозначны. Обычное сохранение остается доступным для устаревших данных, но тестовая текущая карта блокируется, а исходный NID 0 остается.</translation>
+            <translation>Автоматически ничего не меняется. Выберите новые или изменённые объекты, которым нужно назначить другие ID. По умолчанию Endurance сохраняет ID за существующим объектом и не выполняет автоматическое исправление при неоднозначной ссылке в скрипте или ParentID. Старые данные можно сохранить как обычно, но тест карты заблокирован, пока в ней остаётся сохранённый NID 0.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5317" />
             <source>Repair</source>
-            <translation>Ремонт</translation>
+            <translation>Исправить</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5317" />
@@ -10014,7 +10014,7 @@ Requested: %1 / entrance %2   Runtime: %3 / entrance %4</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="5374" />
             <source>Ready</source>
-            <translation>Готовый</translation>
+            <translation>Готово</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5375" />
@@ -10034,7 +10034,7 @@ Requested: %1 / entrance %2   Runtime: %3 / entrance %4</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="5416" />
             <source>Replacement NID %1 is already used by the family or another selected repair.</source>
-            <translation>Замена NID %1 уже используется в родном или другом выбранном ремонте.</translation>
+            <translation>NID %1 уже используется в семействе или выбран для другого исправления.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5431" />
@@ -10081,7 +10081,7 @@ Requested: %1 / entrance %2   Runtime: %3 / entrance %4</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="5524" />
             <source>Collection profile</source>
-            <translation>Профиль коллекции</translation>
+            <translation>Профиль коллекции не совпадает</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5525" />
@@ -10108,7 +10108,7 @@ Requested: %1 / entrance %2   Runtime: %3 / entrance %4</source>
             <location filename="../source/app/main_window.cpp" line="5545" />
             <location filename="../source/app/main_window.cpp" line="5907" />
             <source>Loading landscape...</source>
-            <translation>Загрузка пейзажа...</translation>
+            <translation>Загрузка рельефа...</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="5556" />
@@ -10158,7 +10158,7 @@ Load it now?</source>
             <source>This collection is currently loaded. Reload it now to apply the changed MPR, MOB set, and map identity?
 
 If any loaded document has unsaved edits, Endurance will ask whether to save them before replacing the workspace.</source>
-            <translation>Эта коллекция в настоящее время загружена. Перезагрузите его сейчас, чтобы применить измененные MPR, набор MOB и идентификатор карты?
+            <translation>Эта коллекция сейчас загружена. Перезагрузите его сейчас, чтобы применить измененные MPR, набор MOB и идентификатор карты?
 
 Если в каком-либо загруженном документе есть несохраненные изменения, Endurance спросит, следует ли сохранить их перед заменой рабочей области.</translation>
         </message>
@@ -10458,12 +10458,12 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="6948" />
             <source>A new landscape reuses the exact atlas, material, and animation metadata from a proven template MPR. Endurance creates fresh MP/SEC members and does not invent a MOB or map.txt registration. If you change the namespace, matching atlas textures must already exist in the active resource profile.</source>
-            <translation>Новый ландшафт повторно использует точные метаданные атласа, материалов и анимации из проверенного шаблона MPR. Endurance создает новых членов MP/SEC и не изобретает регистрацию MOB или map.txt. Если вы измените пространство имен, соответствующие текстуры атласа уже должны существовать в профиле активного ресурса.</translation>
+            <translation>Новый рельеф копирует данные атласа, материалов и анимации из проверенного шаблона MPR. Endurance создаёт новые ресурсы MP/SEC, но не создаёт MOB и запись в map.txt. При смене имени ресурсов соответствующие текстуры атласа уже должны находиться в активном профиле.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="6958" />
             <source>A proven MPR whose atlas namespace, tile metadata, liquid materials, animations, and other MP settings will be copied. The template itself is never modified.</source>
-            <translation>Проверенный MPR, в котором будут скопированы пространство имен атласа, метаданные плитки, жидкие материалы, анимация и другие настройки MP. Сам шаблон никогда не модифицируется.</translation>
+            <translation>Проверенный MPR, из которого будут скопированы имя ресурсов атласа, данные тайлов, материалы жидкостей, анимации и другие настройки MP. Сам шаблон не изменяется.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="6960" />
@@ -10479,12 +10479,12 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="6969" />
             <source>Internal MP/SEC resource-name stem for the new archive. Keep the template namespace unless matching atlas textures already exist under a different namespace.</source>
-            <translation>Основа имени внутреннего ресурса MP/SEC для нового архива. Сохраняйте пространство имен шаблона, если соответствующие текстуры атласа уже не существуют в другом пространстве имен.</translation>
+            <translation>Общая основа имён внутренних ресурсов MP/SEC в новом архиве. Оставьте имя из шаблона, если подходящие текстуры атласа не существуют под другим именем.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="6971" />
             <source>MPR namespace</source>
-            <translation>пространство имен MPR</translation>
+            <translation>Пространство имён MPR</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="6978" />
@@ -10499,12 +10499,12 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="6982" />
             <source>Width (16-tile sectors)</source>
-            <translation>Ширина (16-клеточных секторов)</translation>
+            <translation>Ширина (секторы по 16 тайлов)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="6983" />
             <source>Height (16-tile sectors)</source>
-            <translation>Высота (16-клеточные сектора)</translation>
+            <translation>Высота (секторы по 16 тайлов)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="6988" />
@@ -10519,12 +10519,12 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="6994" />
             <source>Initial terrain height when no heightmap is selected. World height = raw height / 65535 x maxZ. A selected heightmap replaces this value across the terrain.</source>
-            <translation>Начальная высота местности, когда карта высот не выбрана. Высота мира = необработанная высота / 65535 x maxZ. Выбранная карта высот заменяет это значение на местности.</translation>
+            <translation>Начальная высота рельефа без карты высот. Высота в мире = исходная высота / 65535 × maxZ. При выборе карты высот это значение заменяется по всему рельефу.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="6996" />
             <source>Flat raw height</source>
-            <translation>Плоская необработанная высота</translation>
+            <translation>Исходная высота плоскости</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="6999" />
@@ -10568,7 +10568,7 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="7007" />
             <source>Initial tile rotation</source>
-            <translation>Начальное вращение плитки</translation>
+            <translation>Поворот начального тайла</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7008" />
@@ -10588,7 +10588,7 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="7018" />
             <source>Edge taper width (tiles)</source>
-            <translation>Ширина конуса края (плитка)</translation>
+            <translation>Ширина сглаживания края (тайлы)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7022" />
@@ -10613,22 +10613,22 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="7040" />
             <source>Raw terrain height assigned to black pixels. It may be higher than the white endpoint to invert the heightmap.</source>
-            <translation>Необработанная высота ландшафта назначена черным пикселям. Это может быть выше белой конечной точки, чтобы инвертировать карту высот.</translation>
+            <translation>Исходная высота для чёрных пикселей. Она может быть выше значения для белых, чтобы инвертировать карту высот.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7042" />
             <source>Raw terrain height assigned to white pixels. It may be lower than the black endpoint to invert the heightmap.</source>
-            <translation>Необработанная высота ландшафта назначена белым пикселям. Оно может быть ниже черной конечной точки, чтобы инвертировать карту высот.</translation>
+            <translation>Исходная высота для белых пикселей. Она может быть ниже значения для чёрных, чтобы инвертировать карту высот.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7044" />
             <source>Heightmap black raw height</source>
-            <translation>Карта высот, черная необработанная высота</translation>
+            <translation>Исходная высота чёрного на карте высот</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7045" />
             <source>Heightmap white raw height</source>
-            <translation>Карта высот белого цвета, необработанная высота</translation>
+            <translation>Исходная высота белого на карте высот</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7046" />
@@ -10653,17 +10653,17 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="7057" />
             <source>Creates an active overlay tile over the entire new map. Leave disabled for terrain-only maps.</source>
-            <translation>Создает активную плитку наложения поверх всей новой карты. Оставьте отключенным для карт только местности.</translation>
+            <translation>Создаёт активный тайл поверхности на всей новой карте. Оставьте выключенным для карт без воды и других поверхностей.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7063" />
             <source>Constant raw height of the overlay plane. World height = raw height / 65535 x maxZ. This plane does not use the terrain heightmap.</source>
-            <translation>Постоянная необработанная высота плоскости наложения. Высота мира = необработанная высота / 65535 x maxZ. Эта плоскость не использует карту высот местности.</translation>
+            <translation>Постоянная исходная высота поверхности. Высота в мире = исходная высота / 65535 × maxZ. Карта высот рельефа на эту плоскость не влияет.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7065" />
             <source>Plane raw height</source>
-            <translation>Необработанная высота плоскости</translation>
+            <translation>Исходная высота поверхности</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7068" />
@@ -10673,7 +10673,7 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="7070" />
             <source>Overlay atlas slot</source>
-            <translation>Наложение слота атласа</translation>
+            <translation>Слот атласа поверхности</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7074" />
@@ -10683,17 +10683,17 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="7076" />
             <source>Overlay tile rotation</source>
-            <translation>Вращение плитки наложения</translation>
+            <translation>Поворот тайла поверхности</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7079" />
             <source>Existing liquid/overlay material from the template MP. This controls material properties; the atlas slot controls the visible tile texture.</source>
-            <translation>Существующий жидкий/накладной материал из шаблона MP. Это контролирует свойства материала; слот атласа управляет видимой текстурой плитки.</translation>
+            <translation>Материал жидкости или поверхности из шаблона MP. Он задаёт свойства материала, а слот атласа — видимую текстуру тайла.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7081" />
             <source>Liquid material index</source>
-            <translation>Индекс жидкого материала</translation>
+            <translation>Индекс материала жидкости</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7083" />
@@ -10713,7 +10713,7 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="7092" />
             <source>Overlay taper width (tiles)</source>
-            <translation>Ширина конуса наложения (плитки)</translation>
+            <translation>Ширина сглаживания поверхности (тайлы)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7129" />
@@ -10733,7 +10733,7 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
         <message>
             <location filename="../source/app/main_window.cpp" line="7175" />
             <source>Flat terrain preview: raw %1 = %2 world units. Choose a heightmap to preview its stretch and orientation.</source>
-            <translation>Предпросмотр равнинной местности: исходные %1 = мировые единицы %2. Выберите карту высот, чтобы просмотреть ее растяжение и ориентацию.</translation>
+            <translation>Плоский рельеф: исходное значение %1 = %2 единицам мира. Выберите карту высот, чтобы проверить растяжение и ориентацию.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7193" />
@@ -10790,7 +10790,7 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
             <source>The generated MPR was not committed.
 
 %1</source>
-            <translation>Сгенерированный MPR не был сохранён.
+            <translation>Созданный MPR не сохранён.
 
 %1</translation>
         </message>
@@ -10805,10 +10805,10 @@ Their source maps are unchanged; open the backup folder to inspect or copy them.
 %1
 
 It was not opened because the current document transition was cancelled.</source>
-            <translation>Проверенный MPR был создан по адресу:
+            <translation>Проверенный MPR создан:
 %1
 
-. Он не был открыт, поскольку текущий переход документа был отменен.</translation>
+Он не открыт, потому что смена текущего документа была отменена.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7351" />
@@ -10829,7 +10829,7 @@ It was not opened because the current document transition was cancelled.</source
         <message>
             <location filename="../source/app/main_window.cpp" line="7365" />
             <source>Create an empty, runtime-valid MOB. Objects, embedded AI graph, VSS, and editor-only directory data are never copied. The normal script and selected map metadata can be copied explicitly.</source>
-            <translation>Создайте пустой, действительный в игре MOB. Объекты, встроенный граф ИИ, VSS и данные каталога, доступные только для редактора, никогда не копируются. Обычный скрипт и выбранные метаданные карты можно скопировать явно.</translation>
+            <translation>Создать пустой MOB, пригодный для игры. Объекты, встроенный граф ИИ, VSS и служебные данные редактора не копируются. Обычный скрипт и выбранные данные карты можно скопировать отдельно.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7374" />
@@ -10844,7 +10844,7 @@ It was not opened because the current document transition was cancelled.</source
         <message>
             <location filename="../source/app/main_window.cpp" line="7377" />
             <source>Primary MOBs own world settings and normally anchor a map. Supplemental MOBs are the usual choice for AutoZones and optional map states.</source>
-            <translation>Первичные MOB владеют настройками мира и обычно привязывают карту. Дополнительные MOB — обычный выбор для автозон и дополнительных состояний карты.</translation>
+            <translation>Основной MOB хранит настройки мира и обычно задаёт карту. Дополнительные MOB обычно используются для AutoZone и дополнительных состояний карты.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7380" />
@@ -10909,7 +10909,7 @@ It was not opened because the current document transition was cancelled.</source
         <message>
             <location filename="../source/app/main_window.cpp" line="7425" />
             <source>Create a default 32-player diplomacy table</source>
-            <translation>Создайте стандартный дипломатический стол для 32 игроков.</translation>
+            <translation>Создать стандартную таблицу дипломатии для 32 групп</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7426" />
@@ -10929,12 +10929,12 @@ It was not opened because the current document transition was cancelled.</source
         <message>
             <location filename="../source/app/main_window.cpp" line="7450" />
             <source>Initial ambient-light scalar stored in WORLD_SET.</source>
-            <translation>Начальный скаляр окружающего освещения хранится в WORLD_SET.</translation>
+            <translation>Начальная яркость фонового света в WORLD_SET.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7451" />
             <source>Initial sun-light scalar stored in WORLD_SET.</source>
-            <translation>Начальный скаляр солнечного света хранится в WORLD_SET.</translation>
+            <translation>Начальная яркость солнечного света в WORLD_SET.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7452" />
@@ -10964,7 +10964,7 @@ It was not opened because the current document transition was cancelled.</source
         <message>
             <location filename="../source/app/main_window.cpp" line="7457" />
             <source>Ambient</source>
-            <translation>Окружающий</translation>
+            <translation>Фоновый свет</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7458" />
@@ -10991,20 +10991,20 @@ It was not opened because the current document transition was cancelled.</source
             <source>The generated MOB failed its fresh validation and was not written.
 
 %1</source>
-            <translation>Сгенерированный MOB не прошел новую проверку и не был записан.
+            <translation>Созданный MOB не прошёл проверку и не был записан.
 
 %1</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7594" />
             <source>Save New MOB</source>
-            <translation>Сохранить нового MOB</translation>
+            <translation>Сохранить новый MOB</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7595" />
             <location filename="../source/app/main_window.cpp" line="7655" />
             <source>MOB (*.mob)</source>
-            <translation>MOB (*.MOB)</translation>
+            <translation>MOB (*.mob)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7608" />
@@ -11021,7 +11021,7 @@ It was not opened because the current document transition was cancelled.</source
             <source>The generated MOB was not committed.
 
 %1</source>
-            <translation>Сгенерированный MOB не был сохранён.
+            <translation>Созданный MOB не сохранён.
 
 %1</translation>
         </message>
@@ -11036,15 +11036,15 @@ It was not opened because the current document transition was cancelled.</source
 %1
 
 It could not be opened automatically.</source>
-            <translation>Подтвержденный MOB был создан по адресу:
+            <translation>Проверенный MOB создан:
 %1
 
-. Его не удалось открыть автоматически.</translation>
+Открыть его автоматически не удалось.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7655" />
             <source>Open one or more MOB files</source>
-            <translation>Откройте один или несколько файлов MOB.</translation>
+            <translation>Открыть один или несколько файлов MOB</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7672" />
@@ -11064,7 +11064,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="7843" />
             <source>Save All MOBs</source>
-            <translation>Сохранить всех MOBов</translation>
+            <translation>Сохранить все MOB</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="7896" />
@@ -11112,7 +11112,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/ui/mob_diff_dialog.cpp" line="30" />
             <source>exact-subtree-hash</source>
-            <translation>точное совпадение</translation>
+            <translation>точное совпадение структуры</translation>
         </message>
         <message>
             <location filename="../source/ui/mob_diff_dialog.cpp" line="31" />
@@ -11122,7 +11122,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/ui/mob_diff_dialog.cpp" line="32" />
             <source>unique-type-prototype-name</source>
-            <translation>тип, прототип и имя</translation>
+            <translation>уникальные тип, прототип и имя</translation>
         </message>
         <message>
             <location filename="../source/ui/mob_diff_dialog.cpp" line="33" />
@@ -11165,12 +11165,12 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="131" />
             <source>Source ambiguity</source>
-            <translation>Неопределенность источника</translation>
+            <translation>Неоднозначный источник</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="132" />
             <source>Incomplete family</source>
-            <translation>Неполная семья</translation>
+            <translation>Неполное семейство</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="133" />
@@ -11210,7 +11210,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="140" />
             <source>Cross-family workspace range overlap</source>
-            <translation>Перекрытие диапазона рабочих пространств для разных семей</translation>
+            <translation>Пересечение диапазонов разных семейств</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="141" />
@@ -11220,17 +11220,17 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="142" />
             <source>Cross-family workspace NID collision</source>
-            <translation>Столкновение NID в межсемейном рабочем пространстве</translation>
+            <translation>Конфликт NID между разными семействами</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="143" />
             <source>Known static alias</source>
-            <translation>Известный статический псевдоним</translation>
+            <translation>Известный общий ID неподвижных объектов</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="144" />
             <source>NID collision</source>
-            <translation>Столкновение NID</translation>
+            <translation>Конфликт NID</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="145" />
@@ -11260,12 +11260,12 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="150" />
             <source>installed fallback</source>
-            <translation>установлен резервный вариант</translation>
+            <translation>резервный файл из установки</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="151" />
             <source>explicit seed</source>
-            <translation>явное начальное значение</translation>
+            <translation>явно заданный источник</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="152" />
@@ -11275,7 +11275,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="153" />
             <source>loaded primary overlay</source>
-            <translation>загружен основной оверлей</translation>
+            <translation>загруженный основной файл вместо профильного</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="154" />
@@ -11290,12 +11290,12 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="156" />
             <source>Multiple opened MOBs use logical name %1; %2 is authoritative</source>
-            <translation>Несколько открытых MOB используют логическое имя %1; %2 является авторитетным</translation>
+            <translation>Несколько открытых MOB используют имя %1; основным считается %2</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="157" />
             <source>MOB file "%1" was not found. Referenced by %2 script line %3: %4</source>
-            <translation>MOB-файл «%1» не найден. Ссылка на строку сценария %2 %3: %4</translation>
+            <translation>MOB-файл «%1» не найден. Ссылка в скрипте %2, строка %3: %4</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="158" />
@@ -11310,12 +11310,12 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="160" />
             <source>%1 has %2 directional diplomacy pair(s). One-way relations are supported and are not normalized, but confirm they are intentional: %3</source>
-            <translation>%1 имеет пару направленной дипломатии %2. Односторонние отношения поддерживаются и не нормализуются, но подтвердите, что они созданы намеренно: %3</translation>
+            <translation>%1: односторонних отношений дипломатии — %2. Они допустимы и не исправляются автоматически; проверьте, что это сделано намеренно: %3</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="161" />
             <source>%1 has %2 non-Ally self-relation(s). Self-relations are supported and are preserved, but are unusual; confirm they are intentional: %3</source>
-            <translation>%1 имеет отношение %2 к себе, не являющемуся союзником. Отношения к себе поддерживаются и сохраняются, но необычны; подтвердите, что они намеренны: %3</translation>
+            <translation>%1: отношений группы к самой себе со значением не «Союз» — %2. Они допустимы и сохраняются, но необычны; проверьте их: %3</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="162" />
@@ -11330,7 +11330,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="164" />
             <source>%1 primary SC_OBJECT_DB_FILE MOBs are loaded; map ownership and Test Current Map are ambiguous</source>
-            <translation>%1 основные MOB SC_OBJECT_DB_FILE загружены; владение картой и проверка текущей карты неоднозначны</translation>
+            <translation>Загружено основных MOB (SC_OBJECT_DB_FILE): %1. Нельзя однозначно определить основной MOB карты для теста</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="165" />
@@ -11340,7 +11340,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="166" />
             <source>%1 contains magic trap NID %2 but no MOB diplomacy table. Runtime derives trap hostility from that table, so the trap may have no valid victims. Copy the intended diplomacy from the primary/source MOB in MOB Parameters.</source>
-            <translation>%1 содержит магическую ловушку NID %2, но не содержит таблицы дипломатии MOB. Среда выполнения извлекает враждебность ловушки из этой таблицы, поэтому ловушка может не иметь допустимых жертв. Скопируйте предполагаемую дипломатию из основного/исходного MOB в параметрах MOB.</translation>
+            <translation>%1 содержит магическую ловушку NID %2, но не содержит таблицы дипломатии MOB. Игра извлекает враждебность ловушки из этой таблицы, поэтому ловушка может не иметь допустимых жертв. Скопируйте предполагаемую дипломатию из основного/исходного MOB в параметрах MOB.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="167" />
@@ -11350,7 +11350,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="168" />
             <source>Character '%1' doesn't have a valid tables.lua entry.</source>
-            <translation>Символ «%1» не имеет допустимой записи в table.lua.</translation>
+            <translation>Для персонажа «%1» нет правильной записи в tables.lua.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="169" />
@@ -11375,12 +11375,12 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="173" />
             <source>NID %1 is owned by %2 objects across separately loaded map sets; they are not one %3 runtime family</source>
-            <translation>NID %1 принадлежит объектам %2 в отдельно загруженных наборах карт; они не входят в одно семейство среды выполнения %3</translation>
+            <translation>NID %1 используется объектами из разных загруженных карт: %2. Эти карты не входят в одно игровое семейство %3</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="174" />
             <source>NID %1 is owned by %2 objects across the runtime family</source>
-            <translation>NID %1 принадлежит объектам %2 во всем семействе среды выполнения.</translation>
+            <translation>NID %1 используется объектами одного игрового семейства: %2</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="175" />
@@ -11438,7 +11438,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="307" />
             <source>The image is stretched to the complete terrain canvas. North is at the top. Thin lines are tiles; stronger lines are 16-tile SEC sectors.</source>
-            <translation>Изображение растягивается на весь холст местности. Север находится наверху. Тонкие линии — плитка; более сильные линии — это сектора SEC размером 16 плиток.</translation>
+            <translation>Изображение растягивается на всю карту. Север сверху. Тонкие линии обозначают тайлы, толстые — сектора SEC по 16 тайлов.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="382" />
@@ -11448,7 +11448,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/app/main_window.cpp" line="384" />
             <source>%1 x %2 tiles (%3 x %4 sectors)</source>
-            <translation>Плитки %1 x %2 (сектора %3 x %4)</translation>
+            <translation>%1 × %2 тайлов (%3 × %4 секторов)</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="465" />
@@ -11488,7 +11488,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="55" />
             <source>Roams to random points within Guard radius around Guard position.</source>
-            <translation>Перемещается в случайные точки в радиусе действия стражи вокруг позиции стражи.</translation>
+            <translation>Перемещается в случайные точки в радиусе действия стражи вокруг позиции охраны.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="56" />
@@ -11533,17 +11533,17 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="76" />
             <source>Raises the configured alarm when the unit sees an enemy.</source>
-            <translation>Поднимает настроенную тревогу, когда отряд видит врага.</translation>
+            <translation>Поднимает заданную тревогу, когда существо видит врага.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="77" />
             <source>Raises the configured alarm when the unit is attacked.</source>
-            <translation>Поднимает настроенную тревогу при нападении на объект.</translation>
+            <translation>Поднимает заданную тревогу, когда существо атаковано.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="78" />
             <source>Raises the configured alarm when the unit becomes suspicious.</source>
-            <translation>Поднимает тревогу, когда существо замечает подозрительное.</translation>
+            <translation>Поднимает заданную тревогу, когда существо замечает подозрительное.</translation>
         </message>
         <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="111" />
@@ -11598,17 +11598,17 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="259" />
             <source>Ally: the row faction treats the column faction as friendly.</source>
-            <translation>Союзник: фракция ряда считает фракцию колонны дружественной.</translation>
+            <translation>Союз: группа в строке считает группу в столбце дружественной.</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="261" />
             <source>Neutral: the row faction treats the column faction as neither friendly nor hostile.</source>
-            <translation>Нейтрально: фракция рядов не считает фракцию колонн ни дружественной, ни враждебной.</translation>
+            <translation>Нейтралитет: группа в строке не считает группу в столбце ни дружественной, ни враждебной.</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="263" />
             <source>War: the row faction treats the column faction as hostile.</source>
-            <translation>Война: фракция ряда считает фракцию колонны враждебной.</translation>
+            <translation>Война: группа в строке считает группу в столбце враждебной.</translation>
         </message>
         <message>
             <location filename="../source/mob/mob_parameters.cpp" line="265" />
@@ -11618,18 +11618,18 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/render/view.cpp" line="440" />
             <source>Edit MPR surface materials and tile animations</source>
-            <translation>Редактирование материалов поверхности MPR и анимации плиток.</translation>
+            <translation>Изменить материалы поверхности MPR и анимацию тайлов</translation>
         </message>
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="52" />
             <location filename="../source/ui/trap_collection_widget.cpp" line="48" />
             <source>Gold indicates the point currently selected in the viewport and outliner.</source>
-            <translation>Золотым выделена точку, выбранную в данный момент в окне карты и списке объектов.</translation>
+            <translation>Золотым цветом выделена точка, выбранная на карте и в иерархии.</translation>
         </message>
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="247" />
             <source>Look %1</source>
-            <translation>Смотри %1</translation>
+            <translation>Точка обзора %1</translation>
         </message>
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="259" />
@@ -11639,7 +11639,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="209" />
             <source>Cast target %1</source>
-            <translation>Применить цель %1</translation>
+            <translation>Цель заклинания %1</translation>
         </message>
         <message>
             <location filename="../source/ui/trap_collection_widget.cpp" line="210" />
@@ -11850,7 +11850,7 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/core/undo.cpp" line="907" />
             <source>Point deleted</source>
-            <translation>Удалить точку</translation>
+            <translation>Точка удалена</translation>
         </message>
         <message>
             <location filename="../source/core/undo.cpp" line="929" />
@@ -11870,17 +11870,17 @@ It could not be opened automatically.</source>
         <message>
             <location filename="../source/core/undo.cpp" line="1046" />
             <source>Deleted range %1–%2</source>
-            <translation>Удалить диапазон %1–%2</translation>
+            <translation>Удалён диапазон %1–%2</translation>
         </message>
         <message>
             <location filename="../source/core/undo.cpp" line="1052" />
             <source>Changed range to %1–%2</source>
-            <translation>Изменить диапазон: %1–%2</translation>
+            <translation>Диапазон изменён на %1–%2</translation>
         </message>
         <message>
             <location filename="../source/core/undo.cpp" line="1060" />
             <source>Added range %1–%2</source>
-            <translation>Добавить диапазон %1–%2</translation>
+            <translation>Добавлен диапазон %1–%2</translation>
         </message>
         <message>
             <location filename="../source/core/undo.cpp" line="1117" />
@@ -11901,7 +11901,7 @@ It could not be opened automatically.</source>
             <location filename="../source/core/undo.cpp" line="1360" />
             <location filename="../source/core/undo.cpp" line="1376" />
             <source>Paint tiles (%1)</source>
-            <translation>Покрасить плитки (%1)</translation>
+            <translation>Рисование тайлов (%1)</translation>
         </message>
     </context>
 </TS>
