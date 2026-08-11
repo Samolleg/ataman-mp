@@ -80,6 +80,11 @@ R115_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r115_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R116_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r116_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -3006,6 +3011,17 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
     # user assignments that the inverse audit supports. Five explicitly listed
     # HD/original or no-evidence conflicts remain on their R114 assignments.
     for slot_text, corner_values in R115_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R116 resolves the five conflicts deliberately held from R115. Exact
+    # byte-identical aliases are enumerated in the decision record; no broader
+    # sibling propagation is inferred.
+    for slot_text, corner_values in R116_CONSOLIDATED_REVIEW[
             "cornerCorrections"].get(namespace, {}).items():
         slot_index = int(slot_text)
         for corner_name, family_name in corner_values.items():

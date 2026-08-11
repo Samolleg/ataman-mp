@@ -114,9 +114,12 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # Zone7 Sand / Dark pink), then applies 158 exact-owner corrections.
         # The two exact bz2g/Zone2 bindings each add 12 relationships and the
         # Zone7 family adds four, for 28 additional pair rows.
+        # R116 resolves the five held R115 decisions across eleven exact owner
+        # corners. The denominator is unchanged; two previously unsupported
+        # relationships gain one authored topology.
         self.assertEqual(1234, report["totalPairCount"])
         self.assertEqual(
-            {"0": 662, "1": 84, "2": 80, "3": 186, "4": 222},
+            {"0": 660, "1": 86, "2": 80, "3": 186, "4": 222},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

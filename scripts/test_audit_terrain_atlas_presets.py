@@ -694,7 +694,8 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             "bz3g": {
                 312: {"northWest": 11, "northEast": 6,
                       "southEast": 6, "southWest": 6},
-                388: {"northWest": 8, "northEast": 4,
+                # R116 resolves the held NW corner from Gravel to Common.
+                388: {"northWest": 4, "northEast": 4,
                       "southEast": 1, "southWest": 4},
                 510: {"northWest": 4, "northEast": 4,
                       "southEast": 13, "southWest": 1},
@@ -757,7 +758,9 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             ("zone15", 201): 3, ("zone15", 203): 3,
             ("zone15", 204): 3, ("zone15", 205): 3,
             ("zone15", 206): 3,
-            ("bz3g", 312): 6, ("bz3g", 388): 4,
+            ("bz3g", 312): 6,
+            # R116 supersedes the older Gravel assignment with Common.
+            ("bz3g", 388): 4,
             ("bz3g", 510): 4,
             ("bz3g", 23): 3, ("bz3g", 109): 3,
             ("bz3g", 387): 3, ("bz3g", 389): 3,
@@ -2848,7 +2851,8 @@ class ReviewDocumentTests(unittest.TestCase):
         decisions = {
             "bz5g": {
                 (279, 0): "Ground / Common",
-                (465, 3): "Ground / Gravel",
+                # R116 supersedes the older R80 Gravel assignment.
+                (465, 3): "Ground / Common",
                 (356, 0): "Sand / Common",
                 (18, 0): "Ground / Common",
                 (367, 0): "Sand / Common",
@@ -2858,7 +2862,8 @@ class ReviewDocumentTests(unittest.TestCase):
             },
             "zone8": {
                 (279, 0): "Ground / Common",
-                (465, 3): "Ground / Gravel",
+                # R116 propagates the reviewed exact slot to Zone8.
+                (465, 3): "Ground / Common",
                 (356, 0): "Sand / Common",
                 (18, 0): "Ground / Common",
                 (367, 0): "Sand / Common",
@@ -3047,8 +3052,9 @@ class ReviewDocumentTests(unittest.TestCase):
                 (187, 3): "Stone / Black", (188, 0): "Stone / Greenish",
             }),
             (("bz2g", "zone2"), {
-                (448, 1): "Ground / Brown", (448, 2): "Ground / Dirt",
-                (448, 3): "Ground / Brown", (502, 0): "Ground / Brown",
+                # R116 resolves both held Brown corners as Ground / Dirt.
+                (448, 1): "Ground / Dirt", (448, 2): "Ground / Dirt",
+                (448, 3): "Ground / Dirt", (502, 0): "Ground / Brown",
             }),
         ]
         checked = 0
@@ -3427,13 +3433,13 @@ class ReviewDocumentTests(unittest.TestCase):
                 for corner in corners:
                     self.assertEqual("Sand / Irregular", values[corner])
 
-    def test_r115_semantic_checkpoint_is_exact(self) -> None:
-        """The modern branch carries the safe reviewed R115 catalog verbatim."""
+    def test_r116_semantic_checkpoint_is_exact(self) -> None:
+        """The modern branch carries the safe reviewed R116 catalog verbatim."""
         root = Path(__file__).resolve().parent.parent
         catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
         payload = catalog_path.read_bytes()
         self.assertEqual(
-            "606f738fb948137c4aa9101fbc9d326a2523c89edeca31d9f9873a06eebe5df2",
+            "ff9edce6d37d694a25c92729d253b5fcff5aec81a2fe36a68ecbe5a5f9cd0bcf",
             hashlib.sha256(payload).hexdigest(),
         )
         catalog = json.loads(payload.decode("utf-8"))
@@ -4090,22 +4096,19 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
                     applied += 1
         self.assertEqual(158, applied)
 
-        def mapping(namespace: str, slot: int) -> list[str]:
-            preset = presets[namespace.casefold()]
-            names = {int(row["id"]): row["name"]
-                     for row in preset["families"]}
-            payload = base64.b64decode(preset["signaturesBase64"])
-            return [names[value] for value in payload[slot * 4:slot * 4 + 4]]
-
-        # Held conflicts retain the R114 assignments.
-        for namespace in ("bz2g", "Zone2"):
-            self.assertEqual("Ground / Brown", mapping(namespace, 448)[1])
-            self.assertEqual("Ground / Dirt", mapping(namespace, 448)[2])
-            self.assertEqual("Ground / Brown", mapping(namespace, 448)[3])
-        for namespace in ("bz4g", "Zone4"):
-            self.assertEqual("Ground / Common", mapping(namespace, 351)[0])
-        self.assertEqual("Ground / Gravel", mapping("bz5g", 465)[3])
-        self.assertEqual("Ground / Gravel", mapping("zone9", 388)[0])
+        # The five held rows remain recorded as R115 provenance even after
+        # their explicit R116 follow-up supersedes the catalog assignments.
+        self.assertEqual(
+            {
+                ("r115-bz2g-slot448", "NE"),
+                ("r115-bz2g-slot448", "SW"),
+                ("r115-bz4g-slot351", "NW"),
+                ("r115-bz5g-slot465", "SW"),
+                ("r115-zone9-slot388", "NW"),
+            },
+            {(row["key"], row["corner"])
+             for row in decisions["heldConflicts"]},
+        )
 
         # Audit-supported cross-atlas families remain transition-only here.
         for namespace in ("bz2g", "Zone2"):
@@ -4115,6 +4118,39 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
         pink = next(row for row in presets["zone7"]["families"]
                     if row["name"] == "Sand / Dark pink")
         self.assertFalse(pink["paintSelectable"])
+
+    def test_r116_resolves_only_the_five_held_conflicts(self) -> None:
+        """R116 applies five explicit decisions to eleven exact owners."""
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r116_consolidated_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        self.assertEqual(5, decisions["logicalChangedCorners"])
+        expected_rows = sum(
+            len(corners)
+            for slots in decisions["cornerCorrections"].values()
+            for corners in slots.values()
+        )
+        self.assertEqual(11, expected_rows)
+        self.assertEqual(11, decisions["propagatedCornerCorrections"])
+
+        for namespace, slots in decisions["cornerCorrections"].items():
+            preset = presets[namespace.casefold()]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            for slot_text, corners in slots.items():
+                slot = int(slot_text)
+                for corner, expected in corners.items():
+                    index = {"NW": 0, "NE": 1, "SE": 2, "SW": 3}[corner]
+                    self.assertEqual(expected, names[payload[slot * 4 + index]],
+                                     f"{namespace} slot {slot} {corner}")
 
 
 if __name__ == "__main__":
