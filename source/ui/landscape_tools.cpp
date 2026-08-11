@@ -3,6 +3,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QLabel>
@@ -83,7 +84,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_flatten->setRange(0, 65535);
     m_flatten->setValue(20000);
     m_flatten->setSingleStep(100);
-    m_falloff->addItem(tr("Smooth"), int(ETerrainBrushFalloff::Smooth));
+    m_falloff->addItem(QCoreApplication::translate("LandscapeFalloff", "Smooth"),
+                       int(ETerrainBrushFalloff::Smooth));
     m_falloff->addItem(tr("Linear"), int(ETerrainBrushFalloff::Linear));
     m_falloff->addItem(tr("Constant"), int(ETerrainBrushFalloff::Constant));
     m_falloff->setCurrentIndex(qBound(0,

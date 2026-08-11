@@ -16,6 +16,10 @@
   Added translation lookups for property, body-part, and unit-stat table
   columns. AI graph controls, layer names, source choices, comparison columns,
   and persistence notices now use concise Russian UI terminology.
+- Localized the object hierarchy headers and category names that previously
+  bypassed the translation catalog.
+- Revised terrain and lighting terms: `Правка рельефа`, `Сгладить`, `Гладкий`,
+  and the concise `Без освещения` / `Простой` / `Полный` mode names.
 - Kept diagnostic logs, command-line/headless output, serialized values,
   resource and object names, identifiers, file formats, and scripts in their
   original language.

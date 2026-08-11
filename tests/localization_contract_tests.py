@@ -38,6 +38,10 @@ def main():
     body_parts = (ROOT / "source/ui/bodypartedit_form.cpp").read_text(encoding="utf-8")
     unit_stats = (ROOT / "source/ui/unitstat_form.cpp").read_text(encoding="utf-8")
     view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+    tree_view = (ROOT / "source/layout_components/tree_view.cpp").read_text(
+        encoding="utf-8")
+    landscape_tools = (ROOT / "source/ui/landscape_tools.cpp").read_text(
+        encoding="utf-8")
     build = (ROOT / "scripts/build_release.ps1").read_text(encoding="utf-8")
     catalog_path = ROOT / "translations/ei_mapper_ru.ts"
 
@@ -82,6 +86,12 @@ def main():
     require("localizedAiGraphLayerLabel" in view and
             "<th>Missing links</th>" not in view,
             "AI graph layer names and comparison columns must be translated")
+    require('labels << tr("Objects") << tr("Count")' in view and
+            'eWorldObject, tr("World objects")' in tree_view,
+            "object hierarchy headings and categories must use translation lookup")
+    require('QCoreApplication::translate("LandscapeFalloff", "Smooth")' in
+            landscape_tools,
+            "the Smooth tool and smooth falloff must have separate translations")
 
     visible_literal_patterns = (
         re.compile(r"set(?:Text|ToolTip|StatusTip|WindowTitle|PlaceholderText)\(\s*\"([^\"]*)\""),
@@ -176,10 +186,28 @@ def main():
         "Filter parts...": "Фильтр частей...",
         "Filter maps...": "Фильтр карт...",
         "English": "Английский",
+        "Lighting mode": "Режим освещения",
+        "Unlit": "Без освещения",
+        "Simple shading": "Простой",
+        "Full environment": "Полный",
+        "Sculpt terrain": "Правка рельефа",
     }
     for source, translated in expected.items():
         require(translations.get(source) == translated,
                 f"representative translation missing: {source!r}")
+
+    context_translations = {
+        (context.findtext("name", default=""),
+         message.findtext("source", default="")):
+            "".join(message.find("translation").itertext())
+        for context in root.findall("context")
+        for message in context.findall("message")
+        if message.find("translation") is not None
+    }
+    require(context_translations.get(("CLandscapeTools", "Smooth")) == "Сгладить",
+            "terrain Smooth action must be translated as an action")
+    require(context_translations.get(("LandscapeFalloff", "Smooth")) == "Гладкий",
+            "smooth brush falloff must be translated as an adjective")
 
     require("Language" in settings and "restart" in settings.lower(),
             "settings must explain the language restart behavior")

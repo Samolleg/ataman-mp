@@ -132,6 +132,45 @@ CORRECTIONS = {
 # vocabulary a Russian player sees in an editor over literal engineering
 # translations produced by the initial catalog seed.
 CORRECTIONS.update({
+    "Lighting mode": "Режим освещения",
+    "Unlit": "Без освещения",
+    "Simple shading": "Простой",
+    "Full environment": "Полный",
+    "Sculpt terrain": "Правка рельефа",
+    "Sculpt overlay surfaces": "Правка покрытий",
+    "Raise": "Поднять",
+    "Lower": "Опустить",
+    "Smooth": "Сгладить",
+    "Flatten": "Выровнять",
+    "Sculpt overlay height": "Правка высоты покрытия",
+    "Sculpt strength": "Сила кисти",
+    "Sculpt radius: %1 vertices": "Радиус кисти: %1 вершин",
+    "Objects": "Объекты",
+    "Count": "Количество",
+    "World objects": "Объекты мира",
+    "Units": "Существа",
+    "Torches": "Факелы",
+    "Levers": "Рычаги",
+    "Magic traps": "Магические ловушки",
+    "Light sources": "Источники света",
+    "Sound sources": "Источники звука",
+    "Particle sources": "Источники частиц",
+    "Minimize lighting mode": "Свернуть панель освещения",
+    "Full environment (unavailable in ANGLE)": "Полный (недоступно в ANGLE)",
+    "ANGLE compatibility renderer: Unlit and Simple shading are available.":
+        "Режим совместимости ANGLE: доступны «Без освещения» и «Простой».",
+    "Shadow maps are not initialized. Select Full environment, enable shadows, and render the failing view first.":
+        "Карты теней не созданы. Выберите режим «Полный», включите тени и снова откройте этот вид.",
+    "Flatten target": "Цель выравнивания",
+    "Flatten whole map": "Выровнять всю карту",
+    "Flatten target: %1 raw units": "Цель выравнивания: %1 исходных единиц",
+    "Objects MOB resource": "Ресурс объектов MOB",
+    "Map objects (*.mob);;Mob as JSON(*.json)":
+        "Объекты карты (*.mob);;MOB как JSON (*.json)",
+    "Left-drag sculpts; right-click samples the raw height as the Flatten target. Alt+Wheel changes radius; Shift+Wheel changes strength; Alt+Shift+Wheel changes raise/lower step or the Flatten target. Z/X/C/V select Raise/Lower/Smooth/Flatten. Wheel keeps camera zoom. Each drag is one undo step.":
+        "ЛКМ правит рельеф; ПКМ выбирает высоту для выравнивания. Alt+колесо меняет радиус, Shift+колесо — силу, Alt+Shift+колесо — шаг или высоту выравнивания. Z/X/C/V: Поднять/Опустить/Сгладить/Выровнять. Колесо меняет масштаб камеры. Один мазок — одно действие отмены.",
+    "Sculpt stroke created a steep local slope (%1 degrees, max raw change %2). Terrain remains seam-consistent, but inspect it for cliffs or exposed backfaces.":
+        "Правка рельефа создала крутой склон (%1°, макс. исходное изменение %2). Швы сохранены, но проверьте обрывы и открытые обратные стороны.",
     "Restart required": "Требуется перезапуск",
     "Restart EI Mapper to apply the new interface language.":
         "Перезапустите EI Mapper, чтобы сменить язык интерфейса.",
@@ -572,6 +611,19 @@ def main():
                 text = re.sub(r"график(а|у|ом|е|и|ов)?", r"граф\1",
                               text, flags=re.IGNORECASE)
             translation.text = text
+    # The English source "Smooth" is intentionally shared by the terrain
+    # action and the brush falloff. Russian needs an imperative for the action
+    # and an adjective for the falloff, so keep this override context-specific.
+    for context in tree.getroot().findall("context"):
+        if context.findtext("name", default="") != "LandscapeFalloff":
+            continue
+        for message in context.findall("message"):
+            if message.findtext("source", default="") != "Smooth":
+                continue
+            translation = message.find("translation")
+            if translation is not None:
+                translation.attrib.pop("type", None)
+                translation.text = "Гладкий"
     ET.indent(tree, space="    ")
     tree.write(CATALOG, encoding="utf-8", xml_declaration=True)
     print(f"applied {changed} reviewed terminology entries")

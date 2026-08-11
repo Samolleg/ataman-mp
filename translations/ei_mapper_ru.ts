@@ -394,7 +394,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="25" />
             <source>Flatten target</source>
-            <translation>Сгладить цель</translation>
+            <translation>Цель выравнивания</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="26" />
@@ -459,7 +459,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="58" />
             <source>Sculpt terrain</source>
-            <translation>Скульптура местности</translation>
+            <translation>Правка рельефа</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="59" />
@@ -479,7 +479,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="62" />
             <source>Sculpt overlay surfaces</source>
-            <translation>Скульптура наложенных поверхностей</translation>
+            <translation>Правка покрытий</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="64" />
@@ -489,161 +489,160 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="68" />
             <source>Raise</source>
-            <translation>Поднимать</translation>
+            <translation>Поднять</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="69" />
             <source>Lower</source>
-            <translation>Ниже</translation>
+            <translation>Опустить</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="70" />
-            <location filename="../source/ui/landscape_tools.cpp" line="86" />
             <source>Smooth</source>
-            <translation>Гладкий</translation>
+            <translation>Сгладить</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="71" />
             <source>Flatten</source>
-            <translation>Сгладить</translation>
+            <translation>Выровнять</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="87" />
+            <location filename="../source/ui/landscape_tools.cpp" line="88" />
             <source>Linear</source>
             <translation>Линейный</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="88" />
+            <location filename="../source/ui/landscape_tools.cpp" line="89" />
             <source>Constant</source>
             <translation>Постоянный</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="125" />
+            <location filename="../source/ui/landscape_tools.cpp" line="126" />
             <source>Tool</source>
             <translation>Инструмент</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="126" />
+            <location filename="../source/ui/landscape_tools.cpp" line="127" />
             <source>Radius (vertices)</source>
             <translation>Радиус (вершины)</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="127" />
+            <location filename="../source/ui/landscape_tools.cpp" line="128" />
             <source>Strength</source>
             <translation>Сила</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="133" />
+            <location filename="../source/ui/landscape_tools.cpp" line="134" />
             <source>Left-drag sculpts; right-click samples the raw height as the Flatten target. Alt+Wheel changes radius; Shift+Wheel changes strength; Alt+Shift+Wheel changes raise/lower step or the Flatten target. Z/X/C/V select Raise/Lower/Smooth/Flatten. Wheel keeps camera zoom. Each drag is one undo step.</source>
-            <translation>Скульптуры с перетаскиванием влево; щелкните правой кнопкой мыши образец исходной высоты в качестве цели выравнивания. Alt+Колесо меняет радиус; Shift+Колесо меняет силу; Alt+Shift+Колесо изменяет шаг повышения/понижения или цель выравнивания. Z/X/C/V выберите «Поднять/Опустить/Сгладить/Сгладить». Колесо удерживает масштаб камеры. Каждое перетаскивание представляет собой один шаг отмены.</translation>
+            <translation>ЛКМ правит рельеф; ПКМ выбирает высоту для выравнивания. Alt+колесо меняет радиус, Shift+колесо — силу, Alt+Shift+колесо — шаг или высоту выравнивания. Z/X/C/V: Поднять/Опустить/Сгладить/Выровнять. Колесо меняет масштаб камеры. Один мазок — одно действие отмены.</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="142" />
+            <location filename="../source/ui/landscape_tools.cpp" line="143" />
             <source>Automatic mode always covers the brush core, uses an exact or constrained nearest authored seam when available, and otherwise leaves a hard edge. Manual mode paints the selected existing atlas tile and rotation without blending. Size 1 paints one core tile. Right-click samples from the map. Alt+Wheel changes brush size. Shift+Wheel selects the automatic material or rotates the manual tile; Wheel keeps camera zoom. Overlay surface mode adds/removes coverage. Its Terrain material selects the atlas texture; its Surface material independently controls tint, opacity, illumination, waves, and texture warp. Overlay painting only changes the atlas texture on cells that already exist.</source>
             <translation>Авто: кисть подбирает подходящие плитки и швы; если перехода нет, остаётся резкая граница. Вручную: рисуется выбранная плитка без смешивания. ПКМ берёт образец с карты. Alt+колесо — размер кисти; Shift+колесо — материал или поворот; обычное колесо — масштаб камеры. Режим поверхности добавляет или удаляет покрытие. Материал рельефа выбирает текстуру атласа, а материал поверхности задаёт цвет, прозрачность, свет, волны и искажение.</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="156" />
+            <location filename="../source/ui/landscape_tools.cpp" line="157" />
             <source>Circle</source>
             <translation>Круг</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="157" />
+            <location filename="../source/ui/landscape_tools.cpp" line="158" />
             <source>Square</source>
             <translation>Квадрат</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="158" />
+            <location filename="../source/ui/landscape_tools.cpp" line="159" />
             <source>Add surface</source>
             <translation>Добавить поверхность</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="159" />
+            <location filename="../source/ui/landscape_tools.cpp" line="160" />
             <source>Remove surface</source>
             <translation>Удалить поверхность</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="160" />
+            <location filename="../source/ui/landscape_tools.cpp" line="161" />
             <source>Selects the existing MPR material record stored on newly added overlay cells. It controls liquid/surface rendering properties, not the atlas texture selected above.</source>
             <translation>Выбирает существующую запись материала MPR, хранящуюся во вновь добавленных ячейках наложения. Он управляет свойствами рендеринга жидкости/поверхности, а не текстурой атласа, выбранной выше.</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="164" />
+            <location filename="../source/ui/landscape_tools.cpp" line="165" />
             <source>Atlas texture material</source>
             <translation>Текстурный материал Атласа</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="165" />
+            <location filename="../source/ui/landscape_tools.cpp" line="166" />
             <source>Brush size (tiles)</source>
             <translation>Размер кисти (плитки)</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="166" />
+            <location filename="../source/ui/landscape_tools.cpp" line="167" />
             <source>Brush shape</source>
             <translation>Форма кисти</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="172" />
+            <location filename="../source/ui/landscape_tools.cpp" line="173" />
             <source>Labels every active overlay cell with the MPR surface-material table slot it references. This is an inspection overlay only and does not change the MPR.</source>
             <translation>Помечает каждую активную ячейку наложения слотом таблицы материалов поверхности MPR, на который она ссылается. Это только наложение проверки, которое не меняет MPR.</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="179" />
+            <location filename="../source/ui/landscape_tools.cpp" line="180" />
             <source>Inspect atlas / choose tile...</source>
             <translation>Осмотреть атлас/выбрать плитку...</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="181" />
+            <location filename="../source/ui/landscape_tools.cpp" line="182" />
             <source>Convert / review semantic atlas...</source>
             <translation>Преобразование/проверка семантического атласа...</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="182" />
+            <location filename="../source/ui/landscape_tools.cpp" line="183" />
             <source>Infer a namespace-scoped semantic profile, review every ambiguity, and explicitly approve it. This does not edit atlas images or MPR resources.</source>
             <translation>Определите семантический профиль в области пространства имен, просмотрите все двусмысленности и явно утвердите его. При этом изображения атласа или ресурсы MPR не редактируются.</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="186" />
+            <location filename="../source/ui/landscape_tools.cpp" line="187" />
             <source>Export paint diagnostic...</source>
             <translation>Экспортная диагностика краски...</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="190" />
+            <location filename="../source/ui/landscape_tools.cpp" line="191" />
             <source>Heightmap import</source>
             <translation>Импорт карты высот</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="192" />
+            <location filename="../source/ui/landscape_tools.cpp" line="193" />
             <source>Import grayscale heightmap...</source>
             <translation>Импортировать карту высот в оттенках серого...</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="194" />
+            <location filename="../source/ui/landscape_tools.cpp" line="195" />
             <source>Open MPR Settings...</source>
             <translation>Открыть настройки MPR...</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="433" />
+            <location filename="../source/ui/landscape_tools.cpp" line="434" />
             <source>water</source>
             <translation>вода</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="433" />
+            <location filename="../source/ui/landscape_tools.cpp" line="434" />
             <source>surface</source>
             <translation>поверхность</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="435" />
+            <location filename="../source/ui/landscape_tools.cpp" line="436" />
             <source>%1 — %2; RGB %3/%4/%5, opacity %6%, light %7, wave %8, warp %9</source>
             <translation>%1 — %2; RGB %3/%4/%5, непрозрачность %6%, светлый %7, волна %8, деформация %9</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="533" />
+            <location filename="../source/ui/landscape_tools.cpp" line="534" />
             <source>No registered materials are available for this layer.</source>
             <translation>Для этого слоя нет зарегистрированных материалов.</translation>
         </message>
         <message>
-            <location filename="../source/ui/landscape_tools.cpp" line="534" />
+            <location filename="../source/ui/landscape_tools.cpp" line="535" />
             <source>Namespace template ready: %1 material(s) for this layer.</source>
             <translation>Готовый шаблон пространства имен: материалы %1 для этого слоя.</translation>
         </message>
@@ -728,7 +727,7 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="130" />
             <source>Objects MOB resource</source>
-            <translation>Объекты MOB ресурс</translation>
+            <translation>Ресурс объектов MOB</translation>
         </message>
         <message>
             <location filename="../source/ui/map_table_editor_dialog.cpp" line="131" />
@@ -3584,11 +3583,13 @@ Select a valid installation or another preset.</source>
             <translation>Приложения (*.exe);;Все файлы (*)</translation>
         </message>
         <message>
+            <location filename="../source/app/main.cpp" line="1939" />
             <location filename="../source/app/settings.cpp" line="811" />
             <source>Restart required</source>
             <translation>Требуется перезапуск</translation>
         </message>
         <message>
+            <location filename="../source/app/main.cpp" line="1941" />
             <location filename="../source/app/settings.cpp" line="812" />
             <source>Restart EI Mapper to apply the new interface language.</source>
             <translation>Перезапустите EI Mapper, чтобы сменить язык интерфейса.</translation>
@@ -4993,6 +4994,54 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
             <source>Paste Logic slot at original world positions</source>
             <translation>Вставить слот логики в исходные позиции мира.</translation>
         </message>
+        <message>
+            <location filename="../source/layout_components/tree_view.cpp" line="372" />
+            <location filename="../source/layout_components/tree_view.cpp" line="387" />
+            <source>World objects</source>
+            <translation>Объекты мира</translation>
+        </message>
+        <message>
+            <location filename="../source/layout_components/tree_view.cpp" line="373" />
+            <location filename="../source/layout_components/tree_view.cpp" line="388" />
+            <source>Units</source>
+            <translation>Существа</translation>
+        </message>
+        <message>
+            <location filename="../source/layout_components/tree_view.cpp" line="374" />
+            <location filename="../source/layout_components/tree_view.cpp" line="389" />
+            <source>Torches</source>
+            <translation>Факелы</translation>
+        </message>
+        <message>
+            <location filename="../source/layout_components/tree_view.cpp" line="375" />
+            <location filename="../source/layout_components/tree_view.cpp" line="390" />
+            <source>Levers</source>
+            <translation>Рычаги</translation>
+        </message>
+        <message>
+            <location filename="../source/layout_components/tree_view.cpp" line="376" />
+            <location filename="../source/layout_components/tree_view.cpp" line="391" />
+            <source>Magic traps</source>
+            <translation>Магические ловушки</translation>
+        </message>
+        <message>
+            <location filename="../source/layout_components/tree_view.cpp" line="377" />
+            <location filename="../source/layout_components/tree_view.cpp" line="392" />
+            <source>Light sources</source>
+            <translation>Источники света</translation>
+        </message>
+        <message>
+            <location filename="../source/layout_components/tree_view.cpp" line="378" />
+            <location filename="../source/layout_components/tree_view.cpp" line="393" />
+            <source>Sound sources</source>
+            <translation>Источники звука</translation>
+        </message>
+        <message>
+            <location filename="../source/layout_components/tree_view.cpp" line="379" />
+            <location filename="../source/layout_components/tree_view.cpp" line="394" />
+            <source>Particle sources</source>
+            <translation>Источники частиц</translation>
+        </message>
     </context>
     <context>
         <name>CUnitStatForm</name>
@@ -5079,22 +5128,22 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="1542" />
             <source>Minimize lighting mode</source>
-            <translation>Свернуть режим освещения</translation>
+            <translation>Свернуть панель освещения</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1553" />
             <source>Unlit</source>
-            <translation>Неосвещенный</translation>
+            <translation>Без освещения</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1554" />
             <source>Simple shading</source>
-            <translation>Простая штриховка</translation>
+            <translation>Простой</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1555" />
             <source>Full environment</source>
-            <translation>Полная среда</translation>
+            <translation>Полный</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="1568" />
@@ -5429,7 +5478,7 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="2412" />
             <source>Full environment (unavailable in ANGLE)</source>
-            <translation>Полная среда (недоступно в ANGLE)</translation>
+            <translation>Полный (недоступно в ANGLE)</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2413" />
@@ -5439,12 +5488,12 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="2423" />
             <source>ANGLE compatibility renderer: Unlit and Simple shading are available.</source>
-            <translation>Модуль визуализации совместимости с ANGLE: доступны неосвещенная и простая штриховка.</translation>
+            <translation>Режим совместимости ANGLE: доступны «Без освещения» и «Простой».</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="3401" />
             <source>Shadow maps are not initialized. Select Full environment, enable shadows, and render the failing view first.</source>
-            <translation>Карты теней не инициализируются. Выберите «Полная среда», включите тени и сначала визуализируйте неудачный вид.</translation>
+            <translation>Карты теней не созданы. Выберите режим «Полный», включите тени и снова откройте этот вид.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="3411" />
@@ -5835,7 +5884,7 @@ NW/NE/SE/SW: %2
         <message>
             <location filename="../source/render/view.cpp" line="8887" />
             <source>Map objects (*.mob);;Mob as JSON(*.json)</source>
-            <translation>Сопоставить объекты (*.mob);;Mob как JSON(*.json)</translation>
+            <translation>Объекты карты (*.mob);;MOB как JSON (*.json)</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="8921" />
@@ -6290,7 +6339,7 @@ Do you want to save changes?</source>
         <message>
             <location filename="../source/render/view.cpp" line="10112" />
             <source>Flatten whole map</source>
-            <translation>Сгладить всю карту</translation>
+            <translation>Выровнять всю карту</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="10113" />
@@ -6934,6 +6983,16 @@ Generate the review proposal now? The review process only describes existing atl
             <translation>Вставить свойства: %1</translation>
         </message>
         <message>
+            <location filename="../source/render/view.cpp" line="12012" />
+            <source>Objects</source>
+            <translation>Объекты</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="12012" />
+            <source>Count</source>
+            <translation>Количество</translation>
+        </message>
+        <message>
             <location filename="../source/render/view.cpp" line="12036" />
             <source> (default)</source>
             <translation>(по умолчанию)</translation>
@@ -7144,12 +7203,12 @@ Generate the review proposal now? The review process only describes existing atl
         <message>
             <location filename="../source/render/view.cpp" line="12519" />
             <source>Sculpt terrain</source>
-            <translation>Скульптура местности</translation>
+            <translation>Правка рельефа</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12521" />
             <source>Sculpt overlay height</source>
-            <translation>Высота наложения скульптуры</translation>
+            <translation>Правка высоты покрытия</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="12749" />
@@ -7264,7 +7323,7 @@ This is undoable and can be committed through the validated MPR save path.</sour
         <message>
             <location filename="../source/render/view.cpp" line="13315" />
             <source>Flatten target: %1 raw units</source>
-            <translation>Сгладить цель: исходные единицы %1</translation>
+            <translation>Цель выравнивания: %1 исходных единиц</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="13322" />
@@ -7284,7 +7343,7 @@ This is undoable and can be committed through the validated MPR save path.</sour
         <message>
             <location filename="../source/render/view.cpp" line="13339" />
             <source>Sculpt radius: %1 vertices</source>
-            <translation>Радиус лепки: вершины %1.</translation>
+            <translation>Радиус кисти: %1 вершин</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="13800" />
@@ -7394,7 +7453,7 @@ This is undoable and can be committed through the validated MPR save path.</sour
         <message>
             <location filename="../source/render/view.cpp" line="15120" />
             <source>Sculpt stroke created a steep local slope (%1 degrees, max raw change %2). Terrain remains seam-consistent, but inspect it for cliffs or exposed backfaces.</source>
-            <translation>Скульптурный штрих создал крутой локальный уклон (%1 градусов, максимальное исходное изменение %2). Ландшафт остается ровным, но осмотрите его на наличие скал или открытых обратных сторон.</translation>
+            <translation>Правка рельефа создала крутой склон (%1°, макс. исходное изменение %2). Швы сохранены, но проверьте обрывы и открытые обратные стороны.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="15125" />
@@ -7644,6 +7703,14 @@ Do you want to %3?</source>
         </message>
     </context>
     <context>
+        <name>LandscapeFalloff</name>
+        <message>
+            <location filename="../source/ui/landscape_tools.cpp" line="86" />
+            <source>Smooth</source>
+            <translation>Гладкий</translation>
+        </message>
+    </context>
+    <context>
         <name>MainWindow</name>
         <message>
             <location filename="../source/app/main_window.ui" line="14" />
@@ -7744,7 +7811,7 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/app/main_window.ui" line="401" />
             <location filename="../source/app/main_window.ui" line="476" />
-            <location filename="../source/app/main.cpp" line="1992" />
+            <location filename="../source/app/main.cpp" line="2003" />
             <source>Settings</source>
             <translation>Настройки</translation>
         </message>
@@ -11354,7 +11421,7 @@ It could not be opened automatically.</source>
     <context>
         <name>QObject</name>
         <message>
-            <location filename="../source/app/main.cpp" line="2984" />
+            <location filename="../source/app/main.cpp" line="2995" />
             <source>Opening main window...</source>
             <translation>Открытие главного окна...</translation>
         </message>

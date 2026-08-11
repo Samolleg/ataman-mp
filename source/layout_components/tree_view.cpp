@@ -369,14 +369,14 @@ QTreeWidgetItem *CTreeView::category(QString &categoryName)
 QString CTreeView::objectNameByType(ENodeType type) const
 {
     QMap<ENodeType, QString> type2str;
-    type2str.insert(ENodeType::eWorldObject, "World objects");
-    type2str.insert(ENodeType::eUnit, "Units");
-    type2str.insert(ENodeType::eTorch, "Torches");
-    type2str.insert(ENodeType::eLever, "Levers");
-    type2str.insert(ENodeType::eMagicTrap, "Magic traps");
-    type2str.insert(ENodeType::eLight, "Light source");
-    type2str.insert(ENodeType::eSound, "Sound sources");
-    type2str.insert(ENodeType::eParticle, "Particle sources");
+    type2str.insert(ENodeType::eWorldObject, tr("World objects"));
+    type2str.insert(ENodeType::eUnit, tr("Units"));
+    type2str.insert(ENodeType::eTorch, tr("Torches"));
+    type2str.insert(ENodeType::eLever, tr("Levers"));
+    type2str.insert(ENodeType::eMagicTrap, tr("Magic traps"));
+    type2str.insert(ENodeType::eLight, tr("Light sources"));
+    type2str.insert(ENodeType::eSound, tr("Sound sources"));
+    type2str.insert(ENodeType::eParticle, tr("Particle sources"));
 
     return type2str[type];
 }
@@ -384,14 +384,14 @@ QString CTreeView::objectNameByType(ENodeType type) const
 ENodeType CTreeView::objectTypeByString(QString str) const
 {
     QMap<ENodeType, QString> type2str;
-    type2str.insert(ENodeType::eWorldObject, "World objects");
-    type2str.insert(ENodeType::eUnit, "Units");
-    type2str.insert(ENodeType::eTorch, "Torches");
-    type2str.insert(ENodeType::eLever, "Levers");
-    type2str.insert(ENodeType::eMagicTrap, "Magic traps");
-    type2str.insert(ENodeType::eLight, "Light source");
-    type2str.insert(ENodeType::eSound, "Sound sources");
-    type2str.insert(ENodeType::eParticle, "Particle sources");
+    type2str.insert(ENodeType::eWorldObject, tr("World objects"));
+    type2str.insert(ENodeType::eUnit, tr("Units"));
+    type2str.insert(ENodeType::eTorch, tr("Torches"));
+    type2str.insert(ENodeType::eLever, tr("Levers"));
+    type2str.insert(ENodeType::eMagicTrap, tr("Magic traps"));
+    type2str.insert(ENodeType::eLight, tr("Light sources"));
+    type2str.insert(ENodeType::eSound, tr("Sound sources"));
+    type2str.insert(ENodeType::eParticle, tr("Particle sources"));
     return type2str.key(str);
 }
 

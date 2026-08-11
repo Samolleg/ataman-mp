@@ -12009,7 +12009,7 @@ void CView::collectObjectTreeData()
 
     m_pTree->setColumnCount(2);
     QStringList labels;
-    labels << "Objects" << "Count";
+    labels << tr("Objects") << tr("Count");
     m_pTree->setHeaderLabels(labels);
     m_pTree->header()->setStretchLastSection(false);
     m_pTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
