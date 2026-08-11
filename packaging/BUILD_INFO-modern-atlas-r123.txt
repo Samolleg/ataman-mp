@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: modern terrain atlas R123 Lava, overlay semantics, and finalization fixes
+Executable source commit: 4604e589
+Semantic source commit: a910c24c771111e7b9ad150725558e7a17f8ba8e
+Preset SHA-256: 1B8493A9CC562603D57B4BDE97F069534B94AFE9A85D1F901C0AF7941B1E6D7A
+Collections: 82 land brushes; stripes 608 slots; circles 748 slots; all visual maps unresolved=0
+Uniform coverage: 984/984 source aliases; 305 exact artworks; 1,220 displayed rotations
+Package policy: finalized clean first-run folder; no options/settings, logs, saves, dumps, object files, generated Makefiles, or stale changelists
+Installed stock JMV assets are included only in isolated visual-test maps; EI-HD research assets are excluded.
