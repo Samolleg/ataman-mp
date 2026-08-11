@@ -5652,7 +5652,10 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
     QVERIFY(mossy != zone2.families.cend());
     QVERIFY(irregular != zone2.families.cend());
     QVERIFY(dirt != zone2.families.cend());
-    QVERIFY(!dirt->paintSelectable);
+    // R117 supplies the reviewed one-on-three authored stamp that makes this
+    // exact Zone2 identity structurally paintable through the global uniform
+    // source pool.
+    QVERIFY(dirt->paintSelectable);
     for(const QString& removed : {
             QStringLiteral("Ground / Light"),
             QStringLiteral("Grass / Winter normal"),
@@ -6048,12 +6051,13 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     // the byte-identical Zone15 atlas, removing its final dead family as well.
     // The pruned R111 authority contains 392 referenced families. R112 adds
     // one reviewed, paint-selectable Zone10 Slabs / Faces irregular family.
-    // R115 adds three honest transition-only rows: Ground / Dirt for the two
-    // exact Zone2 owners and Sand / Dark pink for Zone7.
-    QCOMPARE(totalFamilies, 396);
+    // R115 adds three honest transition-only rows. R117-R120 then add four
+    // reviewed local identities while later authored evidence makes the two
+    // exact Zone2 Ground / Dirt brushes structurally paint-selectable.
+    QCOMPARE(totalFamilies, 400);
     // A referenced family remains transition-only when it has neither a
     // uniform tile nor a one-on-three authored stamp.
-    QCOMPARE(transitionSupportFamilies, 18);
+    QCOMPARE(transitionSupportFamilies, 17);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
@@ -6123,6 +6127,18 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
                 sawZone14IceThumbnail |= source.mprNamespace
                     == QStringLiteral("Zone14") && source.uniformSlot == 4;
             }
+        for(const STerrainGlobalMaterialSource& thumbnail : family.thumbnailSources)
+        {
+            bool isReviewedUniform = false;
+            for(const STerrainGlobalMaterialSource& source : family.sources)
+                isReviewedUniform |= source.mprNamespace.compare(
+                    thumbnail.mprNamespace, Qt::CaseInsensitive) == 0
+                    && source.uniformSlot == thumbnail.uniformSlot;
+            QVERIFY2(isReviewedUniform,
+                     qPrintable(QStringLiteral("Mixed palette thumbnail leaked into %1 from %2:%3")
+                         .arg(family.name, thumbnail.mprNamespace)
+                         .arg(thumbnail.uniformSlot)));
+        }
         if(family.layer == ETerrainAtlasLayer::Land
            && family.theme == QStringLiteral("Grass")) ++grassVariantCount;
         if(family.layer == ETerrainAtlasLayer::Land

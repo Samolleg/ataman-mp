@@ -85,6 +85,26 @@ R116_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r116_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R117_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r117_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R119_RECOVERED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r119_recovered_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R119_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r119_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R120_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r120_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -3029,6 +3049,50 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                 "NW": 0, "NE": 1, "SE": 2, "SW": 3,
             }[corner_name])] = family_name
 
+    # R117 replays only the user's changed selections. Rejected audit rows and
+    # omitted defaults stay on their existing assignments. Exact-identity card
+    # owners are enumerated in the decision record.
+    for slot_text, corner_values in R117_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R119 restores exact R79 decisions that were present in the recovered
+    # human-review corpus but never entered the generated catalog. The record
+    # enumerates the only structurally verified exact-binding propagation.
+    for slot_text, corner_values in R119_RECOVERED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R119 applies all four explicit user-reviewed corners for every exact
+    # byte-identity owner serialized by the locked questionnaire. Non-identical
+    # sibling atlases are deliberately absent and remain independent evidence.
+    for slot_text, corner_values in R119_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R120 resolves the exact-pixel cross-atlas abstention queue. Only values
+    # changed by the user are serialized, and propagation is restricted to
+    # byte-identical owners recorded by the locked questionnaire.
+    for slot_text, corner_values in R120_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(namespace, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
     if not corrections and not family_renames and not family_aliases:
         return recipe
     result = copy.deepcopy(recipe)
@@ -3161,6 +3225,59 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             int(slot) for slot in family_spec["uniformSlots"]]
         template["memberSlots"] = [
             int(slot) for slot in family_spec["memberSlots"]]
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    for family_spec in R117_CONSOLIDATED_REVIEW.get(
+            "newFamilies", {}).get(namespace, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        if any(family["id"] == family_id for family in result["families"]):
+            existing = next(family for family in result["families"]
+                            if family["id"] == family_id)
+            if existing.get("suggestedName") != family_spec["name"]:
+                raise ValueError(
+                    f"{result['namespace']}: R117 family ID {family_id} "
+                    f"already belongs to {existing.get('suggestedName')!r}")
+            continue
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    for family_spec in R120_CONSOLIDATED_REVIEW.get(
+            "newFamilies", {}).get(namespace, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        if any(family["id"] == family_id for family in result["families"]):
+            existing = next(family for family in result["families"]
+                            if family["id"] == family_id)
+            if existing.get("suggestedName") != family_spec["name"]:
+                raise ValueError(
+                    f"{result['namespace']}: R120 family ID {family_id} "
+                    f"already belongs to {existing.get('suggestedName')!r}")
+            continue
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        template["paintSelectable"] = bool(family_spec["paintSelectable"])
         result["families"].append(template)
         result["families"].sort(key=lambda family: family["id"])
     if (namespace in ("bz11k", "zone14")

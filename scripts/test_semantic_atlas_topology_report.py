@@ -89,7 +89,7 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         )
         report = build_report(catalog)
         self.assertEqual(38, report["namespaceCount"])
-        self.assertEqual(26, report["runtimeProfileCount"])
+        self.assertEqual(27, report["runtimeProfileCount"])
         # R97/R98 resolve the reviewed Sand / Irregular transition corners.
         # R105 corrects six provenance-qualified authored blend signatures;
         # R106 then applies the completed 249-card review and one explicit new
@@ -114,12 +114,12 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # Zone7 Sand / Dark pink), then applies 158 exact-owner corrections.
         # The two exact bz2g/Zone2 bindings each add 12 relationships and the
         # Zone7 family adds four, for 28 additional pair rows.
-        # R116 resolves the five held R115 decisions across eleven exact owner
-        # corners. The denominator is unchanged; two previously unsupported
-        # relationships gain one authored topology.
-        self.assertEqual(1234, report["totalPairCount"])
+        # R120 adds transition-only Stone / Gray where the explicitly reviewed
+        # family was absent locally, after resolving every remaining exact
+        # connection disagreement through R117-R120.
+        self.assertEqual(1282, report["totalPairCount"])
         self.assertEqual(
-            {"0": 660, "1": 86, "2": 80, "3": 186, "4": 222},
+            {"0": 696, "1": 95, "2": 69, "3": 192, "4": 230},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

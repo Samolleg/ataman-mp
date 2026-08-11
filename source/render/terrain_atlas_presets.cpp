@@ -227,11 +227,17 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                 if(thumbnailSlot >= 0 && thumbnailSlot < slotCount)
                 {
                     const int offset = thumbnailSlot * 4;
-                    bool containsFamily = false;
+                    bool uniformFamily = true;
                     for(int corner = 0; corner < 4; ++corner)
-                        containsFamily |= quint8(signatures.at(offset + corner))
+                        uniformFamily &= quint8(signatures.at(offset + corner))
                             == localId;
-                    if(containsFamily)
+                    // The catalog thumbnail is useful review metadata even
+                    // for a contextual one-on-three family, but the paint
+                    // palette icon must never show that mixed transition as
+                    // though it were a uniform brush. If the preferred slot
+                    // is mixed, loadGlobalUniformSource falls back to one of
+                    // the audited four-corner sources collected above.
+                    if(uniformFamily)
                         appendSource(thumbnailSlot, &global.thumbnailSources);
                 }
             }
