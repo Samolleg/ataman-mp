@@ -481,6 +481,11 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
 {
     ei::log(eLogInfo, QString("Database editor navigation requested for prototype '%1'")
                         .arg(prototype));
+    if(qApp->property("enduranceDatabasePrototypeNavigationProbe").toBool())
+    {
+        qApp->setProperty("enduranceDatabasePrototypeNavigationReceived", prototype);
+        return;
+    }
     if(!m_databaseEditorDialog)
     {
         const auto snapshot = ei::ProfileDatabaseContext::instance().current();
@@ -1106,8 +1111,6 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(openDatabaseEditor, &QAction::triggered, this,
             [this]() { showDatabaseEditor(); });
-    connect(m_pView, &CView::openDatabasePrototypeRequested,
-            this, &MainWindow::showDatabaseEditor);
     connect(generateMinimapAction, &QAction::triggered,
             this, &MainWindow::generateMinimap);
     connect(persistAiGraphAction, &QAction::triggered,
@@ -1305,6 +1308,14 @@ MainWindow::MainWindow(QWidget* parent) :
     }
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
+    const QMetaObject::Connection databasePrototypeNavigation = connect(
+        m_pView, &CView::openDatabasePrototypeRequested,
+        this, &MainWindow::showDatabaseEditor);
+    Q_ASSERT(databasePrototypeNavigation);
+    ei::log(databasePrototypeNavigation ? eLogInfo : eLogWarning,
+            QString("Database prototype MainWindow route connected=%1 view=%2")
+                .arg(bool(databasePrototypeNavigation))
+                .arg(reinterpret_cast<quintptr>(m_pView), 0, 16));
     m_mapTestLauncher = new CJmvMapTestLauncher(this);
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)

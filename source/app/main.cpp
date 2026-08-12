@@ -655,9 +655,29 @@ int runHeadlessCommand(QApplication& app)
             prototypeMenuAccepted = prototypeMenuEvent.isAccepted();
         }
         QApplication::processEvents();
-        const bool databasePrototypeOpenActionWorks =
+        const bool databasePrototypeMenuEmissionWorks =
             prototypeMenuAccepted && prototypeOpenAction && routedCombo
             && routedPrototype == QStringLiteral("Human Test");
+
+        // Exercise the production receiver chain.  The old regression stopped
+        // at CTableManager and therefore passed while MainWindow had attempted
+        // to connect a null CView before constructing it.
+        qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", true);
+        qApp->setProperty("enduranceDatabasePrototypeNavigationReceived", QString());
+        {
+            MainWindow productionWindow;
+            const bool invoked = productionWindow.view()
+                && QMetaObject::invokeMethod(productionWindow.view(),
+                    "openDatabasePrototypeRequested", Qt::DirectConnection,
+                    Q_ARG(QString, QStringLiteral("Human Test")));
+            QApplication::processEvents();
+            qApp->setProperty("enduranceDatabasePrototypeNavigationInvoked", invoked);
+        }
+        const bool databasePrototypeMainWindowRouteWorks =
+            qApp->property("enduranceDatabasePrototypeNavigationInvoked").toBool()
+            && qApp->property("enduranceDatabasePrototypeNavigationReceived").toString()
+                == QStringLiteral("Human Test");
+        qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", false);
 
         QSharedPointer<IPropertyBase> textureValue(new propStr(eObjParam_PRIM_TXTR, "original_texture"));
         CComboDynItem textureCombo(textureValue);
@@ -2353,7 +2373,8 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyResizeRepaintCoalesced && diplomacyResizeRepaintResumes
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
-                && enterCommit && clickCommit && databasePrototypeOpenActionWorks
+                && enterCommit && clickCommit && databasePrototypeMenuEmissionWorks
+                && databasePrototypeMainWindowRouteWorks
                 && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
@@ -2461,8 +2482,10 @@ int runHeadlessCommand(QApplication& app)
                << " escapeCancel=" << escapeCancel
                << " enterCommit=" << enterCommit
                << " clickCommit=" << clickCommit
-               << " databasePrototypeOpenActionWorks="
-               << databasePrototypeOpenActionWorks
+               << " databasePrototypeMenuEmissionWorks="
+               << databasePrototypeMenuEmissionWorks
+               << " databasePrototypeMainWindowRouteWorks="
+               << databasePrototypeMainWindowRouteWorks
                << " staticChoiceItemDataStored=" << staticChoiceItemDataStored
                << " staticChoicePopupTooltipClear=" << staticChoicePopupTooltipClear
                << " staticChoiceItemTooltipsWork=" << staticChoiceItemTooltipsWork
