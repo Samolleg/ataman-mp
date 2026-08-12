@@ -10,6 +10,7 @@
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDateTime>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGridLayout>
@@ -395,6 +396,21 @@ bool CResourceBrowser::publishTransaction(CResArchiveTransaction& transaction,
             + QFileInfo(context.archivePath).completeBaseName() + "-edited.res",
         tr("Evil Islands archives (*.res)"));
     if(destination.isEmpty()) return false;
+    const QString normalizedDestination = QDir::cleanPath(QFileInfo(destination).absoluteFilePath());
+    const QString normalizedSource = QDir::cleanPath(QFileInfo(context.archivePath).absoluteFilePath());
+    if(normalizedDestination.compare(normalizedSource, Qt::CaseInsensitive) == 0)
+    {
+        QMessageBox::warning(this, tr("Save As required"),
+            tr("The Resource Browser never replaces its indexed source archive. "
+               "Choose a copied, mod-owned, or new override archive as the destination."));
+        return false;
+    }
+    if(QFileInfo(destination).fileName().startsWith("database", Qt::CaseInsensitive))
+    {
+        QMessageBox::warning(this, tr("Protected database destination"),
+            tr("Generic RES transactions cannot publish to database.res or databaseJmv.res."));
+        return false;
+    }
     const bool replacingExisting = QFileInfo::exists(destination);
     const QString review = tr(
         "%1\n\nSource: %2\nDestination: %3\n\n"
