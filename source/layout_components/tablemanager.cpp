@@ -975,8 +975,25 @@ void CTableManager::showPropertyContextMenu(const QList<int>& rows, const QPoint
     QMenu menu(m_pTable);
     QAction* copy = menu.addAction(tr("Copy value"));
     QAction* paste = menu.addAction(tr("Paste value"));
-    QAction* database=nullptr;QString prototype;
-    if(rows.size()==1){const auto value=m_rowValues.value(rows.first());if(value&&value->type()==eObjParam_UNIT_PROTOTYPE){prototype=value->toString();database=menu.addAction(tr("Open prototype in Database Editor"));database->setEnabled(!prototype.trimmed().isEmpty());}}
+    QAction* database = nullptr;
+    QString prototype;
+    if(rows.size() == 1)
+    {
+        const auto value = m_rowValues.value(rows.first());
+        if(value && value->type() == eObjParam_UNIT_PROTOTYPE)
+        {
+            prototype = value->toString().trimmed();
+            database = menu.addAction(tr("Open prototype in Database Editor"));
+            database->setObjectName(QStringLiteral("openDatabasePrototypeAction"));
+            database->setEnabled(!prototype.isEmpty());
+            connect(database, &QAction::triggered, this, [this, prototype]()
+            {
+                ei::log(eLogInfo, QString("Database prototype property action triggered for '%1'")
+                                      .arg(prototype));
+                emit openDatabasePrototypeRequested(prototype);
+            });
+        }
+    }
     copy->setShortcut(QKeySequence::Copy);
     paste->setShortcut(QKeySequence::Paste);
     QString ignored;
@@ -986,8 +1003,6 @@ void CTableManager::showPropertyContextMenu(const QList<int>& rows, const QPoint
         copyRows(rows);
     else if(selected == paste)
         pasteRows(rows);
-    else if(selected==database)
-        emit openDatabasePrototypeRequested(prototype);
 }
 
 bool CTableManager::eventFilter(QObject* watched, QEvent* event)
@@ -1938,7 +1953,12 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
 void CComboDynItem::requestDatabasePrototypeOpen()
 {
     if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
-        emit openDatabasePrototypeRequested(currentText().trimmed());
+    {
+        const QString prototype=currentText().trimmed();
+        ei::log(eLogInfo, QString("Database prototype editor action triggered for '%1'")
+                              .arg(prototype));
+        emit openDatabasePrototypeRequested(prototype);
+    }
 }
 
 void CComboDynItem::showDatabasePrototypeContextMenu(const QPoint& globalPosition)
@@ -1951,8 +1971,12 @@ void CComboDynItem::showDatabasePrototypeContextMenu(const QPoint& globalPositio
     QAction* open = menu->addAction(tr("Open prototype in Database Editor"));
     open->setObjectName(QStringLiteral("openDatabasePrototypeAction"));
     open->setEnabled(!currentText().trimmed().isEmpty());
-    if(menu->exec(globalPosition) == open)
-        requestDatabasePrototypeOpen();
+    // QAction::triggered is delivered before QMenu::exec() returns.  The
+    // property selection can rebuild this cell while the menu is closing, so
+    // relying on exec()'s returned QAction loses the request in the real
+    // properties panel even though the user selected the action.
+    connect(open, &QAction::triggered, this, &CComboDynItem::requestDatabasePrototypeOpen);
+    menu->exec(globalPosition);
 }
 
 void CColorButtonItem::keyPressEvent(QKeyEvent* event)
