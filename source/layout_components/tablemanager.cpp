@@ -1932,22 +1932,6 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     QObject::connect(lineEdit(), SIGNAL(returnPressed()), this, SLOT(_onEditingFinished()));
     QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
     lineEdit()->installEventFilter(this);
-    if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
-    {
-        lineEdit()->setContextMenuPolicy(Qt::CustomContextMenu);
-        QObject::connect(lineEdit(), &QLineEdit::customContextMenuRequested,
-                         this, [this](const QPoint& pos)
-        {
-            QMenu* menu = lineEdit()->createStandardContextMenu();
-            menu->addSeparator();
-            QAction* open = menu->addAction(tr("Open prototype in Database Editor"));
-            open->setEnabled(!currentText().trimmed().isEmpty());
-            QAction* selected = menu->exec(lineEdit()->mapToGlobal(pos));
-            if(selected == open)
-                requestDatabasePrototypeOpen();
-            delete menu;
-        });
-    }
     updateDatabaseDiagnostic(m_committedText);
 }
 
@@ -1955,6 +1939,19 @@ void CComboDynItem::requestDatabasePrototypeOpen()
 {
     if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
         emit openDatabasePrototypeRequested(currentText().trimmed());
+}
+
+void CComboDynItem::showDatabasePrototypeContextMenu(const QPoint& globalPosition)
+{
+    QMenu* menu = lineEdit()->createStandardContextMenu();
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->addSeparator();
+    QAction* open = menu->addAction(tr("Open prototype in Database Editor"));
+    open->setObjectName(QStringLiteral("openDatabasePrototypeAction"));
+    open->setEnabled(!currentText().trimmed().isEmpty());
+    QObject::connect(open, &QAction::triggered,
+                     this, &CComboDynItem::requestDatabasePrototypeOpen);
+    menu->popup(globalPosition);
 }
 
 void CColorButtonItem::keyPressEvent(QKeyEvent* event)
@@ -2180,6 +2177,13 @@ void CComboDynItem::focusOutEvent(QFocusEvent* event)
 
 bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
 {
+    if(watched == lineEdit() && event->type() == QEvent::ContextMenu
+       && m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
+    {
+        const QContextMenuEvent* context = static_cast<QContextMenuEvent*>(event);
+        showDatabasePrototypeContextMenu(context->globalPos());
+        return true;
+    }
     if(watched == lineEdit() && event->type() == QEvent::FocusOut)
     {
         const QFocusEvent* focusEvent = static_cast<QFocusEvent*>(event);

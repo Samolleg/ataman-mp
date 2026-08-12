@@ -628,11 +628,48 @@ int runHeadlessCommand(QApplication& app)
                          [&openedPrototype](const QString& value) {
             openedPrototype = value;
         });
-        prototypeCombo.requestDatabasePrototypeOpen();
+        QContextMenuEvent prototypeMenuEvent(QContextMenuEvent::Mouse,
+            QPoint(2, 2), prototypeCombo.lineEdit()->mapToGlobal(QPoint(2, 2)));
+        QApplication::sendEvent(prototypeCombo.lineEdit(), &prototypeMenuEvent);
+        QApplication::processEvents();
+        QAction* prototypeOpenAction = nullptr;
+        QMenu* prototypeMenu = nullptr;
+        for(QWidget* widget : QApplication::topLevelWidgets())
+            if(QMenu* menu = qobject_cast<QMenu*>(widget))
+                if(QAction* action = menu->findChild<QAction*>(
+                       QStringLiteral("openDatabasePrototypeAction")))
+                {
+                    prototypeMenu = menu;
+                    prototypeOpenAction = action;
+                    break;
+                }
+        if(prototypeOpenAction)
+            prototypeOpenAction->trigger();
+        if(prototypeMenu)
+            prototypeMenu->close();
+        QApplication::processEvents();
+        const bool prototypeComboContextActionWorks =
+            prototypeMenuEvent.isAccepted()
+            && prototypeOpenAction
+            && openedPrototype == QStringLiteral("Human Test");
+
+        QTableWidget prototypeTable;
+        CTableManager prototypeManager(&prototypeTable);
+        QString routedPrototype;
+        QObject::connect(&prototypeManager,
+                         &CTableManager::openDatabasePrototypeRequested,
+                         [&routedPrototype](const QString& value) {
+            routedPrototype = value;
+        });
+        prototypeManager.setNewData(
+            QList<QSharedPointer<IPropertyBase>>() << prototypeValue);
+        CComboDynItem* routedCombo = qobject_cast<CComboDynItem*>(
+            prototypeTable.cellWidget(0, 1));
+        if(routedCombo)
+            routedCombo->requestDatabasePrototypeOpen();
         const bool databasePrototypeOpenActionWorks =
-            openedPrototype == QStringLiteral("Human Test")
-            && prototypeCombo.lineEdit()->contextMenuPolicy()
-                == Qt::CustomContextMenu;
+            prototypeComboContextActionWorks && routedCombo
+            && routedPrototype == QStringLiteral("Human Test");
 
         QSharedPointer<IPropertyBase> textureValue(new propStr(eObjParam_PRIM_TXTR, "original_texture"));
         CComboDynItem textureCombo(textureValue);

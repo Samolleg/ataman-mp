@@ -118,6 +118,7 @@ private slots:
     void retainsAppearanceBatchOwnershipUntilResultsAreConsumed();
     void continuesVisualFinalizationWhileCameraMoves();
     void ignoresIdleVisualProgressBeforeWorkStarts();
+    void transformsDoNotInvalidateDatabaseAppearance();
     void keepsAppearanceCacheBesideEditor();
     void rebuildsIncompatibleAppearanceCacheAutomatically();
     void cachesParsedAnimationAndRecoversFromCorruption();
@@ -314,6 +315,19 @@ void UnitAnimationTests::ignoresIdleVisualProgressBeforeWorkStarts()
     QVERIFY(!ei::shouldLogUnitVisualProgress(402, 31, 0));
     QVERIFY(ei::shouldLogUnitVisualProgress(402, 32, 0));
     QVERIFY(ei::shouldLogUnitVisualProgress(402, 402, 384));
+}
+
+void UnitAnimationTests::transformsDoNotInvalidateDatabaseAppearance()
+{
+    QVERIFY(!ei::unitPropertyAffectsVisual(eObjParam_POSITION));
+    QVERIFY(!ei::unitPropertyAffectsVisual(eObjParam_ROTATION));
+    QVERIFY(!ei::unitPropertyAffectsVisual(eObjParam_NID));
+    QVERIFY(!ei::unitPropertyAffectsVisual(eObjParam_UNIT_QUICK_ITEMS));
+    QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_UNIT_PROTOTYPE));
+    QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_UNIT_ARMORS));
+    QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_UNIT_WEAPONS));
+    QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_BODYPARTS));
+    QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_COMPLECTION));
 }
 
 void UnitAnimationTests::keepsAppearanceCacheBesideEditor()

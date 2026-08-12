@@ -11729,6 +11729,17 @@ void CView::refreshDatabaseVisuals(const QString& tableKey,const QString& rowKey
             unit->invalidateDatabaseVisual();
             affected.append(unit);
         }
+    // End the previous generation's progress ownership before resetting its
+    // counters. A visible shared bar with total == 0 makes the scheduler's
+    // foreign-progress guard reject every subsequent preparation frame.
+    if(m_pProgress && (m_unitAppearanceProgressPending
+       || m_pProgress->format().contains(tr("Resolving full character visuals"))))
+    {
+        m_pProgress->setFormat(QStringLiteral("%p%"));
+        m_pProgress->reset();
+    }
+    if(m_unitVisualPreparationTimer)
+        m_unitVisualPreparationTimer->stop();
     m_unitAppearanceProgressTotal=0;m_unitAppearanceProgressCompleted=0;m_unitAppearanceProgressPending=false;m_unitAppearanceLastLoggedCompleted=-1;
     // Database publication happens on the GUI thread. Re-resolve affected
     // loaded units immediately with the viewport context current so stale

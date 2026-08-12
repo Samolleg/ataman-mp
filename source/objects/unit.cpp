@@ -1030,8 +1030,9 @@ void CUnit::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
 
 void CUnit::applyParam(const QSharedPointer<IPropertyBase>& prop)
 {
-    ++m_visualRevision;
-    invalidateTransientVisual();
+    // Pose, IDs, logic and inventory do not own the derived DB appearance.
+    if(ei::unitPropertyAffectsVisual(prop->type()))
+        invalidateDatabaseVisual();
     switch (prop->type())
     {
     case eObjParam_UNIT_NEED_IMPORT:
