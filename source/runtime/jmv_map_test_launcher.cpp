@@ -1448,6 +1448,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_liveGrpPath.clear();
     m_mapTableSourcePath.clear();
     m_stagedMapTablePath.clear();
+    m_databaseSourcePath.clear();
+    m_stagedDatabasePath.clear();
     m_livePlaceholderResourcePath.clear();
     m_bridgeResultPath.clear();
     m_testSavesPath.clear();
@@ -1457,6 +1459,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_liveGrpSha256.clear();
     m_mapTableSourceSha256.clear();
     m_stagedMapTableSha256.clear();
+    m_databaseSourceSha256.clear();
+    m_stagedDatabaseSha256.clear();
     m_livePlaceholderResourceSha256.clear();
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
@@ -1544,6 +1548,13 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         environment.insert("EI_MAPPER_ENDURANCE_MAP_TABLE_STAGE",
                            m_stagedMapTablePath);
     }
+    if(!m_databaseSourcePath.isEmpty())
+    {
+        environment.insert("EI_MAPPER_ENDURANCE_DATABASE_SOURCE",
+                           m_databaseSourcePath);
+        environment.insert("EI_MAPPER_ENDURANCE_DATABASE_STAGE",
+                           m_stagedDatabasePath);
+    }
     if(!m_livePlaceholderResourcePath.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_TEMP_TEXTURE_RES",
                            m_livePlaceholderResourcePath);
@@ -1572,9 +1583,10 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The active runtime stack is incomplete or does not match an exact manifest.";
         return false;
     }
-    if(!input.spawn.valid || input.mprData.isEmpty() || input.mobData.isEmpty())
+    if(!input.spawn.valid || input.mprData.isEmpty() || input.mobData.isEmpty()
+       || input.databaseSourcePath.trimmed().isEmpty() || input.databaseData.isEmpty())
     {
-        if(error) *error = "The loaded map pair or its unobstructed travel-zone spawn is incomplete.";
+        if(error) *error = "The loaded map pair, active database, or its unobstructed travel-zone spawn is incomplete.";
         return false;
     }
     if(isBase && (input.baseProbeLevel < 1 || input.baseProbeLevel > 4))
@@ -1782,6 +1794,39 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "Could not create the Endurance test-run directory.";
         return false;
     }
+
+    m_databaseSourcePath = QFileInfo(input.databaseSourcePath).absoluteFilePath();
+    QByteArray sourceDatabase;
+    if(!QFileInfo(m_databaseSourcePath).isFile()
+       || QFileInfo(m_databaseSourcePath).fileName().compare(
+              "database.res", Qt::CaseInsensitive) != 0
+       || !readFile(m_databaseSourcePath, &sourceDatabase, error))
+    {
+        if(error && error->isEmpty())
+            *error = "The active database.res source could not be resolved for owned test staging.";
+        return false;
+    }
+    const QString databaseDirectory = QDir(m_runRoot).filePath("database");
+    m_stagedDatabasePath = QDir(databaseDirectory).filePath("database.res");
+    m_databaseSourceSha256 = sha256(sourceDatabase);
+    m_stagedDatabaseSha256 = sha256(input.databaseData);
+    if(!QDir().mkpath(databaseDirectory)
+       || !atomicWrite(m_stagedDatabasePath, input.databaseData, error)
+       || fileSha256(m_stagedDatabasePath).compare(
+              m_stagedDatabaseSha256, Qt::CaseInsensitive) != 0)
+    {
+        if(error && error->isEmpty())
+            *error = "The staged active database failed its post-write SHA-256 check.";
+        return false;
+    }
+    QJsonObject databaseJournal;
+    databaseJournal.insert("policy", "read-only-exact-source-path-redirection");
+    databaseJournal.insert("sourcePath", m_databaseSourcePath);
+    databaseJournal.insert("sourceSha256", m_databaseSourceSha256);
+    databaseJournal.insert("stagedPath", m_stagedDatabasePath);
+    databaseJournal.insert("stagedSha256", m_stagedDatabaseSha256);
+    databaseJournal.insert("installedArchiveModified", false);
+    m_manifest.insert("database", databaseJournal);
 
     // Journal every live artifact before creating it. A crash at any later
     // staging point can therefore be recovered without guessing ownership.
@@ -2177,6 +2222,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         m_manifest.insert("godmodeBootstrapPath", godmodeBootstrapPath);
     appendRunLog(QString("Prepared generation-scoped isolated saves generation=0 path=%1; live saves remain untouched")
                  .arg(m_testSavesPath));
+    appendRunLog(QString("Staged active database source=%1 sourceSha256=%2 staged=%3 stagedSha256=%4 installedModified=false")
+                 .arg(QDir::toNativeSeparators(m_databaseSourcePath),
+                      m_databaseSourceSha256,
+                      QDir::toNativeSeparators(m_stagedDatabasePath),
+                      m_stagedDatabaseSha256));
     if(isJmv)
         appendRunLog(QString("Starter mod target=%1 persistedSelection=%2 persistedAddonPath=%3 policy=owned-process-override persistentModified=false")
                      .arg(QDir::cleanPath(input.profile.modRoot), starterStoredSelection,
@@ -2240,8 +2290,15 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         if(error) *error = "The active editor profile differs from the running test profile.";
         return false;
     }
+    if(QFileInfo(input.databaseSourcePath).absoluteFilePath().compare(
+           m_databaseSourcePath, Qt::CaseInsensitive) != 0)
+    {
+        if(error) *error = "The active database source differs from the running test profile.";
+        return false;
+    }
     if(!input.profile.valid || !input.profile.runtimeStackValidated
-       || input.mprData.isEmpty() || input.mobData.isEmpty() || !input.spawn.valid)
+       || input.mprData.isEmpty() || input.mobData.isEmpty()
+       || input.databaseData.isEmpty() || !input.spawn.valid)
     {
         if(error) *error = "The hot-reload profile, map pair, or selected entrance is incomplete.";
         return false;
@@ -2285,6 +2342,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     const QString payloadMob = QDir(reloadRoot).filePath("map.mob");
     const QString payloadGrp = graphSource.usesExternalGraph()
         ? QDir(reloadRoot).filePath("map.grp") : QString();
+    const QString payloadDatabase = QDir(reloadRoot).filePath("database.res");
     const bool hasGeneratedMinimap = !input.temporaryMinimapMmp.isEmpty();
     const QString minimapTextureName = hasGeneratedMinimap
         ? temporaryMinimapRuntimeTextureName(
@@ -2322,7 +2380,8 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         return false;
     if(!QDir().mkpath(generationSavePath)
        || !atomicWrite(payloadMpr, input.mprData, error)
-       || !atomicWrite(payloadMob, input.mobData, error))
+       || !atomicWrite(payloadMob, input.mobData, error)
+       || !atomicWrite(payloadDatabase, input.databaseData, error))
         return false;
     if(graphSource.usesExternalGraph()
        && !atomicWrite(payloadGrp, graphSource.externalData, error))
@@ -2430,6 +2489,8 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     request.minimapResourcePath = minimapResourcePath;
     request.minimapResourceSha256 = minimapResourcePath.isEmpty()
         ? QString() : fileSha256(minimapResourcePath);
+    request.databasePath = payloadDatabase;
+    request.databaseSha256 = sha256(input.databaseData);
     request.savePath = generationSavePath;
     // Position preservation requires a verified runtime position provider.
     // Until that provider exists, use normal entrance/custom-spawn bootstrap.
@@ -2566,6 +2627,8 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     audit.insert("minimapTextureName", minimapTextureName);
     audit.insert("minimapResourcePath", minimapResourcePath);
     audit.insert("minimapResourceSha256", request.minimapResourceSha256);
+    audit.insert("databasePath", request.databasePath);
+    audit.insert("databaseSha256", request.databaseSha256);
     audit.insert("queuedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     reloads.append(audit);
     m_manifest.insert("hotReloads", reloads);

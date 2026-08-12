@@ -634,29 +634,26 @@ int runHeadlessCommand(QApplication& app)
         CComboDynItem* routedCombo = qobject_cast<CComboDynItem*>(
             prototypeTable.cellWidget(0, 1));
         QAction* prototypeOpenAction = nullptr;
-        QMenu* prototypeMenu = nullptr;
         bool prototypeMenuAccepted = false;
         if(routedCombo)
         {
+            QTimer::singleShot(0, [&prototypeOpenAction]()
+            {
+                for(QWidget* widget : QApplication::topLevelWidgets())
+                    if(QMenu* menu = qobject_cast<QMenu*>(widget))
+                        if(QAction* action = menu->findChild<QAction*>(
+                               QStringLiteral("openDatabasePrototypeAction")))
+                        {
+                            prototypeOpenAction = action;
+                            action->trigger();
+                            return;
+                        }
+            });
             QContextMenuEvent prototypeMenuEvent(QContextMenuEvent::Mouse,
                 QPoint(2, 2), routedCombo->lineEdit()->mapToGlobal(QPoint(2, 2)));
             QApplication::sendEvent(routedCombo->lineEdit(), &prototypeMenuEvent);
             prototypeMenuAccepted = prototypeMenuEvent.isAccepted();
-            QApplication::processEvents();
-            for(QWidget* widget : QApplication::topLevelWidgets())
-                if(QMenu* menu = qobject_cast<QMenu*>(widget))
-                    if(QAction* action = menu->findChild<QAction*>(
-                           QStringLiteral("openDatabasePrototypeAction")))
-                    {
-                        prototypeMenu = menu;
-                        prototypeOpenAction = action;
-                        break;
-                    }
         }
-        if(prototypeOpenAction)
-            prototypeOpenAction->trigger();
-        if(prototypeMenu)
-            prototypeMenu->close();
         QApplication::processEvents();
         const bool databasePrototypeOpenActionWorks =
             prototypeMenuAccepted && prototypeOpenAction && routedCombo

@@ -209,6 +209,12 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
     input.sourceMob = QFileInfo(mobPath);
     input.mprData = mprData;
     input.mobData = mobData;
+    input.databaseSourcePath = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_DATABASE",
+        QDir(modRoot).filePath("res/database.res"));
+    input.databaseData = readAll(input.databaseSourcePath);
+    QVERIFY2(!input.databaseData.isEmpty(),
+             qPrintable("Could not read smoke database: " + input.databaseSourcePath));
     input.mapEntry.zoneId = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_ZONE", "gz1g");
     input.mapEntry.mprName = qEnvironmentVariable(
         "EI_ENDURANCE_RUNTIME_SMOKE_MPR_NAME",

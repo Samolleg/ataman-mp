@@ -3811,6 +3811,35 @@ void MainWindow::launchCurrentMapTest()
     input.mprData = mprData;
     input.mobData = mobData;
     input.generatedAiGraphData = generatedAiGraphData;
+    const auto databaseSnapshot = ei::ProfileDatabaseContext::instance().current();
+    if(!databaseSnapshot || databaseSnapshot->sourceArchivePath.trimmed().isEmpty())
+    {
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("The active profile database cannot be resolved for runtime staging."));
+        return;
+    }
+    input.databaseSourcePath = databaseSnapshot->sourceArchivePath;
+    QString databaseDiagnostic;
+    if(m_databaseDocument
+       && QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath().compare(
+              QFileInfo(input.databaseSourcePath).absoluteFilePath(),
+              Qt::CaseInsensitive) == 0)
+        input.databaseData = m_databaseDocument->buildArchive(&databaseDiagnostic);
+    else
+    {
+        QFile databaseFile(input.databaseSourcePath);
+        if(databaseFile.open(QIODevice::ReadOnly))
+            input.databaseData = databaseFile.readAll();
+        else
+            databaseDiagnostic = databaseFile.errorString();
+    }
+    if(input.databaseData.isEmpty())
+    {
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("The active database could not be staged safely.\n\n%1")
+                .arg(databaseDiagnostic));
+        return;
+    }
     input.supplementalMobs = supplementalMobs;
     input.embeddedScript = mob->script();
     input.mapEntry = entry;

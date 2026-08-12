@@ -1943,15 +1943,16 @@ void CComboDynItem::requestDatabasePrototypeOpen()
 
 void CComboDynItem::showDatabasePrototypeContextMenu(const QPoint& globalPosition)
 {
-    QMenu* menu = lineEdit()->createStandardContextMenu();
-    menu->setAttribute(Qt::WA_DeleteOnClose);
+    // Keep the editor and action alive until the user's choice is known.  A
+    // modeless popup can transfer focus back through the property panel and
+    // rebuild this cell before QAction::triggered reaches the routing chain.
+    QScopedPointer<QMenu> menu(lineEdit()->createStandardContextMenu());
     menu->addSeparator();
     QAction* open = menu->addAction(tr("Open prototype in Database Editor"));
     open->setObjectName(QStringLiteral("openDatabasePrototypeAction"));
     open->setEnabled(!currentText().trimmed().isEmpty());
-    QObject::connect(open, &QAction::triggered,
-                     this, &CComboDynItem::requestDatabasePrototypeOpen);
-    menu->popup(globalPosition);
+    if(menu->exec(globalPosition) == open)
+        requestDatabasePrototypeOpen();
 }
 
 void CColorButtonItem::keyPressEvent(QKeyEvent* event)
