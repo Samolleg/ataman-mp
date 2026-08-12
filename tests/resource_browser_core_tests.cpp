@@ -211,7 +211,7 @@ void ResourceBrowserCoreTests::representativeArchivesIndexReadOnly()
 {
     const QString configured = qEnvironmentVariable("EI_RES_READONLY_PROBES");
     if(configured.isEmpty()) QSKIP("No read-only representative archive paths configured.");
-    for(const QString& path : configured.split(';', Qt::SkipEmptyParts))
+    for(const QString& path : configured.split(';', QString::SkipEmptyParts))
     {
         QElapsedTimer timer;
         timer.start();
