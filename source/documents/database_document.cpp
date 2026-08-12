@@ -2,12 +2,68 @@
 #include <QCryptographicHash>
 #include <QFile>
 #include <QJsonArray>
+#include <QDataStream>
+#include <QSaveFile>
+#include <QTextCodec>
+#include "lossless_database_member.h"
+#include "res_archive_document.h"
 
 namespace {
 QString fold(const QString& v) { return v.trimmed().toLower(); }
 ei::SDatabaseFieldSchema fs(const QString& key, const QString& label, ei::EDatabaseFieldType type, const QString& ref = QString())
 { ei::SDatabaseFieldSchema f; f.key=key; f.label=label; f.type=type; f.referenceTable=ref; return f; }
+ei::SDatabaseFieldSchema ro(ei::SDatabaseFieldSchema f){f.writable=false;return f;}
 QJsonValue jv(const QVariant& v) { return v.type()==QVariant::StringList ? QJsonValue(QJsonArray::fromStringList(v.toStringList())) : QJsonValue::fromVariant(v); }
+QByteArray stringPayload(const QVariant& value)
+{
+    QByteArray out=QTextCodec::codecForName("CP1251")->fromUnicode(value.toString());out.append('\0');return out;
+}
+QByteArray intPayload(const QVariant& value)
+{
+    QByteArray out;QDataStream stream(&out,QIODevice::WriteOnly);stream.setByteOrder(QDataStream::LittleEndian);stream<<qint32(value.toInt());return out;
+}
+QByteArray floatPayload(const QVariant& value)
+{
+    QByteArray out;QDataStream stream(&out,QIODevice::WriteOnly);stream.setByteOrder(QDataStream::LittleEndian);stream.setFloatingPointPrecision(QDataStream::SinglePrecision);stream<<float(value.toDouble());return out;
+}
+struct PatchTarget{QString member;int table{-1};int field{-1};enum Kind{String,Integer,Float}kind{String};};
+bool patchTarget(const ei::SDatabaseChange& change,const ei::SDatabaseTable& table,PatchTarget* target)
+{
+    target->member=table.sourceMember;
+    if(change.tableKey=="raceModels")
+    {target->table=1;if(change.fieldKey=="model")target->field=30;else return false;target->kind=PatchTarget::String;return true;}
+    if(change.tableKey=="monsters")
+    {
+        target->table=2;
+        if(change.fieldKey=="baseRace"){target->field=1;target->kind=PatchTarget::String;}
+        else if(change.fieldKey=="skinIndex"){target->field=3;target->kind=PatchTarget::Integer;}
+        else if(change.fieldKey=="hairIndex"){target->field=4;target->kind=PatchTarget::Integer;}
+        else if(change.fieldKey=="complexionX"){target->field=5;target->kind=PatchTarget::Float;}
+        else if(change.fieldKey=="complexionY"){target->field=6;target->kind=PatchTarget::Float;}
+        else if(change.fieldKey=="complexionZ"){target->field=7;target->kind=PatchTarget::Float;}
+        else if(change.fieldKey=="secondWeapon"){target->field=42;target->kind=PatchTarget::String;}
+        else return false;
+        return true;
+    }
+    if(change.tableKey=="items")
+    {
+        const auto* row=static_cast<const ei::SDatabaseRow*>(nullptr);
+        for(const auto& candidate:table.rows)if(candidate.stableKey==change.rowKey){row=&candidate;break;}
+        if(!row)return false;
+        const QString category=row->values.value("category").toString();
+        const QStringList categories={"materials","weapons","armor","quickItems","questItems","lootItems"};
+        target->table=categories.indexOf(category);if(target->table<0)return false;
+        if(change.fieldKey=="type"){target->field=1;target->kind=PatchTarget::String;}
+        else if(change.fieldKey=="typeId"){target->field=2;target->kind=PatchTarget::Integer;}
+        else if(change.fieldKey=="materialType"){target->field=3;target->kind=PatchTarget::String;}
+        else if(change.fieldKey=="textureType1"){target->field=5;target->kind=PatchTarget::Integer;}
+        else if(change.fieldKey=="textureType2"){target->field=6;target->kind=PatchTarget::Integer;}
+        else if(change.fieldKey=="wearOrder"&&target->table==2){target->field=24;target->kind=PatchTarget::Integer;}
+        else return false;
+        return true;
+    }
+    return false;
+}
 }
 void addOpaqueFields(ei::SDatabaseTable* table, ei::SDatabaseRow* row,
                      const QMap<int, QByteArray>& fields)
@@ -34,13 +90,13 @@ QSharedPointer<DatabaseDocument> DatabaseDocument::fromSnapshot(const QSharedPoi
     if(!s || !s->usable()) { if(d)*d="The active profile database is unavailable or invalid."; return {}; }
     QSharedPointer<DatabaseDocument> out(new DatabaseDocument(s));
     SDatabaseTable races; races.key="raceModels"; races.label="Race models"; races.sourceMember="units.udb";
-    races.fields={fs("name","Name",EDatabaseFieldType::Text),fs("model","Model",EDatabaseFieldType::Text),fs("primaryTextures","Primary textures",EDatabaseFieldType::TextList),fs("secondaryTextures","Secondary textures",EDatabaseFieldType::TextList)};
+    races.fields={ro(fs("name","Name",EDatabaseFieldType::Text)),fs("model","Model",EDatabaseFieldType::Text),ro(fs("primaryTextures","Primary textures",EDatabaseFieldType::TextList)),ro(fs("secondaryTextures","Secondary textures",EDatabaseFieldType::TextList))};
     for(const auto& x:s->raceModels){SDatabaseRow r;r.stableKey=fold(x.name);r.values={{"name",x.name},{"model",x.model},{"primaryTextures",x.primaryTextures},{"secondaryTextures",x.secondaryTextures}};addOpaqueFields(&races,&r,x.opaqueFields);races.rows<<r;} out->m_tables[races.key]=races;
     SDatabaseTable monsters; monsters.key="monsters"; monsters.label="Monster prototypes"; monsters.sourceMember="units.udb";
-    monsters.fields={fs("name","Name",EDatabaseFieldType::Text),fs("baseRace","Base race",EDatabaseFieldType::Reference,"raceModels"),fs("skinIndex","Skin",EDatabaseFieldType::Integer),fs("hairIndex","Hair",EDatabaseFieldType::Integer),fs("complexionX","Complexion X",EDatabaseFieldType::Decimal),fs("complexionY","Complexion Y",EDatabaseFieldType::Decimal),fs("complexionZ","Complexion Z",EDatabaseFieldType::Decimal),fs("items","Items",EDatabaseFieldType::TextList),fs("wears","Wears",EDatabaseFieldType::TextList),fs("weapon","Weapon",EDatabaseFieldType::Text),fs("secondWeapon","Second weapon",EDatabaseFieldType::Text)};
+    monsters.fields={ro(fs("name","Name",EDatabaseFieldType::Text)),fs("baseRace","Base race",EDatabaseFieldType::Reference,"raceModels"),fs("skinIndex","Skin",EDatabaseFieldType::Integer),fs("hairIndex","Hair",EDatabaseFieldType::Integer),fs("complexionX","Complexion X",EDatabaseFieldType::Decimal),fs("complexionY","Complexion Y",EDatabaseFieldType::Decimal),fs("complexionZ","Complexion Z",EDatabaseFieldType::Decimal),ro(fs("items","Items",EDatabaseFieldType::TextList)),ro(fs("wears","Wears",EDatabaseFieldType::TextList)),ro(fs("weapon","Weapon",EDatabaseFieldType::Text)),fs("secondWeapon","Second weapon",EDatabaseFieldType::Text)};
     for(const auto& x:s->monsters){SDatabaseRow r;r.stableKey=fold(x.name);r.values={{"name",x.name},{"baseRace",x.baseRace},{"skinIndex",x.skinIndex},{"hairIndex",x.hairIndex},{"complexionX",x.complexionX},{"complexionY",x.complexionY},{"complexionZ",x.complexionZ},{"items",x.items},{"wears",x.wears},{"weapon",x.weapon},{"secondWeapon",x.secondWeapon}};addOpaqueFields(&monsters,&r,x.opaqueFields);monsters.rows<<r;} out->m_tables[monsters.key]=monsters;
     SDatabaseTable items; items.key="items"; items.label="Items"; items.sourceMember="items.idb";
-    items.fields={fs("name","Name",EDatabaseFieldType::Text),fs("category","Category",EDatabaseFieldType::Text),fs("type","Type",EDatabaseFieldType::Text),fs("typeId","Type ID",EDatabaseFieldType::Integer),fs("materialType","Material type",EDatabaseFieldType::Text),fs("textureType1","Texture 1",EDatabaseFieldType::Integer),fs("textureType2","Texture 2",EDatabaseFieldType::Integer),fs("wearOrder","Wear order",EDatabaseFieldType::Integer)};
+    items.fields={ro(fs("name","Name",EDatabaseFieldType::Text)),ro(fs("category","Category",EDatabaseFieldType::Text)),fs("type","Type",EDatabaseFieldType::Text),fs("typeId","Type ID",EDatabaseFieldType::Integer),fs("materialType","Material type",EDatabaseFieldType::Text),fs("textureType1","Texture 1",EDatabaseFieldType::Integer),fs("textureType2","Texture 2",EDatabaseFieldType::Integer),fs("wearOrder","Wear order",EDatabaseFieldType::Integer)};
     for(const auto& x:s->items){SDatabaseRow r;r.stableKey=fold(x.name);r.values={{"name",x.name},{"category",x.category},{"type",x.type},{"typeId",x.typeId},{"materialType",x.materialType},{"textureType1",x.textureType1},{"textureType2",x.textureType2},{"wearOrder",x.wearOrder}};addOpaqueFields(&items,&r,x.opaqueFields);items.rows<<r;} out->m_tables[items.key]=items;
     return out;
 }
@@ -57,6 +113,41 @@ bool DatabaseDocument::cloneRow(const QString&t,const QString&r,const QString&n,
 bool DatabaseDocument::deleteRow(const QString&t,const QString&r,QString*d){auto*x=row(t,r);if(!x||x->deleted){if(d)*d="Row is unavailable.";return false;}auto before=m_tables;x=row(t,r);x->deleted=true;commit(before,{t,r,{},false,true,QString("Deleted %1").arg(r)});return true;}
 bool DatabaseDocument::undo(){if(m_undo.isEmpty())return false;auto s=m_undo.takeLast();m_redo.append({m_tables,s.change});m_tables=s.tables;return true;} bool DatabaseDocument::redo(){if(m_redo.isEmpty())return false;auto s=m_redo.takeLast();m_undo.append({m_tables,s.change});m_tables=s.tables;return true;}
 QVector<SDatabaseValidationFinding> DatabaseDocument::validate()const{QVector<SDatabaseValidationFinding>o;for(const auto&tb:m_tables){QMap<QString,int>ids;for(const auto&r:tb.rows){if(r.deleted)continue;QString n=fold(r.values.value("name").toString());if(n.isEmpty()||++ids[n]>1)o.append({SDatabaseValidationFinding::Severity::Error,"database.identity.invalid",tb.key,r.stableKey,"Stable name is empty or duplicated.",true});for(const auto&f:tb.fields){if(f.referenceTable.isEmpty())continue;QString ref=fold(r.values.value(f.key).toString());const auto*target=table(f.referenceTable);bool found=ref.isEmpty();if(target)for(const auto&c:target->rows)found|=!c.deleted&&c.stableKey==ref;if(!found)o.append({SDatabaseValidationFinding::Severity::Error,"database.reference.missing",tb.key,r.stableKey,QString("%1 references missing %2 row '%3'.").arg(f.label,f.referenceTable,ref),true});}}}if(isDirty())o.append({SDatabaseValidationFinding::Severity::Warning,"database.impact.opaque",{}, {},"MOB, texts.res, and opaque table references require external impact review before publication.",false});return o;}
-QJsonObject DatabaseDocument::pendingChangeManifest()const{QJsonObject o;o["format"]="ei-mapper-database-change-set-v1";o["providerId"]=providerId();o["profileId"]=profileId();o["sourceArchive"]=sourceArchivePath();o["sourceSha256"]=sourceArchiveSha256();o["publicationSupported"]=false;QJsonArray a;for(const auto&c:changes()){QJsonObject x;x["table"]=c.tableKey;x["row"]=c.rowKey;x["field"]=c.fieldKey;x["before"]=jv(c.before);x["after"]=jv(c.after);x["description"]=c.description;a<<x;}o["changes"]=a;QJsonArray p;for(auto i=m_snapshot->rawMembers.cbegin();i!=m_snapshot->rawMembers.cend();++i)p<<i.key();o["preservedRawMembers"]=p;return o;}
-bool DatabaseDocument::sourceIsCurrent(QString*d)const{QFile f(sourceArchivePath());if(!f.open(QIODevice::ReadOnly)){if(d)*d="Source archive is no longer readable.";return false;}QString h=QString::fromLatin1(QCryptographicHash::hash(f.readAll(),QCryptographicHash::Sha256).toHex());if(h!=sourceArchiveSha256()){if(d)*d="Source archive changed since the document was opened.";return false;}return true;}
+QJsonObject DatabaseDocument::pendingChangeManifest()const{QJsonObject o;o["format"]="ei-mapper-database-change-set-v1";o["providerId"]=providerId();o["profileId"]=profileId();o["sourceArchive"]=sourceArchivePath();o["sourceSha256"]=sourceArchiveSha256();QString publicationDiagnostic;o["publicationSupported"]=!buildArchive(&publicationDiagnostic).isEmpty();o["publicationDiagnostic"]=publicationDiagnostic;QJsonArray a;for(const auto&c:changes()){QJsonObject x;x["table"]=c.tableKey;x["row"]=c.rowKey;x["field"]=c.fieldKey;x["before"]=jv(c.before);x["after"]=jv(c.after);x["description"]=c.description;a<<x;}o["changes"]=a;QJsonArray p;for(auto i=m_snapshot->rawMembers.cbegin();i!=m_snapshot->rawMembers.cend();++i)p<<i.key();o["preservedRawMembers"]=p;return o;}
+bool DatabaseDocument::sourceIsCurrent(QString*d)const{QFile f(sourceArchivePath());if(!f.open(QIODevice::ReadOnly)){if(d)*d="Source archive is no longer readable.";return false;}QString h=QString::fromLatin1(QCryptographicHash::hash(f.readAll(),QCryptographicHash::Sha256).toHex());if(h.compare(sourceArchiveSha256(),Qt::CaseInsensitive)!=0){if(d)*d="Source archive changed since the document was opened.";return false;}return true;}
+QByteArray DatabaseDocument::buildArchive(QString* diagnostic)const
+{
+    QFile source(sourceArchivePath());if(!source.open(QIODevice::ReadOnly)){if(diagnostic)*diagnostic="Source archive is no longer readable.";return {};}
+    QByteArray archiveBytes=source.readAll();
+    if(changes().isEmpty())return archiveBytes;
+    if(!sourceIsCurrent(diagnostic))return {};
+    for(const auto& table:m_tables)for(const auto& row:table.rows)
+        if(row.added||row.deleted){if(diagnostic)*diagnostic="Clone/delete publication is not proven yet.";return {};}
+    QMap<QString,LosslessDatabaseMember> members;
+    for(const auto& change:changes())
+    {
+        const auto tableIt=m_tables.constFind(change.tableKey);if(tableIt==m_tables.constEnd()){if(diagnostic)*diagnostic="Changed table is unavailable.";return {};}
+        PatchTarget target;if(!patchTarget(change,tableIt.value(),&target)){if(diagnostic)*diagnostic=QString("Field %1 is visible but not yet publishable.").arg(change.fieldKey);return {};}
+        if(!members.contains(target.member))
+        {QString parseDiagnostic;auto member=LosslessDatabaseMember::parse(m_snapshot->rawMembers.value(target.member),&parseDiagnostic);if(!member.valid()){if(diagnostic)*diagnostic=parseDiagnostic;return {};}members.insert(target.member,member);}
+        const SDatabaseRow* changedRow=nullptr;for(const auto& candidate:tableIt->rows)if(candidate.stableKey==fold(change.rowKey)){changedRow=&candidate;break;}
+        if(!changedRow){if(diagnostic)*diagnostic="Changed row is unavailable.";return {};}
+        QByteArray name=stringPayload(changedRow->values.value("name"));int record=members[target.member].findRecordByFieldPayload(target.table,0,name);
+        if(record<0){if(diagnostic)*diagnostic=record==-2?"Stable row identity is ambiguous.":"Stable row identity was not found in the source member.";return {};}
+        QByteArray payload=target.kind==PatchTarget::String?stringPayload(change.after):(target.kind==PatchTarget::Integer?intPayload(change.after):floatPayload(change.after));
+        QString patchDiagnostic;if(!members[target.member].replaceFieldPayload(target.table,record,target.field,0,payload,&patchDiagnostic)){if(diagnostic)*diagnostic=patchDiagnostic;return {};}
+    }
+    for(auto it=members.constBegin();it!=members.constEnd();++it)
+    {
+        CResArchiveDocument archive;QStringList errors;if(!archive.loadBytes(archiveBytes,sourceArchivePath(),&errors)){if(diagnostic)*diagnostic=errors.join('\n');return {};}
+        QByteArray replaced;const QByteArray expected=QCryptographicHash::hash(archive.memberPayload(it.key()),QCryptographicHash::Sha256).toHex();
+        if(!archive.replaceMember(it.key(),expected,it.value().serialize(),&replaced,&errors)){if(diagnostic)*diagnostic=errors.join('\n');return {};}
+        archiveBytes=replaced;
+    }
+    return archiveBytes;
+}
+bool DatabaseDocument::saveArchive(const QString& path,QString* diagnostic)const
+{
+    const QByteArray bytes=buildArchive(diagnostic);if(bytes.isEmpty())return false;QSaveFile file(path);if(!file.open(QIODevice::WriteOnly)){if(diagnostic)*diagnostic=file.errorString();return false;}if(file.write(bytes)!=bytes.size()){if(diagnostic)*diagnostic=file.errorString();return false;}if(!file.commit()){if(diagnostic)*diagnostic=file.errorString();return false;}return true;
+}
 }

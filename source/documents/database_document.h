@@ -39,6 +39,8 @@ public:
     bool deleteRow(const QString&, const QString&, QString* = nullptr);
     bool undo(); bool redo(); QVector<SDatabaseValidationFinding> validate() const;
     QJsonObject pendingChangeManifest() const; bool sourceIsCurrent(QString* = nullptr) const;
+    QByteArray buildArchive(QString* = nullptr) const;
+    bool saveArchive(const QString&, QString* = nullptr) const;
 private:
     struct SState { QMap<QString, SDatabaseTable> tables; SDatabaseChange change; };
     explicit DatabaseDocument(const QSharedPointer<const SProfileDatabaseSnapshot>&);

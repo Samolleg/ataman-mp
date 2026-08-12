@@ -27,6 +27,8 @@ public:
     bool valid() const;
     QByteArray serialize() const;
     QVector<SLosslessDatabaseField> fields(int tableIndex, int recordIndex) const;
+    int findRecordByFieldPayload(int tableIndex, int fieldId,
+                                 const QByteArray& payload) const;
     bool replaceFieldPayload(int tableIndex, int recordIndex, int fieldId,
                              int occurrence, const QByteArray& payload,
                              QString* diagnostic = nullptr);
@@ -50,6 +52,7 @@ private:
     const Node* recordNode(int tableIndex, int recordIndex) const;
 
     QByteArray m_original;
+    QByteArray m_suffix;
     Node m_root;
     bool m_valid{false};
 };

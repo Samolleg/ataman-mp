@@ -121,11 +121,14 @@ private slots:
     void installedJmvTitanGripControl();
     void unknownProviderFailsClosed();
     void authoringDocumentPreservesBaselineAndTracksTransactions();
+    void authoringDocumentBuildsExactNoOpAndUndoRestoresIt();
+    void authoringDocumentSavePreservesOpaqueArchiveMembers();
     void authoringDocumentRejectsIdentityAndReferenceBreakage();
     void authoringDocumentDetectsStaleSourceAndKeepsProfilesSeparate();
     void losslessMemberNoOpPreservesDuplicateOrderedAndUnknownTags();
     void losslessMemberPatchChangesOnlyRequestedOccurrence();
     void installedDatabaseMembersAreByteIdenticalOnNoOp();
+    void installedDatabaseDocumentNativeRoundTrip();
 };
 
 QByteArray unitPerkLua(const QString& prototype, int strongMan)
@@ -280,7 +283,21 @@ void ProfileDatabaseTests::authoringDocumentPreservesBaselineAndTracksTransactio
         foundOpaque|=field.key=="opaque.9"&&field.opaque&&!field.writable;
     QVERIFY(foundOpaque);
     QCOMPARE(document->table("monsters")->rows.first().values.value("opaque.9").toString(),QString("7b000000"));
-    QVERIFY(document->pendingChangeManifest().value("preservedRawMembers").toArray().contains("opaque.future")); QVERIFY(!document->pendingChangeManifest().value("publicationSupported").toBool());
+    QVERIFY(document->pendingChangeManifest().value("preservedRawMembers").toArray().contains("opaque.future")); QVERIFY(document->pendingChangeManifest().value("publicationSupported").toBool());
+}
+
+void ProfileDatabaseTests::authoringDocumentBuildsExactNoOpAndUndoRestoresIt()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");
+    const QByteArray source=resArchive(relationalMembers());write(path,source);ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QString diagnostic;QCOMPARE(document->buildArchive(&diagnostic),source);
+    QVERIFY(document->setValue("monsters","human test","skinIndex",5,&diagnostic));const QByteArray changed=document->buildArchive(&diagnostic);QVERIFY2(!changed.isEmpty(),qPrintable(diagnostic));QVERIFY(changed!=source);
+    QVERIFY(document->undo());QCOMPARE(document->buildArchive(&diagnostic),source);QVERIFY(document->redo());QCOMPARE(document->buildArchive(&diagnostic),changed);
+}
+
+void ProfileDatabaseTests::authoringDocumentSavePreservesOpaqueArchiveMembers()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");auto members=relationalMembers();members["opaque.future"]="unchanged";write(path,resArchive(members));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QString diagnostic;QVERIFY(document->setValue("monsters","human test","skinIndex",9,&diagnostic));const QString output=QDir(temporary.path()).filePath("published.res");QVERIFY2(document->saveArchive(output,&diagnostic),qPrintable(diagnostic));QVector<ei::SDatabaseDiagnostic> findings;const auto reopened=ei::readDatabaseArchive(output,&findings);QCOMPARE(reopened.value("opaque.future"),QByteArray("unchanged"));
 }
 
 void ProfileDatabaseTests::authoringDocumentRejectsIdentityAndReferenceBreakage()
@@ -336,6 +353,31 @@ void ProfileDatabaseTests::installedDatabaseMembersAreByteIdenticalOnNoOp()
             if(!document.valid())continue;
             QCOMPARE(document.serialize(),it.value());
         }
+    }
+}
+
+void ProfileDatabaseTests::installedDatabaseDocumentNativeRoundTrip()
+{
+    const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);
+    if(archives.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run installed Base/JMV native publication controls.");
+    for(const QString& archive:archives)
+    {
+        if(QFileInfo(archive).fileName().contains("databaseJmv",Qt::CaseInsensitive))continue;
+        QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString sourcePath=QDir(temporary.path()).filePath("database.res");
+        QVERIFY2(QFile::copy(archive,sourcePath),qPrintable(archive));QFile source(sourcePath);QVERIFY(source.open(QIODevice::ReadOnly));const QByteArray sourceBytes=source.readAll();source.close();
+        ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="native-parity";request.resourceDirectories<<temporary.path();
+        auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY2(document,qPrintable(archive));QString diagnostic;QCOMPARE(document->buildArchive(&diagnostic),sourceBytes);
+        const auto* monsters=document->table("monsters");QVERIFY(monsters);bool published=false;QString rowKey;int newSkin=0;QByteArray edited;
+        for(const auto& row:monsters->rows)
+        {
+            rowKey=row.stableKey;newSkin=row.values.value("skinIndex").toInt()+1;
+            if(!document->setValue("monsters",rowKey,"skinIndex",newSkin,&diagnostic))continue;
+            edited=document->buildArchive(&diagnostic);if(!edited.isEmpty()){published=true;break;}QVERIFY(document->undo());
+        }
+        QVERIFY2(published,qPrintable(QString("%1: %2").arg(archive,diagnostic)));QVERIFY(edited!=sourceBytes);
+        const QString editedPath=QDir(temporary.path()).filePath("edited.res");write(editedPath,edited);QVector<ei::SDatabaseDiagnostic> originalDiagnostics,editedDiagnostics;const auto originalMembers=ei::readDatabaseArchive(sourcePath,&originalDiagnostics);const auto editedMembers=ei::readDatabaseArchive(editedPath,&editedDiagnostics);
+        QCOMPARE(editedMembers.keys(),originalMembers.keys());for(auto it=originalMembers.constBegin();it!=originalMembers.constEnd();++it)if(it.key()!="units.udb")QCOMPARE(editedMembers.value(it.key()),it.value());QVERIFY(editedMembers.value("units.udb")!=originalMembers.value("units.udb"));
+        const auto parsed=ei::parseProfileDatabaseMembers(editedMembers,editedPath);QCOMPARE(parsed.monsters.value(rowKey).skinIndex,newSkin);QVERIFY(document->undo());QCOMPARE(document->buildArchive(&diagnostic),sourceBytes);
     }
 }
 

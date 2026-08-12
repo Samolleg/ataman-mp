@@ -10,7 +10,8 @@ namespace ei {
 LosslessDatabaseMember LosslessDatabaseMember::parse(const QByteArray& bytes,QString* diagnostic)
 {
     LosslessDatabaseMember result; result.m_original=bytes; int next=0;
-    result.m_valid=parseNode(bytes,0,bytes.size(),&result.m_root,&next,0,true,diagnostic)&&next==bytes.size();
+    result.m_valid=parseNode(bytes,0,bytes.size(),&result.m_root,&next,0,true,diagnostic);
+    if(result.m_valid)result.m_suffix=bytes.mid(next);
     if(!result.m_valid&&diagnostic&&diagnostic->isEmpty())*diagnostic="Database member has trailing or invalid data.";
     return result;
 }
@@ -42,7 +43,7 @@ QByteArray LosslessDatabaseMember::encodeNode(const Node& node)
     return encodeHeader(node.id,payload.size())+payload;
 }
 bool LosslessDatabaseMember::valid()const{return m_valid;}
-QByteArray LosslessDatabaseMember::serialize()const{return m_valid?encodeNode(m_root):QByteArray();}
+QByteArray LosslessDatabaseMember::serialize()const{return m_valid?encodeNode(m_root)+m_suffix:QByteArray();}
 const LosslessDatabaseMember::Node* LosslessDatabaseMember::recordNode(int tableIndex,int recordIndex)const
 {
     if(!m_valid||tableIndex<0||tableIndex>=m_root.children.size())return nullptr;
@@ -53,6 +54,21 @@ QVector<SLosslessDatabaseField> LosslessDatabaseMember::fields(int tableIndex,in
 {
     QVector<SLosslessDatabaseField> out;const Node* record=recordNode(tableIndex,recordIndex);if(!record)return out;QMap<int,int> occurrences;
     for(const Node& field:record->children){int occurrence=occurrences[field.id]++;out.append({field.id,occurrence,field.payload,field.header+field.payload});}return out;
+}
+int LosslessDatabaseMember::findRecordByFieldPayload(int tableIndex,int fieldId,const QByteArray& payload)const
+{
+    if(!m_valid||tableIndex<0||tableIndex>=m_root.children.size())return -1;
+    const Node& table=m_root.children[tableIndex];int result=-1;
+    for(int recordIndex=0;recordIndex<table.children.size();++recordIndex)
+    {
+        const Node& record=table.children[recordIndex];bool matches=false;
+        for(const Node& field:record.children)
+            if(field.id==fieldId&&field.payload==payload){matches=true;break;}
+        if(!matches)continue;
+        if(result>=0)return -2;
+        result=recordIndex;
+    }
+    return result;
 }
 LosslessDatabaseMember::Node* LosslessDatabaseMember::fieldNode(int tableIndex,int recordIndex,int fieldId,int occurrence)
 {
