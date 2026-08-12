@@ -5457,8 +5457,15 @@ void CView::loadLandscape(const QFileInfo& filePath)
         return;
     }
 
-    const QString mapLocalAtlas = filePath.dir().filePath(
+    QString mapLocalAtlas = filePath.dir().filePath(
         filePath.completeBaseName() + QStringLiteral("-atlas.res"));
+    if(!QFileInfo::exists(mapLocalAtlas))
+    {
+        const QString publishedTextures = filePath.dir().filePath(
+            QStringLiteral("textures.res"));
+        if(QFileInfo::exists(publishedTextures))
+            mapLocalAtlas = publishedTextures;
+    }
     CTextureList::getInstance()->setMapLocalTerrainArchive(mapLocalAtlas);
     QElapsedTimer totalLoadTimer;
     QElapsedTimer phaseTimer;
@@ -7793,10 +7800,17 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
 
 void CView::finalizeVirtualTerrainAtlas()
 {
-    const bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
+    const QString requestedIdentity = m_requestedTerrainResourceIdentity;
+    const bool requestedReplacement = m_requestedTerrainIdentityReplacement;
+    m_requestedTerrainResourceIdentity.clear();
+    m_requestedTerrainIdentityReplacement = false;
+    const bool identityOnlyRequest = !requestedIdentity.isEmpty();
+    bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
         ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land);
-    const bool overlayActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay)
+    bool overlayActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay)
         ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay);
+    if(identityOnlyRequest && !landActive && !overlayActive)
+        landActive = true;
     if(!m_terrainEditAvailable||!m_pTileForm||m_pTileForm->tileImages().isEmpty()
        ||(!landActive&&!overlayActive))
     {
@@ -7826,17 +7840,27 @@ void CView::finalizeVirtualTerrainAtlas()
     finalizeProgress.setMinimumDuration(0);
     finalizeProgress.show();
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    CValidationReport report;
+    const CTerrainTransitionCatalog& catalog=m_workingTerrainAtlas
+        ?m_workingTerrainAtlas->catalog()
+        :(layer==ETerrainTileLayer::Land
+            ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog);
     CTerrainVirtualMaterialField field;
+    if(identityOnlyRequest
+       && !m_terrainEdit.initializeVirtualMaterialField(layer, catalog, &report))
+    {
+        QMessageBox::critical(this, tr("Identity finalization refused"),
+            tr("This MPR cannot be converted to an exact shared-corner material "
+               "field without changing terrain meaning. No identity or file was "
+               "changed.\n\n%1").arg(report.toText()));
+        return;
+    }
     if(!m_terrainEdit.copyVirtualMaterialField(layer,&field))
     {
         QMessageBox::critical(this,tr("Atlas finalization refused"),
             tr("The virtual material field is incomplete; no package was written."));
         return;
     }
-    const CTerrainTransitionCatalog& catalog=m_workingTerrainAtlas
-        ?m_workingTerrainAtlas->catalog()
-        :(layer==ETerrainTileLayer::Land
-            ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog);
     QVector<quint16> pinned;
     const ETerrainTileLayer preserved=layer==ETerrainTileLayer::Land
         ?ETerrainTileLayer::Overlay:ETerrainTileLayer::Land;
@@ -7855,7 +7879,6 @@ void CView::finalizeVirtualTerrainAtlas()
                               && packed==0xffffu))
                 pinned.append(packed);
         }
-    CValidationReport report;
     const QVector<QImage> authoredImages=m_workingTerrainAtlas
         ?m_workingTerrainAtlas->activeTileImages()
         :(m_authoredTerrainTileImages.isEmpty()
@@ -7961,11 +7984,16 @@ void CView::finalizeVirtualTerrainAtlas()
     summary->setWordWrap(true);
     previewLayout->addWidget(summary);
     QLabel* saveExplanation=new QLabel(tr(
-        "Save result: one edited .mpr plus its required map-specific .res atlas "
-        "and review manifest, stored together. The MPR includes every current "
+        "Save result: one edited .mpr plus its required terrain resources and "
+        "editor-side review metadata, stored together. The MPR includes every current "
         "landscape edit, including sculpted heights and the latest paint stroke. "
-        "After validation you will explicitly choose whether to open the finalized "
-        "copy. The .res is texture data used by that MPR, not a second map."),&preview);
+        "Resource identity: %1 (%2). You will either create a standalone atlas "
+        "archive or derive a publishable textures.res. JSON metadata is never put "
+        "inside the runtime RES archive.")
+        .arg(requestedIdentity.isEmpty()
+            ? tr("choose after this review") : requestedIdentity,
+            requestedReplacement ? tr("use / replace") : tr("new content")),
+        &preview);
     saveExplanation->setWordWrap(true);
     saveExplanation->setStyleSheet(QStringLiteral(
         "QLabel { background: #263746; border: 1px solid #4d718c; padding: 7px; }"));
@@ -8074,6 +8102,80 @@ void CView::finalizeVirtualTerrainAtlas()
     previewLayout->addWidget(buttons);
     finalizeProgress.hide();
     if(preview.exec()!=QDialog::Accepted)return;
+
+    QString selectedIdentity = requestedIdentity;
+    bool replaceIdentity = requestedReplacement;
+    if(selectedIdentity.isEmpty())
+    {
+        QDialog identityDialog(this);
+        identityDialog.setWindowTitle(tr("Choose terrain resource identity"));
+        QVBoxLayout* identityLayout = new QVBoxLayout(&identityDialog);
+        QRadioButton* createIdentity = new QRadioButton(
+            tr("Create a new content identity"), &identityDialog);
+        QRadioButton* useIdentity = new QRadioButton(
+            tr("Use / replace an identity I specify"), &identityDialog);
+        createIdentity->setChecked(true);
+        identityLayout->addWidget(createIdentity);
+        identityLayout->addWidget(useIdentity);
+        QLineEdit* identityEdit = new QLineEdit(
+            finalized.isolatedNamespace, &identityDialog);
+        identityEdit->setMaxLength(100);
+        identityLayout->addWidget(identityEdit);
+        QLabel* identityHelp = new QLabel(tr(
+            "New content defaults to <map>_<12-character content hash>. Using an "
+            "existing identity can affect every MPR that resolves the same MMP page "
+            "names after the resulting textures.res is installed."), &identityDialog);
+        identityHelp->setWordWrap(true);
+        identityLayout->addWidget(identityHelp);
+        QLabel* identityError = new QLabel(&identityDialog);
+        identityError->setWordWrap(true);
+        identityLayout->addWidget(identityError);
+        QDialogButtonBox* identityButtons = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &identityDialog);
+        identityLayout->addWidget(identityButtons);
+        const QString suggestedIdentity = finalized.isolatedNamespace;
+        const QString currentIdentity =
+            m_mprDocument.mapInfo().innerNamespace.toLower();
+        connect(createIdentity, &QRadioButton::toggled, &identityDialog,
+                [identityEdit, suggestedIdentity](bool checked) {
+            if(checked)
+                identityEdit->setText(suggestedIdentity);
+        });
+        connect(useIdentity, &QRadioButton::toggled, &identityDialog,
+                [identityEdit, currentIdentity](bool checked) {
+            if(checked)
+                identityEdit->setText(currentIdentity);
+        });
+        const auto validateIdentity = [identityEdit, identityError,
+                                       identityButtons]() {
+            QString error;
+            const bool valid = CTerrainVirtualAtlas::validateResourceIdentity(
+                identityEdit->text(), &error);
+            identityError->setText(valid ? QString() : error);
+            identityButtons->button(QDialogButtonBox::Ok)->setEnabled(valid);
+        };
+        connect(identityEdit, &QLineEdit::textChanged, &identityDialog,
+                [validateIdentity](const QString&) { validateIdentity(); });
+        connect(identityButtons, &QDialogButtonBox::accepted,
+                &identityDialog, &QDialog::accept);
+        connect(identityButtons, &QDialogButtonBox::rejected,
+                &identityDialog, &QDialog::reject);
+        validateIdentity();
+        if(identityDialog.exec() != QDialog::Accepted)
+            return;
+        selectedIdentity = identityEdit->text().trimmed();
+        replaceIdentity = useIdentity->isChecked();
+    }
+    QString identityErrorText;
+    if(!CTerrainVirtualAtlas::validateResourceIdentity(
+           selectedIdentity, &identityErrorText))
+    {
+        QMessageBox::critical(this, tr("Invalid terrain resource identity"),
+                              identityErrorText);
+        return;
+    }
+    finalized.isolatedNamespace = selectedIdentity;
+
     const STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
         m_mprDocument,m_terrainEdit,finalized,layer,&report);
     if(!package.success)
@@ -8083,6 +8185,73 @@ void CView::finalizeVirtualTerrainAtlas()
         QMessageBox::critical(this,tr("Atlas package validation failed"),
             package.error+findings);
         return;
+    }
+
+    QByteArray outputResourceBytes = package.resourceArchiveBytes;
+    QString outputResourceName = finalized.isolatedNamespace
+        + QStringLiteral("-atlas.res");
+    QString resourceArchiveMode = QStringLiteral("standalone-map-atlas");
+    QString sourceTexturesPath;
+    QMessageBox resourceChoice(
+        QMessageBox::Question, tr("Choose terrain resource output"), tr(
+            "Create a standalone map atlas, or merge these pages into a derived "
+            "textures.res? The selected source textures.res is never modified; the "
+            "combined result is written into the new package folder."),
+        QMessageBox::NoButton, this);
+    QAbstractButton* standaloneChoice = resourceChoice.addButton(
+        tr("Standalone map atlas"), QMessageBox::AcceptRole);
+    QAbstractButton* texturesChoice = resourceChoice.addButton(
+        tr("Build from existing textures.res..."), QMessageBox::ActionRole);
+    resourceChoice.addButton(QMessageBox::Cancel);
+    resourceChoice.setDefaultButton(
+        qobject_cast<QPushButton*>(standaloneChoice));
+    resourceChoice.exec();
+    if(resourceChoice.clickedButton() != standaloneChoice
+       && resourceChoice.clickedButton() != texturesChoice)
+        return;
+    if(resourceChoice.clickedButton() == texturesChoice)
+    {
+        sourceTexturesPath = QFileDialog::getOpenFileName(
+            this, tr("Choose source textures.res"),
+            m_pLand ? m_pLand->filePath().absolutePath() : QDir::homePath(),
+            tr("Evil Islands resources (*.res)"));
+        if(sourceTexturesPath.isEmpty())
+            return;
+        QFile sourceTextures(sourceTexturesPath);
+        CResArchiveDocument sourceArchive;
+        CResArchiveDocument pageArchive;
+        QStringList publishErrors;
+        if(!sourceTextures.open(QIODevice::ReadOnly)
+           || !sourceArchive.loadBytes(sourceTextures.readAll(),
+                                       sourceTexturesPath, &publishErrors)
+           || !pageArchive.loadBytes(package.resourceArchiveBytes,
+                                     QStringLiteral("finalized-pages.res"),
+                                     &publishErrors))
+        {
+            QMessageBox::critical(this, tr("textures.res publication refused"),
+                tr("The selected resource archive could not be read safely.\n\n%1")
+                    .arg(publishErrors.join(QStringLiteral("\n"))));
+            return;
+        }
+        QVector<SResArchiveNewMember> pages;
+        for(const QString& memberName : package.resourceMembers)
+        {
+            SResArchiveNewMember member;
+            member.name = memberName;
+            member.payload = pageArchive.memberPayload(memberName);
+            pages.append(member);
+        }
+        if(!sourceArchive.buildWithPublishedMembers(
+               pages, replaceIdentity, &outputResourceBytes, &publishErrors))
+        {
+            QMessageBox::critical(this, tr("textures.res publication refused"),
+                tr("No output was written. If different bytes already use this "
+                   "identity, choose 'Use / replace an identity I specify'.\n\n%1")
+                    .arg(publishErrors.join(QStringLiteral("\n"))));
+            return;
+        }
+        outputResourceName = QStringLiteral("textures.res");
+        resourceArchiveMode = QStringLiteral("derived-textures-res");
     }
     const QString parentPath=QFileDialog::getExistingDirectory(
         this,tr("Choose parent folder for portable atlas package"),
@@ -8102,11 +8271,25 @@ void CView::finalizeVirtualTerrainAtlas()
     }
     QDir folder(folderPath);
     const QString mprPath=folder.filePath(finalized.isolatedNamespace+QStringLiteral(".mpr"));
-    const QString resPath=folder.filePath(finalized.isolatedNamespace+QStringLiteral("-atlas.res"));
+    const QString resPath=folder.filePath(outputResourceName);
     const QString manifestPath=folder.filePath(QStringLiteral("atlas-package.json"));
     QJsonObject manifest;
-    manifest.insert(QStringLiteral("schema"),QStringLiteral("ei-mapper-modern-atlas-v1"));
+    manifest.insert(QStringLiteral("schema"),QStringLiteral("ei-mapper-modern-atlas-v2"));
     manifest.insert(QStringLiteral("namespace"),finalized.isolatedNamespace);
+    manifest.insert(QStringLiteral("resourceIdentity"),finalized.isolatedNamespace);
+    manifest.insert(QStringLiteral("identityAction"), replaceIdentity
+        ? QStringLiteral("use-or-replace") : QStringLiteral("new-content"));
+    manifest.insert(QStringLiteral("resourceArchiveMode"),resourceArchiveMode);
+    if(!sourceTexturesPath.isEmpty())
+    {
+        manifest.insert(QStringLiteral("sourceTexturesRes"),
+                        QFileInfo(sourceTexturesPath).fileName());
+        QFile sourceTextures(sourceTexturesPath);
+        if(sourceTextures.open(QIODevice::ReadOnly))
+            manifest.insert(QStringLiteral("sourceTexturesResSha256"),
+                QString::fromLatin1(QCryptographicHash::hash(
+                    sourceTextures.readAll(), QCryptographicHash::Sha256).toHex()));
+    }
     manifest.insert(QStringLiteral("stableSha256"),QString::fromLatin1(finalized.stableSha256));
     manifest.insert(QStringLiteral("capacityLimit"),finalized.capacityLimit);
     manifest.insert(QStringLiteral("usedSlots"),finalized.requiredSlots);
@@ -8209,7 +8392,7 @@ void CView::finalizeVirtualTerrainAtlas()
     QString error;
     if(!QDir().mkpath(QFileInfo(profilePath).absolutePath())
        ||!writeFile(mprPath,package.mprBytes,&error)
-       ||!writeFile(resPath,package.resourceArchiveBytes,&error)
+       ||!writeFile(resPath,outputResourceBytes,&error)
        ||!writeFile(profilePath,profileBytes,&error)
        ||!writeFile(manifestPath,manifestBytes,&error))
     {
@@ -9438,7 +9621,7 @@ void CView::openMapParameters()
     QLabel* scaleValue = new QLabel(summaryPage);
     QLabel* materialsValue = new QLabel(summaryPage);
     summaryForm->addRow(tr("Source MPR"), sourceValue);
-    summaryForm->addRow(tr("Embedded namespace"), namespaceValue);
+    summaryForm->addRow(tr("Terrain resource identity"), namespaceValue);
     summaryForm->addRow(tr("Dimensions"), dimensionsValue);
     summaryForm->addRow(tr("Height range"), rangeValue);
     summaryForm->addRow(tr("Vertical scale (maxZ)"), scaleValue);
@@ -9450,6 +9633,42 @@ void CView::openMapParameters()
     summaryScaleExplanation->setWordWrap(true);
     summaryForm->addRow(summaryScaleExplanation);
     tabs->addTab(summaryPage, tr("Summary"));
+
+    QWidget* identityPage = new QWidget(tabs);
+    QVBoxLayout* identityLayout = new QVBoxLayout(identityPage);
+    QFormLayout* identityForm = new QFormLayout;
+    QLabel* currentIdentityValue = new QLabel(identityPage);
+    currentIdentityValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    QLineEdit* identityEdit = new QLineEdit(identityPage);
+    identityEdit->setMaxLength(100);
+    identityEdit->setPlaceholderText(tr("zone2 or zone2_<content hash>"));
+    identityForm->addRow(tr("Current identity"), currentIdentityValue);
+    identityForm->addRow(tr("Identity to use / replace"), identityEdit);
+    identityLayout->addLayout(identityForm);
+    QLabel* identityStatus = new QLabel(identityPage);
+    identityStatus->setWordWrap(true);
+    identityLayout->addWidget(identityStatus);
+    QLabel* identityExplanation = new QLabel(tr(
+        "The identity determines the MMP member names used by this MPR. Individual "
+        "page names are derived automatically and are intentionally hidden. An "
+        "identity change is committed only by terrain finalization, which renames "
+        "the embedded MPR namespace and publishes the matching atlas pages together."),
+        identityPage);
+    identityExplanation->setWordWrap(true);
+    identityLayout->addWidget(identityExplanation);
+    QPushButton* finalizeNewIdentity = new QPushButton(
+        tr("Finalize with a new content identity..."), identityPage);
+    finalizeNewIdentity->setObjectName(
+        QStringLiteral("mprFinalizeNewTerrainIdentity"));
+    QPushButton* finalizeExistingIdentity = new QPushButton(
+        tr("Use / replace this identity during finalization..."), identityPage);
+    finalizeExistingIdentity->setObjectName(
+        QStringLiteral("mprFinalizeExistingTerrainIdentity"));
+    identityEdit->setObjectName(QStringLiteral("mprTerrainResourceIdentity"));
+    identityLayout->addWidget(finalizeNewIdentity);
+    identityLayout->addWidget(finalizeExistingIdentity);
+    identityLayout->addStretch(1);
+    tabs->addTab(identityPage, tr("Resource identity"));
 
     QWidget* heightsPage = new QWidget(tabs);
     QVBoxLayout* heightsLayout = new QVBoxLayout(heightsPage);
@@ -9558,6 +9777,42 @@ void CView::openMapParameters()
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, dock, &QDockWidget::hide);
     connect(atlas, &QPushButton::clicked, dock, [this]() { openAtlasTiles(); });
+
+    const auto refreshIdentityStatus = [identityEdit, identityStatus,
+                                        finalizeExistingIdentity]() {
+        QString error;
+        const bool valid = CTerrainVirtualAtlas::validateResourceIdentity(
+            identityEdit->text(), &error);
+        identityStatus->setText(valid
+            ? QObject::tr("Valid identity. Existing consumers may also resolve these pages.")
+            : error);
+        identityStatus->setStyleSheet(valid
+            ? QStringLiteral("QLabel { color: #69c37d; }")
+            : QStringLiteral("QLabel { color: #df6b62; }"));
+        finalizeExistingIdentity->setEnabled(valid);
+    };
+    connect(identityEdit, &QLineEdit::textChanged, dock,
+            [refreshIdentityStatus](const QString&) { refreshIdentityStatus(); });
+    connect(finalizeNewIdentity, &QPushButton::clicked, dock, [this, dock]() {
+        m_requestedTerrainResourceIdentity.clear();
+        m_requestedTerrainIdentityReplacement = false;
+        dock->hide();
+        finalizeVirtualTerrainAtlas();
+    });
+    connect(finalizeExistingIdentity, &QPushButton::clicked, dock,
+            [this, dock, identityEdit]() {
+        QString error;
+        const QString identity = identityEdit->text().trimmed();
+        if(!CTerrainVirtualAtlas::validateResourceIdentity(identity, &error))
+        {
+            QMessageBox::warning(dock, tr("Invalid terrain resource identity"), error);
+            return;
+        }
+        m_requestedTerrainResourceIdentity = identity;
+        m_requestedTerrainIdentityReplacement = true;
+        dock->hide();
+        finalizeVirtualTerrainAtlas();
+    });
 
     const auto refreshSummary = [this, dimensionsValue, rangeValue, scaleValue,
                                  materialsValue, flatten, clampMinimum,
@@ -9745,7 +10000,9 @@ void CView::openMapParameters()
         m_pUndoStack->push(new CTerrainVerticalScalePreviewCommand(this, command));
     });
     m_refreshMprSettingsDock = [this, statePages, panel, sourceValue,
-                                namespaceValue, refreshSummary, refreshPreview,
+                                namespaceValue, currentIdentityValue,
+                                identityEdit, refreshIdentityStatus,
+                                refreshSummary, refreshPreview,
                                 scaleTarget, refreshScalePreview]() {
         const bool loaded = m_pLand->isMprLoad() && m_terrainEditAvailable;
         statePages->setCurrentIndex(loaded ? 1 : 0);
@@ -9754,6 +10011,10 @@ void CView::openMapParameters()
             return;
         sourceValue->setText(m_pLand->filePath().absoluteFilePath());
         namespaceValue->setText(m_mprDocument.mapInfo().innerNamespace);
+        currentIdentityValue->setText(m_mprDocument.mapInfo().innerNamespace);
+        if(!identityEdit->hasFocus())
+            identityEdit->setText(m_mprDocument.mapInfo().innerNamespace.toLower());
+        refreshIdentityStatus();
         refreshSummary();
         refreshPreview();
         {

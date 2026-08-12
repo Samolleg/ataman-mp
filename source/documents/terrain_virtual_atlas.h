@@ -197,6 +197,10 @@ public:
     static int blendVariationCount() { return 5; }
     static int blendVariationLimit(
         const STerrainTransitionSignature& signature);
+    static bool validateResourceIdentity(const QString& identity,
+                                         QString* error = nullptr);
+    static QString contentResourceIdentity(const QString& sourceNamespace,
+                                           const QByteArray& stableSha256);
 
     bool isValid() const { return m_valid; }
     QString error() const { return m_error; }

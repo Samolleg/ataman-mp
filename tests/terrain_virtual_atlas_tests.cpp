@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QPainter>
+#include <QRegularExpression>
 #include <QTransform>
 #include <cmath>
 
@@ -482,6 +483,7 @@ private slots:
     void rawPageCompositionPreservesEveryUntouchedSlot();
     void pageOrientationMipmapsAlphaAndReopen();
     void namespacesAreIsolated();
+    void identityBaselineRequiresExactSharedCornerTopology();
     void exactOnlyNoOpPreservesPixels();
     void portablePackageRemapsNamespaceAndReopens();
     void portablePackageStagesLiveSculptBeforeAtlasFinalization();
@@ -1156,8 +1158,8 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     QVERIFY(flattened.tiles.at(2).blendProvenance.startsWith(
         QStringLiteral("canonical-generated:")));
     QCOMPARE(flattened.stableSha256.size(), 64);
-    QVERIFY(flattened.isolatedNamespace.startsWith(
-        QStringLiteral("caveset_eime_")));
+    QVERIFY(QRegularExpression(QStringLiteral("^caveset_[0-9a-f]{12}$"))
+                .match(flattened.isolatedNamespace).hasMatch());
 }
 
 void TerrainVirtualAtlasTests::nonUniformResolveUsesAuthoredRotationOrGeneratesExact()
@@ -3437,7 +3439,74 @@ void TerrainVirtualAtlasTests::namespacesAreIsolated()
     const auto gz2g=b.finalize(field,"Gz2G",512);
     QVERIFY(zone2.success&&gz2g.success);
     QVERIFY(zone2.isolatedNamespace!=gz2g.isolatedNamespace);
-    QVERIFY(zone2.isolatedNamespace.startsWith("zone2_eime_"));
+    QVERIFY(QRegularExpression(QStringLiteral("^zone2_[0-9a-f]{12}$"))
+                .match(zone2.isolatedNamespace).hasMatch());
+
+    const auto repeated = a.finalize(
+        field, QStringLiteral("zone2_eime_111111111111_eime_222222222222"),
+        512);
+    QVERIFY(repeated.success);
+    QVERIFY(QRegularExpression(QStringLiteral("^zone2_[0-9a-f]{12}$"))
+                .match(repeated.isolatedNamespace).hasMatch());
+    QVERIFY(!repeated.isolatedNamespace.contains(QStringLiteral("eime")));
+}
+
+void TerrainVirtualAtlasTests::identityBaselineRequiresExactSharedCornerTopology()
+{
+    Fixture fixture;
+    const auto makeSource = [](quint16 packed) {
+        QByteArray payload;
+        QDataStream stream(&payload, QIODevice::WriteOnly);
+        stream.setByteOrder(QDataStream::LittleEndian);
+        stream << quint32(0xCF4BF774) << quint8(0);
+        payload.append(QByteArray(33 * 33 * 8, '\0'));
+        QByteArray tiles(16 * 16 * 2, '\0');
+        for(int y = 0; y < 16; ++y)
+            for(int x = 0; x < 16; ++x)
+                qToLittleEndian<quint16>(packed,
+                    reinterpret_cast<uchar*>(tiles.data()
+                        + (y * 16 + x) * 2));
+        payload.append(tiles);
+        STerrainSectorSource source;
+        source.memberName = QStringLiteral("zone2000000.sec");
+        source.sectorX = 0;
+        source.sectorY = 0;
+        source.type = 0;
+        source.payload = payload;
+        source.landTileOffset = 5 + 33 * 33 * 8;
+        return source;
+    };
+    SMprPackedTile pureOne;
+    pureOne.tileIndex = 0;
+    SMprPackedTile pureTwo;
+    pureTwo.tileIndex = 1;
+
+    CTerrainEditModel exactModel;
+    CValidationReport exactReport;
+    QVERIFY(exactModel.loadSources(1, 1, 100.0f,
+        {makeSource(pureOne.encode())}, &exactReport,
+        1, QVector<qint32>(64, 1), 0));
+    QVERIFY2(exactModel.initializeVirtualMaterialField(
+        ETerrainTileLayer::Land, fixture.catalog, &exactReport),
+        qPrintable(exactReport.toText()));
+    CTerrainVirtualMaterialField exactField;
+    QVERIFY(exactModel.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &exactField));
+
+    STerrainTransitionVariant contradictory;
+    contradictory.signature = signature(1, 2, 1, 1);
+    SMprPackedTile contradictoryPacked;
+    contradictoryPacked.tileIndex = 4;
+    contradictory.packedTile = contradictoryPacked.encode();
+    QVERIFY(fixture.catalog.addVariant(contradictory));
+    CTerrainEditModel contradictoryModel;
+    CValidationReport contradictoryReport;
+    QVERIFY(contradictoryModel.loadSources(1, 1, 100.0f,
+        {makeSource(contradictoryPacked.encode())},
+        &contradictoryReport, 1, QVector<qint32>(64, 1), 0));
+    QVERIFY(!contradictoryModel.initializeVirtualMaterialField(
+        ETerrainTileLayer::Land, fixture.catalog, &contradictoryReport));
+    QVERIFY(contradictoryReport.hasErrors());
 }
 
 void TerrainVirtualAtlasTests::exactOnlyNoOpPreservesPixels()

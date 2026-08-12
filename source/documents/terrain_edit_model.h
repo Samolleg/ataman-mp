@@ -470,6 +470,9 @@ public:
     bool copyVirtualMaterialField(ETerrainTileLayer layer,
         CTerrainVirtualMaterialField* output,
         bool requireComplete = true) const;
+    bool initializeVirtualMaterialField(
+        ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
+        CValidationReport* report = nullptr);
     bool virtualMaterialFieldActive(ETerrainTileLayer layer) const;
     STerrainTileCommand makeSemanticCornerMaterialPaint(
         int selectedCellX, int selectedCellY, int vertexX, int vertexY,

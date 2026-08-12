@@ -108,6 +108,7 @@ private slots:
     void syntheticMapTableAddsOwnedMaplessZoneLosslessly();
     void syntheticPlaceholderBuildsStandaloneResolvableChecker();
     void bulkAppendBuildsAllMembersInOneDerivedArchive();
+    void publishMembersRequiresExplicitReplacementAndPreservesUnrelatedBytes();
 };
 
 void ResArchiveDocumentTests::noOpIsByteIdentical()
@@ -352,6 +353,70 @@ void ResArchiveDocumentTests::bulkAppendBuildsAllMembersInOneDerivedArchive()
     QCOMPARE(reopened.memberPayload("opaque.bin"), baseline.memberPayload("opaque.bin"));
     for(const SResArchiveNewMember& member : appended)
         QCOMPARE(reopened.memberPayload(member.name), member.payload);
+}
+
+void ResArchiveDocumentTests::publishMembersRequiresExplicitReplacementAndPreservesUnrelatedBytes()
+{
+    CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(syntheticRes()));
+    QVector<SResArchiveNewMember> firstPages;
+    SResArchiveNewMember firstPage;
+    firstPage.name = QStringLiteral("zone2_deadbeef000.mmp");
+    firstPage.payload = QByteArray("first-page");
+    firstPages.append(firstPage);
+    QByteArray withFirstIdentity;
+    QStringList errors;
+    QVERIFY2(baseline.buildWithPublishedMembers(
+                 firstPages, false, &withFirstIdentity, &errors),
+             qPrintable(errors.join('\n')));
+
+    CResArchiveDocument installed;
+    QVERIFY(installed.loadBytes(withFirstIdentity, QStringLiteral("textures.res")));
+    const QByteArray unrelated = installed.memberPayload(QStringLiteral("opaque.bin"));
+
+    QVector<SResArchiveNewMember> changedPages;
+    SResArchiveNewMember changedPage;
+    changedPage.name = QStringLiteral("zone2_deadbeef000.mmp");
+    changedPage.payload = QByteArray("replacement-page");
+    changedPages.append(changedPage);
+    QByteArray refused;
+    errors.clear();
+    QVERIFY(!installed.buildWithPublishedMembers(
+        changedPages, false, &refused, &errors));
+    QVERIFY(refused.isEmpty());
+
+    QByteArray replaced;
+    errors.clear();
+    QVERIFY2(installed.buildWithPublishedMembers(
+                 changedPages, true, &replaced, &errors),
+             qPrintable(errors.join('\n')));
+    CResArchiveDocument reopened;
+    QVERIFY(reopened.loadBytes(replaced, QStringLiteral("published-textures.res")));
+    QCOMPARE(reopened.memberPayload(QStringLiteral("zone2_deadbeef000.mmp")),
+             QByteArray("replacement-page"));
+    QCOMPARE(reopened.memberPayload(QStringLiteral("opaque.bin")), unrelated);
+
+    // One missing page beside colliding identity pages is an inconsistent,
+    // partial publication and must not be accepted as either update or reuse.
+    QVector<SResArchiveNewMember> partialIdentity = changedPages;
+    SResArchiveNewMember missingPage;
+    missingPage.name = QStringLiteral("zone2_deadbeef001.mmp");
+    missingPage.payload = QByteArray("second-page");
+    partialIdentity.append(missingPage);
+    QByteArray partialRefused;
+    errors.clear();
+    QVERIFY(!installed.buildWithPublishedMembers(
+        partialIdentity, false, &partialRefused, &errors));
+    QVERIFY(partialRefused.isEmpty());
+
+    // Publishing identical bytes is safe reuse and must not require the
+    // replacement authority reserved for an identity collision.
+    QByteArray reused;
+    errors.clear();
+    QVERIFY2(reopened.buildWithPublishedMembers(
+                 changedPages, false, &reused, &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(reused, replaced);
 }
 
 void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChecker()

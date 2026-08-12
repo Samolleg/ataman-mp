@@ -1440,13 +1440,9 @@ void refreshFinalizationStableIdentity(
         stable.addData(bytes, 2);
     }
     finalization->stableSha256 = stable.result().toHex();
-    QString safeBase = sourceNamespace.toLower();
-    safeBase.replace(
-        QRegularExpression(QStringLiteral("[^a-z0-9_]+")),
-        QStringLiteral("_"));
-    finalization->isolatedNamespace = QStringLiteral("%1_eime_%2")
-        .arg(safeBase.isEmpty() ? QStringLiteral("terrain") : safeBase,
-             QString::fromLatin1(finalization->stableSha256.left(12)));
+    finalization->isolatedNamespace =
+        CTerrainVirtualAtlas::contentResourceIdentity(
+            sourceNamespace, finalization->stableSha256);
 }
 
 bool sameOwnerPattern(const STerrainTransitionSignature& first,
@@ -1461,6 +1457,71 @@ bool sameOwnerPattern(const STerrainTransitionSignature& first,
             return false;
     return true;
 }
+}
+
+bool CTerrainVirtualAtlas::validateResourceIdentity(const QString& identity,
+                                                    QString* error)
+{
+    if(error)
+        error->clear();
+    const QString value = identity.trimmed();
+    if(value.size() < 1 || value.size() > 100)
+    {
+        if(error)
+            *error = QStringLiteral(
+                "Terrain resource identity must contain 1 to 100 characters.");
+        return false;
+    }
+    if(!QRegularExpression(QStringLiteral("^[a-z][a-z0-9_]*$"))
+            .match(value).hasMatch())
+    {
+        if(error)
+            *error = QStringLiteral(
+                "Terrain resource identity must start with a lowercase letter "
+                "and use only lowercase ASCII letters, digits, and underscores.");
+        return false;
+    }
+    return true;
+}
+
+QString CTerrainVirtualAtlas::contentResourceIdentity(
+    const QString& sourceNamespace, const QByteArray& stableSha256)
+{
+    QString base = sourceNamespace.trimmed().toLower();
+    base.replace(QRegularExpression(QStringLiteral("[^a-z0-9_]+")),
+                 QStringLiteral("_"));
+    base.replace(QRegularExpression(QStringLiteral("_+")),
+                 QStringLiteral("_"));
+    while(base.endsWith(QLatin1Char('_')))
+        base.chop(1);
+    while(base.startsWith(QLatin1Char('_')))
+        base.remove(0, 1);
+
+    // Flatten both the legacy Endurance suffix and the current content suffix.
+    // Re-finalizing a published MPR must not create chained resource identities.
+    const QRegularExpression legacySuffix(
+        QStringLiteral("_eime_[0-9a-f]{12}$"));
+    while(legacySuffix.match(base).hasMatch())
+        base.remove(legacySuffix);
+    const QRegularExpression contentSuffix(
+        QStringLiteral("_[0-9a-f]{12}$"));
+    if(contentSuffix.match(base).hasMatch())
+        base.remove(contentSuffix);
+
+    if(base.isEmpty() || !base.at(0).isLetter())
+        base.prepend(QStringLiteral("terrain_"));
+    const int hashLength = 12;
+    const int maximumBaseLength = 100 - 1 - hashLength;
+    base = base.left(maximumBaseLength);
+    while(base.endsWith(QLatin1Char('_')))
+        base.chop(1);
+    const QByteArray contentHash = stableSha256.left(hashLength).toLower();
+    const QByteArray suffix = contentHash.size() == hashLength
+        ? contentHash
+        : QCryptographicHash::hash(stableSha256, QCryptographicHash::Sha256)
+              .toHex().left(hashLength);
+    return QStringLiteral("%1_%2").arg(
+        base, QString::fromLatin1(suffix));
 }
 
 bool CTerrainVirtualMaterialField::resize(int tileWidth, int tileHeight,
@@ -1590,6 +1651,106 @@ bool CTerrainEditModel::copyVirtualMaterialField(
         if(value==unset&&requireComplete)return false;
         output->setMaterial(x,y,value);
     }
+    return true;
+}
+
+bool CTerrainEditModel::initializeVirtualMaterialField(
+    ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
+    CValidationReport* report)
+{
+    QVector<qint32>& active = layer == ETerrainTileLayer::Land
+        ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    if(!active.isEmpty())
+        return active.size() == (tileCountX() + 1) * (tileCountY() + 1);
+    const int vertexWidth = tileCountX() + 1;
+    QVector<QMap<qint32, int>> votes(
+        vertexWidth * (tileCountY() + 1));
+    for(int y = 0; y < tileCountY(); ++y)
+        for(int x = 0; x < tileCountX(); ++x)
+        {
+            bool available = false;
+            bool decoded = false;
+            const quint16 packed = packedTile(x, y, layer, &available);
+            if(!available && layer == ETerrainTileLayer::Overlay)
+                continue;
+            const STerrainTransitionSignature signature = available
+                ? catalog.gridSignatureForPacked(packed, &decoded)
+                : STerrainTransitionSignature();
+            if(!decoded)
+            {
+                if(report)
+                    report->add("terrain.virtual_identity_baseline",
+                        EValidationSeverity::Error,
+                        "The current atlas contains a cell that the semantic profile cannot decode",
+                        QStringLiteral("%1,%2").arg(x).arg(y));
+                active.clear();
+                return false;
+            }
+            const qint32 values[4] = {signature.northWest,
+                signature.northEast, signature.southEast,
+                signature.southWest};
+            const int keys[4] = {y * vertexWidth + x,
+                y * vertexWidth + x + 1,
+                (y + 1) * vertexWidth + x + 1,
+                (y + 1) * vertexWidth + x};
+            for(int corner = 0; corner < 4; ++corner)
+                ++votes[keys[corner]][values[corner]];
+        }
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    active.fill(unset, votes.size());
+    for(int index = 0; index < votes.size(); ++index)
+    {
+        int bestCount = -1;
+        qint32 best = unset;
+        for(auto it = votes.at(index).constBegin();
+            it != votes.at(index).constEnd(); ++it)
+            if(it.value() > bestCount
+               || (it.value() == bestCount && it.key() < best))
+            {
+                bestCount = it.value();
+                best = it.key();
+            }
+        active[index] = best;
+    }
+    for(int y = 0; y < tileCountY(); ++y)
+        for(int x = 0; x < tileCountX(); ++x)
+        {
+            bool available = false;
+            bool decoded = false;
+            const quint16 packed = packedTile(x, y, layer, &available);
+            if(!available && layer == ETerrainTileLayer::Overlay)
+                continue;
+            const STerrainTransitionSignature actual = available
+                ? catalog.gridSignatureForPacked(packed, &decoded)
+                : STerrainTransitionSignature();
+            const int nw = y * vertexWidth + x;
+            const int ne = nw + 1;
+            const int sw = (y + 1) * vertexWidth + x;
+            const int se = sw + 1;
+            STerrainTransitionSignature recovered;
+            recovered.northWest = active.at(nw);
+            recovered.northEast = active.at(ne);
+            recovered.southEast = active.at(se);
+            recovered.southWest = active.at(sw);
+            const bool same = recovered.northWest == actual.northWest
+                && recovered.northEast == actual.northEast
+                && recovered.southEast == actual.southEast
+                && recovered.southWest == actual.southWest;
+            if(!decoded || !same)
+            {
+                if(report)
+                    report->add("terrain.virtual_identity_topology",
+                        EValidationSeverity::Error,
+                        "The current packed cells do not form one exact shared-corner semantic field; identity finalization was refused",
+                        QStringLiteral("%1,%2").arg(x).arg(y));
+                active.clear();
+                return false;
+            }
+        }
+    if(layer == ETerrainTileLayer::Land)
+        m_originalVirtualLandMaterials = active;
+    else
+        m_originalVirtualOverlayMaterials = active;
     return true;
 }
 

@@ -3045,9 +3045,16 @@ void MainWindow::launchCurrentMapTest()
     input.sourceMob = mob->filePath();
     input.mprData = mprData;
     input.mobData = mobData;
-    const QFileInfo terrainAtlasResource(
+    QFileInfo terrainAtlasResource(
         input.sourceMpr.dir().filePath(input.sourceMpr.completeBaseName()
                                       + QStringLiteral("-atlas.res")));
+    if(!terrainAtlasResource.isFile())
+    {
+        const QFileInfo publishedTextures(
+            input.sourceMpr.dir().filePath(QStringLiteral("textures.res")));
+        if(publishedTextures.isFile())
+            terrainAtlasResource = publishedTextures;
+    }
     if(!workingTerrainAtlasResource.isEmpty())
     {
         if(terrainAtlasResource.isFile())
