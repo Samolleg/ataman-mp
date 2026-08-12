@@ -38,6 +38,7 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStyle>
 #include <QTextCodec>
 #include <QTreeWidget>
 #include <QTimer>
@@ -105,19 +106,23 @@ public:
     { m_view.poses = poses; m_view.morphDeltas = morphs; redraw(); }
     void resetView() { m_view.azimuthDegrees = ei::resourceModelDefaultAzimuthDegrees();
         m_view.elevationDegrees = ei::resourceModelDefaultElevationDegrees();
+        m_view.modelYawDegrees = 0; m_view.modelPitchDegrees = 0;
         m_view.zoom = 1; m_view.pan = {}; redraw(); }
+    bool isInteracting() const { return m_button != Qt::NoButton; }
 protected:
     void resizeEvent(QResizeEvent* event) override { QLabel::resizeEvent(event); redraw(); }
     void wheelEvent(QWheelEvent* event) override
-    { m_view.zoom = qBound(0.08f, m_view.zoom * (event->angleDelta().y() >= 0 ? 1.15f : 1.0f/1.15f), 20.0f); redraw(); }
-    void mousePressEvent(QMouseEvent* event) override { m_last = event->pos(); m_button = event->button(); }
+    { m_view.zoom = qBound(0.08f, m_view.zoom * (event->angleDelta().y() >= 0 ? 1.15f : 1.0f/1.15f), 20.0f); redraw(); event->accept(); }
+    void mousePressEvent(QMouseEvent* event) override { m_last = event->pos(); m_button = event->button(); event->accept(); }
     void mouseMoveEvent(QMouseEvent* event) override
     {
         const QPoint delta = event->pos() - m_last; m_last = event->pos();
         if(m_button == Qt::LeftButton)
-            m_view.pan += QVector3D(delta.x(), 0, -delta.y()) * (0.004f / qMax(0.1f, m_view.zoom));
+            m_view.pan += QVector3D(delta.x() / float(qMax(1, width())), 0,
+                                    -delta.y() / float(qMax(1, height())));
         else if(m_button == Qt::MiddleButton)
-            m_view.azimuthDegrees += delta.x() * 0.45f;
+        { m_view.modelYawDegrees += delta.x() * 0.45f;
+          m_view.modelPitchDegrees = qBound(-89.0f, m_view.modelPitchDegrees + delta.y() * 0.45f, 89.0f); }
         else if(m_button == Qt::RightButton)
         { m_view.azimuthDegrees += delta.x() * 0.5f; m_view.elevationDegrees = qBound(-80.0f, m_view.elevationDegrees + delta.y() * 0.4f, 80.0f); }
         redraw();
@@ -135,20 +140,43 @@ private:
     Qt::MouseButton m_button{Qt::NoButton};
 };
 
+class CJumpSlider final : public QSlider
+{
+public:
+    using QSlider::QSlider;
+protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if(event->button() == Qt::LeftButton)
+        {
+            const int position = orientation() == Qt::Horizontal ? event->pos().x() : event->pos().y();
+            const int span = orientation() == Qt::Horizontal ? width() : height();
+            setValue(QStyle::sliderValueFromPosition(minimum(), maximum(), position, span,
+                                                      invertedAppearance()));
+            emit sliderMoved(value());
+            event->accept();
+            return;
+        }
+        QSlider::mousePressEvent(event);
+    }
+};
+
 namespace {
 constexpr int kEntryRole = Qt::UserRole + 80;
 constexpr qint64 kMaximumPreviewBytes = 32ll * 1024ll * 1024ll;
 constexpr qint64 kHexPrefixBytes = 4096;
 
-QString suffixType(const QString& name)
+QString suffixType(const QString& name, const QString& archiveName = QString())
 {
     const QString suffix = QFileInfo(name).suffix().toLower();
     if(suffix == "mmp") return QStringLiteral("Image");
     if(suffix == "txt" || suffix == "lua" || suffix == "reg") return QStringLiteral("Text");
     if(suffix == "fig" || suffix == "mod" || suffix == "lnk" || suffix == "adb"
-       || suffix == "anm") return QStringLiteral("3D / animation");
+       || suffix == "anm" || suffix == "bon") return QStringLiteral("3D / animation");
     if(suffix == "wav" || suffix == "mp3" || suffix == "ogg") return QStringLiteral("Audio");
     if(suffix == "res") return QStringLiteral("Archive");
+    if(suffix.isEmpty() && QFileInfo(archiveName).completeBaseName().startsWith(
+           QStringLiteral("texts"), Qt::CaseInsensitive)) return QStringLiteral("Text");
     return QStringLiteral("Binary");
 }
 
@@ -190,6 +218,7 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
     }
     const SResIndexedMember member = archive.member(memberIndex);
     result.title = member.name;
+    result.previewType = suffixType(member.name, QFileInfo(archive.path()).fileName());
     QString error;
     if(member.dataSize > kMaximumPreviewBytes)
     {
@@ -205,7 +234,10 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
     if(payload.isNull()) { result.error = error; return result; }
     result.sha256 = QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex();
     result.payload = payload;
-    const QString type = suffixType(member.name);
+    QString type = result.previewType;
+    if(type == QStringLiteral("Binary") && ei::resourcePayloadLooksText(payload))
+        type = QStringLiteral("Text");
+    result.previewType = type;
     result.details = QStringLiteral("%1 | %2 | SHA-256 %3")
         .arg(type, humanBytes(member.dataSize), QString::fromLatin1(result.sha256));
     if(type == "Image")
@@ -231,6 +263,8 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
         }
         else if(suffix == "mod")
         {
+            result.details += QStringLiteral(
+                " | MOD is assembly geometry; motion comes from the effective same-model ANM provider");
             QByteArray bon;
             const QString companion = QFileInfo(member.name).completeBaseName() + ".bon";
             const QVector<SResourceCatalogEntry> providers = catalog.providers(companion);
@@ -249,9 +283,14 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
                 const CResArchiveIndex* animationArchive = catalog.archive(
                     animationProviders.first().archivePriority);
                 if(animationArchive)
+                {
                     result.animationPayload = animationArchive->readMember(
                         animationProviders.first().memberIndex);
+                    result.details += QStringLiteral(" | ANM provider %1")
+                        .arg(animationProviders.first().archiveName);
+                }
             }
+            else result.details += QStringLiteral(" | no effective same-model ANM provider found");
             const auto database = ei::ProfileDatabaseContext::instance().current();
             if(database)
                 result.actions = parseAdbActions(database->actionTables.value(
@@ -305,6 +344,43 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
                 result.text += QStringLiteral("\n\nAction lengths inferred from ANM closing-loop samples; no matching provider ADB was available.");
             }
         }
+        else if(suffix == "bon")
+        {
+            int components = 0;
+            result.text = ei::inspectBoneArchive(payload, &components).join('\n');
+            result.details += QStringLiteral(" | %1 bind/rest component record(s)").arg(components);
+            const QString stem = QFileInfo(member.name).completeBaseName();
+            const QVector<SResourceCatalogEntry> modelProviders = catalog.providers(stem + ".mod");
+            if(!modelProviders.isEmpty())
+            {
+                const CResArchiveIndex* provider = catalog.archive(modelProviders.first().archivePriority);
+                if(provider)
+                {
+                    const QByteArray mod = provider->readMember(modelProviders.first().memberIndex);
+                    result.modelScene = ei::buildModScene(mod, payload);
+                    model = ei::previewModAssembly(mod, payload);
+                    result.animationModel = stem;
+                    result.details += QStringLiteral(" | applied to %1 from %2")
+                        .arg(stem + ".mod", modelProviders.first().archiveName);
+                }
+            }
+        }
+        else if(suffix == "adb")
+        {
+            QStringList diagnostics;
+            result.actions = parseAdbActions(payload, &diagnostics);
+            QStringList rows = {QStringLiteral("Action\tFrames\tNumber\tWeapon mask\tState\tType\tModifier\tStage\tProbability")};
+            for(const SAdbAction& action : result.actions)
+                rows.append(QStringLiteral("%1\t%2\t%3\t0x%4\t%5\t%6\t%7\t%8\t%9")
+                    .arg(action.name).arg(action.length).arg(action.number)
+                    .arg(action.weaponMask, 0, 16).arg(action.allowedState)
+                    .arg(action.actionType).arg(action.modifier).arg(action.stage)
+                    .arg(action.probability));
+            result.text = rows.join('\n');
+            if(!diagnostics.isEmpty()) result.text += QStringLiteral("\n\n") + diagnostics.join('\n');
+            result.details += QStringLiteral(" | %1 animation action record(s); metadata only, motion samples live in ANM")
+                .arg(result.actions.size());
+        }
         if(model.valid)
         {
             result.image = model.image;
@@ -313,7 +389,7 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
         if(!model.diagnostics.isEmpty())
             result.text += (result.text.isEmpty() ? QString() : QStringLiteral("\n\n"))
                 + model.diagnostics.join('\n');
-        if(suffix == "lnk" || suffix == "adb")
+        if(suffix == "lnk")
             result.text = hexDump(payload.left(kHexPrefixBytes));
     }
     else if(type == "Text")
@@ -406,9 +482,12 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     m_animationList->setObjectName(QStringLiteral("resourceAnimationList"));
     m_animationPlay = new QPushButton(tr("Pause"), modelPane);
     m_animationPlay->setCheckable(true);
+    m_animationSeek = new CJumpSlider(Qt::Horizontal, modelPane);
+    m_animationSeek->setObjectName(QStringLiteral("resourceAnimationSeek"));
     QHBoxLayout* animationRow = new QHBoxLayout;
     animationRow->addWidget(new QLabel(tr("Animation"), modelPane));
     animationRow->addWidget(m_animationList, 1); animationRow->addWidget(m_animationPlay);
+    animationRow->addWidget(m_animationSeek, 1);
     m_partFilter = new QLineEdit(modelPane);
     m_partFilter->setPlaceholderText(tr("Filter model parts..."));
     m_partList = new QTreeWidget(modelPane);
@@ -437,7 +516,7 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     QHBoxLayout* audioLayout = new QHBoxLayout(m_audioControls);
     audioLayout->setContentsMargins(0, 0, 0, 0);
     m_audioPlay = new QPushButton(tr("Play"), m_audioControls);
-    m_audioSeek = new QSlider(Qt::Horizontal, m_audioControls);
+    m_audioSeek = new CJumpSlider(Qt::Horizontal, m_audioControls);
     m_audioVolume = new QSlider(Qt::Horizontal, m_audioControls);
     m_audioVolume->setRange(0, 100); m_audioVolume->setValue(80);
     m_audioVolume->setMaximumWidth(90);
@@ -531,6 +610,14 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     connect(m_animationPlay, &QPushButton::toggled, this, [this](bool paused) {
         m_animationPlay->setText(paused ? tr("Play") : tr("Pause"));
     });
+    connect(m_animationSeek, &QSlider::sliderMoved, this, [this](int frame) {
+        if(!m_currentClip.valid()) return;
+        m_animationPlay->setChecked(true);
+        const SAnimationLocalPose local = interpolateAnimationPose(
+            m_currentClip, frame, &m_currentPreview.modelScene.skeleton);
+        m_modelView->setPose(propagateAnimationHierarchy(
+            local, m_currentPreview.modelScene.skeleton), local.morphDeltas);
+    });
     connect(m_partFilter, &QLineEdit::textChanged, this, [this](const QString& filter) {
         for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
             m_partList->topLevelItem(row)->setHidden(
@@ -555,7 +642,7 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     connect(noParts, &QPushButton::clicked, this, [setParts]() { setParts(2); });
     connect(resetModel, &QPushButton::clicked, m_modelView, &CResourceModelCanvas::resetView);
     m_animationTimer = new QTimer(this);
-    m_animationTimer->setInterval(66);
+    m_animationTimer->setInterval(33);
     m_animationClock = new QElapsedTimer;
     connect(m_animationTimer, &QTimer::timeout, this, &CResourceBrowser::advanceAnimation);
     m_animationTimer->start(); m_animationClock->start();
@@ -568,7 +655,9 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
         m_audioPlay->setText(state == QMediaPlayer::PlayingState ? tr("Pause") : tr("Play"));
     });
     connect(m_audioPlayer, &QMediaPlayer::durationChanged, m_audioSeek, &QSlider::setMaximum);
-    connect(m_audioPlayer, &QMediaPlayer::positionChanged, m_audioSeek, &QSlider::setValue);
+    connect(m_audioPlayer, &QMediaPlayer::positionChanged, this, [this](qint64 position) {
+        if(!m_audioSeek->isSliderDown()) m_audioSeek->setValue(int(position));
+    });
     connect(m_audioSeek, &QSlider::sliderMoved, m_audioPlayer, &QMediaPlayer::setPosition);
     connect(m_audioVolume, &QSlider::valueChanged, m_audioPlayer, &QMediaPlayer::setVolume);
     connect(m_audioPlayer, QOverload<QMediaPlayer::Error>::of(&QMediaPlayer::error),
@@ -675,7 +764,7 @@ void CResourceBrowser::rebuildList()
         ? m_catalog.entries() : m_catalog.entriesForArchive(archiveFilter);
     for(const SResourceCatalogEntry& entry : candidates)
     {
-        const QString type = suffixType(entry.logicalName);
+        const QString type = suffixType(entry.logicalName, entry.archiveName);
         if(!search.isEmpty() && !entry.logicalName.contains(search, Qt::CaseInsensitive)
            && !entry.archiveName.contains(search, Qt::CaseInsensitive)) continue;
         if(!requestedType.isEmpty() && type != requestedType) continue;
@@ -744,7 +833,7 @@ void CResourceBrowser::finishPreview()
     m_currentPreview = result;
     m_previewDetails->setText(result.title + "\n" + result.details);
     m_previewText->setPlainText(result.text);
-    const QString type = suffixType(result.title);
+    const QString type = result.previewType;
     if(result.modelScene.valid)
     {
         m_previewStack->setCurrentIndex(2);
@@ -770,12 +859,14 @@ void CResourceBrowser::finishPreview()
                     .arg(action.name).arg(action.length), action.name);
         m_animationList->setVisible(m_animationList->count() > 0);
         m_animationPlay->setVisible(m_animationList->count() > 0);
+        m_animationSeek->setVisible(m_animationList->count() > 0);
         if(m_animationList->count())
         {
             m_animationList->insertItem(0, tr("Neutral assembly pose"), QString());
-            m_animationList->setCurrentIndex(0);
-            selectAnimation(0);
+            m_animationList->setCurrentIndex(1);
+            selectAnimation(1);
         }
+        else m_animationSeek->setRange(0, 0);
     }
     else if(type == QStringLiteral("Image"))
     {
@@ -818,6 +909,7 @@ void CResourceBrowser::selectAnimation(int index)
     {
         m_modelView->setPose({}, {});
         m_animationPlay->setChecked(true);
+        m_animationSeek->setRange(0, 0);
         return;
     }
     int length = 0;
@@ -827,19 +919,27 @@ void CResourceBrowser::selectAnimation(int index)
     m_currentClip = parseNestedAnimationClip(m_currentPreview.animationPayload,
                                              action, qMax(1, length));
     if(length <= 0) m_currentClip.logicalLength = ei::inferredAnimationLogicalLength(m_currentClip);
+    m_animationSeek->setRange(0, qMax(0, m_currentClip.logicalLength - 1));
+    m_animationSeek->setValue(0);
+    m_animationPlay->setChecked(false);
     m_animationClock->restart();
 }
 
 void CResourceBrowser::advanceAnimation()
 {
+    if(m_audioPlayer && m_audioPlayer->state() == QMediaPlayer::PlayingState
+       && !m_audioSeek->isSliderDown())
+        m_audioSeek->setValue(int(m_audioPlayer->position()));
     if(!m_currentClip.valid() || m_animationPlay->isChecked()
-       || m_previewStack->currentIndex() != 2) return;
+       || m_previewStack->currentIndex() != 2 || m_modelView->isInteracting()) return;
     const double frame = std::fmod(m_animationClock->elapsed() * 15.0 / 1000.0,
                                    double(m_currentClip.logicalLength));
     const SAnimationLocalPose local = interpolateAnimationPose(
         m_currentClip, frame, &m_currentPreview.modelScene.skeleton);
     m_modelView->setPose(propagateAnimationHierarchy(
         local, m_currentPreview.modelScene.skeleton), local.morphDeltas);
+    QSignalBlocker guard(m_animationSeek);
+    m_animationSeek->setValue(qBound(0, int(frame), m_animationSeek->maximum()));
 }
 
 void CResourceBrowser::updateModelParts()

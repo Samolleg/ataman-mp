@@ -78,7 +78,9 @@ private slots:
     void mmpWidgetPreviewUsesEditorOrientation();
     void fig8CpuPreviewRendersGeometry();
     void modelSceneDefaultsToAboveGroundCamera();
+    void interactiveModelViewKeepsStableFramingForPanAndZoom();
     void modelPartDefaultsKeepHumanoidAnatomyAndCreatureAssemblies();
+    void textSnifferAcceptsExtensionlessCp1251AndRejectsBinary();
     void animationFallbackInfersSelectableActionLength();
     void transactionSupportsReplaceAddRenameDelete();
     void transactionPreservesSourceAndUnchangedPayloadOffsets();
@@ -237,6 +239,33 @@ void ResourceBrowserCoreTests::modelSceneDefaultsToAboveGroundCamera()
     QCOMPARE(ei::resourceModelDefaultElevationDegrees(), 0.0f);
 }
 
+void ResourceBrowserCoreTests::interactiveModelViewKeepsStableFramingForPanAndZoom()
+{
+    ei::SResourceModelScene scene; scene.valid = true;
+    ei::SResourceModelPart part; part.name = "bd";
+    ei::SResourceModelTriangle triangle;
+    triangle.vertices[0].position = QVector3D(-1, 0, 0);
+    triangle.vertices[1].position = QVector3D(1, 0, 0);
+    triangle.vertices[2].position = QVector3D(0, 0, 2);
+    part.triangles.append(triangle); scene.parts.append(part);
+    ei::SResourceModelView normal;
+    const QImage first = ei::renderResourceModelScene(scene, normal, QSize(400, 300));
+    normal.zoom = 2.0f;
+    const QImage zoomed = ei::renderResourceModelScene(scene, normal, QSize(400, 300));
+    normal.pan = QVector3D(0.25f, 0, 0);
+    const QImage panned = ei::renderResourceModelScene(scene, normal, QSize(400, 300));
+    const auto foreground = [](const QImage& image) {
+        QRect bounds;
+        const QRgb background = image.pixel(0, 0);
+        for(int y = 0; y < image.height(); ++y)
+            for(int x = 0; x < image.width(); ++x)
+                if(image.pixel(x, y) != background) bounds |= QRect(x, y, 1, 1);
+        return bounds;
+    };
+    QVERIFY(foreground(zoomed).width() > foreground(first).width() * 1.5);
+    QVERIFY(foreground(panned).center().x() > foreground(zoomed).center().x() + 20);
+}
+
 void ResourceBrowserCoreTests::modelPartDefaultsKeepHumanoidAnatomyAndCreatureAssemblies()
 {
     ei::SResourceModelScene humanoid;
@@ -247,8 +276,8 @@ void ResourceBrowserCoreTests::modelPartDefaultsKeepHumanoidAnatomyAndCreatureAs
     }
     const QSet<QString> humanVisible = ei::defaultVisibleModelParts(humanoid, "unhuma");
     QVERIFY(humanVisible.contains("bd"));
-    QVERIFY(humanVisible.contains("lh1.skin00"));
-    QVERIFY(humanVisible.contains("ll2.armor00"));
+    QVERIFY(!humanVisible.contains("lh1.skin00"));
+    QVERIFY(!humanVisible.contains("ll2.armor00"));
     QVERIFY(!humanVisible.contains("rh3.sword08"));
 
     ei::SResourceModelScene creature;
@@ -259,6 +288,13 @@ void ResourceBrowserCoreTests::modelPartDefaultsKeepHumanoidAnatomyAndCreatureAs
     }
     const QSet<QString> creatureVisible = ei::defaultVisibleModelParts(creature, "unmodg");
     QCOMPARE(creatureVisible.size(), creature.parts.size());
+}
+
+void ResourceBrowserCoreTests::textSnifferAcceptsExtensionlessCp1251AndRejectsBinary()
+{
+    const QByteArray cp1251 = QByteArray::fromHex("cff0e8e2e5f220ece8f0210d0a");
+    QVERIFY(ei::resourcePayloadLooksText(cp1251));
+    QVERIFY(!ei::resourcePayloadLooksText(QByteArray("A\0B\1C", 5)));
 }
 
 void ResourceBrowserCoreTests::animationFallbackInfersSelectableActionLength()

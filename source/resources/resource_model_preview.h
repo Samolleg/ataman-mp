@@ -54,6 +54,8 @@ struct SResourceModelScene
 
 struct SResourceModelView
 {
+    float modelYawDegrees{0.0f};
+    float modelPitchDegrees{0.0f};
     float azimuthDegrees{0.0f};
     float elevationDegrees{0.0f};
     float zoom{1.0f};
@@ -70,6 +72,7 @@ bool isHumanoidAssemblyStem(const QString& modelStem);
 QSet<QString> defaultVisibleModelParts(const SResourceModelScene& scene,
                                        const QString& modelStem);
 int inferredAnimationLogicalLength(const SAnimationClip& clip);
+bool resourcePayloadLooksText(const QByteArray& bytes);
 SResourceModelScene buildFig8Scene(const QByteArray& bytes);
 SResourceModelScene buildModScene(const QByteArray& bytes,
                                   const QByteArray& companionBon = QByteArray());
@@ -90,6 +93,7 @@ SResourceModelPreview previewModAssembly(const QByteArray& bytes,
 // inferred; this inventory is paired with a same-stem model preview by the UI.
 QStringList inspectAnimationArchive(const QByteArray& bytes, int* actionCount = nullptr,
                                     int* channelCount = nullptr);
+QStringList inspectBoneArchive(const QByteArray& bytes, int* componentCount = nullptr);
 
 }
 

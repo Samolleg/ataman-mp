@@ -31,6 +31,7 @@ struct SResourceBrowserPreview
     bool valid{false};
     QString title;
     QString details;
+    QString previewType;
     QString text;
     QImage image;
     QByteArray sha256;
@@ -107,6 +108,7 @@ private:
     QTemporaryDir* m_audioWorkspace{nullptr};
     QString m_audioPath;
     class QTimer* m_animationTimer{nullptr};
+    class QSlider* m_animationSeek{nullptr};
     class QElapsedTimer* m_animationClock{nullptr};
     QLabel* m_previewDetails{nullptr};
     class QPlainTextEdit* m_previewText{nullptr};

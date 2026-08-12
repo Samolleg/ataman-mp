@@ -248,6 +248,49 @@ QImage renderTriangles(const QVector<Triangle>& triangles, const QSize& requeste
     return image;
 }
 
+QImage renderInteractiveTriangles(const QVector<Triangle>& triangles,
+                                  const QVector3D& sceneCenter, float sceneRadius,
+                                  float zoom, const QVector3D& pan,
+                                  const QSize& requested)
+{
+    const QSize size(qMax(240, requested.width()), qMax(180, requested.height()));
+    QImage image(size, QImage::Format_ARGB32_Premultiplied);
+    image.fill(QColor(30, 33, 39));
+    if(triangles.isEmpty()) return image;
+    struct DrawTriangle { QPolygonF polygon; float depth; QColor color; };
+    const float scale = 0.42f * qMin(size.width(), size.height())
+        * qMax(0.05f, zoom) / qMax(1.0e-4f, sceneRadius);
+    const QPointF center(size.width() * 0.5 + pan.x() * qMin(size.width(), size.height()),
+                         size.height() * 0.5 - pan.z() * qMin(size.width(), size.height()));
+    QVector<DrawTriangle> draw;
+    draw.reserve(triangles.size());
+    for(const Triangle& triangle : triangles)
+    {
+        const QVector3D points[3] = {triangle.a - sceneCenter, triangle.b - sceneCenter,
+                                     triangle.c - sceneCenter};
+        QPolygonF polygon;
+        for(const QVector3D& point : points)
+            polygon << center + QPointF(point.x() * scale, -point.z() * scale);
+        const QVector3D normal = QVector3D::crossProduct(points[1] - points[0],
+                                                         points[2] - points[0]).normalized();
+        const int light = qBound(42, int(105 + 105 * qAbs(normal.y())), 215);
+        draw.append({polygon, (points[0].y() + points[1].y() + points[2].y()) / 3.0f,
+                     QColor(light * 0.65, light * 0.78, light)});
+    }
+    std::sort(draw.begin(), draw.end(), [](const DrawTriangle& left, const DrawTriangle& right) {
+        return left.depth < right.depth;
+    });
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    for(const DrawTriangle& triangle : draw)
+    {
+        painter.setBrush(triangle.color);
+        painter.setPen(QPen(QColor(15, 18, 23, 150), 0.6));
+        painter.drawPolygon(triangle.polygon);
+    }
+    return image;
+}
+
 QVector<Triangle> posedTriangles(const SResourceModelScene& scene,
                                   const SResourceModelView& view)
 {
@@ -322,10 +365,7 @@ QSet<QString> defaultVisibleModelParts(const SResourceModelScene& scene,
     {
         const QString name = part.name.toLower();
         const QString root = name.section('.', 0, 0);
-        if(anatomy.contains(root) && (!name.contains('.')
-           || name.endsWith(QStringLiteral("00"))
-           || name.contains(QStringLiteral(".skin"))
-           || name.contains(QStringLiteral(".armor"))))
+        if(anatomy.contains(root) && name == root)
             visible.insert(name);
     }
     return visible;
@@ -339,6 +379,21 @@ int inferredAnimationLogicalLength(const SAnimationClip& clip)
             qMax(it->translations.size(), it->morphations.size())));
     // Authored clips carry a closing loop sample; logicalLength excludes it.
     return qMax(1, samples - 1);
+}
+
+bool resourcePayloadLooksText(const QByteArray& bytes)
+{
+    if(bytes.isEmpty()) return true;
+    if(bytes.startsWith("\xFF\xFE") || bytes.startsWith("\xFE\xFF")) return true;
+    const int sampleSize = qMin(bytes.size(), 8192);
+    int controls = 0;
+    for(int index = 0; index < sampleSize; ++index)
+    {
+        const uchar value = uchar(bytes.at(index));
+        if(value == 0) return false;
+        if(value < 0x20 && value != '\t' && value != '\r' && value != '\n') ++controls;
+    }
+    return controls * 100 <= sampleSize;
 }
 
 SResourceModelScene buildFig8Scene(const QByteArray& bytes)
@@ -472,22 +527,43 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
 QImage renderResourceModelScene(const SResourceModelScene& scene,
                                 const SResourceModelView& view, const QSize& size)
 {
+    QVector3D minimum(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
+                      std::numeric_limits<float>::max());
+    QVector3D maximum(-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(),
+                      -std::numeric_limits<float>::max());
+    for(const SResourceModelPart& part : scene.parts)
+        for(const SResourceModelTriangle& triangle : part.triangles)
+            for(const SResourceModelVertex& vertex : triangle.vertices)
+            {
+                minimum.setX(qMin(minimum.x(), vertex.position.x()));
+                minimum.setY(qMin(minimum.y(), vertex.position.y()));
+                minimum.setZ(qMin(minimum.z(), vertex.position.z()));
+                maximum.setX(qMax(maximum.x(), vertex.position.x()));
+                maximum.setY(qMax(maximum.y(), vertex.position.y()));
+                maximum.setZ(qMax(maximum.z(), vertex.position.z()));
+            }
+    const QVector3D center = (minimum + maximum) * 0.5f;
+    float radius = 0.0f;
+    for(const SResourceModelPart& part : scene.parts)
+        for(const SResourceModelTriangle& triangle : part.triangles)
+            for(const SResourceModelVertex& vertex : triangle.vertices)
+                radius = qMax(radius, (vertex.position - center).length());
     QVector<Triangle> triangles = posedTriangles(scene, view);
     QMatrix4x4 camera;
     camera.setToIdentity();
+    camera.translate(center);
     camera.rotate(-view.elevationDegrees, 1.0f, 0.0f, 0.0f);
     camera.rotate(view.azimuthDegrees, 0.0f, 0.0f, 1.0f);
-    camera.scale(qMax(0.05f, view.zoom));
-    camera.translate(view.pan);
+    camera.rotate(view.modelPitchDegrees, 1.0f, 0.0f, 0.0f);
+    camera.rotate(view.modelYawDegrees, 0.0f, 0.0f, 1.0f);
+    camera.translate(-center);
     for(Triangle& triangle : triangles)
     {
         triangle.a = camera * triangle.a;
         triangle.b = camera * triangle.b;
         triangle.c = camera * triangle.c;
     }
-    // The legacy fixed projection itself is intentionally kept stable here;
-    // the user-facing orbit is applied above in the editor's Z-up convention.
-    return renderTriangles(triangles, size);
+    return renderInteractiveTriangles(triangles, center, radius, view.zoom, view.pan, size);
 }
 
 SResourceModelPreview previewFig8(const QByteArray& bytes, const QSize& size)
@@ -631,6 +707,27 @@ QStringList inspectAnimationArchive(const QByteArray& bytes, int* actionCount, i
     if(channelCount) *channelCount = channels;
     if(actions.isEmpty()) return diagnostics;
     return result;
+}
+
+QStringList inspectBoneArchive(const QByteArray& bytes, int* componentCount)
+{
+    QStringList diagnostics;
+    const QMap<QString, QByteArray> members = resMembers(bytes, &diagnostics);
+    QStringList result;
+    for(auto it = members.constBegin(); it != members.constEnd(); ++it)
+    {
+        if(it.value().size() < 3 * int(sizeof(float)))
+        { result.append(QStringLiteral("%1 — truncated").arg(it.key())); continue; }
+        QDataStream stream(it.value());
+        stream.setByteOrder(QDataStream::LittleEndian);
+        stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+        QVector3D offset; stream >> offset;
+        result.append(QStringLiteral("%1 — rest offset [%2, %3, %4]")
+            .arg(it.key()).arg(offset.x(), 0, 'g', 6).arg(offset.y(), 0, 'g', 6)
+            .arg(offset.z(), 0, 'g', 6));
+    }
+    if(componentCount) *componentCount = members.size();
+    return members.isEmpty() ? diagnostics : result;
 }
 
 }
