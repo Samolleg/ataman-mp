@@ -313,12 +313,13 @@ void ResourceBrowserCoreTests::modelPartDefaultsKeepHumanoidAnatomyAndCreatureAs
 
 void ResourceBrowserCoreTests::largeHumanoidAssembliesReserveDetailForBaseAnatomy()
 {
-    const int bodyBudget = ei::resourceModelPreviewTriangleBudget("bd", 779, 16);
-    const int armorBudget = ei::resourceModelPreviewTriangleBudget("bd.armor24", 779, 16);
-    QVERIFY(bodyBudget >= 2000);
+    const int bodyBudget = ei::resourceModelPreviewTriangleBudget("bd", 4704, 752, 24116);
+    const int armorBudget = ei::resourceModelPreviewTriangleBudget("bd.armor24", 4704, 752, 24116);
+    QCOMPARE(bodyBudget, 4704);
     QVERIFY(armorBudget >= 250);
     QVERIFY(bodyBudget > armorBudget * 5);
-    QCOMPARE(ei::resourceModelPreviewTriangleBudget("leftwing", 20, 0), 2500);
+    QCOMPARE(ei::resourceModelPreviewTriangleBudget("leftwing", 4000, 20, 0), 2500);
+    QVERIFY(ei::isHumanoidAssemblyStem("unhuli"));
 }
 
 void ResourceBrowserCoreTests::textSnifferAcceptsExtensionlessCp1251AndRejectsBinary()

@@ -72,8 +72,8 @@ bool isHumanoidAssemblyStem(const QString& modelStem);
 QSet<QString> defaultVisibleModelParts(const SResourceModelScene& scene,
                                        const QString& modelStem);
 int inferredAnimationLogicalLength(const SAnimationClip& clip);
-int resourceModelPreviewTriangleBudget(const QString& partName, int partCount,
-                                       int anatomyPartCount);
+int resourceModelPreviewTriangleBudget(const QString& partName, int authoredTriangles,
+                                       int partCount, int anatomyTriangles);
 bool resourcePayloadLooksText(const QByteArray& bytes);
 SResourceModelScene buildFig8Scene(const QByteArray& bytes);
 SResourceModelScene buildModScene(const QByteArray& bytes,

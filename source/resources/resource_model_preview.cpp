@@ -350,6 +350,7 @@ bool isHumanoidAssemblyStem(const QString& modelStem)
     if(stem.endsWith(QStringLiteral(".mod"))) stem.chop(4);
     static const QSet<QString> humanoids = {
         QStringLiteral("unhuma"), QStringLiteral("unhufe"),
+        QStringLiteral("unhuli"),
         QStringLiteral("unorma"), QStringLiteral("unorfe"),
         QStringLiteral("unhusk"), QStringLiteral("unhuzm"),
         QStringLiteral("unhuzf")
@@ -395,15 +396,16 @@ int inferredAnimationLogicalLength(const SAnimationClip& clip)
     return qMax(1, samples - 1);
 }
 
-int resourceModelPreviewTriangleBudget(const QString& partName, int partCount,
-                                       int anatomyPartCount)
+int resourceModelPreviewTriangleBudget(const QString& partName, int authoredTriangles,
+                                       int partCount, int anatomyTriangles)
 {
     if(partCount <= 0) return 1;
-    if(anatomyPartCount <= 0)
+    if(anatomyTriangles <= 0)
         return qMax(1, kMaxPreviewTriangles / partCount);
     if(isBaseAnatomyPart(partName))
-        return qMax(2000, kMaxPreviewTriangles / qMax(1, anatomyPartCount));
-    const int optionalCount = qMax(1, partCount - anatomyPartCount);
+        return qMin(qMax(1, authoredTriangles), qMax(1,
+            int(qint64(kMaxPreviewTriangles) * authoredTriangles / anatomyTriangles)));
+    const int optionalCount = qMax(1, partCount - 16);
     const int optionalPool = kMaxAssemblyTriangles - kMaxPreviewTriangles;
     return qMax(250, optionalPool / optionalCount);
 }
@@ -457,10 +459,14 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
     if(members.isEmpty()) return scene;
     QMap<QString, QString> parents;
     int figurePartCount = 0;
-    int anatomyPartCount = 0;
+    int anatomyTriangleCount = 0;
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
         if(it.value().startsWith("FIG8"))
-        { ++figurePartCount; if(isBaseAnatomyPart(it.key())) ++anatomyPartCount; }
+        {
+            ++figurePartCount;
+            if(isBaseAnatomyPart(it.key()) && it.value().size() >= 20)
+                anatomyTriangleCount += int(u32(it.value(), 16) / 3);
+        }
     bool sampled = false;
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
     {
@@ -525,8 +531,10 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
             continue;
         }
         SResourceModelPart part; part.name = it.key();
+        const int authoredTriangles = it.value().size() >= 20
+            ? int(u32(it.value(), 16) / 3) : parsed.size();
         const int perPartTriangleBudget = resourceModelPreviewTriangleBudget(
-            it.key(), figurePartCount, anatomyPartCount);
+            it.key(), authoredTriangles, figurePartCount, anatomyTriangleCount);
         if(parsed.size() > perPartTriangleBudget)
         {
             parsed.resize(perPartTriangleBudget);
