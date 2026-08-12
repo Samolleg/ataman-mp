@@ -210,6 +210,7 @@ private:
     void showUnitTexturePreview();
     void updateUnitTexturePreview();
     void renderUnitTexturePreview();
+    void showDatabaseEditor(const QString& prototype = QString());
 
 private slots:
     void showOutliner(bool bShow);

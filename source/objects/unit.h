@@ -215,6 +215,7 @@ public:
     void preloadVisualResources();
     bool needsVisualResolution() const;
     void invalidateDatabaseVisual();
+    void carryResolvedVisualToCurrentDatabaseGeneration();
     bool hasPreparedAppearance() const;
     bool needsAppearancePreparation() const;
     bool describeAppearancePreparationTask(SUnitAppearancePreparationTask* task) const;

@@ -11729,6 +11729,8 @@ void CView::refreshDatabaseVisuals(const QString& tableKey,const QString& rowKey
             unit->invalidateDatabaseVisual();
             affected.append(unit);
         }
+        else
+            unit->carryResolvedVisualToCurrentDatabaseGeneration();
     // End the previous generation's progress ownership before resetting its
     // counters. A visible shared bar with total == 0 makes the scheduler's
     // foreign-progress guard reject every subsequent preparation frame.

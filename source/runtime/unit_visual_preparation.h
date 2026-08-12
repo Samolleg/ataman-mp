@@ -36,6 +36,12 @@ inline bool shouldShowUnitAppearanceProgress(bool pending, int total, int comple
     return pending && total > 0 && completed < total;
 }
 
+inline bool canCarryResolvedVisualToDatabaseGeneration(
+        quint64 resolvedVisualRevision, quint64 visualRevision)
+{
+    return resolvedVisualRevision == visualRevision;
+}
+
 inline int completedUnitVisualCount(int total, int unresolved)
 {
     return qBound(0, total - qMax(0, unresolved), qMax(0, total));

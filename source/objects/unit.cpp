@@ -162,6 +162,18 @@ void CUnit::invalidateDatabaseVisual()
     invalidateTransientVisual();
 }
 
+void CUnit::carryResolvedVisualToCurrentDatabaseGeneration()
+{
+    if(!ei::canCarryResolvedVisualToDatabaseGeneration(
+           m_resolvedVisualRevision, m_visualRevision))
+        return;
+    const quint64 generation = ei::ProfileDatabaseContext::instance().generation();
+    m_resolvedDatabaseGeneration = generation;
+    if(m_preparedAppearanceValid
+       && m_preparedAppearanceRevision == m_visualRevision)
+        m_preparedAppearanceGeneration = generation;
+}
+
 bool CUnit::hasPreparedAppearance() const
 {
     return m_preparedAppearanceValid

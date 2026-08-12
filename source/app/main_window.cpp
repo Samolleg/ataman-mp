@@ -477,6 +477,51 @@ void MainWindow::on_toolButton_2_clicked()
     ei::log(eLogDebug, "btn test end");
 }
 
+void MainWindow::showDatabaseEditor(const QString& prototype)
+{
+    ei::log(eLogInfo, QString("Database editor navigation requested for prototype '%1'")
+                        .arg(prototype));
+    if(!m_databaseEditorDialog)
+    {
+        const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+        QString diagnostic;
+        if(!m_databaseDocument || !snapshot
+           || QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath()
+                .compare(QFileInfo(snapshot->sourceArchivePath).absoluteFilePath(),
+                         Qt::CaseInsensitive) != 0)
+            m_databaseDocument = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
+        if(!m_databaseDocument)
+        {
+            QMessageBox::warning(this, tr("Database Editor"),
+                tr("The active profile database cannot be opened for authoring.\n\n%1")
+                    .arg(diagnostic));
+            return;
+        }
+
+        m_databaseEditorDialog = new ei::DatabaseEditorDialog(m_databaseDocument, this);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::transactionCommitted,
+                this, [this](const QString& description, const QString& tableKey,
+                             const QString& rowKey)
+        {
+            m_undoStack->push(new CDatabaseHistoryCommand(
+                m_databaseDocument, m_databaseEditorDialog, m_pView,
+                description, tableKey, rowKey));
+            m_pView->refreshDatabaseVisuals(tableKey, rowKey);
+        });
+    }
+
+    m_databaseEditorDialog->show();
+    m_databaseEditorDialog->raise();
+    m_databaseEditorDialog->activateWindow();
+    if(!prototype.trimmed().isEmpty()
+       && !m_databaseEditorDialog->selectPrototype(prototype))
+    {
+        QMessageBox::warning(m_databaseEditorDialog, tr("Prototype not found"),
+            tr("The active profile database does not contain monster prototype '%1'.")
+                .arg(prototype));
+    }
+}
+
 MainWindow::MainWindow(QWidget* parent) :
     QMainWindow(parent),
     m_ui(new Ui::MainWindow),
@@ -1059,37 +1104,10 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog.exec();
         processMapTableSaveReports(dialog.saveReports());
     });
-    const std::function<void(const QString&)> showDatabaseEditor=[this](const QString& prototype)
-    {
-        if(m_databaseEditorDialog)
-        {
-            m_databaseEditorDialog->show();
-            m_databaseEditorDialog->raise();
-            m_databaseEditorDialog->activateWindow();
-            if(!prototype.isEmpty())m_databaseEditorDialog->selectPrototype(prototype);
-            return;
-        }
-        const auto snapshot = ei::ProfileDatabaseContext::instance().current();
-        QString diagnostic;
-        if(!m_databaseDocument || !snapshot
-           || QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath()
-                .compare(QFileInfo(snapshot->sourceArchivePath).absoluteFilePath(),Qt::CaseInsensitive)!=0)
-            m_databaseDocument = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
-        if(!m_databaseDocument)
-        {
-            QMessageBox::warning(this, tr("Database Editor"),
-                tr("The active profile database cannot be opened for authoring.\n\n%1")
-                    .arg(diagnostic));
-            return;
-        }
-        m_databaseEditorDialog = new ei::DatabaseEditorDialog(m_databaseDocument, this);
-        connect(m_databaseEditorDialog,&ei::DatabaseEditorDialog::transactionCommitted,
-                this,[this](const QString& description,const QString& tableKey,const QString& rowKey){m_undoStack->push(new CDatabaseHistoryCommand(m_databaseDocument,m_databaseEditorDialog,m_pView,description,tableKey,rowKey));m_pView->refreshDatabaseVisuals(tableKey,rowKey);});
-        m_databaseEditorDialog->show();
-        if(!prototype.isEmpty())m_databaseEditorDialog->selectPrototype(prototype);
-    };
-    connect(openDatabaseEditor,&QAction::triggered,this,[showDatabaseEditor](){showDatabaseEditor(QString());});
-    connect(m_pView,&CView::openDatabasePrototypeRequested,this,[showDatabaseEditor](const QString& prototype){showDatabaseEditor(prototype);});
+    connect(openDatabaseEditor, &QAction::triggered, this,
+            [this]() { showDatabaseEditor(); });
+    connect(m_pView, &CView::openDatabasePrototypeRequested,
+            this, &MainWindow::showDatabaseEditor);
     connect(generateMinimapAction, &QAction::triggered,
             this, &MainWindow::generateMinimap);
     connect(persistAiGraphAction, &QAction::triggered,

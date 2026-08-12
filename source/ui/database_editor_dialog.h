@@ -8,7 +8,7 @@ namespace ei {
 class DatabaseEditorDialog : public QDialog
 {
     Q_OBJECT
-public: explicit DatabaseEditorDialog(const QSharedPointer<DatabaseDocument>&, QWidget* = nullptr); void refreshFromHistory(); void selectPrototype(const QString& prototype);
+public: explicit DatabaseEditorDialog(const QSharedPointer<DatabaseDocument>&, QWidget* = nullptr); void refreshFromHistory(); bool selectPrototype(const QString& prototype);
 signals: void transactionCommitted(const QString& description, const QString& tableKey, const QString& rowKey);
 private slots: void selectTable(); void rebuildGrid(); void editCell(int,int); void cloneSelected(); void deleteSelected(); void review(); void apply(); void saveAs(); void exportXlsx(); void importXlsx();
 private: QString currentTableKey() const; QString selectedRowKey() const; void updateStatus(); void publishLive(); bool applyDocument(QString* backupPath=nullptr,QString* diagnostic=nullptr);
