@@ -10,7 +10,6 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QComboBox>
-#include <QBuffer>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDateTime>
@@ -42,6 +41,7 @@
 #include <QTextCodec>
 #include <QTreeWidget>
 #include <QTimer>
+#include <QTemporaryDir>
 #include <QElapsedTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -91,10 +91,10 @@ public:
         setMinimumSize(260, 220);
         setStyleSheet(QStringLiteral("background: #1e2127;"));
     }
-    void setScene(const ei::SResourceModelScene& scene)
+    void setScene(const ei::SResourceModelScene& scene, const QSet<QString>& visibleParts)
     {
         m_scene = scene; m_view = ei::SResourceModelView();
-        for(const auto& part : scene.parts) m_view.visibleParts.insert(part.name.toLower());
+        m_view.visibleParts = visibleParts;
         m_view.filterParts = true;
         redraw();
     }
@@ -103,7 +103,8 @@ public:
     void setPose(const QMap<QString, QMatrix4x4>& poses,
                  const QMap<QString, QVector<QVector3D>>& morphs)
     { m_view.poses = poses; m_view.morphDeltas = morphs; redraw(); }
-    void resetView() { m_view.azimuthDegrees = 35; m_view.elevationDegrees = 22;
+    void resetView() { m_view.azimuthDegrees = ei::resourceModelDefaultAzimuthDegrees();
+        m_view.elevationDegrees = ei::resourceModelDefaultElevationDegrees();
         m_view.zoom = 1; m_view.pan = {}; redraw(); }
 protected:
     void resizeEvent(QResizeEvent* event) override { QLabel::resizeEvent(event); redraw(); }
@@ -114,9 +115,11 @@ protected:
     {
         const QPoint delta = event->pos() - m_last; m_last = event->pos();
         if(m_button == Qt::LeftButton)
+            m_view.pan += QVector3D(delta.x(), 0, -delta.y()) * (0.004f / qMax(0.1f, m_view.zoom));
+        else if(m_button == Qt::MiddleButton)
+            m_view.azimuthDegrees += delta.x() * 0.45f;
+        else if(m_button == Qt::RightButton)
         { m_view.azimuthDegrees += delta.x() * 0.5f; m_view.elevationDegrees = qBound(-80.0f, m_view.elevationDegrees + delta.y() * 0.4f, 80.0f); }
-        else if(m_button == Qt::MiddleButton || m_button == Qt::RightButton)
-        { m_view.pan += QVector3D(delta.x(), 0, -delta.y()) * (0.004f / qMax(0.1f, m_view.zoom)); }
         redraw();
     }
     void mouseReleaseEvent(QMouseEvent*) override { m_button = Qt::NoButton; }
@@ -176,9 +179,10 @@ QString hexDump(const QByteArray& bytes)
 }
 
 SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
-                                    CResourceCatalog catalog)
+                                    CResourceCatalog catalog, quint64 generation)
 {
     SResourceBrowserPreview result;
+    result.generation = generation;
     if(memberIndex < 0 || memberIndex >= archive.memberCount())
     {
         result.error = QStringLiteral("The selected archive member no longer exists.");
@@ -397,7 +401,7 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     QVBoxLayout* modelLayout = new QVBoxLayout(modelPane);
     m_modelView = new CResourceModelCanvas(modelPane);
     m_modelView->setObjectName(QStringLiteral("resourceModelCanvas"));
-    QLabel* modelHint = new QLabel(tr("Drag to orbit; right/middle drag pans; wheel zooms"), modelPane);
+    QLabel* modelHint = new QLabel(tr("Left drag pans; middle drag rotates; right drag orbits; wheel zooms"), modelPane);
     m_animationList = new QComboBox(modelPane);
     m_animationList->setObjectName(QStringLiteral("resourceAnimationList"));
     m_animationPlay = new QPushButton(tr("Pause"), modelPane);
@@ -498,7 +502,20 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
         beginPreview(m_resources->currentItem());
     });
     connect(m_archives, &QTreeWidget::itemSelectionChanged,
-            this, &CResourceBrowser::rebuildList);
+            this, [this]() {
+        m_resources->clearSelection();
+        ++m_previewGeneration;
+        m_audioPlayer->stop();
+        m_audioPlayer->setMedia(QMediaContent());
+        m_audioSeek->setRange(0, 0);
+        m_audioSeek->setValue(0);
+        m_audioControls->hide();
+        m_previewText->clear();
+        m_imageView->setImage(QImage());
+        m_previewStack->setCurrentIndex(0);
+        m_previewDetails->setText(tr("Select a resource to preview it."));
+        rebuildList();
+    });
     connect(m_export, &QPushButton::clicked, this, &CResourceBrowser::exportSelected);
     connect(m_copyName, &QPushButton::clicked, this, &CResourceBrowser::copySelectedName);
     connect(m_openLocation, &QPushButton::clicked, this, &CResourceBrowser::openSelectedLocation);
@@ -521,17 +538,14 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     });
     connect(m_partList, &QTreeWidget::itemChanged, this, &CResourceBrowser::updateModelParts);
     const auto setParts = [this](int preset) {
-        const QSet<QString> normal = {"hp","bd","hd","hr","lh1","rh1","lh2","rh2","lh3","rh3","ll1","rl1","ll2","rl2","ll3","rl3"};
-        bool hasNormalPart = false;
-        for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
-            hasNormalPart = hasNormalPart
-                || normal.contains(m_partList->topLevelItem(row)->text(0).toLower());
+        const QSet<QString> defaults = ei::defaultVisibleModelParts(
+            m_currentPreview.modelScene, m_currentPreview.animationModel);
         QSignalBlocker guard(m_partList);
         for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
         {
             QTreeWidgetItem* item = m_partList->topLevelItem(row);
             const bool visible = preset == 1 || (preset == 0
-                && (!hasNormalPart || normal.contains(item->text(0).toLower())));
+                && defaults.contains(item->text(0).toLower()));
             item->setCheckState(1, visible ? Qt::Checked : Qt::Unchecked);
         }
         updateModelParts();
@@ -567,7 +581,13 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
 
 CResourceBrowser::~CResourceBrowser()
 {
+    if(m_audioPlayer)
+    {
+        m_audioPlayer->stop();
+        m_audioPlayer->setMedia(QMediaContent());
+    }
     delete m_animationClock;
+    delete m_audioWorkspace;
 }
 
 void CResourceBrowser::setActiveProfileSources(const QVector<QString>& sources,
@@ -691,9 +711,12 @@ void CResourceBrowser::beginPreview(QTreeWidgetItem*)
     if(!entry) return;
     const CResArchiveIndex* archive = m_catalog.archive(entry->archivePriority);
     if(!archive) return;
-    ++m_previewGeneration;
+    const quint64 generation = ++m_previewGeneration;
     m_audioPlayer->stop();
     m_audioPlayer->setMedia(QMediaContent());
+    m_audioSeek->setRange(0, 0);
+    m_audioSeek->setValue(0);
+    m_audioPlay->setText(tr("Play"));
     m_audioControls->hide();
     m_imageView->setImage(QImage());
     m_previewStack->setCurrentIndex(0);
@@ -705,12 +728,13 @@ void CResourceBrowser::beginPreview(QTreeWidgetItem*)
     m_previewDetails->setText(entry->logicalName + chainText);
     m_databaseEditor->setVisible(QFileInfo(entry->archivePath).fileName().startsWith("database", Qt::CaseInsensitive));
     m_previewWatcher->setFuture(QtConcurrent::run(
-        makePreview, *archive, entry->memberIndex, m_catalog));
+        makePreview, *archive, entry->memberIndex, m_catalog, generation));
 }
 
 void CResourceBrowser::finishPreview()
 {
     const SResourceBrowserPreview result = m_previewWatcher->result();
+    if(result.generation != m_previewGeneration) return;
     if(!result.valid)
     {
         m_previewDetails->setText(result.error);
@@ -724,7 +748,10 @@ void CResourceBrowser::finishPreview()
     if(result.modelScene.valid)
     {
         m_previewStack->setCurrentIndex(2);
-        m_modelView->setScene(result.modelScene);
+        const QString stem = result.animationModel.isEmpty()
+            ? QFileInfo(result.title).completeBaseName() : result.animationModel;
+        const QSet<QString> defaults = ei::defaultVisibleModelParts(result.modelScene, stem);
+        m_modelView->setScene(result.modelScene, defaults);
         m_partList->clear();
         QSignalBlocker guard(m_partList);
         for(const ei::SResourceModelPart& part : result.modelScene.parts)
@@ -732,20 +759,9 @@ void CResourceBrowser::finishPreview()
             QTreeWidgetItem* item = new QTreeWidgetItem(m_partList,
                 {part.name, QString()});
             item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-            item->setCheckState(1, Qt::Checked);
+            item->setCheckState(1, defaults.contains(part.name.toLower())
+                ? Qt::Checked : Qt::Unchecked);
         }
-        const QSet<QString> normal = {"hp","bd","hd","hr","lh1","rh1","lh2","rh2","lh3","rh3","ll1","rl1","ll2","rl2","ll3","rl3"};
-        bool humanoid = false;
-        for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
-            humanoid = humanoid || normal.contains(
-                m_partList->topLevelItem(row)->text(0).toLower());
-        if(humanoid)
-            for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
-            {
-                QTreeWidgetItem* item = m_partList->topLevelItem(row);
-                item->setCheckState(1, normal.contains(item->text(0).toLower())
-                    ? Qt::Checked : Qt::Unchecked);
-            }
         updateModelParts();
         m_animationList->clear();
         for(const SAdbAction& action : result.actions)
@@ -754,7 +770,12 @@ void CResourceBrowser::finishPreview()
                     .arg(action.name).arg(action.length), action.name);
         m_animationList->setVisible(m_animationList->count() > 0);
         m_animationPlay->setVisible(m_animationList->count() > 0);
-        if(m_animationList->count()) selectAnimation(0);
+        if(m_animationList->count())
+        {
+            m_animationList->insertItem(0, tr("Neutral assembly pose"), QString());
+            m_animationList->setCurrentIndex(0);
+            selectAnimation(0);
+        }
     }
     else if(type == QStringLiteral("Image"))
     {
@@ -767,14 +788,22 @@ void CResourceBrowser::finishPreview()
         if(type == QStringLiteral("Audio"))
         {
             m_audioControls->show();
-            delete m_audioBuffer;
-            m_audioBuffer = new QBuffer(this);
-            m_audioBuffer->setData(result.payload);
-            m_audioBuffer->open(QIODevice::ReadOnly);
-            const QString mime = QFileInfo(result.title).suffix().toLower() == "wav"
+            if(!m_audioWorkspace) m_audioWorkspace = new QTemporaryDir();
+            const QString suffix = QFileInfo(result.title).suffix().toLower();
+            m_audioPath = m_audioWorkspace && m_audioWorkspace->isValid()
+                ? m_audioWorkspace->filePath(QStringLiteral("preview.%1").arg(suffix)) : QString();
+            QFile audio(m_audioPath);
+            if(m_audioPath.isEmpty() || !audio.open(QIODevice::WriteOnly)
+               || audio.write(result.payload) != result.payload.size())
+            {
+                m_previewText->setPlainText(tr("Could not stage this audio preview as a local file. Export remains available."));
+                return;
+            }
+            audio.close();
+            const QString mime = suffix == "wav"
                 ? QStringLiteral("audio/wav") : QStringLiteral("audio/mpeg");
-            m_audioPlayer->setMedia(QMediaContent(), m_audioBuffer);
-            m_previewText->setPlainText(tr("Audio preview ready (%1). Playback depends on the deployed Qt multimedia codec backend.")
+            m_audioPlayer->setMedia(QUrl::fromLocalFile(m_audioPath));
+            m_previewText->setPlainText(tr("Audio preview ready (%1). WAV uses the deployed Windows audio backend; MP3 also requires an installed system decoder.")
                 .arg(mime));
         }
     }
@@ -785,6 +814,12 @@ void CResourceBrowser::selectAnimation(int index)
     m_currentClip = SAnimationClip();
     if(index < 0 || index >= m_animationList->count()) return;
     const QString action = m_animationList->itemData(index).toString();
+    if(action.isEmpty())
+    {
+        m_modelView->setPose({}, {});
+        m_animationPlay->setChecked(true);
+        return;
+    }
     int length = 0;
     for(const SAdbAction& candidate : m_currentPreview.actions)
         if(candidate.name.compare(action, Qt::CaseInsensitive) == 0)

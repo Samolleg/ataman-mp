@@ -78,6 +78,7 @@ private slots:
     void mmpWidgetPreviewUsesEditorOrientation();
     void fig8CpuPreviewRendersGeometry();
     void modelSceneDefaultsToAboveGroundCamera();
+    void modelPartDefaultsKeepHumanoidAnatomyAndCreatureAssemblies();
     void animationFallbackInfersSelectableActionLength();
     void transactionSupportsReplaceAddRenameDelete();
     void transactionPreservesSourceAndUnchangedPayloadOffsets();
@@ -232,8 +233,32 @@ void ResourceBrowserCoreTests::fig8CpuPreviewRendersGeometry()
 
 void ResourceBrowserCoreTests::modelSceneDefaultsToAboveGroundCamera()
 {
-    QVERIFY(ei::resourceModelDefaultElevationDegrees() > 0.0f);
-    QVERIFY(ei::resourceModelDefaultElevationDegrees() < 90.0f);
+    QCOMPARE(ei::resourceModelDefaultAzimuthDegrees(), 0.0f);
+    QCOMPARE(ei::resourceModelDefaultElevationDegrees(), 0.0f);
+}
+
+void ResourceBrowserCoreTests::modelPartDefaultsKeepHumanoidAnatomyAndCreatureAssemblies()
+{
+    ei::SResourceModelScene humanoid;
+    for(const QString& name : {QStringLiteral("bd"), QStringLiteral("lh1.skin00"),
+                                QStringLiteral("ll2.armor00"), QStringLiteral("rh3.sword08")})
+    {
+        ei::SResourceModelPart part; part.name = name; humanoid.parts.append(part);
+    }
+    const QSet<QString> humanVisible = ei::defaultVisibleModelParts(humanoid, "unhuma");
+    QVERIFY(humanVisible.contains("bd"));
+    QVERIFY(humanVisible.contains("lh1.skin00"));
+    QVERIFY(humanVisible.contains("ll2.armor00"));
+    QVERIFY(!humanVisible.contains("rh3.sword08"));
+
+    ei::SResourceModelScene creature;
+    for(const QString& name : {QStringLiteral("bd"), QStringLiteral("leftwing"),
+                                QStringLiteral("weapon"), QStringLiteral("tail")})
+    {
+        ei::SResourceModelPart part; part.name = name; creature.parts.append(part);
+    }
+    const QSet<QString> creatureVisible = ei::defaultVisibleModelParts(creature, "unmodg");
+    QCOMPARE(creatureVisible.size(), creature.parts.size());
 }
 
 void ResourceBrowserCoreTests::animationFallbackInfersSelectableActionLength()

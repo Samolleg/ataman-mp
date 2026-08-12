@@ -54,8 +54,8 @@ struct SResourceModelScene
 
 struct SResourceModelView
 {
-    float azimuthDegrees{35.0f};
-    float elevationDegrees{22.0f};
+    float azimuthDegrees{0.0f};
+    float elevationDegrees{0.0f};
     float zoom{1.0f};
     QVector3D pan;
     QSet<QString> visibleParts;
@@ -65,6 +65,10 @@ struct SResourceModelView
 };
 
 float resourceModelDefaultElevationDegrees();
+float resourceModelDefaultAzimuthDegrees();
+bool isHumanoidAssemblyStem(const QString& modelStem);
+QSet<QString> defaultVisibleModelParts(const SResourceModelScene& scene,
+                                       const QString& modelStem);
 int inferredAnimationLogicalLength(const SAnimationClip& clip);
 SResourceModelScene buildFig8Scene(const QByteArray& bytes);
 SResourceModelScene buildModScene(const QByteArray& bytes,

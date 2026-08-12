@@ -17,6 +17,7 @@ class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QFileSystemWatcher;
+class QTemporaryDir;
 
 struct SResourceBrowserLoadResult
 {
@@ -26,6 +27,7 @@ struct SResourceBrowserLoadResult
 
 struct SResourceBrowserPreview
 {
+    quint64 generation{0};
     bool valid{false};
     QString title;
     QString details;
@@ -102,7 +104,8 @@ private:
     class QSlider* m_audioSeek{nullptr};
     class QSlider* m_audioVolume{nullptr};
     class QMediaPlayer* m_audioPlayer{nullptr};
-    class QBuffer* m_audioBuffer{nullptr};
+    QTemporaryDir* m_audioWorkspace{nullptr};
+    QString m_audioPath;
     class QTimer* m_animationTimer{nullptr};
     class QElapsedTimer* m_animationClock{nullptr};
     QLabel* m_previewDetails{nullptr};

@@ -279,7 +279,56 @@ QVector<Triangle> posedTriangles(const SResourceModelScene& scene,
 
 float resourceModelDefaultElevationDegrees()
 {
-    return 22.0f;
+    return 0.0f;
+}
+
+float resourceModelDefaultAzimuthDegrees()
+{
+    return 0.0f;
+}
+
+bool isHumanoidAssemblyStem(const QString& modelStem)
+{
+    QString stem = modelStem.trimmed().toLower();
+    if(stem.endsWith(QStringLiteral(".mod"))) stem.chop(4);
+    static const QSet<QString> humanoids = {
+        QStringLiteral("unhuma"), QStringLiteral("unhufe"),
+        QStringLiteral("unorma"), QStringLiteral("unorfe"),
+        QStringLiteral("unhusk"), QStringLiteral("unhuzm"),
+        QStringLiteral("unhuzf")
+    };
+    return humanoids.contains(stem);
+}
+
+QSet<QString> defaultVisibleModelParts(const SResourceModelScene& scene,
+                                       const QString& modelStem)
+{
+    QSet<QString> visible;
+    if(!isHumanoidAssemblyStem(modelStem))
+    {
+        for(const SResourceModelPart& part : scene.parts)
+            visible.insert(part.name.toLower());
+        return visible;
+    }
+    static const QSet<QString> anatomy = {
+        QStringLiteral("hp"), QStringLiteral("bd"), QStringLiteral("hd"),
+        QStringLiteral("hr"), QStringLiteral("lh1"), QStringLiteral("rh1"),
+        QStringLiteral("lh2"), QStringLiteral("rh2"), QStringLiteral("lh3"),
+        QStringLiteral("rh3"), QStringLiteral("ll1"), QStringLiteral("rl1"),
+        QStringLiteral("ll2"), QStringLiteral("rl2"), QStringLiteral("ll3"),
+        QStringLiteral("rl3")
+    };
+    for(const SResourceModelPart& part : scene.parts)
+    {
+        const QString name = part.name.toLower();
+        const QString root = name.section('.', 0, 0);
+        if(anatomy.contains(root) && (!name.contains('.')
+           || name.endsWith(QStringLiteral("00"))
+           || name.contains(QStringLiteral(".skin"))
+           || name.contains(QStringLiteral(".armor"))))
+            visible.insert(name);
+    }
+    return visible;
 }
 
 int inferredAnimationLogicalLength(const SAnimationClip& clip)
@@ -325,6 +374,11 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
     const QMap<QString, QByteArray> members = resMembers(bytes, &scene.diagnostics);
     if(members.isEmpty()) return scene;
     QMap<QString, QString> parents;
+    int figurePartCount = 0;
+    for(auto it = members.constBegin(); it != members.constEnd(); ++it)
+        if(it.value().startsWith("FIG8")) ++figurePartCount;
+    const int perPartTriangleBudget = qMax(1, kMaxPreviewTriangles / qMax(1, figurePartCount));
+    bool sampled = false;
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
     {
         if(it.value().startsWith("FIG8")) continue;
@@ -388,6 +442,11 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
             continue;
         }
         SResourceModelPart part; part.name = it.key();
+        if(parsed.size() > perPartTriangleBudget)
+        {
+            parsed.resize(perPartTriangleBudget);
+            sampled = true;
+        }
         for(const Triangle& triangle : parsed)
         {
             SResourceModelTriangle output;
@@ -400,14 +459,11 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
         scene.triangleCount += parsed.size();
         scene.skeleton.parents.insert(it.key(), parents.value(it.key()));
         scene.skeleton.restOffsets.insert(it.key(), resolve(it.key(), {}));
-        if(scene.triangleCount >= kMaxPreviewTriangles)
-        {
-            scene.diagnostics.append(QStringLiteral(
-                "Interactive preview reached its %1-triangle safety budget.")
-                .arg(kMaxPreviewTriangles));
-            break;
-        }
     }
+    if(sampled)
+        scene.diagnostics.append(QStringLiteral(
+            "Interactive preview sampled every assembly part within its %1-triangle safety budget.")
+            .arg(kMaxPreviewTriangles));
     scene.kind = QStringLiteral("MOD assembly");
     scene.valid = !scene.parts.isEmpty();
     return scene;
