@@ -96,6 +96,12 @@ public:
     void setDirty(bool bDirty) {m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
+    bool adoptCanonicalTerrainSave(
+        const QFileInfo& path, const QByteArray& bytes,
+        const QString& innerNamespace, uint textureCount,
+        uint textureSize, uint tileCount, uint tileSize, float maxZ,
+        const QVector<qint32>& tileTypes,
+        const QVector<QPair<quint16, quint16>>& animatedTiles);
     const QString& mapName() const {return m_innerMapName;}
 
 private:

@@ -325,6 +325,16 @@ bool CMprDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
         m_mapInfo.tileTypes.reserve(int(m_mapInfo.tileCount));
         for(quint32 tile = 0; tile < m_mapInfo.tileCount; ++tile)
             m_mapInfo.tileTypes.append(readI32(mp, tileTypeOffset + quint64(tile) * 4));
+        const quint64 animationOffset = tileTypeOffset
+            + quint64(m_mapInfo.tileCount) * 4;
+        m_mapInfo.animatedTiles.reserve(int(m_mapInfo.animatedTileCount));
+        for(quint32 animation = 0;
+            animation < m_mapInfo.animatedTileCount; ++animation)
+        {
+            const quint64 offset = animationOffset + quint64(animation) * 4;
+            m_mapInfo.animatedTiles.append(qMakePair(
+                readU16(mp, offset), readU16(mp, offset + 2)));
+        }
         if(m_mapInfo.parsedSize < quint64(mp.size()) && report)
             report->add("mpr.mp_trailing", EValidationSeverity::Warning,
                         QString("MP has %1 trailing bytes; they are preserved")

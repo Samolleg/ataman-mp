@@ -109,6 +109,8 @@ private slots:
     void syntheticPlaceholderBuildsStandaloneResolvableChecker();
     void bulkAppendBuildsAllMembersInOneDerivedArchive();
     void publishMembersRequiresExplicitReplacementAndPreservesUnrelatedBytes();
+    void publishedMembersCommitInPlaceWithOptionalBackup();
+    void failedPublishedMembersCommitLeavesArchiveUntouched();
 };
 
 void ResArchiveDocumentTests::noOpIsByteIdentical()
@@ -328,6 +330,92 @@ void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
         QCOMPARE(zone.maps.objectivesTexture, QString("customatlas007"));
     }
     QCOMPARE(customMatches, 1);
+}
+
+void ResArchiveDocumentTests::publishedMembersCommitInPlaceWithOptionalBackup()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString archivePath = directory.filePath("textures.res");
+    const QByteArray original = syntheticRes();
+    QFile archive(archivePath);
+    QVERIFY(archive.open(QIODevice::WriteOnly));
+    QCOMPARE(archive.write(original), qint64(original.size()));
+    archive.close();
+
+    CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(original, archivePath));
+    SResPublishedMembersSaveRequest request;
+    request.source = QFileInfo(archivePath);
+    request.destination = QFileInfo(archivePath);
+    SResArchiveNewMember page;
+    page.name = QStringLiteral("zone2_deadbeef000.mmp");
+    page.payload = QByteArray("new terrain page");
+    request.published.append(page);
+    request.allowReplaceExisting = false;
+    request.createBackup = false;
+    request.backupRootOverride = directory.filePath("backups");
+    const SResPublishedMembersSaveResult withoutBackup =
+        commitStagedResPublishedMembers(baseline, request);
+    QVERIFY2(withoutBackup.success,
+             qPrintable(withoutBackup.phase + ": " + withoutBackup.error));
+    QVERIFY(withoutBackup.backupPath.isEmpty());
+
+    QFile saved(archivePath);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    const QByteArray firstPublished = saved.readAll();
+    saved.close();
+    CResArchiveDocument first;
+    QVERIFY(first.loadBytes(firstPublished, archivePath));
+    QCOMPARE(first.memberPayload("zone2_deadbeef000.mmp"),
+             QByteArray("new terrain page"));
+    QCOMPARE(first.memberPayload("opaque.bin"), baseline.memberPayload("opaque.bin"));
+
+    SResPublishedMembersSaveRequest replacement = request;
+    replacement.published[0].payload = QByteArray("replacement terrain page");
+    replacement.allowReplaceExisting = true;
+    replacement.createBackup = true;
+    CResArchiveDocument replacementBaseline;
+    QVERIFY(replacementBaseline.loadBytes(firstPublished, archivePath));
+    const SResPublishedMembersSaveResult withBackup =
+        commitStagedResPublishedMembers(replacementBaseline, replacement);
+    QVERIFY2(withBackup.success,
+             qPrintable(withBackup.phase + ": " + withBackup.error));
+    QVERIFY(!withBackup.backupPath.isEmpty());
+    QFile backup(withBackup.backupPath);
+    QVERIFY(backup.open(QIODevice::ReadOnly));
+    QCOMPARE(backup.readAll(), firstPublished);
+}
+
+void ResArchiveDocumentTests::failedPublishedMembersCommitLeavesArchiveUntouched()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString archivePath = directory.filePath("textures.res");
+    const QByteArray original = syntheticRes();
+    QFile archive(archivePath);
+    QVERIFY(archive.open(QIODevice::WriteOnly));
+    QCOMPARE(archive.write(original), qint64(original.size()));
+    archive.close();
+
+    CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(original, archivePath));
+    SResPublishedMembersSaveRequest request;
+    request.source = QFileInfo(archivePath);
+    request.destination = QFileInfo(archivePath);
+    SResArchiveNewMember page;
+    page.name = QStringLiteral("zone2_deadbeef000.mmp");
+    page.payload = QByteArray("new terrain page");
+    request.published.append(page);
+    request.createBackup = false;
+    request.simulateAtomicCommitFailure = true;
+    const SResPublishedMembersSaveResult result =
+        commitStagedResPublishedMembers(baseline, request);
+    QVERIFY(!result.success);
+    QCOMPARE(result.phase, QStringLiteral("atomic-replacement"));
+    QFile unchanged(archivePath);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), original);
 }
 
 void ResArchiveDocumentTests::bulkAppendBuildsAllMembersInOneDerivedArchive()

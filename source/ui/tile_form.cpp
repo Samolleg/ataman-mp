@@ -462,6 +462,38 @@ bool CTileForm::replaceTileImages(const QVector<QImage>& images)
     return true;
 }
 
+bool CTileForm::adoptTileImages(const QVector<QImage>& images,
+                                const QVector<qint32>& tileTypes)
+{
+    if(images.isEmpty() || images.size() % 64 != 0
+       || tileTypes.size() != images.size())
+        return false;
+    const QSize size = images.front().size();
+    if(size.width() <= 0 || size.width() != size.height())
+        return false;
+    for(const QImage& image : images)
+        if(image.isNull() || image.size() != size)
+            return false;
+    m_tileImages = images;
+    m_nTextureAtlas = images.size() / 64;
+    m_originalTilesize = size.width();
+    m_tileTypes.clear();
+    for(qint32 type : tileTypes)
+        m_tileTypes.append(ETileType(type));
+    m_icoList.clear();
+    for(int slot = 0; slot < images.size(); ++slot)
+        m_icoList.append(QIcon());
+    ui->tableTile->clearContents();
+    ui->tableTile->setRowCount(m_nTextureAtlas * m_nTilePerRow);
+    ui->tableTile->setColumnCount(m_nTilePerRow);
+    for(int& slot : m_arrQuickTile)
+        if(slot < 0 || slot >= images.size())
+            slot = 0;
+    ensureVisibleTileIcons();
+    updateQuickTable();
+    return true;
+}
+
 bool CTileForm::selectTile(int index)
 {
     // The modern painter can realize imported/generated artwork in working

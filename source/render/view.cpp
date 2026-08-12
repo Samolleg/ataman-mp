@@ -84,6 +84,7 @@
 #include "terrain_atlas_review_dialog.h"
 #include "terrain_virtual_atlas.h"
 #include "res_archive_document.h"
+#include "res_save_coordinator.h"
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
 #include "portable_diagnostic_writer.h"
@@ -5609,11 +5610,10 @@ void CView::saveLandAs()
 
     if(m_pLand->isDirty())
     {
-        const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
-        const QString destinationPath = QDir::cleanPath(fileName.absoluteFilePath());
-        const bool samePath = QString::compare(sourcePath, destinationPath,
-                                               Qt::CaseInsensitive) == 0;
-        saveChangedLandscapeDocument(fileName, samePath);
+        // Save As adopts the validated destination as the open baseline. The
+        // former dirty-save path wrote a copy but silently kept editing the
+        // old MPR, unlike normal Save As and unlike the user's chosen name.
+        saveChangedLandscapeDocument(fileName, true);
         return;
     }
     //QFileInfo fileName("c:\\konst\\Проклятые Земли (Дополнение)\\Mods\\ferneo_mod\\Maps\\zone1gTest.mpr");
@@ -5798,8 +5798,11 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         return false;
     }
 
+    const bool workingExtension =
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
+        || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay);
     QProgressDialog progress(tr("Preparing canonical terrain patches..."), QString(),
-                             0, 4, this);
+                             0, workingExtension ? 8 : 4, this);
     progress.setWindowTitle(tr("Saving MPR"));
     progress.setWindowModality(Qt::ApplicationModal);
     progress.setCancelButton(nullptr);
@@ -5816,16 +5819,6 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
 
     finishSculptStroke();
     endTileBrushGroup();
-    if(terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
-       || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay))
-    {
-        QMessageBox::information(this, tr("Finalize terrain atlas required"),
-            tr("This terrain edit uses exact tiles from the working atlas extension. "
-               "Use Finalize map atlas so the MPR, physical textures, runtime tile types, "
-               "and the exact painted variant arrangement are saved together. "
-               "The ordinary MPR save was not written."));
-        return false;
-    }
     const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
     const QString destinationPath = QDir::cleanPath(destination.absoluteFilePath());
     CMprEditTransaction transaction(adoptAsOpenBaseline
@@ -5856,6 +5849,207 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             tr("The temporary candidate failed validation. No destination was changed.\n\n%1")
                 .arg(preview.error));
         return false;
+    }
+
+    if(workingExtension)
+    {
+        updateProgress(tr("Encoding the map-local working atlas..."), 2);
+        CMprDocument stagedDocument;
+        CValidationReport draftReport;
+        if(!stagedDocument.loadBytes(preview.candidateBytes,
+                                     QStringLiteral("working-draft.mpr"),
+                                     &draftReport)
+           || draftReport.hasErrors())
+        {
+            QMessageBox::critical(this, tr("Modern draft save refused"),
+                tr("The edited MPR could not be reopened before pairing it "
+                   "with the working atlas. No destination was changed.\n\n%1")
+                    .arg(draftReport.toText().trimmed()));
+            return false;
+        }
+        QVector<QByteArray> authoredPages;
+        const QStringList authoredNames = ei::terrainTextureResourceNames(
+            m_mprDocument.mapInfo().innerNamespace,
+            int(m_mprDocument.mapInfo().textureCount));
+        for(const QString& name : authoredNames)
+        {
+            QByteArray payload;
+            QString sourcePath;
+            if(!CTextureList::getInstance()->terrainMmpPayload(
+                   name, &payload, &sourcePath))
+            {
+                QMessageBox::critical(this, tr("Modern draft save refused"),
+                    tr("The authored terrain page '%1' could not be read. "
+                       "No destination was changed.").arg(name));
+                return false;
+            }
+            authoredPages.append(payload);
+        }
+        const QVector<QImage> activeTiles =
+            m_workingTerrainAtlas->activeTileImages();
+        const QVector<qint32> activeTypes =
+            m_workingTerrainAtlas->activeTileTypes();
+        const STerrainPortableAtlasPackage draft =
+            CTerrainVirtualAtlas::buildWorkingPreviewPackage(
+                stagedDocument, activeTiles, activeTypes,
+                authoredPages, &draftReport);
+        if(!draft.success)
+        {
+            QMessageBox::critical(this, tr("Modern draft save refused"),
+                draft.error + QStringLiteral("\n\n")
+                    + draftReport.toText().trimmed());
+            return false;
+        }
+        QVector<QImage> physicalDraftTiles;
+        physicalDraftTiles.reserve(activeTiles.size());
+        CResArchiveDocument draftArchive;
+        QStringList draftArchiveErrors;
+        if(!draftArchive.loadBytes(draft.resourceArchiveBytes,
+                                   QStringLiteral("working-draft.res"),
+                                   &draftArchiveErrors))
+        {
+            QMessageBox::critical(this, tr("Modern draft save refused"),
+                draftArchiveErrors.join(QStringLiteral("\n")));
+            return false;
+        }
+        for(const QString& memberName : draft.resourceMembers)
+            for(int localSlot = 0; localSlot < 64; ++localSlot)
+            {
+                QImage tile;
+                QString diagnostic;
+                if(!ei::decodeMmpDxt1AtlasTile(
+                       draftArchive.memberPayload(memberName), localSlot,
+                       &tile, &diagnostic))
+                {
+                    QMessageBox::critical(this,
+                        tr("Modern draft save refused"), diagnostic);
+                    return false;
+                }
+                physicalDraftTiles.append(tile.convertToFormat(
+                    QImage::Format_RGBA8888));
+            }
+        STerrainAtlasProfile draftProfile =
+            CTerrainAtlasProfileStore::workingAtlasProfile(
+                stagedDocument.mapInfo().innerNamespace, physicalDraftTiles,
+                m_workingTerrainAtlas->catalog(), m_terrainAtlasProfile,
+                m_terrainGlobalFamilies, &draftReport);
+        if(draftProfile.assignedSlotCount() <= 0
+           || draftReport.hasErrors())
+        {
+            QMessageBox::critical(this, tr("Modern draft save refused"),
+                tr("The editor could not preserve the working material "
+                   "assignments for reopen. No destination was changed.\n\n%1")
+                    .arg(draftReport.toText().trimmed()));
+            return false;
+        }
+        const QString atlasPath = destination.dir().filePath(
+            destination.completeBaseName() + QStringLiteral("-atlas.res"));
+        const QString draftProfilePath =
+            CTerrainAtlasProfileStore::profilePath(
+                stagedDocument.mapInfo().innerNamespace,
+                destination.absolutePath());
+        const bool draftProfileExisted = QFileInfo::exists(draftProfilePath);
+        QByteArray previousDraftProfile;
+        if(draftProfileExisted)
+        {
+            QFile previousProfile(draftProfilePath);
+            if(!previousProfile.open(QIODevice::ReadOnly))
+            {
+                QMessageBox::critical(this, tr("Modern draft save refused"),
+                    tr("The existing editor profile could not be read before "
+                       "replacement. No destination was changed."));
+                return false;
+            }
+            previousDraftProfile = previousProfile.readAll();
+        }
+        updateProgress(tr("Staging and verifying the map-local atlas..."), 3);
+        SResArchiveBytesSaveRequest atlasRequest;
+        atlasRequest.destination = QFileInfo(atlasPath);
+        atlasRequest.candidateBytes = draft.resourceArchiveBytes;
+        atlasRequest.createBackup = true;
+        const SResArchiveBytesSaveResult atlasResult =
+            commitValidatedResArchiveBytes(atlasRequest);
+        if(!atlasResult.success)
+        {
+            QMessageBox::critical(this, tr("Modern draft save failed"),
+                tr("The map-local atlas was not committed.\n\nPhase: %1\n%2")
+                    .arg(atlasResult.phase, atlasResult.error));
+            return false;
+        }
+        const bool atlasWasNoOp =
+            atlasResult.phase == QStringLiteral("no-op");
+        const auto restoreDraftAtlas = [&]() {
+            if(atlasWasNoOp)
+                return true;
+            if(atlasResult.backupPath.isEmpty())
+                return QFile::remove(atlasPath);
+            QFile backup(atlasResult.backupPath);
+            if(!backup.open(QIODevice::ReadOnly))
+                return false;
+            const QByteArray previous = backup.readAll();
+            QSaveFile restore(atlasPath);
+            return restore.open(QIODevice::WriteOnly)
+                && restore.write(previous) == previous.size()
+                && restore.commit();
+        };
+        const auto restoreDraftProfile = [&]() {
+            if(!draftProfileExisted)
+                return !QFileInfo::exists(draftProfilePath)
+                    || QFile::remove(draftProfilePath);
+            QSaveFile restore(draftProfilePath);
+            return restore.open(QIODevice::WriteOnly)
+                && restore.write(previousDraftProfile)
+                    == previousDraftProfile.size()
+                && restore.commit();
+        };
+        updateProgress(tr("Saving the editor material profile..."), 5);
+        if(!CTerrainAtlasProfileStore::save(
+               draftProfile, destination.absolutePath(), &draftReport))
+        {
+            restoreDraftAtlas();
+            QMessageBox::critical(this, tr("Modern draft save failed"),
+                tr("The atlas was written, but its editor material profile "
+                   "could not be saved. The MPR was not changed.\n\n%1")
+                    .arg(draftReport.toText().trimmed()));
+            return false;
+        }
+        updateProgress(tr("Committing and reopening the paired MPR..."), 6);
+        SMprBytesSaveCommitRequest mprRequest;
+        mprRequest.source = m_pLand->filePath();
+        mprRequest.destination = destination;
+        mprRequest.expectedSourceBytes = m_mprDocument.originalBytes();
+        mprRequest.candidateBytes = draft.mprBytes;
+        const SMprBytesSaveCommitResult mprResult =
+            commitValidatedMprBytes(mprRequest);
+        if(!mprResult.success)
+        {
+            const bool atlasRestored = restoreDraftAtlas();
+            const bool profileRestored = restoreDraftProfile();
+            QMessageBox::critical(this, tr("Modern draft save failed"),
+                tr("The MPR was not committed. Atlas rollback: %1; profile "
+                   "rollback: %2.\n\nPhase: %3\n%4")
+                    .arg(atlasRestored ? tr("complete") : tr("failed"),
+                         profileRestored ? tr("complete") : tr("failed"),
+                         mprResult.phase, mprResult.error));
+            return false;
+        }
+        if(adoptAsOpenBaseline
+           && !adoptCompleteTerrainBaseline(
+               destination, mprResult.candidateSha256,
+               physicalDraftTiles, atlasPath))
+        {
+            QMessageBox::critical(this, tr("Modern draft saved; reopen required"),
+                tr("The paired MPR and map-local atlas were saved, but the "
+                   "current session could not adopt them. Reopen this MPR "
+                   "before editing further:\n%1")
+                    .arg(QDir::toNativeSeparators(
+                        destination.absoluteFilePath())));
+            return false;
+        }
+        updateProgress(tr("Modern draft save complete."), 8);
+        emit updateMsg(tr("Modern draft saved with map-local atlas: %1")
+            .arg(QDir::toNativeSeparators(destination.absoluteFilePath())));
+        return true;
     }
     updateProgress(tr("Creating backup and committing atomically..."), 2);
 
@@ -7558,6 +7752,66 @@ QMap<int, quint64> CView::workingTerrainAtlasUsage() const
     return result;
 }
 
+bool CView::adoptCompleteTerrainBaseline(
+    const QFileInfo& destination, const QString& expectedSha256,
+    const QVector<QImage>& physicalTiles,
+    const QString& terrainArchivePath)
+{
+    CMprDocument reopenedDocument;
+    CValidationReport report;
+    if(!reopenedDocument.load(destination, &report) || report.hasErrors())
+        return false;
+    const QString reopenedSha256 = QString::fromLatin1(QCryptographicHash::hash(
+        reopenedDocument.originalBytes(), QCryptographicHash::Sha256).toHex());
+    if(reopenedSha256.compare(expectedSha256, Qt::CaseInsensitive) != 0)
+        return false;
+    CTerrainEditModel reopenedTerrain;
+    if(!reopenedTerrain.load(reopenedDocument, &report) || report.hasErrors())
+        return false;
+    for(const SMprSectorInfo& sector : reopenedDocument.sectors())
+    {
+        const QByteArray payload = reopenedTerrain.sectorPayload(
+            sector.sectorX, sector.sectorY);
+        // The complete canonical preview updates land and overlay arrays in
+        // one parse. Calling the overlay-only parser again is redundant and
+        // may rebuild water buffers twice during in-session adoption.
+        if(!m_pLand->previewCanonicalSector(
+               sector.sectorX, sector.sectorY, payload))
+            return false;
+    }
+    const bool acquireContext = isValid()
+        && QGLContext::currentContext() != context();
+    if(acquireContext)
+        makeCurrent();
+    const SMprMapInfo& map = reopenedDocument.mapInfo();
+    const bool rendererAdopted =
+        m_pLand->previewTerrainAtlas(physicalTiles, int(map.textureCount))
+        && m_pLand->adoptCanonicalTerrainSave(
+            destination, reopenedDocument.originalBytes(), map.innerNamespace,
+            map.textureCount, map.textureSize, map.tileCount, map.tileSize,
+            map.maxZ, map.tileTypes, map.animatedTiles)
+        && m_pTileForm->adoptTileImages(physicalTiles, map.tileTypes);
+    if(acquireContext)
+        doneCurrent();
+    if(!rendererAdopted)
+        return false;
+    m_pTileForm->setAnimTile(m_pLand->animTiles());
+    CTextureList::getInstance()->setMapLocalTerrainArchive(terrainArchivePath);
+    m_mprDocument = reopenedDocument;
+    m_terrainEdit = reopenedTerrain;
+    m_terrainEditAvailable = true;
+    m_authoredTerrainTileImages = physicalTiles;
+    m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
+    if(m_pUndoStack)
+        m_pUndoStack->clear();
+    rebuildTerrainAutoCatalog();
+    m_pLand->setDirty(false);
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
+                               destination.baseName());
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+    return true;
+}
+
 bool CView::terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const
 {
     const int authoredSlots = m_authoredTerrainTileImages.size();
@@ -8188,164 +8442,86 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
 
-    QByteArray outputResourceBytes = package.resourceArchiveBytes;
-    QString outputResourceName = finalized.isolatedNamespace
-        + QStringLiteral("-atlas.res");
-    QString resourceArchiveMode = QStringLiteral("standalone-map-atlas");
-    QString sourceTexturesPath;
-    QMessageBox resourceChoice(
-        QMessageBox::Question, tr("Choose terrain resource output"), tr(
-            "Create a standalone map atlas, or merge these pages into a derived "
-            "textures.res? The selected source textures.res is never modified; the "
-            "combined result is written into the new package folder."),
+    const QString texturesPath = QFileDialog::getOpenFileName(
+        this, tr("Choose textures.res to update in place"),
+        m_pLand ? m_pLand->filePath().absolutePath() : QDir::homePath(),
+        tr("Evil Islands resources (*.res)"));
+    if(texturesPath.isEmpty())
+        return;
+    QFile sourceTextures(texturesPath);
+    QByteArray originalTexturesBytes;
+    CResArchiveDocument sourceArchive;
+    CResArchiveDocument pageArchive;
+    QStringList publishErrors;
+    if(!sourceTextures.open(QIODevice::ReadOnly)
+       || (originalTexturesBytes = sourceTextures.readAll()).isEmpty()
+       || !sourceArchive.loadBytes(originalTexturesBytes, texturesPath,
+                                   &publishErrors)
+       || !pageArchive.loadBytes(package.resourceArchiveBytes,
+                                 QStringLiteral("finalized-pages.res"),
+                                 &publishErrors))
+    {
+        QMessageBox::critical(this, tr("textures.res publication refused"),
+            tr("The selected resource archive could not be read safely.\n\n%1")
+                .arg(publishErrors.join(QStringLiteral("\n"))));
+        return;
+    }
+    sourceTextures.close();
+    QVector<SResArchiveNewMember> pages;
+    for(const QString& memberName : package.resourceMembers)
+    {
+        SResArchiveNewMember member;
+        member.name = memberName;
+        member.payload = pageArchive.memberPayload(memberName);
+        pages.append(member);
+    }
+
+    QMessageBox mprChoice(QMessageBox::Question,
+        tr("Choose finalized MPR destination"),
+        tr("The selected textures.res will be updated in place. Save the "
+           "finalized map over the current MPR, or choose a new MPR name?"),
         QMessageBox::NoButton, this);
-    QAbstractButton* standaloneChoice = resourceChoice.addButton(
-        tr("Standalone map atlas"), QMessageBox::AcceptRole);
-    QAbstractButton* texturesChoice = resourceChoice.addButton(
-        tr("Build from existing textures.res..."), QMessageBox::ActionRole);
-    resourceChoice.addButton(QMessageBox::Cancel);
-    resourceChoice.setDefaultButton(
-        qobject_cast<QPushButton*>(standaloneChoice));
-    resourceChoice.exec();
-    if(resourceChoice.clickedButton() != standaloneChoice
-       && resourceChoice.clickedButton() != texturesChoice)
+    QAbstractButton* overwriteMpr = mprChoice.addButton(
+        tr("Overwrite current MPR"), QMessageBox::AcceptRole);
+    QAbstractButton* saveAsMpr = mprChoice.addButton(
+        tr("Save MPR as..."), QMessageBox::ActionRole);
+    mprChoice.addButton(QMessageBox::Cancel);
+    mprChoice.setDefaultButton(qobject_cast<QPushButton*>(overwriteMpr));
+    mprChoice.exec();
+    if(mprChoice.clickedButton() != overwriteMpr
+       && mprChoice.clickedButton() != saveAsMpr)
         return;
-    if(resourceChoice.clickedButton() == texturesChoice)
+    QFileInfo mprDestination = m_pLand->filePath();
+    if(mprChoice.clickedButton() == saveAsMpr)
     {
-        sourceTexturesPath = QFileDialog::getOpenFileName(
-            this, tr("Choose source textures.res"),
-            m_pLand ? m_pLand->filePath().absolutePath() : QDir::homePath(),
-            tr("Evil Islands resources (*.res)"));
-        if(sourceTexturesPath.isEmpty())
+        const QString selectedMprPath = QFileDialog::getSaveFileName(
+            this, tr("Save finalized MPR as"),
+            m_pLand->filePath().absoluteFilePath(),
+            tr("Landscape (*.mpr)"));
+        if(selectedMprPath.isEmpty())
             return;
-        QFile sourceTextures(sourceTexturesPath);
-        CResArchiveDocument sourceArchive;
-        CResArchiveDocument pageArchive;
-        QStringList publishErrors;
-        if(!sourceTextures.open(QIODevice::ReadOnly)
-           || !sourceArchive.loadBytes(sourceTextures.readAll(),
-                                       sourceTexturesPath, &publishErrors)
-           || !pageArchive.loadBytes(package.resourceArchiveBytes,
-                                     QStringLiteral("finalized-pages.res"),
-                                     &publishErrors))
-        {
-            QMessageBox::critical(this, tr("textures.res publication refused"),
-                tr("The selected resource archive could not be read safely.\n\n%1")
-                    .arg(publishErrors.join(QStringLiteral("\n"))));
-            return;
-        }
-        QVector<SResArchiveNewMember> pages;
-        for(const QString& memberName : package.resourceMembers)
-        {
-            SResArchiveNewMember member;
-            member.name = memberName;
-            member.payload = pageArchive.memberPayload(memberName);
-            pages.append(member);
-        }
-        if(!sourceArchive.buildWithPublishedMembers(
-               pages, replaceIdentity, &outputResourceBytes, &publishErrors))
-        {
-            QMessageBox::critical(this, tr("textures.res publication refused"),
-                tr("No output was written. If different bytes already use this "
-                   "identity, choose 'Use / replace an identity I specify'.\n\n%1")
-                    .arg(publishErrors.join(QStringLiteral("\n"))));
-            return;
-        }
-        outputResourceName = QStringLiteral("textures.res");
-        resourceArchiveMode = QStringLiteral("derived-textures-res");
+        mprDestination = QFileInfo(selectedMprPath);
     }
-    const QString parentPath=QFileDialog::getExistingDirectory(
-        this,tr("Choose parent folder for portable atlas package"),
-        m_pLand?m_pLand->filePath().absolutePath():QDir::homePath());
-    if(parentPath.isEmpty())return;
-    const QString folderName=QStringLiteral("%1-modern-atlas-%2")
-        .arg(finalized.isolatedNamespace,
-             QString::fromLatin1(finalized.stableSha256.left(8)));
-    QDir parent(parentPath);
-    const QString folderPath=parent.filePath(folderName);
-    if(QFileInfo::exists(folderPath)||!parent.mkdir(folderName))
-    {
-        QMessageBox::critical(this,tr("Atlas package not written"),
-            tr("The deterministic package folder already exists or could not be created:\n%1\n\n"
-               "Existing packages are never replaced silently.").arg(QDir::toNativeSeparators(folderPath)));
+
+    QMessageBox backupChoice(QMessageBox::Question,
+        tr("Replace textures.res in place"),
+        tr("Endurance will stage and reopen the complete updated archive before "
+           "atomically replacing:\n%1\n\nCreate a backup first?")
+            .arg(QDir::toNativeSeparators(texturesPath)),
+        QMessageBox::NoButton, this);
+    QAbstractButton* backupButton = backupChoice.addButton(
+        tr("Replace with backup"), QMessageBox::AcceptRole);
+    QAbstractButton* noBackupButton = backupChoice.addButton(
+        tr("Replace without backup"), QMessageBox::DestructiveRole);
+    backupChoice.addButton(QMessageBox::Cancel);
+    backupChoice.setDefaultButton(qobject_cast<QPushButton*>(backupButton));
+    backupChoice.exec();
+    if(backupChoice.clickedButton() != backupButton
+       && backupChoice.clickedButton() != noBackupButton)
         return;
-    }
-    QDir folder(folderPath);
-    const QString mprPath=folder.filePath(finalized.isolatedNamespace+QStringLiteral(".mpr"));
-    const QString resPath=folder.filePath(outputResourceName);
-    const QString manifestPath=folder.filePath(QStringLiteral("atlas-package.json"));
-    QJsonObject manifest;
-    manifest.insert(QStringLiteral("schema"),QStringLiteral("ei-mapper-modern-atlas-v2"));
-    manifest.insert(QStringLiteral("namespace"),finalized.isolatedNamespace);
-    manifest.insert(QStringLiteral("resourceIdentity"),finalized.isolatedNamespace);
-    manifest.insert(QStringLiteral("identityAction"), replaceIdentity
-        ? QStringLiteral("use-or-replace") : QStringLiteral("new-content"));
-    manifest.insert(QStringLiteral("resourceArchiveMode"),resourceArchiveMode);
-    if(!sourceTexturesPath.isEmpty())
-    {
-        manifest.insert(QStringLiteral("sourceTexturesRes"),
-                        QFileInfo(sourceTexturesPath).fileName());
-        QFile sourceTextures(sourceTexturesPath);
-        if(sourceTextures.open(QIODevice::ReadOnly))
-            manifest.insert(QStringLiteral("sourceTexturesResSha256"),
-                QString::fromLatin1(QCryptographicHash::hash(
-                    sourceTextures.readAll(), QCryptographicHash::Sha256).toHex()));
-    }
-    manifest.insert(QStringLiteral("stableSha256"),QString::fromLatin1(finalized.stableSha256));
-    manifest.insert(QStringLiteral("capacityLimit"),finalized.capacityLimit);
-    manifest.insert(QStringLiteral("usedSlots"),finalized.requiredSlots);
-    manifest.insert(QStringLiteral("texturePages"),finalized.textureCount);
-    manifest.insert(QStringLiteral("retainedAuthoredTiles"),retainedAuthored);
-    manifest.insert(QStringLiteral("evictedUnusedAuthoredTiles"),evictedAuthored);
-    manifest.insert(QStringLiteral("addedStockJmvBlends"),importedStockCount);
-    manifest.insert(QStringLiteral("addedGeneratedExactBlends"),generatedCount);
-    manifest.insert(QStringLiteral("runtimeStabilityTier"),capacityTier);
-    manifest.insert(QStringLiteral("layer"),layer==ETerrainTileLayer::Land
-        ?QStringLiteral("land"):QStringLiteral("overlay"));
-    QJsonArray members;for(const QString& member:package.resourceMembers)members.append(member);
-    manifest.insert(QStringLiteral("resourceMembers"),members);
-    QJsonArray tiles;
-    for(int slot=0;slot<finalized.tiles.size();++slot)
-    {
-        const STerrainFinalizedTile& tile=finalized.tiles.at(slot);
-        QJsonObject item;item.insert(QStringLiteral("slot"),slot);
-        item.insert(QStringLiteral("authored"),tile.authored);
-        item.insert(QStringLiteral("sourceSlot"),tile.sourceSlot);
-        item.insert(QStringLiteral("sourceNamespace"), tile.sourceNamespace);
-        QJsonArray sourceAliases;
-        for(int sourceAlias : tile.sourceSlotAliases)
-            sourceAliases.append(sourceAlias);
-        item.insert(QStringLiteral("sourceSlotAliases"), sourceAliases);
-        item.insert(QStringLiteral("pixelSha256"),QString::fromLatin1(tile.pixelSha256));
-        item.insert(QStringLiteral("stockDerivedBlend"),tile.stockDerivedBlend);
-        item.insert(QStringLiteral("canonicalGeneratedBlend"),
-                    tile.canonicalGeneratedBlend);
-        item.insert(QStringLiteral("origin"),
-            retainedSourceOutputs.contains(slot)
-            ?QStringLiteral("original-map")
-            :(tile.authored?QStringLiteral("stock-jmv")
-                           :QStringLiteral("generated-exact")));
-        item.insert(QStringLiteral("blendProvenance"),tile.blendProvenance);
-        QJsonArray families;
-        QStringList familyLabels;
-        for(qint32 id:{tile.canonicalSignature.northWest,
-                       tile.canonicalSignature.northEast,
-                       tile.canonicalSignature.southEast,
-                       tile.canonicalSignature.southWest})
-        {
-            const QString label=materialNames.contains(id)
-                ?materialNames.value(id):QStringLiteral("Material %1").arg(id);
-            if(!familyLabels.contains(label))familyLabels.append(label);
-        }
-        for(const QString& label:familyLabels)families.append(label);
-        item.insert(QStringLiteral("materialFamilies"),families);
-        QJsonArray corners;corners.append(tile.canonicalSignature.northWest);
-        corners.append(tile.canonicalSignature.northEast);
-        corners.append(tile.canonicalSignature.southEast);
-        corners.append(tile.canonicalSignature.southWest);
-        item.insert(QStringLiteral("canonicalGridCorners"),corners);tiles.append(item);
-    }
-    manifest.insert(QStringLiteral("tiles"),tiles);
+    const bool createTexturesBackup =
+        backupChoice.clickedButton() == backupButton;
+
     // The isolated atlas has a new namespace, pixel hash, slot order, and
     // generated signatures. Persist its exact semantic contract beside the
     // MPR; otherwise reopening correctly finds the 704 (etc.) texture slots
@@ -8359,7 +8535,6 @@ void CView::finalizeVirtualTerrainAtlas()
         QMessageBox::critical(this,tr("Atlas package not written"),
             tr("The isolated physical atlas could not be decoded.\n\n%1")
                 .arg(portableProfileReport.toText()));
-        parent.rmdir(folderName);
         return;
     }
     STerrainAtlasProfile portableProfile=
@@ -8373,87 +8548,240 @@ void CView::finalizeVirtualTerrainAtlas()
         QMessageBox::critical(this,tr("Atlas package not written"),
             tr("The isolated material profile could not be constructed.\n\n%1")
                 .arg(portableProfileReport.toText()));
-        parent.rmdir(folderName);
         return;
     }
-    const QByteArray profileBytes=QJsonDocument(
-        portableProfile.toJson()).toJson(QJsonDocument::Indented);
     const QString profilePath=CTerrainAtlasProfileStore::profilePath(
-        finalized.isolatedNamespace,folderPath);
-    manifest.insert(QStringLiteral("semanticProfile"),
-        QDir(folderPath).relativeFilePath(profilePath));
-    const QByteArray manifestBytes=QJsonDocument(manifest).toJson(QJsonDocument::Indented);
-    const auto writeFile=[](const QString& path,const QByteArray& bytes,QString* error)
+        finalized.isolatedNamespace, mprDestination.absolutePath());
+    if(!QDir().mkpath(QFileInfo(profilePath).absolutePath()))
     {
-        QSaveFile file(path);
-        if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.commit())
-        {if(error)*error=file.errorString();return false;}
-        return true;
+        QMessageBox::critical(this, tr("Atlas publication refused"),
+            tr("The editor profile directory could not be created. No RES or "
+               "MPR was changed."));
+        return;
+    }
+    const bool profileExisted = QFileInfo::exists(profilePath);
+    QByteArray previousProfileBytes;
+    if(profileExisted)
+    {
+        QFile previousProfile(profilePath);
+        if(!previousProfile.open(QIODevice::ReadOnly))
+        {
+            QMessageBox::critical(this, tr("Atlas publication refused"),
+                tr("The existing editor profile could not be read before "
+                   "replacement. No RES or MPR was changed."));
+            return;
+        }
+        previousProfileBytes = previousProfile.readAll();
+    }
+    const bool mprDestinationExisted = mprDestination.exists();
+    QByteArray previousMprBytes;
+    if(mprDestinationExisted)
+    {
+        QFile previousMpr(mprDestination.absoluteFilePath());
+        if(!previousMpr.open(QIODevice::ReadOnly))
+        {
+            QMessageBox::critical(this, tr("Atlas publication refused"),
+                tr("The selected MPR destination could not be read before "
+                   "replacement. No RES or MPR was changed."));
+            return;
+        }
+        previousMprBytes = previousMpr.readAll();
+    }
+    const SStagedSaveValidation stagedMpr = validateStagedSave(
+        package.mprBytes, mprDestination);
+    if(!stagedMpr.success)
+    {
+        QMessageBox::critical(this, tr("Atlas publication refused"),
+            tr("The complete MPR candidate failed its fresh reopen. No output "
+               "was written.\n\n%1").arg(stagedMpr.error));
+        return;
+    }
+
+    // Large RES archives can take long enough to look hung. Build the complete
+    // candidate away from the GUI thread and keep one visible progress dialog
+    // alive through staging, replacement, and post-commit verification.
+    QProgressDialog publishProgress(
+        tr("Building and reopening the complete textures.res candidate..."),
+        QString(), 0, 0, this);
+    publishProgress.setWindowTitle(tr("Publishing finalized terrain atlas"));
+    publishProgress.setWindowModality(Qt::ApplicationModal);
+    publishProgress.setCancelButton(nullptr);
+    publishProgress.setMinimumDuration(0);
+    publishProgress.show();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    QFuture<QPair<QByteArray, QStringList>> stageResFuture = QtConcurrent::run(
+        [sourceArchive, pages, replaceIdentity]() {
+            QByteArray bytes;
+            QStringList errors;
+            sourceArchive.buildWithPublishedMembers(
+                pages, replaceIdentity, &bytes, &errors);
+            return qMakePair(bytes, errors);
+        });
+    QFutureWatcher<QPair<QByteArray, QStringList>> stageResWatcher;
+    QEventLoop stageResLoop;
+    connect(&stageResWatcher, &QFutureWatcherBase::finished,
+            &stageResLoop, &QEventLoop::quit);
+    stageResWatcher.setFuture(stageResFuture);
+    stageResLoop.exec(QEventLoop::ExcludeUserInputEvents);
+    const QPair<QByteArray, QStringList> stagedResResult = stageResFuture.result();
+    const QByteArray stagedResBytes = stagedResResult.first;
+    publishErrors.append(stagedResResult.second);
+    if(stagedResBytes.isEmpty())
+    {
+        publishProgress.close();
+        QMessageBox::critical(this, tr("Atlas publication refused"),
+            tr("The complete textures.res candidate could not be built. No "
+               "output was written.\n\n%1")
+                .arg(publishErrors.join(QStringLiteral("\n"))));
+        return;
+    }
+    CResArchiveDocument stagedRes;
+    QStringList stagedResErrors;
+    if(!stagedRes.loadBytes(stagedResBytes,
+                            QStringLiteral("staged-textures.res"),
+                            &stagedResErrors))
+    {
+        publishProgress.close();
+        QMessageBox::critical(this, tr("Atlas publication refused"),
+            tr("The complete staged textures.res failed reopen. No output was "
+               "written.\n\n%1")
+                .arg(stagedResErrors.join(QStringLiteral("\n"))));
+        return;
+    }
+
+    publishProgress.setLabelText(tr(
+        "Backing up and atomically replacing textures.res..."));
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    SResPublishedMembersSaveRequest resRequest;
+    resRequest.source = QFileInfo(texturesPath);
+    resRequest.destination = QFileInfo(texturesPath);
+    resRequest.published = pages;
+    resRequest.allowReplaceExisting = replaceIdentity;
+    resRequest.createBackup = createTexturesBackup;
+    QFuture<SResPublishedMembersSaveResult> publishFuture =
+        QtConcurrent::run([sourceArchive, resRequest]() {
+            return commitStagedResPublishedMembers(sourceArchive, resRequest);
+        });
+    QFutureWatcher<SResPublishedMembersSaveResult> publishWatcher;
+    QEventLoop publishLoop;
+    connect(&publishWatcher, &QFutureWatcherBase::finished,
+            &publishLoop, &QEventLoop::quit);
+    publishWatcher.setFuture(publishFuture);
+    publishLoop.exec(QEventLoop::ExcludeUserInputEvents);
+    const SResPublishedMembersSaveResult resResult = publishFuture.result();
+    if(!resResult.success)
+    {
+        publishProgress.close();
+        QMessageBox::critical(this, tr("textures.res publication failed"),
+            tr("The selected archive was not replaced.\n\nPhase: %1\n%2")
+                .arg(resResult.phase, resResult.error));
+        return;
+    }
+    const auto restorePublishedRes = [&]() {
+        if(resResult.phase == QStringLiteral("no-op"))
+            return true;
+        QFile publishedTextures(texturesPath);
+        if(!publishedTextures.open(QIODevice::ReadOnly))
+            return false;
+        const QByteArray currentPublishedBytes = publishedTextures.readAll();
+        publishedTextures.close();
+        if(currentPublishedBytes != stagedResBytes)
+            return false;
+        QSaveFile restore(texturesPath);
+        return restore.open(QIODevice::WriteOnly)
+            && restore.write(originalTexturesBytes) == originalTexturesBytes.size()
+            && restore.commit();
     };
-    QString error;
-    if(!QDir().mkpath(QFileInfo(profilePath).absolutePath())
-       ||!writeFile(mprPath,package.mprBytes,&error)
-       ||!writeFile(resPath,outputResourceBytes,&error)
-       ||!writeFile(profilePath,profileBytes,&error)
-       ||!writeFile(manifestPath,manifestBytes,&error))
+    const auto restorePublishedProfile = [&]() {
+        if(!profileExisted)
+            return !QFileInfo::exists(profilePath) || QFile::remove(profilePath);
+        QSaveFile restore(profilePath);
+        return restore.open(QIODevice::WriteOnly)
+            && restore.write(previousProfileBytes) == previousProfileBytes.size()
+            && restore.commit();
+    };
+    const auto restorePublishedMpr = [&]() {
+        QFile currentMpr(mprDestination.absoluteFilePath());
+        if(!currentMpr.open(QIODevice::ReadOnly))
+            return !mprDestinationExisted
+                && !QFileInfo::exists(mprDestination.absoluteFilePath());
+        const QByteArray currentMprBytes = currentMpr.readAll();
+        currentMpr.close();
+        if(currentMprBytes != package.mprBytes)
+            return false;
+        if(!mprDestinationExisted)
+            return QFile::remove(mprDestination.absoluteFilePath());
+        QSaveFile restore(mprDestination.absoluteFilePath());
+        return restore.open(QIODevice::WriteOnly)
+            && restore.write(previousMprBytes) == previousMprBytes.size()
+            && restore.commit();
+    };
+    publishProgress.setLabelText(tr("Saving finalized MPR and editor profile..."));
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    CValidationReport profileSaveReport;
+    if(!CTerrainAtlasProfileStore::save(
+           portableProfile, mprDestination.absolutePath(), &profileSaveReport))
     {
-        QFile::remove(mprPath);QFile::remove(resPath);QFile::remove(profilePath);
-        QFile::remove(manifestPath);
-        QDir(folderPath).rmdir(QStringLiteral("terrain-atlas-profiles"));
-        parent.rmdir(folderName);
-        QMessageBox::critical(this,tr("Atlas package not written"),error);
+        const bool resRestored = restorePublishedRes();
+        const bool profileRestored = restorePublishedProfile();
+        publishProgress.close();
+        QMessageBox::critical(this, tr("MPR publication failed"),
+            tr("The editor profile could not be saved. textures.res rollback: "
+               "%1; profile rollback: %2. The MPR was not changed.\n\n%3")
+                .arg(resRestored ? tr("complete") : tr("manual recovery required"),
+                     profileRestored ? tr("complete") : tr("manual recovery required"),
+                     profileSaveReport.toText().trimmed()));
         return;
     }
-    CMprDocument reopenedMpr;CValidationReport reopenReport;
-    CResArchiveDocument reopenedRes;QStringList errors;
-    QFile mprFile(mprPath),resFile(resPath);
-    if(!mprFile.open(QIODevice::ReadOnly)||!resFile.open(QIODevice::ReadOnly)
-       ||!reopenedMpr.loadBytes(mprFile.readAll(),mprPath,&reopenReport)
-       ||reopenReport.hasErrors()
-       ||!reopenedRes.loadBytes(resFile.readAll(),resPath,&errors))
+    SMprBytesSaveCommitRequest mprRequest;
+    mprRequest.source = m_pLand->filePath();
+    mprRequest.destination = mprDestination;
+    mprRequest.expectedSourceBytes = m_mprDocument.originalBytes();
+    mprRequest.candidateBytes = package.mprBytes;
+    const SMprBytesSaveCommitResult mprResult =
+        commitValidatedMprBytes(mprRequest);
+    if(!mprResult.success)
     {
-        QMessageBox::critical(this,tr("Atlas package reopen failed"),
-            tr("The package was written but failed the final disk reopen. Do not install it.\n%1")
-                .arg(reopenReport.toText()+errors.join(QStringLiteral("\n"))));
+        publishProgress.close();
+        const bool resRestored = restorePublishedRes();
+        const bool profileRestored = restorePublishedProfile();
+        const bool mprRestored = restorePublishedMpr();
+        QMessageBox::critical(this, tr("MPR publication failed"),
+            tr("Publication did not complete. textures.res rollback: %1; "
+               "profile rollback: %2; MPR rollback: %3.\n\nPhase: %4\n%5")
+                .arg(resRestored ? tr("complete") : tr("manual recovery required"),
+                     profileRestored ? tr("complete") : tr("manual recovery required"),
+                     mprRestored ? tr("complete") : tr("manual recovery required"),
+                     mprResult.phase, mprResult.error));
         return;
     }
-    STerrainAtlasProfile reopenedProfile;
-    QString reopenedProfilePath;
-    if(!CTerrainAtlasProfileStore::loadExplicitOverride(
-           finalized.isolatedNamespace,portableProfile.atlasPixelSha256,
-           physicalTiles.size(),&reopenedProfile,folderPath,
-           &reopenedProfilePath,&reopenReport)
-       ||reopenedProfile.assignedSlotCount()!=portableProfile.assignedSlotCount())
+    publishProgress.setLabelText(tr("Adopting the finalized map in this session..."));
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    if(!adoptCompleteTerrainBaseline(
+           mprDestination, mprResult.candidateSha256,
+           physicalTiles, texturesPath))
     {
-        QMessageBox::critical(this,tr("Atlas package reopen failed"),
-            tr("The package textures reopened, but its material assignments did not. Do not install it.\n%1")
-                .arg(reopenReport.toText()));
+        publishProgress.close();
+        QMessageBox::critical(this, tr("Finalized map saved; reopen required"),
+            tr("The validated textures.res and MPR are saved, but this session "
+               "could not adopt them. Reopen the MPR before editing further."));
         return;
     }
-    emit updateMsg(tr("Validated map-specific atlas package written: %1")
-        .arg(QDir::toNativeSeparators(folderPath)));
-    QMessageBox ready(QMessageBox::Information,tr("Edited MPR and atlas ready"),tr(
-        "The edited map and its isolated terrain atlas were saved and reopened "
-        "from disk successfully. All current landscape edits are in this MPR.\n\n"
-        "MPR:\n%1\n\nRequired atlas resource:\n%2\n\n"
-        "Namespace: %3\nUsed tiles: %4 / %5\nTexture pages: %6\n\n"
-        "The editor has NOT reloaded it yet. Keep the MPR and RES together. "
-        "The original MPR and shared atlas resources were not modified.")
-        .arg(QDir::toNativeSeparators(mprPath),
-             QDir::toNativeSeparators(resPath),finalized.isolatedNamespace)
-        .arg(finalized.requiredSlots).arg(finalized.capacityLimit)
-        .arg(finalized.textureCount),QMessageBox::NoButton,this);
-    QAbstractButton* openFinalized=ready.addButton(
-        tr("Open finalized MPR now"),QMessageBox::AcceptRole);
-    ready.addButton(tr("Keep original editing session open"),
-                    QMessageBox::RejectRole);
-    ready.setDefaultButton(qobject_cast<QPushButton*>(openFinalized));
-    ready.exec();
-    if(ready.clickedButton()==openFinalized)
-    {
-        unloadLand(false);
-        loadLandscape(QFileInfo(mprPath));
-    }
+    publishProgress.close();
+    emit updateMsg(tr("Finalized atlas published in place: %1")
+        .arg(QDir::toNativeSeparators(texturesPath)));
+    QMessageBox::information(this, tr("Terrain atlas finalized"),
+        tr("textures.res was updated in place and the finalized MPR is now the "
+           "open editing baseline. No reload is required.\n\n"
+           "MPR: %1\ntextures.res: %2\nIdentity: %3\n"
+           "Used tiles: %4 / %5\nTexture pages: %6\n\n"
+           "Undo history was cleared because finalization changed external "
+           "resource identity and physical atlas ownership.")
+            .arg(QDir::toNativeSeparators(mprDestination.absoluteFilePath()),
+                 QDir::toNativeSeparators(texturesPath),
+                 finalized.isolatedNamespace)
+            .arg(finalized.requiredSlots).arg(finalized.capacityLimit)
+            .arg(finalized.textureCount));
 }
 
 void CView::onChangeCursorTile(QPixmap ico)

@@ -462,6 +462,38 @@ bool CLandscape::adoptCanonicalSave(const QFileInfo& path, const QByteArray& byt
     return true;
 }
 
+bool CLandscape::adoptCanonicalTerrainSave(
+    const QFileInfo& path, const QByteArray& bytes,
+    const QString& innerNamespace, uint textureCount,
+    uint textureSize, uint tileCount, uint tileSize, float maxZ,
+    const QVector<qint32>& tileTypes,
+    const QVector<QPair<quint16, quint16>>& animatedTiles)
+{
+    if(tileTypes.size() != int(tileCount) || textureCount == 0
+       || tileCount != textureCount * 64u || innerNamespace.trimmed().isEmpty()
+       || !adoptCanonicalSave(path, bytes))
+        return false;
+    m_innerMapName = innerNamespace;
+    m_header.nTexture = textureCount;
+    m_header.textureSize = textureSize;
+    m_header.nTile = tileCount;
+    m_header.tileSize = tileSize;
+    m_header.maxZ = maxZ;
+    m_header.nAnimTile = uint(animatedTiles.size());
+    m_aTileTypes.clear();
+    for(qint32 type : tileTypes)
+        m_aTileTypes.append(ETileType(type));
+    m_aAnimTile.clear();
+    for(const QPair<quint16, quint16>& animation : animatedTiles)
+    {
+        SAnimTile tile;
+        tile.tileIndex = animation.first;
+        tile.nPhase = animation.second;
+        m_aAnimTile.append(tile);
+    }
+    return previewCanonicalMaxZ(maxZ);
+}
+
 void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum)
 {
     m_texture->bind(0);

@@ -1013,6 +1013,101 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
     return profile;
 }
 
+STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
+    const QString& mprNamespace,
+    const QVector<QImage>& decodedPhysicalTiles,
+    const CTerrainTransitionCatalog& workingCatalog,
+    const STerrainAtlasProfile& sourceProfile,
+    const QVector<STerrainGlobalMaterialFamily>& globalFamilies,
+    CValidationReport* report)
+{
+    STerrainAtlasProfile profile;
+    profile.mprNamespace = mprNamespace.trimmed();
+    profile.atlasPixelSha256 =
+        CTerrainAtlasProfileInference::pixelSha256(decodedPhysicalTiles);
+    profile.atlasSlotCount = decodedPhysicalTiles.size();
+    profile.provenance = QStringLiteral("portable-finalized-modern-atlas-v1");
+    profile.approved = true;
+
+    QMap<qint32, STerrainAtlasProfileFamily> families;
+    for(const STerrainAtlasProfileFamily& local : sourceProfile.families)
+    {
+        STerrainAtlasProfileFamily family = local;
+        family.id = CTerrainAtlasPresetCatalog::globalMaterialId(
+            local.name, local.layer);
+        family.memberSlots.clear();
+        family.thumbnailSlot = -1;
+        families.insert(family.id, family);
+    }
+    for(const STerrainGlobalMaterialFamily& global : globalFamilies)
+    {
+        STerrainAtlasProfileFamily family = families.value(global.id);
+        family.id = global.id;
+        family.name = global.name;
+        family.layer = global.layer;
+        family.landAllowed = global.layer == ETerrainAtlasLayer::Land;
+        family.overlayAllowed = global.layer == ETerrainAtlasLayer::Overlay;
+        family.paintSelectable = true;
+        family.tileType = global.runtimeTerrainType;
+        family.memberSlots.clear();
+        family.thumbnailSlot = -1;
+        families.insert(family.id, family);
+    }
+
+    QSet<qint32> usedMaterials;
+    for(int slot = 0; slot < decodedPhysicalTiles.size(); ++slot)
+    {
+        SMprPackedTile packed;
+        packed.atlasIndex = quint8(slot / 64);
+        packed.tileIndex = quint8(slot % 64);
+        bool found = false;
+        STerrainAtlasProfileSlot definition;
+        definition.slot = slot;
+        definition.signature = workingCatalog.gridSignatureForPacked(
+            packed.encode(), &found);
+        definition.assigned = found;
+        definition.ambiguous = false;
+        if(found)
+            for(qint32 id : {definition.signature.northWest,
+                              definition.signature.northEast,
+                              definition.signature.southEast,
+                              definition.signature.southWest})
+            {
+                usedMaterials.insert(id);
+                if(!families.contains(id))
+                {
+                    STerrainAtlasProfileFamily family;
+                    family.id = id;
+                    family.name = QStringLiteral("Material %1").arg(id);
+                    family.paintSelectable = false;
+                    families.insert(id, family);
+                }
+            }
+        profile.slotDefinitions.append(definition);
+    }
+    if(!usedMaterials.isEmpty())
+    {
+        const qint32 paddingFamily = *usedMaterials.constBegin();
+        for(STerrainAtlasProfileSlot& definition : profile.slotDefinitions)
+            if(!definition.assigned)
+            {
+                definition.signature.northWest = paddingFamily;
+                definition.signature.northEast = paddingFamily;
+                definition.signature.southEast = paddingFamily;
+                definition.signature.southWest = paddingFamily;
+            }
+    }
+    for(qint32 id : usedMaterials)
+    {
+        STerrainAtlasProfileFamily family = families.value(id);
+        if(family.name.trimmed().isEmpty())
+            family.name = QStringLiteral("Material %1").arg(id);
+        profile.families.append(family);
+    }
+    profile.normalizeMembership(report);
+    return profile;
+}
+
 QString CTerrainAtlasProfileStore::profilePath(const QString& mprNamespace,
                                                 const QString& rootDirectory)
 {

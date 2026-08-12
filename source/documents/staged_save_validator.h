@@ -59,6 +59,31 @@ struct SMprSaveCommitResult
     QString semanticDiff;
 };
 
+// Commits an already-built complete MPR candidate. This is used when atlas
+// finalization deliberately changes archive member names and MP topology, so
+// the narrower member-edit transaction contract is not applicable.
+struct SMprBytesSaveCommitRequest
+{
+    QFileInfo source;
+    QFileInfo destination;
+    QByteArray expectedSourceBytes;
+    QByteArray candidateBytes;
+    bool createBackup{true};
+    QString backupRootOverride;
+#ifdef QT_TESTLIB_LIB
+    bool simulateAtomicCommitFailure{false};
+#endif
+};
+
+struct SMprBytesSaveCommitResult
+{
+    bool success{false};
+    QString phase;
+    QString error;
+    QString candidateSha256;
+    QString backupPath;
+};
+
 SExistingFileComparison compareExistingFile(const QFileInfo& file,
                                              const QByteArray& expectedBytes);
 
@@ -78,5 +103,8 @@ SStagedMprTransactionValidation validateStagedMprTransaction(
 SMprSaveCommitResult commitStagedMprTransaction(
     const CMprDocument& baseline, const CMprEditTransaction& transaction,
     const SMprSaveCommitRequest& request);
+
+SMprBytesSaveCommitResult commitValidatedMprBytes(
+    const SMprBytesSaveCommitRequest& request);
 
 #endif // STAGED_SAVE_VALIDATOR_H

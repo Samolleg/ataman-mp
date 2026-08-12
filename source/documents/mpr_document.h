@@ -3,6 +3,7 @@
 
 #include <QByteArray>
 #include <QFileInfo>
+#include <QPair>
 #include <QString>
 #include <QVector>
 
@@ -50,6 +51,7 @@ struct SMprMapInfo
     // Raw, read-only atlas slot categories from the MP member. Endurance uses
     // these for selection/diagnostics; changing them would be atlas editing.
     QVector<qint32> tileTypes;
+    QVector<QPair<quint16, quint16>> animatedTiles;
 
     qint32 tileType(int atlasSlot, bool* found = nullptr) const;
 };

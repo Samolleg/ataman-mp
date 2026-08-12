@@ -305,6 +305,10 @@ private:
                                       bool adoptAsOpenBaseline);
     bool adoptCommittedLandscapeBaseline(const QFileInfo& destination,
                                          const SMprSaveCommitResult& commit);
+    bool adoptCompleteTerrainBaseline(
+        const QFileInfo& destination, const QString& expectedSha256,
+        const QVector<QImage>& physicalTiles,
+        const QString& terrainArchivePath);
     void refreshMobDirtyStates();
     void initShaders();
     void draw();

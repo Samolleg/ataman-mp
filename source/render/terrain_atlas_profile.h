@@ -167,6 +167,13 @@ public:
         ETerrainAtlasLayer layer,
         const QMap<qint32, QString>& materialNames = {},
         CValidationReport* report = nullptr);
+    static STerrainAtlasProfile workingAtlasProfile(
+        const QString& mprNamespace,
+        const QVector<QImage>& decodedPhysicalTiles,
+        const CTerrainTransitionCatalog& workingCatalog,
+        const STerrainAtlasProfile& sourceProfile,
+        const QVector<STerrainGlobalMaterialFamily>& globalFamilies,
+        CValidationReport* report = nullptr);
     static QString profilePath(const QString& mprNamespace,
                                const QString& rootDirectory = QString());
     static bool save(const STerrainAtlasProfile& profile,
