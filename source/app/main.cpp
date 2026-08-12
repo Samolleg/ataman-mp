@@ -67,6 +67,7 @@
 #include "ui/dock_hidden_tab.h"
 #include "ui/viewport_minimap_widget.h"
 #include "ui/minimap_export_dialog.h"
+#include "ui/resource_browser.h"
 #include "objects/object_base.h"
 #include "window_lifecycle.h"
 #include "settings.h"
@@ -2295,8 +2296,15 @@ int runHeadlessCommand(QApplication& app)
                 && (!floatingDockHost || !floatingDockHost->isVisible());
         const bool routineDockDiagnosticsSuppressed =
                 dockDiagnosticCount() == dockDiagnosticsBefore;
+        CResourceBrowser resourceBrowser;
+        const bool resourceBrowserContract = resourceBrowser.uiContractSatisfied()
+                && resourceBrowser.findChild<QLineEdit*>(
+                    QStringLiteral("resourceBrowserSearch"))
+                && resourceBrowser.findChild<QTreeWidget*>(
+                    QStringLiteral("resourceContentView"));
 
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+                && resourceBrowserContract
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
                 && prefixesOnly && valueStable && focusCancel && escapeCancel
                 && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork
@@ -2591,6 +2599,7 @@ int runHeadlessCommand(QApplication& app)
                << " validationViewReopensBesideMessageLog="
                << validationViewReopensBesideMessageLog
                << " routineDockDiagnosticsSuppressed=" << routineDockDiagnosticsSuppressed
+               << " resourceBrowserContract=" << resourceBrowserContract
                << " physicalPixelViewportScaling="
                << QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
                << " viewportSurfaceTopLeftAlpha=" << viewportSurface.pixelColor(1, 1).alpha()

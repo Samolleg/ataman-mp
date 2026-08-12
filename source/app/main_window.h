@@ -66,6 +66,7 @@ class CViewportMinimapWidget;
 class CMinimapExportDialog;
 class CMessageLogPanel;
 class CDockHiddenTab;
+class CResourceBrowser;
 
 struct SWindowTitle
 {
@@ -279,6 +280,8 @@ private:
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;
     QDockWidget* m_messageLogDock{nullptr};
+    QDockWidget* m_resourceBrowserDock{nullptr};
+    CResourceBrowser* m_resourceBrowser{nullptr};
     CMessageLogPanel* m_messageLogPanel{nullptr};
     CDockHiddenTab* m_mapsHiddenTab{nullptr};
     CDockHiddenTab* m_messageLogHiddenTab{nullptr};

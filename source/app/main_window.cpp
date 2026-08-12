@@ -112,6 +112,8 @@
 #include "mmp_inspector.h"
 #include "script_reference_analyzer.h"
 #include "unit.h"
+#include "resource_browser.h"
+#include "resource_name.h"
 
 namespace
 {
@@ -866,6 +868,26 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
     viewMenu->addAction(m_messageLogDock->toggleViewAction());
+    m_resourceBrowser = new CResourceBrowser(this);
+    m_resourceBrowserDock = new QDockWidget(tr("Resource Browser"), this);
+    m_resourceBrowserDock->setObjectName(QStringLiteral("resourceBrowserDock"));
+    m_resourceBrowserDock->setFeatures(QDockWidget::DockWidgetClosable |
+                                       QDockWidget::DockWidgetMovable |
+                                       QDockWidget::DockWidgetFloatable);
+    m_resourceBrowserDock->setWidget(m_resourceBrowser);
+    addDockWidget(Qt::BottomDockWidgetArea, m_resourceBrowserDock);
+    tabifyDockWidget(m_messageLogDock, m_resourceBrowserDock);
+    m_resourceBrowserDock->hide();
+    QAction* resourceBrowserAction = m_resourceBrowserDock->toggleViewAction();
+    resourceBrowserAction->setText(tr("Resource Browser"));
+    viewMenu->addAction(resourceBrowserAction);
+    connect(m_resourceBrowser, &CResourceBrowser::databaseEditorRequested,
+            this, [this](const QString& archivePath) {
+        QMessageBox::information(this, tr("Database Editor"),
+            tr("Database archives are protected from generic RES editing.\n\n"
+               "A dedicated Database Editor integration request was created for:\n%1")
+                .arg(archivePath));
+    });
     m_landscapeTools = new CLandscapeTools(this);
     m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools"), this);
     m_landscapeToolsDock->setObjectName("landscapeToolsDock");
@@ -1175,6 +1197,23 @@ MainWindow::MainWindow(QWidget* parent) :
     // wizard later allowed initializeGL() to run against empty legacy settings.
     if(firstRunSetup)
         showGameAndModSetup();
+
+    if(m_resourceBrowser)
+    {
+        QVector<QString> configured;
+        if(COptStringList* roots = dynamic_cast<COptStringList*>(
+                m_settings->opt(eOptSetResource, "resourceRoots")))
+            configured = roots->value();
+        if(configured.isEmpty())
+        {
+            for(QString optionName : {QStringLiteral("figPaths"), QStringLiteral("texPaths")})
+                if(COptStringList* paths = dynamic_cast<COptStringList*>(
+                        m_settings->opt(eOptSetResource, optionName)))
+                    configured.append(paths->value());
+        }
+        m_resourceBrowser->setActiveProfileSources(
+            ei::orderedResourceSources(configured), activeProfileDisplayName());
+    }
 
     m_undoStack = new QUndoStack(this);
     int undoHistoryLimit = 512;
