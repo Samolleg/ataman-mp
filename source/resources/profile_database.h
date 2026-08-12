@@ -94,6 +94,9 @@ struct SProfileDatabaseSnapshot
     QString profileId;
     QString runtimeManifestId;
     QString cacheKey;
+    QString sourceArchivePath;
+    QString sourceArchiveSha256;
+    QMap<QString, QByteArray> rawMembers;
     QMap<QString, SMonsterDatabaseRecord> monsters;
     QMap<QString, SRaceModelDatabaseRecord> raceModels;
     QMap<QString, SItemDatabaseRecord> items;

@@ -14,6 +14,10 @@ QSharedPointer<SProfileDatabaseSnapshot> JmvProfileDatabaseProvider::load(
     // root. Falling through to Base would mix profiles and hide broken installs.
     const QString database = activeDatabaseArchive(request.resourceDirectories, true);
     const QMap<QString, QByteArray> members = readDatabaseArchive(database, &result->diagnostics);
+    result->sourceArchivePath = database;
+    result->rawMembers = members;
+    result->sourceArchiveSha256 = databaseProvenance(
+        *result, database, QString(), false).sha256;
     if(!members.isEmpty())
     {
         applyRelationalMembers(members, database, result.data());

@@ -12,6 +12,10 @@ QSharedPointer<SProfileDatabaseSnapshot> BaseProfileDatabaseProvider::load(
     result->runtimeManifestId = request.runtimeManifestId;
     const QString database = activeDatabaseArchive(request.resourceDirectories, false);
     const QMap<QString, QByteArray> members = readDatabaseArchive(database, &result->diagnostics);
+    result->sourceArchivePath = database;
+    result->rawMembers = members;
+    result->sourceArchiveSha256 = databaseProvenance(
+        *result, database, QString(), false).sha256;
     if(!members.isEmpty())
     {
         applyRelationalMembers(members, database, result.data());

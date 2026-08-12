@@ -106,6 +106,8 @@
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
+#include "database_editor_dialog.h"
+#include "database_document.h"
 #include "minimap_export_dialog.h"
 #include "viewport_minimap_widget.h"
 #include "mmp_codec.h"
@@ -995,6 +997,7 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
     QAction* repairMobFamily = new QAction(tr("Review and Repair Object IDs..."), this);
     QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
+    QAction* openDatabaseEditor = new QAction(tr("Database Editor..."), this);
     QAction* generateMinimapAction = new QAction(tr("Export Minimap..."), this);
     QAction* persistAiGraphAction = new QAction(tr("Bake / Export AI Graph..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
@@ -1011,6 +1014,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(validateSelectedMobs);
     m_ui->menuTools->addAction(repairMobFamily);
     m_ui->menuTools->addAction(openMapCatalog);
+    m_ui->menuTools->addAction(openDatabaseEditor);
     m_ui->menuTools->addAction(generateMinimapAction);
     m_ui->menuTools->addAction(persistAiGraphAction);
     m_ui->menuTools->addAction(m_mapTestAction);
@@ -1031,6 +1035,22 @@ MainWindow::MainWindow(QWidget* parent) :
         CMapTableEditorDialog dialog(this);
         dialog.exec();
         processMapTableSaveReports(dialog.saveReports());
+    });
+    connect(openDatabaseEditor, &QAction::triggered, this, [this]()
+    {
+        const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+        QString diagnostic;
+        const auto document = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
+        if(!document)
+        {
+            QMessageBox::warning(this, tr("Database Editor"),
+                tr("The active profile database cannot be opened for authoring.\n\n%1")
+                    .arg(diagnostic));
+            return;
+        }
+        auto* dialog = new ei::DatabaseEditorDialog(document, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
     });
     connect(generateMinimapAction, &QAction::triggered,
             this, &MainWindow::generateMinimap);

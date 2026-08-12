@@ -1,0 +1,37 @@
+#include "database_editor_dialog.h"
+#include <QAbstractItemView>
+#include <QDialogButtonBox>
+#include <QHeaderView>
+#include <QInputDialog>
+#include <QJsonDocument>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QSplitter>
+#include <QTableWidget>
+#include <QVBoxLayout>
+
+namespace ei {
+DatabaseEditorDialog::DatabaseEditorDialog(const QSharedPointer<DatabaseDocument>& document,QWidget* parent):QDialog(parent),m_document(document)
+{
+    setWindowTitle(tr("Database Editor — %1").arg(document->profileId())); resize(1180,720); setModal(false);
+    auto* layout=new QVBoxLayout(this); auto* source=new QLabel(tr("Profile: %1  •  Provider: %2\nSource: %3").arg(document->profileId(),document->providerId(),document->sourceArchivePath()),this);source->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(source);
+    m_filter=new QLineEdit(this);m_filter->setPlaceholderText(tr("Filter rows across visible fields…"));layout->addWidget(m_filter);
+    auto* split=new QSplitter(this);m_tables=new QListWidget(split);m_tables->setMinimumWidth(190);m_grid=new QTableWidget(split);m_grid->setSortingEnabled(true);m_grid->setSelectionBehavior(QAbstractItemView::SelectRows);m_grid->setAlternatingRowColors(true);m_grid->horizontalHeader()->setStretchLastSection(true);split->setStretchFactor(1,1);layout->addWidget(split,1);
+    auto* buttons=new QDialogButtonBox(this);auto* clone=buttons->addButton(tr("Clone Row…"),QDialogButtonBox::ActionRole);auto* remove=buttons->addButton(tr("Delete Row"),QDialogButtonBox::ActionRole);m_undo=buttons->addButton(tr("Undo"),QDialogButtonBox::ActionRole);m_redo=buttons->addButton(tr("Redo"),QDialogButtonBox::ActionRole);auto* reviewButton=buttons->addButton(tr("Review Changes…"),QDialogButtonBox::ActionRole);buttons->addButton(QDialogButtonBox::Close);layout->addWidget(buttons);m_status=new QLabel(this);m_status->setWordWrap(true);layout->addWidget(m_status);
+    for(const QString& key:document->tableKeys()){const auto* table=document->table(key);auto* item=new QListWidgetItem(tr("%1 (%2)").arg(table->label).arg(table->rows.size()),m_tables);item->setData(Qt::UserRole,key);}
+    connect(m_tables,&QListWidget::currentRowChanged,this,&DatabaseEditorDialog::selectTable);connect(m_filter,&QLineEdit::textChanged,this,&DatabaseEditorDialog::rebuildGrid);connect(m_grid,&QTableWidget::cellChanged,this,&DatabaseEditorDialog::editCell);connect(clone,&QPushButton::clicked,this,&DatabaseEditorDialog::cloneSelected);connect(remove,&QPushButton::clicked,this,&DatabaseEditorDialog::deleteSelected);connect(m_undo,&QPushButton::clicked,this,&DatabaseEditorDialog::undo);connect(m_redo,&QPushButton::clicked,this,&DatabaseEditorDialog::redo);connect(reviewButton,&QPushButton::clicked,this,&DatabaseEditorDialog::review);connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::close);if(m_tables->count())m_tables->setCurrentRow(0);updateStatus();
+}
+QString DatabaseEditorDialog::currentTableKey()const{auto*i=m_tables->currentItem();return i?i->data(Qt::UserRole).toString():QString();}
+QString DatabaseEditorDialog::selectedRowKey()const{auto*i=m_grid->item(m_grid->currentRow(),0);return i?i->data(Qt::UserRole).toString():QString();}
+void DatabaseEditorDialog::selectTable(){rebuildGrid();}
+void DatabaseEditorDialog::rebuildGrid(){const auto* table=m_document->table(currentTableKey());if(!table)return;m_refreshing=true;m_grid->setSortingEnabled(false);m_grid->clear();m_grid->setColumnCount(table->fields.size());QStringList headers;for(const auto&f:table->fields)headers<<tr(qPrintable(f.label));m_grid->setHorizontalHeaderLabels(headers);m_grid->setRowCount(0);const QString filter=m_filter->text().trimmed();for(const auto&r:table->rows){if(r.deleted)continue;QStringList values;for(const auto&f:table->fields)values<<r.values.value(f.key).toString();if(!filter.isEmpty()&&!values.join(' ').contains(filter,Qt::CaseInsensitive))continue;int row=m_grid->rowCount();m_grid->insertRow(row);for(int c=0;c<table->fields.size();++c){const auto&f=table->fields[c];QString text=r.values.value(f.key).type()==QVariant::StringList?r.values.value(f.key).toStringList().join(", "):r.values.value(f.key).toString();auto*item=new QTableWidgetItem(text);item->setData(Qt::UserRole,r.stableKey);if(!f.writable)item->setFlags(item->flags()&~Qt::ItemIsEditable);m_grid->setItem(row,c,item);}}m_grid->setSortingEnabled(true);m_grid->resizeColumnsToContents();m_refreshing=false;updateStatus();}
+void DatabaseEditorDialog::editCell(int row,int column){if(m_refreshing)return;const auto*table=m_document->table(currentTableKey());if(!table||column>=table->fields.size())return;auto*item=m_grid->item(row,column);QString diagnostic;QVariant value=item->text();const auto&f=table->fields[column];if(f.type==EDatabaseFieldType::Integer)value=item->text().toInt();else if(f.type==EDatabaseFieldType::Decimal)value=item->text().toDouble();else if(f.type==EDatabaseFieldType::TextList)value=item->text().split(',',QString::SkipEmptyParts);if(!m_document->setValue(table->key,item->data(Qt::UserRole).toString(),f.key,value,&diagnostic)){QMessageBox::warning(this,tr("Edit rejected"),diagnostic);rebuildGrid();}else rebuildGrid();}
+void DatabaseEditorDialog::cloneSelected(){QString key=selectedRowKey();if(key.isEmpty())return;bool ok=false;QString name=QInputDialog::getText(this,tr("Clone row"),tr("New stable name:"),QLineEdit::Normal,QString(),&ok);if(!ok)return;QString d;if(!m_document->cloneRow(currentTableKey(),key,name,&d))QMessageBox::warning(this,tr("Clone rejected"),d);rebuildGrid();}
+void DatabaseEditorDialog::deleteSelected(){QString key=selectedRowKey();if(key.isEmpty())return;if(QMessageBox::question(this,tr("Delete row"),tr("Mark '%1' for deletion? References will be validated before publication.").arg(key))!=QMessageBox::Yes)return;QString d;if(!m_document->deleteRow(currentTableKey(),key,&d))QMessageBox::warning(this,tr("Delete rejected"),d);rebuildGrid();}
+void DatabaseEditorDialog::undo(){m_document->undo();rebuildGrid();}void DatabaseEditorDialog::redo(){m_document->redo();rebuildGrid();}
+void DatabaseEditorDialog::review(){QString text;for(const auto&c:m_document->changes())text+=QString("• %1\n").arg(c.description);for(const auto&f:m_document->validate())text+=QString("\n%1 %2").arg(f.verified?tr("Verified:"):tr("Opaque:"),f.message);if(text.isEmpty())text=tr("No pending changes.");text+=tr("\n\nPublication is disabled in this first slice. Exported review manifest:\n%1").arg(QString::fromUtf8(QJsonDocument(m_document->pendingChangeManifest()).toJson(QJsonDocument::Indented)));QMessageBox box(QMessageBox::Information,tr("Pending Database Changes"),text,QMessageBox::Ok,this);box.setDetailedText(text);box.exec();}
+void DatabaseEditorDialog::updateStatus(){m_undo->setEnabled(m_document->canUndo());m_redo->setEnabled(m_document->canRedo());int errors=0;for(const auto&f:m_document->validate())errors+=f.severity==SDatabaseValidationFinding::Severity::Error;m_status->setText(tr("%1 pending change(s) • %2 verified error(s) • Save/export locked until an EIDBEditor no-op and semantic round trip is proven.").arg(m_document->changes().size()).arg(errors));}
+}

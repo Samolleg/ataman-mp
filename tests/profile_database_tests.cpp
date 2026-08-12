@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 
 #include "profile_database.h"
+#include "database_document.h"
 
 namespace {
 
@@ -116,6 +117,9 @@ private slots:
     void jmvLoadsBoundedUnitPerkOwnership();
     void installedJmvTitanGripControl();
     void unknownProviderFailsClosed();
+    void authoringDocumentPreservesBaselineAndTracksTransactions();
+    void authoringDocumentRejectsIdentityAndReferenceBreakage();
+    void authoringDocumentDetectsStaleSourceAndKeepsProfilesSeparate();
 };
 
 QByteArray unitPerkLua(const QString& prototype, int strongMan)
@@ -251,6 +255,36 @@ void ProfileDatabaseTests::unknownProviderFailsClosed()
     const auto snapshot = service.snapshot(request);
     QVERIFY(!snapshot->usable());
     QCOMPARE(snapshot->diagnostics.first().code, QString("database.provider.unavailable"));
+}
+
+void ProfileDatabaseTests::authoringDocumentPreservesBaselineAndTracksTransactions()
+{
+    QTemporaryDir temporary; QVERIFY(temporary.isValid()); const QString path=QDir(temporary.path()).filePath("database.res");
+    auto members=relationalMembers(); members["opaque.future"]="unchanged"; write(path,resArchive(members));
+    ei::ProfileDatabaseService service; ei::SProfileDatabaseLoadRequest request; request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request)); QVERIFY(document);
+    QVERIFY(document->setValue("monsters","human test","skinIndex",5)); QCOMPARE(document->table("monsters")->rows.first().values.value("skinIndex").toInt(),5);
+    QVERIFY(document->undo()); QCOMPARE(document->table("monsters")->rows.first().values.value("skinIndex").toInt(),2); QVERIFY(document->redo());
+    QVERIFY(document->pendingChangeManifest().value("preservedRawMembers").toArray().contains("opaque.future")); QVERIFY(!document->pendingChangeManifest().value("publicationSupported").toBool());
+}
+
+void ProfileDatabaseTests::authoringDocumentRejectsIdentityAndReferenceBreakage()
+{
+    QTemporaryDir temporary; QVERIFY(temporary.isValid()); write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service; ei::SProfileDatabaseLoadRequest request; request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request)); QString diagnostic;
+    QVERIFY(!document->cloneRow("monsters","human test","Human Test",&diagnostic)); QVERIFY(diagnostic.contains("exists")); QVERIFY(document->setValue("monsters","human test","baseRace","missing race"));
+    bool missing=false,opaque=false; for(const auto& finding:document->validate()){missing|=finding.code=="database.reference.missing"&&finding.verified;opaque|=finding.code=="database.impact.opaque"&&!finding.verified;} QVERIFY(missing);QVERIFY(opaque);
+}
+
+void ProfileDatabaseTests::authoringDocumentDetectsStaleSourceAndKeepsProfilesSeparate()
+{
+    QTemporaryDir temporary; QVERIFY(temporary.isValid()); QDir root(temporary.path()); QVERIFY(root.mkpath("base"));QVERIFY(root.mkpath("jmv"));
+    write(root.filePath("base/database.res"),resArchive(relationalMembers()));write(root.filePath("jmv/database.res"),resArchive(relationalMembers()));write(root.filePath("jmv/databaseJmv.res"),resArchive({}));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<root.filePath("base");auto base=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    request.providerId="jmv.v1";request.profileId="jamais-vu";request.resourceDirectories=QStringList()<<root.filePath("jmv")<<root.filePath("base");auto jmv=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QCOMPARE(base->providerId(),QString("base.standard.v1"));QCOMPARE(jmv->providerId(),QString("jmv.v1"));QVERIFY(base->sourceArchivePath()!=jmv->sourceArchivePath());QVERIFY(base->sourceIsCurrent());
+    write(root.filePath("base/database.res"),resArchive({{"changed","data"}}));QString diagnostic;QVERIFY(!base->sourceIsCurrent(&diagnostic));QVERIFY(diagnostic.contains("changed"));
 }
 
 QTEST_APPLESS_MAIN(ProfileDatabaseTests)
