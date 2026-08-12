@@ -45,7 +45,7 @@ QMap<QString, QByteArray> relationalMembers()
     QByteArray race = stringField(0, "Human Male") + stringField(30, "unhuma")
         + tag(31, stringField(0, "unhumaskin_00"));
     QByteArray monster = stringField(0, "Human Test") + stringField(1, "Human Male")
-        + intField(3, 2) + tag(29, stringField(0, "gold [3]"))
+        + intField(3, 2) + intField(9, 123) + tag(29, stringField(0, "gold [3]"))
         + tag(32, stringField(0, "armor_leather.iron"))
         + tag(33, stringField(0, "2h sword.iron[effect{a,b}],shield.iron"));
     const QByteArray units = database({QByteArray(), record(race), record(monster), QByteArray()});
@@ -265,6 +265,15 @@ void ProfileDatabaseTests::authoringDocumentPreservesBaselineAndTracksTransactio
     auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request)); QVERIFY(document);
     QVERIFY(document->setValue("monsters","human test","skinIndex",5)); QCOMPARE(document->table("monsters")->rows.first().values.value("skinIndex").toInt(),5);
     QVERIFY(document->undo()); QCOMPARE(document->table("monsters")->rows.first().values.value("skinIndex").toInt(),2); QVERIFY(document->redo());
+    QVERIFY(document->deleteRow("monsters","human test"));
+    QVERIFY(document->table("monsters")->rows.first().deleted);
+    QVERIFY(document->undo());
+    QVERIFY(!document->table("monsters")->rows.first().deleted);
+    bool foundOpaque=false;
+    for(const auto& field:document->table("monsters")->fields)
+        foundOpaque|=field.key=="opaque.9"&&field.opaque&&!field.writable;
+    QVERIFY(foundOpaque);
+    QCOMPARE(document->table("monsters")->rows.first().values.value("opaque.9").toString(),QString("7b000000"));
     QVERIFY(document->pendingChangeManifest().value("preservedRawMembers").toArray().contains("opaque.future")); QVERIFY(!document->pendingChangeManifest().value("publicationSupported").toBool());
 }
 

@@ -58,6 +58,7 @@ struct SMonsterDatabaseRecord
     QStringList wears;
     QString weapon;
     QString secondWeapon;
+    QMap<int, QByteArray> opaqueFields;
 };
 
 struct SRaceModelDatabaseRecord
@@ -66,6 +67,7 @@ struct SRaceModelDatabaseRecord
     QString model;
     QStringList primaryTextures;
     QStringList secondaryTextures;
+    QMap<int, QByteArray> opaqueFields;
 };
 
 struct SItemDatabaseRecord
@@ -78,6 +80,7 @@ struct SItemDatabaseRecord
     int textureType1{-1};
     int textureType2{-1};
     int wearOrder{-1};
+    QMap<int, QByteArray> opaqueFields;
 };
 
 struct SMaterialDatabaseRecord

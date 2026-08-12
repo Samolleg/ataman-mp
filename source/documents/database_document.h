@@ -11,7 +11,7 @@
 namespace ei {
 
 enum class EDatabaseFieldType { Text, Integer, Decimal, Reference, TextList };
-struct SDatabaseFieldSchema { QString key, label; EDatabaseFieldType type{EDatabaseFieldType::Text}; QString referenceTable; bool writable{true}; };
+struct SDatabaseFieldSchema { QString key, label; EDatabaseFieldType type{EDatabaseFieldType::Text}; QString referenceTable; bool writable{true}; bool opaque{false}; };
 struct SDatabaseRow { QString stableKey; QMap<QString, QVariant> values; bool added{false}; bool deleted{false}; };
 struct SDatabaseTable { QString key, label, sourceMember; QVector<SDatabaseFieldSchema> fields; QVector<SDatabaseRow> rows; };
 struct SDatabaseChange {

@@ -9,6 +9,23 @@ ei::SDatabaseFieldSchema fs(const QString& key, const QString& label, ei::EDatab
 { ei::SDatabaseFieldSchema f; f.key=key; f.label=label; f.type=type; f.referenceTable=ref; return f; }
 QJsonValue jv(const QVariant& v) { return v.type()==QVariant::StringList ? QJsonValue(QJsonArray::fromStringList(v.toStringList())) : QJsonValue::fromVariant(v); }
 }
+void addOpaqueFields(ei::SDatabaseTable* table, ei::SDatabaseRow* row,
+                     const QMap<int, QByteArray>& fields)
+{
+    for(auto it = fields.constBegin(); it != fields.constEnd(); ++it)
+    {
+        const QString key = QString("opaque.%1").arg(it.key());
+        bool exists = false;
+        for(const auto& schema : table->fields) exists = exists || schema.key == key;
+        if(!exists)
+        {
+            auto schema = fs(key, QString("Unknown FLD%1 (raw)").arg(it.key()),
+                             ei::EDatabaseFieldType::Text);
+            schema.writable = false; schema.opaque = true; table->fields.append(schema);
+        }
+        row->values.insert(key, QString::fromLatin1(it.value().toHex()));
+    }
+}
 
 namespace ei {
 DatabaseDocument::DatabaseDocument(const QSharedPointer<const SProfileDatabaseSnapshot>& s):m_snapshot(s){}
@@ -18,13 +35,13 @@ QSharedPointer<DatabaseDocument> DatabaseDocument::fromSnapshot(const QSharedPoi
     QSharedPointer<DatabaseDocument> out(new DatabaseDocument(s));
     SDatabaseTable races; races.key="raceModels"; races.label="Race models"; races.sourceMember="units.udb";
     races.fields={fs("name","Name",EDatabaseFieldType::Text),fs("model","Model",EDatabaseFieldType::Text),fs("primaryTextures","Primary textures",EDatabaseFieldType::TextList),fs("secondaryTextures","Secondary textures",EDatabaseFieldType::TextList)};
-    for(const auto& x:s->raceModels){SDatabaseRow r;r.stableKey=fold(x.name);r.values={{"name",x.name},{"model",x.model},{"primaryTextures",x.primaryTextures},{"secondaryTextures",x.secondaryTextures}};races.rows<<r;} out->m_tables[races.key]=races;
+    for(const auto& x:s->raceModels){SDatabaseRow r;r.stableKey=fold(x.name);r.values={{"name",x.name},{"model",x.model},{"primaryTextures",x.primaryTextures},{"secondaryTextures",x.secondaryTextures}};addOpaqueFields(&races,&r,x.opaqueFields);races.rows<<r;} out->m_tables[races.key]=races;
     SDatabaseTable monsters; monsters.key="monsters"; monsters.label="Monster prototypes"; monsters.sourceMember="units.udb";
     monsters.fields={fs("name","Name",EDatabaseFieldType::Text),fs("baseRace","Base race",EDatabaseFieldType::Reference,"raceModels"),fs("skinIndex","Skin",EDatabaseFieldType::Integer),fs("hairIndex","Hair",EDatabaseFieldType::Integer),fs("complexionX","Complexion X",EDatabaseFieldType::Decimal),fs("complexionY","Complexion Y",EDatabaseFieldType::Decimal),fs("complexionZ","Complexion Z",EDatabaseFieldType::Decimal),fs("items","Items",EDatabaseFieldType::TextList),fs("wears","Wears",EDatabaseFieldType::TextList),fs("weapon","Weapon",EDatabaseFieldType::Text),fs("secondWeapon","Second weapon",EDatabaseFieldType::Text)};
-    for(const auto& x:s->monsters){SDatabaseRow r;r.stableKey=fold(x.name);r.values={{"name",x.name},{"baseRace",x.baseRace},{"skinIndex",x.skinIndex},{"hairIndex",x.hairIndex},{"complexionX",x.complexionX},{"complexionY",x.complexionY},{"complexionZ",x.complexionZ},{"items",x.items},{"wears",x.wears},{"weapon",x.weapon},{"secondWeapon",x.secondWeapon}};monsters.rows<<r;} out->m_tables[monsters.key]=monsters;
+    for(const auto& x:s->monsters){SDatabaseRow r;r.stableKey=fold(x.name);r.values={{"name",x.name},{"baseRace",x.baseRace},{"skinIndex",x.skinIndex},{"hairIndex",x.hairIndex},{"complexionX",x.complexionX},{"complexionY",x.complexionY},{"complexionZ",x.complexionZ},{"items",x.items},{"wears",x.wears},{"weapon",x.weapon},{"secondWeapon",x.secondWeapon}};addOpaqueFields(&monsters,&r,x.opaqueFields);monsters.rows<<r;} out->m_tables[monsters.key]=monsters;
     SDatabaseTable items; items.key="items"; items.label="Items"; items.sourceMember="items.idb";
     items.fields={fs("name","Name",EDatabaseFieldType::Text),fs("category","Category",EDatabaseFieldType::Text),fs("type","Type",EDatabaseFieldType::Text),fs("typeId","Type ID",EDatabaseFieldType::Integer),fs("materialType","Material type",EDatabaseFieldType::Text),fs("textureType1","Texture 1",EDatabaseFieldType::Integer),fs("textureType2","Texture 2",EDatabaseFieldType::Integer),fs("wearOrder","Wear order",EDatabaseFieldType::Integer)};
-    for(const auto& x:s->items){SDatabaseRow r;r.stableKey=fold(x.name);r.values={{"name",x.name},{"category",x.category},{"type",x.type},{"typeId",x.typeId},{"materialType",x.materialType},{"textureType1",x.textureType1},{"textureType2",x.textureType2},{"wearOrder",x.wearOrder}};items.rows<<r;} out->m_tables[items.key]=items;
+    for(const auto& x:s->items){SDatabaseRow r;r.stableKey=fold(x.name);r.values={{"name",x.name},{"category",x.category},{"type",x.type},{"typeId",x.typeId},{"materialType",x.materialType},{"textureType1",x.textureType1},{"textureType2",x.textureType2},{"wearOrder",x.wearOrder}};addOpaqueFields(&items,&r,x.opaqueFields);items.rows<<r;} out->m_tables[items.key]=items;
     return out;
 }
 QString DatabaseDocument::profileId()const{return m_snapshot->profileId;} QString DatabaseDocument::providerId()const{return m_snapshot->providerId;}
