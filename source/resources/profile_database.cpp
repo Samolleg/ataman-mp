@@ -497,6 +497,10 @@ void ProfileDatabaseContext::activate(const QSharedPointer<const SProfileDatabas
     m_providerBindings = providerBindings;
     ++m_generation;
 }
+void ProfileDatabaseContext::publishEditedSnapshot(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot)
+{
+    QWriteLocker locker(&m_lock);m_current=snapshot;++m_generation;
+}
 
 QString ProfileDatabaseContext::providerForRole(const QString& role) const
 {

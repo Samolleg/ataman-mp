@@ -180,6 +180,7 @@ public:
     static ProfileDatabaseContext& instance();
     void activate(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot,
                   const QMap<QString, QString>& providerBindings = QMap<QString, QString>());
+    void publishEditedSnapshot(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot);
     QSharedPointer<const SProfileDatabaseSnapshot> current() const;
     quint64 generation() const;
     QString providerForRole(const QString& role) const;

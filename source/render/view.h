@@ -466,6 +466,7 @@ signals:
     void mobScriptChanged(CMob* mob, const QString& displayScript);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
     void selectionStateChanged(bool hasSelection);
+    void openDatabasePrototypeRequested(const QString& prototype);
     void mobStateChanged();
     void loadedMapStateChanged();
     void nidChangeProposed(quint32 nid, const QString& mobPath);

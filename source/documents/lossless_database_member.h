@@ -32,6 +32,10 @@ public:
     bool replaceFieldPayload(int tableIndex, int recordIndex, int fieldId,
                              int occurrence, const QByteArray& payload,
                              QString* diagnostic = nullptr);
+    bool cloneRecordByFieldPayload(int tableIndex, int fieldId, const QByteArray& sourcePayload,
+                                   const QByteArray& newPayload, QString* diagnostic = nullptr);
+    bool removeRecordByFieldPayload(int tableIndex, int fieldId, const QByteArray& payload,
+                                    QString* diagnostic = nullptr);
 
 private:
     struct Node

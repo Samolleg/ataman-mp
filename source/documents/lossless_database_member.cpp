@@ -81,4 +81,15 @@ bool LosslessDatabaseMember::replaceFieldPayload(int tableIndex,int recordIndex,
 {
     Node* field=fieldNode(tableIndex,recordIndex,fieldId,occurrence);if(!field){if(diagnostic)*diagnostic="Requested field occurrence does not exist.";return false;}field->payload=payload;return true;
 }
+bool LosslessDatabaseMember::cloneRecordByFieldPayload(int tableIndex,int fieldId,const QByteArray& sourcePayload,const QByteArray& newPayload,QString* diagnostic)
+{
+    const int source=findRecordByFieldPayload(tableIndex,fieldId,sourcePayload);if(source<0){if(diagnostic)*diagnostic="Clone source record is missing or ambiguous.";return false;}
+    Node& table=m_root.children[tableIndex];Node clone=table.children[source];table.children.append(clone);table.dirty=true;m_root.dirty=true;
+    return replaceFieldPayload(tableIndex,table.children.size()-1,fieldId,0,newPayload,diagnostic);
+}
+bool LosslessDatabaseMember::removeRecordByFieldPayload(int tableIndex,int fieldId,const QByteArray& payload,QString* diagnostic)
+{
+    const int record=findRecordByFieldPayload(tableIndex,fieldId,payload);if(record<0){if(diagnostic)*diagnostic="Deleted record is missing or ambiguous.";return false;}
+    Node& table=m_root.children[tableIndex];table.children.removeAt(record);table.dirty=true;m_root.dirty=true;return true;
+}
 }

@@ -1052,6 +1052,7 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->show();
     });
+    connect(m_pView,&CView::openDatabasePrototypeRequested,this,[openDatabaseEditor](const QString&){openDatabaseEditor->trigger();});
     connect(generateMinimapAction, &QAction::triggered,
             this, &MainWindow::generateMinimap);
     connect(persistAiGraphAction, &QAction::triggered,

@@ -1,5 +1,4 @@
-QT += core testlib
-QT -= gui
+QT += core testlib gui-private
 CONFIG += testcase console c++11
 TEMPLATE = app
 TARGET = profile_database_tests
@@ -8,6 +7,7 @@ INCLUDEPATH += ../source/resources ../source/runtime/providers ../source/documen
 SOURCES += \
     profile_database_tests.cpp \
     ../source/documents/database_document.cpp \
+    ../source/documents/database_workbook.cpp \
     ../source/documents/lossless_database_member.cpp \
     ../source/documents/res_archive_document.cpp \
     ../source/resources/profile_database.cpp \
@@ -18,6 +18,7 @@ SOURCES += \
 HEADERS += \
     ../source/resources/profile_database.h \
     ../source/documents/database_document.h \
+    ../source/documents/database_workbook.h \
     ../source/documents/lossless_database_member.h \
     ../source/documents/res_archive_document.h \
     ../source/runtime/providers/profile_database_provider_support.h \

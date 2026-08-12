@@ -967,6 +967,8 @@ void CTableManager::showPropertyContextMenu(const QList<int>& rows, const QPoint
     QMenu menu(m_pTable);
     QAction* copy = menu.addAction(tr("Copy value"));
     QAction* paste = menu.addAction(tr("Paste value"));
+    QAction* database=nullptr;QString prototype;
+    if(rows.size()==1){const auto value=m_rowValues.value(rows.first());if(value&&value->type()==eObjParam_UNIT_PROTOTYPE){prototype=value->toString();database=menu.addAction(tr("Open prototype in Database Editor"));database->setEnabled(!prototype.trimmed().isEmpty());}}
     copy->setShortcut(QKeySequence::Copy);
     paste->setShortcut(QKeySequence::Paste);
     QString ignored;
@@ -976,6 +978,8 @@ void CTableManager::showPropertyContextMenu(const QList<int>& rows, const QPoint
         copyRows(rows);
     else if(selected == paste)
         pasteRows(rows);
+    else if(selected==database)
+        emit openDatabasePrototypeRequested(prototype);
 }
 
 bool CTableManager::eventFilter(QObject* watched, QEvent* event)

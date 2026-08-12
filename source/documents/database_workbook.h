@@ -1,0 +1,14 @@
+#ifndef DATABASE_WORKBOOK_H
+#define DATABASE_WORKBOOK_H
+#include <QMap>
+#include <QString>
+#include "database_document.h"
+namespace ei {
+struct SDatabaseWorkbookImport { QMap<QString,SDatabaseTable> tables; QVector<SDatabaseValidationFinding> findings; };
+class DatabaseWorkbook {
+public:
+    static bool exportXlsx(const DatabaseDocument& document,const QString& path,QString* diagnostic=nullptr);
+    static bool importXlsx(const DatabaseDocument& document,const QString& path,SDatabaseWorkbookImport* result,QString* diagnostic=nullptr);
+};
+}
+#endif

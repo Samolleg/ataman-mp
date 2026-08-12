@@ -381,6 +381,7 @@ signals:
     void onTrapCastTargetMove(CMagicTrap* trap, int from, int to);
     void onTrapActivationAreaAdd(CMagicTrap* trap);
     void onTrapCastTargetAdd(CMagicTrap* trap);
+    void openDatabasePrototypeRequested(const QString& prototype);
 
 public slots:
     void onParamChange(const QSharedPointer<IPropertyBase>& pProp); //get value for translating it to view class

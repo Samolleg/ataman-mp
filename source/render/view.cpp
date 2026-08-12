@@ -1269,6 +1269,7 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperty(const QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(const QSharedPointer<IPropertyBase>&)));
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>&)),
                      this, SLOT(onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>&)));
+    connect(m_tableManager.get(),&CTableManager::openDatabasePrototypeRequested,this,&CView::openDatabasePrototypeRequested);
     connect(m_tableManager.get(), &CTableManager::onBehaviorPointSelected,
             this, [this](CNode* point)
     {
