@@ -311,6 +311,7 @@ void ProfileDatabaseTests::authoringDocumentRejectsIdentityAndReferenceBreakage(
     QTemporaryDir temporary; QVERIFY(temporary.isValid()); write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));
     ei::ProfileDatabaseService service; ei::SProfileDatabaseLoadRequest request; request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();
     auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request)); QString diagnostic;
+    QCOMPARE(document->displayIdentity("monsters","human test"),QString("Human Test"));
     QVERIFY(!document->cloneRow("monsters","human test","Human Test",&diagnostic)); QVERIFY(diagnostic.contains("exists")); QVERIFY(document->setValue("monsters","human test","baseRace","missing race"));
     bool missing=false,opaque=false; for(const auto& finding:document->validate()){missing|=finding.code=="database.reference.missing"&&finding.verified;opaque|=finding.code=="database.impact.opaque"&&!finding.verified;} QVERIFY(missing);QVERIFY(opaque);
 }

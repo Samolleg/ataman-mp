@@ -160,9 +160,11 @@ public slots:
     void _onChange(QString str); //override default 'on change event'
     void _onEditingFinished();
     void _onFilterTextChanged(const QString& text);
+    void requestDatabasePrototypeOpen();
 
 signals:
     void onParamChange(const QSharedPointer<IPropertyBase>&);
+    void openDatabasePrototypeRequested(const QString& prototype);
 
 private:
     void ensureOptionsLoaded();

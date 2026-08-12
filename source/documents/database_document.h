@@ -37,6 +37,7 @@ public:
     bool hasUnappliedChanges(QString* = nullptr) const;
     bool identityAvailable(const QString& tableKey, const QString& identity,
                            const QString& exceptRowKey = QString()) const;
+    QString displayIdentity(const QString& tableKey, const QString& rowKey) const;
     bool setValue(const QString&, const QString&, const QString&, const QVariant&, QString* = nullptr);
     bool cloneRow(const QString&, const QString&, const QString&, QString* = nullptr);
     bool deleteRow(const QString&, const QString&, QString* = nullptr);

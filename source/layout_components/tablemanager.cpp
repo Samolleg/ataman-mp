@@ -736,12 +736,8 @@ void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyB
     if(editor && value->type()==eObjParam_UNIT_PROTOTYPE)
     {
         editor->setToolTip(tr("Right-click to open this prototype in the Database Editor."));
-        editor->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(editor,&QWidget::customContextMenuRequested,this,[this,editor,row](const QPoint& pos){showPropertyContextMenu(QList<int>()<<row,editor->mapToGlobal(pos));});
         if(QLineEdit* line=editor->findChild<QLineEdit*>())
         {
-            line->setProperty("propertyRow",row);
-            line->installEventFilter(this);
             line->setToolTip(tr("Right-click to open this prototype in the Database Editor."));
         }
     }
@@ -1421,6 +1417,9 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             blockEditWidget(m_pTable->item(i, 0));
             CComboDynItem* pCombo = new CComboDynItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
+            if(type == eObjParam_UNIT_PROTOTYPE)
+                QObject::connect(pCombo, &CComboDynItem::openDatabasePrototypeRequested,
+                                 this, &CTableManager::openDatabasePrototypeRequested);
             m_pTable->setCellWidget(i, 1, pCombo);
             registerPropertyRow(i, item);
             ++i;
@@ -1933,7 +1932,29 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     QObject::connect(lineEdit(), SIGNAL(returnPressed()), this, SLOT(_onEditingFinished()));
     QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
     lineEdit()->installEventFilter(this);
+    if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
+    {
+        lineEdit()->setContextMenuPolicy(Qt::CustomContextMenu);
+        QObject::connect(lineEdit(), &QLineEdit::customContextMenuRequested,
+                         this, [this](const QPoint& pos)
+        {
+            QMenu* menu = lineEdit()->createStandardContextMenu();
+            menu->addSeparator();
+            QAction* open = menu->addAction(tr("Open prototype in Database Editor"));
+            open->setEnabled(!currentText().trimmed().isEmpty());
+            QAction* selected = menu->exec(lineEdit()->mapToGlobal(pos));
+            if(selected == open)
+                requestDatabasePrototypeOpen();
+            delete menu;
+        });
+    }
     updateDatabaseDiagnostic(m_committedText);
+}
+
+void CComboDynItem::requestDatabasePrototypeOpen()
+{
+    if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
+        emit openDatabasePrototypeRequested(currentText().trimmed());
 }
 
 void CColorButtonItem::keyPressEvent(QKeyEvent* event)

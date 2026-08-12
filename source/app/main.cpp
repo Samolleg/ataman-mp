@@ -619,6 +619,21 @@ int runHeadlessCommand(QApplication& app)
         combo._onChange("house");
         const bool clickCommit = combo.value()->toString() == "house" && appliedChanges == 2;
 
+        QSharedPointer<IPropertyBase> prototypeValue(
+            new propStr(eObjParam_UNIT_PROTOTYPE, "Human Test"));
+        CComboDynItem prototypeCombo(prototypeValue);
+        QString openedPrototype;
+        QObject::connect(&prototypeCombo,
+                         &CComboDynItem::openDatabasePrototypeRequested,
+                         [&openedPrototype](const QString& value) {
+            openedPrototype = value;
+        });
+        prototypeCombo.requestDatabasePrototypeOpen();
+        const bool databasePrototypeOpenActionWorks =
+            openedPrototype == QStringLiteral("Human Test")
+            && prototypeCombo.lineEdit()->contextMenuPolicy()
+                == Qt::CustomContextMenu;
+
         QSharedPointer<IPropertyBase> textureValue(new propStr(eObjParam_PRIM_TXTR, "original_texture"));
         CComboDynItem textureCombo(textureValue);
         QMimeData* incompatibleMime = new QMimeData;
@@ -2313,7 +2328,8 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyResizeRepaintCoalesced && diplomacyResizeRepaintResumes
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
-                && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
+                && enterCommit && clickCommit && databasePrototypeOpenActionWorks
+                && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
                 && uiScaleSettingsPersist && uiScaleLiveApply && uiScaleFontApplied
@@ -2420,6 +2436,8 @@ int runHeadlessCommand(QApplication& app)
                << " escapeCancel=" << escapeCancel
                << " enterCommit=" << enterCommit
                << " clickCommit=" << clickCommit
+               << " databasePrototypeOpenActionWorks="
+               << databasePrototypeOpenActionWorks
                << " staticChoiceItemDataStored=" << staticChoiceItemDataStored
                << " staticChoicePopupTooltipClear=" << staticChoicePopupTooltipClear
                << " staticChoiceItemTooltipsWork=" << staticChoiceItemTooltipsWork

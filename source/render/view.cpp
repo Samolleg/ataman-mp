@@ -11722,10 +11722,24 @@ void CView::viewParameters()
 void CView::refreshDatabaseVisuals(const QString& tableKey,const QString& rowKey)
 {
     const bool targeted=tableKey==QStringLiteral("monsters")&&!rowKey.trimmed().isEmpty();
+    QVector<CUnit*> affected;
     for(CMob* mob:m_aMob)if(mob)for(CNode* node:mob->nodes())if(CUnit* unit=dynamic_cast<CUnit*>(node))
         if(!targeted||unit->databaseName().compare(rowKey,Qt::CaseInsensitive)==0)
+        {
             unit->invalidateDatabaseVisual();
+            affected.append(unit);
+        }
     m_unitAppearanceProgressTotal=0;m_unitAppearanceProgressCompleted=0;m_unitAppearanceProgressPending=false;m_unitAppearanceLastLoggedCompleted=-1;
+    // Database publication happens on the GUI thread. Re-resolve affected
+    // loaded units immediately with the viewport context current so stale
+    // worker/cold-frame results cannot alternate with the published row when
+    // the object is moved.
+    if(isValid()&&!affected.isEmpty())
+    {
+        makeCurrent();
+        for(CUnit* unit:affected)
+            unit->preloadVisualResources();
+    }
     viewParameters();update();
 }
 
