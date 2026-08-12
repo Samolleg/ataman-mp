@@ -428,14 +428,17 @@ SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QStr
         result.error = QString("Cannot read backup source: %1").arg(input.errorString());
         return result;
     }
-    const QByteArray data = input.readAll();
+    QCryptographicHash sourceHash(QCryptographicHash::Sha256);
+    QByteArray chunk;
+    while(!(chunk = input.read(4 * 1024 * 1024)).isEmpty())
+        sourceHash.addData(chunk);
     if(input.error() != QFile::NoError)
     {
         result.error = QString("Cannot finish reading backup source: %1").arg(input.errorString());
         return result;
     }
 
-    result.sha256 = QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex();
+    result.sha256 = sourceHash.result().toHex();
     const QString directoryPath = sourceDirectory(source);
     if(!QDir().mkpath(directoryPath))
     {
@@ -468,19 +471,46 @@ SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QStr
             backupPath = QDir(directoryPath).filePath(QString("%1-%2.backup").arg(baseName).arg(suffix++));
     }
 
-    QString error;
-    if(!writeAtomically(backupPath, data, error))
+    input.close();
+    if(!input.open(QIODevice::ReadOnly))
     {
-        result.error = QString("Cannot write backup: %1").arg(error);
+        result.error = QString("Cannot reopen backup source: %1").arg(input.errorString());
+        return result;
+    }
+    QSaveFile backupOutput(backupPath);
+    if(!backupOutput.open(QIODevice::WriteOnly))
+    {
+        result.error = QString("Cannot create backup: %1").arg(backupOutput.errorString());
+        return result;
+    }
+    while(!(chunk = input.read(4 * 1024 * 1024)).isEmpty())
+    {
+        if(backupOutput.write(chunk) != chunk.size())
+        {
+            backupOutput.cancelWriting();
+            result.error = QString("Cannot write backup: %1").arg(backupOutput.errorString());
+            return result;
+        }
+    }
+    if(input.error() != QFile::NoError)
+    {
+        backupOutput.cancelWriting();
+        result.error = QString("Cannot finish reading backup source: %1").arg(input.errorString());
+        return result;
+    }
+    if(!backupOutput.commit())
+    {
+        result.error = QString("Cannot publish backup: %1").arg(backupOutput.errorString());
         return result;
     }
 
+    QString error;
     QJsonObject metadata;
     metadata.insert("schema", 1);
     metadata.insert("event", event);
     metadata.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     metadata.insert("sourcePath", source.absoluteFilePath());
-    metadata.insert("sourceSize", double(data.size()));
+    metadata.insert("sourceSize", double(source.size()));
     metadata.insert("sourceSha256", result.sha256);
     metadata.insert("backupFile", QFileInfo(backupPath).fileName());
     const QString metadataPath = backupPath + ".json";
@@ -494,7 +524,7 @@ SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QStr
     result.success = true;
     result.backupPath = backupPath;
     ei::log(eLogInfo, QString("Backup created event:%1 source:%2 size:%3 sha256:%4 path:%5")
-        .arg(event, source.absoluteFilePath()).arg(data.size()).arg(result.sha256, backupPath));
+        .arg(event, source.absoluteFilePath()).arg(source.size()).arg(result.sha256, backupPath));
     if(!deduplicate)
         enforceRetention(directoryPath);
     return result;
