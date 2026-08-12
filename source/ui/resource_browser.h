@@ -6,6 +6,7 @@
 
 #include <QFutureWatcher>
 #include <QImage>
+#include <QSet>
 #include <QWidget>
 
 class QComboBox;
@@ -15,6 +16,7 @@ class QPushButton;
 class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QFileSystemWatcher;
 
 struct SResourceBrowserLoadResult
 {
@@ -50,6 +52,7 @@ public:
 
 signals:
     void databaseEditorRequested(const QString& archivePath);
+    void activeResourcesPublished(const QString& archivePath);
 
 private:
     static constexpr int ArchivePathRole = Qt::UserRole + 81;
@@ -66,6 +69,7 @@ private:
     void copySelectedName();
     void openSelectedLocation();
     void openExternalArchive();
+    void indexedArchiveChanged(const QString& archivePath);
     void replaceSelected();
     void addMember();
     void renameSelected();
@@ -116,6 +120,10 @@ private:
     CResourceCatalog m_catalog;
     QVector<QString> m_activeSources;
     QString m_activeProfileName;
+    bool m_activeProfileMode{true};
+    QVector<QString> m_loadedSources;
+    QFileSystemWatcher* m_archiveWatcher{nullptr};
+    QSet<QString> m_internalPublications;
     QVector<SResourceCatalogEntry> m_visibleEntries;
     quint64 m_loadGeneration{0};
     quint64 m_previewGeneration{0};

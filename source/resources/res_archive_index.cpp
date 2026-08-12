@@ -372,6 +372,8 @@ bool CResArchiveTransaction::writeCandidate(const QString& destinationPath, QStr
         setError(error, "Could not retain the complete transaction source archive.");
         return false;
     }
+    // QSaveFile cannot atomically replace an open source on Windows.
+    source.close();
 
     struct OutputMember { QByteArray name; quint32 size; quint32 offset; quint32 time; };
     QVector<OutputMember> outputMembers;

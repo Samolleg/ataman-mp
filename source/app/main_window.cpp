@@ -888,6 +888,12 @@ MainWindow::MainWindow(QWidget* parent) :
                "A dedicated Database Editor integration request was created for:\n%1")
                 .arg(archivePath));
     });
+    connect(m_resourceBrowser, &CResourceBrowser::activeResourcesPublished,
+            this, [this](const QString& archivePath) {
+        if(m_pView) m_pView->refreshAfterResourceSetup();
+        statusBar()->showMessage(tr("Reloaded resources after publishing %1")
+            .arg(QFileInfo(archivePath).fileName()), 8000);
+    });
     m_landscapeTools = new CLandscapeTools(this);
     m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools"), this);
     m_landscapeToolsDock->setObjectName("landscapeToolsDock");

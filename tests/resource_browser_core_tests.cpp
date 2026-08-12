@@ -81,6 +81,7 @@ private slots:
     void animationFallbackInfersSelectableActionLength();
     void transactionSupportsReplaceAddRenameDelete();
     void transactionPreservesSourceAndUnchangedPayloadOffsets();
+    void transactionCanAtomicallyReplaceItsIndexedSource();
     void staleTransactionLeavesDestinationUntouched();
     void transactionRejectsCaseAndCp1251Collisions();
     void representativeArchivesIndexReadOnly();
@@ -297,6 +298,26 @@ void ResourceBrowserCoreTests::transactionPreservesSourceAndUnchangedPayloadOffs
     QVERIFY2(reopened.open(output, &error), qPrintable(error));
     QCOMPARE(reopened.member(reopened.memberIndex("unchanged.bin")).dataOffset, unchangedOffset);
     QCOMPARE(reopened.readMember("unchanged.bin", &error), QByteArray("unchanged-payload"));
+}
+
+void ResourceBrowserCoreTests::transactionCanAtomicallyReplaceItsIndexedSource()
+{
+    QTemporaryDir directory;
+    const QString path = writeArchive(directory, "loaded.res",
+        {{"keep.bin", "keep"}, {"remove.bin", "remove"}});
+    CResArchiveIndex index;
+    QString error;
+    QVERIFY2(index.open(path, &error), qPrintable(error));
+    CResArchiveTransaction transaction(index);
+    QVERIFY2(transaction.remove("remove.bin", &error), qPrintable(error));
+
+    // A loaded mod archive is a supported publication target. Publication must
+    // be atomic, semantically reopenable, and leave the retained member intact.
+    QVERIFY2(transaction.writeCandidate(path, &error), qPrintable(error));
+    CResArchiveIndex reopened;
+    QVERIFY2(reopened.open(path, &error), qPrintable(error));
+    QCOMPARE(reopened.readMember("keep.bin", &error), QByteArray("keep"));
+    QCOMPARE(reopened.memberIndex("remove.bin"), -1);
 }
 
 void ResourceBrowserCoreTests::staleTransactionLeavesDestinationUntouched()

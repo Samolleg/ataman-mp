@@ -14,9 +14,12 @@
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDateTime>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QGridLayout>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
@@ -24,6 +27,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QCheckBox>
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QMediaPlayer>
@@ -474,6 +478,9 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     m_previewWatcher = new QFutureWatcher<SResourceBrowserPreview>(this);
     connect(m_loadWatcher, &QFutureWatcher<SResourceBrowserLoadResult>::finished,
             this, &CResourceBrowser::finishLoad);
+    m_archiveWatcher = new QFileSystemWatcher(this);
+    connect(m_archiveWatcher, &QFileSystemWatcher::fileChanged,
+            this, &CResourceBrowser::indexedArchiveChanged);
     connect(m_previewWatcher, &QFutureWatcher<SResourceBrowserPreview>::finished,
             this, &CResourceBrowser::finishPreview);
     connect(m_openArchive, &QPushButton::clicked, this, &CResourceBrowser::openExternalArchive);
@@ -571,9 +578,20 @@ void CResourceBrowser::setActiveProfileSources(const QVector<QString>& sources,
     if(m_mode->currentIndex() == 0) beginLoad(sources, true, profileName);
 }
 
-void CResourceBrowser::beginLoad(const QVector<QString>& archives, bool, const QString& label)
+void CResourceBrowser::beginLoad(const QVector<QString>& archives, bool activeProfile, const QString& label)
 {
     ++m_loadGeneration;
+    m_activeProfileMode = activeProfile;
+    m_loadedSources = archives;
+    if(m_archiveWatcher)
+    {
+        const QStringList watched = m_archiveWatcher->files();
+        if(!watched.isEmpty()) m_archiveWatcher->removePaths(watched);
+        QStringList existing;
+        for(const QString& path : archives)
+            if(QFileInfo::exists(path)) existing.append(QFileInfo(path).absoluteFilePath());
+        if(!existing.isEmpty()) m_archiveWatcher->addPaths(existing);
+    }
     m_summary->setText(tr("Indexing %1 archive(s) for %2...").arg(archives.size()).arg(label));
     m_resources->clear();
     m_archives->clear();
@@ -582,6 +600,24 @@ void CResourceBrowser::beginLoad(const QVector<QString>& archives, bool, const Q
         result.catalog.build(archives, &result.errors);
         return result;
     }));
+}
+
+void CResourceBrowser::indexedArchiveChanged(const QString& archivePath)
+{
+    const QString normalized = QDir::cleanPath(QFileInfo(archivePath).absoluteFilePath()).toLower();
+    if(m_internalPublications.remove(normalized)) return;
+    const QString label = m_activeProfileMode ? m_activeProfileName
+        : QFileInfo(m_loadedSources.value(0)).fileName();
+    const auto answer = QMessageBox::question(this, tr("RES archive changed"),
+        tr("A loaded archive changed on disk:\n%1\n\nRefresh the Resource Browser and live resource lists now?")
+            .arg(archivePath), QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+    if(answer == QMessageBox::Yes)
+    {
+        beginLoad(m_loadedSources, m_activeProfileMode, label);
+        if(m_activeProfileMode) emit activeResourcesPublished(archivePath);
+    }
+    else if(QFileInfo::exists(archivePath))
+        m_archiveWatcher->addPath(archivePath);
 }
 
 void CResourceBrowser::finishLoad()
@@ -826,19 +862,74 @@ bool CResourceBrowser::publishTransaction(CResArchiveTransaction& transaction,
         emit databaseEditorRequested(context.archivePath);
         return false;
     }
-    const QString destination = QFileDialog::getSaveFileName(this,
-        tr("Save reviewed RES transaction as"),
-        QFileInfo(context.archivePath).absolutePath() + "/"
-            + QFileInfo(context.archivePath).completeBaseName() + "-edited.res",
-        tr("Evil Islands archives (*.res)"));
+    auto samePath = [](const QString& left, const QString& right) {
+        return QDir::cleanPath(QFileInfo(left).absoluteFilePath()).compare(
+            QDir::cleanPath(QFileInfo(right).absoluteFilePath()), Qt::CaseInsensitive) == 0;
+    };
+    bool sourceIsActive = false;
+    for(const QString& source : m_activeSources)
+        if(samePath(source, context.archivePath)) { sourceIsActive = true; break; }
+    const QString portableSource = QDir::fromNativeSeparators(context.archivePath).toLower();
+    const bool modOwnedSource = portableSource.contains(QStringLiteral("/mods/"));
+    const bool sourceCanBeUpdated = !sourceIsActive || modOwnedSource;
+
+    QDialog reviewDialog(this);
+    reviewDialog.setWindowTitle(tr("Apply RES changes"));
+    auto* layout = new QVBoxLayout(&reviewDialog);
+    auto* summary = new QLabel(operationSummary, &reviewDialog);
+    summary->setWordWrap(true);
+    layout->addWidget(summary);
+    auto* safety = new QLabel(&reviewDialog);
+    safety->setWordWrap(true);
+    safety->setText(sourceCanBeUpdated
+        ? tr("The target is staged, semantically reopened, race-checked, and atomically replaced. "
+             "The live resource index refreshes only after validation succeeds.")
+        : tr("This archive belongs to the active base installation and is read-only here. "
+             "Choose a mod-owned or copied archive as the target."));
+    layout->addWidget(safety);
+    auto* targetLayout = new QHBoxLayout();
+    targetLayout->addWidget(new QLabel(tr("Target archive:"), &reviewDialog));
+    auto* target = new QLineEdit(&reviewDialog);
+    const QString editedDefault = QFileInfo(context.archivePath).absolutePath() + "/"
+        + QFileInfo(context.archivePath).completeBaseName() + "-edited.res";
+    target->setText(sourceCanBeUpdated ? context.archivePath : editedDefault);
+    targetLayout->addWidget(target, 1);
+    auto* browse = new QPushButton(tr("Browse..."), &reviewDialog);
+    targetLayout->addWidget(browse);
+    layout->addLayout(targetLayout);
+    auto* backup = new QCheckBox(&reviewDialog);
+    auto updateBackupText = [backup, target]() {
+        const QFileInfo file(target->text());
+        backup->setText(QObject::tr("Create a visible backup before replacement (%1 additional space)\n%2")
+            .arg(file.exists() ? humanBytes(file.size()) : QObject::tr("target does not exist"),
+                 CBackupManager::defaultRootPath()));
+        backup->setEnabled(file.exists());
+        if(!file.exists()) backup->setChecked(false);
+    };
+    backup->setChecked(QFileInfo::exists(target->text()));
+    updateBackupText();
+    layout->addWidget(backup);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+                                          Qt::Horizontal, &reviewDialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Apply changes"));
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &reviewDialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &reviewDialog, &QDialog::reject);
+    connect(target, &QLineEdit::textChanged, &reviewDialog, [updateBackupText]() { updateBackupText(); });
+    connect(browse, &QPushButton::clicked, &reviewDialog, [this, target, updateBackupText]() {
+        const QString chosen = QFileDialog::getSaveFileName(this, tr("Choose RES transaction target"),
+            target->text(), tr("Evil Islands archives (*.res)"));
+        if(!chosen.isEmpty()) { target->setText(chosen); updateBackupText(); }
+    });
+    if(reviewDialog.exec() != QDialog::Accepted) return false;
+    const QString destination = target->text().trimmed();
     if(destination.isEmpty()) return false;
     const QString normalizedDestination = QDir::cleanPath(QFileInfo(destination).absoluteFilePath());
     const QString normalizedSource = QDir::cleanPath(QFileInfo(context.archivePath).absoluteFilePath());
-    if(normalizedDestination.compare(normalizedSource, Qt::CaseInsensitive) == 0)
+    if(!sourceCanBeUpdated && normalizedDestination.compare(normalizedSource, Qt::CaseInsensitive) == 0)
     {
-        QMessageBox::warning(this, tr("Save As required"),
-            tr("The Resource Browser never replaces its indexed source archive. "
-               "Choose a copied, mod-owned, or new override archive as the destination."));
+        QMessageBox::warning(this, tr("Protected active archive"),
+            tr("Base-installation archives are read-only. Choose a mod-owned, copied, or new override archive."));
         return false;
     }
     if(QFileInfo(destination).fileName().startsWith("database", Qt::CaseInsensitive))
@@ -847,15 +938,19 @@ bool CResourceBrowser::publishTransaction(CResArchiveTransaction& transaction,
             tr("Generic RES transactions cannot publish to database.res or databaseJmv.res."));
         return false;
     }
-    const bool replacingExisting = QFileInfo::exists(destination);
-    const QString review = tr(
-        "%1\n\nSource: %2\nDestination: %3\n\n"
-        "The archive will be staged, freshly reopened, race-checked, and atomically published. "
-        "An existing destination will be backed up first. The source archive is not modified.")
-        .arg(operationSummary, context.archivePath, destination);
-    if(QMessageBox::question(this, tr("Review RES transaction"), review)
-       != QMessageBox::Yes) return false;
-    if(replacingExisting)
+    for(const QString& activeSource : m_activeSources)
+    {
+        if(!samePath(activeSource, destination)) continue;
+        const QString portableDestination = QDir::fromNativeSeparators(destination).toLower();
+        if(!portableDestination.contains(QStringLiteral("/mods/")))
+        {
+            QMessageBox::warning(this, tr("Protected active archive"),
+                tr("Base-installation archives are read-only. Choose a mod-owned, copied, or new override archive."));
+            return false;
+        }
+    }
+    QString backupPath;
+    if(QFileInfo::exists(destination) && backup->isChecked())
     {
         const SBackupResult backup = CBackupManager().snapshotBeforeSave(QFileInfo(destination));
         if(!backup.success)
@@ -863,15 +958,34 @@ bool CResourceBrowser::publishTransaction(CResArchiveTransaction& transaction,
             QMessageBox::warning(this, tr("RES transaction backup"), backup.error);
             return false;
         }
+        backupPath = backup.backupPath;
     }
     QString error;
+    m_internalPublications.insert(normalizedDestination.toLower());
     if(!transaction.writeCandidate(destination, &error))
     {
+        m_internalPublications.remove(normalizedDestination.toLower());
         QMessageBox::warning(this, tr("RES transaction failed"), error);
         return false;
     }
+    QTimer::singleShot(2000, this, [this, normalizedDestination]() {
+        m_internalPublications.remove(normalizedDestination.toLower());
+    });
+    bool activeDestination = false;
+    for(const QString& source : m_activeSources)
+        if(samePath(source, destination)) { activeDestination = true; break; }
+    if(activeDestination)
+    {
+        beginLoad(m_activeSources, true, m_activeProfileName);
+        emit activeResourcesPublished(destination);
+    }
+    else if(!m_activeProfileMode && samePath(context.archivePath, destination))
+        beginLoad({destination}, false, QFileInfo(destination).fileName());
     QMessageBox::information(this, tr("RES transaction complete"),
-        tr("The validated archive was written to:\n%1").arg(destination));
+        backupPath.isEmpty()
+            ? tr("The validated archive was written to:\n%1\n\nNo backup was created.").arg(destination)
+            : tr("The validated archive was written to:\n%1\n\nBackup:\n%2")
+                .arg(destination, backupPath));
     return true;
 }
 
