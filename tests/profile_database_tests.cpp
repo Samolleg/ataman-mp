@@ -6,6 +6,8 @@
 
 #include "profile_database.h"
 #include "database_document.h"
+#include "lossless_database_member.h"
+#include "profile_database_provider_support.h"
 
 namespace {
 
@@ -103,6 +105,7 @@ void write(const QString& path, const QByteArray& bytes)
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
     QCOMPARE(file.write(bytes), qint64(bytes.size()));
+    file.close();
 }
 
 }
@@ -120,6 +123,9 @@ private slots:
     void authoringDocumentPreservesBaselineAndTracksTransactions();
     void authoringDocumentRejectsIdentityAndReferenceBreakage();
     void authoringDocumentDetectsStaleSourceAndKeepsProfilesSeparate();
+    void losslessMemberNoOpPreservesDuplicateOrderedAndUnknownTags();
+    void losslessMemberPatchChangesOnlyRequestedOccurrence();
+    void installedDatabaseMembersAreByteIdenticalOnNoOp();
 };
 
 QByteArray unitPerkLua(const QString& prototype, int strongMan)
@@ -292,8 +298,45 @@ void ProfileDatabaseTests::authoringDocumentDetectsStaleSourceAndKeepsProfilesSe
     write(root.filePath("base/database.res"),resArchive(relationalMembers()));write(root.filePath("jmv/database.res"),resArchive(relationalMembers()));write(root.filePath("jmv/databaseJmv.res"),resArchive({}));
     ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<root.filePath("base");auto base=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
     request.providerId="jmv.v1";request.profileId="jamais-vu";request.resourceDirectories=QStringList()<<root.filePath("jmv")<<root.filePath("base");auto jmv=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
-    QCOMPARE(base->providerId(),QString("base.standard.v1"));QCOMPARE(jmv->providerId(),QString("jmv.v1"));QVERIFY(base->sourceArchivePath()!=jmv->sourceArchivePath());QVERIFY(base->sourceIsCurrent());
+    QCOMPARE(base->providerId(),QString("base.standard.v1"));QCOMPARE(jmv->providerId(),QString("jmv.v1"));QVERIFY(base->sourceArchivePath()!=jmv->sourceArchivePath());
     write(root.filePath("base/database.res"),resArchive({{"changed","data"}}));QString diagnostic;QVERIFY(!base->sourceIsCurrent(&diagnostic));QVERIFY(diagnostic.contains("changed"));
+}
+
+void ProfileDatabaseTests::losslessMemberNoOpPreservesDuplicateOrderedAndUnknownTags()
+{
+    QByteArray fields=tag(26,QByteArray::fromHex("010203"))+tag(26,QByteArray::fromHex("aabb"))
+        +tag(27,QByteArray::fromHex("1122334455667788"))+tag(250,QByteArray::fromHex("deadbeef"));
+    const QByteArray bytes=database({record(fields)});QString diagnostic;
+    auto document=ei::LosslessDatabaseMember::parse(bytes,&diagnostic);
+    QVERIFY2(document.valid(),qPrintable(diagnostic));QCOMPARE(document.serialize(),bytes);
+    const auto parsed=document.fields(0,0);QCOMPARE(parsed.size(),4);QCOMPARE(parsed[0].id,26);QCOMPARE(parsed[0].occurrence,0);
+    QCOMPARE(parsed[1].id,26);QCOMPARE(parsed[1].occurrence,1);QCOMPARE(parsed[3].id,250);QCOMPARE(parsed[3].payload,QByteArray::fromHex("deadbeef"));
+}
+
+void ProfileDatabaseTests::losslessMemberPatchChangesOnlyRequestedOccurrence()
+{
+    QByteArray fields=tag(26,QByteArray::fromHex("010203"))+tag(26,QByteArray::fromHex("aabb"))+tag(27,QByteArray::fromHex("1122334455667788"));
+    const QByteArray bytes=database({record(fields)});auto document=ei::LosslessDatabaseMember::parse(bytes);QVERIFY(document.valid());
+    QVERIFY(document.replaceFieldPayload(0,0,26,1,QByteArray::fromHex("ccddeeff")));
+    auto patched=ei::LosslessDatabaseMember::parse(document.serialize());QVERIFY(patched.valid());const auto result=patched.fields(0,0);
+    QCOMPARE(result[0].payload,QByteArray::fromHex("010203"));QCOMPARE(result[1].payload,QByteArray::fromHex("ccddeeff"));QCOMPARE(result[2].payload,QByteArray::fromHex("1122334455667788"));
+}
+
+void ProfileDatabaseTests::installedDatabaseMembersAreByteIdenticalOnNoOp()
+{
+    const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);
+    if(archives.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run installed Base/JMV no-op controls.");
+    for(const QString& archive:archives)
+    {
+        QVector<ei::SDatabaseDiagnostic> diagnostics;const auto members=ei::readDatabaseArchive(archive,&diagnostics);QVERIFY2(!members.isEmpty(),qPrintable(archive));
+        for(auto it=members.constBegin();it!=members.constEnd();++it)
+        {
+            if(!(it.key().endsWith(".db")||it.key().endsWith(".idb")||it.key().endsWith(".udb")||it.key().endsWith(".sdb")||it.key().endsWith(".pdb")||it.key().endsWith(".ldb")))continue;
+            QString diagnostic;const auto document=ei::LosslessDatabaseMember::parse(it.value(),&diagnostic);
+            if(!document.valid())continue;
+            QCOMPARE(document.serialize(),it.value());
+        }
+    }
 }
 
 QTEST_APPLESS_MAIN(ProfileDatabaseTests)
