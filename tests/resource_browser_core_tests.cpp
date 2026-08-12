@@ -74,6 +74,7 @@ private slots:
     void catalogPreservesRuntimePrecedenceAndOverrideChain();
     void transactionSupportsReplaceAddRenameDelete();
     void transactionRejectsCaseAndCp1251Collisions();
+    void representativeArchivesIndexReadOnly();
 };
 
 void ResourceBrowserCoreTests::fileIndexIsMetadataOnlyAndReadsLazily()
@@ -204,6 +205,23 @@ void ResourceBrowserCoreTests::transactionRejectsCaseAndCp1251Collisions()
     error.clear();
     QVERIFY(!transaction.add(QString::fromUtf8("日本語.txt"), "two", 0, &error));
     QVERIFY(error.contains("CP1251", Qt::CaseInsensitive));
+}
+
+void ResourceBrowserCoreTests::representativeArchivesIndexReadOnly()
+{
+    const QString configured = qEnvironmentVariable("EI_RES_READONLY_PROBES");
+    if(configured.isEmpty()) QSKIP("No read-only representative archive paths configured.");
+    for(const QString& path : configured.split(';', Qt::SkipEmptyParts))
+    {
+        QElapsedTimer timer;
+        timer.start();
+        CResArchiveIndex index;
+        QString error;
+        QVERIFY2(index.open(path, &error), qPrintable(path + ": " + error));
+        QCOMPARE(index.retainedPayloadBytes(), qint64(0));
+        qInfo().noquote() << QString("readonly-res-index path=%1 size=%2 members=%3 elapsedMs=%4 retainedPayloadBytes=0")
+            .arg(path).arg(index.sourceSize()).arg(index.memberCount()).arg(timer.elapsed());
+    }
 }
 
 QTEST_APPLESS_MAIN(ResourceBrowserCoreTests)
