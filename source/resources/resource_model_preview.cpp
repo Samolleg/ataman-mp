@@ -22,6 +22,20 @@ constexpr quint64 kResEntrySize = 22;
 constexpr quint32 kMaxArrayItems = 3000000;
 constexpr int kMaxNestedMembers = 10000;
 constexpr int kMaxPreviewTriangles = 50000;
+constexpr int kMaxAssemblyTriangles = 300000;
+
+bool isBaseAnatomyPart(const QString& partName)
+{
+    static const QSet<QString> anatomy = {
+        QStringLiteral("hp"), QStringLiteral("bd"), QStringLiteral("hd"),
+        QStringLiteral("hr"), QStringLiteral("lh1"), QStringLiteral("rh1"),
+        QStringLiteral("lh2"), QStringLiteral("rh2"), QStringLiteral("lh3"),
+        QStringLiteral("rh3"), QStringLiteral("ll1"), QStringLiteral("rl1"),
+        QStringLiteral("ll2"), QStringLiteral("rl2"), QStringLiteral("ll3"),
+        QStringLiteral("rl3")
+    };
+    return anatomy.contains(partName.trimmed().toLower());
+}
 
 struct Triangle
 {
@@ -381,6 +395,19 @@ int inferredAnimationLogicalLength(const SAnimationClip& clip)
     return qMax(1, samples - 1);
 }
 
+int resourceModelPreviewTriangleBudget(const QString& partName, int partCount,
+                                       int anatomyPartCount)
+{
+    if(partCount <= 0) return 1;
+    if(anatomyPartCount <= 0)
+        return qMax(1, kMaxPreviewTriangles / partCount);
+    if(isBaseAnatomyPart(partName))
+        return qMax(2000, kMaxPreviewTriangles / qMax(1, anatomyPartCount));
+    const int optionalCount = qMax(1, partCount - anatomyPartCount);
+    const int optionalPool = kMaxAssemblyTriangles - kMaxPreviewTriangles;
+    return qMax(250, optionalPool / optionalCount);
+}
+
 bool resourcePayloadLooksText(const QByteArray& bytes)
 {
     if(bytes.isEmpty()) return true;
@@ -430,9 +457,10 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
     if(members.isEmpty()) return scene;
     QMap<QString, QString> parents;
     int figurePartCount = 0;
+    int anatomyPartCount = 0;
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
-        if(it.value().startsWith("FIG8")) ++figurePartCount;
-    const int perPartTriangleBudget = qMax(1, kMaxPreviewTriangles / qMax(1, figurePartCount));
+        if(it.value().startsWith("FIG8"))
+        { ++figurePartCount; if(isBaseAnatomyPart(it.key())) ++anatomyPartCount; }
     bool sampled = false;
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
     {
@@ -497,6 +525,8 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
             continue;
         }
         SResourceModelPart part; part.name = it.key();
+        const int perPartTriangleBudget = resourceModelPreviewTriangleBudget(
+            it.key(), figurePartCount, anatomyPartCount);
         if(parsed.size() > perPartTriangleBudget)
         {
             parsed.resize(perPartTriangleBudget);
@@ -517,8 +547,8 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
     }
     if(sampled)
         scene.diagnostics.append(QStringLiteral(
-            "Interactive preview sampled every assembly part within its %1-triangle safety budget.")
-            .arg(kMaxPreviewTriangles));
+            "Interactive preview sampled assembly variants within a %1-triangle safety ceiling while preserving base anatomy detail.")
+            .arg(kMaxAssemblyTriangles));
     scene.kind = QStringLiteral("MOD assembly");
     scene.valid = !scene.parts.isEmpty();
     return scene;
@@ -549,19 +579,29 @@ QImage renderResourceModelScene(const SResourceModelScene& scene,
             for(const SResourceModelVertex& vertex : triangle.vertices)
                 radius = qMax(radius, (vertex.position - center).length());
     QVector<Triangle> triangles = posedTriangles(scene, view);
-    QMatrix4x4 camera;
-    camera.setToIdentity();
-    camera.translate(center);
-    camera.rotate(-view.elevationDegrees, 1.0f, 0.0f, 0.0f);
-    camera.rotate(view.azimuthDegrees, 0.0f, 0.0f, 1.0f);
-    camera.rotate(view.modelPitchDegrees, 1.0f, 0.0f, 0.0f);
-    camera.rotate(view.modelYawDegrees, 0.0f, 0.0f, 1.0f);
-    camera.translate(-center);
+    QMatrix4x4 model;
+    model.setToIdentity();
+    model.translate(center);
+    model.rotate(view.modelYawDegrees, 0.0f, 0.0f, 1.0f);
+    model.rotate(view.modelPitchDegrees, 1.0f, 0.0f, 0.0f);
+    model.translate(-center);
+    const float yaw = qDegreesToRadians(view.azimuthDegrees);
+    const float elevation = qDegreesToRadians(view.elevationDegrees);
+    const QVector3D right(std::cos(yaw), std::sin(yaw), 0.0f);
+    const QVector3D depth(std::sin(yaw) * std::cos(elevation),
+                          -std::cos(yaw) * std::cos(elevation), std::sin(elevation));
+    const QVector3D up = QVector3D::crossProduct(depth, right).normalized();
+    const auto orbit = [&](const QVector3D& point) {
+        const QVector3D relative = model * point - center;
+        return center + QVector3D(QVector3D::dotProduct(relative, right),
+                                  QVector3D::dotProduct(relative, depth),
+                                  QVector3D::dotProduct(relative, up));
+    };
     for(Triangle& triangle : triangles)
     {
-        triangle.a = camera * triangle.a;
-        triangle.b = camera * triangle.b;
-        triangle.c = camera * triangle.c;
+        triangle.a = orbit(triangle.a);
+        triangle.b = orbit(triangle.b);
+        triangle.c = orbit(triangle.c);
     }
     return renderInteractiveTriangles(triangles, center, radius, view.zoom, view.pan, size);
 }

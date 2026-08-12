@@ -79,7 +79,9 @@ private slots:
     void fig8CpuPreviewRendersGeometry();
     void modelSceneDefaultsToAboveGroundCamera();
     void interactiveModelViewKeepsStableFramingForPanAndZoom();
+    void cameraOrbitAndModelRotationAreDistinctTransforms();
     void modelPartDefaultsKeepHumanoidAnatomyAndCreatureAssemblies();
+    void largeHumanoidAssembliesReserveDetailForBaseAnatomy();
     void textSnifferAcceptsExtensionlessCp1251AndRejectsBinary();
     void animationFallbackInfersSelectableActionLength();
     void transactionSupportsReplaceAddRenameDelete();
@@ -266,6 +268,25 @@ void ResourceBrowserCoreTests::interactiveModelViewKeepsStableFramingForPanAndZo
     QVERIFY(foreground(panned).center().x() > foreground(zoomed).center().x() + 20);
 }
 
+void ResourceBrowserCoreTests::cameraOrbitAndModelRotationAreDistinctTransforms()
+{
+    ei::SResourceModelScene scene; scene.valid = true;
+    ei::SResourceModelPart part; part.name = "asymmetric";
+    for(const QVector<QVector3D>& points : {
+        QVector<QVector3D>{QVector3D(-2, 0, 0), QVector3D(1, 1, 0), QVector3D(0, 0, 3)},
+        QVector<QVector3D>{QVector3D(0, 0, 3), QVector3D(1, 1, 0), QVector3D(0, 2, 1)}})
+    {
+        ei::SResourceModelTriangle triangle;
+        for(int index = 0; index < 3; ++index) triangle.vertices[index].position = points[index];
+        part.triangles.append(triangle);
+    }
+    scene.parts.append(part);
+    ei::SResourceModelView model; model.modelYawDegrees = 35; model.modelPitchDegrees = 20;
+    ei::SResourceModelView camera; camera.azimuthDegrees = 35; camera.elevationDegrees = 20;
+    QVERIFY(ei::renderResourceModelScene(scene, model, QSize(400, 300))
+        != ei::renderResourceModelScene(scene, camera, QSize(400, 300)));
+}
+
 void ResourceBrowserCoreTests::modelPartDefaultsKeepHumanoidAnatomyAndCreatureAssemblies()
 {
     ei::SResourceModelScene humanoid;
@@ -288,6 +309,16 @@ void ResourceBrowserCoreTests::modelPartDefaultsKeepHumanoidAnatomyAndCreatureAs
     }
     const QSet<QString> creatureVisible = ei::defaultVisibleModelParts(creature, "unmodg");
     QCOMPARE(creatureVisible.size(), creature.parts.size());
+}
+
+void ResourceBrowserCoreTests::largeHumanoidAssembliesReserveDetailForBaseAnatomy()
+{
+    const int bodyBudget = ei::resourceModelPreviewTriangleBudget("bd", 779, 16);
+    const int armorBudget = ei::resourceModelPreviewTriangleBudget("bd.armor24", 779, 16);
+    QVERIFY(bodyBudget >= 2000);
+    QVERIFY(armorBudget >= 250);
+    QVERIFY(bodyBudget > armorBudget * 5);
+    QCOMPARE(ei::resourceModelPreviewTriangleBudget("leftwing", 20, 0), 2500);
 }
 
 void ResourceBrowserCoreTests::textSnifferAcceptsExtensionlessCp1251AndRejectsBinary()
