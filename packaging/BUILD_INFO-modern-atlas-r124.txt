@@ -1,6 +1,6 @@
 EI Mapper: Endurance Edition 0.3.0-alpha.26
 Closed test build: modern terrain resource identity and textures.res publishing R124
-Executable source commit: c36c02d7
+Executable source baseline: c36c02d7 plus the identity-only finalization follow-up reported in handoff
 Semantic source commit: a910c24c771111e7b9ad150725558e7a17f8ba8e
 Preset SHA-256: 1B8493A9CC562603D57B4BDE97F069534B94AFE9A85D1F901C0AF7941B1E6D7A
 Identity policy: flat <map>_<12 hex>; explicit new-content or use/replace action

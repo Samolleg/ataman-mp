@@ -7802,9 +7802,10 @@ void CView::finalizeVirtualTerrainAtlas()
 {
     const QString requestedIdentity = m_requestedTerrainResourceIdentity;
     const bool requestedReplacement = m_requestedTerrainIdentityReplacement;
+    const bool identityOnlyRequest = m_requestedTerrainIdentityFinalization;
     m_requestedTerrainResourceIdentity.clear();
     m_requestedTerrainIdentityReplacement = false;
-    const bool identityOnlyRequest = !requestedIdentity.isEmpty();
+    m_requestedTerrainIdentityFinalization = false;
     bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
         ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land);
     bool overlayActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay)
@@ -9796,6 +9797,7 @@ void CView::openMapParameters()
     connect(finalizeNewIdentity, &QPushButton::clicked, dock, [this, dock]() {
         m_requestedTerrainResourceIdentity.clear();
         m_requestedTerrainIdentityReplacement = false;
+        m_requestedTerrainIdentityFinalization = true;
         dock->hide();
         finalizeVirtualTerrainAtlas();
     });
@@ -9810,6 +9812,7 @@ void CView::openMapParameters()
         }
         m_requestedTerrainResourceIdentity = identity;
         m_requestedTerrainIdentityReplacement = true;
+        m_requestedTerrainIdentityFinalization = true;
         dock->hide();
         finalizeVirtualTerrainAtlas();
     });

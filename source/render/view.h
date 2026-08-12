@@ -591,6 +591,7 @@ private:
     quint32 m_tileStrokeDistributionSeed{0};
     QString m_requestedTerrainResourceIdentity;
     bool m_requestedTerrainIdentityReplacement{false};
+    bool m_requestedTerrainIdentityFinalization{false};
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};
