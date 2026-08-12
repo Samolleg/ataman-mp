@@ -736,6 +736,8 @@ void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyB
     if(editor && value->type()==eObjParam_UNIT_PROTOTYPE)
     {
         editor->setToolTip(tr("Right-click to open this prototype in the Database Editor."));
+        editor->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(editor,&QWidget::customContextMenuRequested,this,[this,editor,row](const QPoint& pos){showPropertyContextMenu(QList<int>()<<row,editor->mapToGlobal(pos));});
         if(QLineEdit* line=editor->findChild<QLineEdit*>())
         {
             line->setProperty("propertyRow",row);

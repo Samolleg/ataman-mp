@@ -108,6 +108,7 @@ private:
     void initShortcuts();
     void connectUiButtons();
     bool isExitAllowed();
+    bool isDatabaseExitAllowed();
     void closeAll();
     void showGameAndModSetup();
     void generateMinimap();

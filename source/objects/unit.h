@@ -214,6 +214,7 @@ public:
     const QStringList& visualDiagnostics() const { return m_visualDiagnostics; }
     void preloadVisualResources();
     bool needsVisualResolution() const;
+    void invalidateDatabaseVisual();
     bool hasPreparedAppearance() const;
     bool needsAppearancePreparation() const;
     bool describeAppearancePreparationTask(SUnitAppearancePreparationTask* task) const;

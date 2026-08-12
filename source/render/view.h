@@ -269,6 +269,8 @@ public:
     CTreeView* objectTree() {return m_pTree;}
     int nSelectedNodes();
     QList<CNode*> selectedNodes();
+    void refreshDatabaseVisuals(const QString& tableKey = QString(),
+                                const QString& rowKey = QString());
     QList<CNode*> selectionSnapshot();
     void restoreSelection(const QList<CNode*>& selection);
     bool selectObjectByProvenance(const QString& mobPath, quint32 nid,

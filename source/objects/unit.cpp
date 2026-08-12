@@ -154,6 +154,14 @@ bool CUnit::needsVisualResolution() const
         || m_resolvedVisualRevision != m_visualRevision;
 }
 
+void CUnit::invalidateDatabaseVisual()
+{
+    ++m_visualRevision;
+    m_preparedAppearanceValid=false;
+    m_appearancePreparationInFlight=false;
+    invalidateTransientVisual();
+}
+
 bool CUnit::hasPreparedAppearance() const
 {
     return m_preparedAppearanceValid

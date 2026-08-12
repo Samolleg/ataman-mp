@@ -11719,6 +11719,16 @@ void CView::viewParameters()
     emit selectionStateChanged(true);
 }
 
+void CView::refreshDatabaseVisuals(const QString& tableKey,const QString& rowKey)
+{
+    const bool targeted=tableKey==QStringLiteral("monsters")&&!rowKey.trimmed().isEmpty();
+    for(CMob* mob:m_aMob)if(mob)for(CNode* node:mob->nodes())if(CUnit* unit=dynamic_cast<CUnit*>(node))
+        if(!targeted||unit->databaseName().compare(rowKey,Qt::CaseInsensitive)==0)
+            unit->invalidateDatabaseVisual();
+    m_unitAppearanceProgressTotal=0;m_unitAppearanceProgressCompleted=0;m_unitAppearanceProgressPending=false;m_unitAppearanceLastLoggedCompleted=-1;
+    viewParameters();update();
+}
+
 void CView::setLogicSlotIndex(int index)
 {
     const int bounded = qBound(0, index, 4);

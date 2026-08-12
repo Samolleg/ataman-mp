@@ -130,20 +130,22 @@ class CDatabaseHistoryCommand final : public QUndoCommand
 {
 public:
     CDatabaseHistoryCommand(const QSharedPointer<ei::DatabaseDocument>& document,
-                            ei::DatabaseEditorDialog* dialog, const QString& description)
-        : QUndoCommand(description), m_document(document), m_dialog(dialog) {}
+                            ei::DatabaseEditorDialog* dialog, CView* view,
+                            const QString& description,const QString& tableKey,
+                            const QString& rowKey)
+        : QUndoCommand(description), m_document(document), m_dialog(dialog),m_view(view),m_tableKey(tableKey),m_rowKey(rowKey) {}
     void undo() override { if(m_document->undo()) refresh(); }
     void redo() override { if(m_initialRedo){m_initialRedo=false;return;} if(m_document->redo()) refresh(); }
 private:
     void refresh()
     {
-        if(m_dialog) { m_dialog->refreshFromHistory(); return; }
-        QString diagnostic;
-        const auto snapshot=m_document->currentSnapshot(&diagnostic);
-        if(snapshot) ei::ProfileDatabaseContext::instance().publishEditedSnapshot(snapshot);
+        if(m_dialog)m_dialog->refreshFromHistory();else{QString diagnostic;const auto snapshot=m_document->currentSnapshot(&diagnostic);if(snapshot)ei::ProfileDatabaseContext::instance().publishEditedSnapshot(snapshot);}
+        if(m_view)m_view->refreshDatabaseVisuals(m_tableKey,m_rowKey);
     }
     QSharedPointer<ei::DatabaseDocument> m_document;
     QPointer<ei::DatabaseEditorDialog> m_dialog;
+    QPointer<CView> m_view;
+    QString m_tableKey,m_rowKey;
     bool m_initialRedo{true};
 };
 
@@ -1057,13 +1059,14 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog.exec();
         processMapTableSaveReports(dialog.saveReports());
     });
-    connect(openDatabaseEditor, &QAction::triggered, this, [this]()
+    const std::function<void(const QString&)> showDatabaseEditor=[this](const QString& prototype)
     {
         if(m_databaseEditorDialog)
         {
             m_databaseEditorDialog->show();
             m_databaseEditorDialog->raise();
             m_databaseEditorDialog->activateWindow();
+            if(!prototype.isEmpty())m_databaseEditorDialog->selectPrototype(prototype);
             return;
         }
         const auto snapshot = ei::ProfileDatabaseContext::instance().current();
@@ -1080,12 +1083,13 @@ MainWindow::MainWindow(QWidget* parent) :
             return;
         }
         m_databaseEditorDialog = new ei::DatabaseEditorDialog(m_databaseDocument, this);
-        m_databaseEditorDialog->setAttribute(Qt::WA_DeleteOnClose);
         connect(m_databaseEditorDialog,&ei::DatabaseEditorDialog::transactionCommitted,
-                this,[this](const QString& description){m_undoStack->push(new CDatabaseHistoryCommand(m_databaseDocument,m_databaseEditorDialog,description));});
+                this,[this](const QString& description,const QString& tableKey,const QString& rowKey){m_undoStack->push(new CDatabaseHistoryCommand(m_databaseDocument,m_databaseEditorDialog,m_pView,description,tableKey,rowKey));m_pView->refreshDatabaseVisuals(tableKey,rowKey);});
         m_databaseEditorDialog->show();
-    });
-    connect(m_pView,&CView::openDatabasePrototypeRequested,this,[openDatabaseEditor](const QString&){openDatabaseEditor->trigger();});
+        if(!prototype.isEmpty())m_databaseEditorDialog->selectPrototype(prototype);
+    };
+    connect(openDatabaseEditor,&QAction::triggered,this,[showDatabaseEditor](){showDatabaseEditor(QString());});
+    connect(m_pView,&CView::openDatabasePrototypeRequested,this,[showDatabaseEditor](const QString& prototype){showDatabaseEditor(prototype);});
     connect(generateMinimapAction, &QAction::triggered,
             this, &MainWindow::generateMinimap);
     connect(persistAiGraphAction, &QAction::triggered,
@@ -1831,6 +1835,8 @@ MainWindow::MainWindow(QWidget* parent) :
 MainWindow::~MainWindow()
 {
     saveUiState();
+    delete m_databaseEditorDialog;
+    m_databaseEditorDialog=nullptr;
     delete m_minimapExportDialog;
     m_minimapExportDialog = nullptr;
     if(m_pView && m_pView->prepareForApplicationShutdown())
@@ -6342,6 +6348,7 @@ void MainWindow::closeHotReloadProgress()
 
 bool MainWindow::isExitAllowed()
 {
+    if(!isDatabaseExitAllowed())return false;
     QStringList dirtyMobs;
     if(m_pView)
         for(CMob* mob : m_pView->mobs())
@@ -6358,6 +6365,24 @@ bool MainWindow::isExitAllowed()
     else if(m_pView)
         m_pView->prepareDocumentTransition();
     return m_pView->onExit();
+}
+
+bool MainWindow::isDatabaseExitAllowed()
+{
+    if(!m_databaseDocument)return true;
+    QString diagnostic;
+    if(!m_databaseDocument->hasUnappliedChanges(&diagnostic))return true;
+    QMessageBox box(QMessageBox::Warning,tr("Unapplied database changes"),tr("The active database has unapplied changes. Apply them before deciding whether to save maps, so saved maps cannot reference database rows that were never published."),QMessageBox::NoButton,this);
+    QPushButton* apply=box.addButton(tr("Apply Database"),QMessageBox::AcceptRole);
+    QPushButton* discard=box.addButton(tr("Exit Without Applying"),QMessageBox::DestructiveRole);
+    QPushButton* cancel=box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(apply);box.setEscapeButton(cancel);box.exec();
+    if(box.clickedButton()==cancel)return false;
+    if(box.clickedButton()==discard)return true;
+    CBackupManager backups;const SBackupResult backup=backups.snapshotBeforeSave(QFileInfo(m_databaseDocument->sourceArchivePath()));
+    if(!backup.success&&!backup.skipped){QMessageBox::critical(this,tr("Database apply failed"),backup.error);return false;}
+    if(!m_databaseDocument->applyToSource(&diagnostic)){QMessageBox::critical(this,tr("Database apply failed"),diagnostic);return false;}
+    return true;
 }
 
 void MainWindow::closeAll()
