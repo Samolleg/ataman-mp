@@ -2,6 +2,7 @@
 
 #include "mmp_inspector.h"
 #include "backup_manager.h"
+#include "resource_model_preview.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QApplication>
@@ -70,7 +71,8 @@ QString hexDump(const QByteArray& bytes)
     return result;
 }
 
-SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex)
+SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
+                                    CResourceCatalog catalog)
 {
     SResourceBrowserPreview result;
     if(memberIndex < 0 || memberIndex >= archive.memberCount())
@@ -102,12 +104,70 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex)
         const ei::SMmpInspection inspection = ei::inspectMmp(payload);
         if(inspection.valid)
         {
-            result.image = inspection.baseImage;
+            result.image = ei::mmpEditorPreviewImage(inspection.baseImage);
             result.details += QStringLiteral(" | %1 %2 x %3 | %4 mip level(s)")
                 .arg(inspection.formatName).arg(inspection.width).arg(inspection.height)
                 .arg(inspection.authoredMipSizes.size());
         }
         else result.text = inspection.diagnostic;
+    }
+    else if(type == "3D / animation")
+    {
+        const QString suffix = QFileInfo(member.name).suffix().toLower();
+        ei::SResourceModelPreview model;
+        if(suffix == "fig") model = ei::previewFig8(payload);
+        else if(suffix == "mod")
+        {
+            QByteArray bon;
+            const QString companion = QFileInfo(member.name).completeBaseName() + ".bon";
+            const QVector<SResourceCatalogEntry> providers = catalog.providers(companion);
+            if(!providers.isEmpty())
+            {
+                const CResArchiveIndex* provider = catalog.archive(providers.first().archivePriority);
+                if(provider) bon = provider->readMember(providers.first().memberIndex);
+            }
+            model = ei::previewModAssembly(payload, bon);
+        }
+        else if(suffix == "anm")
+        {
+            int actions = 0, channels = 0;
+            const QStringList animation = ei::inspectAnimationArchive(payload, &actions, &channels);
+            result.text = animation.join('\n');
+            result.details += QStringLiteral(" | %1 action(s) | %2 component channel(s)")
+                .arg(actions).arg(channels);
+            const QString companion = QFileInfo(member.name).completeBaseName() + ".mod";
+            const QVector<SResourceCatalogEntry> providers = catalog.providers(companion);
+            if(!providers.isEmpty())
+            {
+                const CResArchiveIndex* provider = catalog.archive(providers.first().archivePriority);
+                if(provider)
+                {
+                    const QByteArray mod = provider->readMember(providers.first().memberIndex);
+                    const QString bonName = QFileInfo(companion).completeBaseName() + ".bon";
+                    QByteArray bon;
+                    const QVector<SResourceCatalogEntry> bonProviders = catalog.providers(bonName);
+                    if(!bonProviders.isEmpty())
+                    {
+                        const CResArchiveIndex* bonArchive = catalog.archive(bonProviders.first().archivePriority);
+                        if(bonArchive) bon = bonArchive->readMember(bonProviders.first().memberIndex);
+                    }
+                    model = ei::previewModAssembly(mod, bon);
+                    result.details += QStringLiteral(" | paired model %1").arg(companion);
+                }
+            }
+            result.text += QStringLiteral("\n\nPose playback requires provider ADB action timing; "
+                                          "the browser does not infer it for a standalone ANM.");
+        }
+        if(model.valid)
+        {
+            result.image = model.image;
+            result.details += QStringLiteral(" | ") + model.details;
+        }
+        if(!model.diagnostics.isEmpty())
+            result.text += (result.text.isEmpty() ? QString() : QStringLiteral("\n\n"))
+                + model.diagnostics.join('\n');
+        if(suffix == "lnk" || suffix == "adb")
+            result.text = hexDump(payload.left(kHexPrefixBytes));
     }
     else if(type == "Text")
     {
@@ -158,7 +218,11 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     auto* horizontal = new QSplitter(Qt::Horizontal, this);
     m_archives = new QTreeWidget(horizontal);
     m_archives->setObjectName(QStringLiteral("resourceArchiveTree"));
-    m_archives->setHeaderLabels({tr("Archives / folders")});
+    m_archives->setRootIsDecorated(false);
+    m_archives->setHeaderLabels({tr("Archive"), tr("Members"), tr("Size")});
+    m_archives->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_archives->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_archives->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_resources = new QTreeWidget(horizontal);
     m_resources->setObjectName(QStringLiteral("resourceContentView"));
     m_resources->setAlternatingRowColors(true);
@@ -226,6 +290,8 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     connect(m_resources, &QTreeWidget::itemSelectionChanged, this, [this]() {
         beginPreview(m_resources->currentItem());
     });
+    connect(m_archives, &QTreeWidget::itemSelectionChanged,
+            this, &CResourceBrowser::rebuildList);
     connect(m_export, &QPushButton::clicked, this, &CResourceBrowser::exportSelected);
     connect(m_copyName, &QPushButton::clicked, this, &CResourceBrowser::copySelectedName);
     connect(m_openLocation, &QPushButton::clicked, this, &CResourceBrowser::openSelectedLocation);
@@ -263,18 +329,23 @@ void CResourceBrowser::finishLoad()
 {
     const SResourceBrowserLoadResult result = m_loadWatcher->result();
     m_catalog = result.catalog;
+    auto* allArchives = new QTreeWidgetItem(m_archives,
+        {tr("All archives"), QString::number(m_catalog.entries().size()), QString()});
+    allArchives->setData(0, ArchivePathRole, QString());
     for(int priority = 0; ; ++priority)
     {
         const CResArchiveIndex* archive = m_catalog.archive(priority);
         if(!archive) break;
-        auto* item = new QTreeWidgetItem(m_archives, {QFileInfo(archive->path()).fileName()});
+        auto* item = new QTreeWidgetItem(m_archives,
+            {QFileInfo(archive->path()).fileName(), QString::number(archive->memberCount()),
+             humanBytes(archive->sourceSize())});
         item->setToolTip(0, archive->path());
-        item->addChild(new QTreeWidgetItem({tr("%1 members | %2")
-            .arg(archive->memberCount()).arg(humanBytes(archive->sourceSize()))}));
+        item->setData(0, ArchivePathRole, archive->path());
     }
+    m_archives->setCurrentItem(allArchives);
     rebuildList();
     m_summary->setText(tr("%1 members from %2 archive(s)%3")
-        .arg(m_catalog.entries().size()).arg(m_archives->topLevelItemCount())
+        .arg(m_catalog.entries().size()).arg(qMax(0, m_archives->topLevelItemCount() - 1))
         .arg(result.errors.isEmpty() ? QString() : tr("; %1 archive(s) rejected").arg(result.errors.size())));
 }
 
@@ -284,7 +355,10 @@ void CResourceBrowser::rebuildList()
     m_visibleEntries.clear();
     const QString search = m_search->text().trimmed();
     const QString requestedType = m_typeFilter->currentIndex() ? m_typeFilter->currentText() : QString();
-    for(const SResourceCatalogEntry& entry : m_catalog.entries())
+    const QString archiveFilter = selectedArchivePath();
+    const QVector<SResourceCatalogEntry> candidates = archiveFilter.isEmpty()
+        ? m_catalog.entries() : m_catalog.entriesForArchive(archiveFilter);
+    for(const SResourceCatalogEntry& entry : candidates)
     {
         const QString type = suffixType(entry.logicalName);
         if(!search.isEmpty() && !entry.logicalName.contains(search, Qt::CaseInsensitive)
@@ -300,6 +374,12 @@ void CResourceBrowser::rebuildList()
         item->setData(0, kEntryRole, row);
         item->setToolTip(4, entry.archivePath);
     }
+}
+
+QString CResourceBrowser::selectedArchivePath() const
+{
+    QTreeWidgetItem* item = m_archives ? m_archives->currentItem() : nullptr;
+    return item ? item->data(0, ArchivePathRole).toString() : QString();
 }
 
 const SResourceCatalogEntry* CResourceBrowser::selectedEntry() const
@@ -325,7 +405,8 @@ void CResourceBrowser::beginPreview(QTreeWidgetItem*)
         chainText += QString("\n%1 %2").arg(provider.winning ? tr("Active:") : tr("Overridden:"), provider.archivePath);
     m_previewDetails->setText(entry->logicalName + chainText);
     m_databaseEditor->setVisible(QFileInfo(entry->archivePath).fileName().startsWith("database", Qt::CaseInsensitive));
-    m_previewWatcher->setFuture(QtConcurrent::run(makePreview, *archive, entry->memberIndex));
+    m_previewWatcher->setFuture(QtConcurrent::run(
+        makePreview, *archive, entry->memberIndex, m_catalog));
 }
 
 void CResourceBrowser::finishPreview()

@@ -2,6 +2,8 @@
 
 #include "res_archive_index.h"
 #include "resource_catalog.h"
+#include "resource_model_preview.h"
+#include "mmp_inspector.h"
 
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -72,7 +74,12 @@ private slots:
     void sparse765MiBArchiveIndexesWithoutPayloadRead();
     void staleArchiveRejectsLazyRead();
     void catalogPreservesRuntimePrecedenceAndOverrideChain();
+    void catalogFiltersOneArchiveExactly();
+    void mmpWidgetPreviewUsesEditorOrientation();
+    void fig8CpuPreviewRendersGeometry();
     void transactionSupportsReplaceAddRenameDelete();
+    void transactionPreservesSourceAndUnchangedPayloadOffsets();
+    void staleTransactionLeavesDestinationUntouched();
     void transactionRejectsCaseAndCp1251Collisions();
     void representativeArchivesIndexReadOnly();
 };
@@ -166,6 +173,60 @@ void ResourceBrowserCoreTests::catalogPreservesRuntimePrecedenceAndOverrideChain
     QCOMPARE(catalog.entries().size(), 4);
 }
 
+void ResourceBrowserCoreTests::catalogFiltersOneArchiveExactly()
+{
+    QTemporaryDir directory;
+    const QString first = writeArchive(directory, "first.res", {{"a.fig", "a"}, {"b.mmp", "b"}});
+    const QString second = writeArchive(directory, "second.res", {{"c.anm", "c"}});
+    CResourceCatalog catalog;
+    QVERIFY(catalog.build({first, second}));
+    const QVector<SResourceCatalogEntry> filtered = catalog.entriesForArchive(first);
+    QCOMPARE(filtered.size(), 2);
+    for(const SResourceCatalogEntry& entry : filtered)
+        QCOMPARE(QFileInfo(entry.archivePath).absoluteFilePath(), QFileInfo(first).absoluteFilePath());
+}
+
+void ResourceBrowserCoreTests::mmpWidgetPreviewUsesEditorOrientation()
+{
+    QImage decoded(1, 2, QImage::Format_ARGB32);
+    decoded.setPixelColor(0, 0, Qt::red);
+    decoded.setPixelColor(0, 1, Qt::blue);
+    const QImage preview = ei::mmpEditorPreviewImage(decoded);
+    QCOMPARE(preview.pixelColor(0, 0), QColor(Qt::blue));
+    QCOMPARE(preview.pixelColor(0, 1), QColor(Qt::red));
+}
+
+void ResourceBrowserCoreTests::fig8CpuPreviewRendersGeometry()
+{
+    QByteArray fig;
+    QDataStream stream(&fig, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream << quint32(0x38474946) << quint32(1) << quint32(1) << quint32(3)
+           << quint32(3) << quint32(3) << quint32(0) << quint32(0)
+           << quint32(0) << quint32(0);
+    for(int block = 0; block < 3; ++block)
+        for(int morph = 0; morph < 8; ++morph)
+            stream << 0.0f << 0.0f << 0.0f;
+    for(int morph = 0; morph < 8; ++morph) stream << 1.0f;
+    const QVector<QVector3D> vertices = {QVector3D(-1, 0, 0), QVector3D(1, 0, 0),
+                                         QVector3D(0, 0, 1), QVector3D(0, 0, 0)};
+    for(int axis = 0; axis < 3; ++axis)
+        for(int morph = 0; morph < 8; ++morph)
+            for(const QVector3D& vertex : vertices) stream << vertex[axis];
+    for(int axis = 0; axis < 4; ++axis)
+        for(int lane = 0; lane < 4; ++lane) stream << (axis == 2 ? 1.0f : 0.0f);
+    for(int uv = 0; uv < 3; ++uv) stream << 0.0f << 0.0f;
+    stream << quint16(0) << quint16(1) << quint16(2);
+    stream << quint16(0) << quint16(0) << quint16(0)
+           << quint16(1) << quint16(0) << quint16(1)
+           << quint16(2) << quint16(0) << quint16(2);
+    const ei::SResourceModelPreview preview = ei::previewFig8(fig, QSize(320, 240));
+    QVERIFY2(preview.valid, qPrintable(preview.diagnostics.join('\n')));
+    QCOMPARE(preview.triangleCount, 1);
+    QVERIFY(!preview.image.isNull());
+}
+
 void ResourceBrowserCoreTests::transactionSupportsReplaceAddRenameDelete()
 {
     QTemporaryDir directory;
@@ -190,6 +251,60 @@ void ResourceBrowserCoreTests::transactionSupportsReplaceAddRenameDelete()
     QCOMPARE(reopened.readMember("new.txt", &error), QByteArray("new"));
     QCOMPARE(reopened.readMember("renamed.lua", &error), QByteArray("lua"));
     QVERIFY(reopened.memberIndex("delete.bin") < 0);
+}
+
+void ResourceBrowserCoreTests::transactionPreservesSourceAndUnchangedPayloadOffsets()
+{
+    QTemporaryDir directory;
+    const QString path = writeArchive(directory, "source.res",
+        {{"unchanged.bin", "unchanged-payload"}, {"replace.txt", "before"}});
+    QFile source(path);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = source.readAll();
+    source.close();
+
+    CResArchiveIndex index;
+    QString error;
+    QVERIFY2(index.open(path, &error), qPrintable(error));
+    const quint32 unchangedOffset = index.member(index.memberIndex("unchanged.bin")).dataOffset;
+    CResArchiveTransaction transaction(index);
+    QVERIFY(transaction.replace("replace.txt", sha("before"), "after", &error));
+    const QString output = directory.filePath("candidate.res");
+    QVERIFY2(transaction.writeCandidate(output, &error), qPrintable(error));
+
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QCOMPARE(source.readAll(), originalBytes);
+    CResArchiveIndex reopened;
+    QVERIFY2(reopened.open(output, &error), qPrintable(error));
+    QCOMPARE(reopened.member(reopened.memberIndex("unchanged.bin")).dataOffset, unchangedOffset);
+    QCOMPARE(reopened.readMember("unchanged.bin", &error), QByteArray("unchanged-payload"));
+}
+
+void ResourceBrowserCoreTests::staleTransactionLeavesDestinationUntouched()
+{
+    QTemporaryDir directory;
+    const QString path = writeArchive(directory, "source.res", {{"replace.txt", "before"}});
+    CResArchiveIndex index;
+    QString error;
+    QVERIFY2(index.open(path, &error), qPrintable(error));
+    CResArchiveTransaction transaction(index);
+    QVERIFY(transaction.replace("replace.txt", sha("before"), "after", &error));
+
+    QFile source(path);
+    QVERIFY(source.open(QIODevice::Append));
+    QCOMPARE(source.write("stale"), qint64(5));
+    source.close();
+    const QString destination = directory.filePath("existing.res");
+    QFile existing(destination);
+    QVERIFY(existing.open(QIODevice::WriteOnly));
+    QCOMPARE(existing.write("destination-must-survive"), qint64(24));
+    existing.close();
+
+    QVERIFY(!transaction.writeCandidate(destination, &error));
+    QVERIFY(error.contains("changed", Qt::CaseInsensitive)
+            || error.contains("stale", Qt::CaseInsensitive));
+    QVERIFY(existing.open(QIODevice::ReadOnly));
+    QCOMPARE(existing.readAll(), QByteArray("destination-must-survive"));
 }
 
 void ResourceBrowserCoreTests::transactionRejectsCaseAndCp1251Collisions()

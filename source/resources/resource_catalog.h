@@ -24,6 +24,7 @@ public:
     bool build(const QVector<QString>& archivePaths, QStringList* errors = nullptr);
     const QVector<SResourceCatalogEntry>& entries() const { return m_entries; }
     QVector<SResourceCatalogEntry> providers(const QString& logicalName) const;
+    QVector<SResourceCatalogEntry> entriesForArchive(const QString& archivePath) const;
     const CResArchiveIndex* archive(int priority) const;
 
 private:

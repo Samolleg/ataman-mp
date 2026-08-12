@@ -1,6 +1,7 @@
 #include "resource_catalog.h"
 
 #include <QFileInfo>
+#include <QDir>
 #include <QSet>
 
 bool CResourceCatalog::build(const QVector<QString>& archivePaths, QStringList* errors)
@@ -45,6 +46,17 @@ QVector<SResourceCatalogEntry> CResourceCatalog::providers(const QString& logica
     QVector<SResourceCatalogEntry> result;
     for(const SResourceCatalogEntry& entry : m_entries)
         if(entry.logicalName.compare(logicalName, Qt::CaseInsensitive) == 0)
+            result.append(entry);
+    return result;
+}
+
+QVector<SResourceCatalogEntry> CResourceCatalog::entriesForArchive(const QString& archivePath) const
+{
+    QVector<SResourceCatalogEntry> result;
+    const QString requested = QDir::cleanPath(QFileInfo(archivePath).absoluteFilePath());
+    for(const SResourceCatalogEntry& entry : m_entries)
+        if(QDir::cleanPath(QFileInfo(entry.archivePath).absoluteFilePath())
+               .compare(requested, Qt::CaseInsensitive) == 0)
             result.append(entry);
     return result;
 }

@@ -146,4 +146,9 @@ SMmpInspection inspectMmp(const QByteArray& bytes)
     return result;
 }
 
+QImage mmpEditorPreviewImage(const QImage& decodedGameRows)
+{
+    return decodedGameRows.mirrored(false, true);
+}
+
 }

@@ -1,0 +1,385 @@
+#include "resource_model_preview.h"
+
+#include <QDataStream>
+#include <QMap>
+#include <QPainter>
+#include <QSet>
+#include <QTextCodec>
+#include <QVector2D>
+#include <QVector3D>
+#include <QtEndian>
+
+#include <cmath>
+#include <functional>
+#include <limits>
+
+namespace ei {
+namespace {
+constexpr quint32 kResSignature = 0x019CE23C;
+constexpr quint32 kFigSignature = 0x38474946;
+constexpr quint64 kResEntrySize = 22;
+constexpr quint32 kMaxArrayItems = 3000000;
+constexpr int kMaxNestedMembers = 10000;
+
+struct Triangle { QVector3D a; QVector3D b; QVector3D c; };
+
+quint16 u16(const QByteArray& bytes, quint64 offset)
+{
+    return qFromLittleEndian<quint16>(reinterpret_cast<const uchar*>(bytes.constData() + offset));
+}
+
+quint32 u32(const QByteArray& bytes, quint64 offset)
+{
+    return qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(bytes.constData() + offset));
+}
+
+bool rangeFits(const QByteArray& bytes, quint64 offset, quint64 size)
+{
+    return offset <= quint64(bytes.size()) && size <= quint64(bytes.size()) - offset;
+}
+
+QMap<QString, QByteArray> resMembers(const QByteArray& bytes, QStringList* diagnostics)
+{
+    QMap<QString, QByteArray> result;
+    if(bytes.size() < 16 || u32(bytes, 0) != kResSignature)
+    {
+        if(diagnostics) diagnostics->append(QStringLiteral("Nested RES signature is invalid."));
+        return result;
+    }
+    const quint32 count = u32(bytes, 4);
+    const quint32 tableOffset = u32(bytes, 8);
+    const quint32 namesLength = u32(bytes, 12);
+    if(count == 0 || count > kMaxNestedMembers
+       || !rangeFits(bytes, tableOffset, quint64(count) * kResEntrySize + namesLength))
+    {
+        if(diagnostics) diagnostics->append(QStringLiteral("Nested RES table is out of bounds."));
+        return result;
+    }
+    const quint64 namesOffset = quint64(tableOffset) + quint64(count) * kResEntrySize;
+    QTextCodec* codec = QTextCodec::codecForName("CP1251");
+    for(quint32 slot = 0; slot < count; ++slot)
+    {
+        const quint64 entry = quint64(tableOffset) + quint64(slot) * kResEntrySize;
+        const quint32 size = u32(bytes, entry + 4);
+        const quint32 offset = u32(bytes, entry + 8);
+        const quint16 nameLength = u16(bytes, entry + 16);
+        const quint32 nameOffset = u32(bytes, entry + 18);
+        if(!rangeFits(bytes, offset, size) || quint64(nameOffset) + nameLength > namesLength)
+        {
+            if(diagnostics) diagnostics->append(
+                QStringLiteral("Nested RES member %1 is out of bounds.").arg(slot));
+            return {};
+        }
+        const QByteArray encoded = bytes.mid(int(namesOffset + nameOffset), nameLength);
+        const QString name = (codec ? codec->toUnicode(encoded)
+                                    : QString::fromLatin1(encoded)).toLower();
+        if(result.contains(name))
+        {
+            if(diagnostics) diagnostics->append(
+                QStringLiteral("Nested RES member name is ambiguous: %1").arg(name));
+            return {};
+        }
+        result.insert(name, bytes.mid(int(offset), int(size)));
+    }
+    return result;
+}
+
+bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* diagnostic,
+              const QVector3D& offset = QVector3D())
+{
+    if(!triangles) return false;
+    if(bytes.size() < 40 || u32(bytes, 0) != kFigSignature)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral("FIG8 signature is invalid.");
+        return false;
+    }
+    const quint32 vertexBlocks = u32(bytes, 4);
+    const quint32 normalBlocks = u32(bytes, 8);
+    const quint32 uvCount = u32(bytes, 12);
+    const quint32 indexCount = u32(bytes, 16);
+    const quint32 componentCount = u32(bytes, 20);
+    const quint32 morphCount = u32(bytes, 24);
+    if(vertexBlocks == 0 || vertexBlocks > kMaxArrayItems || normalBlocks > kMaxArrayItems
+       || uvCount > kMaxArrayItems || indexCount > kMaxArrayItems
+       || componentCount > kMaxArrayItems || morphCount > kMaxArrayItems)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral("FIG8 array count exceeds the safety bound.");
+        return false;
+    }
+    const quint64 tail = quint64(80) * sizeof(float);
+    const quint64 vertexBytes = quint64(vertexBlocks) * 3 * 8 * 4 * sizeof(float);
+    const quint64 normalBytes = quint64(normalBlocks) * 4 * 4 * sizeof(float);
+    const quint64 uvBytes = quint64(uvCount) * 2 * sizeof(float);
+    const quint64 indexBytes = quint64(indexCount) * sizeof(quint16);
+    const quint64 componentBytes = quint64(componentCount) * 3 * sizeof(quint16);
+    const quint64 morphBytes = quint64(morphCount) * sizeof(quint32);
+    const quint64 expected = 40 + tail + vertexBytes + normalBytes + uvBytes
+        + indexBytes + componentBytes + morphBytes;
+    if(expected > quint64(bytes.size()))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral("FIG8 arrays are truncated.");
+        return false;
+    }
+    QDataStream stream(bytes);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    if(!stream.device()->seek(40 + qint64(tail))) return false;
+    QVector<QVector3D> vertices(int(vertexBlocks * 4));
+    for(quint32 block = 0; block < vertexBlocks; ++block)
+        for(int axis = 0; axis < 3; ++axis)
+            for(int morph = 0; morph < 8; ++morph)
+                for(int lane = 0; lane < 4; ++lane)
+                {
+                    float value = 0.0f;
+                    stream >> value;
+                    if(morph == 0) vertices[int(block * 4 + lane)][axis] = value;
+                }
+    stream.skipRawData(int(normalBytes + uvBytes));
+    QVector<quint16> indices;
+    indices.resize(int(indexCount));
+    for(quint16& value : indices) stream >> value;
+    QVector<quint16> componentVertices;
+    componentVertices.resize(int(componentCount));
+    for(quint32 component = 0; component < componentCount; ++component)
+    {
+        quint16 vertex = 0, normal = 0, uv = 0;
+        stream >> vertex >> normal >> uv;
+        Q_UNUSED(normal); Q_UNUSED(uv);
+        componentVertices[int(component)] = vertex;
+    }
+    if(stream.status() != QDataStream::Ok)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral("FIG8 arrays could not be read.");
+        return false;
+    }
+    const int complete = qMin(indices.size() - (indices.size() % 3), 900000);
+    triangles->reserve(triangles->size() + complete / 3);
+    for(int index = 0; index < complete; index += 3)
+    {
+        const quint16 ia = indices.at(index);
+        const quint16 ib = indices.at(index + 1);
+        const quint16 ic = indices.at(index + 2);
+        if(ia >= componentVertices.size() || ib >= componentVertices.size()
+           || ic >= componentVertices.size()) continue;
+        const quint16 va = componentVertices.at(ia);
+        const quint16 vb = componentVertices.at(ib);
+        const quint16 vc = componentVertices.at(ic);
+        if(va >= vertices.size() || vb >= vertices.size() || vc >= vertices.size()) continue;
+        Triangle triangle;
+        triangle.a = vertices.at(va) + offset;
+        triangle.b = vertices.at(vb) + offset;
+        triangle.c = vertices.at(vc) + offset;
+        triangles->append(triangle);
+    }
+    return !triangles->isEmpty();
+}
+
+QImage renderTriangles(const QVector<Triangle>& triangles, const QSize& requested)
+{
+    const QSize size(qMax(240, requested.width()), qMax(180, requested.height()));
+    QImage image(size, QImage::Format_ARGB32_Premultiplied);
+    image.fill(QColor(30, 33, 39));
+    if(triangles.isEmpty()) return image;
+    struct DrawTriangle { QPolygonF polygon; float depth; QColor color; };
+    QVector<QVector3D> projected;
+    projected.reserve(triangles.size() * 3);
+    const float yaw = 0.72f;
+    const float pitch = -0.42f;
+    auto project = [yaw, pitch](const QVector3D& value) {
+        const float x = std::cos(yaw) * value.x() - std::sin(yaw) * value.y();
+        const float y0 = std::sin(yaw) * value.x() + std::cos(yaw) * value.y();
+        const float y = std::cos(pitch) * value.z() - std::sin(pitch) * y0;
+        const float z = std::sin(pitch) * value.z() + std::cos(pitch) * y0;
+        return QVector3D(x, y, z);
+    };
+    QVector3D minimum(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), 0);
+    QVector3D maximum(-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), 0);
+    for(const Triangle& triangle : triangles)
+        for(const QVector3D& point : {triangle.a, triangle.b, triangle.c})
+        {
+            const QVector3D value = project(point);
+            projected.append(value);
+            minimum.setX(qMin(minimum.x(), value.x())); minimum.setY(qMin(minimum.y(), value.y()));
+            maximum.setX(qMax(maximum.x(), value.x())); maximum.setY(qMax(maximum.y(), value.y()));
+        }
+    const float width = qMax(1.0e-5f, maximum.x() - minimum.x());
+    const float height = qMax(1.0e-5f, maximum.y() - minimum.y());
+    const float scale = 0.86f * qMin(size.width() / width, size.height() / height);
+    const QPointF center(size.width() * 0.5, size.height() * 0.5);
+    const QVector2D boundsCenter((minimum.x() + maximum.x()) * 0.5f,
+                                 (minimum.y() + maximum.y()) * 0.5f);
+    QVector<DrawTriangle> draw;
+    draw.reserve(triangles.size());
+    for(int triangle = 0; triangle < triangles.size(); ++triangle)
+    {
+        const QVector3D a = projected.at(triangle * 3);
+        const QVector3D b = projected.at(triangle * 3 + 1);
+        const QVector3D c = projected.at(triangle * 3 + 2);
+        QPolygonF polygon;
+        for(const QVector3D& point : {a, b, c})
+            polygon << center + QPointF((point.x() - boundsCenter.x()) * scale,
+                                        -(point.y() - boundsCenter.y()) * scale);
+        QVector3D normal = QVector3D::crossProduct(b - a, c - a).normalized();
+        const int light = qBound(42, int(105 + 105 * qAbs(normal.z())), 215);
+        draw.append({polygon, (a.z() + b.z() + c.z()) / 3.0f,
+                     QColor(light * 0.65, light * 0.78, light)});
+    }
+    std::sort(draw.begin(), draw.end(), [](const DrawTriangle& a, const DrawTriangle& b) {
+        return a.depth < b.depth;
+    });
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    for(const DrawTriangle& triangle : draw)
+    {
+        painter.setBrush(triangle.color);
+        painter.setPen(QPen(QColor(15, 18, 23, 150), 0.6));
+        painter.drawPolygon(triangle.polygon);
+    }
+    return image;
+}
+}
+
+SResourceModelPreview previewFig8(const QByteArray& bytes, const QSize& size)
+{
+    SResourceModelPreview result;
+    QVector<Triangle> triangles;
+    QString diagnostic;
+    if(!parseFig(bytes, &triangles, &diagnostic))
+    {
+        result.diagnostics.append(diagnostic);
+        return result;
+    }
+    result.valid = true;
+    result.componentCount = 1;
+    result.triangleCount = triangles.size();
+    result.image = renderTriangles(triangles, size);
+    result.details = QStringLiteral("FIG8 | %1 triangle(s)").arg(result.triangleCount);
+    return result;
+}
+
+SResourceModelPreview previewModAssembly(const QByteArray& bytes,
+                                         const QByteArray& companionBon,
+                                         const QSize& size)
+{
+    SResourceModelPreview result;
+    const QMap<QString, QByteArray> members = resMembers(bytes, &result.diagnostics);
+    if(members.isEmpty()) return result;
+    QMap<QString, QString> parents;
+    QStringList orderedComponents;
+    for(auto it = members.constBegin(); it != members.constEnd(); ++it)
+    {
+        if(it.value().startsWith("FIG8")) continue;
+        QDataStream links(it.value());
+        links.setByteOrder(QDataStream::LittleEndian);
+        int count = 0;
+        links >> count;
+        if(count <= 0 || count > kMaxNestedMembers) continue;
+        QMap<QString, QString> candidateParents;
+        QStringList candidateOrder;
+        bool valid = true;
+        for(int index = 0; index < count; ++index)
+        {
+            auto readName = [&links](QString* name, bool allowEmpty) {
+                int length = 0;
+                links >> length;
+                if(length < 0 || length > 4096 || (!allowEmpty && length == 0)) return false;
+                QByteArray raw(length, Qt::Uninitialized);
+                if(length && links.readRawData(raw.data(), length) != length) return false;
+                while(raw.endsWith('\0')) raw.chop(1);
+                *name = QString::fromLatin1(raw).toLower();
+                return allowEmpty || !name->isEmpty();
+            };
+            QString component, parent;
+            if(!readName(&component, false) || !readName(&parent, true)) { valid = false; break; }
+            candidateParents.insert(component, parent);
+            candidateOrder.append(component);
+        }
+        if(valid && links.status() == QDataStream::Ok)
+        {
+            parents = candidateParents;
+            orderedComponents = candidateOrder;
+            break;
+        }
+    }
+    if(parents.isEmpty())
+        result.diagnostics.append(QStringLiteral("MOD LNK hierarchy is missing or invalid; components are shown at authored origins."));
+
+    QMap<QString, QVector3D> localOffsets;
+    if(!companionBon.isEmpty())
+    {
+        QStringList bonDiagnostics;
+        const QMap<QString, QByteArray> offsets = resMembers(companionBon, &bonDiagnostics);
+        for(auto it = offsets.constBegin(); it != offsets.constEnd(); ++it)
+        {
+            if(it.value().size() < 8 * 3 * int(sizeof(float))) continue;
+            QDataStream stream(it.value());
+            stream.setByteOrder(QDataStream::LittleEndian);
+            stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+            QVector3D offset;
+            stream >> offset;
+            if(stream.status() == QDataStream::Ok) localOffsets.insert(it.key(), offset);
+        }
+        result.diagnostics.append(bonDiagnostics);
+    }
+    QMap<QString, QVector3D> accumulatedOffsets;
+    std::function<QVector3D(const QString&, QSet<QString>)> accumulated =
+        [&](const QString& component, QSet<QString> visiting) -> QVector3D {
+        if(accumulatedOffsets.contains(component)) return accumulatedOffsets.value(component);
+        if(visiting.contains(component)) return localOffsets.value(component);
+        visiting.insert(component);
+        const QString parent = parents.value(component);
+        const QVector3D value = localOffsets.value(component)
+            + (parent.isEmpty() ? QVector3D() : accumulated(parent, visiting));
+        accumulatedOffsets.insert(component, value);
+        return value;
+    };
+
+    QVector<Triangle> triangles;
+    for(auto it = members.constBegin(); it != members.constEnd(); ++it)
+    {
+        if(!it.key().endsWith(QStringLiteral(".fig")) && !it.value().startsWith("FIG8")) continue;
+        QString diagnostic;
+        const int before = triangles.size();
+        if(parseFig(it.value(), &triangles, &diagnostic, accumulated(it.key(), {})))
+            ++result.componentCount;
+        else if(!diagnostic.isEmpty())
+            result.diagnostics.append(it.key() + QStringLiteral(": ") + diagnostic);
+        if(triangles.size() == before && result.diagnostics.size() > 20) break;
+    }
+    if(triangles.isEmpty())
+    {
+        result.diagnostics.append(QStringLiteral("MOD contains no renderable FIG8 components."));
+        return result;
+    }
+    result.valid = true;
+    result.triangleCount = triangles.size();
+    result.image = renderTriangles(triangles, size);
+    result.details = QStringLiteral("MOD assembly | %1 component(s) | %2 triangle(s)%3")
+        .arg(result.componentCount).arg(result.triangleCount);
+    result.details = result.details.arg(companionBon.isEmpty()
+        ? QStringLiteral(" | no companion BON offsets") : QStringLiteral(" | companion BON offsets applied"));
+    return result;
+}
+
+QStringList inspectAnimationArchive(const QByteArray& bytes, int* actionCount, int* channelCount)
+{
+    QStringList diagnostics;
+    const QMap<QString, QByteArray> actions = resMembers(bytes, &diagnostics);
+    int channels = 0;
+    QStringList result;
+    for(auto it = actions.constBegin(); it != actions.constEnd(); ++it)
+    {
+        QStringList nestedDiagnostics;
+        const QMap<QString, QByteArray> nested = resMembers(it.value(), &nestedDiagnostics);
+        channels += nested.size();
+        result.append(QStringLiteral("%1 — %2 channel(s)").arg(it.key()).arg(nested.size()));
+        if(!nestedDiagnostics.isEmpty())
+            result.append(QStringLiteral("  %1").arg(nestedDiagnostics.join(QStringLiteral("; "))));
+    }
+    if(actionCount) *actionCount = actions.size();
+    if(channelCount) *channelCount = channels;
+    if(actions.isEmpty()) return diagnostics;
+    return result;
+}
+
+}

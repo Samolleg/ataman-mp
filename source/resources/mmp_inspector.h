@@ -28,6 +28,11 @@ struct SMmpInspection
 // compressed byte count rather than inventing a mip chain for it.
 SMmpInspection inspectMmp(const QByteArray& bytes);
 
+// MMP decoders preserve game-row orientation. Conventional Qt image widgets
+// display top-left rows, so previews use the same vertical adapter as other
+// editor MMP/minimap review surfaces without changing payload or UV semantics.
+QImage mmpEditorPreviewImage(const QImage& decodedGameRows);
+
 }
 
 #endif // MMP_INSPECTOR_H

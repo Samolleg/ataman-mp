@@ -45,6 +45,7 @@ signals:
     void databaseEditorRequested(const QString& archivePath);
 
 private:
+    static constexpr int ArchivePathRole = Qt::UserRole + 81;
     void beginLoad(const QVector<QString>& archives, bool activeProfile,
                    const QString& label);
     void finishLoad();
@@ -63,6 +64,7 @@ private:
                             const SResourceCatalogEntry& context,
                             const QString& operationSummary);
     const SResourceCatalogEntry* selectedEntry() const;
+    QString selectedArchivePath() const;
 
     QComboBox* m_mode{nullptr};
     QLineEdit* m_search{nullptr};

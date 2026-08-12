@@ -2297,11 +2297,16 @@ int runHeadlessCommand(QApplication& app)
         const bool routineDockDiagnosticsSuppressed =
                 dockDiagnosticCount() == dockDiagnosticsBefore;
         CResourceBrowser resourceBrowser;
+        QTreeWidget* resourceArchiveTree = resourceBrowser.findChild<QTreeWidget*>(
+                    QStringLiteral("resourceArchiveTree"));
         const bool resourceBrowserContract = resourceBrowser.uiContractSatisfied()
                 && resourceBrowser.findChild<QLineEdit*>(
                     QStringLiteral("resourceBrowserSearch"))
                 && resourceBrowser.findChild<QTreeWidget*>(
-                    QStringLiteral("resourceContentView"));
+                    QStringLiteral("resourceContentView"))
+                && resourceArchiveTree
+                && !resourceArchiveTree->rootIsDecorated()
+                && resourceArchiveTree->columnCount() == 3;
 
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract
