@@ -77,6 +77,8 @@ private slots:
     void catalogFiltersOneArchiveExactly();
     void mmpWidgetPreviewUsesEditorOrientation();
     void fig8CpuPreviewRendersGeometry();
+    void modelSceneDefaultsToAboveGroundCamera();
+    void animationFallbackInfersSelectableActionLength();
     void transactionSupportsReplaceAddRenameDelete();
     void transactionPreservesSourceAndUnchangedPayloadOffsets();
     void staleTransactionLeavesDestinationUntouched();
@@ -225,6 +227,23 @@ void ResourceBrowserCoreTests::fig8CpuPreviewRendersGeometry()
     QVERIFY2(preview.valid, qPrintable(preview.diagnostics.join('\n')));
     QCOMPARE(preview.triangleCount, 1);
     QVERIFY(!preview.image.isNull());
+}
+
+void ResourceBrowserCoreTests::modelSceneDefaultsToAboveGroundCamera()
+{
+    QVERIFY(ei::resourceModelDefaultElevationDegrees() > 0.0f);
+    QVERIFY(ei::resourceModelDefaultElevationDegrees() < 90.0f);
+}
+
+void ResourceBrowserCoreTests::animationFallbackInfersSelectableActionLength()
+{
+    SAnimationClip clip;
+    clip.logicalLength = 0;
+    SAnimationChannel channel;
+    channel.rotations.resize(17);
+    channel.translations.resize(9);
+    clip.channels.insert("bd", channel);
+    QCOMPARE(ei::inferredAnimationLogicalLength(clip), 16);
 }
 
 void ResourceBrowserCoreTests::transactionSupportsReplaceAddRenameDelete()

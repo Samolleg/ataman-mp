@@ -2,6 +2,7 @@
 #define RESOURCE_BROWSER_H
 
 #include "resource_catalog.h"
+#include "resource_model_preview.h"
 
 #include <QFutureWatcher>
 #include <QImage>
@@ -29,6 +30,11 @@ struct SResourceBrowserPreview
     QString text;
     QImage image;
     QByteArray sha256;
+    QByteArray payload;
+    QByteArray animationPayload;
+    ei::SResourceModelScene modelScene;
+    QVector<SAdbAction> actions;
+    QString animationModel;
     QString error;
 };
 
@@ -37,6 +43,7 @@ class CResourceBrowser final : public QWidget
     Q_OBJECT
 public:
     explicit CResourceBrowser(QWidget* parent = nullptr);
+    ~CResourceBrowser() override;
     void setActiveProfileSources(const QVector<QString>& sources,
                                  const QString& profileName);
     bool uiContractSatisfied() const;
@@ -52,6 +59,9 @@ private:
     void rebuildList();
     void beginPreview(QTreeWidgetItem* item);
     void finishPreview();
+    void selectAnimation(int index);
+    void advanceAnimation();
+    void updateModelParts();
     void exportSelected();
     void copySelectedName();
     void openSelectedLocation();
@@ -75,6 +85,22 @@ private:
     QTreeWidget* m_resources{nullptr};
     QLabel* m_summary{nullptr};
     QLabel* m_previewImage{nullptr};
+    class CZoomableResourceImageView* m_imageView{nullptr};
+    class CResourceModelCanvas* m_modelView{nullptr};
+    QStackedWidget* m_previewStack{nullptr};
+    QWidget* m_modelControls{nullptr};
+    QLineEdit* m_partFilter{nullptr};
+    QTreeWidget* m_partList{nullptr};
+    QComboBox* m_animationList{nullptr};
+    QPushButton* m_animationPlay{nullptr};
+    QWidget* m_audioControls{nullptr};
+    QPushButton* m_audioPlay{nullptr};
+    class QSlider* m_audioSeek{nullptr};
+    class QSlider* m_audioVolume{nullptr};
+    class QMediaPlayer* m_audioPlayer{nullptr};
+    class QBuffer* m_audioBuffer{nullptr};
+    class QTimer* m_animationTimer{nullptr};
+    class QElapsedTimer* m_animationClock{nullptr};
     QLabel* m_previewDetails{nullptr};
     class QPlainTextEdit* m_previewText{nullptr};
     QPushButton* m_export{nullptr};
@@ -93,6 +119,8 @@ private:
     QVector<SResourceCatalogEntry> m_visibleEntries;
     quint64 m_loadGeneration{0};
     quint64 m_previewGeneration{0};
+    SResourceBrowserPreview m_currentPreview;
+    SAnimationClip m_currentClip;
 };
 
 #endif // RESOURCE_BROWSER_H

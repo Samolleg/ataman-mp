@@ -2306,7 +2306,15 @@ int runHeadlessCommand(QApplication& app)
                     QStringLiteral("resourceContentView"))
                 && resourceArchiveTree
                 && !resourceArchiveTree->rootIsDecorated()
-                && resourceArchiveTree->columnCount() == 3;
+                && resourceArchiveTree->columnCount() == 3
+                && resourceBrowser.findChild<QWidget*>(
+                    QStringLiteral("resourceImagePanZoom"))
+                && resourceBrowser.findChild<QWidget*>(
+                    QStringLiteral("resourceModelCanvas"))
+                && resourceBrowser.findChild<QComboBox*>(
+                    QStringLiteral("resourceAnimationList"))
+                && resourceBrowser.findChild<QTreeWidget*>(
+                    QStringLiteral("resourceModelParts"));
 
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract

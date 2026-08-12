@@ -7,6 +7,7 @@
 #include <QTextCodec>
 #include <QVector2D>
 #include <QVector3D>
+#include <QtMath>
 #include <QtEndian>
 
 #include <cmath>
@@ -20,8 +21,13 @@ constexpr quint32 kFigSignature = 0x38474946;
 constexpr quint64 kResEntrySize = 22;
 constexpr quint32 kMaxArrayItems = 3000000;
 constexpr int kMaxNestedMembers = 10000;
+constexpr int kMaxPreviewTriangles = 50000;
 
-struct Triangle { QVector3D a; QVector3D b; QVector3D c; };
+struct Triangle
+{
+    QVector3D a; QVector3D b; QVector3D c;
+    int sourceA{-1}; int sourceB{-1}; int sourceC{-1};
+};
 
 quint16 u16(const QByteArray& bytes, quint64 offset)
 {
@@ -152,7 +158,8 @@ bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* di
         if(diagnostic) *diagnostic = QStringLiteral("FIG8 arrays could not be read.");
         return false;
     }
-    const int complete = qMin(indices.size() - (indices.size() % 3), 900000);
+    const int complete = qMin(indices.size() - (indices.size() % 3),
+                              kMaxPreviewTriangles * 3);
     triangles->reserve(triangles->size() + complete / 3);
     for(int index = 0; index < complete; index += 3)
     {
@@ -169,6 +176,9 @@ bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* di
         triangle.a = vertices.at(va) + offset;
         triangle.b = vertices.at(vb) + offset;
         triangle.c = vertices.at(vc) + offset;
+        triangle.sourceA = va;
+        triangle.sourceB = vb;
+        triangle.sourceC = vc;
         triangles->append(triangle);
     }
     return !triangles->isEmpty();
@@ -184,7 +194,7 @@ QImage renderTriangles(const QVector<Triangle>& triangles, const QSize& requeste
     QVector<QVector3D> projected;
     projected.reserve(triangles.size() * 3);
     const float yaw = 0.72f;
-    const float pitch = -0.42f;
+    const float pitch = 0.42f;
     auto project = [yaw, pitch](const QVector3D& value) {
         const float x = std::cos(yaw) * value.x() - std::sin(yaw) * value.y();
         const float y0 = std::sin(yaw) * value.x() + std::cos(yaw) * value.y();
@@ -237,6 +247,191 @@ QImage renderTriangles(const QVector<Triangle>& triangles, const QSize& requeste
     }
     return image;
 }
+
+QVector<Triangle> posedTriangles(const SResourceModelScene& scene,
+                                  const SResourceModelView& view)
+{
+    QVector<Triangle> result;
+    for(const SResourceModelPart& part : scene.parts)
+    {
+        if(view.filterParts && !view.visibleParts.contains(part.name.toLower()))
+            continue;
+        const QMatrix4x4 pose = view.poses.value(part.name.toLower());
+        const QVector<QVector3D> morph = view.morphDeltas.value(part.name.toLower());
+        for(const SResourceModelTriangle& source : part.triangles)
+        {
+            Triangle triangle;
+            const auto point = [&](const SResourceModelVertex& vertex) {
+                QVector3D value = vertex.position;
+                if(vertex.sourceIndex >= 0 && vertex.sourceIndex < morph.size())
+                    value += morph.at(vertex.sourceIndex);
+                return pose * value;
+            };
+            triangle.a = point(source.vertices[0]);
+            triangle.b = point(source.vertices[1]);
+            triangle.c = point(source.vertices[2]);
+            result.append(triangle);
+        }
+    }
+    return result;
+}
+}
+
+float resourceModelDefaultElevationDegrees()
+{
+    return 22.0f;
+}
+
+int inferredAnimationLogicalLength(const SAnimationClip& clip)
+{
+    int samples = 0;
+    for(auto it = clip.channels.constBegin(); it != clip.channels.constEnd(); ++it)
+        samples = qMax(samples, qMax(it->rotations.size(),
+            qMax(it->translations.size(), it->morphations.size())));
+    // Authored clips carry a closing loop sample; logicalLength excludes it.
+    return qMax(1, samples - 1);
+}
+
+SResourceModelScene buildFig8Scene(const QByteArray& bytes)
+{
+    SResourceModelScene scene;
+    QVector<Triangle> parsed;
+    QString diagnostic;
+    if(!parseFig(bytes, &parsed, &diagnostic))
+    {
+        scene.diagnostics.append(diagnostic);
+        return scene;
+    }
+    SResourceModelPart part;
+    part.name = QStringLiteral("figure");
+    for(const Triangle& triangle : parsed)
+    {
+        SResourceModelTriangle output;
+        output.vertices[0].position = triangle.a; output.vertices[0].sourceIndex = triangle.sourceA;
+        output.vertices[1].position = triangle.b; output.vertices[1].sourceIndex = triangle.sourceB;
+        output.vertices[2].position = triangle.c; output.vertices[2].sourceIndex = triangle.sourceC;
+        part.triangles.append(output);
+    }
+    scene.parts.append(part);
+    scene.triangleCount = parsed.size();
+    scene.kind = QStringLiteral("FIG8");
+    scene.valid = true;
+    return scene;
+}
+
+SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& companionBon)
+{
+    SResourceModelScene scene;
+    const QMap<QString, QByteArray> members = resMembers(bytes, &scene.diagnostics);
+    if(members.isEmpty()) return scene;
+    QMap<QString, QString> parents;
+    for(auto it = members.constBegin(); it != members.constEnd(); ++it)
+    {
+        if(it.value().startsWith("FIG8")) continue;
+        QDataStream links(it.value());
+        links.setByteOrder(QDataStream::LittleEndian);
+        int count = 0; links >> count;
+        if(count <= 0 || count > kMaxNestedMembers) continue;
+        QMap<QString, QString> candidate;
+        bool valid = true;
+        for(int index = 0; index < count; ++index)
+        {
+            auto readName = [&links](QString* name, bool allowEmpty) {
+                int length = 0; links >> length;
+                if(length < 0 || length > 4096 || (!allowEmpty && length == 0)) return false;
+                QByteArray raw(length, Qt::Uninitialized);
+                if(length && links.readRawData(raw.data(), length) != length) return false;
+                while(raw.endsWith('\0')) raw.chop(1);
+                *name = QString::fromLatin1(raw).toLower();
+                return allowEmpty || !name->isEmpty();
+            };
+            QString component, parent;
+            if(!readName(&component, false) || !readName(&parent, true)) { valid = false; break; }
+            candidate.insert(component, parent);
+        }
+        if(valid && links.status() == QDataStream::Ok) { parents = candidate; break; }
+    }
+    QMap<QString, QVector3D> offsets;
+    if(!companionBon.isEmpty())
+    {
+        const QMap<QString, QByteArray> bon = resMembers(companionBon, &scene.diagnostics);
+        for(auto it = bon.constBegin(); it != bon.constEnd(); ++it)
+        {
+            if(it.value().size() < 8 * 3 * int(sizeof(float))) continue;
+            QDataStream stream(it.value());
+            stream.setByteOrder(QDataStream::LittleEndian);
+            stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+            QVector3D value; stream >> value;
+            if(stream.status() == QDataStream::Ok) offsets.insert(it.key(), value);
+        }
+    }
+    QMap<QString, QVector3D> accumulated;
+    std::function<QVector3D(const QString&, QSet<QString>)> resolve =
+        [&](const QString& name, QSet<QString> visiting) -> QVector3D {
+        if(accumulated.contains(name)) return accumulated.value(name);
+        if(visiting.contains(name)) return offsets.value(name);
+        visiting.insert(name);
+        const QString parent = parents.value(name);
+        const QVector3D value = offsets.value(name)
+            + (parent.isEmpty() ? QVector3D() : resolve(parent, visiting));
+        accumulated.insert(name, value);
+        return value;
+    };
+    for(auto it = members.constBegin(); it != members.constEnd(); ++it)
+    {
+        if(!it.value().startsWith("FIG8")) continue;
+        QVector<Triangle> parsed;
+        QString diagnostic;
+        if(!parseFig(it.value(), &parsed, &diagnostic, resolve(it.key(), {})))
+        {
+            if(!diagnostic.isEmpty()) scene.diagnostics.append(it.key() + ": " + diagnostic);
+            continue;
+        }
+        SResourceModelPart part; part.name = it.key();
+        for(const Triangle& triangle : parsed)
+        {
+            SResourceModelTriangle output;
+            output.vertices[0].position = triangle.a; output.vertices[0].sourceIndex = triangle.sourceA;
+            output.vertices[1].position = triangle.b; output.vertices[1].sourceIndex = triangle.sourceB;
+            output.vertices[2].position = triangle.c; output.vertices[2].sourceIndex = triangle.sourceC;
+            part.triangles.append(output);
+        }
+        scene.parts.append(part);
+        scene.triangleCount += parsed.size();
+        scene.skeleton.parents.insert(it.key(), parents.value(it.key()));
+        scene.skeleton.restOffsets.insert(it.key(), resolve(it.key(), {}));
+        if(scene.triangleCount >= kMaxPreviewTriangles)
+        {
+            scene.diagnostics.append(QStringLiteral(
+                "Interactive preview reached its %1-triangle safety budget.")
+                .arg(kMaxPreviewTriangles));
+            break;
+        }
+    }
+    scene.kind = QStringLiteral("MOD assembly");
+    scene.valid = !scene.parts.isEmpty();
+    return scene;
+}
+
+QImage renderResourceModelScene(const SResourceModelScene& scene,
+                                const SResourceModelView& view, const QSize& size)
+{
+    QVector<Triangle> triangles = posedTriangles(scene, view);
+    QMatrix4x4 camera;
+    camera.setToIdentity();
+    camera.rotate(-view.elevationDegrees, 1.0f, 0.0f, 0.0f);
+    camera.rotate(view.azimuthDegrees, 0.0f, 0.0f, 1.0f);
+    camera.scale(qMax(0.05f, view.zoom));
+    camera.translate(view.pan);
+    for(Triangle& triangle : triangles)
+    {
+        triangle.a = camera * triangle.a;
+        triangle.b = camera * triangle.b;
+        triangle.c = camera * triangle.c;
+    }
+    // The legacy fixed projection itself is intentionally kept stable here;
+    // the user-facing orbit is applied above in the editor's Z-up convention.
+    return renderTriangles(triangles, size);
 }
 
 SResourceModelPreview previewFig8(const QByteArray& bytes, const QSize& size)

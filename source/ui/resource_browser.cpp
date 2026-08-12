@@ -3,11 +3,14 @@
 #include "mmp_inspector.h"
 #include "backup_manager.h"
 #include "resource_model_preview.h"
+#include "profile_database.h"
+#include "unit_animation.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QApplication>
 #include <QClipboard>
 #include <QComboBox>
+#include <QBuffer>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDateTime>
@@ -15,18 +18,115 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGridLayout>
+#include <QGraphicsPixmapItem>
+#include <QGraphicsScene>
+#include <QGraphicsView>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QMediaPlayer>
+#include <QMediaContent>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSlider>
+#include <QSignalBlocker>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QTextCodec>
 #include <QTreeWidget>
+#include <QTimer>
+#include <QElapsedTimer>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QWheelEvent>
+
+#include <cmath>
+
+class CZoomableResourceImageView final : public QGraphicsView
+{
+public:
+    explicit CZoomableResourceImageView(QWidget* parent = nullptr)
+        : QGraphicsView(parent), m_scene(new QGraphicsScene(this))
+    {
+        setScene(m_scene);
+        setDragMode(QGraphicsView::ScrollHandDrag);
+        setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+        setResizeAnchor(QGraphicsView::AnchorViewCenter);
+        setBackgroundBrush(QColor(30, 33, 39));
+    }
+    void setImage(const QImage& image)
+    {
+        m_scene->clear(); m_item = nullptr;
+        if(image.isNull()) return;
+        m_item = m_scene->addPixmap(QPixmap::fromImage(image));
+        m_scene->setSceneRect(m_item->boundingRect());
+        fitImage();
+    }
+    void fitImage() { if(m_item) fitInView(m_item, Qt::KeepAspectRatio); }
+    void actualSize() { resetTransform(); }
+protected:
+    void wheelEvent(QWheelEvent* event) override
+    {
+        const qreal factor = event->angleDelta().y() >= 0 ? 1.2 : 1.0 / 1.2;
+        scale(factor, factor); event->accept();
+    }
+private:
+    QGraphicsScene* m_scene{nullptr};
+    QGraphicsPixmapItem* m_item{nullptr};
+};
+
+class CResourceModelCanvas final : public QLabel
+{
+public:
+    explicit CResourceModelCanvas(QWidget* parent = nullptr) : QLabel(parent)
+    {
+        setAlignment(Qt::AlignCenter);
+        setMinimumSize(260, 220);
+        setStyleSheet(QStringLiteral("background: #1e2127;"));
+    }
+    void setScene(const ei::SResourceModelScene& scene)
+    {
+        m_scene = scene; m_view = ei::SResourceModelView();
+        for(const auto& part : scene.parts) m_view.visibleParts.insert(part.name.toLower());
+        m_view.filterParts = true;
+        redraw();
+    }
+    void setVisibleParts(const QSet<QString>& parts)
+    { m_view.visibleParts = parts; m_view.filterParts = true; redraw(); }
+    void setPose(const QMap<QString, QMatrix4x4>& poses,
+                 const QMap<QString, QVector<QVector3D>>& morphs)
+    { m_view.poses = poses; m_view.morphDeltas = morphs; redraw(); }
+    void resetView() { m_view.azimuthDegrees = 35; m_view.elevationDegrees = 22;
+        m_view.zoom = 1; m_view.pan = {}; redraw(); }
+protected:
+    void resizeEvent(QResizeEvent* event) override { QLabel::resizeEvent(event); redraw(); }
+    void wheelEvent(QWheelEvent* event) override
+    { m_view.zoom = qBound(0.08f, m_view.zoom * (event->angleDelta().y() >= 0 ? 1.15f : 1.0f/1.15f), 20.0f); redraw(); }
+    void mousePressEvent(QMouseEvent* event) override { m_last = event->pos(); m_button = event->button(); }
+    void mouseMoveEvent(QMouseEvent* event) override
+    {
+        const QPoint delta = event->pos() - m_last; m_last = event->pos();
+        if(m_button == Qt::LeftButton)
+        { m_view.azimuthDegrees += delta.x() * 0.5f; m_view.elevationDegrees = qBound(-80.0f, m_view.elevationDegrees + delta.y() * 0.4f, 80.0f); }
+        else if(m_button == Qt::MiddleButton || m_button == Qt::RightButton)
+        { m_view.pan += QVector3D(delta.x(), 0, -delta.y()) * (0.004f / qMax(0.1f, m_view.zoom)); }
+        redraw();
+    }
+    void mouseReleaseEvent(QMouseEvent*) override { m_button = Qt::NoButton; }
+private:
+    void redraw()
+    {
+        if(!m_scene.valid || width() < 2 || height() < 2) { clear(); return; }
+        setPixmap(QPixmap::fromImage(ei::renderResourceModelScene(m_scene, m_view, size())));
+    }
+    ei::SResourceModelScene m_scene;
+    ei::SResourceModelView m_view;
+    QPoint m_last;
+    Qt::MouseButton m_button{Qt::NoButton};
+};
 
 namespace {
 constexpr int kEntryRole = Qt::UserRole + 80;
@@ -96,6 +196,7 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
     const QByteArray payload = archive.readMember(memberIndex, &error);
     if(payload.isNull()) { result.error = error; return result; }
     result.sha256 = QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex();
+    result.payload = payload;
     const QString type = suffixType(member.name);
     result.details = QStringLiteral("%1 | %2 | SHA-256 %3")
         .arg(type, humanBytes(member.dataSize), QString::fromLatin1(result.sha256));
@@ -115,7 +216,11 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
     {
         const QString suffix = QFileInfo(member.name).suffix().toLower();
         ei::SResourceModelPreview model;
-        if(suffix == "fig") model = ei::previewFig8(payload);
+        if(suffix == "fig")
+        {
+            result.modelScene = ei::buildFig8Scene(payload);
+            model = ei::previewFig8(payload);
+        }
         else if(suffix == "mod")
         {
             QByteArray bon;
@@ -126,10 +231,27 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
                 const CResArchiveIndex* provider = catalog.archive(providers.first().archivePriority);
                 if(provider) bon = provider->readMember(providers.first().memberIndex);
             }
+            result.modelScene = ei::buildModScene(payload, bon);
             model = ei::previewModAssembly(payload, bon);
+            result.animationModel = QFileInfo(member.name).completeBaseName();
+            const QVector<SResourceCatalogEntry> animationProviders = catalog.providers(
+                result.animationModel + ".anm");
+            if(!animationProviders.isEmpty())
+            {
+                const CResArchiveIndex* animationArchive = catalog.archive(
+                    animationProviders.first().archivePriority);
+                if(animationArchive)
+                    result.animationPayload = animationArchive->readMember(
+                        animationProviders.first().memberIndex);
+            }
+            const auto database = ei::ProfileDatabaseContext::instance().current();
+            if(database)
+                result.actions = parseAdbActions(database->actionTables.value(
+                    result.animationModel.toLower() + ".adb"));
         }
         else if(suffix == "anm")
         {
+            result.animationPayload = payload;
             int actions = 0, channels = 0;
             const QStringList animation = ei::inspectAnimationArchive(payload, &actions, &channels);
             result.text = animation.join('\n');
@@ -151,12 +273,29 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
                         const CResArchiveIndex* bonArchive = catalog.archive(bonProviders.first().archivePriority);
                         if(bonArchive) bon = bonArchive->readMember(bonProviders.first().memberIndex);
                     }
+                    result.modelScene = ei::buildModScene(mod, bon);
                     model = ei::previewModAssembly(mod, bon);
+                    result.animationModel = QFileInfo(companion).completeBaseName();
                     result.details += QStringLiteral(" | paired model %1").arg(companion);
                 }
             }
-            result.text += QStringLiteral("\n\nPose playback requires provider ADB action timing; "
-                                          "the browser does not infer it for a standalone ANM.");
+            const auto database = ei::ProfileDatabaseContext::instance().current();
+            if(database && !result.animationModel.isEmpty())
+                result.actions = parseAdbActions(database->actionTables.value(
+                    result.animationModel.toLower() + ".adb"));
+            if(result.actions.isEmpty())
+            {
+                const QStringList names = ei::inspectAnimationArchive(payload);
+                for(const QString& line : names)
+                {
+                    SAdbAction action;
+                    action.name = line.section(QStringLiteral(" — "), 0, 0).trimmed();
+                    const SAnimationClip probe = parseNestedAnimationClip(payload, action.name, 1);
+                    action.length = quint32(ei::inferredAnimationLogicalLength(probe));
+                    if(!action.name.isEmpty()) result.actions.append(action);
+                }
+                result.text += QStringLiteral("\n\nAction lengths inferred from ANM closing-loop samples; no matching provider ADB was available.");
+            }
         }
         if(model.valid)
         {
@@ -233,18 +372,79 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     m_resources->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     auto* preview = new QWidget(horizontal);
     auto* previewLayout = new QVBoxLayout(preview);
-    m_previewImage = new QLabel(preview);
+    m_previewStack = new QStackedWidget(preview);
+    m_previewStack->setObjectName(QStringLiteral("resourcePreviewStack"));
+    m_previewImage = new QLabel(m_previewStack);
+    m_previewImage->setVisible(false); // compatibility child for the existing UI contract
     m_previewImage->setObjectName(QStringLiteral("resourcePreviewImage"));
-    m_previewImage->setAlignment(Qt::AlignCenter);
-    m_previewImage->setMinimumSize(220, 160);
-    m_previewDetails = new QLabel(tr("Select a resource to preview it."), preview);
-    m_previewDetails->setWordWrap(true);
-    m_previewText = new QPlainTextEdit(preview);
+    QWidget* imagePane = new QWidget(m_previewStack);
+    QVBoxLayout* imageLayout = new QVBoxLayout(imagePane);
+    m_imageView = new CZoomableResourceImageView(imagePane);
+    m_imageView->setObjectName(QStringLiteral("resourceImagePanZoom"));
+    QHBoxLayout* imageActions = new QHBoxLayout;
+    QPushButton* imageFit = new QPushButton(tr("Fit"), imagePane);
+    QPushButton* imageActual = new QPushButton(tr("100%"), imagePane);
+    imageActions->addStretch(); imageActions->addWidget(imageFit); imageActions->addWidget(imageActual);
+    imageLayout->addWidget(m_imageView, 1); imageLayout->addLayout(imageActions);
+    connect(imageFit, &QPushButton::clicked, m_imageView, &CZoomableResourceImageView::fitImage);
+    connect(imageActual, &QPushButton::clicked, m_imageView, &CZoomableResourceImageView::actualSize);
+
+    QWidget* modelPane = new QWidget(m_previewStack);
+    QVBoxLayout* modelLayout = new QVBoxLayout(modelPane);
+    m_modelView = new CResourceModelCanvas(modelPane);
+    m_modelView->setObjectName(QStringLiteral("resourceModelCanvas"));
+    QLabel* modelHint = new QLabel(tr("Drag to orbit; right/middle drag pans; wheel zooms"), modelPane);
+    m_animationList = new QComboBox(modelPane);
+    m_animationList->setObjectName(QStringLiteral("resourceAnimationList"));
+    m_animationPlay = new QPushButton(tr("Pause"), modelPane);
+    m_animationPlay->setCheckable(true);
+    QHBoxLayout* animationRow = new QHBoxLayout;
+    animationRow->addWidget(new QLabel(tr("Animation"), modelPane));
+    animationRow->addWidget(m_animationList, 1); animationRow->addWidget(m_animationPlay);
+    m_partFilter = new QLineEdit(modelPane);
+    m_partFilter->setPlaceholderText(tr("Filter model parts..."));
+    m_partList = new QTreeWidget(modelPane);
+    m_partList->setObjectName(QStringLiteral("resourceModelParts"));
+    m_partList->setHeaderLabels({tr("Part"), tr("Visible")});
+    m_partList->setRootIsDecorated(false);
+    m_partList->setMaximumHeight(170);
+    QHBoxLayout* partPresets = new QHBoxLayout;
+    QPushButton* normalParts = new QPushButton(tr("Normal"), modelPane);
+    QPushButton* allParts = new QPushButton(tr("All"), modelPane);
+    QPushButton* noParts = new QPushButton(tr("None"), modelPane);
+    QPushButton* resetModel = new QPushButton(tr("Reset view"), modelPane);
+    partPresets->addWidget(normalParts); partPresets->addWidget(allParts);
+    partPresets->addWidget(noParts); partPresets->addStretch(); partPresets->addWidget(resetModel);
+    modelLayout->addWidget(m_modelView, 1); modelLayout->addWidget(modelHint);
+    modelLayout->addLayout(animationRow); modelLayout->addWidget(m_partFilter);
+    modelLayout->addWidget(m_partList); modelLayout->addLayout(partPresets);
+
+    QWidget* textPane = new QWidget(m_previewStack);
+    QVBoxLayout* textLayout = new QVBoxLayout(textPane);
+    m_previewText = new QPlainTextEdit(textPane);
     m_previewText->setReadOnly(true);
     m_previewText->setLineWrapMode(QPlainTextEdit::NoWrap);
-    previewLayout->addWidget(m_previewImage);
+    textLayout->addWidget(m_previewText);
+    m_audioControls = new QWidget(textPane);
+    QHBoxLayout* audioLayout = new QHBoxLayout(m_audioControls);
+    audioLayout->setContentsMargins(0, 0, 0, 0);
+    m_audioPlay = new QPushButton(tr("Play"), m_audioControls);
+    m_audioSeek = new QSlider(Qt::Horizontal, m_audioControls);
+    m_audioVolume = new QSlider(Qt::Horizontal, m_audioControls);
+    m_audioVolume->setRange(0, 100); m_audioVolume->setValue(80);
+    m_audioVolume->setMaximumWidth(90);
+    audioLayout->addWidget(m_audioPlay); audioLayout->addWidget(m_audioSeek, 1);
+    audioLayout->addWidget(new QLabel(tr("Volume"), m_audioControls));
+    audioLayout->addWidget(m_audioVolume);
+    textLayout->addWidget(m_audioControls);
+    m_audioControls->hide();
+    m_previewStack->addWidget(textPane);
+    m_previewStack->addWidget(imagePane);
+    m_previewStack->addWidget(modelPane);
+    m_previewDetails = new QLabel(tr("Select a resource to preview it."), preview);
+    m_previewDetails->setWordWrap(true);
+    previewLayout->addWidget(m_previewStack, 1);
     previewLayout->addWidget(m_previewDetails);
-    previewLayout->addWidget(m_previewText, 1);
     auto* actions = new QGridLayout;
     m_export = new QPushButton(tr("Export..."), preview);
     m_copyName = new QPushButton(tr("Copy Name"), preview);
@@ -302,6 +502,65 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     connect(m_add, &QPushButton::clicked, this, &CResourceBrowser::addMember);
     connect(m_rename, &QPushButton::clicked, this, &CResourceBrowser::renameSelected);
     connect(m_delete, &QPushButton::clicked, this, &CResourceBrowser::deleteSelected);
+    connect(m_animationList, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &CResourceBrowser::selectAnimation);
+    connect(m_animationPlay, &QPushButton::toggled, this, [this](bool paused) {
+        m_animationPlay->setText(paused ? tr("Play") : tr("Pause"));
+    });
+    connect(m_partFilter, &QLineEdit::textChanged, this, [this](const QString& filter) {
+        for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
+            m_partList->topLevelItem(row)->setHidden(
+                !m_partList->topLevelItem(row)->text(0).contains(filter, Qt::CaseInsensitive));
+    });
+    connect(m_partList, &QTreeWidget::itemChanged, this, &CResourceBrowser::updateModelParts);
+    const auto setParts = [this](int preset) {
+        const QSet<QString> normal = {"hp","bd","hd","hr","lh1","rh1","lh2","rh2","lh3","rh3","ll1","rl1","ll2","rl2","ll3","rl3"};
+        bool hasNormalPart = false;
+        for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
+            hasNormalPart = hasNormalPart
+                || normal.contains(m_partList->topLevelItem(row)->text(0).toLower());
+        QSignalBlocker guard(m_partList);
+        for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
+        {
+            QTreeWidgetItem* item = m_partList->topLevelItem(row);
+            const bool visible = preset == 1 || (preset == 0
+                && (!hasNormalPart || normal.contains(item->text(0).toLower())));
+            item->setCheckState(1, visible ? Qt::Checked : Qt::Unchecked);
+        }
+        updateModelParts();
+    };
+    connect(normalParts, &QPushButton::clicked, this, [setParts]() { setParts(0); });
+    connect(allParts, &QPushButton::clicked, this, [setParts]() { setParts(1); });
+    connect(noParts, &QPushButton::clicked, this, [setParts]() { setParts(2); });
+    connect(resetModel, &QPushButton::clicked, m_modelView, &CResourceModelCanvas::resetView);
+    m_animationTimer = new QTimer(this);
+    m_animationTimer->setInterval(66);
+    m_animationClock = new QElapsedTimer;
+    connect(m_animationTimer, &QTimer::timeout, this, &CResourceBrowser::advanceAnimation);
+    m_animationTimer->start(); m_animationClock->start();
+    m_audioPlayer = new QMediaPlayer(this);
+    connect(m_audioPlay, &QPushButton::clicked, this, [this]() {
+        if(m_audioPlayer->state() == QMediaPlayer::PlayingState) m_audioPlayer->pause();
+        else m_audioPlayer->play();
+    });
+    connect(m_audioPlayer, &QMediaPlayer::stateChanged, this, [this](QMediaPlayer::State state) {
+        m_audioPlay->setText(state == QMediaPlayer::PlayingState ? tr("Pause") : tr("Play"));
+    });
+    connect(m_audioPlayer, &QMediaPlayer::durationChanged, m_audioSeek, &QSlider::setMaximum);
+    connect(m_audioPlayer, &QMediaPlayer::positionChanged, m_audioSeek, &QSlider::setValue);
+    connect(m_audioSeek, &QSlider::sliderMoved, m_audioPlayer, &QMediaPlayer::setPosition);
+    connect(m_audioVolume, &QSlider::valueChanged, m_audioPlayer, &QMediaPlayer::setVolume);
+    connect(m_audioPlayer, QOverload<QMediaPlayer::Error>::of(&QMediaPlayer::error),
+            this, [this](QMediaPlayer::Error error) {
+        if(error != QMediaPlayer::NoError)
+            m_previewText->setPlainText(tr("The deployed multimedia backend cannot decode this audio stream. Export remains available.\n\n%1")
+                .arg(m_audioPlayer->errorString()));
+    });
+}
+
+CResourceBrowser::~CResourceBrowser()
+{
+    delete m_animationClock;
 }
 
 void CResourceBrowser::setActiveProfileSources(const QVector<QString>& sources,
@@ -397,7 +656,11 @@ void CResourceBrowser::beginPreview(QTreeWidgetItem*)
     const CResArchiveIndex* archive = m_catalog.archive(entry->archivePriority);
     if(!archive) return;
     ++m_previewGeneration;
-    m_previewImage->clear();
+    m_audioPlayer->stop();
+    m_audioPlayer->setMedia(QMediaContent());
+    m_audioControls->hide();
+    m_imageView->setImage(QImage());
+    m_previewStack->setCurrentIndex(0);
     m_previewText->setPlainText(tr("Loading preview..."));
     const QVector<SResourceCatalogEntry> chain = m_catalog.providers(entry->logicalName);
     QString chainText;
@@ -418,11 +681,103 @@ void CResourceBrowser::finishPreview()
         m_previewText->clear();
         return;
     }
+    m_currentPreview = result;
     m_previewDetails->setText(result.title + "\n" + result.details);
     m_previewText->setPlainText(result.text);
-    if(!result.image.isNull())
-        m_previewImage->setPixmap(QPixmap::fromImage(result.image).scaled(
-            m_previewImage->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    const QString type = suffixType(result.title);
+    if(result.modelScene.valid)
+    {
+        m_previewStack->setCurrentIndex(2);
+        m_modelView->setScene(result.modelScene);
+        m_partList->clear();
+        QSignalBlocker guard(m_partList);
+        for(const ei::SResourceModelPart& part : result.modelScene.parts)
+        {
+            QTreeWidgetItem* item = new QTreeWidgetItem(m_partList,
+                {part.name, QString()});
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(1, Qt::Checked);
+        }
+        const QSet<QString> normal = {"hp","bd","hd","hr","lh1","rh1","lh2","rh2","lh3","rh3","ll1","rl1","ll2","rl2","ll3","rl3"};
+        bool humanoid = false;
+        for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
+            humanoid = humanoid || normal.contains(
+                m_partList->topLevelItem(row)->text(0).toLower());
+        if(humanoid)
+            for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
+            {
+                QTreeWidgetItem* item = m_partList->topLevelItem(row);
+                item->setCheckState(1, normal.contains(item->text(0).toLower())
+                    ? Qt::Checked : Qt::Unchecked);
+            }
+        updateModelParts();
+        m_animationList->clear();
+        for(const SAdbAction& action : result.actions)
+            if(action.length > 0)
+                m_animationList->addItem(QStringLiteral("%1 (%2 frames)")
+                    .arg(action.name).arg(action.length), action.name);
+        m_animationList->setVisible(m_animationList->count() > 0);
+        m_animationPlay->setVisible(m_animationList->count() > 0);
+        if(m_animationList->count()) selectAnimation(0);
+    }
+    else if(type == QStringLiteral("Image"))
+    {
+        m_previewStack->setCurrentIndex(1);
+        m_imageView->setImage(result.image);
+    }
+    else
+    {
+        m_previewStack->setCurrentIndex(0);
+        if(type == QStringLiteral("Audio"))
+        {
+            m_audioControls->show();
+            delete m_audioBuffer;
+            m_audioBuffer = new QBuffer(this);
+            m_audioBuffer->setData(result.payload);
+            m_audioBuffer->open(QIODevice::ReadOnly);
+            const QString mime = QFileInfo(result.title).suffix().toLower() == "wav"
+                ? QStringLiteral("audio/wav") : QStringLiteral("audio/mpeg");
+            m_audioPlayer->setMedia(QMediaContent(), m_audioBuffer);
+            m_previewText->setPlainText(tr("Audio preview ready (%1). Playback depends on the deployed Qt multimedia codec backend.")
+                .arg(mime));
+        }
+    }
+}
+
+void CResourceBrowser::selectAnimation(int index)
+{
+    m_currentClip = SAnimationClip();
+    if(index < 0 || index >= m_animationList->count()) return;
+    const QString action = m_animationList->itemData(index).toString();
+    int length = 0;
+    for(const SAdbAction& candidate : m_currentPreview.actions)
+        if(candidate.name.compare(action, Qt::CaseInsensitive) == 0)
+        { length = int(candidate.length); break; }
+    m_currentClip = parseNestedAnimationClip(m_currentPreview.animationPayload,
+                                             action, qMax(1, length));
+    if(length <= 0) m_currentClip.logicalLength = ei::inferredAnimationLogicalLength(m_currentClip);
+    m_animationClock->restart();
+}
+
+void CResourceBrowser::advanceAnimation()
+{
+    if(!m_currentClip.valid() || m_animationPlay->isChecked()
+       || m_previewStack->currentIndex() != 2) return;
+    const double frame = std::fmod(m_animationClock->elapsed() * 15.0 / 1000.0,
+                                   double(m_currentClip.logicalLength));
+    const SAnimationLocalPose local = interpolateAnimationPose(
+        m_currentClip, frame, &m_currentPreview.modelScene.skeleton);
+    m_modelView->setPose(propagateAnimationHierarchy(
+        local, m_currentPreview.modelScene.skeleton), local.morphDeltas);
+}
+
+void CResourceBrowser::updateModelParts()
+{
+    QSet<QString> visible;
+    for(int row = 0; row < m_partList->topLevelItemCount(); ++row)
+        if(m_partList->topLevelItem(row)->checkState(1) == Qt::Checked)
+            visible.insert(m_partList->topLevelItem(row)->text(0).toLower());
+    m_modelView->setVisibleParts(visible);
 }
 
 void CResourceBrowser::openExternalArchive()
