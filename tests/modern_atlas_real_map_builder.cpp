@@ -2093,7 +2093,7 @@ BuiltMap buildMap(const QString& sourcePath, const QString& nameSpace,
     const STerrainAtlasProfile portableProfile =
         CTerrainAtlasProfileStore::portableFinalizedProfile(
             finalized, physicalTiles, sourceAtlas.profile,
-            ETerrainAtlasLayer::Land, names, &portableProfileReport);
+            ETerrainAtlasLayer::Land, names, {}, &portableProfileReport);
     if(portableProfile.assignedSlotCount() <= 0
        || !CTerrainAtlasProfileStore::save(
            portableProfile, outputDirectory, &portableProfileReport))
@@ -2662,7 +2662,7 @@ BuiltMap buildUniformBrushInventory(
     const STerrainAtlasProfile portableProfile =
         CTerrainAtlasProfileStore::portableFinalizedProfile(
             finalized, physicalTiles, sourceAtlas.profile,
-            ETerrainAtlasLayer::Land, materialNames, &packageReport);
+            ETerrainAtlasLayer::Land, materialNames, {}, &packageReport);
     if(portableProfile.assignedSlotCount() != finalized.tiles.size()
        || !CTerrainAtlasProfileStore::save(
            portableProfile, outputDirectory, &packageReport))

@@ -166,6 +166,7 @@ public:
         const STerrainAtlasProfile& sourceProfile,
         ETerrainAtlasLayer layer,
         const QMap<qint32, QString>& materialNames = {},
+        const QMap<qint32, qint32>& materialRuntimeTypes = {},
         CValidationReport* report = nullptr);
     static STerrainAtlasProfile workingAtlasProfile(
         const QString& mprNamespace,

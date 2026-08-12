@@ -1153,7 +1153,11 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     QCOMPARE(flattened.tiles.at(1).sourceNamespace,
              QStringLiteral("ZoneReview"));
     QCOMPARE(flattened.tiles.at(1).sourceSlot, 137);
+    QCOMPARE(flattened.tiles.at(1).canonicalSignature,
+             importedIdentity.canonicalSignature);
     QVERIFY(!flattened.tiles.at(2).authored);
+    QCOMPARE(flattened.tiles.at(2).canonicalSignature,
+             generatedIdentity.canonicalSignature);
     QVERIFY(flattened.tiles.at(2).canonicalGeneratedBlend);
     QVERIFY(flattened.tiles.at(2).blendProvenance.startsWith(
         QStringLiteral("canonical-generated:")));

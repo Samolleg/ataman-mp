@@ -22,6 +22,7 @@
 #include "log.h"
 #include "mpr_document.h"
 #include "terrain_virtual_atlas.h"
+#include "terrain_atlas_shape_policy.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -469,8 +470,10 @@ bool CLandscape::adoptCanonicalTerrainSave(
     const QVector<qint32>& tileTypes,
     const QVector<QPair<quint16, quint16>>& animatedTiles)
 {
-    if(tileTypes.size() != int(tileCount) || textureCount == 0
-       || tileCount != textureCount * 64u || innerNamespace.trimmed().isEmpty()
+    if(!terrainAtlasLogicalCountsFitPhysicalPages(
+           int(textureCount), int(tileCount), int(textureCount * 64u),
+           tileTypes.size())
+       || innerNamespace.trimmed().isEmpty()
        || !adoptCanonicalSave(path, bytes))
         return false;
     m_innerMapName = innerNamespace;

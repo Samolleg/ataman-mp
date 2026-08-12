@@ -8180,11 +8180,15 @@ void CView::finalizeVirtualTerrainAtlas()
             placedCellTypes.append(typeFound?type:-1);
             placedPackedCells.append(available?packed:quint16(0));
         }
+    const CTerrainTransitionCatalog* finalizedDecodeCatalog =
+        m_workingTerrainAtlas
+            ? &m_workingTerrainAtlas->catalog()
+            : &m_terrainAtlasAnalysis.overlayCompatibleCatalog;
     STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,
         kMprPackedTerrainAtlasSlotLimit,
         authoredTypes,&report,pinned,placedCellTypes,placedPackedCells,{},
-        &m_terrainAtlasAnalysis.overlayCompatibleCatalog);
+        finalizedDecodeCatalog);
     if(!finalized.success)
     {
         const QString findings=report.findings().isEmpty()
@@ -8542,11 +8546,16 @@ void CView::finalizeVirtualTerrainAtlas()
             finalized,physicalTiles,m_terrainAtlasProfile,
             layer==ETerrainTileLayer::Land?ETerrainAtlasLayer::Land
                                           :ETerrainAtlasLayer::Overlay,
-            materialNames,&portableProfileReport);
-    if(portableProfile.assignedSlotCount()<=0)
+            materialNames,
+            materialRuntimeTypes(m_terrainAtlasProfile,
+                                 m_terrainGlobalFamilies),
+            &portableProfileReport);
+    if(portableProfileReport.hasErrors()
+       || portableProfile.assignedSlotCount()!=finalized.requiredSlots)
     {
         QMessageBox::critical(this,tr("Atlas package not written"),
-            tr("The isolated material profile could not be constructed.\n\n%1")
+            tr("The isolated material profile does not describe every logical "
+               "atlas tile exactly. No RES or MPR was changed.\n\n%1")
                 .arg(portableProfileReport.toText()));
         return;
     }

@@ -3006,6 +3006,17 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             && candidate.canonicalSignature.northEast > 0
             && candidate.canonicalSignature.southEast > 0
             && candidate.canonicalSignature.southWest > 0;
+        if(!signatureAssigned)
+        {
+            result.error = QStringLiteral(
+                "The authored atlas source slot %1 has no complete semantic signature; "
+                "finalization cannot preserve its terrain meaning.").arg(sourceSlot);
+            if(report) report->add(
+                "terrain.finalized_authored_signature",
+                EValidationSeverity::Error, result.error,
+                QStringLiteral("source slot %1").arg(sourceSlot));
+            return false;
+        }
 
         const QByteArray dedupeKey = candidate.pixelSha256
             + QByteArray(1, '\0')
@@ -3759,10 +3770,10 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
         packed.tileIndex = quint8(sourceIndex % 64);
         packed.atlasIndex = quint8(sourceIndex / 64);
         bool found = false;
-        const STerrainTransitionVariant variant =
-            m_authoredCatalog.variantForPacked(packed.encode(), &found);
-        if(found)
-            identity->canonicalSignature = variant.signature;
+        identity->canonicalSignature = m_authoredCatalog.gridSignatureForPacked(
+            packed.encode(), &found);
+        if(!found)
+            identity->canonicalSignature = STerrainTransitionSignature();
         return true;
     }
     if(!m_resolver || sourceIndex < 0
@@ -3832,6 +3843,30 @@ bool CTerrainWorkingAtlas::restoreFinalizedProvenance(
                 imported.append(identity);
             else if(identity.origin == ETerrainWorkingTileOrigin::CanonicalGenerated)
                 generated.append(identity);
+        }
+        if(!identities.isEmpty())
+        {
+            const STerrainTransitionSignature restoredSignature =
+                identities.front().canonicalSignature;
+            const auto completeSignature = [](const STerrainTransitionSignature& value)
+            {
+                return value.northWest > 0 && value.northEast > 0
+                    && value.southEast > 0 && value.southWest > 0;
+            };
+            bool identityAgreement = completeSignature(restoredSignature);
+            for(const STerrainWorkingTileIdentity& identity : identities)
+                identityAgreement = identityAgreement
+                    && identity.canonicalSignature == restoredSignature;
+            if(!identityAgreement)
+            {
+                if(report) report->add(
+                    QStringLiteral("terrain.finalized_working_signature"),
+                    EValidationSeverity::Error,
+                    QStringLiteral("Compacted working-atlas aliases do not share one complete semantic signature."),
+                    QStringLiteral("finalized slot %1").arg(outputSlot));
+                return false;
+            }
+            tile.canonicalSignature = restoredSignature;
         }
         if(!retained.isEmpty())
         {

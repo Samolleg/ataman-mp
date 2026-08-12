@@ -8,6 +8,7 @@
 
 #include "endurance_document.h"
 #include "landscape_edit_policy.h"
+#include "terrain_atlas_shape_policy.h"
 #include "mmp_codec.h"
 #include "operation_history_policy.h"
 #include "portable_diagnostic_writer.h"
@@ -285,6 +286,8 @@ private slots:
     void landscapeWheelDirectionUsesAvailableDelta();
     void paintIssueReportCapturesEveryAvailableLayer();
     void paintIssueMarkingKeepsCameraNavigation();
+    void partialFinalAtlasPageIsAValidLiveBaseline();
+    void recoveredFinalizedProfileDecodesEveryLogicalCell();
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
@@ -484,6 +487,50 @@ void EnduranceDocumentTests::paintIssueMarkingKeepsCameraNavigation()
 {
     QVERIFY(terrainPaintIssueMarkerConsumesMouseMove(false));
     QVERIFY(!terrainPaintIssueMarkerConsumesMouseMove(true));
+}
+
+void EnduranceDocumentTests::partialFinalAtlasPageIsAValidLiveBaseline()
+{
+    // R125 produced 473 logical tiles in eight physical 64-tile pages.  The
+    // remaining 39 images are page padding, not missing MP tile types.
+    QVERIFY(terrainAtlasLogicalCountsFitPhysicalPages(8, 473, 512, 473));
+    QVERIFY(terrainAtlasLogicalCountsFitPhysicalPages(8, 512, 512, 512));
+    QVERIFY(!terrainAtlasLogicalCountsFitPhysicalPages(8, 513, 512, 513));
+    QVERIFY(!terrainAtlasLogicalCountsFitPhysicalPages(8, 473, 512, 512));
+    QVERIFY(!terrainAtlasLogicalCountsFitPhysicalPages(8, 448, 512, 448));
+}
+
+void EnduranceDocumentTests::recoveredFinalizedProfileDecodesEveryLogicalCell()
+{
+    const QString profilePath = qEnvironmentVariable(
+        "ENDURANCE_RECOVERED_TERRAIN_PROFILE");
+    const QString mprPath = qEnvironmentVariable(
+        "ENDURANCE_RECOVERED_TERRAIN_MPR");
+    if(profilePath.isEmpty() || mprPath.isEmpty())
+        QSKIP("Set ENDURANCE_RECOVERED_TERRAIN_PROFILE and ENDURANCE_RECOVERED_TERRAIN_MPR to validate the R125 recovery artifact.");
+
+    CValidationReport report;
+    STerrainAtlasProfile profile;
+    QVERIFY2(STerrainAtlasProfile::load(profilePath, &profile, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(profile.assignedSlotCount(), 473);
+    QCOMPARE(profile.atlasSlotCount, 512);
+
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    const STerrainAtlasAnalysis analysis = profile.usableAnalysis(&report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+    QVERIFY2(terrain.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, analysis.landCatalog, &report),
+             qPrintable(report.toText()));
+    CTerrainVirtualMaterialField field;
+    QVERIFY(terrain.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &field, true));
+    QCOMPARE(field.tileWidth(), terrain.tileCountX());
+    QCOMPARE(field.tileHeight(), terrain.tileCountY());
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()
@@ -6633,9 +6680,14 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
     QVERIFY2(CTerrainVirtualAtlas::decodePhysicalTileImages(
                  finalized, &physical, &report), qPrintable(report.toText()));
     QCOMPARE(physical.size(), 64);
+    QMap<qint32, qint32> runtimeTypes;
+    runtimeTypes.insert(1, 4);
+    runtimeTypes.insert(2, 7);
+    runtimeTypes.insert(3, 9);
     const STerrainAtlasProfile portable =
         CTerrainAtlasProfileStore::portableFinalizedProfile(
-            finalized, physical, source, ETerrainAtlasLayer::Land, {}, &report);
+            finalized, physical, source, ETerrainAtlasLayer::Land, {},
+            runtimeTypes, &report);
     QCOMPARE(portable.atlasSlotCount, 64);
     QCOMPARE(portable.slotDefinitions.size(), 64);
     QCOMPARE(portable.assignedSlotCount(), 4);
@@ -6644,6 +6696,12 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
                  foreignTile.canonicalSignature));
     QCOMPARE(portable.slotDefinitions.at(3).sourceNamespace,
              QStringLiteral("foreign-zone"));
+    QMap<qint32, qint32> portableTypes;
+    for(const STerrainAtlasProfileFamily& family : portable.families)
+        portableTypes.insert(family.id, family.tileType);
+    QCOMPARE(portableTypes.value(1), 4);
+    QCOMPARE(portableTypes.value(2), 7);
+    QCOMPARE(portableTypes.value(3), 9);
     QVERIFY(portable.validateBinding(
         finalized.isolatedNamespace,
         CTerrainAtlasProfileInference::pixelSha256(physical), 64, &report));
@@ -6675,6 +6733,18 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
              QVector<int>({0, 17}));
     QCOMPARE(reopened.slotDefinitions.at(0).sourcePixelSha256,
              QByteArray(64, 'a'));
+
+    STerrainAtlasFinalization incomplete = finalized;
+    incomplete.tiles[3].canonicalSignature = STerrainTransitionSignature();
+    CValidationReport incompleteReport;
+    const STerrainAtlasProfile refused =
+        CTerrainAtlasProfileStore::portableFinalizedProfile(
+            incomplete, physical, source, ETerrainAtlasLayer::Land, {},
+            {}, &incompleteReport);
+    QCOMPARE(refused.assignedSlotCount(), 3);
+    QVERIFY(incompleteReport.hasErrors());
+    QVERIFY(incompleteReport.toText().contains(
+        QStringLiteral("logical slot 3")));
 }
 
 void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraftReopen()

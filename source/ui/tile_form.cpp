@@ -11,6 +11,7 @@
 #include "resourcemanager.h"
 #include "resource_name.h"
 #include "log.h"
+#include "terrain_atlas_shape_policy.h"
 
 #include "layout_components/tablemanager.h"
 
@@ -466,7 +467,9 @@ bool CTileForm::adoptTileImages(const QVector<QImage>& images,
                                 const QVector<qint32>& tileTypes)
 {
     if(images.isEmpty() || images.size() % 64 != 0
-       || tileTypes.size() != images.size())
+       || !terrainAtlasLogicalCountsFitPhysicalPages(
+              images.size() / 64, tileTypes.size(), images.size(),
+              tileTypes.size()))
         return false;
     const QSize size = images.front().size();
     if(size.width() <= 0 || size.width() != size.height())

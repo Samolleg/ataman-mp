@@ -901,7 +901,9 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
     const STerrainAtlasFinalization& finalization,
     const QVector<QImage>& decodedPhysicalTiles,
     const STerrainAtlasProfile& sourceProfile, ETerrainAtlasLayer layer,
-    const QMap<qint32, QString>& materialNames, CValidationReport* report)
+    const QMap<qint32, QString>& materialNames,
+    const QMap<qint32, qint32>& materialRuntimeTypes,
+    CValidationReport* report)
 {
     STerrainAtlasProfile profile;
     profile.mprNamespace = finalization.isolatedNamespace;
@@ -911,9 +913,6 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
     profile.provenance = QStringLiteral("portable-finalized-modern-atlas-v1");
     profile.approved = true;
 
-    QMap<int, STerrainAtlasProfileSlot> sourceDefinitions;
-    for(const STerrainAtlasProfileSlot& definition : sourceProfile.slotDefinitions)
-        sourceDefinitions.insert(definition.slot, definition);
     QMap<qint32, STerrainAtlasProfileFamily> sourceFamilies;
     for(const STerrainAtlasProfileFamily& family : sourceProfile.families)
         sourceFamilies.insert(family.id, family);
@@ -928,20 +927,21 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
         if(definition.assigned)
         {
             const STerrainFinalizedTile& tile = finalization.tiles.at(slot);
-            const bool belongsToSourceProfile = tile.sourceNamespace.isEmpty()
-                || tile.sourceNamespace.compare(
-                       sourceProfile.mprNamespace,
-                       Qt::CaseInsensitive) == 0;
-            if(belongsToSourceProfile && tile.sourceSlot >= 0
-               && sourceDefinitions.contains(tile.sourceSlot))
-                definition.signature = sourceDefinitions.value(tile.sourceSlot).signature;
-            else
-                definition.signature = CTerrainTransitionCatalog::mirroredGridY(
-                    tile.canonicalSignature);
+            // Finalization has resolved and compacted the complete working
+            // catalog. Its canonical grid signature is authoritative for
+            // retained, imported, and generated logical output slots alike.
+            definition.signature = CTerrainTransitionCatalog::mirroredGridY(
+                tile.canonicalSignature);
             definition.assigned = definition.signature.northWest > 0
                 && definition.signature.northEast > 0
                 && definition.signature.southEast > 0
                 && definition.signature.southWest > 0;
+            if(!definition.assigned && report)
+                report->add(
+                    QStringLiteral("terrain.finalized_profile_signature"),
+                    EValidationSeverity::Error,
+                    QStringLiteral("A logical finalized atlas tile has no complete semantic signature."),
+                    QStringLiteral("logical slot %1").arg(slot));
             QVector<int> aliases = tile.sourceSlotAliases;
             if(aliases.isEmpty() && tile.sourceSlot >= 0)
                 aliases.append(tile.sourceSlot);
@@ -995,6 +995,8 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
             family.landAllowed = layer == ETerrainAtlasLayer::Land;
             family.overlayAllowed = layer == ETerrainAtlasLayer::Overlay;
         }
+        if(materialRuntimeTypes.contains(id))
+            family.tileType = materialRuntimeTypes.value(id);
         family.memberSlots.clear();
         family.thumbnailSlot = -1;
         for(const STerrainAtlasProfileSlot& definition : profile.slotDefinitions)
