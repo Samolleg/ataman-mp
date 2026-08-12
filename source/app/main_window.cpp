@@ -126,6 +126,27 @@ constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
 constexpr int kLoadedMapMob = 2;
 
+class CDatabaseHistoryCommand final : public QUndoCommand
+{
+public:
+    CDatabaseHistoryCommand(const QSharedPointer<ei::DatabaseDocument>& document,
+                            ei::DatabaseEditorDialog* dialog, const QString& description)
+        : QUndoCommand(description), m_document(document), m_dialog(dialog) {}
+    void undo() override { if(m_document->undo()) refresh(); }
+    void redo() override { if(m_initialRedo){m_initialRedo=false;return;} if(m_document->redo()) refresh(); }
+private:
+    void refresh()
+    {
+        if(m_dialog) { m_dialog->refreshFromHistory(); return; }
+        QString diagnostic;
+        const auto snapshot=m_document->currentSnapshot(&diagnostic);
+        if(snapshot) ei::ProfileDatabaseContext::instance().publishEditedSnapshot(snapshot);
+    }
+    QSharedPointer<ei::DatabaseDocument> m_document;
+    QPointer<ei::DatabaseEditorDialog> m_dialog;
+    bool m_initialRedo{true};
+};
+
 class CElidedPathLabel final : public QLabel
 {
 public:
@@ -1038,19 +1059,31 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(openDatabaseEditor, &QAction::triggered, this, [this]()
     {
+        if(m_databaseEditorDialog)
+        {
+            m_databaseEditorDialog->show();
+            m_databaseEditorDialog->raise();
+            m_databaseEditorDialog->activateWindow();
+            return;
+        }
         const auto snapshot = ei::ProfileDatabaseContext::instance().current();
         QString diagnostic;
-        const auto document = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
-        if(!document)
+        if(!m_databaseDocument || !snapshot
+           || QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath()
+                .compare(QFileInfo(snapshot->sourceArchivePath).absoluteFilePath(),Qt::CaseInsensitive)!=0)
+            m_databaseDocument = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
+        if(!m_databaseDocument)
         {
             QMessageBox::warning(this, tr("Database Editor"),
                 tr("The active profile database cannot be opened for authoring.\n\n%1")
                     .arg(diagnostic));
             return;
         }
-        auto* dialog = new ei::DatabaseEditorDialog(document, this);
-        dialog->setAttribute(Qt::WA_DeleteOnClose);
-        dialog->show();
+        m_databaseEditorDialog = new ei::DatabaseEditorDialog(m_databaseDocument, this);
+        m_databaseEditorDialog->setAttribute(Qt::WA_DeleteOnClose);
+        connect(m_databaseEditorDialog,&ei::DatabaseEditorDialog::transactionCommitted,
+                this,[this](const QString& description){m_undoStack->push(new CDatabaseHistoryCommand(m_databaseDocument,m_databaseEditorDialog,description));});
+        m_databaseEditorDialog->show();
     });
     connect(m_pView,&CView::openDatabasePrototypeRequested,this,[openDatabaseEditor](const QString&){openDatabaseEditor->trigger();});
     connect(generateMinimapAction, &QAction::triggered,

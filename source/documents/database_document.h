@@ -41,13 +41,14 @@ public:
     QJsonObject pendingChangeManifest() const; bool sourceIsCurrent(QString* = nullptr) const;
     QByteArray buildArchive(QString* = nullptr) const;
     bool saveArchive(const QString&, QString* = nullptr) const;
+    bool applyToSource(QString* = nullptr);
     QSharedPointer<const SProfileDatabaseSnapshot> currentSnapshot(QString* = nullptr) const;
     bool replaceTables(const QMap<QString, SDatabaseTable>&, const QString&, QString* = nullptr);
 private:
     struct SState { QMap<QString, SDatabaseTable> tables; SDatabaseChange change; };
     explicit DatabaseDocument(const QSharedPointer<const SProfileDatabaseSnapshot>&);
     SDatabaseRow* row(const QString&, const QString&); void commit(const QMap<QString, SDatabaseTable>&, const SDatabaseChange&);
-    QSharedPointer<const SProfileDatabaseSnapshot> m_snapshot; QMap<QString, SDatabaseTable> m_tables, m_baselineTables; QVector<SState> m_undo, m_redo;
+    QSharedPointer<const SProfileDatabaseSnapshot> m_snapshot; QMap<QString, SDatabaseTable> m_tables, m_baselineTables; QVector<SState> m_undo, m_redo; QByteArray m_sourceArchiveBaseline; QString m_expectedSourceSha256;
 };
 }
 #endif

@@ -733,6 +733,16 @@ void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyB
         }
     }
     installClipboardFilter(editor, row);
+    if(editor && value->type()==eObjParam_UNIT_PROTOTYPE)
+    {
+        editor->setToolTip(tr("Right-click to open this prototype in the Database Editor."));
+        if(QLineEdit* line=editor->findChild<QLineEdit*>())
+        {
+            line->setProperty("propertyRow",row);
+            line->installEventFilter(this);
+            line->setToolTip(tr("Right-click to open this prototype in the Database Editor."));
+        }
+    }
 }
 
 QList<int> CTableManager::selectedPropertyRows(int fallbackRow) const

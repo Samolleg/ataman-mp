@@ -66,6 +66,7 @@ class CViewportMinimapWidget;
 class CMinimapExportDialog;
 class CMessageLogPanel;
 class CDockHiddenTab;
+namespace ei { class DatabaseDocument; class DatabaseEditorDialog; }
 
 struct SWindowTitle
 {
@@ -377,6 +378,8 @@ private:
     QString m_customSpawnContextKey;
     QPointer<CViewportMinimapWidget> m_viewportMinimap;
     QPointer<CMinimapExportDialog> m_minimapExportDialog;
+    QSharedPointer<ei::DatabaseDocument> m_databaseDocument;
+    QPointer<ei::DatabaseEditorDialog> m_databaseEditorDialog;
     QTimer* m_minimapRefreshTimer{nullptr};
     QTimer* m_minimapCameraTimer{nullptr};
     QByteArray m_generatedMinimapMmp;

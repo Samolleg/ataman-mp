@@ -132,6 +132,8 @@ private slots:
     void installedDatabaseDocumentNativeRoundTrip();
     void authoringDocumentPublishesCloneAndUndoRestoresOriginal();
     void workbookImportIsOneValidatedUndoableTransaction();
+    void workbookNoOpAllowsPreexistingReferenceFindings();
+    void authoringDocumentApplyIsAtomicAndUndoCanRestoreSource();
 };
 
 QByteArray unitPerkLua(const QString& prototype, int strongMan)
@@ -394,6 +396,14 @@ void ProfileDatabaseTests::workbookImportIsOneValidatedUndoableTransaction()
 {
     QTemporaryDir temporary;QVERIFY(temporary.isValid());write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QString diagnostic;const QString workbook=QDir(temporary.path()).filePath("database.xlsx");QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));ei::SDatabaseWorkbookImport imported;QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));auto tables=imported.tables;tables["monsters"].rows[0].values["skinIndex"]=11;QVERIFY(document->replaceTables(tables,"Imported database.xlsx",&diagnostic));QCOMPARE(document->table("monsters")->rows[0].values.value("skinIndex").toInt(),11);QVERIFY(document->undo());QCOMPARE(document->table("monsters")->rows[0].values.value("skinIndex").toInt(),2);
     tables=imported.tables;tables["monsters"].rows[0].values["baseRace"]="missing race";QVERIFY(!document->replaceTables(tables,"Invalid workbook",&diagnostic));QCOMPARE(document->table("monsters")->rows[0].values.value("baseRace").toString(),QString("Human Male"));
+}
+void ProfileDatabaseTests::workbookNoOpAllowsPreexistingReferenceFindings()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());auto members=relationalMembers();QByteArray monster=stringField(0,"Broken Existing")+stringField(1,"missing race");members["units.udb"]=database({QByteArray(),record(stringField(0,"Human Male")+stringField(30,"unhuma")),record(monster),QByteArray()});write(QDir(temporary.path()).filePath("database.res"),resArchive(members));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QMap<QString,ei::SDatabaseTable> unchanged;for(const QString& key:document->tableKeys())unchanged[key]=*document->table(key);QString diagnostic;QVERIFY2(document->replaceTables(unchanged,"No-op workbook",&diagnostic),qPrintable(diagnostic));QVERIFY(document->undo());
+}
+void ProfileDatabaseTests::authoringDocumentApplyIsAtomicAndUndoCanRestoreSource()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");const QByteArray original=resArchive(relationalMembers());write(path,original);ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QString diagnostic;QVERIFY2(document->setValue("monsters","human test","skinIndex",17,&diagnostic),qPrintable(diagnostic));QVERIFY2(document->applyToSource(&diagnostic),qPrintable(diagnostic));QFile applied(path);QVERIFY(applied.open(QIODevice::ReadOnly));QVERIFY(applied.readAll()!=original);applied.close();QVERIFY(document->undo());QVERIFY2(document->applyToSource(&diagnostic),qPrintable(diagnostic));QFile restored(path);QVERIFY(restored.open(QIODevice::ReadOnly));QCOMPARE(restored.readAll(),original);
 }
 
 QTEST_APPLESS_MAIN(ProfileDatabaseTests)
