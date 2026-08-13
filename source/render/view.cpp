@@ -7117,15 +7117,6 @@ void CView::rebuildTerrainAutoCatalog()
            mprNamespace, atlasHash, slotCount, &stored, QString(),
            &storedPath, &storedReport))
     {
-        QFile storedFile(storedPath);
-        QByteArray storedBytes;
-        if(storedFile.open(QIODevice::ReadOnly))
-            storedBytes = storedFile.readAll();
-        STerrainAtlasProfile recovered;
-        if(CTerrainAtlasProfileStore::recoverKnownIncompleteFinalizedProfile(
-               stored, storedBytes, m_mprDocument.originalBytes(),
-               &recovered, &storedReport))
-            stored = recovered;
         m_terrainAtlasProfile = stored;
         m_terrainAtlasAnalysis = m_terrainAtlasProfile.usableAnalysis(&storedReport);
         reviewedProfileActive = m_terrainAtlasAnalysis.usable;
