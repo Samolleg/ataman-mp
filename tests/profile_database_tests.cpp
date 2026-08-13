@@ -7,6 +7,16 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QApplication>
+#include <QClipboard>
+#include <QContextMenuEvent>
+#include <QDialogButtonBox>
+#include <QListWidget>
+#include <QMenu>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QTimer>
+#include <QTableWidget>
 #include <cmath>
 
 #include "profile_database.h"
@@ -16,6 +26,7 @@
 #include "database_value_codec.h"
 #include "lossless_database_member.h"
 #include "res_archive_document.h"
+#include "database_editor_dialog.h"
 #include "profile_database_provider_support.h"
 
 namespace {
@@ -163,6 +174,7 @@ private slots:
     void authoringDocumentRenameThenDeleteRestoresExactBaseline();
     void losslessMemberFixedSizePatchPreservesOriginalHeaders();
     void workbookImportRejectsReadOnlyAndUnpublishableChanges();
+    void databaseEditorRowMenuAndWrappedFieldEditor();
 };
 
 QByteArray unitPerkLua(const QString& prototype, int strongMan)
@@ -731,5 +743,128 @@ void ProfileDatabaseTests::workbookImportRejectsReadOnlyAndUnpublishableChanges(
     QVERIFY(!document->replaceTables(candidate,"unsafe absent-field import",&diagnostic));QVERIFY(diagnostic.contains("does not exist")||diagnostic.contains("absent"));QVERIFY(!document->isDirty());
 }
 
-QTEST_APPLESS_MAIN(ProfileDatabaseTests)
+void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    write(QDir(temporary.path()).filePath("database.res"), resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId = "base.standard.v1";
+    request.profileId = "base";
+    request.resourceDirectories << temporary.path();
+    auto document = ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    const QString originalLongValue = QStringLiteral("[\"armor_leather.iron\",\"armor_leather.iron\",\"armor_leather.iron\",\"armor_leather.iron\",\"armor_leather.iron\"]");
+    QString setupDiagnostic;
+    const ei::SDatabaseTable* setupMonsters = document->table("units.monsters");
+    QVERIFY(setupMonsters);
+    QString setupRow;
+    for(const ei::SDatabaseRow& row : setupMonsters->rows)
+        if(row.stableKey.startsWith("human test#"))
+            setupRow = row.stableKey;
+    QVERIFY(!setupRow.isEmpty());
+    QVERIFY2(document->setValue("units.monsters", setupRow, "fld.32.0",
+        originalLongValue, &setupDiagnostic), qPrintable(setupDiagnostic));
+
+    ei::DatabaseEditorDialog dialog(document);
+    dialog.show();
+    QVERIFY(dialog.selectPrototype("Human Test"));
+    QTableWidget* grid = dialog.findChild<QTableWidget*>("databaseGrid");
+    QVERIFY(grid);
+    QVERIFY(grid->currentRow() >= 0);
+
+    bool copiedByRealMenu = false;
+    bool cloneActionAvailable = false;
+    QTimer::singleShot(0, [&copiedByRealMenu, &cloneActionAvailable]() {
+        QMenu* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+        if(!menu)
+        {
+            QTimer::singleShot(10, [&copiedByRealMenu, &cloneActionAvailable]() {
+                QMenu* delayedMenu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                if(!delayedMenu)
+                    return;
+                QAction* delayedCopy = nullptr;
+                for(QAction* action : delayedMenu->actions()) {
+                    if(action->objectName() == "databaseCloneRowAction")
+                        cloneActionAvailable = action->isEnabled();
+                    if(action->objectName() == "databaseCopyRowIdAction")
+                        delayedCopy = action;
+                }
+                if(delayedCopy) { delayedCopy->trigger(); copiedByRealMenu = true; delayedMenu->close(); return; }
+                delayedMenu->close();
+            });
+            return;
+        }
+        QAction* copyAction = nullptr;
+        for(QAction* action : menu->actions()) {
+            if(action->objectName() == "databaseCloneRowAction")
+                cloneActionAvailable = action->isEnabled();
+            if(action->objectName() == "databaseCopyRowIdAction")
+                copyAction = action;
+        }
+        if(copyAction) { copyAction->trigger(); copiedByRealMenu = true; menu->close(); return; }
+        menu->close();
+    });
+    const QRect rowCell = grid->visualItemRect(grid->item(grid->currentRow(), 0));
+    const QPoint local = rowCell.center();
+    QContextMenuEvent menuEvent(QContextMenuEvent::Mouse, local,
+        grid->viewport()->mapToGlobal(local));
+    QApplication::sendEvent(grid->viewport(), &menuEvent);
+    QTRY_VERIFY_WITH_TIMEOUT(copiedByRealMenu, 1000);
+    QVERIFY(cloneActionAvailable);
+    QApplication::processEvents();
+    QCOMPARE(QApplication::clipboard()->text(), QString("Human Test"));
+
+    int wearsColumn = -1;
+    for(int column = 0; column < grid->columnCount(); ++column)
+        if(grid->horizontalHeaderItem(column)->text().contains("Wears", Qt::CaseInsensitive))
+            wearsColumn = column;
+    QVERIFY(wearsColumn >= 0);
+    QTableWidgetItem* wearsItem = grid->item(grid->currentRow(), wearsColumn);
+    QVERIFY(wearsItem);
+    QVERIFY(wearsItem->data(Qt::UserRole + 2).toString().size() > wearsItem->text().size());
+    grid->scrollToItem(wearsItem, QAbstractItemView::PositionAtCenter);
+    grid->setCurrentCell(wearsItem->row(), wearsColumn);
+    QApplication::processEvents();
+
+    bool openedWrappedEditor = false;
+    const QString edited = QStringLiteral("[\"armor_leather.iron\",\"armor_leather.iron\",\"armor_leather.iron\"]");
+    QTimer::singleShot(0, [&openedWrappedEditor, &edited]() {
+        QDialog* editor = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        if(!editor || editor->objectName() != "databaseFieldEditorDialog")
+            for(QWidget* widget : QApplication::topLevelWidgets())
+                if(widget->objectName() == "databaseFieldEditorDialog")
+                    editor = qobject_cast<QDialog*>(widget);
+        if(!editor)
+            return;
+        QPlainTextEdit* text = editor->findChild<QPlainTextEdit*>("databaseFieldEditorText");
+        QDialogButtonBox* buttons = editor->findChild<QDialogButtonBox*>("databaseFieldEditorButtons");
+        openedWrappedEditor = true;
+        QVERIFY(text);
+        QVERIFY(buttons);
+        QCOMPARE(text->lineWrapMode(), QPlainTextEdit::WidgetWidth);
+        QVERIFY(editor->width() <= 760);
+        if(text)
+            text->setPlainText(edited);
+        if(buttons)
+            buttons->button(QDialogButtonBox::Ok)->click();
+    });
+    const QRect wearsRect = grid->visualItemRect(wearsItem);
+    QVERIFY(wearsRect.isValid());
+    QMetaObject::invokeMethod(grid, "cellDoubleClicked", Qt::DirectConnection,
+        Q_ARG(int, wearsItem->row()), Q_ARG(int, wearsColumn));
+    QApplication::processEvents();
+    QVERIFY(openedWrappedEditor);
+    const ei::SDatabaseTable* monsters = document->table("units.monsters");
+    QVERIFY(monsters);
+    bool storedCompleteValue = false;
+    for(const ei::SDatabaseRow& row : monsters->rows)
+        if(row.stableKey.startsWith("human test#"))
+            storedCompleteValue = row.values.value("fld.32.0").toString() == edited;
+    QVERIFY(storedCompleteValue);
+    QVERIFY(document->canUndo());
+}
+
+QTEST_MAIN(ProfileDatabaseTests)
 #include "profile_database_tests.moc"
