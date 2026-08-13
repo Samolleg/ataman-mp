@@ -25,7 +25,7 @@
 1	11	4	0	A.Chemic	Absorbtion: Chemic
 1	11	5	0	A.Electric	Absorbtion: Electric
 1	11	6	0	A.General	Absorbtion: General
-1	12	0	0	Unk12-0
+1	12	0	0	Cripple Mask	Body-part cripple flags applied by this material
 1	13	0	0	Shop 1
 1	13	1	0	Shop 2
 1	13	2	0	Shop 3
@@ -36,7 +36,7 @@
 2	1	0	0	Type
 2	2	0	0	TypeID
 2	3	0	0	M.Type	Material Type
-2	4	0	0	Unk4-0
+2	4	0	0	Material Type Index	Cached material-type lookup index
 2	5	0	0	TTI	Texture Type Index
 2	6	0	0	TTI2	Texture Type Index 2
 2	7	0	0	Price
@@ -53,10 +53,10 @@
 2	14	4	0	Shop 5
 2	15	0	0	Dec.	Deconstructable
 2	21	0	0	Actions
-2	22	0	0	Unk22-0
+2	22	0	0	Stat Modifiers	Packed stat/skill modifier identifiers
 2	23	0	0	Range
 2	24	0	0	D.Min	Damage Min
-2	25	0	0	D.Max	Damage Max
+2	25	0	0	D.Random	Damage Random Range
 2	26	0	0	DP.Piercing	Damage Proportions: Piercing
 2	26	1	0	DP.Slashing	Damage Proportions: Slashing
 2	26	2	0	DP.Bludg.	Damage Proportions: Bludgeoning
@@ -64,8 +64,8 @@
 2	26	4	0	DP.Chemic	Damage Proportions: Chemic
 2	26	5	0	DP.Electric	Damage Proportions: Electric
 2	26	6	0	DP.General	Damage Proportions: General
-2	27	0	0	Unk27-0
-2	28	0	0	Unk28-0
+2	27	0	0	Manual Skill Modifiers
+2	28	0	0	Automatic Skill Modifiers
 2	29	0	0	Attack	Attack modifier
 2	30	0	0	Defence	Defence modifier
 # Armors
@@ -73,7 +73,7 @@
 3	1	0	0	Type
 3	2	0	0	TypeID
 3	3	0	0	M.Type	Material Type
-3	4	0	0	Unk4-0
+3	4	0	0	Material Type Index	Cached material-type lookup index
 3	5	0	0	TTI	Texture Type Index
 3	6	0	0	TTI2	Texture Type Index 2
 3	7	0	0	Price
@@ -97,7 +97,7 @@
 3	21	5	0	M. Chemic	Main Chemic
 3	21	6	0	M. Electric	Main Electric
 3	21	7	0	M. General	Main General
-3	21	8	0	Unk21-8
+3	21	8	0	Main Cripple Mask
 3	22	0	0	A. Absorb.	Additional Absrobtion
 3	22	1	0	A. Piercing	Additional Piercing
 3	22	2	0	A. Slashing	Additional Slashing
@@ -106,17 +106,17 @@
 3	22	5	0	A. Chemic	Additional Chemic
 3	22	6	0	A. Electric	Additional Electric
 3	22	7	0	A. General	Additional General
-3	22	8	0	Unk22-8
+3	22	8	0	Additional Cripple Mask
 3	23	0	0	Apply Wounds	Graphic Data: Apply Wounds
 3	24	0	0	Wear Order	Graphic Data: Wear Order
-3	25	0	0	Unk25-0
-3	26	0	0	Unk26-0
+3	25	0	0	Manual Skill Modifiers
+3	26	0	0	Automatic Skill Modifiers
 # Quick Items
 4	0	0	120	Name
 4	1	0	0	Type
-4	2	0	0	Unk2-0
+4	2	0	0	Type ID
 4	3	0	0	M.Type	Material Type
-4	4	0	0	Unk4-0
+4	4	0	0	Material Type Index	Cached material-type lookup index
 4	5	0	0	TTI	Texture Type Index
 4	6	0	0	TTI2	Texture Type Index 2
 4	7	0	0	Price
@@ -132,21 +132,21 @@
 4	14	3	0	Shop 4
 4	14	4	0	Shop 5
 4	15	0	0	Dec.	Deconstructable
-4	21	0	0	ItemID	Quick Item ID
-4	22	0	0	GD Level	Graphics data: Level
+4	21	0	0	Quick Item Type
+4	22	0	0	Skill	Manual skill associated with the quick item
 4	23	0	0	Damage
-4	24	0	0	Unk24-0
+4	24	0	0	Damage Type
 4	25	0	0	Spell
 4	26	0	0	Science modifier
 4	26	1	0	Stealing modifier
-4	26	2	0	Unk26-2
-4	27	0	0	Unk27-0
+4	26	2	0	Tame Modifier
+4	27	0	0	Automatic Skill Modifiers
 # Quest Items
 5	0	0	120	Name
 5	1	0	0	Type
-5	2	0	0	Unk2-0
+5	2	0	0	Type ID
 5	3	0	0	M.Type	Material Type
-5	4	0	0	Unk4-0
+5	4	0	0	Material Type Index	Cached material-type lookup index
 5	5	0	0	TTI	Texture Type Index
 5	6	0	0	TTI2	Texture Type Index 2
 5	7	0	0	Price
@@ -167,9 +167,9 @@
 # Loot Items
 6	0	0	120	Name
 6	1	0	0	Type
-6	2	0	0	Unk2-0
+6	2	0	0	Type ID
 6	3	0	0	M.Type	Material Type
-6	4	0	0	Unk4-0
+6	4	0	0	Material Type Index	Cached material-type lookup index
 6	5	0	0	TTI	Texture Type Index
 6	6	0	0	TTI2	Texture Type Index 2
 6	7	0	0	Price
@@ -185,9 +185,9 @@
 6	14	3	0	Shop 4
 6	14	4	0	Shop 5
 6	15	0	0	Dec.	Deconstructable
-6	21	0	0	TypeID
-6	22	0	0	Unk22-0
-6	23	0	0	Unk23-0
+6	21	0	0	Loot Type
+6	22	0	0	Instruction Type
+6	23	0	0	Material Index	Material or prototype lookup index, depending on loot type
 
 [Levers]
 # Lever Prototypes
@@ -196,7 +196,7 @@
 1	1	1	70	Place1-2
 1	1	2	70	Place2-1
 1	1	3	70	Place2-2
-1	2	0	0	Unk2-0
+1	2	0	0	Valid Place Count	Number of populated use-place coordinates
 1	3	0	0	Scale
 1	4	0	0	Switch Time
 1	5	0	0	Material
@@ -215,8 +215,8 @@
 2	2	0	0	TTI	Texture Type Index
 2	10	0	60	Perk
 2	11	0	60	Skill
-2	12	0	80	SkillID
-2	13	0	80	Unk13-0
+2	12	0	80	Automatic Skill ID
+2	13	0	80	Manual Skill ID
 2	14	0	0	SL
 2	15	0	0	Str
 2	16	0	0	Dex
@@ -236,7 +236,7 @@
 1	2	3	0	Clear Weather Fadeout
 1	3	1	0	Weather Precipitation Opacity
 1	3	2	0	Weather Precipitation Lifetime
-1	3	2	0	Weather Precipitation Fadeout
+1	3	3	0	Weather Precipitation Fadeout
 # Foot Prints
 2	1	0	0	Terrain Type
 2	2	1	0	Clear Weather Opacity
@@ -244,18 +244,18 @@
 2	2	3	0	Clear Weather Fadeout
 2	3	1	0	Weather Precipitation Opacity
 2	3	2	0	Weather Precipitation Lifetime
-2	3	2	0	Weather Precipitation Fadeout
-2	10	1	0	Unknown Opacity
-2	10	2	0	Unknown Lifetime
-2	10	3	0	Unknown Fadeout
-# Blood Prints
+2	3	3	0	Weather Precipitation Fadeout
+2	10	1	0	Bloody Opacity
+2	10	2	0	Bloody Lifetime
+2	10	3	0	Bloody Fadeout
+# Fire Prints
 3	1	0	0	Terrain Type
 3	2	1	0	Clear Weather Opacity
 3	2	2	0	Clear Weather Lifetime
 3	2	3	0	Clear Weather Fadeout
 3	3	1	0	Weather Precipitation Opacity
 3	3	2	0	Weather Precipitation Lifetime
-3	3	2	0	Weather Precipitation Fadeout
+3	3	3	0	Weather Precipitation Fadeout
 
 [Spells]
 # Spell Prototypes
@@ -357,16 +357,16 @@
 1	2	4	0	Elemental Chemic2
 1	2	5	0	Elemental Electric2
 1	2	6	0	Other General2
-1	3	0	0	Unk3-0
-1	4	0	0	Unk4-0
+1	3	0	0	Cripple Mask
+1	4	0	0	Hit Location Type
 # Race Models
 2	0	0	150	Name
 2	1	0	0	TypeId
 2	2	0	0	Regenerate Health
 2	3	0	0	Regenerate Mana
-2	4	0	0	Secondary Language
-2	5	0	0	Secondary Locomotion
-2	6	0	0	Secondary Vision arc
+2	4	0	0	Language
+2	5	0	0	Locomotion
+2	6	0	0	Vision Arc
 2	7	0	0	Speed Run
 2	7	1	0	Speed Walk
 2	7	2	0	Speed Sneak
@@ -382,27 +382,27 @@
 2	11	5	0	Attack Electric
 2	11	6	0	Attack General
 2	12	0	0	HL Head Type
-2	12	1	0	Unk12-1
+2	12	1	0	Head Type Index	Cached hit-location-type lookup index
 2	12	2	0	HL Head Weight
 2	12	3	0	HL Head Vitality
 2	13	0	0	HL Torso Type
-2	13	1	0	Unk13-1
+2	13	1	0	Torso Type Index	Cached hit-location-type lookup index
 2	13	2	0	HL Torso Weight
 2	13	3	0	HL Torso Vitality
 2	14	0	0	HL Right Arm Type
-2	14	1	0	Unk14-1
+2	14	1	0	Right Arm Type Index	Cached hit-location-type lookup index
 2	14	2	0	HL Right Arm Weight
 2	14	3	0	HL Right Arm Vitality
 2	15	0	0	HL Left Arm Type
-2	15	1	0	Unk15-1
+2	15	1	0	Left Arm Type Index	Cached hit-location-type lookup index
 2	15	2	0	HL Left Arm Weight
 2	15	3	0	HL Left Arm Vitality
 2	16	0	0	HL Rigth Leg Type
-2	16	1	0	Unk16-1
+2	16	1	0	Right Leg Type Index	Cached hit-location-type lookup index
 2	16	2	0	HL Rigth Leg Weight
 2	16	3	0	HL Rigth Leg Vitality
 2	17	0	0	HL Left Leg Type
-2	17	1	0	Unk17-1
+2	17	1	0	Left Leg Type Index	Cached hit-location-type lookup index
 2	17	2	0	HL Left Leg Weight
 2	17	3	0	HL Left Leg Vitality
 2	30	0	0	Graphic data Mask Name
@@ -433,20 +433,20 @@
 2	44	0	0	Graphics data Skin Type
 2	45	0	0	Graphics data First Step Right
 2	46	0	0	Graphics data Head Height
-2	47	0	0	Unk47-0
-2	48	0	0	Unk48-0
-2	49	0	0	Unk49-0
-2	50	0	0	Unk50-0
+2	47	0	0	Mouth Point X
+2	48	0	0	Mouth Point Y
+2	49	0	0	Mouth Rectangle Size X
+2	50	0	0	Mouth Rectangle Size Y
 # Monster Prototypes
 3	0	0	150	Name
 3	1	0	0	Base Race
-3	2	0	0	Unk2-0
+3	2	0	0	Base Race Index	Cached race-model lookup index
 3	3	0	0	Graphics Data Skin Index
 3	4	0	0	Graphics Data Hair
 3	5	0	0	Graphics Data Complection X
 3	6	0	0	Graphics Data Complection Y
 3	7	0	0	Graphics Data Complection Z
-3	8	0	0	Unk8-0
+3	8	0	0	Sounds Data SFX Path
 3	9	0	0	Stats Health
 3	10	0	0	Stats Mana
 3	11	0	0	Stats Absorbtion
@@ -457,8 +457,8 @@
 3	16	0	0	Stats Parry
 3	17	0	0	Tuning Weapon Weight
 3	18	0	0	Attack Weapon Type Id
-3	19	0	0	Stats Danage Nub
-3	20	0	0	Stats Damage Max
+3	19	0	0	Stats Damage Minimum
+3	20	0	0	Stats Damage Random Range
 3	21	0	0	Skills General
 3	22	0	0	Skills Steal
 3	23	0	0	Skills Tame
@@ -503,7 +503,7 @@
 3	43	0	0	Stats Exp
 # NPCs
 4	0	0	150	Name
-4	1	0	0	Unk1-0
+4	1	0	0	Character Points
 4	2	0	0	Exp
 4	3	0	0	Strength
 4	4	0	0	Dexterity
@@ -553,7 +553,7 @@
 1	30	0	0	ArmCrip
 1	31	0	0	LegCrip
 1	32	0	0	Bored
-1	33	0	0	Unknown
+1	33	0	0	Target Too High
 1	34	0	0	Overload
 1	35	0	0	Injured
 1	36	0	0	BigAtt
@@ -563,8 +563,8 @@
 1	40	0	0	WaitFoll
 1	41	0	0	Scenario
 1	42	0	0	StealEmp
-1	43	0	0	ShopYes
-1	44	0	0	ShopNo
+1	43	0	0	Whisper Yes
+1	44	0	0	Whisper No
 # Cryes
 2	1	0	150	Name
 2	10	0	0	Agress
@@ -581,21 +581,21 @@
 # Quests
 1	0	0	80	Name
 1	1	0	0	Experience
-1	2	0	0	Unk2-0
+1	2	0	0	Total Previous Experience
 1	3	0	0	Zone Number
-1	4	0	0	Comment
+1	4	0	0	Description
 1	5	0	0	Money
 1	6	0	0	Record Number
-1	7	0	0	Unk7-0
+1	7	0	0	Quest Places	Coordinate pairs for quest locations
 # Briefings
 2	0	0	60	Name
-2	1	0	0	Unk1-0
+2	1	0	0	Experience
 2	2	0	0	Money
 2	3	0	0	Give Items
-2	4	0	0	Comment
+2	4	0	0	Description
 2	5	0	0	Take Items
 2	6	0	0	Give Quests 1
 2	7	0	0	Give Quests 2
 2	8	0	0	Open Zones
-2	9	0	0	Unk9-0
+2	9	0	0	Complete Zones
 2	10	0	0	Bonus Number

@@ -180,6 +180,7 @@ private slots:
     void installedAllFieldCodecIdentity();
     void installedEveryStorageTypeEditIsIsolated();
     void nestedCodecPreservesUntouchedEncodingAndOpaqueBits();
+    void schemaNamesRuntimeMappedFields();
     void authoringDocumentPublishesEveryWritableFieldLosslessly_data();
     void authoringDocumentPublishesEveryWritableFieldLosslessly();
     void authoringDocumentComposesTablesSharingOneMember();
@@ -705,6 +706,39 @@ void ProfileDatabaseTests::nestedCodecPreservesUntouchedEncodingAndOpaqueBits()
     QCOMPARE(ei::DatabaseValueCodec::encode(
         QString::fromUtf8(QJsonDocument(values).toJson(QJsonDocument::Compact)),
         bitSource,bits,schema,"__lossless_test__",&diagnostic),QByteArray(1,char(0xf9)));
+}
+
+void ProfileDatabaseTests::schemaNamesRuntimeMappedFields()
+{
+    struct Expected { const char* family; int block; int field; int index; const char* name; };
+    const Expected expected[] = {
+        {"Items",1,12,0,"Cripple Mask"}, {"Items",2,4,0,"Material Type Index"},
+        {"Items",2,22,0,"Stat Modifiers"}, {"Items",2,27,0,"Manual Skill Modifiers"},
+        {"Items",2,28,0,"Automatic Skill Modifiers"}, {"Items",3,21,8,"Main Cripple Mask"},
+        {"Items",3,22,8,"Additional Cripple Mask"}, {"Items",3,25,0,"Manual Skill Modifiers"},
+        {"Items",3,26,0,"Automatic Skill Modifiers"}, {"Items",4,2,0,"Type ID"},
+        {"Items",4,24,0,"Damage Type"}, {"Items",4,26,2,"Tame Modifier"},
+        {"Items",4,27,0,"Automatic Skill Modifiers"}, {"Items",6,22,0,"Instruction Type"},
+        {"Items",6,23,0,"Material Index"}, {"Levers",1,2,0,"Valid Place Count"},
+        {"Perks",2,13,0,"Manual Skill ID"}, {"Prints",2,10,1,"Bloody Opacity"},
+        {"Prints",2,10,2,"Bloody Lifetime"}, {"Prints",2,10,3,"Bloody Fadeout"},
+        {"Units",1,3,0,"Cripple Mask"}, {"Units",1,4,0,"Hit Location Type"},
+        {"Units",2,12,1,"Head Type Index"}, {"Units",2,17,1,"Left Leg Type Index"},
+        {"Units",2,47,0,"Mouth Point X"}, {"Units",2,48,0,"Mouth Point Y"},
+        {"Units",2,49,0,"Mouth Rectangle Size X"}, {"Units",2,50,0,"Mouth Rectangle Size Y"},
+        {"Units",3,2,0,"Base Race Index"}, {"Units",3,8,0,"Sounds Data SFX Path"},
+        {"Units",4,1,0,"Character Points"}, {"Acks",1,33,0,"Target Too High"},
+        {"Quests",1,2,0,"Total Previous Experience"}, {"Quests",1,7,0,"Quest Places"},
+        {"Quests",2,1,0,"Experience"}, {"Quests",2,9,0,"Complete Zones"}
+    };
+    const auto& schema=ei::DatabaseSchema::instance();
+    for(const Expected& item:expected)
+    {
+        const auto headers=schema.headers(item.family,item.block,item.field);
+        auto found=std::find_if(headers.cbegin(),headers.cend(),[&](const ei::SDatabaseStorageHeader& header){return header.index==item.index;});
+        QVERIFY2(found!=headers.cend(),qPrintable(QString("Missing %1 block %2 FLD%3[%4]").arg(item.family).arg(item.block).arg(item.field).arg(item.index)));
+        QCOMPARE(found->name,QString::fromLatin1(item.name));
+    }
 }
 
 void ProfileDatabaseTests::authoringDocumentPublishesEveryWritableFieldLosslessly_data()
