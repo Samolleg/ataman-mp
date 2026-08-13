@@ -171,6 +171,7 @@ private slots:
     void installedWearsEditPreservesStructuralTagIdentity();
     void authoringDocumentPublishesCloneAndUndoRestoresOriginal();
     void workbookImportIsOneValidatedUndoableTransaction();
+    void workbookUsesEidbCompatibleListAndSharedStringSyntax();
     void workbookNoOpAllowsPreexistingReferenceFindings();
     void authoringDocumentApplyIsAtomicAndUndoCanRestoreSource();
     void authoringDocumentRenamesStableIdentityAndTracksAppliedState();
@@ -496,6 +497,26 @@ void ProfileDatabaseTests::workbookImportIsOneValidatedUndoableTransaction()
     QTemporaryDir temporary;QVERIFY(temporary.isValid());write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QString diagnostic;const QString workbook=QDir(temporary.path()).filePath("database.xlsx");QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));ei::SDatabaseWorkbookImport imported;QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));auto tables=imported.tables;int monsterRow=-1;for(int index=0;index<tables["monsters"].rows.size();++index)if(tables["monsters"].rows[index].stableKey=="human test")monsterRow=index;QVERIFY(monsterRow>=0);tables["monsters"].rows[monsterRow].values["skinIndex"]=11;QVERIFY2(document->replaceTables(tables,"Imported database.xlsx",&diagnostic),qPrintable(diagnostic));QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("skinIndex").toInt(),11);QVERIFY(document->undo());QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("skinIndex").toInt(),2);
     tables=imported.tables;tables["monsters"].rows[monsterRow].values["baseRace"]="missing race";QVERIFY(!document->replaceTables(tables,"Invalid workbook",&diagnostic));QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("baseRace").toString(),QString("Human Male"));
 }
+
+void ProfileDatabaseTests::workbookUsesEidbCompatibleListAndSharedStringSyntax()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());
+    write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    const auto* monsters=document->table("units.monsters");QVERIFY(monsters);QString monsterRow;for(const auto& row:monsters->rows)if(row.sourceStableKey=="Human Test")monsterRow=row.stableKey;QVERIFY(!monsterRow.isEmpty());QString setupDiagnostic;QVERIFY2(document->setValue("units.monsters",monsterRow,"fld.32.0",QStringLiteral("[\"armor_leather.iron\",\"helmet_plate.iron\"]"),&setupDiagnostic),qPrintable(setupDiagnostic));
+    QString diagnostic;const QString workbook=QDir(temporary.path()).filePath("database.xlsx");
+    QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));
+    QZipReader zip(workbook);QVERIFY(zip.exists());
+    const QByteArray shared=zip.fileData("xl/sharedStrings.xml");QVERIFY(!shared.isEmpty());
+    QVERIFY(shared.contains("armor_leather.iron,helmet_plate.iron"));
+    QVERIFY(!shared.contains("[&quot;armor_leather.iron&quot;"));
+    QVERIFY(shared.contains("FLD32-0"));
+    const int sheetCount=ei::workbookTableKeys(*document).size();QVERIFY(sheetCount>0);for(int index=1;index<=sheetCount;++index){const QByteArray sheet=zip.fileData(QString("xl/worksheets/sheet%1.xml").arg(index));QVERIFY2(!sheet.isEmpty(),qPrintable(QString("sheet %1 missing").arg(index)));QVERIFY2(sheet.contains("<dimension ref="),qPrintable(QString("sheet %1 lacks dimension").arg(index)));QVERIFY(!sheet.contains("inlineStr"));}
+    ei::SDatabaseWorkbookImport imported;
+    QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));
+}
 void ProfileDatabaseTests::workbookNoOpAllowsPreexistingReferenceFindings()
 {
     QTemporaryDir temporary;QVERIFY(temporary.isValid());auto members=relationalMembers();QByteArray monster=stringField(0,"Broken Existing")+stringField(1,"missing race");members["units.udb"]=database({QByteArray(),record(stringField(0,"Human Male")+stringField(30,"unhuma")),record(monster),QByteArray()});write(QDir(temporary.path()).filePath("database.res"),resArchive(members));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QMap<QString,ei::SDatabaseTable> unchanged;for(const QString& key:document->tableKeys())unchanged[key]=*document->table(key);QString diagnostic;QVERIFY2(document->replaceTables(unchanged,"No-op workbook",&diagnostic),qPrintable(diagnostic));QVERIFY(document->undo());
@@ -596,7 +617,8 @@ void ProfileDatabaseTests::installedFullSchemaWorkbookRoundTrip()
     for(const QString& archivePath:archives)
     {
         const QFileInfo info(archivePath);QVERIFY2(info.isFile(),qPrintable(archivePath));if(info.fileName().compare("database.res",Qt::CaseInsensitive)!=0)continue;ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<info.absolutePath();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QString diagnostic;QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString workbook=QDir(temporary.path()).filePath("database.xlsx");
-        QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));ei::SDatabaseWorkbookImport imported;QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));QVERIFY2(document->replaceTables(imported.tables,"Full schema XLSX no-op",&diagnostic),qPrintable(diagnostic));QFile source(archivePath);QVERIFY(source.open(QIODevice::ReadOnly));QCOMPARE(document->buildArchive(&diagnostic),source.readAll());QVERIFY(document->undo());
+        QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));const QString retained=qEnvironmentVariable("EI_TEST_RETAIN_XLSX");if(!retained.isEmpty()){QFile::remove(retained);QVERIFY2(QFile::copy(workbook,retained),qPrintable(retained));}ei::SDatabaseWorkbookImport imported;QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));QVERIFY2(document->replaceTables(imported.tables,"Full schema XLSX no-op",&diagnostic),qPrintable(diagnostic));QFile source(archivePath);QVERIFY(source.open(QIODevice::ReadOnly));QCOMPARE(document->buildArchive(&diagnostic),source.readAll());QVERIFY(document->undo());
+        const QString eidbWorkbook=qEnvironmentVariable("EI_TEST_EIDB_WORKBOOK");if(!eidbWorkbook.isEmpty()){ei::SDatabaseWorkbookImport eidbImported;QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,eidbWorkbook,&eidbImported,&diagnostic),qPrintable(diagnostic));QVERIFY2(document->replaceTables(eidbImported.tables,"EIDB workbook no-op",&diagnostic),qPrintable(diagnostic));QFile eidbSource(archivePath);QVERIFY(eidbSource.open(QIODevice::ReadOnly));QCOMPARE(document->buildArchive(&diagnostic),eidbSource.readAll());QVERIFY(document->undo());}
         QZipReader zip(workbook);QVERIFY(zip.exists());const QStringList keys=ei::workbookTableKeys(*document);QCOMPARE(keys.size(),26);for(int index=0;index<keys.size();++index)QVERIFY(!zip.fileData(QString("xl/worksheets/sheet%1.xml").arg(index+1)).isEmpty());QVERIFY(!zip.fileData("ei-mapper/source.res").isEmpty());
     }
 }
@@ -950,14 +972,15 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
     QVERIFY(wearsColumn >= 0);
     QTableWidgetItem* wearsItem = grid->item(grid->currentRow(), wearsColumn);
     QVERIFY(wearsItem);
-    QVERIFY(wearsItem->data(Qt::UserRole + 2).toString().size() > wearsItem->text().size());
+    QVERIFY(!wearsItem->data(Qt::UserRole + 2).toString().contains('['));
+    QVERIFY(wearsItem->data(Qt::UserRole + 2).toString().contains('\n'));
     QVERIFY(!wearsItem->toolTip().contains(originalLongValue));
     grid->scrollToItem(wearsItem, QAbstractItemView::PositionAtCenter);
     grid->setCurrentCell(wearsItem->row(), wearsColumn);
     QApplication::processEvents();
 
     bool openedWrappedEditor = false;
-    const QString edited = QStringLiteral("[\"armor_leather.iron\",\"armor_leather.iron\",\"armor_leather.iron\"]");
+    const QString edited = QStringLiteral("armor_leather.iron\narmor_leather.iron\narmor_leather.iron");
     QTimer::singleShot(0, [&openedWrappedEditor, &edited]() {
         QDialog* editor = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         if(!editor || editor->objectName() != "databaseFieldEditorDialog")
@@ -977,8 +1000,10 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
         QVERIFY(editor->width() <= 760);
         if(text)
             text->setPlainText(edited);
-        if(count)
-            QVERIFY(count->text().contains(QString::number(edited.size())));
+        if(count) {
+            QVERIFY(count->text().contains(QStringLiteral("3")));
+            QVERIFY(count->text().contains(QStringLiteral("item"), Qt::CaseInsensitive));
+        }
         if(buttons)
             buttons->button(QDialogButtonBox::Ok)->click();
     });
@@ -993,7 +1018,7 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
     bool storedCompleteValue = false;
     for(const ei::SDatabaseRow& row : monsters->rows)
         if(row.stableKey.startsWith("human test#"))
-            storedCompleteValue = row.values.value("fld.32.0").toString() == edited;
+            storedCompleteValue = row.values.value("fld.32.0").toString() == QStringLiteral("[\"armor_leather.iron\",\"armor_leather.iron\",\"armor_leather.iron\"]");
     QVERIFY(storedCompleteValue);
     QVERIFY(document->canUndo());
     QVERIFY(!committed.isEmpty());
