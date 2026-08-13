@@ -40,10 +40,27 @@ QByteArray LosslessDatabaseMember::encodeNode(const Node& node)
 {
     if(!node.dirty)return node.header+node.payload;
     QByteArray payload;if(node.container)for(const Node& child:node.children)payload+=encodeNode(child);else payload=node.payload;
-    return encodeHeader(node.id,payload.size())+payload;
+    // Retain the exact original tag header whenever its encoded payload length
+    // remains valid. This preserves non-canonical-but-valid short/long headers
+    // and limits fixed-size edits to the field payload bytes themselves.
+    bool headerMatches=false;
+    if(node.header.size()==2)
+        headerMatches=uchar(node.header.at(0))==node.id
+            && !(uchar(node.header.at(1))&1)
+            && uchar(node.header.at(1))/2==payload.size();
+    else if(node.header.size()==5)
+        headerMatches=uchar(node.header.at(0))==node.id
+            && (u32(node.header,1)-1)/2==quint32(payload.size());
+    return (headerMatches?node.header:encodeHeader(node.id,payload.size()))+payload;
 }
 bool LosslessDatabaseMember::valid()const{return m_valid;}
 QByteArray LosslessDatabaseMember::serialize()const{return m_valid?encodeNode(m_root)+m_suffix:QByteArray();}
+int LosslessDatabaseMember::tableCount()const{return m_valid?m_root.children.size():0;}
+int LosslessDatabaseMember::recordCount(int tableIndex)const
+{
+    return m_valid&&tableIndex>=0&&tableIndex<m_root.children.size()
+        ?m_root.children.at(tableIndex).children.size():0;
+}
 const LosslessDatabaseMember::Node* LosslessDatabaseMember::recordNode(int tableIndex,int recordIndex)const
 {
     if(!m_valid||tableIndex<0||tableIndex>=m_root.children.size())return nullptr;
@@ -69,6 +86,27 @@ int LosslessDatabaseMember::findRecordByFieldPayload(int tableIndex,int fieldId,
         result=recordIndex;
     }
     return result;
+}
+int LosslessDatabaseMember::findRecordByEncodedFields(int tableIndex,const QVector<SLosslessDatabaseField>& wanted)const
+{
+    if(!m_valid||tableIndex<0||tableIndex>=m_root.children.size())return -1;int result=-1;
+    for(int record=0;record<recordCount(tableIndex);++record)
+    {
+        const auto candidate=fields(tableIndex,record);if(candidate.size()!=wanted.size())continue;bool same=true;
+        for(int i=0;i<candidate.size();++i)same=same&&candidate[i].encoded==wanted[i].encoded;
+        if(!same)continue;if(result>=0)return -2;result=record;
+    }
+    return result;
+}
+bool LosslessDatabaseMember::cloneRecord(int tableIndex,int recordIndex,QString* diagnostic)
+{
+    if(!m_valid||tableIndex<0||tableIndex>=m_root.children.size()||recordIndex<0||recordIndex>=m_root.children[tableIndex].children.size()){if(diagnostic)*diagnostic="Clone source record is unavailable.";return false;}
+    Node& table=m_root.children[tableIndex];table.children.append(table.children.at(recordIndex));table.dirty=true;m_root.dirty=true;return true;
+}
+bool LosslessDatabaseMember::removeRecord(int tableIndex,int recordIndex,QString* diagnostic)
+{
+    if(!m_valid||tableIndex<0||tableIndex>=m_root.children.size()||recordIndex<0||recordIndex>=m_root.children[tableIndex].children.size()){if(diagnostic)*diagnostic="Deleted record is unavailable.";return false;}
+    Node& table=m_root.children[tableIndex];table.children.removeAt(recordIndex);table.dirty=true;m_root.dirty=true;return true;
 }
 LosslessDatabaseMember::Node* LosslessDatabaseMember::fieldNode(int tableIndex,int recordIndex,int fieldId,int occurrence)
 {

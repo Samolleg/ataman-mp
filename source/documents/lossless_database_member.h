@@ -26,12 +26,18 @@ public:
                                         QString* diagnostic = nullptr);
     bool valid() const;
     QByteArray serialize() const;
+    int tableCount() const;
+    int recordCount(int tableIndex) const;
     QVector<SLosslessDatabaseField> fields(int tableIndex, int recordIndex) const;
     int findRecordByFieldPayload(int tableIndex, int fieldId,
                                  const QByteArray& payload) const;
     bool replaceFieldPayload(int tableIndex, int recordIndex, int fieldId,
                              int occurrence, const QByteArray& payload,
                              QString* diagnostic = nullptr);
+    int findRecordByEncodedFields(int tableIndex,
+                                  const QVector<SLosslessDatabaseField>& fields) const;
+    bool cloneRecord(int tableIndex, int recordIndex, QString* diagnostic = nullptr);
+    bool removeRecord(int tableIndex, int recordIndex, QString* diagnostic = nullptr);
     bool cloneRecordByFieldPayload(int tableIndex, int fieldId, const QByteArray& sourcePayload,
                                    const QByteArray& newPayload, QString* diagnostic = nullptr);
     bool removeRecordByFieldPayload(int tableIndex, int fieldId, const QByteArray& payload,

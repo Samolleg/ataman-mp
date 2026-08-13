@@ -4,6 +4,7 @@
 #include <QString>
 #include "database_document.h"
 namespace ei {
+QStringList workbookTableKeys(const DatabaseDocument& document);
 struct SDatabaseWorkbookImport { QMap<QString,SDatabaseTable> tables; QVector<SDatabaseValidationFinding> findings; };
 class DatabaseWorkbook {
 public:

@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QSharedPointer>
+#include <QSet>
 #include <QVariant>
 #include <QVector>
 #include "profile_database.h"
@@ -11,9 +12,9 @@
 namespace ei {
 
 enum class EDatabaseFieldType { Text, Integer, Decimal, Reference, TextList };
-struct SDatabaseFieldSchema { QString key, label; EDatabaseFieldType type{EDatabaseFieldType::Text}; QString referenceTable; bool writable{true}; bool opaque{false}; };
-struct SDatabaseRow { QString stableKey, sourceStableKey; QMap<QString, QVariant> values; bool added{false}; bool deleted{false}; };
-struct SDatabaseTable { QString key, label, sourceMember; QVector<SDatabaseFieldSchema> fields; QVector<SDatabaseRow> rows; };
+struct SDatabaseFieldSchema { QString key, label; EDatabaseFieldType type{EDatabaseFieldType::Text}; QString referenceTable; bool writable{true}; bool opaque{false}; int storageId{-1}; int storageOccurrence{0}; };
+struct SDatabaseRow { QString stableKey, sourceStableKey; int sourceRecordIndex{-1}; QMap<QString, QVariant> values; bool added{false}; bool deleted{false}; };
+struct SDatabaseTable { QString key, label, sourceMember, schemaFamily; int physicalTable{-1}; int blockId{-1}; int identityFieldId{-1}; QVector<SDatabaseFieldSchema> fields; QVector<SDatabaseRow> rows; bool structuralEditing{true}; };
 struct SDatabaseChange {
     SDatabaseChange() = default;
     SDatabaseChange(const QString&t,const QString&r,const QString&f,const QVariant&b,const QVariant&a,const QString&d):tableKey(t),rowKey(r),fieldKey(f),before(b),after(a),description(d){}
@@ -37,6 +38,8 @@ public:
     bool hasUnappliedChanges(QString* = nullptr) const;
     bool identityAvailable(const QString& tableKey, const QString& identity,
                            const QString& exceptRowKey = QString()) const;
+    bool fieldEditable(const QString& tableKey, const QString& rowKey,
+                       const QString& fieldKey, QString* diagnostic = nullptr) const;
     QString displayIdentity(const QString& tableKey, const QString& rowKey) const;
     bool setValue(const QString&, const QString&, const QString&, const QVariant&, QString* = nullptr);
     bool cloneRow(const QString&, const QString&, const QString&, QString* = nullptr);
@@ -52,7 +55,7 @@ private:
     struct SState { QMap<QString, SDatabaseTable> tables; SDatabaseChange change; };
     explicit DatabaseDocument(const QSharedPointer<const SProfileDatabaseSnapshot>&);
     SDatabaseRow* row(const QString&, const QString&); void commit(const QMap<QString, SDatabaseTable>&, const SDatabaseChange&);
-    QSharedPointer<const SProfileDatabaseSnapshot> m_snapshot; QMap<QString, SDatabaseTable> m_tables, m_baselineTables; QVector<SState> m_undo, m_redo; QByteArray m_sourceArchiveBaseline; QString m_expectedSourceSha256;
+    QSharedPointer<const SProfileDatabaseSnapshot> m_snapshot; QMap<QString, SDatabaseTable> m_tables, m_baselineTables; QSet<QString> m_sourceFieldOccurrences; QVector<SState> m_undo, m_redo; QByteArray m_sourceArchiveBaseline; QString m_expectedSourceSha256; mutable bool m_buildingReplacementCandidate{false};
 };
 }
 #endif

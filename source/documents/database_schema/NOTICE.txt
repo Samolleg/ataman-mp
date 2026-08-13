@@ -1,0 +1,6 @@
+Database schema descriptor data in this directory is derived from EIDBEditor
+by chemmalion, licensed under the MIT License. The descriptors document the
+public Evil Islands database interchange format. EI Mapper Endurance's parser,
+document model, and serializer are independently implemented.
+
+Source: https://github.com/chemmalion/EIDBEditor

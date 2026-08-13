@@ -3,11 +3,19 @@
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QtGui/private/qzipreader_p.h>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <cmath>
 
 #include "profile_database.h"
 #include "database_document.h"
 #include "database_workbook.h"
+#include "database_schema.h"
+#include "database_value_codec.h"
 #include "lossless_database_member.h"
+#include "res_archive_document.h"
 #include "profile_database_provider_support.h"
 
 namespace {
@@ -47,11 +55,17 @@ QMap<QString, QByteArray> relationalMembers()
 {
     QByteArray race = stringField(0, "Human Male") + stringField(30, "unhuma")
         + tag(31, stringField(0, "unhumaskin_00"));
+    QByteArray race2 = stringField(0, "Human Female") + stringField(30, "unhumf")
+        + tag(31, stringField(0, "unhumfskin_00"));
     QByteArray monster = stringField(0, "Human Test") + stringField(1, "Human Male")
-        + intField(3, 2) + intField(9, 123) + tag(29, stringField(0, "gold [3]"))
-        + tag(32, stringField(0, "armor_leather.iron"))
-        + tag(33, stringField(0, "2h sword.iron[effect{a,b}],shield.iron"));
-    const QByteArray units = database({QByteArray(), record(race), record(monster), QByteArray()});
+        + intField(3, 2) + intField(4, 1) + tag(5,QByteArray::fromHex("0000803f"))
+        + tag(6,QByteArray::fromHex("0000803f")) + tag(7,QByteArray::fromHex("0000803f"))
+        + intField(9, 123) + tag(29, stringField(0, "gold [3]"))
+        + tag(32, stringField(1, "armor_leather.iron"))
+        + tag(33, stringField(0, "2h sword.iron[effect{a,b}],shield.iron"))
+        + stringField(42,"2h sword.iron");
+    const QByteArray sparseMonster=stringField(0,"Sparse Test")+stringField(1,"Human Male")+intField(3,0);
+    const QByteArray units = database({QByteArray(), record(race)+record(race2), record(monster)+record(sparseMonster), QByteArray()});
 
     QVector<QByteArray> itemTables;
     const QStringList names = {"iron", "2h sword", "armor_leather", "potion", "quest_key", "gold"};
@@ -62,7 +76,8 @@ QMap<QString, QByteArray> relationalMembers()
             fields += stringField(1, "Metal") + stringField(2, "ir") + intField(3, 7);
         else
             fields += stringField(1, index == 1 ? "weapon" : "item") + intField(2, index)
-                + stringField(3, "metal") + intField(5, 1);
+                + stringField(3, "metal") + intField(5, 1) + intField(6,2);
+        if(index==2)fields+=intField(24,4);
         itemTables.append(record(fields));
     }
     const QByteArray items = database(itemTables);
@@ -130,11 +145,24 @@ private slots:
     void losslessMemberPatchChangesOnlyRequestedOccurrence();
     void installedDatabaseMembersAreByteIdenticalOnNoOp();
     void installedDatabaseDocumentNativeRoundTrip();
+    void installedWearsEditPreservesStructuralTagIdentity();
     void authoringDocumentPublishesCloneAndUndoRestoresOriginal();
     void workbookImportIsOneValidatedUndoableTransaction();
     void workbookNoOpAllowsPreexistingReferenceFindings();
     void authoringDocumentApplyIsAtomicAndUndoCanRestoreSource();
     void authoringDocumentRenamesStableIdentityAndTracksAppliedState();
+    void authoringDocumentPreservesNestedWearsTagIdentity();
+    void authoringDocumentExposesCompleteRawDatabaseCoverage();
+    void installedFullSchemaWorkbookRoundTrip();
+    void installedAllFieldCodecIdentity();
+    void installedEveryStorageTypeEditIsIsolated();
+    void authoringDocumentPublishesEveryWritableFieldLosslessly_data();
+    void authoringDocumentPublishesEveryWritableFieldLosslessly();
+    void authoringDocumentComposesTablesSharingOneMember();
+    void authoringDocumentClonesAndDeletesEveryPhysicalTable();
+    void authoringDocumentRenameThenDeleteRestoresExactBaseline();
+    void losslessMemberFixedSizePatchPreservesOriginalHeaders();
+    void workbookImportRejectsReadOnlyAndUnpublishableChanges();
 };
 
 QByteArray unitPerkLua(const QString& prototype, int strongMan)
@@ -388,6 +416,48 @@ void ProfileDatabaseTests::installedDatabaseDocumentNativeRoundTrip()
     }
 }
 
+void ProfileDatabaseTests::installedWearsEditPreservesStructuralTagIdentity()
+{
+    const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);
+    if(archives.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run the installed wears structure control.");
+    bool foundTarget=false;
+    for(const QString& archive:archives)
+    {
+        if(QFileInfo(archive).fileName().contains("databaseJmv",Qt::CaseInsensitive))continue;
+        QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString sourcePath=QDir(temporary.path()).filePath("database.res");
+        QVERIFY2(QFile::copy(archive,sourcePath),qPrintable(archive));
+        ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="wears-parity";request.resourceDirectories<<temporary.path();
+        auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY2(document,qPrintable(archive));
+        const auto* monsters=document->table("monsters");QVERIFY(monsters);
+        const ei::SDatabaseRow* target=nullptr;
+        for(const auto& row:monsters->rows)if(row.stableKey=="human poselok ad f4"){target=&row;break;}
+        if(!target)continue;
+        foundTarget=true;
+        const QStringList replacement=QStringList()<<"armor plate.mithril"<<"helmet plate.mithril";
+        QString diagnostic;QVERIFY2(document->setValue("monsters",target->stableKey,"wears",replacement,&diagnostic),qPrintable(diagnostic));
+        const QByteArray edited=document->buildArchive(&diagnostic);QVERIFY2(!edited.isEmpty(),qPrintable(diagnostic));
+        CResArchiveDocument sourceRes,editedRes;QStringList errors;
+        QFile sourceFile(sourcePath);QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+        QVERIFY2(sourceRes.loadBytes(sourceFile.readAll(),sourcePath,&errors),qPrintable(errors.join('\n')));errors.clear();
+        QVERIFY2(editedRes.loadBytes(edited,"memory",&errors),qPrintable(errors.join('\n')));
+        const auto before=ei::LosslessDatabaseMember::parse(sourceRes.memberPayload("units.udb"),&diagnostic);
+        const auto after=ei::LosslessDatabaseMember::parse(editedRes.memberPayload("units.udb"),&diagnostic);
+        QVERIFY(before.valid());QVERIFY(after.valid());
+        const QByteArray name=QTextCodec::codecForName("CP1251")->fromUnicode("Human Poselok AD F4")+'\0';
+        const int beforeRecord=before.findRecordByFieldPayload(2,0,name),afterRecord=after.findRecordByFieldPayload(2,0,name);
+        QVERIFY(beforeRecord>=0);QVERIFY(afterRecord>=0);
+        QByteArray beforeWears,afterWears;
+        for(const auto& field:before.fields(2,beforeRecord))if(field.id==32&&field.occurrence==0)beforeWears=field.payload;
+        for(const auto& field:after.fields(2,afterRecord))if(field.id==32&&field.occurrence==0)afterWears=field.payload;
+        QVERIFY(!beforeWears.isEmpty());QVERIFY(!afterWears.isEmpty());
+        QCOMPARE(uchar(afterWears.at(0)),uchar(beforeWears.at(0)));
+        const int afterFirstLength=uchar(afterWears.at(1))/2;
+        QVERIFY(2+afterFirstLength<afterWears.size());
+        QCOMPARE(uchar(afterWears.at(2+afterFirstLength)),uchar(beforeWears.at(0)));
+    }
+    QVERIFY2(foundTarget,"Human Poselok AD F4 was absent from every supplied database archive.");
+}
+
 void ProfileDatabaseTests::authoringDocumentPublishesCloneAndUndoRestoresOriginal()
 {
     QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");const QByteArray source=resArchive(relationalMembers());write(path,source);ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QString diagnostic;
@@ -396,8 +466,8 @@ void ProfileDatabaseTests::authoringDocumentPublishesCloneAndUndoRestoresOrigina
 
 void ProfileDatabaseTests::workbookImportIsOneValidatedUndoableTransaction()
 {
-    QTemporaryDir temporary;QVERIFY(temporary.isValid());write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QString diagnostic;const QString workbook=QDir(temporary.path()).filePath("database.xlsx");QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));ei::SDatabaseWorkbookImport imported;QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));auto tables=imported.tables;tables["monsters"].rows[0].values["skinIndex"]=11;QVERIFY(document->replaceTables(tables,"Imported database.xlsx",&diagnostic));QCOMPARE(document->table("monsters")->rows[0].values.value("skinIndex").toInt(),11);QVERIFY(document->undo());QCOMPARE(document->table("monsters")->rows[0].values.value("skinIndex").toInt(),2);
-    tables=imported.tables;tables["monsters"].rows[0].values["baseRace"]="missing race";QVERIFY(!document->replaceTables(tables,"Invalid workbook",&diagnostic));QCOMPARE(document->table("monsters")->rows[0].values.value("baseRace").toString(),QString("Human Male"));
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QString diagnostic;const QString workbook=QDir(temporary.path()).filePath("database.xlsx");QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));ei::SDatabaseWorkbookImport imported;QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));auto tables=imported.tables;int monsterRow=-1;for(int index=0;index<tables["monsters"].rows.size();++index)if(tables["monsters"].rows[index].stableKey=="human test")monsterRow=index;QVERIFY(monsterRow>=0);tables["monsters"].rows[monsterRow].values["skinIndex"]=11;QVERIFY2(document->replaceTables(tables,"Imported database.xlsx",&diagnostic),qPrintable(diagnostic));QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("skinIndex").toInt(),11);QVERIFY(document->undo());QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("skinIndex").toInt(),2);
+    tables=imported.tables;tables["monsters"].rows[monsterRow].values["baseRace"]="missing race";QVERIFY(!document->replaceTables(tables,"Invalid workbook",&diagnostic));QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("baseRace").toString(),QString("Human Male"));
 }
 void ProfileDatabaseTests::workbookNoOpAllowsPreexistingReferenceFindings()
 {
@@ -410,6 +480,255 @@ void ProfileDatabaseTests::authoringDocumentApplyIsAtomicAndUndoCanRestoreSource
 void ProfileDatabaseTests::authoringDocumentRenamesStableIdentityAndTracksAppliedState()
 {
     QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");write(path,resArchive(relationalMembers()));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QVERIFY(!document->identityAvailable("monsters","Human Test"));QVERIFY(document->identityAvailable("monsters","Human Test Copy"));QString diagnostic;QVERIFY2(document->setValue("monsters","human test","name","Human Test Renamed",&diagnostic),qPrintable(diagnostic));QVERIFY(!document->identityAvailable("monsters","human test renamed"));QVERIFY(document->hasUnappliedChanges(&diagnostic));QVERIFY2(document->applyToSource(&diagnostic),qPrintable(diagnostic));QVERIFY(!document->hasUnappliedChanges(&diagnostic));QVERIFY(document->undo());QVERIFY(document->hasUnappliedChanges(&diagnostic));
+}
+
+void ProfileDatabaseTests::authoringDocumentPreservesNestedWearsTagIdentity()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString sourcePath = QDir(temporary.path()).filePath("database.res");
+    write(sourcePath, resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId = "base.standard.v1";
+    request.profileId = "base";
+    request.resourceDirectories << temporary.path();
+    auto document = ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    QString diagnostic;
+    QVERIFY2(document->setValue("monsters", "human test", "wears",
+        QStringList() << "armor_plate.meteoric" << "helmet_plate.meteoric",
+        &diagnostic), qPrintable(diagnostic));
+    const QByteArray archive = document->buildArchive(&diagnostic);
+    QVERIFY2(!archive.isEmpty(), qPrintable(diagnostic));
+    CResArchiveDocument res;
+    QStringList errors;
+    QVERIFY2(res.loadBytes(archive, "memory", &errors), qPrintable(errors.join('\n')));
+    const auto member = ei::LosslessDatabaseMember::parse(res.memberPayload("units.udb"),
+                                                           &diagnostic);
+    QVERIFY2(member.valid(), qPrintable(diagnostic));
+    const int recordIndex = member.findRecordByFieldPayload(2, 0,
+                                                             stringField(0, "Human Test").mid(2));
+    QVERIFY(recordIndex >= 0);
+    QByteArray wearsPayload;
+    for(const auto& field : member.fields(2, recordIndex))
+        if(field.id == 32 && field.occurrence == 0)
+            wearsPayload = field.payload;
+    QVERIFY(!wearsPayload.isEmpty());
+    QCOMPARE(uchar(wearsPayload.at(0)), uchar(1));
+    const int firstLength = uchar(wearsPayload.at(1)) / 2;
+    QVERIFY(2 + firstLength < wearsPayload.size());
+    QCOMPARE(uchar(wearsPayload.at(2 + firstLength)), uchar(1));
+}
+
+void ProfileDatabaseTests::authoringDocumentExposesCompleteRawDatabaseCoverage()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString sourcePath = QDir(temporary.path()).filePath("database.res");
+    const QByteArray source = resArchive(relationalMembers());
+    write(sourcePath, source);
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId = "base.standard.v1";
+    request.profileId = "base";
+    request.resourceDirectories << temporary.path();
+    auto document = ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    QVERIFY(document->tableKeys().size() > 3);
+    const auto* fullMonsters = document->table("units.monsters");
+    QVERIFY(fullMonsters);
+    QVERIFY(fullMonsters->structuralEditing);
+    QCOMPARE(fullMonsters->rows.size(), 2);
+    QVERIFY(fullMonsters->rows.first().values.contains("fld.32.0"));
+    QString diagnostic;
+    QVERIFY(document->cloneRow(fullMonsters->key, fullMonsters->rows.first().stableKey,
+                               "Full Schema Clone", &diagnostic));
+    QVERIFY2(!document->buildArchive(&diagnostic).isEmpty(),qPrintable(diagnostic));
+    QVERIFY(document->undo());
+    QCOMPARE(document->buildArchive(&diagnostic), source);
+}
+
+void ProfileDatabaseTests::installedFullSchemaWorkbookRoundTrip()
+{
+    const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);
+    if(archives.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run full workbook corpus parity.");
+    for(const QString& archivePath:archives)
+    {
+        const QFileInfo info(archivePath);QVERIFY2(info.isFile(),qPrintable(archivePath));if(info.fileName().compare("database.res",Qt::CaseInsensitive)!=0)continue;ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<info.absolutePath();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QString diagnostic;QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString workbook=QDir(temporary.path()).filePath("database.xlsx");
+        QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));ei::SDatabaseWorkbookImport imported;QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));QVERIFY2(document->replaceTables(imported.tables,"Full schema XLSX no-op",&diagnostic),qPrintable(diagnostic));QFile source(archivePath);QVERIFY(source.open(QIODevice::ReadOnly));QCOMPARE(document->buildArchive(&diagnostic),source.readAll());QVERIFY(document->undo());
+        QZipReader zip(workbook);QVERIFY(zip.exists());const QStringList keys=ei::workbookTableKeys(*document);QCOMPARE(keys.size(),26);for(int index=0;index<keys.size();++index)QVERIFY(!zip.fileData(QString("xl/worksheets/sheet%1.xml").arg(index+1)).isEmpty());QVERIFY(!zip.fileData("ei-mapper/source.res").isEmpty());
+    }
+}
+
+void ProfileDatabaseTests::installedAllFieldCodecIdentity()
+{
+    const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);if(archives.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run exhaustive codec parity.");const auto& schema=ei::DatabaseSchema::instance();QVERIFY2(schema.diagnostic().isEmpty(),qPrintable(schema.diagnostic()));
+    for(const QString& archivePath:archives)
+    {
+        QVector<ei::SDatabaseDiagnostic> diagnostics;const auto members=ei::readDatabaseArchive(archivePath,&diagnostics);
+        for(const auto& table:schema.tables())
+        {
+            if(!members.contains(table.memberName))continue;QString parseDiagnostic;const auto member=ei::LosslessDatabaseMember::parse(members.value(table.memberName),&parseDiagnostic);QVERIFY2(member.valid(),qPrintable(parseDiagnostic));QVERIFY(table.physicalIndex<member.tableCount());
+            for(int record=0;record<member.recordCount(table.physicalIndex);++record)for(const auto& field:member.fields(table.physicalIndex,record))
+            {
+                const auto* descriptor=schema.field(table.family,table.blockId,field.id);if(!descriptor)continue;QString diagnostic;const QVariant value=ei::DatabaseValueCodec::decode(field.payload,*descriptor,schema,table.family,&diagnostic);QVERIFY2(diagnostic.isEmpty(),qPrintable(QString("%1 row %2 FLD%3: %4").arg(table.key).arg(record).arg(field.id).arg(diagnostic)));const QByteArray encoded=ei::DatabaseValueCodec::encode(value,field.payload,*descriptor,schema,table.family,&diagnostic);QVERIFY2(diagnostic.isEmpty(),qPrintable(diagnostic));QVERIFY2(encoded==field.payload,qPrintable(QString("%1 row %2 FLD%3 type %4 encoded=%5 source=%6").arg(table.key).arg(record).arg(field.id).arg(int(descriptor->type)).arg(QString::fromLatin1(encoded.toHex()),QString::fromLatin1(field.payload.toHex()))));
+            }
+        }
+    }
+}
+
+void ProfileDatabaseTests::installedEveryStorageTypeEditIsIsolated()
+{
+    const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);if(archives.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run storage-type edit isolation.");const auto& schema=ei::DatabaseSchema::instance();QSet<int> tested;
+    for(const QString& archivePath:archives)
+    {
+        QVector<ei::SDatabaseDiagnostic> diagnostics;const auto members=ei::readDatabaseArchive(archivePath,&diagnostics);
+        for(const auto& table:schema.tables())
+        {
+            if(!members.contains(table.memberName))continue;const auto original=ei::LosslessDatabaseMember::parse(members.value(table.memberName));if(!original.valid())continue;
+            for(int record=0;record<original.recordCount(table.physicalIndex);++record)for(const auto& field:original.fields(table.physicalIndex,record))
+            {
+                const auto* descriptor=schema.field(table.family,table.blockId,field.id);if(!descriptor||tested.contains(int(descriptor->type)))continue;QString diagnostic;QVariant value=ei::DatabaseValueCodec::decode(field.payload,*descriptor,schema,table.family,&diagnostic);if(!diagnostic.isEmpty())continue;QByteArray replacement=field.payload;
+                if(descriptor->type==ei::EDatabaseStorageType::String||descriptor->type==ei::EDatabaseStorageType::FixedString){value=value.toString()+"_codex";replacement=ei::DatabaseValueCodec::encode(value,field.payload,*descriptor,schema,table.family,&diagnostic);}
+                else if(descriptor->type==ei::EDatabaseStorageType::SignedLong||descriptor->type==ei::EDatabaseStorageType::UnsignedLong||descriptor->type==ei::EDatabaseStorageType::Byte){value=value.toLongLong()+1;replacement=ei::DatabaseValueCodec::encode(value,field.payload,*descriptor,schema,table.family,&diagnostic);}
+                else if(descriptor->type==ei::EDatabaseStorageType::Float&&std::isfinite(value.toDouble())){value=value.toDouble()+0.25;replacement=ei::DatabaseValueCodec::encode(value,field.payload,*descriptor,schema,table.family,&diagnostic);}
+                else if(descriptor->type==ei::EDatabaseStorageType::Hex&&!field.payload.isEmpty()){replacement=field.payload;replacement[0]=char(uchar(replacement[0])^1);}
+                else if(value.type()==QVariant::String){QJsonParseError error;QJsonDocument doc=QJsonDocument::fromJson(value.toString().toUtf8(),&error);if(error.error==QJsonParseError::NoError&&doc.isArray()&&!doc.array().isEmpty()){QJsonArray array=doc.array();if(array[0].isBool())array[0]=!array[0].toBool();else if(array[0].isDouble())array[0]=array[0].toDouble()+1;else if(array[0].isString())array[0]=array[0].toString()+"_codex";else if(array[0].isObject()){QJsonObject object=array[0].toObject();if(object.contains("value")){if(object["value"].isDouble())object["value"]=object["value"].toDouble()+1;else if(object["value"].isString())object["value"]=object["value"].toString()+"_codex";}else if(object.value("fields").isArray()){QJsonArray fields=object.value("fields").toArray();if(!fields.isEmpty()){QJsonObject nested=fields[0].toObject();if(nested["value"].isDouble())nested["value"]=nested["value"].toDouble()+1;else nested["value"]=nested["value"].toString()+"_codex";fields[0]=nested;object["fields"]=fields;}}array[0]=object;}value=QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));replacement=ei::DatabaseValueCodec::encode(value,field.payload,*descriptor,schema,table.family,&diagnostic);}}
+                if(replacement.isEmpty()||replacement==field.payload||!diagnostic.isEmpty())continue;auto changed=original;QVERIFY(changed.replaceFieldPayload(table.physicalIndex,record,field.id,field.occurrence,replacement,&diagnostic));const auto reparsed=ei::LosslessDatabaseMember::parse(changed.serialize(),&diagnostic);QVERIFY(reparsed.valid());for(int ti=0;ti<original.tableCount();++ti)for(int ri=0;ri<original.recordCount(ti);++ri){const auto before=original.fields(ti,ri),after=reparsed.fields(ti,ri);QCOMPARE(after.size(),before.size());for(int fi=0;fi<before.size();++fi)if(!(ti==table.physicalIndex&&ri==record&&before[fi].id==field.id&&before[fi].occurrence==field.occurrence))QCOMPARE(after[fi].encoded,before[fi].encoded);}tested.insert(int(descriptor->type));
+            }
+        }
+    }
+    const QSet<int> corpusTypes=QSet<int>()<<int(ei::EDatabaseStorageType::Hex)<<int(ei::EDatabaseStorageType::String)<<int(ei::EDatabaseStorageType::UnsignedLong)<<int(ei::EDatabaseStorageType::SignedLong)<<int(ei::EDatabaseStorageType::Float)<<int(ei::EDatabaseStorageType::Byte)<<int(ei::EDatabaseStorageType::FloatList)<<int(ei::EDatabaseStorageType::ByteList)<<int(ei::EDatabaseStorageType::StringList)<<int(ei::EDatabaseStorageType::FixedStringList)<<int(ei::EDatabaseStorageType::BitList)<<int(ei::EDatabaseStorageType::TypeList)<<int(ei::EDatabaseStorageType::AcksUniqueType)<<int(ei::EDatabaseStorageType::FixedString);
+    for(int type:corpusTypes)QVERIFY2(tested.contains(type),qPrintable(QString("Installed corpus storage type %1 was not mutation-tested.").arg(type)));
+}
+
+void ProfileDatabaseTests::authoringDocumentPublishesEveryWritableFieldLosslessly_data()
+{
+    QTest::addColumn<QString>("table");QTest::addColumn<QString>("row");
+    QTest::addColumn<QString>("field");QTest::addColumn<QVariant>("value");
+    QTest::newRow("race-name")<<"raceModels"<<"human male"<<"name"<<QVariant("Human Male Renamed");
+    QTest::newRow("race-model")<<"raceModels"<<"human male"<<"model"<<QVariant("unhumb");
+    QTest::newRow("monster-name")<<"monsters"<<"human test"<<"name"<<QVariant("Human Test Renamed");
+    QTest::newRow("monster-race")<<"monsters"<<"human test"<<"baseRace"<<QVariant("Human Female");
+    QTest::newRow("monster-skin")<<"monsters"<<"human test"<<"skinIndex"<<QVariant(7);
+    QTest::newRow("monster-hair")<<"monsters"<<"human test"<<"hairIndex"<<QVariant(4);
+    QTest::newRow("monster-x")<<"monsters"<<"human test"<<"complexionX"<<QVariant(1.25);
+    QTest::newRow("monster-y")<<"monsters"<<"human test"<<"complexionY"<<QVariant(1.5);
+    QTest::newRow("monster-z")<<"monsters"<<"human test"<<"complexionZ"<<QVariant(1.75);
+    QTest::newRow("monster-items")<<"monsters"<<"human test"<<"items"<<QVariant(QStringList()<<"gold [5]");
+    QTest::newRow("monster-wears")<<"monsters"<<"human test"<<"wears"<<QVariant(QStringList()<<"armor_leather.iron"<<"armor_leather.iron");
+    QTest::newRow("monster-second-weapon")<<"monsters"<<"human test"<<"secondWeapon"<<QVariant("shield.iron");
+    QTest::newRow("weapon-name")<<"items"<<"2h sword"<<"name"<<QVariant("2h sword renamed");
+    QTest::newRow("weapon-type")<<"items"<<"2h sword"<<"type"<<QVariant("weapon2");
+    QTest::newRow("weapon-type-id")<<"items"<<"2h sword"<<"typeId"<<QVariant(12);
+    QTest::newRow("weapon-material")<<"items"<<"2h sword"<<"materialType"<<QVariant("metal2");
+    QTest::newRow("weapon-texture-1")<<"items"<<"2h sword"<<"textureType1"<<QVariant(3);
+    QTest::newRow("weapon-texture-2")<<"items"<<"2h sword"<<"textureType2"<<QVariant(4);
+    QTest::newRow("armor-wear-order")<<"items"<<"armor_leather"<<"wearOrder"<<QVariant(8);
+}
+
+void ProfileDatabaseTests::authoringDocumentPublishesEveryWritableFieldLosslessly()
+{
+    QFETCH(QString,table);QFETCH(QString,row);QFETCH(QString,field);QFETCH(QVariant,value);
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");
+    const QByteArray source=resArchive(relationalMembers());write(path,source);
+    CResArchiveDocument baseline;QStringList errors;QVERIFY(baseline.loadBytes(source,"baseline",&errors));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QString diagnostic;
+    QVERIFY2(document->setValue(table,row,field,value,&diagnostic),qPrintable(diagnostic));
+    const QByteArray edited=document->buildArchive(&diagnostic);QVERIFY2(!edited.isEmpty(),qPrintable(diagnostic));QVERIFY(edited!=source);
+    CResArchiveDocument candidate;errors.clear();QVERIFY2(candidate.loadBytes(edited,"candidate",&errors),qPrintable(errors.join('\n')));
+    const QString changedMember=table=="items"?"items.idb":"units.udb";
+    QCOMPARE(candidate.members().size(),baseline.members().size());
+    for(const auto& member:baseline.members())if(member.name.compare(changedMember,Qt::CaseInsensitive)!=0)QCOMPARE(candidate.memberPayload(member.name),member.payload);
+    const auto original=ei::LosslessDatabaseMember::parse(baseline.memberPayload(changedMember),&diagnostic);
+    const auto changed=ei::LosslessDatabaseMember::parse(candidate.memberPayload(changedMember),&diagnostic);QVERIFY2(original.valid()&&changed.valid(),qPrintable(diagnostic));
+    int physicalTable=table=="raceModels"?1:(table=="monsters"?2:-1),physicalField=-1;
+    if(table=="items")
+    {
+        const auto* items=document->table("items");QVERIFY(items);for(const auto& item:items->rows)if(item.sourceStableKey.compare(row,Qt::CaseInsensitive)==0||item.stableKey==row){physicalTable=QStringList({"materials","weapons","armor","quickItems","questItems","lootItems"}).indexOf(item.values.value("category").toString());break;}
+    }
+    if(field=="name")physicalField=0;else if(table=="raceModels"&&field=="model")physicalField=30;
+    else if(table=="monsters")physicalField=QMap<QString,int>{{"baseRace",1},{"skinIndex",3},{"hairIndex",4},{"complexionX",5},{"complexionY",6},{"complexionZ",7},{"items",29},{"wears",32},{"secondWeapon",42}}.value(field,-1);
+    else if(table=="items")physicalField=QMap<QString,int>{{"type",1},{"typeId",2},{"materialType",3},{"textureType1",5},{"textureType2",6},{"wearOrder",24}}.value(field,-1);
+    QVERIFY(physicalTable>=0);QVERIFY(physicalField>=0);QCOMPARE(changed.tableCount(),original.tableCount());
+    int targetRecord=-1;
+    for(int recordIndex=0;recordIndex<original.recordCount(physicalTable);++recordIndex)
+        for(const auto& sourceField:original.fields(physicalTable,recordIndex))
+            if(sourceField.id==0&&sourceField.occurrence==0
+               &&QTextCodec::codecForName("CP1251")->toUnicode(sourceField.payload).remove('\0').compare(row,Qt::CaseInsensitive)==0)
+                targetRecord=recordIndex;
+    QVERIFY(targetRecord>=0);
+    for(int tableIndex=0;tableIndex<original.tableCount();++tableIndex)
+    {
+        QCOMPARE(changed.recordCount(tableIndex),original.recordCount(tableIndex));
+        for(int recordIndex=0;recordIndex<original.recordCount(tableIndex);++recordIndex)
+        {
+            const auto beforeFields=original.fields(tableIndex,recordIndex),afterFields=changed.fields(tableIndex,recordIndex);QCOMPARE(afterFields.size(),beforeFields.size());
+            for(int index=0;index<beforeFields.size();++index)
+            {
+                QCOMPARE(afterFields.at(index).id,beforeFields.at(index).id);QCOMPARE(afterFields.at(index).occurrence,beforeFields.at(index).occurrence);
+                const bool target=tableIndex==physicalTable&&recordIndex==targetRecord
+                    &&beforeFields.at(index).id==physicalField&&beforeFields.at(index).occurrence==0;
+                if(!target)QCOMPARE(afterFields.at(index).encoded,beforeFields.at(index).encoded);
+            }
+        }
+    }
+    QVERIFY(document->undo());QCOMPARE(document->buildArchive(&diagnostic),source);
+}
+
+void ProfileDatabaseTests::authoringDocumentComposesTablesSharingOneMember()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");const QByteArray source=resArchive(relationalMembers());write(path,source);
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QString diagnostic;
+    QVERIFY(document->setValue("raceModels","human male","model","unhumb",&diagnostic));QVERIFY(document->setValue("monsters","human test","skinIndex",8,&diagnostic));
+    const auto snapshot=document->currentSnapshot(&diagnostic);QVERIFY2(snapshot,qPrintable(diagnostic));QCOMPARE(snapshot->raceModels.value("human male").model,QString("unhumb"));QCOMPARE(snapshot->monsters.value("human test").skinIndex,8);
+    QVERIFY(document->undo());QVERIFY(document->undo());QCOMPARE(document->buildArchive(&diagnostic),source);
+}
+
+void ProfileDatabaseTests::authoringDocumentClonesAndDeletesEveryPhysicalTable()
+{
+    const QVector<QPair<QString,QString>> rows={{"raceModels","human male"},{"monsters","human test"},{"items","2h sword"},{"items","armor_leather"},{"items","potion"},{"items","quest_key"},{"items","gold"}};
+    for(const auto& test:rows)
+    {
+        QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");const QByteArray source=resArchive(relationalMembers());write(path,source);
+        ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QString diagnostic;const QString clone=test.second+" clone";
+        QVERIFY2(document->cloneRow(test.first,test.second,clone,&diagnostic),qPrintable(diagnostic));const auto snapshot=document->currentSnapshot(&diagnostic);QVERIFY2(snapshot,qPrintable(QString("%1/%2: %3").arg(test.first,test.second,diagnostic)));
+        QVERIFY(document->undo());QCOMPARE(document->buildArchive(&diagnostic),source);
+        QVERIFY(document->deleteRow(test.first,test.second,&diagnostic));QVERIFY2(!document->buildArchive(&diagnostic).isEmpty(),qPrintable(diagnostic));QVERIFY(document->undo());QCOMPARE(document->buildArchive(&diagnostic),source);
+    }
+}
+
+void ProfileDatabaseTests::authoringDocumentRenameThenDeleteRestoresExactBaseline()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");const QByteArray source=resArchive(relationalMembers());write(path,source);
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QString diagnostic;
+    QVERIFY(document->setValue("monsters","human test","name","Human Renamed",&diagnostic));QVERIFY(document->deleteRow("monsters","human renamed",&diagnostic));QVERIFY2(!document->buildArchive(&diagnostic).isEmpty(),qPrintable(diagnostic));
+    QVERIFY(document->undo());QVERIFY(document->undo());QCOMPARE(document->buildArchive(&diagnostic),source);
+}
+
+void ProfileDatabaseTests::losslessMemberFixedSizePatchPreservesOriginalHeaders()
+{
+    QByteArray nonCanonical;nonCanonical.append(char(3));dword(&nonCanonical,9);nonCanonical+=QByteArray::fromHex("01020304");
+    const QByteArray bytes=database({record(nonCanonical)});auto member=ei::LosslessDatabaseMember::parse(bytes);QVERIFY(member.valid());QVERIFY(member.replaceFieldPayload(0,0,3,0,QByteArray::fromHex("05060708")));
+    const QByteArray changed=member.serialize();QCOMPARE(changed.size(),bytes.size());
+    int difference=0;for(int index=0;index<bytes.size();++index)difference+=bytes.at(index)!=changed.at(index);QCOMPARE(difference,4);
+}
+
+void ProfileDatabaseTests::workbookImportRejectsReadOnlyAndUnpublishableChanges()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");write(path,resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QString diagnostic;
+    QMap<QString,ei::SDatabaseTable> candidate;for(const QString& key:document->tableKeys())candidate[key]=*document->table(key);
+    for(auto& row:candidate["items"].rows)if(row.stableKey=="2h sword")row.values["category"]="armor";
+    QVERIFY(!document->replaceTables(candidate,"unsafe read-only import",&diagnostic));QVERIFY(diagnostic.contains("Read-only"));QVERIFY(!document->isDirty());
+    candidate.clear();for(const QString& key:document->tableKeys())candidate[key]=*document->table(key);
+    for(auto& row:candidate["monsters"].rows)if(row.stableKey=="human test")row.values["weapon"]="unsafe";
+    QVERIFY(!document->replaceTables(candidate,"unsafe unsupported import",&diagnostic));QVERIFY(diagnostic.contains("Read-only"));QVERIFY(!document->isDirty());
+    candidate.clear();for(const QString& key:document->tableKeys())candidate[key]=*document->table(key);
+    for(auto& row:candidate["monsters"].rows)if(row.stableKey=="sparse test")row.values["hairIndex"]=5;
+    QVERIFY(!document->replaceTables(candidate,"unsafe absent-field import",&diagnostic));QVERIFY(diagnostic.contains("does not exist")||diagnostic.contains("absent"));QVERIFY(!document->isDirty());
 }
 
 QTEST_APPLESS_MAIN(ProfileDatabaseTests)

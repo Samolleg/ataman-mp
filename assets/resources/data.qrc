@@ -6,5 +6,10 @@
         <file>arrow_right.ico</file>
         <file>endurance_gate.png</file>
         <file>endurance_splash.png</file>
+        <!-- Public EIDBEditor database schema (MIT); used by the native,
+             schema-driven database document and XLSX codec. -->
+        <file alias="database_schema/dbblocks.txt">../../source/documents/database_schema/dbblocks.txt</file>
+        <file alias="database_schema/dbtypes.txt">../../source/documents/database_schema/dbtypes.txt</file>
+        <file alias="database_schema/dbheaders.txt">../../source/documents/database_schema/dbheaders.txt</file>
     </qresource>
 </RCC>
