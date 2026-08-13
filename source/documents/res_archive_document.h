@@ -33,6 +33,8 @@ public:
     const QByteArray& originalBytes() const { return m_originalBytes; }
     QByteArray serialize() const { return m_originalBytes; }
     const QVector<SResArchiveMember>& members() const { return m_members; }
+    quint32 tableOffset() const { return m_tableOffset; }
+    int uniqueMemberIndex(const QString& name) const;
     QByteArray memberPayload(const QString& name) const;
 
     bool replaceMember(const QString& name, const QByteArray& expectedPayloadSha256,
@@ -54,7 +56,6 @@ public:
                                     QStringList* errors = nullptr);
 
 private:
-    int uniqueMemberIndex(const QString& name) const;
 
     QByteArray m_originalBytes;
     QByteArray m_tableBytes;

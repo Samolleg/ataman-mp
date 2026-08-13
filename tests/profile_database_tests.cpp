@@ -440,6 +440,19 @@ void ProfileDatabaseTests::installedDatabaseDocumentNativeRoundTrip()
             edited=document->buildArchive(&diagnostic);if(!edited.isEmpty()){published=true;break;}QVERIFY(document->undo());
         }
         QVERIFY2(published,qPrintable(QString("%1: %2").arg(archive,diagnostic)));QVERIFY(edited!=sourceBytes);
+        CResArchiveDocument sourceLayout,editedLayout;QStringList layoutErrors;
+        QVERIFY2(sourceLayout.loadBytes(sourceBytes,sourcePath,&layoutErrors),qPrintable(layoutErrors.join('\n')));layoutErrors.clear();
+        QVERIFY2(editedLayout.loadBytes(edited,"edited",&layoutErrors),qPrintable(layoutErrors.join('\n')));
+        const int sourceUnitsIndex=sourceLayout.uniqueMemberIndex("units.udb"),editedUnitsIndex=editedLayout.uniqueMemberIndex("units.udb");
+        QVERIFY(sourceUnitsIndex>=0);QVERIFY(editedUnitsIndex>=0);
+        const auto sourceUnits=sourceLayout.members().at(sourceUnitsIndex),editedUnits=editedLayout.members().at(editedUnitsIndex);
+        QCOMPARE(editedLayout.tableOffset(),quint32(qint64(sourceLayout.tableOffset())+qint64(editedUnits.dataSize)-sourceUnits.dataSize));
+        QCOMPARE(editedUnits.dataOffset,sourceUnits.dataOffset);
+        for(const auto& member:editedLayout.members())QVERIFY2(quint64(member.dataOffset)+member.dataSize<=editedLayout.tableOffset(),qPrintable(member.name));
+        const auto originalUnits=ei::LosslessDatabaseMember::parse(sourceLayout.memberPayload("units.udb"));
+        const auto publishedUnits=ei::LosslessDatabaseMember::parse(editedLayout.memberPayload("units.udb"));
+        const int wolfRecord=originalUnits.findRecordByFieldPayload(2,0,QByteArray("WolfGreyF10\0",12));QVERIFY(wolfRecord>=0);
+        const auto originalWolf=originalUnits.fields(2,wolfRecord),publishedWolf=publishedUnits.fields(2,wolfRecord);QCOMPARE(publishedWolf.size(),originalWolf.size());for(int field=0;field<originalWolf.size();++field)QCOMPARE(publishedWolf.at(field).encoded,originalWolf.at(field).encoded);
         const QString editedPath=QDir(temporary.path()).filePath("edited.res");write(editedPath,edited);QVector<ei::SDatabaseDiagnostic> originalDiagnostics,editedDiagnostics;const auto originalMembers=ei::readDatabaseArchive(sourcePath,&originalDiagnostics);const auto editedMembers=ei::readDatabaseArchive(editedPath,&editedDiagnostics);
         QCOMPARE(editedMembers.keys(),originalMembers.keys());for(auto it=originalMembers.constBegin();it!=originalMembers.constEnd();++it)if(it.key()!="units.udb")QCOMPARE(editedMembers.value(it.key()),it.value());QVERIFY(editedMembers.value("units.udb")!=originalMembers.value("units.udb"));
         const auto parsed=ei::parseProfileDatabaseMembers(editedMembers,editedPath);QCOMPARE(parsed.monsters.value(rowKey).skinIndex,newSkin);QVERIFY(document->undo());QCOMPARE(document->buildArchive(&diagnostic),sourceBytes);
