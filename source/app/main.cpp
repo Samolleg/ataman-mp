@@ -61,6 +61,32 @@
 #endif
 
 namespace {
+QtMessageHandler g_previousQtMessageHandler = nullptr;
+
+void enduranceQtMessageHandler(QtMsgType type,
+                               const QMessageLogContext& context,
+                               const QString& message)
+{
+    const QString category = QString::fromLatin1(
+        context.category ? context.category : "");
+    // Qt 5.12's Windows platform/accessibility plugins can repeatedly emit
+    // non-actionable warnings during otherwise successful editor operation.
+    // Keep application/default-category diagnostics visible and suppress only
+    // those known framework categories.
+    if((type == QtDebugMsg || type == QtInfoMsg || type == QtWarningMsg)
+       && (category.startsWith(QStringLiteral("qt.qpa."))
+           || category.startsWith(QStringLiteral("qt.accessibility"))))
+        return;
+    if(g_previousQtMessageHandler)
+        g_previousQtMessageHandler(type, context, message);
+    else
+    {
+        const QByteArray encoded = message.toLocal8Bit();
+        std::fprintf(stderr, "%s\n", encoded.constData());
+        std::fflush(stderr);
+    }
+}
+
 class CStartupSplash final: public QWidget
 {
 public:
@@ -1170,6 +1196,27 @@ int runHeadlessCommand(QApplication& app)
             materialAtlasButton->click();
         const bool materialAtlasActionWorks = materialAtlasButtonAvailable
             && semanticAtlasReviewRequested;
+        bool modernDraftRequested = false;
+        QObject::connect(&landscapeTools,
+                         &CLandscapeTools::saveModernDraftRequested,
+                         [&modernDraftRequested]() {
+            modernDraftRequested = true;
+        });
+        QPushButton* modernDraftButton =
+            landscapeTools.findChild<QPushButton*>("saveModernDraftButton");
+        const bool modernDraftActionWorks = modernDraftButton
+            && modernDraftButton->text().contains(QStringLiteral("draft"),
+                                                   Qt::CaseInsensitive);
+        if(modernDraftButton)
+            modernDraftButton->click();
+        const QList<QPushButton*> landscapePushButtons =
+            landscapeTools.findChildren<QPushButton*>();
+        const bool redundantFinalizeActionRemoved = std::none_of(
+            landscapePushButtons.cbegin(), landscapePushButtons.cend(),
+            [](const QPushButton* button) {
+                return button->text().contains(
+                    QStringLiteral("Finalize map-specific"));
+            });
         QComboBox* paintIssueCategory =
             landscapeTools.findChild<QComboBox*>("paintIssueCategory");
         QToolButton* markPaintIssueButton =
@@ -1427,6 +1474,8 @@ int runHeadlessCommand(QApplication& app)
             && expandedAtlasCapacityIsYellow
             && unstableAtlasCapacityIsRedButInformational
             && materialAtlasActionWorks
+            && modernDraftActionWorks && modernDraftRequested
+            && redundantFinalizeActionRemoved
             && paintIssueMarkerActivates
             && paintIssueMarkerMutuallyExclusive
             && paintIssueTemporarySelectPreservesEditing
@@ -1524,6 +1573,10 @@ int runHeadlessCommand(QApplication& app)
                << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
                << " localAtlasSourceVisible=" << localAtlasSourceVisible
                << " generatedAtlasCountVisible=" << generatedAtlasCountVisible
+               << " modernDraftActionWorks=" << modernDraftActionWorks
+               << " modernDraftRequested=" << modernDraftRequested
+               << " redundantFinalizeActionRemoved="
+               << redundantFinalizeActionRemoved
                << " expandedAtlasCapacityIsYellow="
                << expandedAtlasCapacityIsYellow
                << " unstableAtlasCapacityIsRedButInformational="
@@ -1702,6 +1755,8 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+    g_previousQtMessageHandler = qInstallMessageHandler(
+        enduranceQtMessageHandler);
     app.setWindowIcon(QIcon(":/endurance_gate.png"));
 
     // QGLWidget reads the default format when the first preview/view widget is

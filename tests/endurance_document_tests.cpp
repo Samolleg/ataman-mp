@@ -9,6 +9,7 @@
 #include "endurance_document.h"
 #include "landscape_edit_policy.h"
 #include "terrain_atlas_shape_policy.h"
+#include "terrain_save_flow_policy.h"
 #include "mmp_codec.h"
 #include "operation_history_policy.h"
 #include "portable_diagnostic_writer.h"
@@ -288,6 +289,8 @@ private slots:
     void paintIssueMarkingKeepsCameraNavigation();
     void partialFinalAtlasPageIsAValidLiveBaseline();
     void recoveredFinalizedProfileDecodesEveryLogicalCell();
+    void damagedR125ProfileRecoversInMemoryAndPreservesLayers();
+    void modernSaveRoutesThroughPublicationExactlyOnce();
     void unchangedMobIsByteIdentical();
     void duplicateMobIdsAreWarningsOnly();
     void vulcansmokeIsACriticalNonBlockingFinding();
@@ -531,6 +534,75 @@ void EnduranceDocumentTests::recoveredFinalizedProfileDecodesEveryLogicalCell()
         ETerrainTileLayer::Land, &field, true));
     QCOMPARE(field.tileWidth(), terrain.tileCountX());
     QCOMPARE(field.tileHeight(), terrain.tileCountY());
+}
+
+void EnduranceDocumentTests::damagedR125ProfileRecoversInMemoryAndPreservesLayers()
+{
+    const QString profilePath = qEnvironmentVariable(
+        "ENDURANCE_DAMAGED_TERRAIN_PROFILE");
+    const QString mprPath = qEnvironmentVariable(
+        "ENDURANCE_RECOVERED_TERRAIN_MPR");
+    if(profilePath.isEmpty() || mprPath.isEmpty())
+        QSKIP("Set ENDURANCE_DAMAGED_TERRAIN_PROFILE and ENDURANCE_RECOVERED_TERRAIN_MPR to validate the exact R125 in-memory migration.");
+
+    QFile profileFile(profilePath);
+    QFile mprFile(mprPath);
+    QVERIFY(profileFile.open(QIODevice::ReadOnly));
+    QVERIFY(mprFile.open(QIODevice::ReadOnly));
+    const QByteArray profileBytes = profileFile.readAll();
+    const QByteArray mprBytes = mprFile.readAll();
+    CValidationReport report;
+    STerrainAtlasProfile damaged;
+    QVERIFY2(STerrainAtlasProfile::load(
+                 profilePath, &damaged, &report), qPrintable(report.toText()));
+    QCOMPARE(damaged.assignedSlotCount(), 441);
+
+    STerrainAtlasProfile recovered;
+    QVERIFY2(CTerrainAtlasProfileStore::recoverKnownIncompleteFinalizedProfile(
+                 damaged, profileBytes, mprBytes, &recovered, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(recovered.assignedSlotCount(), 473);
+    QCOMPARE(recovered.atlasSlotCount, 512);
+    QVERIFY(recovered.provenance.contains(QStringLiteral("r125-hash-gated-recovery")));
+    QMap<QString, ETerrainAtlasLayer> layers;
+    for(const STerrainAtlasProfileFamily& family : recovered.families)
+        layers.insert(family.name, family.layer);
+    QCOMPARE(layers.value(QStringLiteral("Swamp")), ETerrainAtlasLayer::Overlay);
+    QCOMPARE(layers.value(QStringLiteral("Water / Still")), ETerrainAtlasLayer::Overlay);
+    QCOMPARE(layers.value(QStringLiteral("Paving / Sand ruins")),
+             ETerrainAtlasLayer::Land);
+    const STerrainAtlasAnalysis analysis = recovered.usableAnalysis(&report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+
+    CMprDocument document;
+    QVERIFY2(document.loadBytes(mprBytes, mprPath, &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    QVERIFY2(terrain.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, analysis.landCatalog, &report),
+             qPrintable(report.toText()));
+}
+
+void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
+{
+    QCOMPARE(terrainMprSaveRoute(false, false, false, false, false),
+             ETerrainMprSaveRoute::PlainMpr);
+    QCOMPARE(terrainMprSaveRoute(true, false, false, false, false),
+             ETerrainMprSaveRoute::PublishModernAtlas);
+    QCOMPARE(terrainMprSaveRoute(false, true, false, false, false),
+             ETerrainMprSaveRoute::PublishModernAtlas);
+    QCOMPARE(terrainMprSaveRoute(false, false, true, false, false),
+             ETerrainMprSaveRoute::PublishModernAtlas);
+    QCOMPARE(terrainMprSaveRoute(false, false, false, true, false),
+             ETerrainMprSaveRoute::PublishModernAtlas);
+    QCOMPARE(terrainMprSaveRoute(false, false, false, false, true),
+             ETerrainMprSaveRoute::PublishModernAtlas);
+
+    // File > Save and File > Save As already own the destination. Publication
+    // must not ask for a second MPR path after either action.
+    QVERIFY(!terrainPublishNeedsMprDestinationDialog(true));
+    QVERIFY(terrainPublishNeedsMprDestinationDialog(false));
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

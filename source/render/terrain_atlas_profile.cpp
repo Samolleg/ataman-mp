@@ -1184,6 +1184,198 @@ bool CTerrainAtlasProfileStore::loadExplicitOverride(
     return true;
 }
 
+bool CTerrainAtlasProfileStore::recoverKnownIncompleteFinalizedProfile(
+    const STerrainAtlasProfile& damaged,
+    const QByteArray& damagedProfileBytes,
+    const QByteArray& mprBytes,
+    STerrainAtlasProfile* recovered,
+    CValidationReport* report)
+{
+    if(!recovered)
+        return false;
+    const QByteArray profileSha = QCryptographicHash::hash(
+        damagedProfileBytes, QCryptographicHash::Sha256).toHex();
+    const QByteArray mprSha = QCryptographicHash::hash(
+        mprBytes, QCryptographicHash::Sha256).toHex();
+    if(profileSha != QByteArrayLiteral(
+           "fbfd88aee8aa5b295a62dc9aca7faddb87de9ee582c87baf7a2af8dfaafd47f3")
+       || mprSha != QByteArrayLiteral(
+           "81e911073443a0ec36de058e90b6607fa5aa4b0b694372966cabe0240aa8917b")
+       || damaged.mprNamespace.compare(
+              QStringLiteral("zone1_88a2ca174820"), Qt::CaseInsensitive) != 0
+       || damaged.atlasSlotCount != 512
+       || damaged.assignedSlotCount() != 441)
+        return false;
+
+    STerrainAtlasProfile result = damaged;
+    QMap<qint32, STerrainAtlasProfileFamily> oldFamilies;
+    QMap<qint32, qint32> globalByOldId;
+    for(const STerrainAtlasProfileFamily& family : damaged.families)
+    {
+        oldFamilies.insert(family.id, family);
+        globalByOldId.insert(family.id,
+            CTerrainAtlasPresetCatalog::globalMaterialId(
+                family.name, family.layer));
+    }
+    const auto globalize = [&globalByOldId](qint32 value) {
+        return globalByOldId.contains(value)
+            ? globalByOldId.value(value) : value;
+    };
+    for(STerrainAtlasProfileSlot& definition : result.slotDefinitions)
+    {
+        definition.signature.northWest = globalize(
+            definition.signature.northWest);
+        definition.signature.northEast = globalize(
+            definition.signature.northEast);
+        definition.signature.southEast = globalize(
+            definition.signature.southEast);
+        definition.signature.southWest = globalize(
+            definition.signature.southWest);
+    }
+
+    const qint32 common = CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Ground / Common"), ETerrainAtlasLayer::Land);
+    const qint32 lime = CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Stone / Lime"), ETerrainAtlasLayer::Land);
+    const qint32 underwater = CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Rock / Underwater emerald"), ETerrainAtlasLayer::Land);
+    const qint32 sandRuins = CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Paving / Sand ruins"), ETerrainAtlasLayer::Land);
+    const qint32 cobblestone = CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Paving / Cobblestone"), ETerrainAtlasLayer::Land);
+    const auto assign = [&result](int slot, qint32 nw, qint32 ne,
+                                  qint32 se, qint32 sw) {
+        if(slot < 0 || slot >= result.slotDefinitions.size())
+            return;
+        STerrainAtlasProfileSlot& definition = result.slotDefinitions[slot];
+        definition.signature.northWest = nw;
+        definition.signature.northEast = ne;
+        definition.signature.southEast = se;
+        definition.signature.southWest = sw;
+        definition.assigned = true;
+        definition.ambiguous = false;
+    };
+    assign(214, common, common, common, underwater);
+    assign(215, common, common, common, underwater);
+    assign(217, common, underwater, underwater, underwater);
+    assign(218, common, underwater, underwater, underwater);
+    assign(222, common, underwater, common, underwater);
+    assign(223, underwater, common, underwater, underwater);
+    assign(224, underwater, common, underwater, underwater);
+    assign(231, underwater, common, common, sandRuins);
+    assign(232, underwater, sandRuins, sandRuins, underwater);
+    assign(233, underwater, underwater, sandRuins, sandRuins);
+    assign(234, common, underwater, sandRuins, sandRuins);
+    assign(235, common, common, sandRuins, sandRuins);
+    assign(236, common, common, common, sandRuins);
+    assign(244, sandRuins, sandRuins, sandRuins, sandRuins);
+    assign(245, sandRuins, sandRuins, sandRuins, sandRuins);
+    assign(246, sandRuins, sandRuins, sandRuins, sandRuins);
+    assign(247, common, sandRuins, sandRuins, sandRuins);
+    assign(251, sandRuins, sandRuins, sandRuins, sandRuins);
+    assign(252, sandRuins, sandRuins, sandRuins, sandRuins);
+    assign(253, lime, sandRuins, sandRuins, sandRuins);
+    assign(254, lime, lime, common, sandRuins);
+    assign(264, common, common, common, sandRuins);
+    assign(265, common, sandRuins, sandRuins, sandRuins);
+    assign(266, common, lime, sandRuins, sandRuins);
+    assign(267, lime, lime, lime, sandRuins);
+    assign(274, common, common, sandRuins, sandRuins);
+    assign(296, sandRuins, sandRuins, sandRuins, sandRuins);
+    assign(301, common, common, lime, sandRuins);
+    assign(302, lime, lime, sandRuins, sandRuins);
+    assign(326, common, common, common, cobblestone);
+    assign(327, common, common, common, cobblestone);
+    assign(329, common, cobblestone, cobblestone, cobblestone);
+
+    // Physical page padding is not part of the 473 logical MPR tile table,
+    // but every serialized signature must still reference a declared family.
+    for(int slot = 473; slot < result.slotDefinitions.size(); ++slot)
+    {
+        result.slotDefinitions[slot].signature.northWest = common;
+        result.slotDefinitions[slot].signature.northEast = common;
+        result.slotDefinitions[slot].signature.southEast = common;
+        result.slotDefinitions[slot].signature.southWest = common;
+        result.slotDefinitions[slot].assigned = false;
+        result.slotDefinitions[slot].ambiguous = false;
+    }
+
+    QMap<qint32, STerrainAtlasProfileFamily> familiesByGlobalId;
+    for(const STerrainAtlasProfileFamily& old : damaged.families)
+    {
+        STerrainAtlasProfileFamily family = old;
+        family.id = globalByOldId.value(old.id);
+        family.memberSlots.clear();
+        family.thumbnailSlot = -1;
+        if(!familiesByGlobalId.contains(family.id)
+           || (familiesByGlobalId.value(family.id).tileType < 0
+               && family.tileType >= 0))
+            familiesByGlobalId.insert(family.id, family);
+    }
+    const QVector<STerrainGlobalMaterialFamily> globalFamilies =
+        CTerrainAtlasPresetCatalog::globalUniformFamilies(report);
+    QMap<qint32, STerrainGlobalMaterialFamily> globalMetadata;
+    for(const STerrainGlobalMaterialFamily& family : globalFamilies)
+        globalMetadata.insert(family.id, family);
+    QSet<qint32> used;
+    for(int slot = 0; slot < 473; ++slot)
+    {
+        const STerrainTransitionSignature signature =
+            result.slotDefinitions.at(slot).signature;
+        used.insert(signature.northWest);
+        used.insert(signature.northEast);
+        used.insert(signature.southEast);
+        used.insert(signature.southWest);
+    }
+    result.families.clear();
+    for(qint32 id : used)
+    {
+        STerrainAtlasProfileFamily family = familiesByGlobalId.value(id);
+        if(globalMetadata.contains(id))
+        {
+            const STerrainGlobalMaterialFamily metadata =
+                globalMetadata.value(id);
+            family.id = id;
+            family.name = metadata.name;
+            family.layer = metadata.layer;
+            family.landAllowed = metadata.layer == ETerrainAtlasLayer::Land;
+            family.overlayAllowed = metadata.layer == ETerrainAtlasLayer::Overlay;
+            if(family.tileType < 0)
+                family.tileType = metadata.runtimeTerrainType;
+            family.paintSelectable = !metadata.sources.isEmpty();
+        }
+        if(family.id <= 0 || family.name.isEmpty())
+        {
+            if(report) report->add(
+                QStringLiteral("terrain.r125_recovery_family"),
+                EValidationSeverity::Error,
+                QStringLiteral("The R125 recovery referenced a material absent from the reviewed catalog."),
+                QString::number(id));
+            return false;
+        }
+        result.families.append(family);
+    }
+    CValidationReport normalizeReport;
+    if(!result.normalizeMembership(&normalizeReport)
+       || result.assignedSlotCount() != 473)
+    {
+        if(report)
+            for(const SValidationFinding& finding : normalizeReport.findings())
+                report->add(finding.code, finding.severity,
+                            finding.message, finding.location);
+        return false;
+    }
+    result.approved = true;
+    result.provenance = QStringLiteral(
+        "portable-finalized-modern-atlas-v1;r125-hash-gated-recovery");
+    *recovered = result;
+    if(report) report->add(
+        QStringLiteral("terrain.r125_profile_recovered"),
+        EValidationSeverity::Warning,
+        QStringLiteral("Recovered the known incomplete R125 finalized profile in memory. The next successful Save or Save As will replace it with a complete validated profile."));
+    return true;
+}
+
 bool CTerrainAtlasProfileStore::removeLocalOverride(
     const QString& mprNamespace, const QString& rootDirectory,
     CValidationReport* report)

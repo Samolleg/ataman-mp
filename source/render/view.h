@@ -120,6 +120,7 @@ public:
     void unloadLand(bool promptForSave = true);
     void saveLand();
     void saveLandAs();
+    void saveModernDraftAs();
     bool buildValidatedLandscapeCandidate(QByteArray* data,
                                           CValidationReport* report = nullptr,
                                           QByteArray* terrainAtlasResource = nullptr,
@@ -302,7 +303,9 @@ private:
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
     bool saveLandscapeDocument(const QFileInfo& destination);
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
-                                      bool adoptAsOpenBaseline);
+                                      bool adoptAsOpenBaseline,
+                                      bool allowModernDraft = false);
+    bool modernTerrainPublicationRequired() const;
     bool adoptCommittedLandscapeBaseline(const QFileInfo& destination,
                                          const SMprSaveCommitResult& commit);
     bool adoptCompleteTerrainBaseline(
@@ -596,6 +599,8 @@ private:
     QString m_requestedTerrainResourceIdentity;
     bool m_requestedTerrainIdentityReplacement{false};
     bool m_requestedTerrainIdentityFinalization{false};
+    QFileInfo m_requestedTerrainMprDestination;
+    QString m_activeTerrainArchivePath;
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};

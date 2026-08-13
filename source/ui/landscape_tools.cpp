@@ -292,16 +292,16 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QHBoxLayout* issueRow = new QHBoxLayout;
     issueRow->addWidget(m_paintIssueCategory, 1);
     issueRow->addWidget(m_markPaintIssue);
-    QPushButton* finalizeAtlas = new QPushButton(
-        tr("Finalize map-specific atlas package..."), this);
-    finalizeAtlas->setToolTip(tr(
-        "Generate exact missing transitions, compact map-wide tile usage, and write "
-        "a portable isolated MPR + RES package. Unused source slots are evicted. "
-        "The packed format allows 16,384 slots; sizes above 4,096 remain potentially "
-        "unstable and are clearly warned, but staging is not blocked."));
+    QPushButton* saveDraft = new QPushButton(
+        tr("Save editable modern draft as..."), this);
+    saveDraft->setObjectName(QStringLiteral("saveModernDraftButton"));
+    saveDraft->setToolTip(tr(
+        "Keep unfinished modern painting in a separate MPR plus map-local atlas. "
+        "Normal Save MPR and Save MPR As publish game-ready atlas pages into "
+        "textures.res instead."));
     paintLayout->addWidget(exportDiagnostic);
     paintLayout->addLayout(issueRow);
-    paintLayout->addWidget(finalizeAtlas);
+    paintLayout->addWidget(saveDraft);
     // The material palette is the primary authoring surface. Give it all
     // remaining vertical space instead of leaving an empty stretch below the
     // fixed heightmap controls.
@@ -327,7 +327,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(m_paintIssueCategory,
             QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this](int) { updatePaintIssueUi(); emit editingStateChanged(); });
-    connect(finalizeAtlas, &QPushButton::clicked, this, &CLandscapeTools::finalizeVirtualAtlasRequested);
+    connect(saveDraft, &QPushButton::clicked,
+            this, &CLandscapeTools::saveModernDraftRequested);
     m_atlasCoverage->setObjectName(QStringLiteral("materialAtlasSourceStatus"));
     m_generatedAtlasTiles->setObjectName(QStringLiteral("generatedAtlasTileCount"));
     refreshAtlasCapacity(0);

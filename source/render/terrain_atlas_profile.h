@@ -191,6 +191,16 @@ public:
         const QString& rootDirectory = QString(),
         QString* sourcePath = nullptr,
         CValidationReport* report = nullptr);
+    // R125 could publish a valid 473-slot MPR while writing only 441 logical
+    // slot signatures into its adjacent editor profile.  This hash-gated,
+    // in-memory migration makes that exact document editable again without
+    // touching arbitrary profiles or the live file before a validated save.
+    static bool recoverKnownIncompleteFinalizedProfile(
+        const STerrainAtlasProfile& damaged,
+        const QByteArray& damagedProfileBytes,
+        const QByteArray& mprBytes,
+        STerrainAtlasProfile* recovered,
+        CValidationReport* report = nullptr);
     static bool removeLocalOverride(
         const QString& mprNamespace,
         const QString& rootDirectory = QString(),

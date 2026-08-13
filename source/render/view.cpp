@@ -31,6 +31,7 @@
 
 #include "view.h"
 #include "landscape_operation_policy.h"
+#include "terrain_save_flow_policy.h"
 #include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
@@ -839,8 +840,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::reviewTerrainAtlasProfile);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
                 this, &CView::exportTerrainPaintDiagnostic);
-        connect(m_landscapeTools, &CLandscapeTools::finalizeVirtualAtlasRequested,
-                this, &CView::finalizeVirtualTerrainAtlas);
+        connect(m_landscapeTools, &CLandscapeTools::saveModernDraftRequested,
+                this, &CView::saveModernDraftAs);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
                 this, &CView::syncLandscapeToolState);
         connect(m_landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
@@ -5468,6 +5469,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
             mapLocalAtlas = publishedTextures;
     }
     CTextureList::getInstance()->setMapLocalTerrainArchive(mapLocalAtlas);
+    m_activeTerrainArchivePath = QFileInfo::exists(mapLocalAtlas)
+        ? QFileInfo(mapLocalAtlas).absoluteFilePath() : QString();
     QElapsedTimer totalLoadTimer;
     QElapsedTimer phaseTimer;
     totalLoadTimer.start();
@@ -5478,6 +5481,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     if(!m_pLand->isMprLoad())
     {
         CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
+        m_activeTerrainArchivePath.clear();
         ei::log(eLogWarning, "Landscape failed to load: " + filePath.absoluteFilePath());
         return;
     }
@@ -5497,6 +5501,41 @@ void CView::loadLandscape(const QFileInfo& filePath)
     {
         ei::log(eLogInfo, QString("Canonical terrain preview ready: %1 x %2 vertices")
             .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
+    }
+    if(m_activeTerrainArchivePath.isEmpty() && m_terrainEditAvailable)
+    {
+        // A published MPR can live in Maps while textures.res lives in the
+        // configured mod resource folder. Resolve every current page back to
+        // its archive once so subsequent Save updates the archive already in
+        // use instead of making the user select it again.
+        QSet<QString> atlasSources;
+        const QStringList pageNames = ei::terrainTextureResourceNames(
+            m_mprDocument.mapInfo().innerNamespace,
+            int(m_mprDocument.mapInfo().textureCount));
+        for(const QString& pageName : pageNames)
+        {
+            QByteArray payload;
+            QString sourcePath;
+            if(CTextureList::getInstance()->terrainMmpPayload(
+                   pageName, &payload, &sourcePath)
+               && !sourcePath.isEmpty())
+                atlasSources.insert(QFileInfo(sourcePath).absoluteFilePath());
+        }
+        if(atlasSources.size() == 1)
+        {
+            const QFileInfo source(*atlasSources.constBegin());
+            if(source.fileName().compare(
+                   QStringLiteral("textures.res"), Qt::CaseInsensitive) == 0)
+            {
+                m_activeTerrainArchivePath = source.absoluteFilePath();
+                ei::log(eLogInfo, QStringLiteral(
+                    "Resolved published terrain identity archive: %1")
+                    .arg(m_activeTerrainArchivePath));
+            }
+        }
+        else if(atlasSources.size() > 1)
+            ei::log(eLogWarning, QStringLiteral(
+                "Published terrain pages resolve from multiple archives; Save will request one explicit textures.res destination."));
     }
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
@@ -5546,7 +5585,13 @@ void CView::unloadLand(bool promptForSave)
         reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!saveLandscapeDocument(m_pLand->filePath()))
+            if(modernTerrainPublicationRequired())
+            {
+                saveLand();
+                if(m_pLand->isDirty())
+                    return;
+            }
+            else if(!saveLandscapeDocument(m_pLand->filePath()))
                 return;
         }
         else if(reply == QMessageBox::Cancel)
@@ -5571,6 +5616,7 @@ void CView::unloadLand(bool promptForSave)
         makeCurrent();
     m_pLand->unloadMpr();
     CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
+    m_activeTerrainArchivePath.clear();
     if(isValid())
         doneCurrent();
     refreshMprSettingsDock();
@@ -5592,6 +5638,12 @@ void CView::saveLand()
 {
     if(m_pLand->isMprLoad())
     {
+        if(modernTerrainPublicationRequired())
+        {
+            m_requestedTerrainMprDestination = m_pLand->filePath();
+            finalizeVirtualTerrainAtlas();
+            return;
+        }
         if(saveLandscapeDocument(m_pLand->filePath()))
             emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
     }
@@ -5608,6 +5660,13 @@ void CView::saveLandAs()
     if(fileName.filePath().isEmpty())
         return;
 
+    if(modernTerrainPublicationRequired())
+    {
+        m_requestedTerrainMprDestination = fileName;
+        finalizeVirtualTerrainAtlas();
+        return;
+    }
+
     if(m_pLand->isDirty())
     {
         // Save As adopts the validated destination as the open baseline. The
@@ -5623,6 +5682,35 @@ void CView::saveLandAs()
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, fileName.baseName());
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
     }
+}
+
+void CView::saveModernDraftAs()
+{
+    if(!m_pLand->isMprLoad())
+        return;
+    const QFileInfo destination = QFileDialog::getSaveFileName(
+        this, tr("Save editable modern MPR draft as..."),
+        m_pLand->filePath().absoluteFilePath(), tr("Landscape (*.mpr);;)"));
+    if(destination.filePath().isEmpty())
+        return;
+    if(saveChangedLandscapeDocument(destination, true, true))
+    {
+        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
+                                   destination.baseName());
+        emit updateMainWindowTitle(
+            eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+    }
+}
+
+bool CView::modernTerrainPublicationRequired() const
+{
+    return terrainMprSaveRoute(
+        m_requestedTerrainIdentityFinalization,
+        m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land),
+        m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay),
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay))
+        == ETerrainMprSaveRoute::PublishModernAtlas;
 }
 
 bool CView::saveLandscapeDocument(const QFileInfo& destination)
@@ -5789,7 +5877,8 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
 }
 
 bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
-                                         bool adoptAsOpenBaseline)
+                                         bool adoptAsOpenBaseline,
+                                         bool allowModernDraft)
 {
     if(!m_terrainEditAvailable)
     {
@@ -5851,6 +5940,14 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         return false;
     }
 
+    if(workingExtension && !allowModernDraft)
+    {
+        QMessageBox::critical(this, tr("Modern MPR publication required"),
+            tr("This map contains modern terrain atlas edits. Use Save MPR or "
+               "Save MPR As to publish them, or use Save Editable Modern Draft "
+               "As when you intentionally need a temporary map-local atlas."));
+        return false;
+    }
     if(workingExtension)
     {
         updateProgress(tr("Encoding the map-local working atlas..."), 2);
@@ -7020,6 +7117,15 @@ void CView::rebuildTerrainAutoCatalog()
            mprNamespace, atlasHash, slotCount, &stored, QString(),
            &storedPath, &storedReport))
     {
+        QFile storedFile(storedPath);
+        QByteArray storedBytes;
+        if(storedFile.open(QIODevice::ReadOnly))
+            storedBytes = storedFile.readAll();
+        STerrainAtlasProfile recovered;
+        if(CTerrainAtlasProfileStore::recoverKnownIncompleteFinalizedProfile(
+               stored, storedBytes, m_mprDocument.originalBytes(),
+               &recovered, &storedReport))
+            stored = recovered;
         m_terrainAtlasProfile = stored;
         m_terrainAtlasAnalysis = m_terrainAtlasProfile.usableAnalysis(&storedReport);
         reviewedProfileActive = m_terrainAtlasAnalysis.usable;
@@ -7797,6 +7903,7 @@ bool CView::adoptCompleteTerrainBaseline(
         return false;
     m_pTileForm->setAnimTile(m_pLand->animTiles());
     CTextureList::getInstance()->setMapLocalTerrainArchive(terrainArchivePath);
+    m_activeTerrainArchivePath = terrainArchivePath;
     m_mprDocument = reopenedDocument;
     m_terrainEdit = reopenedTerrain;
     m_terrainEditAvailable = true;
@@ -8057,9 +8164,12 @@ void CView::finalizeVirtualTerrainAtlas()
     const QString requestedIdentity = m_requestedTerrainResourceIdentity;
     const bool requestedReplacement = m_requestedTerrainIdentityReplacement;
     const bool identityOnlyRequest = m_requestedTerrainIdentityFinalization;
+    const QFileInfo preselectedMprDestination =
+        m_requestedTerrainMprDestination;
     m_requestedTerrainResourceIdentity.clear();
     m_requestedTerrainIdentityReplacement = false;
     m_requestedTerrainIdentityFinalization = false;
+    m_requestedTerrainMprDestination = QFileInfo();
     bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
         ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land);
     bool overlayActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay)
@@ -8229,8 +8339,25 @@ void CView::finalizeVirtualTerrainAtlas()
     const int originalSourceSlotCount=m_workingTerrainAtlas
         ?m_authoredTerrainTileImages.size():authoredImages.size();
     const int evictedAuthored=qMax(0,originalSourceSlotCount-retainedAuthored);
+    QString selectedIdentity = requestedIdentity;
+    bool replaceIdentity = requestedReplacement;
+    const bool saveOverCurrentMpr = !preselectedMprDestination.filePath().isEmpty()
+        && QString::compare(
+            QDir::cleanPath(preselectedMprDestination.absoluteFilePath()),
+            QDir::cleanPath(m_pLand->filePath().absoluteFilePath()),
+            Qt::CaseInsensitive) == 0;
+    if(selectedIdentity.isEmpty() && saveOverCurrentMpr
+       && m_terrainAtlasProfile.provenance.startsWith(
+              QStringLiteral("portable-finalized-modern-atlas-v1")))
+    {
+        // Normal Save on an already-published modern MPR means update that
+        // identity. Save As still asks because a copied map may intentionally
+        // need a distinct identity instead of changing existing consumers.
+        selectedIdentity = m_mprDocument.mapInfo().innerNamespace.toLower();
+        replaceIdentity = true;
+    }
     QDialog preview(this);
-    preview.setWindowTitle(tr("Review finalized map atlas"));
+    preview.setWindowTitle(tr("Review modern MPR save"));
     preview.resize(900,700);
     QVBoxLayout* previewLayout=new QVBoxLayout(&preview);
     QLabel* summary=new QLabel(tr(
@@ -8243,15 +8370,14 @@ void CView::finalizeVirtualTerrainAtlas()
     summary->setWordWrap(true);
     previewLayout->addWidget(summary);
     QLabel* saveExplanation=new QLabel(tr(
-        "Save result: one edited .mpr plus its required terrain resources and "
-        "editor-side review metadata, stored together. The MPR includes every current "
+        "Save result: the selected .mpr and the textures.res already supplying its "
+        "terrain identity are updated together. The MPR includes every current "
         "landscape edit, including sculpted heights and the latest paint stroke. "
-        "Resource identity: %1 (%2). You will either create a standalone atlas "
-        "archive or derive a publishable textures.res. JSON metadata is never put "
-        "inside the runtime RES archive.")
-        .arg(requestedIdentity.isEmpty()
-            ? tr("choose after this review") : requestedIdentity,
-            requestedReplacement ? tr("use / replace") : tr("new content")),
+        "Resource identity: %1 (%2). Editor-side JSON review metadata stays beside "
+        "the MPR and is never put inside the runtime RES archive.")
+        .arg(selectedIdentity.isEmpty()
+            ? tr("choose after this review") : selectedIdentity,
+            replaceIdentity ? tr("use / replace") : tr("new content")),
         &preview);
     saveExplanation->setWordWrap(true);
     saveExplanation->setStyleSheet(QStringLiteral(
@@ -8354,16 +8480,15 @@ void CView::finalizeVirtualTerrainAtlas()
     previewLayout->addWidget(addedScroll,1);
     QDialogButtonBox* buttons=new QDialogButtonBox(
         QDialogButtonBox::Save|QDialogButtonBox::Cancel,&preview);
-    buttons->button(QDialogButtonBox::Save)->setText(tr(
-        "Save edited MPR with atlas resources..."));
+    buttons->button(QDialogButtonBox::Save)->setText(
+        preselectedMprDestination.filePath().isEmpty()
+            ? tr("Continue publication...") : tr("Continue Save MPR"));
     connect(buttons,&QDialogButtonBox::accepted,&preview,&QDialog::accept);
     connect(buttons,&QDialogButtonBox::rejected,&preview,&QDialog::reject);
     previewLayout->addWidget(buttons);
     finalizeProgress.hide();
     if(preview.exec()!=QDialog::Accepted)return;
 
-    QString selectedIdentity = requestedIdentity;
-    bool replaceIdentity = requestedReplacement;
     if(selectedIdentity.isEmpty())
     {
         QDialog identityDialog(this);
@@ -8446,10 +8571,24 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
 
-    const QString texturesPath = QFileDialog::getOpenFileName(
-        this, tr("Choose textures.res to update in place"),
-        m_pLand ? m_pLand->filePath().absolutePath() : QDir::homePath(),
-        tr("Evil Islands resources (*.res)"));
+    QString texturesPath;
+    const QFileInfo activeArchive(m_activeTerrainArchivePath);
+    if(activeArchive.exists()
+       && activeArchive.fileName().compare(
+              QStringLiteral("textures.res"), Qt::CaseInsensitive) == 0)
+        texturesPath = activeArchive.absoluteFilePath();
+    if(texturesPath.isEmpty() && m_pLand)
+    {
+        const QFileInfo siblingTextures(m_pLand->filePath().dir().filePath(
+            QStringLiteral("textures.res")));
+        if(siblingTextures.exists())
+            texturesPath = siblingTextures.absoluteFilePath();
+    }
+    if(texturesPath.isEmpty())
+        texturesPath = QFileDialog::getOpenFileName(
+            this, tr("Choose textures.res to update in place"),
+            m_pLand ? m_pLand->filePath().absolutePath() : QDir::homePath(),
+            tr("Evil Islands resources (*.res)"));
     if(texturesPath.isEmpty())
         return;
     QFile sourceTextures(texturesPath);
@@ -8480,31 +8619,35 @@ void CView::finalizeVirtualTerrainAtlas()
         pages.append(member);
     }
 
-    QMessageBox mprChoice(QMessageBox::Question,
-        tr("Choose finalized MPR destination"),
-        tr("The selected textures.res will be updated in place. Save the "
-           "finalized map over the current MPR, or choose a new MPR name?"),
-        QMessageBox::NoButton, this);
-    QAbstractButton* overwriteMpr = mprChoice.addButton(
-        tr("Overwrite current MPR"), QMessageBox::AcceptRole);
-    QAbstractButton* saveAsMpr = mprChoice.addButton(
-        tr("Save MPR as..."), QMessageBox::ActionRole);
-    mprChoice.addButton(QMessageBox::Cancel);
-    mprChoice.setDefaultButton(qobject_cast<QPushButton*>(overwriteMpr));
-    mprChoice.exec();
-    if(mprChoice.clickedButton() != overwriteMpr
-       && mprChoice.clickedButton() != saveAsMpr)
-        return;
-    QFileInfo mprDestination = m_pLand->filePath();
-    if(mprChoice.clickedButton() == saveAsMpr)
+    QFileInfo mprDestination = preselectedMprDestination;
+    if(terrainPublishNeedsMprDestinationDialog(
+           !mprDestination.filePath().isEmpty()))
     {
-        const QString selectedMprPath = QFileDialog::getSaveFileName(
-            this, tr("Save finalized MPR as"),
-            m_pLand->filePath().absoluteFilePath(),
-            tr("Landscape (*.mpr)"));
-        if(selectedMprPath.isEmpty())
+        QMessageBox mprChoice(QMessageBox::Question,
+            tr("Choose finalized MPR destination"),
+            tr("Save over the current MPR, or choose a new MPR name?"),
+            QMessageBox::NoButton, this);
+        QAbstractButton* overwriteMpr = mprChoice.addButton(
+            tr("Overwrite current MPR"), QMessageBox::AcceptRole);
+        QAbstractButton* saveAsMpr = mprChoice.addButton(
+            tr("Save MPR as..."), QMessageBox::ActionRole);
+        mprChoice.addButton(QMessageBox::Cancel);
+        mprChoice.setDefaultButton(qobject_cast<QPushButton*>(overwriteMpr));
+        mprChoice.exec();
+        if(mprChoice.clickedButton() != overwriteMpr
+           && mprChoice.clickedButton() != saveAsMpr)
             return;
-        mprDestination = QFileInfo(selectedMprPath);
+        mprDestination = m_pLand->filePath();
+        if(mprChoice.clickedButton() == saveAsMpr)
+        {
+            const QString selectedMprPath = QFileDialog::getSaveFileName(
+                this, tr("Save finalized MPR as"),
+                m_pLand->filePath().absoluteFilePath(),
+                tr("Landscape (*.mpr)"));
+            if(selectedMprPath.isEmpty())
+                return;
+            mprDestination = QFileInfo(selectedMprPath);
+        }
     }
 
     QMessageBox backupChoice(QMessageBox::Question,
@@ -9988,23 +10131,13 @@ void CView::openMapParameters()
     identityLayout->addWidget(identityStatus);
     QLabel* identityExplanation = new QLabel(tr(
         "The identity determines the MMP member names used by this MPR. Individual "
-        "page names are derived automatically and are intentionally hidden. An "
-        "identity change is committed only by terrain finalization, which renames "
-        "the embedded MPR namespace and publishes the matching atlas pages together."),
+        "page names are derived automatically and are intentionally hidden. Edit "
+        "the value above to replace that identity on the next Save MPR or Save MPR "
+        "As. Clear it to let Save create a new content-hash identity."),
         identityPage);
     identityExplanation->setWordWrap(true);
     identityLayout->addWidget(identityExplanation);
-    QPushButton* finalizeNewIdentity = new QPushButton(
-        tr("Finalize with a new content identity..."), identityPage);
-    finalizeNewIdentity->setObjectName(
-        QStringLiteral("mprFinalizeNewTerrainIdentity"));
-    QPushButton* finalizeExistingIdentity = new QPushButton(
-        tr("Use / replace this identity during finalization..."), identityPage);
-    finalizeExistingIdentity->setObjectName(
-        QStringLiteral("mprFinalizeExistingTerrainIdentity"));
     identityEdit->setObjectName(QStringLiteral("mprTerrainResourceIdentity"));
-    identityLayout->addWidget(finalizeNewIdentity);
-    identityLayout->addWidget(finalizeExistingIdentity);
     identityLayout->addStretch(1);
     tabs->addTab(identityPage, tr("Resource identity"));
 
@@ -10116,8 +10249,15 @@ void CView::openMapParameters()
     connect(buttons, &QDialogButtonBox::rejected, dock, &QDockWidget::hide);
     connect(atlas, &QPushButton::clicked, dock, [this]() { openAtlasTiles(); });
 
-    const auto refreshIdentityStatus = [identityEdit, identityStatus,
-                                        finalizeExistingIdentity]() {
+    const auto refreshIdentityStatus = [identityEdit, identityStatus]() {
+        if(identityEdit->text().trimmed().isEmpty())
+        {
+            identityStatus->setText(QObject::tr(
+                "Next Save will create a new content-hash identity."));
+            identityStatus->setStyleSheet(
+                QStringLiteral("QLabel { color: #69c37d; }"));
+            return;
+        }
         QString error;
         const bool valid = CTerrainVirtualAtlas::validateResourceIdentity(
             identityEdit->text(), &error);
@@ -10127,31 +10267,34 @@ void CView::openMapParameters()
         identityStatus->setStyleSheet(valid
             ? QStringLiteral("QLabel { color: #69c37d; }")
             : QStringLiteral("QLabel { color: #df6b62; }"));
-        finalizeExistingIdentity->setEnabled(valid);
     };
     connect(identityEdit, &QLineEdit::textChanged, dock,
-            [refreshIdentityStatus](const QString&) { refreshIdentityStatus(); });
-    connect(finalizeNewIdentity, &QPushButton::clicked, dock, [this, dock]() {
-        m_requestedTerrainResourceIdentity.clear();
-        m_requestedTerrainIdentityReplacement = false;
-        m_requestedTerrainIdentityFinalization = true;
-        dock->hide();
-        finalizeVirtualTerrainAtlas();
-    });
-    connect(finalizeExistingIdentity, &QPushButton::clicked, dock,
-            [this, dock, identityEdit]() {
+            [this, identityEdit, refreshIdentityStatus](const QString&) {
         QString error;
         const QString identity = identityEdit->text().trimmed();
-        if(!CTerrainVirtualAtlas::validateResourceIdentity(identity, &error))
+        if(identity.isEmpty())
         {
-            QMessageBox::warning(dock, tr("Invalid terrain resource identity"), error);
+            m_requestedTerrainResourceIdentity.clear();
+            m_requestedTerrainIdentityReplacement = false;
+            m_requestedTerrainIdentityFinalization = true;
+            refreshIdentityStatus();
             return;
         }
-        m_requestedTerrainResourceIdentity = identity;
-        m_requestedTerrainIdentityReplacement = true;
-        m_requestedTerrainIdentityFinalization = true;
-        dock->hide();
-        finalizeVirtualTerrainAtlas();
+        if(CTerrainVirtualAtlas::validateResourceIdentity(identity, &error))
+        {
+            m_requestedTerrainResourceIdentity = identity;
+            m_requestedTerrainIdentityReplacement = true;
+            m_requestedTerrainIdentityFinalization = identity.compare(
+                m_mprDocument.mapInfo().innerNamespace,
+                Qt::CaseInsensitive) != 0;
+        }
+        else
+        {
+            m_requestedTerrainResourceIdentity.clear();
+            m_requestedTerrainIdentityReplacement = false;
+            m_requestedTerrainIdentityFinalization = false;
+        }
+        refreshIdentityStatus();
     });
 
     const auto refreshSummary = [this, dimensionsValue, rangeValue, scaleValue,
@@ -10352,8 +10495,10 @@ void CView::openMapParameters()
         sourceValue->setText(m_pLand->filePath().absoluteFilePath());
         namespaceValue->setText(m_mprDocument.mapInfo().innerNamespace);
         currentIdentityValue->setText(m_mprDocument.mapInfo().innerNamespace);
-        if(!identityEdit->hasFocus())
-            identityEdit->setText(m_mprDocument.mapInfo().innerNamespace.toLower());
+        if(!identityEdit->hasFocus() && identityEdit->text().isEmpty()
+           && !m_requestedTerrainIdentityFinalization)
+            identityEdit->setText(
+                m_mprDocument.mapInfo().innerNamespace.toLower());
         refreshIdentityStatus();
         refreshSummary();
         refreshPreview();
@@ -11260,7 +11405,13 @@ bool CView::onExit()
         reply = QMessageBox::question(this, "Exit", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(!saveLandscapeDocument(m_pLand->filePath()))
+            if(modernTerrainPublicationRequired())
+            {
+                saveLand();
+                if(m_pLand->isDirty())
+                    bCloseAllowed = false;
+            }
+            else if(!saveLandscapeDocument(m_pLand->filePath()))
                 bCloseAllowed = false;
         }
         else if(reply == QMessageBox::Cancel)

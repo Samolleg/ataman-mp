@@ -1,0 +1,7 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: unified modern MPR save and R125 profile recovery R127
+Source baseline: 1a4e3159 plus the unified-save/profile-recovery R127 changes
+Semantic source commit: a910c24c771111e7b9ad150725558e7a17f8ba8e
+Preset SHA-256: 1B8493A9CC562603D57B4BDE97F069534B94AFE9A85D1F901C0AF7941B1E6D7A
+Validation: virtual atlas 92/92; document 101/101 + 3 expected skips; --ui-widget-check PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
