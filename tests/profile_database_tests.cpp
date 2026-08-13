@@ -84,6 +84,8 @@ QMap<QString, QByteArray> relationalMembers()
         + intField(3, 2) + intField(4, 1) + tag(5,QByteArray::fromHex("0000803f"))
         + tag(6,QByteArray::fromHex("0000803f")) + tag(7,QByteArray::fromHex("0000803f"))
         + intField(9, 123) + tag(29, stringField(0, "gold [3]"))
+        + tag(27, tag(0,QByteArray::fromHex("0000c842"))+tag(1,QByteArray::fromHex("00000000"))
+            +tag(2,QByteArray::fromHex("00001c42"))+tag(3,QByteArray::fromHex("00003442")))
         + tag(32, stringField(1, "armor_leather.iron"))
         + tag(33, stringField(0, "2h sword.iron[effect{a,b}],shield.iron"))
         + stringField(42,"2h sword.iron");
@@ -514,6 +516,9 @@ void ProfileDatabaseTests::workbookUsesEidbCompatibleListAndSharedStringSyntax()
     QVERIFY(!shared.contains("[&quot;armor_leather.iron&quot;"));
     QVERIFY(shared.contains("FLD32-0"));
     const int sheetCount=ei::workbookTableKeys(*document).size();QVERIFY(sheetCount>0);for(int index=1;index<=sheetCount;++index){const QByteArray sheet=zip.fileData(QString("xl/worksheets/sheet%1.xml").arg(index));QVERIFY2(!sheet.isEmpty(),qPrintable(QString("sheet %1 missing").arg(index)));QVERIFY2(sheet.contains("<dimension ref="),qPrintable(QString("sheet %1 lacks dimension").arg(index)));QVERIFY(!sheet.contains("inlineStr"));}
+    QVERIFY2(!zip.fileData("eidbeditor/source.res").isEmpty(),"Patched EIDBEditor source archive is missing");
+    QCOMPARE(zip.fileData("eidbeditor/source.res"),document->buildArchive(&diagnostic));
+    QCOMPARE(zip.fileData("eidbeditor/sheets.sha256").trimmed().size(),64);
     ei::SDatabaseWorkbookImport imported;
     QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));
 }
@@ -1024,6 +1029,24 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
     QVERIFY(!committed.isEmpty());
     QCOMPARE(committed.last().at(1).toString(),QString("units.monsters"));
     QCOMPARE(committed.last().at(2).toString(),QString("Human Test"));
+
+    int probabilityColumn=-1;
+    for(int column=0;column<grid->columnCount();++column)
+        if(grid->horizontalHeaderItem(column)->text().contains("Common loot Probability",Qt::CaseInsensitive))
+            probabilityColumn=column;
+    QVERIFY(probabilityColumn>=0);
+    QTableWidgetItem* probabilityItem=grid->item(grid->currentRow(),probabilityColumn);
+    QVERIFY(probabilityItem);
+    const QString readableProbability=probabilityItem->data(Qt::UserRole+2).toString();
+    QVERIFY(!readableProbability.contains('{'));
+    QVERIFY(!readableProbability.contains('"'));
+    QVERIFY(readableProbability.contains("[0]"));
+    QVERIFY(readableProbability.contains("= 100"));
+    bool editedProbability=false;
+    QTimer::singleShot(0,[&editedProbability](){QDialog*editor=qobject_cast<QDialog*>(QApplication::activeModalWidget());if(!editor)return;QPlainTextEdit*text=editor->findChild<QPlainTextEdit*>("databaseFieldEditorText");QDialogButtonBox*buttons=editor->findChild<QDialogButtonBox*>("databaseFieldEditorButtons");if(text){QStringList lines=text->toPlainText().split('\n');for(QString&line:lines)if(line.trimmed().startsWith("[0]")){line="[0] Common loot Probability = 75";editedProbability=true;break;}text->setPlainText(lines.join('\n'));}if(buttons)buttons->button(QDialogButtonBox::Ok)->click();});
+    QMetaObject::invokeMethod(grid,"cellDoubleClicked",Qt::DirectConnection,Q_ARG(int,probabilityItem->row()),Q_ARG(int,probabilityColumn));
+    QVERIFY(editedProbability);
+    monsters=document->table("units.monsters");QVERIFY(monsters);bool probabilityStored=false;QString storedProbability;for(const auto&row:monsters->rows)if(row.stableKey.startsWith("human test#")){storedProbability=row.values.value("fld.27.0").toString();const QJsonArray value=QJsonDocument::fromJson(storedProbability.toUtf8()).array();probabilityStored=!value.isEmpty()&&value.first().toObject().value("value").toDouble()==75.0;}QVERIFY2(probabilityStored,qPrintable(storedProbability));
 
     const int changesBeforeCancel = document->changes().size();
     QVERIFY(dialog.selectPrototype("Human Test"));
