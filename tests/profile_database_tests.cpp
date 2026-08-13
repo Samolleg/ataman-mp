@@ -11,6 +11,7 @@
 #include <QClipboard>
 #include <QContextMenuEvent>
 #include <QDialogButtonBox>
+#include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QPlainTextEdit>
@@ -824,6 +825,7 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
     QTableWidgetItem* wearsItem = grid->item(grid->currentRow(), wearsColumn);
     QVERIFY(wearsItem);
     QVERIFY(wearsItem->data(Qt::UserRole + 2).toString().size() > wearsItem->text().size());
+    QVERIFY(!wearsItem->toolTip().contains(originalLongValue));
     grid->scrollToItem(wearsItem, QAbstractItemView::PositionAtCenter);
     grid->setCurrentCell(wearsItem->row(), wearsColumn);
     QApplication::processEvents();
@@ -839,14 +841,18 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
         if(!editor)
             return;
         QPlainTextEdit* text = editor->findChild<QPlainTextEdit*>("databaseFieldEditorText");
+        QLabel* count = editor->findChild<QLabel*>("databaseFieldEditorCount");
         QDialogButtonBox* buttons = editor->findChild<QDialogButtonBox*>("databaseFieldEditorButtons");
         openedWrappedEditor = true;
         QVERIFY(text);
         QVERIFY(buttons);
+        QVERIFY(count);
         QCOMPARE(text->lineWrapMode(), QPlainTextEdit::WidgetWidth);
         QVERIFY(editor->width() <= 760);
         if(text)
             text->setPlainText(edited);
+        if(count)
+            QVERIFY(count->text().contains(QString::number(edited.size())));
         if(buttons)
             buttons->button(QDialogButtonBox::Ok)->click();
     });
@@ -864,6 +870,25 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
             storedCompleteValue = row.values.value("fld.32.0").toString() == edited;
     QVERIFY(storedCompleteValue);
     QVERIFY(document->canUndo());
+
+    const int changesBeforeCancel = document->changes().size();
+    QVERIFY(dialog.selectPrototype("Human Test"));
+    QTableWidgetItem* cancelItem = grid->item(grid->currentRow(), wearsColumn);
+    QVERIFY(cancelItem);
+    QTimer::singleShot(0, []() {
+        QDialog* editor = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        if(!editor)
+            return;
+        QPlainTextEdit* text = editor->findChild<QPlainTextEdit*>("databaseFieldEditorText");
+        QDialogButtonBox* buttons = editor->findChild<QDialogButtonBox*>("databaseFieldEditorButtons");
+        if(text)
+            text->setPlainText("cancelled mutation");
+        if(buttons)
+            buttons->button(QDialogButtonBox::Cancel)->click();
+    });
+    QMetaObject::invokeMethod(grid, "cellDoubleClicked", Qt::DirectConnection,
+        Q_ARG(int, cancelItem->row()), Q_ARG(int, wearsColumn));
+    QCOMPARE(document->changes().size(), changesBeforeCancel);
 }
 
 QTEST_MAIN(ProfileDatabaseTests)
