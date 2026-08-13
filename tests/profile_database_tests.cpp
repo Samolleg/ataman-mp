@@ -519,6 +519,12 @@ void ProfileDatabaseTests::workbookUsesEidbCompatibleListAndSharedStringSyntax()
     QVERIFY2(!zip.fileData("eidbeditor/source.res").isEmpty(),"Patched EIDBEditor source archive is missing");
     QCOMPARE(zip.fileData("eidbeditor/source.res"),document->buildArchive(&diagnostic));
     QCOMPARE(zip.fileData("eidbeditor/sheets.sha256").trimmed().size(),64);
+    QCOMPARE(zip.fileData("eidbeditor/cells.sha256").trimmed().size(),64);
+    const QByteArray contentTypes=zip.fileData("[Content_Types].xml");
+    QVERIFY2(contentTypes.contains("Extension=\"sha256\""),"The fingerprint part has no OPC content type");
+    const QByteArray packageRelationships=zip.fileData("_rels/.rels");
+    for(const QByteArray& target:{QByteArray("ei-mapper/manifest.txt"),QByteArray("ei-mapper/source.res"),QByteArray("eidbeditor/source.res"),QByteArray("eidbeditor/sheets.sha256"),QByteArray("eidbeditor/cells.sha256")})
+        QVERIFY2(packageRelationships.contains("Target=\""+target+"\""),target.constData());
     ei::SDatabaseWorkbookImport imported;
     QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));
 }
