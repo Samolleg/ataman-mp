@@ -11,12 +11,14 @@
 #include <QClipboard>
 #include <QContextMenuEvent>
 #include <QDialogButtonBox>
+#include <QElapsedTimer>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTimer>
+#include <QSignalSpy>
 #include <QTableWidget>
 #include <cmath>
 
@@ -176,6 +178,7 @@ private slots:
     void losslessMemberFixedSizePatchPreservesOriginalHeaders();
     void workbookImportRejectsReadOnlyAndUnpublishableChanges();
     void databaseEditorRowMenuAndWrappedFieldEditor();
+    void installedDatabaseInteractiveLatency();
 };
 
 QByteArray unitPerkLua(const QString& prototype, int strongMan)
@@ -769,6 +772,7 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
         originalLongValue, &setupDiagnostic), qPrintable(setupDiagnostic));
 
     ei::DatabaseEditorDialog dialog(document);
+    QSignalSpy committed(&dialog,SIGNAL(transactionCommitted(QString,QString,QString)));
     dialog.show();
     QVERIFY(dialog.selectPrototype("Human Test"));
     QTableWidget* grid = dialog.findChild<QTableWidget*>("databaseGrid");
@@ -870,6 +874,9 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
             storedCompleteValue = row.values.value("fld.32.0").toString() == edited;
     QVERIFY(storedCompleteValue);
     QVERIFY(document->canUndo());
+    QVERIFY(!committed.isEmpty());
+    QCOMPARE(committed.last().at(1).toString(),QString("units.monsters"));
+    QCOMPARE(committed.last().at(2).toString(),QString("Human Test"));
 
     const int changesBeforeCancel = document->changes().size();
     QVERIFY(dialog.selectPrototype("Human Test"));
@@ -889,6 +896,16 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
     QMetaObject::invokeMethod(grid, "cellDoubleClicked", Qt::DirectConnection,
         Q_ARG(int, cancelItem->row()), Q_ARG(int, wearsColumn));
     QCOMPARE(document->changes().size(), changesBeforeCancel);
+}
+
+void ProfileDatabaseTests::installedDatabaseInteractiveLatency()
+{
+    const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);
+    if(archives.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run the installed interaction latency control.");
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString sourcePath=QDir(temporary.path()).filePath("database.res");QVERIFY(QFile::copy(archives.first(),sourcePath));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="latency";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    const ei::SDatabaseTable* monsters=document->table("units.monsters");QVERIFY(monsters&&!monsters->rows.isEmpty());const QString rowKey=monsters->rows.first().stableKey;QString diagnostic;QElapsedTimer timer;timer.start();QVERIFY2(document->setValue("units.monsters",rowKey,"fld.3.0",monsters->rows.first().values.value("fld.3.0").toInt()+1,&diagnostic),qPrintable(diagnostic));const qint64 setValueMs=timer.restart();const auto snapshot=document->currentSnapshot(&diagnostic);const qint64 snapshotMs=timer.restart();QVERIFY2(snapshot,qPrintable(diagnostic));
+    ei::DatabaseEditorDialog dialog(document);dialog.show();timer.restart();dialog.refreshFromHistory();const qint64 refreshMs=timer.elapsed();qInfo()<<"database interaction latency ms set"<<setValueMs<<"snapshot"<<snapshotMs<<"refresh"<<refreshMs<<"rows"<<monsters->rows.size();QVERIFY2(setValueMs<100,qPrintable(QString("A simple database mutation took %1 ms; expected under 100 ms.").arg(setValueMs)));QVERIFY2(snapshotMs<500,qPrintable(QString("Runtime snapshot publication took %1 ms; expected under 500 ms.").arg(snapshotMs)));QVERIFY2(refreshMs<500,qPrintable(QString("A simple database refresh took %1 ms; expected under 500 ms.").arg(refreshMs)));
 }
 
 QTEST_MAIN(ProfileDatabaseTests)

@@ -11721,7 +11721,13 @@ void CView::viewParameters()
 
 void CView::refreshDatabaseVisuals(const QString& tableKey,const QString& rowKey)
 {
-    const bool targeted=tableKey==QStringLiteral("monsters")&&!rowKey.trimmed().isEmpty();
+    const bool monsterTable=tableKey==QStringLiteral("monsters")||tableKey==QStringLiteral("units.monsters");
+    const bool globallyVisual=tableKey.isEmpty()||tableKey==QStringLiteral("raceModels")
+        ||tableKey==QStringLiteral("items")||tableKey==QStringLiteral("units.racemodels")
+        ||tableKey.startsWith(QStringLiteral("items."));
+    if(!monsterTable&&!globallyVisual)
+        return;
+    const bool targeted=monsterTable&&!rowKey.trimmed().isEmpty();
     QVector<CUnit*> affected;
     for(CMob* mob:m_aMob)if(mob)for(CNode* node:mob->nodes())if(CUnit* unit=dynamic_cast<CUnit*>(node))
         if(!targeted||unit->databaseName().compare(rowKey,Qt::CaseInsensitive)==0)
