@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QDataStream>
 #include <QSaveFile>
 #include <QSet>
@@ -45,49 +46,14 @@ QByteArray floatPayload(const QVariant& value)
     QByteArray out;QDataStream stream(&out,QIODevice::WriteOnly);stream.setByteOrder(QDataStream::LittleEndian);stream.setFloatingPointPrecision(QDataStream::SinglePrecision);stream<<float(value.toDouble());return out;
 }
 struct PatchTarget{QString member;int table{-1};int field{-1};enum Kind{String,Integer,Float,NestedStrings}kind{String};};
-QVector<int> nestedFieldIds(const QByteArray& source)
-{
-    QVector<int> ids;
-    int offset = 0;
-    while(offset + 2 <= source.size())
-    {
-        const int id = uchar(source.at(offset));
-        quint32 encoded = uchar(source.at(offset + 1));
-        int header = 2;
-        if(encoded & 1)
-        {
-            if(offset + 5 > source.size())
-                return {};
-            encoded = quint32(uchar(source.at(offset + 1)))
-                | (quint32(uchar(source.at(offset + 2))) << 8)
-                | (quint32(uchar(source.at(offset + 3))) << 16)
-                | (quint32(uchar(source.at(offset + 4))) << 24);
-            encoded -= 1;
-            header = 5;
-        }
-        const int length = int(encoded / 2);
-        if(length < 0 || offset + header + length > source.size())
-            return {};
-        ids.append(id);
-        offset += header + length;
-    }
-    return offset == source.size() ? ids : QVector<int>();
-}
 QByteArray nestedStringPayload(const QVariant& value, const QByteArray& source)
 {
-    QByteArray out;
-    const QVector<int> sourceIds = nestedFieldIds(source);
-    const QStringList strings = value.toStringList();
-    for(int index = 0; index < strings.size(); ++index)
-    {
-        const QByteArray payload = stringPayload(strings.at(index));
-        const int id = sourceIds.isEmpty() ? 0
-            : sourceIds.at(qMin(index, sourceIds.size() - 1));
-        out.append(char(id));
-        const quint32 encoded=quint32(payload.size())*2;
-        if(encoded<=254)out.append(char(encoded));else{const quint32 longSize=encoded+1;out.append(char(longSize));out.append(char(longSize>>8));out.append(char(longSize>>16));out.append(char(longSize>>24));}out+=payload;
-    }
-    return out;
+    ei::SDatabaseStorageField field;
+    field.type=ei::EDatabaseStorageType::StringList;
+    const QString json=QString::fromUtf8(QJsonDocument(
+        QJsonArray::fromStringList(value.toStringList())).toJson(QJsonDocument::Compact));
+    return ei::DatabaseValueCodec::encode(json,source,field,
+        ei::DatabaseSchema::instance(),QString());
 }
 bool patchTarget(const ei::SDatabaseChange& change,const ei::SDatabaseTable& table,PatchTarget* target)
 {

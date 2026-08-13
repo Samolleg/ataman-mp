@@ -17,6 +17,16 @@ QVector<Element> elements(const QByteArray& payload,bool* ok=nullptr)
 {
     QVector<Element> out;int offset=0;while(offset<payload.size()){if(offset+2>payload.size()){if(ok)*ok=false;return {};}const int start=offset,id=uchar(payload[offset++]);quint32 n=uchar(payload[offset++]);if(n&1){if(offset+3>payload.size()){if(ok)*ok=false;return {};}n|=quint32(uchar(payload[offset]))<<8;n|=quint32(uchar(payload[offset+1]))<<16;n|=quint32(uchar(payload[offset+2]))<<24;offset+=3;n-=1;}const int size=int(n/2);if(size<0||offset+size>payload.size()){if(ok)*ok=false;return {};}Element e;e.id=id;e.payload=payload.mid(offset,size);offset+=size;e.encoded=payload.mid(start,offset-start);out.append(e);}if(ok)*ok=true;return out;
 }
+QByteArray wrap(int id,const QByteArray& payload,const Element* original=nullptr)
+{
+    if(original&&original->id==id)
+    {
+        if(original->payload==payload)return original->encoded;
+        if(original->payload.size()==payload.size())
+            return original->encoded.left(original->encoded.size()-original->payload.size())+payload;
+    }
+    return header(id,payload.size())+payload;
+}
 QString text(const QByteArray& payload){QByteArray b=payload;while(!b.isEmpty()&&b.endsWith('\0'))b.chop(1);return QTextCodec::codecForName("CP1251")->toUnicode(b);}
 QByteArray encodedText(const QString& value,bool fixed,int size)
 {
@@ -84,10 +94,11 @@ QByteArray DatabaseValueCodec::encode(const QVariant& value,const QByteArray& so
     if(f.type==EDatabaseStorageType::SignedLong||f.type==EDatabaseStorageType::UnsignedLong||f.type==EDatabaseStorageType::Byte||f.type==EDatabaseStorageType::Float)return scalarBytes(QJsonValue::fromVariant(value),f.type,f.modifier,diagnostic);
     const QJsonDocument doc=json(value,diagnostic);if(!doc.isArray())return {};const QJsonArray values=doc.array();QByteArray out;
     if(f.type==EDatabaseStorageType::FloatList||f.type==EDatabaseStorageType::UnsignedLongList||f.type==EDatabaseStorageType::ByteList){const auto scalarType=f.type==EDatabaseStorageType::FloatList?EDatabaseStorageType::Float:(f.type==EDatabaseStorageType::UnsignedLongList?EDatabaseStorageType::UnsignedLong:EDatabaseStorageType::Byte);for(const auto& v:values)out+=scalarBytes(v,scalarType,0,diagnostic);return out;}
-    if(f.type==EDatabaseStorageType::BitList){out=QByteArray(qMax(source.size(),(f.modifier+7)/8),'\0');for(int i=0;i<values.size()&&i<f.modifier;++i)if(values[i].toBool())out[i/8]=char(uchar(out[i/8])|(1u<<(i%8)));return out;}
+    if(f.type==EDatabaseStorageType::BitList){out=source;const int required=(f.modifier+7)/8;if(out.size()<required)out.append(QByteArray(required-out.size(),'\0'));for(int i=0;i<values.size()&&i<f.modifier;++i){const uchar mask=uchar(1u<<(i%8));uchar byte=uchar(out[i/8]);byte=values[i].toBool()?uchar(byte|mask):uchar(byte&~mask);out[i/8]=char(byte);}return out;}
     if(f.type==EDatabaseStorageType::TypeList)
     {
-        for(const auto& item:values){const QJsonObject object=item.toObject();const int id=object.value("id").toInt();const auto* nestedField=schema.field(family,f.modifier,id);const QByteArray payload=nestedField?scalarBytes(object.value("value"),nestedField->type,nestedField->modifier,diagnostic):QByteArray::fromHex(object.value("value").toString().toLatin1());out+=header(id,payload.size())+payload;}return out;
+        const auto originals=elements(source);
+        for(int i=0;i<values.size();++i){const QJsonObject object=values[i].toObject();const int id=object.value("id").toInt();const auto* nestedField=schema.field(family,f.modifier,id);const QByteArray payload=nestedField?scalarBytes(object.value("value"),nestedField->type,nestedField->modifier,diagnostic):QByteArray::fromHex(object.value("value").toString().toLatin1());out+=wrap(id,payload,i<originals.size()?&originals[i]:nullptr);}return out;
     }
     const auto originals=elements(source);for(int i=0;i<values.size();++i)
     {
@@ -95,8 +106,8 @@ QByteArray DatabaseValueCodec::encode(const QVariant& value,const QByteArray& so
         if(f.type==EDatabaseStorageType::StringList)payload=encodedText(values[i].toString(),false,0);
         else if(f.type==EDatabaseStorageType::FixedStringList)payload=encodedText(values[i].toString(),true,qMax(f.modifier,1));
         else if(f.type==EDatabaseStorageType::IndexedFloatList){const QJsonObject o=values[i].toObject();id=o.value("id").toInt(id);payload=scalarBytes(o.value("value"),EDatabaseStorageType::Float,0,diagnostic);}
-        else {const QJsonObject o=values[i].toObject();id=o.value("id").toInt(id);if(o.contains("raw"))payload=QByteArray::fromHex(o.value("raw").toString().toLatin1());else for(const auto& fv:o.value("fields").toArray()){const QJsonObject fo=fv.toObject();const int childId=fo.value("id").toInt();const auto* nf=schema.field(family,f.modifier,childId);const QByteArray child=nf?scalarBytes(fo.value("value"),nf->type,nf->modifier,diagnostic):QByteArray::fromHex(fo.value("value").toString().toLatin1());payload+=header(childId,child.size())+child;}}
-        out+=header(id,payload.size())+payload;
+        else {const QJsonObject o=values[i].toObject();id=o.value("id").toInt(id);if(o.contains("raw"))payload=QByteArray::fromHex(o.value("raw").toString().toLatin1());else {const QVector<Element> originalChildren=i<originals.size()?elements(originals[i].payload):QVector<Element>();const QJsonArray fields=o.value("fields").toArray();for(int childIndex=0;childIndex<fields.size();++childIndex){const QJsonObject fo=fields[childIndex].toObject();const int childId=fo.value("id").toInt();const auto* nf=schema.field(family,f.modifier,childId);const QByteArray child=nf?scalarBytes(fo.value("value"),nf->type,nf->modifier,diagnostic):QByteArray::fromHex(fo.value("value").toString().toLatin1());payload+=wrap(childId,child,childIndex<originalChildren.size()?&originalChildren[childIndex]:nullptr);}}}
+        out+=wrap(id,payload,i<originals.size()?&originals[i]:nullptr);
     }
     return out;
 }

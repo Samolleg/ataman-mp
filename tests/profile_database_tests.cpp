@@ -53,6 +53,15 @@ QByteArray tag(int id, const QByteArray& payload)
     return result;
 }
 
+QByteArray longTag(int id, const QByteArray& payload)
+{
+    QByteArray result;
+    result.append(char(id));
+    dword(&result, quint32(payload.size()) * 2 + 1);
+    result.append(payload);
+    return result;
+}
+
 QByteArray stringField(int id, const QByteArray& value) { return tag(id, value + '\0'); }
 QByteArray intField(int id, qint32 value) { QByteArray bytes; dword(&bytes, quint32(value)); return tag(id, bytes); }
 QByteArray record(const QByteArray& fields) { return tag(1, fields); }
@@ -170,6 +179,7 @@ private slots:
     void installedFullSchemaWorkbookRoundTrip();
     void installedAllFieldCodecIdentity();
     void installedEveryStorageTypeEditIsIsolated();
+    void nestedCodecPreservesUntouchedEncodingAndOpaqueBits();
     void authoringDocumentPublishesEveryWritableFieldLosslessly_data();
     void authoringDocumentPublishesEveryWritableFieldLosslessly();
     void authoringDocumentComposesTablesSharingOneMember();
@@ -503,7 +513,15 @@ void ProfileDatabaseTests::authoringDocumentPreservesNestedWearsTagIdentity()
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
     const QString sourcePath = QDir(temporary.path()).filePath("database.res");
-    write(sourcePath, resArchive(relationalMembers()));
+    auto members=relationalMembers();
+    const QByteArray untouched=longTag(7,QByteArray("helmet_plate.iron\0",18));
+    const QByteArray monster=stringField(0,"Human Test")+stringField(1,"Human Male")
+        +intField(3,2)+intField(4,1)+tag(5,QByteArray::fromHex("0000803f"))
+        +tag(6,QByteArray::fromHex("0000803f"))+tag(7,QByteArray::fromHex("0000803f"))
+        +tag(32,stringField(1,"armor_leather.iron")+untouched);
+    members["units.udb"]=database({QByteArray(),record(stringField(0,"Human Male")
+        +stringField(30,"unhuma")),record(monster),QByteArray()});
+    write(sourcePath, resArchive(members));
     ei::ProfileDatabaseService service;
     ei::SProfileDatabaseLoadRequest request;
     request.providerId = "base.standard.v1";
@@ -512,9 +530,17 @@ void ProfileDatabaseTests::authoringDocumentPreservesNestedWearsTagIdentity()
     auto document = ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
     QVERIFY(document);
     QString diagnostic;
-    QVERIFY2(document->setValue("monsters", "human test", "wears",
-        QStringList() << "armor_plate.meteoric" << "helmet_plate.meteoric",
-        &diagnostic), qPrintable(diagnostic));
+    const QString workbook=QDir(temporary.path()).filePath("database.xlsx");
+    QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));
+    ei::SDatabaseWorkbookImport imported;
+    QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));
+    auto tables=imported.tables;int monsterRow=-1;
+    for(int index=0;index<tables["monsters"].rows.size();++index)
+        if(tables["monsters"].rows[index].stableKey=="human test")monsterRow=index;
+    QVERIFY(monsterRow>=0);
+    tables["monsters"].rows[monsterRow].values["wears"]=
+        QStringList()<<"armor_plate.meteoric"<<"helmet_plate.iron";
+    QVERIFY2(document->replaceTables(tables,"Imported nested database edit",&diagnostic),qPrintable(diagnostic));
     const QByteArray archive = document->buildArchive(&diagnostic);
     QVERIFY2(!archive.isEmpty(), qPrintable(diagnostic));
     CResArchiveDocument res;
@@ -531,10 +557,7 @@ void ProfileDatabaseTests::authoringDocumentPreservesNestedWearsTagIdentity()
         if(field.id == 32 && field.occurrence == 0)
             wearsPayload = field.payload;
     QVERIFY(!wearsPayload.isEmpty());
-    QCOMPARE(uchar(wearsPayload.at(0)), uchar(1));
-    const int firstLength = uchar(wearsPayload.at(1)) / 2;
-    QVERIFY(2 + firstLength < wearsPayload.size());
-    QCOMPARE(uchar(wearsPayload.at(2 + firstLength)), uchar(1));
+    QCOMPARE(wearsPayload,tag(1,QByteArray("armor_plate.meteoric\0",21))+untouched);
 }
 
 void ProfileDatabaseTests::authoringDocumentExposesCompleteRawDatabaseCoverage()
@@ -617,6 +640,71 @@ void ProfileDatabaseTests::installedEveryStorageTypeEditIsIsolated()
     }
     const QSet<int> corpusTypes=QSet<int>()<<int(ei::EDatabaseStorageType::Hex)<<int(ei::EDatabaseStorageType::String)<<int(ei::EDatabaseStorageType::UnsignedLong)<<int(ei::EDatabaseStorageType::SignedLong)<<int(ei::EDatabaseStorageType::Float)<<int(ei::EDatabaseStorageType::Byte)<<int(ei::EDatabaseStorageType::FloatList)<<int(ei::EDatabaseStorageType::ByteList)<<int(ei::EDatabaseStorageType::StringList)<<int(ei::EDatabaseStorageType::FixedStringList)<<int(ei::EDatabaseStorageType::BitList)<<int(ei::EDatabaseStorageType::TypeList)<<int(ei::EDatabaseStorageType::AcksUniqueType)<<int(ei::EDatabaseStorageType::FixedString);
     for(int type:corpusTypes)QVERIFY2(tested.contains(type),qPrintable(QString("Installed corpus storage type %1 was not mutation-tested.").arg(type)));
+}
+
+void ProfileDatabaseTests::nestedCodecPreservesUntouchedEncodingAndOpaqueBits()
+{
+    const auto& schema=ei::DatabaseSchema::instance();
+    QString diagnostic;
+    auto editFirst=[&](ei::EDatabaseStorageType type,const QByteArray& source,
+                       const std::function<void(QJsonArray*)>& edit,int modifier=0)->QByteArray
+    {
+        diagnostic.clear();
+        ei::SDatabaseStorageField field;field.type=type;field.modifier=modifier;
+        const QVariant decoded=ei::DatabaseValueCodec::decode(source,field,schema,"__lossless_test__",&diagnostic);
+        QJsonDocument document=QJsonDocument::fromJson(decoded.toString().toUtf8());
+        if(!diagnostic.isEmpty()||!document.isArray())return {};
+        QJsonArray values=document.array();edit(&values);
+        const QByteArray encoded=ei::DatabaseValueCodec::encode(
+            QString::fromUtf8(QJsonDocument(values).toJson(QJsonDocument::Compact)),
+            source,field,schema,"__lossless_test__",&diagnostic);
+        return encoded;
+    };
+
+    const QByteArray untouchedString=longTag(9,QByteArray("beta\0",5));
+    const QByteArray stringSource=tag(7,QByteArray("alpha\0",6))+untouchedString;
+    QCOMPARE(editFirst(ei::EDatabaseStorageType::StringList,stringSource,
+        [](QJsonArray* a){(*a)[0]="omega";}),tag(7,QByteArray("omega\0",6))+untouchedString);
+
+    const QByteArray fixedFirst=QByteArray("one\0\0\0\0\0",8);
+    const QByteArray fixedChanged=QByteArray("six\0\0\0\0\0",8);
+    const QByteArray untouchedFixed=longTag(10,QByteArray("two\0\0\0\0\0",8));
+    const QByteArray fixedSource=tag(8,fixedFirst)+untouchedFixed;
+    QCOMPARE(editFirst(ei::EDatabaseStorageType::FixedStringList,fixedSource,
+        [](QJsonArray* a){(*a)[0]="six";},8),tag(8,fixedChanged)+untouchedFixed);
+
+    const QByteArray untouchedFloat=longTag(12,QByteArray::fromHex("00000040"));
+    const QByteArray floatSource=tag(11,QByteArray::fromHex("0000803f"))+untouchedFloat;
+    QCOMPARE(editFirst(ei::EDatabaseStorageType::IndexedFloatList,floatSource,
+        [](QJsonArray* a){QJsonObject o=(*a)[0].toObject();o["value"]=3.0;(*a)[0]=o;}),
+        tag(11,QByteArray::fromHex("00004040"))+untouchedFloat);
+
+    const QByteArray untouchedTyped=longTag(22,QByteArray::fromHex("bb"));
+    const QByteArray typedSource=tag(21,QByteArray::fromHex("aa"))+untouchedTyped;
+    QCOMPARE(editFirst(ei::EDatabaseStorageType::TypeList,typedSource,
+        [](QJsonArray* a){QJsonObject o=(*a)[0].toObject();o["value"]="ab";(*a)[0]=o;},99),
+        tag(21,QByteArray::fromHex("ab"))+untouchedTyped);
+
+    const QByteArray untouchedChild=longTag(32,QByteArray::fromHex("cc"));
+    const QByteArray firstChildren=tag(31,QByteArray::fromHex("aa"))+untouchedChild;
+    const QByteArray untouchedOuter=longTag(42,longTag(33,QByteArray::fromHex("dd")));
+    const QByteArray opaqueOuter=longTag(43,QByteArray::fromHex("ff"));
+    const QByteArray compoundSource=tag(41,firstChildren)+untouchedOuter+opaqueOuter;
+    const QByteArray compoundExpected=tag(41,tag(31,QByteArray::fromHex("ab"))+untouchedChild)+untouchedOuter+opaqueOuter;
+    for(const auto type:{ei::EDatabaseStorageType::CapsulatedTypeList,ei::EDatabaseStorageType::AcksUniqueType})
+        QCOMPARE(editFirst(type,compoundSource,[](QJsonArray* a){
+            QJsonObject outer=(*a)[0].toObject();QJsonArray fields=outer["fields"].toArray();
+            QJsonObject child=fields[0].toObject();child["value"]="ab";fields[0]=child;
+            outer["fields"]=fields;(*a)[0]=outer;
+        },99),compoundExpected);
+
+    ei::SDatabaseStorageField bits;bits.type=ei::EDatabaseStorageType::BitList;bits.modifier=3;
+    const QByteArray bitSource(1,char(0xf8));
+    const QVariant decoded=ei::DatabaseValueCodec::decode(bitSource,bits,schema,"__lossless_test__",&diagnostic);
+    QJsonArray values=QJsonDocument::fromJson(decoded.toString().toUtf8()).array();values[0]=true;
+    QCOMPARE(ei::DatabaseValueCodec::encode(
+        QString::fromUtf8(QJsonDocument(values).toJson(QJsonDocument::Compact)),
+        bitSource,bits,schema,"__lossless_test__",&diagnostic),QByteArray(1,char(0xf9)));
 }
 
 void ProfileDatabaseTests::authoringDocumentPublishesEveryWritableFieldLosslessly_data()
