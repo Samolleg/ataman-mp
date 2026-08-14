@@ -1081,8 +1081,17 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
         bool found = false;
         STerrainAtlasProfileSlot definition;
         definition.slot = slot;
-        definition.signature = workingCatalog.gridSignatureForPacked(
-            packed.encode(), &found);
+        const STerrainTransitionSignature gridSignature =
+            workingCatalog.gridSignatureForPacked(packed.encode(), &found);
+        // Profile schema v8 stores the corners visible in the atlas preview,
+        // while a working catalog exposes the recovered terrain-grid corners.
+        // This conversion must not depend on the catalog's internal mirror
+        // flag. In particular, a catalog reopened from a portable finalized
+        // profile has mirror=false; writing its grid tuple directly made the
+        // next draft reopen reflect every non-symmetric tile a second time.
+        definition.signature = found
+            ? CTerrainTransitionCatalog::mirroredGridY(gridSignature)
+            : STerrainTransitionSignature();
         definition.assigned = found;
         definition.ambiguous = false;
         if(found)

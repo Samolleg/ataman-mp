@@ -7041,13 +7041,13 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
         QStringLiteral("Stone / Gray"), ETerrainAtlasLayer::Land);
     CTerrainTransitionCatalog catalog;
     catalog.setMirrorPaintGridY(true);
-    STerrainTransitionSignature visible;
-    visible.northWest = grass;
-    visible.northEast = stone;
-    visible.southEast = stone;
-    visible.southWest = grass;
-    const STerrainTransitionSignature paint =
-        CTerrainTransitionCatalog::mirroredGridY(visible);
+    STerrainTransitionSignature grid;
+    grid.northWest = grass;
+    grid.northEast = stone;
+    grid.southEast = grass;
+    grid.southWest = grass;
+    const STerrainTransitionSignature preview =
+        CTerrainTransitionCatalog::mirroredGridY(grid);
     for(int rotation = 0; rotation < 4; ++rotation)
     {
         SMprPackedTile packed;
@@ -7055,8 +7055,11 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
         packed.atlasIndex = 1;
         packed.rotation = quint8(rotation);
         STerrainTransitionVariant variant;
+        // This synthetic catalog uses the same explicit mirror boundary as
+        // the live working catalog. gridSignatureForPacked() must therefore
+        // recover `grid` regardless of the catalog's internal corner space.
         variant.signature = CTerrainTransitionCatalog::rotated(
-            paint, -rotation);
+            preview, -rotation);
         variant.packedTile = packed.encode();
         QVERIFY(catalog.addVariant(variant));
     }
@@ -7084,7 +7087,7 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QCOMPARE(profile.atlasSlotCount, 128);
     QCOMPARE(profile.assignedSlotCount(), 1);
-    QCOMPARE(profile.slotDefinitions.at(64).signature, visible);
+    QCOMPARE(profile.slotDefinitions.at(64).signature, preview);
     QCOMPARE(profile.provenance,
              CTerrainAtlasProfileStore::workingAtlasProvenance());
     QVERIFY(profile.validateBinding(
@@ -7109,7 +7112,25 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
     packed.atlasIndex = 1;
     packed.rotation = 0;
     QCOMPARE(analysis.landCatalog.gridSignatureForPacked(
-                 packed.encode(), &found), visible);
+                 packed.encode(), &found), grid);
+    QVERIFY(found);
+
+    // The real regression needs a second boundary: Save a draft from a map
+    // whose portable profile has already been reopened. That compiled catalog
+    // stores paint-grid tuples directly (mirror=false). The next draft profile
+    // must still serialize preview-image corners and reopen to the same grid.
+    const STerrainAtlasProfile redraft =
+        CTerrainAtlasProfileStore::workingAtlasProfile(
+            QStringLiteral("zone_redraft"), tiles,
+            analysis.overlayCompatibleCatalog, reopenedProfile,
+            QVector<STerrainGlobalMaterialFamily>()
+                << grassFamily << stoneFamily, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QCOMPARE(redraft.slotDefinitions.at(64).signature, preview);
+    const STerrainAtlasAnalysis redraftAnalysis = redraft.usableAnalysis(&report);
+    QVERIFY2(redraftAnalysis.usable, qPrintable(report.toText()));
+    QCOMPARE(redraftAnalysis.landCatalog.gridSignatureForPacked(
+                 packed.encode(), &found), grid);
     QVERIFY(found);
 }
 
