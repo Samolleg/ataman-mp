@@ -7,6 +7,8 @@
 #include <QJsonObject>
 
 #include "endurance_document.h"
+#include "mmp_codec.h"
+#include "resource_name.h"
 
 namespace {
 const QJsonArray& presetArray(CValidationReport* report)
@@ -254,6 +256,117 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
         return left.name.localeAwareCompare(right.name) < 0;
     });
     return result;
+}
+
+QImage CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
+    const STerrainGlobalMaterialFamily& family,
+    const QString& preferredNamespace,
+    const QSize& requiredSize,
+    QMap<QString, QByteArray>* encodedPageCache,
+    QSet<QString>* missingPageCache,
+    QMap<QString, QImage>* decodedTileCache,
+    const std::function<bool(const QString&, QByteArray*)>& pageLoader,
+    bool thumbnail,
+    STerrainGlobalMaterialSource* selectedSource)
+{
+    if(!encodedPageCache || !missingPageCache || !decodedTileCache
+       || !pageLoader)
+        return QImage();
+
+    QVector<STerrainGlobalMaterialSource> sources;
+    const auto appendUnique = [&sources](
+        const STerrainGlobalMaterialSource& source) {
+        for(const STerrainGlobalMaterialSource& existing : sources)
+            if(existing.mprNamespace.compare(
+                   source.mprNamespace, Qt::CaseInsensitive) == 0
+               && existing.uniformSlot == source.uniformSlot)
+                return;
+        sources.append(source);
+    };
+    const auto appendMatching = [&](
+        const QVector<STerrainGlobalMaterialSource>& candidates,
+        bool preferred) {
+        for(const STerrainGlobalMaterialSource& source : candidates)
+            if((source.mprNamespace.compare(
+                    preferredNamespace, Qt::CaseInsensitive) == 0)
+               == preferred)
+                appendUnique(source);
+    };
+    if(thumbnail)
+    {
+        // Display metadata must not force a foreign atlas when the current
+        // atlas has a structurally proven uniform. This is important for
+        // reviewed catalogs whose legacy thumbnailSlot still points at a
+        // mixed transition: local uniform first, foreign thumbnail second.
+        appendMatching(family.thumbnailSources, true);
+        appendMatching(family.sources, true);
+        appendMatching(family.thumbnailSources, false);
+        appendMatching(family.sources, false);
+    }
+    else
+    {
+        appendMatching(family.sources, true);
+        appendMatching(family.sources, false);
+    }
+
+    QImage fallback;
+    STerrainGlobalMaterialSource fallbackSource;
+    for(const STerrainGlobalMaterialSource& source : sources)
+    {
+        const QStringList names = ei::terrainTextureResourceNames(
+            source.mprNamespace, source.textureCount);
+        const int pageIndex = source.uniformSlot / 64;
+        if(pageIndex < 0 || pageIndex >= names.size())
+            continue;
+        const QString pageName = names.at(pageIndex).toCaseFolded();
+        if(missingPageCache->contains(pageName))
+            continue;
+        auto encoded = encodedPageCache->find(pageName);
+        if(encoded == encodedPageCache->end())
+        {
+            QByteArray payload;
+            if(!pageLoader(pageName, &payload) || payload.isEmpty())
+            {
+                missingPageCache->insert(pageName);
+                continue;
+            }
+            encoded = encodedPageCache->insert(pageName, payload);
+        }
+        const QByteArray payloadSha256 = QCryptographicHash::hash(
+            encoded.value(), QCryptographicHash::Sha256).toHex();
+        const QString tileCacheKey = QStringLiteral("%1|%2|%3|%4x%5")
+            .arg(pageName, QString::fromLatin1(payloadSha256))
+            .arg(source.uniformSlot % 64)
+            .arg(requiredSize.width()).arg(requiredSize.height());
+        if(decodedTileCache->contains(tileCacheKey))
+        {
+            if(selectedSource) *selectedSource = source;
+            return decodedTileCache->value(tileCacheKey);
+        }
+        QImage tile;
+        QString diagnostic;
+        if(!ei::decodeMmpDxt1AtlasTile(
+               encoded.value(), source.uniformSlot % 64,
+               &tile, &diagnostic))
+            continue;
+        tile = tile.convertToFormat(QImage::Format_RGBA8888);
+        if(requiredSize.isEmpty() || tile.size() == requiredSize)
+        {
+            decodedTileCache->insert(tileCacheKey, tile);
+            if(selectedSource) *selectedSource = source;
+            return tile;
+        }
+        if(fallback.isNull())
+        {
+            fallback = tile;
+            fallbackSource = source;
+        }
+    }
+    if(fallback.isNull())
+        return QImage();
+    if(selectedSource) *selectedSource = fallbackSource;
+    return fallback.scaled(requiredSize, Qt::IgnoreAspectRatio,
+                           Qt::SmoothTransformation);
 }
 
 QVector<STerrainGlobalTransitionSource>

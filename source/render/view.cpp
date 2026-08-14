@@ -112,83 +112,6 @@ CTerrainTransitionCatalog globalMaterialCatalog(
     return CTerrainAtlasPresetCatalog::globalizedCatalog(profile, source);
 }
 
-QImage loadGlobalUniformSource(const STerrainGlobalMaterialFamily& family,
-                               const QString& preferredNamespace,
-                               const QSize& requiredSize,
-                               QMap<QString, QByteArray>* encodedPageCache,
-                               QSet<QString>* missingPageCache,
-                               QMap<QString, QImage>* decodedTileCache,
-                               bool thumbnail = false,
-                               STerrainGlobalMaterialSource* selectedSource = nullptr)
-{
-    QVector<STerrainGlobalMaterialSource> sources = thumbnail
-        && !family.thumbnailSources.isEmpty()
-        ? family.thumbnailSources : family.sources;
-    std::stable_sort(sources.begin(), sources.end(),
-        [&preferredNamespace](const STerrainGlobalMaterialSource& left,
-                              const STerrainGlobalMaterialSource& right) {
-            const bool leftPreferred = left.mprNamespace.compare(
-                preferredNamespace, Qt::CaseInsensitive) == 0;
-            const bool rightPreferred = right.mprNamespace.compare(
-                preferredNamespace, Qt::CaseInsensitive) == 0;
-            return leftPreferred && !rightPreferred;
-        });
-    QImage fallback;
-    STerrainGlobalMaterialSource fallbackSource;
-    for(const STerrainGlobalMaterialSource& source : sources)
-    {
-        const QStringList names = ei::terrainTextureResourceNames(
-            source.mprNamespace, source.textureCount);
-        const int pageIndex = source.uniformSlot / 64;
-        if(pageIndex < 0 || pageIndex >= names.size())
-            continue;
-        const QString pageName = names.at(pageIndex).toCaseFolded();
-        const QString tileCacheKey = QStringLiteral("%1|%2|%3x%4")
-            .arg(pageName).arg(source.uniformSlot % 64)
-            .arg(requiredSize.width()).arg(requiredSize.height());
-        if(decodedTileCache && decodedTileCache->contains(tileCacheKey))
-        {
-            if(selectedSource) *selectedSource = source;
-            return decodedTileCache->value(tileCacheKey);
-        }
-        const int localSlot = source.uniformSlot % 64;
-        QImage tile;
-        QString diagnostic;
-        // Several hundred material cards often share a few dozen MMP pages.
-        // Read each encoded page once, then decode only each requested tile.
-        // This avoids both whole-page RGBA expansion and repeated multi-MiB
-        // RES reads for every family on that page.
-        if(!ei::decodeMmpDxt1AtlasTileCached(
-               pageName, localSlot, encodedPageCache, missingPageCache,
-               [](const QString& name, QByteArray* payload) {
-                   return CTextureList::getInstance()->terrainMmpPayload(
-                       name, payload);
-               }, &tile, &diagnostic))
-            continue;
-        tile = tile.convertToFormat(QImage::Format_RGBA8888);
-        if(requiredSize.isEmpty() || tile.size() == requiredSize)
-        {
-            if(decodedTileCache)
-                decodedTileCache->insert(tileCacheKey, tile);
-            if(selectedSource) *selectedSource = source;
-            return tile;
-        }
-        if(fallback.isNull())
-        {
-            fallback = tile;
-            fallbackSource = source;
-        }
-    }
-    // Material identity is independent of a map atlas's native tile
-    // resolution. Prefer a same-size reviewed anchor above, but do not make a
-    // valid stock JMV family unpaintable when only another resolution exists.
-    if(fallback.isNull())
-        return QImage();
-    if(selectedSource) *selectedSource = fallbackSource;
-    return fallback.scaled(requiredSize, Qt::IgnoreAspectRatio,
-                           Qt::SmoothTransformation);
-}
-
 QMap<qint32, ETerrainBlendStyle> globalMaterialBlendStyles(
     const QVector<STerrainGlobalMaterialFamily>& families)
 {
@@ -261,7 +184,7 @@ QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
     if(!ei::decodeMmpDxt1AtlasTileCached(
            pageName, localSlot, encodedPageCache, missingPageCache,
            [](const QString& name, QByteArray* payload) {
-               return CTextureList::getInstance()->terrainMmpPayload(
+               return CTextureList::getInstance()->catalogTerrainMmpPayload(
                    name, payload);
            }, &tile, &diagnostic))
         return {};
@@ -7344,10 +7267,14 @@ void CView::rebuildTerrainAutoCatalog()
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             STerrainGlobalMaterialSource selectedSource;
-            const QImage source = loadGlobalUniformSource(
+            const QImage source = CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
                 family, mprNamespace, requiredSize,
                 &encodedGlobalPages, &missingGlobalPages,
-                &m_terrainGlobalUniformTileCache, false, &selectedSource);
+                &m_terrainGlobalUniformTileCache,
+                [](const QString& name, QByteArray* payload) {
+                    return CTextureList::getInstance()->catalogTerrainMmpPayload(
+                        name, payload);
+                }, false, &selectedSource);
             if(source.isNull())
             {
                 report.add("terrain.global_family_source",
@@ -7363,10 +7290,14 @@ void CView::rebuildTerrainAutoCatalog()
             choice.id = family.id;
             choice.name = family.name;
             choice.familyName = family.theme;
-            const QImage thumbnail = loadGlobalUniformSource(
+            const QImage thumbnail = CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
                 family, mprNamespace, requiredSize,
                 &encodedGlobalPages, &missingGlobalPages,
-                &m_terrainGlobalUniformTileCache, true);
+                &m_terrainGlobalUniformTileCache,
+                [](const QString& name, QByteArray* payload) {
+                    return CTextureList::getInstance()->catalogTerrainMmpPayload(
+                        name, payload);
+                }, true);
             choice.thumbnail = thumbnail.isNull() ? source : thumbnail;
             choice.assignedSlots = family.sources.size();
             if(family.layer == ETerrainAtlasLayer::Land)

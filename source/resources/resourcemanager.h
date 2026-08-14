@@ -147,6 +147,12 @@ public:
     // appending generated working-atlas pages to a run-local RES archive.
     bool terrainMmpPayload(const QString& textureName, QByteArray* payload,
                            QString* sourcePath = nullptr) const;
+    // Built-in semantic catalog sources refer to stock configured archives,
+    // never to the currently open map's private/finalized atlas. A private
+    // archive may reuse stock member names for completely different slots.
+    bool catalogTerrainMmpPayload(const QString& textureName,
+                                  QByteArray* payload,
+                                  QString* sourcePath = nullptr) const;
     bool terrainMmpTile(const QString& textureName, int logicalSlot,
                         QImage* tile, QString* sourcePath = nullptr) const;
     // A finalized isolated MPR may carry a sibling <mpr>-atlas.res. This

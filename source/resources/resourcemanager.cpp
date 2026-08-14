@@ -1340,6 +1340,18 @@ bool CTextureList::terrainMmpPayload(const QString& textureName,
                                sourcePath);
 }
 
+bool CTextureList::catalogTerrainMmpPayload(const QString& textureName,
+                                            QByteArray* payload,
+                                            QString* sourcePath) const
+{
+    if(payload)
+        payload->clear();
+    if(!payload)
+        return false;
+    return readIndexedResource(configuredResourceSources(m_pSettings),
+                               textureName.toLower(), *payload, sourcePath);
+}
+
 bool CTextureList::terrainMmpTile(const QString& textureName, int logicalSlot,
                                   QImage* tile, QString* sourcePath) const
 {

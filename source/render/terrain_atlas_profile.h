@@ -5,8 +5,11 @@
 #include <QImage>
 #include <QJsonObject>
 #include <QMap>
+#include <QSet>
 #include <QString>
 #include <QVector>
+
+#include <functional>
 
 #include "terrain_atlas_analyzer.h"
 
@@ -238,6 +241,19 @@ public:
                                    qint32 localFamilyId = 0);
     static QVector<STerrainGlobalMaterialFamily> globalUniformFamilies(
         CValidationReport* report = nullptr);
+    // Resolve one palette/paint source against the exact currently loaded
+    // MMP payload. The decoded cache is payload-addressed so opening another
+    // map or RES with the same page member names cannot reuse stale artwork.
+    static QImage loadGlobalUniformSource(
+        const STerrainGlobalMaterialFamily& family,
+        const QString& preferredNamespace,
+        const QSize& requiredSize,
+        QMap<QString, QByteArray>* encodedPageCache,
+        QSet<QString>* missingPageCache,
+        QMap<QString, QImage>* decodedTileCache,
+        const std::function<bool(const QString&, QByteArray*)>& pageLoader,
+        bool thumbnail = false,
+        STerrainGlobalMaterialSource* selectedSource = nullptr);
     static QVector<STerrainGlobalTransitionSource> globalAuthoredTransitions(
         CValidationReport* report = nullptr);
     static CTerrainTransitionCatalog globalizedCatalog(

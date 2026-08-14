@@ -358,6 +358,7 @@ private slots:
     void authoredPresetCatalogCoversKnownAtlasesAndMatchesZone1();
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
+    void globalMaterialBrushSourceIsPayloadCoherentAndPrefersLocalUniform();
     void stockInputsCannotOverrideCanonicalOneCornerMask();
     void workingAtlasRealizesExactTransitionsBeyond512Slots();
     void globalAuthoredTransitionLibraryIndexesRealStockBlends();
@@ -6340,6 +6341,102 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
+}
+
+void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefersLocalUniform()
+{
+    const auto page = [](const QColor& first, const QColor& second) {
+        QVector<QImage> tiles;
+        for(int slot = 0; slot < 64; ++slot)
+        {
+            QImage tile(8, 8, QImage::Format_RGBA8888);
+            tile.fill(slot == 0 ? first : second);
+            tiles.append(tile);
+        }
+        QString diagnostic;
+        return ei::encodeMmpDxt1(
+            CTerrainVirtualAtlas::composePage(tiles, 0, 8), true,
+            &diagnostic);
+    };
+    const QByteArray foreignPage = page(Qt::red, Qt::yellow);
+    const QByteArray preferredPage = page(Qt::blue, Qt::green);
+    QVERIFY(!foreignPage.isEmpty());
+    QVERIFY(!preferredPage.isEmpty());
+
+    STerrainGlobalMaterialSource foreign;
+    foreign.mprNamespace = QStringLiteral("foreign");
+    foreign.textureCount = 1;
+    foreign.uniformSlot = 0;
+    foreign.variantName = QStringLiteral("Ground / Test");
+    STerrainGlobalMaterialSource preferred = foreign;
+    preferred.mprNamespace = QStringLiteral("preferred");
+    preferred.uniformSlot = 1;
+    STerrainGlobalMaterialFamily family;
+    family.name = foreign.variantName;
+    family.sources = {foreign, preferred};
+    // The legacy display choice exists only in another atlas. The current
+    // atlas's proven uniform must still win before that foreign thumbnail.
+    family.thumbnailSources = {foreign};
+
+    QMap<QString, QByteArray> encodedPages;
+    QSet<QString> missingPages;
+    QMap<QString, QImage> decodedTiles;
+    STerrainGlobalMaterialSource selected;
+    const QImage thumbnail =
+        CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
+            family, QStringLiteral("preferred"), QSize(8, 8),
+            &encodedPages, &missingPages, &decodedTiles,
+            [&](const QString& name, QByteArray* payload) {
+                if(name == QStringLiteral("preferred000.mmp"))
+                    *payload = preferredPage;
+                else if(name == QStringLiteral("foreign000.mmp"))
+                    *payload = foreignPage;
+                else
+                    return false;
+                return true;
+            }, true, &selected);
+    QVERIFY(!thumbnail.isNull());
+    QCOMPARE(selected.mprNamespace, QStringLiteral("preferred"));
+    QCOMPARE(selected.uniformSlot, 1);
+    QImage expectedPreferred;
+    QString diagnostic;
+    QVERIFY(ei::decodeMmpDxt1AtlasTile(
+        preferredPage, 1, &expectedPreferred, &diagnostic));
+    QCOMPARE(thumbnail, expectedPreferred.convertToFormat(
+        QImage::Format_RGBA8888));
+
+    // Reusing one decoded cache across two maps used to return the first map's
+    // tile solely because the RES member name and slot matched. The current
+    // encoded payload is now part of the key, so the second map cannot inherit
+    // a stale uniform or blend image from the first one.
+    STerrainGlobalMaterialFamily sameNamed;
+    sameNamed.name = QStringLiteral("Ground / Same named page");
+    STerrainGlobalMaterialSource sameNamedSource = foreign;
+    sameNamedSource.mprNamespace = QStringLiteral("shared");
+    sameNamed.sources = {sameNamedSource};
+    const auto loadShared = [&](const QByteArray& currentPage) {
+        QMap<QString, QByteArray> currentEncoded;
+        QSet<QString> currentMissing;
+        return CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
+            sameNamed, QStringLiteral("shared"), QSize(8, 8),
+            &currentEncoded, &currentMissing, &decodedTiles,
+            [&](const QString& name, QByteArray* payload) {
+                if(name != QStringLiteral("shared000.mmp"))
+                    return false;
+                *payload = currentPage;
+                return true;
+            });
+    };
+    const QImage first = loadShared(foreignPage);
+    const QImage second = loadShared(preferredPage);
+    QVERIFY(!first.isNull());
+    QVERIFY(!second.isNull());
+    QVERIFY(first != second);
+    QImage expectedSecond;
+    QVERIFY(ei::decodeMmpDxt1AtlasTile(
+        preferredPage, 0, &expectedSecond, &diagnostic));
+    QCOMPARE(second, expectedSecond.convertToFormat(
+        QImage::Format_RGBA8888));
 }
 
 void EnduranceDocumentTests::stockInputsCannotOverrideCanonicalOneCornerMask()
