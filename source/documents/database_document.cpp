@@ -13,11 +13,22 @@
 #include "lossless_database_member.h"
 #include "database_schema.h"
 #include "database_value_codec.h"
+#include "item_spell_constructor.h"
 #include "res_archive_document.h"
 #include "../runtime/providers/profile_database_provider_support.h"
 
 namespace {
 QString fold(const QString& v) { return v.trimmed().toLower(); }
+QStringList storedItemCodes(const QVariant& value)
+{
+    if(value.type()==QVariant::StringList)return value.toStringList();
+    if(value.type()==QVariant::List){QStringList result;for(const QVariant& entry:value.toList())result<<entry.toString();return result;}
+    const QString text=value.toString().trimmed();if(text.isEmpty())return {};
+    QJsonParseError error;const QJsonDocument json=QJsonDocument::fromJson(text.toUtf8(),&error);
+    if(error.error==QJsonParseError::NoError&&json.isArray())
+    {QStringList result;for(const QJsonValue& entry:json.array())if(entry.isString())result<<entry.toString();return result;}
+    return {text};
+}
 bool isJmvLuaField(const ei::SDatabaseFieldSchema& field)
 { return (field.storageId == -2 && field.key.startsWith("jmv.perk."))
       || (field.storageId == -3 && field.key.startsWith("jmv.stat.")); }
@@ -370,7 +381,13 @@ bool DatabaseDocument::fieldEditable(const QString&t,const QString&r,const QStri
 {
     const SDatabaseTable*tb=table(t);const SDatabaseRow*x=nullptr;if(tb)for(const auto&candidate:tb->rows)if(candidate.stableKey==fold(r)){x=&candidate;break;}
     if(!x||!tb){if(d)*d="Row is unavailable.";return false;}bool writable=false;for(const auto&s:tb->fields)writable|=s.key==f&&s.writable;if(!writable){if(d)*d="Field is unsupported or read-only.";return false;}
-    for(const auto&s:tb->fields)if(s.key==f&&isJmvLuaField(s)){if(x->added||x->values.contains(f))return true;if(d)*d=s.storageId==-2?"This monster has no UnitPerk row in the active JMV tables.lua.":"This monster has no UnitStat row in the active JMV tables.lua.";return false;}
+    for(const auto&s:tb->fields)if(s.key==f&&isJmvLuaField(s)){
+        if(x->added||x->values.contains(f))return true;
+        for(const auto&peer:tb->fields)
+            if(peer.storageId==s.storageId&&x->values.contains(peer.key))return true;
+        if(d)*d=s.storageId==-2?"This monster has no UnitPerk row in the active JMV tables.lua.":"This monster has no UnitStat row in the active JMV tables.lua.";
+        return false;
+    }
     if(tb->physicalTable>=0){if(x->added||x->values.contains(f))return true;if(d)*d="This optional field is absent from the source row; safe field insertion is not yet proven.";return false;}
     SDatabaseChange physical;physical.tableKey=t;physical.rowKey=r;physical.fieldKey=f;PatchTarget target;if(!patchTarget(physical,*tb,&target)){if(d)*d="This field has no verified publication mapping for this row.";return false;}
     const QString sourceName=x->sourceStableKey.isEmpty()?x->values.value("name").toString():x->sourceStableKey;if(m_sourceFieldOccurrences.contains(t+'|'+fold(sourceName)+'|'+f))return true;if(d)*d="This optional field is absent from the source row; safe field insertion is not yet proven.";return false;
@@ -423,6 +440,49 @@ QVector<SDatabaseValidationFinding> DatabaseDocument::validate()const
                         "database.reference.missing",table.key,row.stableKey,
                         QString("%1 references missing %2 row '%3'.")
                             .arg(field.label,field.referenceTable,reference),true});
+            }
+        }
+    }
+    const SDatabaseTable* monsters=table(QStringLiteral("units.monsters"));
+    if(monsters)
+    {
+        const ItemSpellConstructorCatalog catalog=ItemSpellConstructorCatalog::fromDocument(*this);
+        for(const SDatabaseRow& row:monsters->rows)
+        {
+            if(row.deleted)continue;
+            const QString monster=displayIdentity(monsters->key,row.stableKey);
+            for(const SDatabaseFieldSchema& field:monsters->fields)
+            {
+                if(field.storageId!=29&&field.storageId!=32&&field.storageId!=33&&field.storageId!=42)continue;
+                for(const QString& code:storedItemCodes(row.values.value(field.key)))
+                {
+                    const SParsedItemCode parsed=ItemSpellConstructorCatalog::parseItemCode(code);
+                    if(!parsed.valid)continue;
+                    const SConstructorItem* item=catalog.findItem(parsed.prototypeName);
+                    const SConstructorMaterial* material=parsed.materialName.isEmpty()?nullptr:catalog.findMaterial(parsed.materialName);
+                    if(item&&material&&item->materialType.compare(material->type,Qt::CaseInsensitive)!=0)
+                        findings.append({SDatabaseValidationFinding::Severity::Warning,
+                            QStringLiteral("database.item.material_incompatible"),monsters->key,row.stableKey,
+                            QCoreApplication::translate("DatabaseDocument",
+                                "%1.%2 contains '%3': item requires material type %4, but %5 is %6.")
+                                .arg(monster,field.label,code,item->materialType,material->name,material->type),true});
+                    if(!item||!parsed.spell.valid)continue;
+                    const SConstructorSpell* spell=catalog.findSpell(parsed.spell.prototypeCode);
+                    if(!spell)continue;
+                    const SConstructorLimitReport report=catalog.limits(*item,material,spell,parsed.spell.runeCodes);
+                    if(report.spellMana>report.itemMana)
+                        findings.append({SDatabaseValidationFinding::Severity::Warning,
+                            QStringLiteral("database.item.spell_energy_exceeded"),monsters->key,row.stableKey,
+                            QCoreApplication::translate("DatabaseDocument",
+                                "%1.%2 contains '%3': spell energy %4 exceeds item energy %5.")
+                                .arg(monster,field.label,code).arg(report.spellMana,0,'g',8).arg(report.itemMana,0,'g',8),true});
+                    if(report.spellComplexity>report.itemSlots)
+                        findings.append({SDatabaseValidationFinding::Severity::Warning,
+                            QStringLiteral("database.item.spell_difficulty_exceeded"),monsters->key,row.stableKey,
+                            QCoreApplication::translate("DatabaseDocument",
+                                "%1.%2 contains '%3': spell difficulty %4 exceeds item maximum difficulty %5.")
+                                .arg(monster,field.label,code).arg(report.spellComplexity).arg(report.itemSlots),true});
+                }
             }
         }
     }
@@ -574,7 +634,7 @@ QMap<QString,SJmvUnitStatRecord> DatabaseDocument::desiredJmvUnitStats()const
             const QString sourceKey=fold(row.sourceStableKey);const SDatabaseRow* base=nullptr;if(row.sourceRecordIndex>=0&&row.sourceRecordIndex<baseline.rows.size())base=&baseline.rows.at(row.sourceRecordIndex);else for(const auto& candidate:baseline.rows)if(fold(candidate.sourceStableKey)==sourceKey){base=&candidate;break;}
             const bool hadLua=base&&base->values.contains(fields.first()->key);if(row.deleted){if(hadLua)records.remove(sourceKey);continue;}if(!row.values.contains(fields.first()->key))continue;
             bool changed=row.added||!base||row.values.value(identityKey)!=base->values.value(identityKey);if(base)for(const SDatabaseFieldSchema*field:fields)changed|=!sameValue(row.values.value(field->key),base->values.value(field->key));if(!changed)continue;
-            if(hadLua)records.remove(sourceKey);SJmvUnitStatRecord record;record.prototype=row.values.value(identityKey).toString().trimmed();if(record.prototype.isEmpty())continue;for(const SDatabaseFieldSchema*field:fields)if(row.values.contains(field->key))record.values.append(row.values.value(field->key).toDouble());else break;record.physicalOccurrences=row.added?1:qMax(1,m_snapshot->jmvUnitStatsByPrototype.value(sourceKey).physicalOccurrences);records.insert(fold(record.prototype),record);
+            if(hadLua)records.remove(sourceKey);SJmvUnitStatRecord record;record.prototype=row.values.value(identityKey).toString().trimmed();if(record.prototype.isEmpty())continue;for(const SDatabaseFieldSchema*field:fields)record.values.append(row.values.value(field->key,0.0).toDouble());record.physicalOccurrences=row.added?1:qMax(1,m_snapshot->jmvUnitStatsByPrototype.value(sourceKey).physicalOccurrences);records.insert(fold(record.prototype),record);
         }
     }
     return records;

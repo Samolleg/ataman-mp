@@ -122,6 +122,8 @@ constexpr int kValidationPathRole = Qt::UserRole;
 constexpr int kValidationCopyRole = Qt::UserRole + 1;
 constexpr int kValidationNidRole = Qt::UserRole + 2;
 constexpr int kValidationSectionRole = Qt::UserRole + 3;
+constexpr int kValidationDatabaseTableRole = Qt::UserRole + 4;
+constexpr int kValidationDatabaseRowRole = Qt::UserRole + 5;
 constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
 constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
@@ -551,7 +553,12 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
                 m_databaseDocument, m_databaseEditorDialog, m_pView,
                 description, tableKey, rowKey));
             m_pView->refreshDatabaseVisuals(tableKey, rowKey);
+            updateMobFamilyValidationPanel();
         });
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::undoRequested,
+                m_undoStack, &QUndoStack::undo);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::redoRequested,
+                m_undoStack, &QUndoStack::redo);
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::itemSpellConstructorRequested,
                 this, &MainWindow::showItemSpellConstructor);
     }
@@ -1302,6 +1309,9 @@ MainWindow::MainWindow(QWidget* parent) :
         showGameAndModSetup();
 
     m_undoStack = new QUndoStack(this);
+    connect(m_undoStack,&QUndoStack::indexChanged,this,[this](){
+        if(m_databaseDocument)updateMobFamilyValidationPanel();
+    });
     int undoHistoryLimit = 512;
     if(COptInt* configuredLimit = dynamic_cast<COptInt*>(m_settings->opt(eOptSetGeneral, "undoHistoryLimit")))
         undoHistoryLimit = qBound(1, configuredLimit->value(), 1000000);
@@ -4951,13 +4961,20 @@ void MainWindow::updateMobFamilyValidationPanel()
     m_validationTree->clear();
     if(m_validationShowMore)
         m_validationShowMore->hide();
-    if(m_familyValidation.members.isEmpty())
+    const QVector<ei::SDatabaseValidationFinding> databaseFindings =
+        m_databaseDocument ? m_databaseDocument->validate()
+                           : QVector<ei::SDatabaseValidationFinding>();
+    if(m_familyValidation.members.isEmpty() && databaseFindings.isEmpty())
     {
         m_validationSummary->setText(tr("No active MOB family."));
         return;
     }
-    m_validationSummary->setText(m_familyValidation.summary());
-    QTreeWidgetItem* membersRoot = new QTreeWidgetItem(m_validationTree,
+    QString summary=m_familyValidation.members.isEmpty()?QString():m_familyValidation.summary();
+    if(!databaseFindings.isEmpty())summary+=tr("%1Database: %2 finding(s).")
+        .arg(summary.isEmpty()?QString():QStringLiteral("  ")).arg(databaseFindings.size());
+    m_validationSummary->setText(summary);
+    QTreeWidgetItem* membersRoot = nullptr;
+    if(!m_familyValidation.members.isEmpty())membersRoot = new QTreeWidgetItem(m_validationTree,
         QStringList() << tr("INFO") << tr("Family members")
                       << QString() << tr("%1 MOB(s)").arg(m_familyValidation.members.size()));
     for(const SMobFamilyMember& member : m_familyValidation.members)
@@ -5076,7 +5093,28 @@ void MainWindow::updateMobFamilyValidationPanel()
             .arg(m_familyValidation.findings.size() - visibleFindingCount));
         m_validationShowMore->show();
     }
-    membersRoot->setExpanded(true);
+    if(!databaseFindings.isEmpty())
+    {
+        auto* databaseRoot=new QTreeWidgetItem(m_validationTree,
+            QStringList()<<tr("INFO")<<tr("Database")<<QString()
+                         <<tr("%1 finding(s)").arg(databaseFindings.size()));
+        for(const ei::SDatabaseValidationFinding& finding:databaseFindings)
+        {
+            const bool error=finding.severity==ei::SDatabaseValidationFinding::Severity::Error;
+            const bool warning=finding.severity==ei::SDatabaseValidationFinding::Severity::Warning;
+            const QString severity=error?tr("CRITICAL"):(warning?tr("WARNING"):tr("INFO"));
+            auto* item=new QTreeWidgetItem(databaseRoot,
+                QStringList()<<severity<<finding.code<<finding.rowKey<<finding.message);
+            item->setForeground(0,QBrush(error?QColor(220,70,70):warning?QColor(230,160,45):QColor(130,160,190)));
+            item->setData(0,kValidationDatabaseTableRole,finding.tableKey);
+            item->setData(0,kValidationDatabaseRowRole,finding.rowKey);
+            item->setData(0,kValidationCopyRole,finding.message);
+            if(!finding.tableKey.isEmpty()&&!finding.rowKey.isEmpty())
+                item->setToolTip(1,tr("Double-click to open this row in the Database Editor."));
+        }
+        databaseRoot->setExpanded(true);
+    }
+    if(membersRoot)membersRoot->setExpanded(true);
     if(m_familyValidation.criticalCount() > 0 && m_validationDock)
         m_validationDock->show();
 }
@@ -5282,7 +5320,17 @@ QString MainWindow::validationWarningPreview(
 
 void MainWindow::selectValidationObject(QTreeWidgetItem* item)
 {
-    if(!item || !m_pView || !item->data(0, kValidationNidRole).isValid())
+    if(!item)return;
+    const QString databaseTable=item->data(0,kValidationDatabaseTableRole).toString();
+    const QString databaseRow=item->data(0,kValidationDatabaseRowRole).toString();
+    if(!databaseTable.isEmpty()&&!databaseRow.isEmpty())
+    {
+        showDatabaseEditor();
+        if(m_databaseEditorDialog&&!m_databaseEditorDialog->selectFinding(databaseTable,databaseRow))
+            statusBar()->showMessage(tr("The database finding's row is no longer available."),8000);
+        return;
+    }
+    if(!m_pView || !item->data(0, kValidationNidRole).isValid())
         return;
     const QString mobPath = item->data(0, kValidationPathRole).toString();
     const quint32 nid = item->data(0, kValidationNidRole).toUInt();

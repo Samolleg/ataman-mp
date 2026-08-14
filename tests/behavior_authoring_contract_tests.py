@@ -38,6 +38,7 @@ def main() -> int:
     trap_targets = source("source/core/trap_diplomacy.cpp")
     table = source("source/layout_components/tablemanager.cpp")
     table_h = source("source/layout_components/tablemanager.h")
+    constructor = source("source/ui/item_spell_constructor_dialog.cpp")
 
     require(settings, '{"shortcutHistory", "Ctrl+H"}',
             "Undo History default shortcut")
@@ -388,6 +389,14 @@ def main() -> int:
             "activation-area add action integration")
     require(view, "onTrapCastTargetAdd",
             "cast-target add action integration")
+    import_code = constructor[constructor.index("void ItemSpellConstructorDialog::importCode()"):
+                              constructor.index("void ItemSpellConstructorDialog::copyCode()")]
+    require(import_code, "m_itemFilter->clear()",
+            "constructor import clearing a row filter that hides the requested item")
+    require(import_code, "m_itemCategory->setCurrentIndex(0)",
+            "constructor import clearing a category filter that hides the requested item")
+    require(import_code, "m_itemType->setCurrentIndex(0)",
+            "constructor import clearing a type filter that hides the requested item")
 
     print("behavior authoring contract: PASS")
     return 0

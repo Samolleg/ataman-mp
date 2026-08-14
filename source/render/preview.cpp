@@ -62,7 +62,7 @@ void CPreview::resizeGL(int width, int height)
     const float ratio = float(width)/height;
     ei::gl::Viewport(0, 0, width, height);
     m_projection.setToIdentity();
-    m_projection.perspective(45, ratio, 1, 1000);
+    m_projection.perspective(45, ratio, 0.02f, 1000.0f);
 }
 
 void CPreview::paintGL()
@@ -149,8 +149,10 @@ void CPreview::draw()
 
 void CPreview::refreshCam(CBox box)
 {
-    m_cam->moveTo(box.center());
-    m_cam->moveAwayOn(box.radius()*1.5f);
+    const float distance=qMax(0.25f,box.radius()*2.6f);
+    const QVector3D pivot=box.center();
+    m_cam->setLocation(pivot+QVector3D(0.0f,0.0f,distance),pivot,
+                       QVector3D(-70.0f,0.0f,-45.0f));
     updateGL();
 }
 

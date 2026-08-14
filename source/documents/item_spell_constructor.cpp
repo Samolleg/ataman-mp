@@ -457,6 +457,7 @@ SConstructorLimitReport ItemSpellConstructorCatalog::limits(const SConstructorIt
     // runtime adds the selected material's magic capacities exactly once.
     result.itemMana = item.mana + (material ? material->mana : 0.0);
     result.itemSlots = item.slotCapacity + (material ? material->slotCapacity : 0);
+    result.itemManaRegenerationPerSecond = result.itemMana * 0.015;
     if(!spell) return result;
     if(result.spellMana > result.itemMana)
         result.warnings << QCoreApplication::translate(
@@ -493,21 +494,22 @@ SConstructorLimitReport ItemSpellConstructorCatalog::spellReport(
                                "Unknown rune code '%1'.").arg(code);
             continue;
         }
-        const QChar kind = rune->code.isEmpty() ? QChar() : rune->code.at(0).toLower();
-        if(kind == QLatin1Char('r')) result.range = qMax(0.0, result.range + spell.range * rune->value);
-        else if(kind == QLatin1Char('t')) result.targets = qMax(0, result.targets + int(spell.targets * rune->value));
-        else if(kind == QLatin1Char('a')) result.area = qMax(0.0, result.area + spell.area * rune->value);
-        else if(kind == QLatin1Char('e')) result.effect = qMax(0.0, result.effect + spell.effect * rune->value);
-        else if(kind == QLatin1Char('d'))
+        if(rune->type == 0) result.range = qMax(0.0, result.range + spell.range * rune->value);
+        else if(rune->type == 1) result.targets = qMax(0, result.targets + int(spell.targets * rune->value));
+        else if(rune->type == 2) result.area = qMax(0.0, result.area + spell.area * rune->value);
+        else if(rune->type == 3) result.effect = qMax(0.0, result.effect + spell.effect * rune->value);
+        else if(rune->type == 4)
             result.durationSegments = qMax(0, result.durationSegments
                                                + int(spell.durationSegments * rune->value));
-        else if(kind == QLatin1Char('m'))
+        else if(rune->type == 5)
             result.spellMana = qMax(0.0, result.spellMana + spell.mana * rune->value);
         ++result.spellSlots;
         result.spellComplexity += rune->complexity;
         result.spellMana += rune->mana;
     }
     result.spellMana = qMax(spell.mana, result.spellMana);
+    if(result.durationSegments > 0)
+        result.spellManaPerSecond = result.spellMana / (result.durationSegments / 15.0);
     result.areaRadius = result.area > 0.0 ? qSqrt(result.area / M_PI) : 0.0;
     return result;
 }

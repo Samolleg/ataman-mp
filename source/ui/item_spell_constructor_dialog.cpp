@@ -167,7 +167,7 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
 
     auto* itemRight = new QVBoxLayout;
     auto* itemForm = new QFormLayout;
-    m_material = new QComboBox(itemTab);
+    m_material = new QComboBox(itemTab);m_material->setObjectName(QStringLiteral("constructorMaterial"));
     m_itemSpell = new QLineEdit(itemTab); m_itemSpell->setPlaceholderText(tr("Optional spell code"));
     auto* useSpell = new QPushButton(tr("Use spell from Spell tab"), itemTab);
     auto* openSpell = new QPushButton(tr("Open in Spell tab"), itemTab);openSpell->setObjectName(QStringLiteral("constructorOpenInsertedSpell"));
@@ -233,9 +233,6 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
 
     m_validation = new QLabel(this); m_validation->setWordWrap(true); m_validation->setObjectName(QStringLiteral("constructorValidation"));
     root->addWidget(m_validation);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    buttons->button(QDialogButtonBox::Ok)->setText(tr("Copy code and close"));
-    root->addWidget(buttons);
 
     connect(m_itemFilter,&QLineEdit::textChanged,this,&ItemSpellConstructorDialog::refreshItemFilter);
     connect(m_itemCategory,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){refreshItemFilterChoices();refreshItemFilter();});
@@ -262,8 +259,6 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     connect(import,&QPushButton::clicked,this,&ItemSpellConstructorDialog::importCode);
     connect(copy,&QPushButton::clicked,this,&ItemSpellConstructorDialog::copyCode);
     connect(m_tabs,&QTabWidget::currentChanged,this,&ItemSpellConstructorDialog::updateOutput);
-    connect(buttons,&QDialogButtonBox::accepted,this,[this](){ copyCode(); accept(); });
-    connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::reject);
     refreshItemFilterChoices();refreshItemFilter(); refreshSpellFilter();
 }
 
@@ -496,12 +491,12 @@ void ItemSpellConstructorDialog::updateSpellPreview()
                 rune->code,rune->displayName,runeTypeName(rune->type));
     m_spellDetails->setText(tr(
         "%1\nCode: %2\nSchool: %3 | %4\n"
-        "Energy: %5 | item slots: %6 | difficulty: %7\n"
+        "Energy: %5 (%6 per second) | difficulty: %7\n"
         "Effect: %8 | duration: %9 s (%10 segments)\n"
         "Range: %11 m | area: %12 m² (radius %13 m) | targets: %14\n\n"
         "Runes:\n%15")
         .arg(spell->displayName,spell->code).arg(spell->school).arg(spell->subtype)
-        .arg(report.spellMana,0,'g',8).arg(report.spellSlots).arg(report.spellComplexity)
+        .arg(report.spellMana,0,'g',8).arg(report.spellManaPerSecond,0,'g',8).arg(report.spellComplexity)
         .arg(report.effect,0,'g',8).arg(report.durationSegments/15.0,0,'g',8)
         .arg(report.durationSegments).arg(report.range,0,'g',8).arg(report.area,0,'g',8)
         .arg(report.areaRadius,0,'g',8).arg(report.targets).arg(verifiedLines.join('\n')));
@@ -534,6 +529,10 @@ void ItemSpellConstructorDialog::updateOutput()
     if(materialRequired&&!currentMaterial())
         warnings<<tr("This item requires a supported %1 material.").arg(item->materialType);
     const SParsedSpellCode parsed=ItemSpellConstructorCatalog::parseSpellCode(spellCode);
+    const auto capacity=m_catalog.limits(*item,currentMaterial(),nullptr,{});
+    detail<<tr("Constructed item: energy %1 | maximum spell difficulty %2 | energy regeneration %3 per second")
+               .arg(capacity.itemMana,0,'g',8).arg(capacity.itemSlots)
+               .arg(capacity.itemManaRegenerationPerSecond,0,'g',8);
     if(!spellCode.isEmpty())
     {
         warnings+=parsed.diagnostics;
@@ -545,9 +544,8 @@ void ItemSpellConstructorDialog::updateOutput()
             const auto report=m_catalog.limits(*item,currentMaterial(),spell,parsed.runeCodes);
             warnings+=report.warnings;
             const auto marked=[](const QString&value,bool exceeded){return exceeded?QStringLiteral("<span style='color:#ff6666'><b>%1</b></span>").arg(value):value;};
-            detail<<tr("Constructed item capacity: energy %1 | maximum difficulty %2").arg(report.itemMana,0,'g',8).arg(report.itemSlots)
-                  <<tr("Inserted spell: energy %1 | difficulty %2 | database slots %3")
-                        .arg(marked(QString::number(report.spellMana,'g',8),report.spellMana>report.itemMana),marked(QString::number(report.spellComplexity),report.spellComplexity>report.itemSlots),QString::number(report.spellSlots));
+            detail<<tr("Inserted spell: energy %1 (%2 per second) | difficulty %3")
+                        .arg(marked(QString::number(report.spellMana,'g',8),report.spellMana>report.itemMana),QString::number(report.spellManaPerSecond,'g',8),marked(QString::number(report.spellComplexity),report.spellComplexity>report.itemSlots));
         }
     }
     m_itemDetails->setTextFormat(Qt::RichText);m_itemDetails->setText(detail.join(QStringLiteral("<br>")));
@@ -559,7 +557,7 @@ void ItemSpellConstructorDialog::updateOutput()
 void ItemSpellConstructorDialog::importCode()
 {
     const QString value=m_codeEdit->text().trimmed();if(value.contains('{')&&!value.contains('[')){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(value);if(!parsed.valid){showImportDiagnostic(parsed.diagnostics);return;}const auto*spell=m_catalog.findSpell(parsed.prototypeCode);if(!spell){showImportDiagnostic({tr("Unknown spell prototype '%1'.").arg(parsed.prototypeCode)});return;}m_tabs->setCurrentIndex(1);for(int i=0;i<m_spellList->count();++i)if(m_spellList->item(i)->data(Qt::UserRole).toString().compare(spell->code,Qt::CaseInsensitive)==0)m_spellList->setCurrentRow(i);m_selectedRunes->clear();for(const QString&code:parsed.runeCodes){if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes,runePixmap(m_catalog,*rune));else catalogItem(tr("Unknown rune"),code,code,m_selectedRunes);}updateOutput();return;}
-    const auto parsed=ItemSpellConstructorCatalog::parseItemCode(value);if(!parsed.valid){showImportDiagnostic(parsed.diagnostics);return;}const auto*item=m_catalog.findItem(parsed.prototypeName);if(!item){showImportDiagnostic({tr("Unknown item prototype '%1'.").arg(parsed.prototypeName)});return;}m_tabs->setCurrentIndex(0);for(int i=0;i<m_itemList->count();++i)if(m_itemList->item(i)->data(Qt::UserRole).toString().compare(item->name,Qt::CaseInsensitive)==0)m_itemList->setCurrentRow(i);rebuildMaterialChoices(parsed.materialName);if(!parsed.materialName.isEmpty()&&m_material->currentData().toString().compare(parsed.materialName,Qt::CaseInsensitive)!=0)showImportDiagnostic({tr("Material '%1' is not compatible with %2 (%3 required).").arg(parsed.materialName,item->name,item->materialType)});m_itemSpell->setText(parsed.spell.valid?ItemSpellConstructorCatalog::formatSpellCode(parsed.spell.prototypeCode,parsed.spell.runeCodes):parsed.bracketPayload);updateOutput();
+    const auto parsed=ItemSpellConstructorCatalog::parseItemCode(value);if(!parsed.valid){showImportDiagnostic(parsed.diagnostics);return;}const auto*item=m_catalog.findItem(parsed.prototypeName);if(!item){showImportDiagnostic({tr("Unknown item prototype '%1'.").arg(parsed.prototypeName)});return;}m_tabs->setCurrentIndex(0);m_itemFilter->clear();m_itemCategory->setCurrentIndex(0);m_itemType->setCurrentIndex(0);m_armorLayer->setCurrentIndex(0);refreshItemFilterChoices();refreshItemFilter();for(int i=0;i<m_itemList->count();++i)if(m_itemList->item(i)->data(Qt::UserRole).toString().compare(item->name,Qt::CaseInsensitive)==0){m_itemList->setCurrentRow(i);break;}rebuildMaterialChoices(parsed.materialName);if(!parsed.materialName.isEmpty()&&m_material->currentData().toString().compare(parsed.materialName,Qt::CaseInsensitive)!=0)showImportDiagnostic({tr("Material '%1' is not compatible with %2 (%3 required).").arg(parsed.materialName,item->name,item->materialType)});m_itemSpell->setText(parsed.spell.valid?ItemSpellConstructorCatalog::formatSpellCode(parsed.spell.prototypeCode,parsed.spell.runeCodes):parsed.bracketPayload);updateOutput();
 }
 void ItemSpellConstructorDialog::copyCode(){QApplication::clipboard()->setText(code());}
 void ItemSpellConstructorDialog::showImportDiagnostic(const QStringList&messages){QMessageBox::warning(this,tr("Code could not be imported"),messages.join('\n'));}

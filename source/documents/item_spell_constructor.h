@@ -59,7 +59,8 @@ struct SParsedItemCode
 
 struct SConstructorLimitReport
 {
-    double spellMana{0.0}, itemMana{0.0};
+    double spellMana{0.0}, spellManaPerSecond{0.0};
+    double itemMana{0.0}, itemManaRegenerationPerSecond{0.0};
     int spellComplexity{0}, spellSlots{0}, itemSlots{0};
     double range{0.0}, area{0.0}, areaRadius{0.0}, effect{0.0};
     int durationSegments{0}, targets{0};

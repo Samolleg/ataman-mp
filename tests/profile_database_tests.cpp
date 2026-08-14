@@ -167,6 +167,8 @@ private slots:
     void validatesBalancedItemGrammarWithoutMutation();
     void providersAreStrictAndJmvOverlaysOnlyActions();
     void jmvLoadsBoundedUnitPerkOwnership();
+    void jmvNewUnitStatPadsToActiveRuntimeWidth();
+    void installedSuppliedJmvUnitStatStagesAtRuntimeWidth();
     void jmvMonsterLuaDataClonesUndoesAndPublishesAtomically();
     void installedJmvTitanGripControl();
     void unknownProviderFailsClosed();
@@ -203,17 +205,20 @@ private slots:
     void databaseEditorRowMenuAndWrappedFieldEditor();
     void databaseEditorUsesLazyModelAndNavigatesReferences();
     void databaseEditorPersistsVisualColumnControls();
+    void databaseEditorForwardsFocusedUndoRedo();
     void installedVerifiedReferenceMappingsResolve();
     void installedDatabaseInteractiveLatency();
     void itemSpellConstructorParsesCanonicalAndLegacyCodes();
     void itemSpellConstructorRestrictsMaterialsAndReportsSoftLimits();
     void itemSpellConstructorCalculatesRuntimeSpellValues();
     void itemSpellConstructorDoesNotTreatAuthoredCodesAsCraftingExceptions();
+    void databaseValidationReportsInvalidConstructedItems();
     void itemSpellConstructorUsesGameTextKeys();
     void databaseEditorExposesConstructorEntryPoint();
     void itemSpellConstructorUsesVerifiedPreviewFamilies();
     void itemSpellConstructorUsesEffectiveJmvSpellCatalog();
     void installedConstructorCatalogCoverage();
+    void installedConstructorImportsAgilityStaffIron();
     void gameTextCatalogComposesProfileOverlays();
 };
 
@@ -366,6 +371,93 @@ void ProfileDatabaseTests::unknownProviderFailsClosed()
     const auto snapshot = service.snapshot(request);
     QVERIFY(!snapshot->usable());
     QCOMPARE(snapshot->diagnostics.first().code, QString("database.provider.unavailable"));
+}
+
+void ProfileDatabaseTests::jmvNewUnitStatPadsToActiveRuntimeWidth()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    QDir root(temporary.path());
+    QVERIFY(root.mkpath("mod/res"));
+    QVERIFY(root.mkpath("mod/lua"));
+    write(root.filePath("mod/res/database.res"), resArchive(relationalMembers()));
+    write(root.filePath("mod/res/databaseJmv.res"), resArchive({}));
+    write(root.filePath("mod/lua/tables.lua"), unitPerkLua("Lua Width Template", 0));
+
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId = "jmv.v1";
+    request.profileId = "jamais-vu";
+    request.runtimeManifestId = "jmv-unit-stat-width";
+    request.resourceDirectories << root.filePath("mod/res");
+    auto document = ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+
+    const ei::SDatabaseTable* monsters = document->table("units.monsters");
+    QVERIFY(monsters);
+    QString sourceRow;
+    for(const auto& row : monsters->rows)
+        if(row.sourceStableKey.compare("Human Test", Qt::CaseInsensitive) == 0)
+            sourceRow = row.stableKey;
+    QVERIFY(!sourceRow.isEmpty());
+
+    QString diagnostic;
+    QVERIFY2(document->cloneRow("units.monsters", sourceRow,
+                                "Human Partial Lua Clone", &diagnostic),
+             qPrintable(diagnostic));
+    const QString cloneRow = document->table("units.monsters")->rows.last().stableKey;
+    const QVector<QPair<QString, QVariant>> entered = {
+        {"jmv.stat.experience", 10000},
+        {"jmv.stat.strength", 30.0},
+        {"jmv.stat.dexterity", 25.0},
+        {"jmv.stat.intelligence", 15.0},
+        {"jmv.stat.criticalChance", 0.0}
+    };
+    for(const auto& value : entered)
+        QVERIFY2(document->setValue("units.monsters", cloneRow,
+                                    value.first, value.second, &diagnostic),
+                 qPrintable(diagnostic));
+
+    const auto staged = document->currentSnapshot(&diagnostic);
+    QVERIFY2(staged, qPrintable(diagnostic));
+    const auto record = staged->jmvUnitStatsByPrototype.value("human partial lua clone");
+    QCOMPARE(record.values.size(), 20);
+    QCOMPARE(record.values.value(0), 10000.0);
+    QCOMPARE(record.values.value(4), 0.0);
+    QCOMPARE(record.values.value(5), 0.0);
+    for(int index = 6; index < record.values.size(); ++index)
+        QCOMPARE(record.values.at(index), 0.0);
+}
+
+void ProfileDatabaseTests::installedSuppliedJmvUnitStatStagesAtRuntimeWidth()
+{
+    const QString database=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").section(';',0,0);
+    const QString tables=qEnvironmentVariable("EI_TEST_JMV_TABLES_LUA");
+    if(database.isEmpty()||tables.isEmpty())QSKIP("Set supplied database and tables.lua paths.");
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());QDir root(temporary.path());
+    QVERIFY(root.mkpath("mod/res"));QVERIFY(root.mkpath("mod/lua"));
+    QVERIFY(QFile::copy(database,root.filePath("mod/res/database.res")));
+    QVERIFY(QFile::copy(tables,root.filePath("mod/lua/tables.lua")));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="jmv.v1";request.profileId="supplied-jmv";
+    request.resourceDirectories<<root.filePath("mod/res");
+    const auto loaded=service.snapshot(request);
+    auto document=ei::DatabaseDocument::fromSnapshot(loaded);QVERIFY(document);
+    const QString prototype="Human Poselok Peasant F01 1";
+    const auto* monsters=document->table("units.monsters");QVERIFY(monsters);
+    QString rowKey,lastStatField;int statWidth=0;
+    for(const auto& field:monsters->fields)if(field.storageId==-3){lastStatField=field.key;++statWidth;}
+    for(const auto& row:monsters->rows)if(row.values.value("fld.0.0").toString()==prototype)rowKey=row.stableKey;
+    QVERIFY(!rowKey.isEmpty());QVERIFY(statWidth>5);QVERIFY(!lastStatField.isEmpty());
+    QString diagnostic;QVERIFY2(document->setValue("units.monsters",rowKey,lastStatField,0.0,&diagnostic),qPrintable(diagnostic));
+    const QByteArray stagedLua=document->buildTablesLua(&diagnostic);QVERIFY2(!stagedLua.isEmpty(),qPrintable(diagnostic));
+    const auto snapshot=document->currentSnapshot(&diagnostic);QVERIFY2(snapshot,qPrintable(diagnostic));
+    const auto record=snapshot->jmvUnitStatsByPrototype.value(prototype.toLower());
+    QCOMPARE(record.values.size(),statWidth);
+    QVERIFY(root.mkpath("stage"));
+    QVERIFY2(document->saveBundle(root.filePath("stage/database.res"),root.filePath("stage/tables.lua"),&diagnostic),qPrintable(diagnostic));
+    QFile output(root.filePath("stage/tables.lua"));QVERIFY(output.open(QIODevice::ReadOnly));
+    QVERIFY(output.readAll().contains(prototype.toUtf8()));
 }
 
 void ProfileDatabaseTests::jmvMonsterLuaDataClonesUndoesAndPublishesAtomically()
@@ -1448,6 +1540,24 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
     QSettings::setDefaultFormat(previousFormat);
 }
 
+void ProfileDatabaseTests::databaseEditorForwardsFocusedUndoRedo()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());
+    write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="base";
+    request.resourceDirectories<<temporary.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    ei::DatabaseEditorDialog dialog(document);dialog.show();dialog.activateWindow();
+    QTRY_VERIFY_WITH_TIMEOUT(dialog.isActiveWindow(),1000);QVERIFY(dialog.selectPrototype("Human Test"));
+    QTableView* grid=dialog.findChild<QTableView*>("databaseGrid");QVERIFY(grid);grid->setFocus();
+    QSignalSpy undo(&dialog,&ei::DatabaseEditorDialog::undoRequested);
+    QSignalSpy redo(&dialog,&ei::DatabaseEditorDialog::redoRequested);
+    QTest::keySequence(grid,QKeySequence::Undo);
+    QTest::keySequence(grid,QKeySequence::Redo);
+    QCOMPARE(undo.count(),1);QCOMPARE(redo.count(),1);
+}
+
 void ProfileDatabaseTests::installedVerifiedReferenceMappingsResolve()
 {
     const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);
@@ -1544,6 +1654,7 @@ void ProfileDatabaseTests::itemSpellConstructorRestrictsMaterialsAndReportsSoftL
     const ei::SConstructorLimitReport limits = catalog.limits(
         item, &choices.front(), &spell, {"e0"});
     QCOMPARE(limits.itemMana, 8.0);
+    QCOMPARE(limits.itemManaRegenerationPerSecond, 0.12);
     QCOMPARE(limits.itemSlots, 7);
     QCOMPARE(limits.spellMana, 27.0);
     QCOMPARE(limits.spellSlots, 3);
@@ -1577,6 +1688,14 @@ void ProfileDatabaseTests::itemSpellConstructorCalculatesRuntimeSpellValues()
     QCOMPARE(report.effect,30.0);
     QCOMPARE(report.durationSegments,90);
     QCOMPARE(report.targets,2);
+
+    ei::ItemSpellConstructorCatalog jmvCodes;
+    jmvCodes.runes << rune("pr0",4,0.0,0.5,0)
+                   << rune("pp0",3,0.0,0.25,0);
+    const auto jmvReport=jmvCodes.spellReport(spell,{"pr0","pp0"});
+    QCOMPARE(jmvReport.durationSegments,67);
+    QCOMPARE(jmvReport.effect,50.0);
+    QVERIFY(qAbs(jmvReport.spellManaPerSecond-(20.0/(67.0/15.0)))<0.000001);
 }
 
 void ProfileDatabaseTests::itemSpellConstructorDoesNotTreatAuthoredCodesAsCraftingExceptions()
@@ -1600,6 +1719,25 @@ void ProfileDatabaseTests::itemSpellConstructorDoesNotTreatAuthoredCodesAsCrafti
              QStringList({QStringLiteral("armor_leather.iron (Leather != Metal)")}));
     const auto compatible=catalog.compatibleMaterials(*armor);
     QVERIFY(compatible.isEmpty());
+}
+
+void ProfileDatabaseTests::databaseValidationReportsInvalidConstructedItems()
+{
+    QTemporaryDir directory;QVERIFY(directory.isValid());
+    write(directory.filePath("database.res"),resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="validation-items";
+    request.resourceDirectories<<directory.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    const auto* armors=document->table("items.armors");QVERIFY(armors&&!armors->rows.isEmpty());
+    QString diagnostic;QVERIFY2(document->setValue("items.armors",armors->rows.first().stableKey,
+        "fld.3.0","Leather",&diagnostic),qPrintable(diagnostic));
+    const auto findings=document->validate();bool found=false;
+    for(const auto& finding:findings)if(finding.code=="database.item.material_incompatible")
+    {found=true;QCOMPARE(finding.severity,ei::SDatabaseValidationFinding::Severity::Warning);
+     QCOMPARE(finding.tableKey,QString("units.monsters"));QVERIFY(!finding.rowKey.isEmpty());
+     QVERIFY(finding.message.contains("armor_leather.iron"));}
+    QVERIFY(found);
 }
 
 void ProfileDatabaseTests::itemSpellConstructorUsesGameTextKeys()
@@ -1740,6 +1878,62 @@ void ProfileDatabaseTests::installedConstructorCatalogCoverage()
             "The authored agility staff supports metal materials; choices were: %1")
             .arg(names.join(QStringLiteral(", ")))));
     }
+}
+
+void ProfileDatabaseTests::installedConstructorImportsAgilityStaffIron()
+{
+    const QString archive = qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES")
+                                .split(';', QString::SkipEmptyParts).value(0);
+    if(archive.isEmpty())
+        QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run the supplied constructor import control.");
+    const QFileInfo info(archive);
+    QVERIFY(info.isFile());
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId="jmv.v1";
+    request.profileId="jamais-vu";
+    request.resourceDirectories << info.absolutePath();
+    const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    const auto catalog=ei::ItemSpellConstructorCatalog::fromDocument(*document);
+    const auto parsed=ei::ItemSpellConstructorCatalog::parseItemCode(
+        "agility staff.iron[slow{it;e1;m1;m1;im1;im1;im1}]");
+    QVERIFY(parsed.valid);
+    const auto* item=catalog.findItem(parsed.prototypeName);
+    const auto* material=catalog.findMaterial(parsed.materialName);
+    QVERIFY(item);
+    QVERIFY(material);
+    QCOMPARE(item->materialType.compare(material->type,Qt::CaseInsensitive),0);
+    bool offered=false;
+    for(const auto& candidate:catalog.compatibleMaterials(*item))
+        offered|=candidate.name.compare(material->name,Qt::CaseInsensitive)==0;
+    QVERIFY(offered);
+
+    const QString overLimitCode="large potion 3[speed{e3;e3;e3;e3;e3;d3;d2;d2}]";
+    const auto overLimit=ei::ItemSpellConstructorCatalog::parseItemCode(overLimitCode);
+    QVERIFY(overLimit.valid);const auto* potion=catalog.findItem(overLimit.prototypeName);
+    const auto* spell=catalog.findSpell(overLimit.spell.prototypeCode);QVERIFY(potion);QVERIFY(spell);
+    const auto limits=catalog.limits(*potion,nullptr,spell,overLimit.spell.runeCodes);
+    QVERIFY(limits.spellComplexity>limits.itemSlots);
+    QString energyCode;
+    for(const auto& candidate:catalog.items)
+    {
+        const auto materials=catalog.compatibleMaterials(candidate);
+        if(materials.isEmpty())continue;
+        const auto energyLimits=catalog.limits(candidate,&materials.first(),spell,overLimit.spell.runeCodes);
+        if(energyLimits.spellMana>energyLimits.itemMana)
+        {energyCode=ei::ItemSpellConstructorCatalog::formatItemCode(candidate.name,materials.first().name,
+            ei::ItemSpellConstructorCatalog::formatSpellCode(overLimit.spell.prototypeCode,overLimit.spell.runeCodes));break;}
+    }
+    QVERIFY(!energyCode.isEmpty());
+    const auto* monsters=document->table("units.monsters");QVERIFY(monsters);QString rowKey;
+    for(const auto& row:monsters->rows)if(row.values.contains("fld.32.0")){rowKey=row.stableKey;break;}
+    QVERIFY(!rowKey.isEmpty());QString diagnostic;
+    QVERIFY2(document->setValue("units.monsters",rowKey,"fld.32.0",
+        QStringLiteral("[\"")+overLimitCode+QStringLiteral("\",\"")+energyCode+QStringLiteral("\"]"),&diagnostic),qPrintable(diagnostic));
+    QSet<QString> codes;for(const auto& finding:document->validate())codes.insert(finding.code);
+    QVERIFY(codes.contains("database.item.spell_energy_exceeded"));
+    QVERIFY(codes.contains("database.item.spell_difficulty_exceeded"));
 }
 
 void ProfileDatabaseTests::gameTextCatalogComposesProfileOverlays()

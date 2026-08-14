@@ -36,6 +36,7 @@
 #include <QVBoxLayout>
 #include <QPlainTextEdit>
 #include <QScreen>
+#include <QShortcut>
 #include <QScrollBar>
 #include <QSettings>
 #include <QSet>
@@ -362,6 +363,8 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QSharedPointer<DatabaseDocument
     m_filterTimer=new QTimer(this);m_filterTimer->setSingleShot(true);m_filterTimer->setInterval(80);connect(m_filterTimer,&QTimer::timeout,this,[this](){m_proxy->setSearchText(m_filter->text());});connect(m_tables,&QListWidget::currentRowChanged,this,&DatabaseEditorDialog::selectTable);connect(m_filter,&QLineEdit::textChanged,this,[this](){m_filterTimer->start();});const auto editCell=[this](const QModelIndex& index){const QModelIndex source=m_proxy->mapToSource(index);const auto* field=m_model->fieldForIndex(source);if(!field)return;if(!field->referenceTable.isEmpty()||!source.data(ChoicesRole).toStringList().isEmpty())m_grid->edit(index);else editFieldDialog(index);};connect(m_grid,&QTableView::doubleClicked,this,editCell);connect(m_grid->frozenView(),&QTableView::doubleClicked,this,editCell);connect(m_grid,&QTableView::customContextMenuRequested,this,&DatabaseEditorDialog::showRowContextMenu);connect(m_grid->frozenView(),&QTableView::customContextMenuRequested,this,[this](const QPoint& point){const QModelIndex index=m_grid->frozenView()->indexAt(point);if(!index.isValid())return;m_grid->setCurrentIndex(index);m_grid->selectRow(index.row());showRowContextMenu(m_grid->visualRect(index).center());});const auto headerMenu=[this](QHeaderView* header,const QPoint& point){const int logical=header->logicalIndexAt(point);if(logical>=0)showColumnContextMenu(logical,header->mapToGlobal(point));};connect(m_grid->horizontalHeader(),&QHeaderView::customContextMenuRequested,this,[this,headerMenu](const QPoint& point){headerMenu(m_grid->horizontalHeader(),point);});connect(m_grid->frozenView()->horizontalHeader(),&QHeaderView::customContextMenuRequested,this,[this,headerMenu](const QPoint& point){headerMenu(m_grid->frozenView()->horizontalHeader(),point);});connect(m_grid->horizontalHeader(),&QHeaderView::sectionResized,this,[this](){m_grid->syncFrozenColumns();saveCurrentColumnState();});connect(m_grid->horizontalHeader(),&QHeaderView::sectionMoved,this,[this](){saveCurrentColumnState();});connect(m_cloneButton,&QPushButton::clicked,this,&DatabaseEditorDialog::cloneSelected);connect(m_deleteButton,&QPushButton::clicked,this,&DatabaseEditorDialog::deleteSelected);connect(reviewButton,&QPushButton::clicked,this,&DatabaseEditorDialog::review);connect(exportButton,&QPushButton::clicked,this,&DatabaseEditorDialog::exportXlsx);connect(importButton,&QPushButton::clicked,this,&DatabaseEditorDialog::importXlsx);connect(applyButton,&QPushButton::clicked,this,&DatabaseEditorDialog::apply);connect(saveButton,&QPushButton::clicked,this,&DatabaseEditorDialog::saveAs);connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::close);
     auto*editFullValue=new QAction(tr("Edit Full Value…"),m_grid);editFullValue->setShortcuts({QKeySequence(Qt::Key_Return),QKeySequence(Qt::Key_Enter),QKeySequence(Qt::Key_F2)});editFullValue->setShortcutContext(Qt::WidgetShortcut);m_grid->addAction(editFullValue);connect(editFullValue,&QAction::triggered,this,[this](){if(m_grid->currentIndex().isValid())editFieldDialog(m_grid->currentIndex());});
     auto*openReference=new QAction(tr("Open Referenced Row"),m_grid);openReference->setShortcut(QKeySequence(Qt::CTRL|Qt::Key_Return));openReference->setShortcutContext(Qt::WidgetShortcut);m_grid->addAction(openReference);connect(openReference,&QAction::triggered,this,&DatabaseEditorDialog::openCurrentReference);
+    auto*undoShortcut=new QShortcut(QKeySequence::Undo,this);undoShortcut->setContext(Qt::WindowShortcut);connect(undoShortcut,&QShortcut::activated,this,&DatabaseEditorDialog::undoRequested);
+    auto*redoShortcut=new QShortcut(QKeySequence::Redo,this);redoShortcut->setContext(Qt::WindowShortcut);connect(redoShortcut,&QShortcut::activated,this,&DatabaseEditorDialog::redoRequested);
     if(m_tables->count())m_tables->setCurrentRow(0);updateStatus();
 }
 DatabaseEditorDialog::~DatabaseEditorDialog(){saveCurrentColumnState();}
@@ -434,6 +437,10 @@ void DatabaseEditorDialog::selectTable(){rebuildGrid();}
 bool DatabaseEditorDialog::selectPrototype(const QString& prototype)
 {
     return selectTableRow("units.monsters",prototype);
+}
+bool DatabaseEditorDialog::selectFinding(const QString& tableKey,const QString& rowKey)
+{
+    return selectTableRow(tableKey,rowKey);
 }
 bool DatabaseEditorDialog::selectTableRow(const QString& tableKey,const QString& identity)
 {
