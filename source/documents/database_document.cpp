@@ -1,5 +1,6 @@
 #include "database_document.h"
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -13,9 +14,64 @@
 #include "database_schema.h"
 #include "database_value_codec.h"
 #include "res_archive_document.h"
+#include "../runtime/providers/profile_database_provider_support.h"
 
 namespace {
 QString fold(const QString& v) { return v.trimmed().toLower(); }
+bool isJmvLuaField(const ei::SDatabaseFieldSchema& field)
+{ return (field.storageId == -2 && field.key.startsWith("jmv.perk."))
+      || (field.storageId == -3 && field.key.startsWith("jmv.stat.")); }
+QStringList jmvPerkKeys()
+{
+    return {QString(),QString(),"melee","archery","science","stealing","tame",
+        "backstabSkill","elemental","senses","astral","stealth","awareness",
+        "strength","lift","health","blockPower","critPower","armory",
+        "weaponsHeavy","fire","lightning","acid","dexterity","trickster",
+        "critChance","blockChance","quickness","backstab","weaponsLight",
+        "intelligence","spirit","parryChance","anatomy","caster","flow",
+        "magic","weaponsMiddle","nightVision","weaponsMaster","magicBlood",
+        "duelist","strongMan","dexMan","wiseMan"};
+}
+QStringList jmvPerkLabels()
+{
+    return {QString(),QString(),"Auto-skill: Melee","Auto-skill: Archery",
+        "Unused auto-skill: Science / theft","Unused auto-skill: Stealing",
+        "Unused auto-skill: Taming","Auto-skill: Backstab",
+        "Unused auto-skill: Elemental magic","Unused auto-skill: Senses",
+        "Unused auto-skill: Astral","Unused auto-skill: Stealth",
+        "Unused auto-skill: Awareness","Perk: Strength","Perk: Lift",
+        "Perk: Health","Perk: Block power","Perk: Critical power","Perk: Armory",
+        "Perk: Heavy weapons","Perk: Fire","Perk: Lightning",
+        "Perk: Water / acid","Perk: Dexterity","Perk: Trickster",
+        "Perk: Critical chance","Perk: Block chance","Perk: Quickness",
+        "Perk: Backstab","Perk: Light weapons","Perk: Intelligence",
+        "Perk: Spirit","Perk: Parry chance","Perk: Anatomy","Perk: Caster",
+        "Perk: Flow","Perk: Magic","Perk: Medium weapons",
+        "Perk: Night vision (placeholder)","Perk: Weapons master",
+        "Perk: Magic blood","Perk: Duelist","Perk: Strong Man",
+        "Perk: Dex Man","Perk: Wise Man"};
+}
+QStringList jmvStatKeys()
+{
+    return {QString(),QString(),"experience","strength","dexterity","intelligence",
+        "criticalChance","criticalDamage","encumbrance","parryChance","regeneration",
+        "physicalDamage","magicDamage","defense","attack","mana","sight","hearing",
+        "actions","headDamage","backstabDamage","manaRestoration"};
+}
+QStringList jmvStatLabels()
+{
+    return {QString(),QString(),"Experience","Strength","Dexterity","Intelligence",
+        "Critical chance","Critical damage","Encumbrance","Parry chance","Regeneration",
+        "Physical damage","Magic damage","Defense","Attack","Mana","Sight","Hearing",
+        "Actions","Head damage","Backstab damage","Mana restoration"};
+}
+QString sha256Hex(const QByteArray& bytes)
+{ return QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex()); }
+bool writeAtomically(const QString& path,const QByteArray& bytes,QString* diagnostic)
+{
+    QSaveFile file(path);if(!file.open(QIODevice::WriteOnly)){if(diagnostic)*diagnostic=file.errorString();return false;}
+    if(file.write(bytes)!=bytes.size()||!file.commit()){if(diagnostic)*diagnostic=file.errorString();return false;}return true;
+}
 bool sameValue(const QVariant& a,const QVariant& b)
 {
     if(a.type()!=b.type())return a.toString()==b.toString();
@@ -235,6 +291,43 @@ void addSchemaDatabaseTables(const QSharedPointer<const ei::SProfileDatabaseSnap
     }
 }
 
+void addJmvCharacterLuaFields(const QSharedPointer<const ei::SProfileDatabaseSnapshot>& snapshot,
+                             QMap<QString,ei::SDatabaseTable>* tables)
+{
+    if(!snapshot || snapshot->jmvUnitPerkTableStatus != ei::EJmvUnitPerkTableStatus::Valid) return;
+    int maximumPerkIndex=44, maximumStatIndex=1;
+    for(const auto& record:snapshot->jmvUnitPerksByPrototype) maximumPerkIndex=qMax(maximumPerkIndex,record.values.size()+1);
+    for(const auto& record:snapshot->jmvUnitStatsByPrototype) maximumStatIndex=qMax(maximumStatIndex,record.values.size()+1);
+    const QStringList perkKeys=jmvPerkKeys(),perkLabels=jmvPerkLabels();
+    const QStringList statKeys=jmvStatKeys(),statLabels=jmvStatLabels();
+    for(const QString& tableKey:{QString("monsters"),QString("units.monsters")})
+    {
+        auto table=tables->find(tableKey);if(table==tables->end())continue;
+        for(int luaIndex=2;luaIndex<=maximumPerkIndex;++luaIndex)
+        {
+            ei::SDatabaseFieldSchema field;field.key=QString("jmv.perk.%1").arg(luaIndex<perkKeys.size()?perkKeys.at(luaIndex):QString("field%1").arg(luaIndex));
+            const QString meaning=luaIndex<perkLabels.size()?perkLabels.at(luaIndex):QString("Unknown perk field %1").arg(luaIndex);
+            field.label=QCoreApplication::translate("DatabaseDocument","JMV Lua [%1] — %2").arg(luaIndex).arg(meaning);
+            field.type=ei::EDatabaseFieldType::Integer;field.storageId=-2;field.storageOccurrence=luaIndex;table->fields.append(field);
+        }
+        for(int luaIndex=2;luaIndex<=maximumStatIndex;++luaIndex)
+        {
+            ei::SDatabaseFieldSchema field;field.key=QString("jmv.stat.%1").arg(luaIndex<statKeys.size()?statKeys.at(luaIndex):QString("field%1").arg(luaIndex));
+            const QString meaning=luaIndex<statLabels.size()?statLabels.at(luaIndex):QString("Unknown field %1").arg(luaIndex);
+            field.label=QCoreApplication::translate("DatabaseDocument","JMV Lua [%1] — Unit stat: %2").arg(luaIndex).arg(meaning);
+            field.type=luaIndex==2?ei::EDatabaseFieldType::Integer:ei::EDatabaseFieldType::Decimal;field.storageId=-3;field.storageOccurrence=luaIndex;table->fields.append(field);
+        }
+        for(auto& row:table->rows)
+        {
+            const QString sourceKey=fold(row.sourceStableKey);
+            const auto perks=snapshot->jmvUnitPerksByPrototype.constFind(sourceKey);
+            if(perks!=snapshot->jmvUnitPerksByPrototype.constEnd())for(int offset=0;offset<perks->values.size();++offset){const int luaIndex=offset+2;const QString key=QString("jmv.perk.%1").arg(luaIndex<perkKeys.size()?perkKeys.at(luaIndex):QString("field%1").arg(luaIndex));row.values.insert(key,perks->values.at(offset));}
+            const auto stats=snapshot->jmvUnitStatsByPrototype.constFind(sourceKey);
+            if(stats!=snapshot->jmvUnitStatsByPrototype.constEnd())for(int offset=0;offset<stats->values.size();++offset){const int luaIndex=offset+2;const QString key=QString("jmv.stat.%1").arg(luaIndex<statKeys.size()?statKeys.at(luaIndex):QString("field%1").arg(luaIndex));row.values.insert(key,stats->values.at(offset));}
+        }
+    }
+}
+
 namespace ei {
 DatabaseDocument::DatabaseDocument(const QSharedPointer<const SProfileDatabaseSnapshot>& s):m_snapshot(s){}
 QSharedPointer<DatabaseDocument> DatabaseDocument::fromSnapshot(const QSharedPointer<const SProfileDatabaseSnapshot>& s, QString* d)
@@ -251,6 +344,7 @@ QSharedPointer<DatabaseDocument> DatabaseDocument::fromSnapshot(const QSharedPoi
     items.fields={fs("name","Name / ID",EDatabaseFieldType::Text),ro(fs("category","Category",EDatabaseFieldType::Text)),fs("type","Type",EDatabaseFieldType::Text),fs("typeId","Type ID",EDatabaseFieldType::Integer),fs("materialType","Material type",EDatabaseFieldType::Text),fs("textureType1","Texture 1",EDatabaseFieldType::Integer),fs("textureType2","Texture 2",EDatabaseFieldType::Integer),fs("wearOrder","Wear order",EDatabaseFieldType::Integer)};
     for(const auto& x:s->items){SDatabaseRow r;r.stableKey=fold(x.name);r.sourceStableKey=x.name;r.values={{"name",x.name},{"category",x.category},{"type",x.type},{"typeId",x.typeId},{"materialType",x.materialType},{"textureType1",x.textureType1},{"textureType2",x.textureType2},{"wearOrder",x.wearOrder}};addOpaqueFields(&items,&r,x.opaqueFields);items.rows<<r;} out->m_tables[items.key]=items;
     QString schemaDiagnostic;addSchemaDatabaseTables(s,&out->m_tables,&schemaDiagnostic);if(!schemaDiagnostic.isEmpty()){if(d)*d=schemaDiagnostic;return {};}
+    addJmvCharacterLuaFields(s,&out->m_tables);
     QMap<QString,LosslessDatabaseMember> parsedMembers;
     for(auto tableIt=out->m_tables.constBegin();tableIt!=out->m_tables.constEnd();++tableIt)if(tableIt->structuralEditing)
         for(const auto& sourceRow:tableIt->rows)for(const auto& field:tableIt->fields)if(field.writable)
@@ -261,19 +355,22 @@ QSharedPointer<DatabaseDocument> DatabaseDocument::fromSnapshot(const QSharedPoi
             for(const auto& sourceField:member.fields(target.table,recordIndex))if(sourceField.id==target.field&&sourceField.occurrence==0)out->m_sourceFieldOccurrences.insert(tableIt.key()+'|'+fold(sourceRow.sourceStableKey)+'|'+field.key);
         }
     out->m_baselineTables=out->m_tables;QFile sourceFile(s->sourceArchivePath);if(sourceFile.open(QIODevice::ReadOnly))out->m_sourceArchiveBaseline=sourceFile.readAll();out->m_expectedSourceSha256=s->sourceArchiveSha256;
+    if(s->jmvUnitPerkTableStatus==EJmvUnitPerkTableStatus::Valid){QFile lua(s->jmvUnitPerkSourcePath);if(lua.open(QIODevice::ReadOnly))out->m_tablesLuaBaseline=lua.readAll();out->m_expectedTablesLuaSha256=s->jmvUnitPerkSha256.toLower();}
     return out;
 }
 QString DatabaseDocument::profileId()const{return m_snapshot->profileId;} QString DatabaseDocument::providerId()const{return m_snapshot->providerId;}
 QString DatabaseDocument::sourceArchivePath()const{return m_snapshot->sourceArchivePath;} QString DatabaseDocument::sourceArchiveSha256()const{return m_snapshot->sourceArchiveSha256;}
+QString DatabaseDocument::sourceTablesLuaPath()const{return m_snapshot->jmvUnitPerkSourcePath;}
 QStringList DatabaseDocument::tableKeys()const{return m_tables.keys();} const SDatabaseTable* DatabaseDocument::table(const QString& k)const{auto i=m_tables.constFind(k);return i==m_tables.constEnd()?nullptr:&i.value();}
 bool DatabaseDocument::isDirty()const{return !m_undo.isEmpty();} bool DatabaseDocument::canUndo()const{return !m_undo.isEmpty();} bool DatabaseDocument::canRedo()const{return !m_redo.isEmpty();}
-bool DatabaseDocument::hasUnappliedChanges(QString* diagnostic)const{const QByteArray candidate=buildArchive(diagnostic);if(candidate.isEmpty())return true;QFile live(sourceArchivePath());if(!live.open(QIODevice::ReadOnly)){if(diagnostic)*diagnostic="The active database cannot be read.";return true;}return live.readAll()!=candidate;}
+bool DatabaseDocument::hasUnappliedChanges(QString* diagnostic)const{const QByteArray candidate=buildArchive(diagnostic);if(candidate.isEmpty())return true;QFile live(sourceArchivePath());if(!live.open(QIODevice::ReadOnly)){if(diagnostic)*diagnostic="The active database cannot be read.";return true;}if(live.readAll()!=candidate)return true;if(!m_tablesLuaBaseline.isEmpty()){const QByteArray luaCandidate=buildTablesLua(diagnostic);QFile lua(sourceTablesLuaPath());if(luaCandidate.isEmpty()||!lua.open(QIODevice::ReadOnly))return true;return lua.readAll()!=luaCandidate;}return false;}
 bool DatabaseDocument::identityAvailable(const QString&t,const QString&identity,const QString&except)const{const auto*tb=table(t);const QString wanted=fold(identity),ignored=fold(except);if(!tb||wanted.isEmpty())return false;const QString identityKey=tb->identityFieldId>=0?QString("fld.%1.0").arg(tb->identityFieldId):QString("name");for(const auto&r:tb->rows)if(!r.deleted&&fold(r.values.value(identityKey).toString())==wanted&&r.stableKey!=ignored)return false;return true;}
 QString DatabaseDocument::displayIdentity(const QString&t,const QString&k)const{const auto*tb=table(t);if(!tb)return QString();const QString wanted=fold(k);for(const auto&r:tb->rows)if(r.stableKey==wanted){if(tb->identityFieldId>=0)return r.values.value(QString("fld.%1.0").arg(tb->identityFieldId)).toString();return r.values.value("name").toString();}return QString();}
 bool DatabaseDocument::fieldEditable(const QString&t,const QString&r,const QString&f,QString*d)const
 {
     const SDatabaseTable*tb=table(t);const SDatabaseRow*x=nullptr;if(tb)for(const auto&candidate:tb->rows)if(candidate.stableKey==fold(r)){x=&candidate;break;}
     if(!x||!tb){if(d)*d="Row is unavailable.";return false;}bool writable=false;for(const auto&s:tb->fields)writable|=s.key==f&&s.writable;if(!writable){if(d)*d="Field is unsupported or read-only.";return false;}
+    for(const auto&s:tb->fields)if(s.key==f&&isJmvLuaField(s)){if(x->added||x->values.contains(f))return true;if(d)*d=s.storageId==-2?"This monster has no UnitPerk row in the active JMV tables.lua.":"This monster has no UnitStat row in the active JMV tables.lua.";return false;}
     if(tb->physicalTable>=0){if(x->added||x->values.contains(f))return true;if(d)*d="This optional field is absent from the source row; safe field insertion is not yet proven.";return false;}
     SDatabaseChange physical;physical.tableKey=t;physical.rowKey=r;physical.fieldKey=f;PatchTarget target;if(!patchTarget(physical,*tb,&target)){if(d)*d="This field has no verified publication mapping for this row.";return false;}
     const QString sourceName=x->sourceStableKey.isEmpty()?x->values.value("name").toString():x->sourceStableKey;if(m_sourceFieldOccurrences.contains(t+'|'+fold(sourceName)+'|'+f))return true;if(d)*d="This optional field is absent from the source row; safe field insertion is not yet proven.";return false;
@@ -334,8 +431,8 @@ QVector<SDatabaseValidationFinding> DatabaseDocument::validate()const
         "MOB, texts.res, and descriptor-unknown references require external impact review before publication.",false});
     return findings;
 }
-QJsonObject DatabaseDocument::pendingChangeManifest()const{QJsonObject o;o["format"]="ei-mapper-database-change-set-v1";o["providerId"]=providerId();o["profileId"]=profileId();o["sourceArchive"]=sourceArchivePath();o["sourceSha256"]=sourceArchiveSha256();QString publicationDiagnostic;o["publicationSupported"]=!buildArchive(&publicationDiagnostic).isEmpty();o["publicationDiagnostic"]=publicationDiagnostic;QJsonArray a;for(const auto&c:changes()){QJsonObject x;x["table"]=c.tableKey;x["row"]=c.rowKey;x["field"]=c.fieldKey;x["before"]=jv(c.before);x["after"]=jv(c.after);x["description"]=c.description;a<<x;}o["changes"]=a;QJsonArray p;for(auto i=m_snapshot->rawMembers.cbegin();i!=m_snapshot->rawMembers.cend();++i)p<<i.key();o["preservedRawMembers"]=p;return o;}
-bool DatabaseDocument::sourceIsCurrent(QString*d)const{QFile f(sourceArchivePath());if(!f.open(QIODevice::ReadOnly)){if(d)*d="Source archive is no longer readable.";return false;}QString h=QString::fromLatin1(QCryptographicHash::hash(f.readAll(),QCryptographicHash::Sha256).toHex());if(h.compare(m_expectedSourceSha256,Qt::CaseInsensitive)!=0){if(d)*d="Source archive changed outside this database editor session.";return false;}return true;}
+QJsonObject DatabaseDocument::pendingChangeManifest()const{QJsonObject o;o["format"]="ei-mapper-database-change-set-v1";o["providerId"]=providerId();o["profileId"]=profileId();o["sourceArchive"]=sourceArchivePath();o["sourceSha256"]=sourceArchiveSha256();if(!sourceTablesLuaPath().isEmpty()){o["tablesLua"]=sourceTablesLuaPath();o["tablesLuaSha256"]=m_expectedTablesLuaSha256;}QString publicationDiagnostic;o["publicationSupported"]=!buildArchive(&publicationDiagnostic).isEmpty()&&!buildTablesLua(&publicationDiagnostic).isEmpty();o["publicationDiagnostic"]=publicationDiagnostic;QJsonArray a;for(const auto&c:changes()){QJsonObject x;x["table"]=c.tableKey;x["row"]=c.rowKey;x["field"]=c.fieldKey;x["before"]=jv(c.before);x["after"]=jv(c.after);x["description"]=c.description;a<<x;}o["changes"]=a;QJsonArray p;for(auto i=m_snapshot->rawMembers.cbegin();i!=m_snapshot->rawMembers.cend();++i)p<<i.key();o["preservedRawMembers"]=p;return o;}
+bool DatabaseDocument::sourceIsCurrent(QString*d)const{QFile f(sourceArchivePath());if(!f.open(QIODevice::ReadOnly)){if(d)*d="Source archive is no longer readable.";return false;}QString h=sha256Hex(f.readAll());if(h.compare(m_expectedSourceSha256,Qt::CaseInsensitive)!=0){if(d)*d="Source archive changed outside this database editor session.";return false;}if(!m_tablesLuaBaseline.isEmpty()){QFile lua(sourceTablesLuaPath());if(!lua.open(QIODevice::ReadOnly)){if(d)*d="The active JMV tables.lua is no longer readable.";return false;}if(sha256Hex(lua.readAll()).compare(m_expectedTablesLuaSha256,Qt::CaseInsensitive)!=0){if(d)*d="The active JMV tables.lua changed outside this database editor session.";return false;}}return true;}
 QByteArray DatabaseDocument::buildArchive(QString* diagnostic)const
 {
     QByteArray archiveBytes=m_sourceArchiveBaseline;if(archiveBytes.isEmpty()){if(diagnostic)*diagnostic="Source archive baseline is unavailable.";return {};}
@@ -352,7 +449,7 @@ QByteArray DatabaseDocument::buildArchive(QString* diagnostic)const
         {
             anyStateChange|=(row.added&&!row.deleted)||(!row.added&&row.deleted);
             const QString baselineKey=fold(row.sourceStableKey.isEmpty()?row.stableKey:row.sourceStableKey);const SDatabaseRow* base=nullptr;if(row.sourceRecordIndex>=0&&row.sourceRecordIndex<baseline.rows.size())base=&baseline.rows.at(row.sourceRecordIndex);else for(const auto& candidate:baseline.rows)if(candidate.stableKey==baselineKey){base=&candidate;break;}
-            if(!row.deleted&&base)for(const auto& field:tableIt->fields)anyStateChange|=field.writable&&!sameValue(base->values.value(field.key),row.values.value(field.key));
+            if(!row.deleted&&base)for(const auto& field:tableIt->fields)anyStateChange|=field.writable&&!isJmvLuaField(field)&&!sameValue(base->values.value(field.key),row.values.value(field.key));
         }
     }
     if(!anyStateChange)return archiveBytes;
@@ -360,7 +457,7 @@ QByteArray DatabaseDocument::buildArchive(QString* diagnostic)const
     for(auto tableIt=m_tables.constBegin();tableIt!=m_tables.constEnd();++tableIt)
     {
         const SDatabaseTable& table=tableIt.value();const SDatabaseTable baseline=m_baselineTables.value(table.key);
-        bool tableChanged=false;for(const auto& row:table.rows)tableChanged|=(row.added&&!row.deleted)||(!row.added&&row.deleted);for(const auto& row:table.rows)if(!row.deleted){const SDatabaseRow* base=nullptr;const QString baselineKey=row.sourceStableKey.isEmpty()?row.stableKey:fold(row.sourceStableKey);if(row.sourceRecordIndex>=0&&row.sourceRecordIndex<baseline.rows.size())base=&baseline.rows.at(row.sourceRecordIndex);else for(const auto& candidate:baseline.rows)if(candidate.stableKey==baselineKey){base=&candidate;break;}if(base)for(const auto& field:table.fields)tableChanged|=field.writable&&!sameValue(base->values.value(field.key),row.values.value(field.key));}
+        bool tableChanged=false;for(const auto& row:table.rows)tableChanged|=(row.added&&!row.deleted)||(!row.added&&row.deleted);for(const auto& row:table.rows)if(!row.deleted){const SDatabaseRow* base=nullptr;const QString baselineKey=row.sourceStableKey.isEmpty()?row.stableKey:fold(row.sourceStableKey);if(row.sourceRecordIndex>=0&&row.sourceRecordIndex<baseline.rows.size())base=&baseline.rows.at(row.sourceRecordIndex);else for(const auto& candidate:baseline.rows)if(candidate.stableKey==baselineKey){base=&candidate;break;}if(base)for(const auto& field:table.fields)tableChanged|=field.writable&&!isJmvLuaField(field)&&!sameValue(base->values.value(field.key),row.values.value(field.key));}
         if(!tableChanged)
             continue;
         QString parseDiagnostic;auto member=members.contains(table.sourceMember)
@@ -375,7 +472,7 @@ QByteArray DatabaseDocument::buildArchive(QString* diagnostic)const
                 const auto existing=member.fields(table.physicalTable,record);
                 for(const auto& field:table.fields)
                 {
-                    if(!field.writable)continue;const QVariant before=base?base->values.value(field.key):QVariant();const QVariant after=row.values.value(field.key);if(base&&sameValue(before,after))continue;if(!row.values.contains(field.key))continue;
+                    if(!field.writable||isJmvLuaField(field))continue;const QVariant before=base?base->values.value(field.key):QVariant();const QVariant after=row.values.value(field.key);if(base&&sameValue(before,after))continue;if(!row.values.contains(field.key))continue;
                     QByteArray sourcePayload;bool occurrence=false;for(const auto& stored:existing)if(stored.id==field.storageId&&stored.occurrence==field.storageOccurrence){sourcePayload=stored.payload;occurrence=true;break;}if(!occurrence){if(diagnostic)*diagnostic=QString("Field %1 is absent from the source record.").arg(field.key);return false;}
                     SDatabaseStorageField fallback;fallback.id=field.storageId;fallback.type=EDatabaseStorageType::Hex;const SDatabaseStorageField* storage=schema.field(table.schemaFamily,table.blockId,field.storageId);if(!storage)storage=&fallback;QString error;const QByteArray payload=DatabaseValueCodec::encode(after,sourcePayload,*storage,schema,table.schemaFamily,&error);if(!error.isEmpty()){if(diagnostic)*diagnostic=QString("%1: %2").arg(field.label,error);return false;}if(!member.replaceFieldPayload(table.physicalTable,record,field.storageId,field.storageOccurrence,payload,&error)){if(diagnostic)*diagnostic=error;return false;}
                 }
@@ -391,7 +488,7 @@ QByteArray DatabaseDocument::buildArchive(QString* diagnostic)const
         // Publish identity last so every other changed field still locates an
         // existing record by its immutable source identity.
         QVector<SDatabaseFieldSchema> publicationFields=table.fields;std::stable_sort(publicationFields.begin(),publicationFields.end(),[](const SDatabaseFieldSchema&a,const SDatabaseFieldSchema&b){return a.key!="name"&&b.key=="name";});
-        for(const auto& row:table.rows)if(!row.deleted)for(const auto& field:publicationFields)if(field.writable)
+        for(const auto& row:table.rows)if(!row.deleted)for(const auto& field:publicationFields)if(field.writable&&!isJmvLuaField(field))
         {
             const SDatabaseRow* base=nullptr;const QString baselineKey=fold(row.sourceStableKey.isEmpty()?row.stableKey:row.sourceStableKey);for(const auto& candidate:baseline.rows)if(candidate.stableKey==baselineKey){base=&candidate;break;}
             if(base&&base->values.value(field.key)==row.values.value(field.key))continue;
@@ -444,14 +541,78 @@ bool DatabaseDocument::replaceTables(const QMap<QString,SDatabaseTable>& tables,
     QString publicationDiagnostic;m_buildingReplacementCandidate=true;const QByteArray candidate=buildArchive(&publicationDiagnostic);m_buildingReplacementCandidate=false;if(candidate.isEmpty()){m_tables=before;if(diagnostic)*diagnostic=publicationDiagnostic;return false;}
     commit(before,{"workbook",{}, {}, {}, {},description});return true;
 }
+QMap<QString,SJmvUnitPerkRecord> DatabaseDocument::desiredJmvUnitPerks()const
+{
+    QMap<QString,SJmvUnitPerkRecord> records=m_snapshot->jmvUnitPerksByPrototype;
+    if(m_tablesLuaBaseline.isEmpty())return records;
+    for(const QString& tableKey:{QString("monsters"),QString("units.monsters")})
+    {
+        const SDatabaseTable* monsters=table(tableKey);const SDatabaseTable baseline=m_baselineTables.value(tableKey);
+        if(!monsters)continue;QVector<const SDatabaseFieldSchema*> fields;for(const auto& field:monsters->fields)if(field.storageId==-2)fields.append(&field);std::sort(fields.begin(),fields.end(),[](const SDatabaseFieldSchema*left,const SDatabaseFieldSchema*right){return left->storageOccurrence<right->storageOccurrence;});if(fields.isEmpty())continue;
+        const QString identityKey=monsters->identityFieldId>=0?QString("fld.%1.0").arg(monsters->identityFieldId):QString("name");
+        for(const auto& row:monsters->rows)
+        {
+            const QString sourceKey=fold(row.sourceStableKey);const SDatabaseRow* base=nullptr;if(row.sourceRecordIndex>=0&&row.sourceRecordIndex<baseline.rows.size())base=&baseline.rows.at(row.sourceRecordIndex);else for(const auto& candidate:baseline.rows)if(fold(candidate.sourceStableKey)==sourceKey){base=&candidate;break;}
+            const bool hadLua=base&&base->values.contains(fields.first()->key);if(row.deleted){if(hadLua)records.remove(sourceKey);continue;}if(!row.values.contains(fields.first()->key))continue;
+            bool changed=row.added||!base||row.values.value(identityKey)!=base->values.value(identityKey);if(base)for(const SDatabaseFieldSchema*field:fields)changed|=!sameValue(row.values.value(field->key),base->values.value(field->key));if(!changed)continue;
+            if(hadLua)records.remove(sourceKey);SJmvUnitPerkRecord record;record.prototype=row.values.value(identityKey).toString().trimmed();if(record.prototype.isEmpty())continue;for(const SDatabaseFieldSchema*field:fields)record.values.append(row.values.value(field->key).toInt());record.physicalOccurrences=row.added?1:qMax(1,m_snapshot->jmvUnitPerksByPrototype.value(sourceKey).physicalOccurrences);records.insert(fold(record.prototype),record);
+        }
+    }
+    return records;
+}
+QMap<QString,SJmvUnitStatRecord> DatabaseDocument::desiredJmvUnitStats()const
+{
+    QMap<QString,SJmvUnitStatRecord> records=m_snapshot->jmvUnitStatsByPrototype;
+    if(m_tablesLuaBaseline.isEmpty())return records;
+    for(const QString& tableKey:{QString("monsters"),QString("units.monsters")})
+    {
+        const SDatabaseTable* monsters=table(tableKey);const SDatabaseTable baseline=m_baselineTables.value(tableKey);
+        if(!monsters)continue;QVector<const SDatabaseFieldSchema*> fields;for(const auto& field:monsters->fields)if(field.storageId==-3)fields.append(&field);std::sort(fields.begin(),fields.end(),[](const SDatabaseFieldSchema*left,const SDatabaseFieldSchema*right){return left->storageOccurrence<right->storageOccurrence;});if(fields.isEmpty())continue;
+        const QString identityKey=monsters->identityFieldId>=0?QString("fld.%1.0").arg(monsters->identityFieldId):QString("name");
+        for(const auto& row:monsters->rows)
+        {
+            const QString sourceKey=fold(row.sourceStableKey);const SDatabaseRow* base=nullptr;if(row.sourceRecordIndex>=0&&row.sourceRecordIndex<baseline.rows.size())base=&baseline.rows.at(row.sourceRecordIndex);else for(const auto& candidate:baseline.rows)if(fold(candidate.sourceStableKey)==sourceKey){base=&candidate;break;}
+            const bool hadLua=base&&base->values.contains(fields.first()->key);if(row.deleted){if(hadLua)records.remove(sourceKey);continue;}if(!row.values.contains(fields.first()->key))continue;
+            bool changed=row.added||!base||row.values.value(identityKey)!=base->values.value(identityKey);if(base)for(const SDatabaseFieldSchema*field:fields)changed|=!sameValue(row.values.value(field->key),base->values.value(field->key));if(!changed)continue;
+            if(hadLua)records.remove(sourceKey);SJmvUnitStatRecord record;record.prototype=row.values.value(identityKey).toString().trimmed();if(record.prototype.isEmpty())continue;for(const SDatabaseFieldSchema*field:fields)if(row.values.contains(field->key))record.values.append(row.values.value(field->key).toDouble());else break;record.physicalOccurrences=row.added?1:qMax(1,m_snapshot->jmvUnitStatsByPrototype.value(sourceKey).physicalOccurrences);records.insert(fold(record.prototype),record);
+        }
+    }
+    return records;
+}
+QByteArray DatabaseDocument::buildTablesLua(QString* diagnostic)const
+{
+    if(m_tablesLuaBaseline.isEmpty())return QByteArray("not-applicable");
+    const QByteArray perks=rewriteJmvUnitPerkTable(m_tablesLuaBaseline,desiredJmvUnitPerks(),diagnostic);
+    if(perks.isEmpty())return {};
+    return rewriteJmvUnitStatTable(perks,desiredJmvUnitStats(),diagnostic);
+}
 QSharedPointer<const SProfileDatabaseSnapshot> DatabaseDocument::currentSnapshot(QString* diagnostic)const
 {
     const QByteArray archive=buildArchive(diagnostic);if(archive.isEmpty())return {};CResArchiveDocument res;QStringList errors;if(!res.loadBytes(archive,sourceArchivePath(),&errors)){if(diagnostic)*diagnostic=errors.join('\n');return {};}
-    QMap<QString,QByteArray> raw;for(const auto& member:res.members())raw.insert(member.name,member.payload);const auto parsed=parseProfileDatabaseMembers(raw,sourceArchivePath());QSharedPointer<SProfileDatabaseSnapshot> out(new SProfileDatabaseSnapshot(*m_snapshot));out->rawMembers=raw;out->monsters=parsed.monsters;out->raceModels=parsed.raceModels;out->items=parsed.items;out->materialRecords=parsed.materialRecords;out->materials=parsed.namesByCategory.value("materials");out->weapons=parsed.namesByCategory.value("weapons");out->armor=parsed.namesByCategory.value("armor");out->quickItems=parsed.namesByCategory.value("quickItems");out->questItems=parsed.namesByCategory.value("questItems");out->lootItems=parsed.namesByCategory.value("lootItems");return out;
+    QMap<QString,QByteArray> raw;for(const auto& member:res.members())raw.insert(member.name,member.payload);const auto parsed=parseProfileDatabaseMembers(raw,sourceArchivePath());QSharedPointer<SProfileDatabaseSnapshot> out(new SProfileDatabaseSnapshot(*m_snapshot));out->rawMembers=raw;out->monsters=parsed.monsters;out->raceModels=parsed.raceModels;out->items=parsed.items;out->materialRecords=parsed.materialRecords;out->materials=parsed.namesByCategory.value("materials");out->weapons=parsed.namesByCategory.value("weapons");out->armor=parsed.namesByCategory.value("armor");out->quickItems=parsed.namesByCategory.value("quickItems");out->questItems=parsed.namesByCategory.value("questItems");out->lootItems=parsed.namesByCategory.value("lootItems");if(!m_tablesLuaBaseline.isEmpty()){out->jmvUnitPerksByPrototype=desiredJmvUnitPerks();out->jmvUnitStatsByPrototype=desiredJmvUnitStats();out->jmvStrongManByPrototype.clear();for(auto it=out->jmvUnitPerksByPrototype.constBegin();it!=out->jmvUnitPerksByPrototype.constEnd();++it)if(it->values.size()>40)out->jmvStrongManByPrototype.insert(it.key(),it->values.at(40));}return out;
 }
 bool DatabaseDocument::saveArchive(const QString& path,QString* diagnostic)const
 {
-    const QByteArray bytes=buildArchive(diagnostic);if(bytes.isEmpty())return false;QSaveFile file(path);if(!file.open(QIODevice::WriteOnly)){if(diagnostic)*diagnostic=file.errorString();return false;}if(file.write(bytes)!=bytes.size()){if(diagnostic)*diagnostic=file.errorString();return false;}if(!file.commit()){if(diagnostic)*diagnostic=file.errorString();return false;}return true;
+    const QByteArray bytes=buildArchive(diagnostic);if(bytes.isEmpty())return false;if(!m_tablesLuaBaseline.isEmpty()){const QByteArray lua=buildTablesLua(diagnostic);if(lua.isEmpty())return false;QFile live(sourceTablesLuaPath());if(!live.open(QIODevice::ReadOnly))return false;if(live.readAll()!=lua){if(diagnostic)*diagnostic="Save As would omit linked JMV tables.lua changes. Use Apply Database to publish the database and Lua data together.";return false;}}return writeAtomically(path,bytes,diagnostic);
 }
-bool DatabaseDocument::applyToSource(QString* diagnostic){if(!sourceIsCurrent(diagnostic))return false;const QByteArray bytes=buildArchive(diagnostic);if(bytes.isEmpty())return false;QSaveFile file(sourceArchivePath());if(!file.open(QIODevice::WriteOnly)){if(diagnostic)*diagnostic=file.errorString();return false;}if(file.write(bytes)!=bytes.size()||!file.commit()){if(diagnostic)*diagnostic=file.errorString();return false;}m_expectedSourceSha256=QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());return true;}
+bool DatabaseDocument::applyToSource(QString* diagnostic)
+{
+    if(!sourceIsCurrent(diagnostic))return false;
+    const QByteArray databaseBytes=buildArchive(diagnostic);if(databaseBytes.isEmpty())return false;
+    const QByteArray luaBytes=buildTablesLua(diagnostic);if(luaBytes.isEmpty())return false;
+    QFile databaseLive(sourceArchivePath());if(!databaseLive.open(QIODevice::ReadOnly)){if(diagnostic)*diagnostic=databaseLive.errorString();return false;}const QByteArray previousDatabase=databaseLive.readAll();databaseLive.close();
+    QByteArray previousLua;const bool hasLua=!m_tablesLuaBaseline.isEmpty();if(hasLua){QFile luaLive(sourceTablesLuaPath());if(!luaLive.open(QIODevice::ReadOnly)){if(diagnostic)*diagnostic=luaLive.errorString();return false;}previousLua=luaLive.readAll();luaLive.close();}
+    const bool databaseChanged=previousDatabase!=databaseBytes,luaChanged=hasLua&&previousLua!=luaBytes;
+    if(databaseChanged&&!writeAtomically(sourceArchivePath(),databaseBytes,diagnostic))return false;
+    if(luaChanged&&!writeAtomically(sourceTablesLuaPath(),luaBytes,diagnostic))
+    {
+        QString rollbackDiagnostic;
+        const bool restored=!databaseChanged||writeAtomically(sourceArchivePath(),previousDatabase,&rollbackDiagnostic);
+        if(diagnostic){const QString publicationError=*diagnostic;*diagnostic=restored?QString("tables.lua publication failed; database.res was restored. %1").arg(publicationError):QString("tables.lua publication failed and database.res rollback also failed: %1").arg(rollbackDiagnostic);}
+        return false;
+    }
+    m_expectedSourceSha256=sha256Hex(databaseBytes);
+    if(hasLua)m_expectedTablesLuaSha256=sha256Hex(luaBytes);
+    return true;
+}
 }

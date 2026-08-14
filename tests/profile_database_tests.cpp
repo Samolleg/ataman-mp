@@ -167,6 +167,7 @@ private slots:
     void validatesBalancedItemGrammarWithoutMutation();
     void providersAreStrictAndJmvOverlaysOnlyActions();
     void jmvLoadsBoundedUnitPerkOwnership();
+    void jmvMonsterLuaDataClonesUndoesAndPublishesAtomically();
     void installedJmvTitanGripControl();
     void unknownProviderFailsClosed();
     void authoringDocumentPreservesBaselineAndTracksTransactions();
@@ -222,8 +223,13 @@ QByteArray unitPerkLua(const QString& prototype, int strongMan)
     fields << QString("\"%1\"").arg(prototype);
     for(int luaIndex = 2; luaIndex <= 44; ++luaIndex)
         fields << QString::number(luaIndex == 42 ? strongMan : 0);
-    return QString("\xEF\xBB\xBF\nUnitPerk = {\n{%1,},\n}\n")
-        .arg(fields.join(','))
+    QStringList stats;
+    stats << QString("\"%1\"").arg(prototype);
+    for(int luaIndex = 2; luaIndex <= 21; ++luaIndex)
+        stats << (luaIndex == 2 ? QString("100")
+                  : luaIndex == 3 ? QString("10.5") : QString("0"));
+    return QString("\xEF\xBB\xBF\nUnitPerk = {\n{%1,},\n}\n\nUnitStat = {\n{%2,},\n}\n")
+        .arg(fields.join(','), stats.join(','))
         .toUtf8();
 }
 
@@ -310,6 +316,8 @@ void ProfileDatabaseTests::jmvLoadsBoundedUnitPerkOwnership()
     QVERIFY2(snapshot->jmvUnitPerkTableStatus == ei::EJmvUnitPerkTableStatus::Valid,
              qPrintable(snapshot->jmvUnitPerkDiagnostic));
     QCOMPARE(snapshot->jmvStrongManByPrototype.value("human test"), 1);
+    QCOMPARE(snapshot->jmvUnitStatsByPrototype.value("human test").values.value(0), 100.0);
+    QCOMPARE(snapshot->jmvUnitStatsByPrototype.value("human test").values.value(1), 10.5);
 
     write(root.filePath("mod/lua/tables.lua"), "UnitPerk = { {\"Human Test\", nope} }");
     snapshot = service.snapshot(request);
@@ -339,6 +347,15 @@ void ProfileDatabaseTests::installedJmvTitanGripControl()
     QVERIFY(snapshot->monsters.contains(prototype));
     QVERIFY(snapshot->jmvStrongManByPrototype.contains(prototype));
     QVERIFY(snapshot->jmvStrongManByPrototype.value(prototype) != 0);
+    QVERIFY(!snapshot->jmvUnitStatsByPrototype.isEmpty());
+    QFile tables(snapshot->jmvUnitPerkSourcePath);
+    QVERIFY(tables.open(QIODevice::ReadOnly));
+    const QByteArray source = tables.readAll();
+    QString diagnostic;
+    const QByteArray perks = ei::rewriteJmvUnitPerkTable(
+        source, snapshot->jmvUnitPerksByPrototype, &diagnostic);
+    QCOMPARE(ei::rewriteJmvUnitStatTable(
+                 perks, snapshot->jmvUnitStatsByPrototype, &diagnostic), source);
 }
 
 void ProfileDatabaseTests::unknownProviderFailsClosed()
@@ -349,6 +366,119 @@ void ProfileDatabaseTests::unknownProviderFailsClosed()
     const auto snapshot = service.snapshot(request);
     QVERIFY(!snapshot->usable());
     QCOMPARE(snapshot->diagnostics.first().code, QString("database.provider.unavailable"));
+}
+
+void ProfileDatabaseTests::jmvMonsterLuaDataClonesUndoesAndPublishesAtomically()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    QDir root(temporary.path());
+    QVERIFY(root.mkpath("mod/res"));
+    QVERIFY(root.mkpath("mod/lua"));
+    const QString databasePath = root.filePath("mod/res/database.res");
+    const QString luaPath = root.filePath("mod/lua/tables.lua");
+    const QByteArray originalDatabase = resArchive(relationalMembers());
+    const QByteArray originalLua = unitPerkLua("Human Test", 1);
+    write(databasePath, originalDatabase);
+    write(root.filePath("mod/res/databaseJmv.res"), resArchive({}));
+    write(luaPath, originalLua);
+
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId = "jmv.v1";
+    request.profileId = "jamais-vu";
+    request.runtimeManifestId = "jmv-lua-authoring";
+    request.resourceDirectories << root.filePath("mod/res");
+    auto document = ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    QString diagnostic;
+    QCOMPARE(document->buildTablesLua(&diagnostic), originalLua);
+    QVERIFY2(document->cloneRow("monsters", "human test", "Human Concise Lua Clone",
+                                &diagnostic), qPrintable(diagnostic));
+    QVERIFY(document->buildTablesLua(&diagnostic).contains("\"Human Concise Lua Clone\""));
+    QVERIFY(document->undo());
+    QCOMPARE(document->buildTablesLua(&diagnostic), originalLua);
+
+    const ei::SDatabaseTable* monsters = document->table("units.monsters");
+    QVERIFY(monsters);
+    QString sourceRow;
+    for(const auto& row : monsters->rows)
+        if(row.sourceStableKey.compare("Human Test", Qt::CaseInsensitive) == 0)
+            sourceRow = row.stableKey;
+    QVERIFY(!sourceRow.isEmpty());
+    bool hasHealth = false, hasStrongMan = false, hasStrengthStat = false;
+    for(const auto& field : monsters->fields)
+    {
+        hasHealth |= field.key == "jmv.perk.health" && field.writable;
+        hasStrongMan |= field.key == "jmv.perk.strongMan" && field.writable;
+        if(field.key == "jmv.perk.strength")
+            QCOMPARE(field.label, QString::fromUtf8("JMV Lua [13] — Perk: Strength"));
+        if(field.key == "jmv.stat.strength")
+        {
+            hasStrengthStat = field.writable;
+            QCOMPARE(field.label, QString::fromUtf8("JMV Lua [3] — Unit stat: Strength"));
+            QCOMPARE(field.type, ei::EDatabaseFieldType::Decimal);
+        }
+    }
+    QVERIFY(hasHealth);
+    QVERIFY(hasStrongMan);
+    QVERIFY(hasStrengthStat);
+
+    QVERIFY2(document->cloneRow("units.monsters", sourceRow, "Human Lua Clone", &diagnostic),
+             qPrintable(diagnostic));
+    monsters = document->table("units.monsters");
+    QString cloneRow;
+    for(const auto& row : monsters->rows)
+        if(row.values.value("fld.0.0").toString() == "Human Lua Clone")
+        {
+            cloneRow = row.stableKey;
+            QCOMPARE(row.values.value("jmv.perk.strongMan").toInt(), 1);
+            QCOMPARE(row.values.value("jmv.stat.strength").toDouble(), 10.5);
+        }
+    QVERIFY(!cloneRow.isEmpty());
+    QVERIFY2(document->setValue("units.monsters", cloneRow, "jmv.perk.health", 9,
+                                &diagnostic), qPrintable(diagnostic));
+    QVERIFY(document->undo());
+    QCOMPARE(document->table("units.monsters")->rows.last().values
+             .value("jmv.perk.health").toInt(), 0);
+    QVERIFY(document->undo());
+    for(const auto& row : document->table("units.monsters")->rows)
+        QVERIFY(row.values.value("fld.0.0").toString() != "Human Lua Clone");
+    QVERIFY(document->redo());
+    QVERIFY(document->redo());
+    QVERIFY2(document->setValue("units.monsters", cloneRow, "jmv.stat.strength", 33.5,
+                                &diagnostic), qPrintable(diagnostic));
+    QVERIFY(document->undo());
+    QCOMPARE(document->table("units.monsters")->rows.last().values
+             .value("jmv.stat.strength").toDouble(), 10.5);
+    QVERIFY(document->redo());
+
+    QVERIFY2(document->applyToSource(&diagnostic), qPrintable(diagnostic));
+    QFile database(databasePath), lua(luaPath);
+    QVERIFY(database.open(QIODevice::ReadOnly));
+    QVERIFY(lua.open(QIODevice::ReadOnly));
+    const QByteArray publishedDatabase = database.readAll();
+    const QByteArray publishedLua = lua.readAll();
+    QVERIFY(publishedDatabase != originalDatabase);
+    QVERIFY(publishedLua != originalLua);
+    QVERIFY(publishedLua.contains("\"Human Lua Clone\""));
+
+    ei::ProfileDatabaseService reopenedService;
+    const auto reopened = reopenedService.snapshot(request);
+    QVERIFY2(reopened->jmvUnitPerkTableStatus == ei::EJmvUnitPerkTableStatus::Valid,
+             qPrintable(reopened->jmvUnitPerkDiagnostic));
+    QCOMPARE(reopened->jmvStrongManByPrototype.value("human lua clone"), 1);
+    QCOMPARE(reopened->jmvUnitPerksByPrototype.value("human lua clone").values.value(13), 9);
+    QCOMPARE(reopened->jmvUnitStatsByPrototype.value("human lua clone").values.value(1), 33.5);
+
+    QVERIFY(document->undo());
+    write(luaPath, publishedLua + "-- external edit\n");
+    const QByteArray databaseBeforeRejectedApply = publishedDatabase;
+    QVERIFY(!document->applyToSource(&diagnostic));
+    QVERIFY(diagnostic.contains("tables.lua", Qt::CaseInsensitive));
+    database.close();
+    QVERIFY(database.open(QIODevice::ReadOnly));
+    QCOMPARE(database.readAll(), databaseBeforeRejectedApply);
 }
 
 void ProfileDatabaseTests::authoringDocumentPreservesBaselineAndTracksTransactions()

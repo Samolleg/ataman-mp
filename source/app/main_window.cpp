@@ -6487,6 +6487,13 @@ bool MainWindow::isDatabaseExitAllowed()
     if(box.clickedButton()==discard)return true;
     CBackupManager backups;const SBackupResult backup=backups.snapshotBeforeSave(QFileInfo(m_databaseDocument->sourceArchivePath()));
     if(!backup.success&&!backup.skipped){QMessageBox::critical(this,tr("Database apply failed"),backup.error);return false;}
+    if(!m_databaseDocument->sourceTablesLuaPath().isEmpty())
+    {
+        const SBackupResult luaBackup=backups.snapshotBeforeSave(
+            QFileInfo(m_databaseDocument->sourceTablesLuaPath()));
+        if(!luaBackup.success&&!luaBackup.skipped)
+        {QMessageBox::critical(this,tr("Database apply failed"),luaBackup.error);return false;}
+    }
     if(!m_databaseDocument->applyToSource(&diagnostic)){QMessageBox::critical(this,tr("Database apply failed"),diagnostic);return false;}
     return true;
 }

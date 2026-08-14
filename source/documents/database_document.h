@@ -33,6 +33,7 @@ class DatabaseDocument
 public:
     static QSharedPointer<DatabaseDocument> fromSnapshot(const QSharedPointer<const SProfileDatabaseSnapshot>&, QString* = nullptr);
     QString profileId() const; QString providerId() const; QString sourceArchivePath() const; QString sourceArchiveSha256() const;
+    QString sourceTablesLuaPath() const;
     QStringList tableKeys() const; const SDatabaseTable* table(const QString&) const;
     bool isDirty() const; bool canUndo() const; bool canRedo() const; QVector<SDatabaseChange> changes() const;
     bool hasUnappliedChanges(QString* = nullptr) const;
@@ -47,6 +48,7 @@ public:
     bool undo(); bool redo(); QVector<SDatabaseValidationFinding> validate() const;
     QJsonObject pendingChangeManifest() const; bool sourceIsCurrent(QString* = nullptr) const;
     QByteArray buildArchive(QString* = nullptr) const;
+    QByteArray buildTablesLua(QString* = nullptr) const;
     bool saveArchive(const QString&, QString* = nullptr) const;
     bool applyToSource(QString* = nullptr);
     QSharedPointer<const SProfileDatabaseSnapshot> currentSnapshot(QString* = nullptr) const;
@@ -55,7 +57,9 @@ private:
     struct SState { QMap<QString, SDatabaseTable> tables; SDatabaseChange change; };
     explicit DatabaseDocument(const QSharedPointer<const SProfileDatabaseSnapshot>&);
     SDatabaseRow* row(const QString&, const QString&); void commit(const QMap<QString, SDatabaseTable>&, const SDatabaseChange&);
-    QSharedPointer<const SProfileDatabaseSnapshot> m_snapshot; QMap<QString, SDatabaseTable> m_tables, m_baselineTables; QSet<QString> m_sourceFieldOccurrences; QVector<SState> m_undo, m_redo; QByteArray m_sourceArchiveBaseline; QString m_expectedSourceSha256; mutable bool m_buildingReplacementCandidate{false};
+    QMap<QString, SJmvUnitPerkRecord> desiredJmvUnitPerks() const;
+    QMap<QString, SJmvUnitStatRecord> desiredJmvUnitStats() const;
+    QSharedPointer<const SProfileDatabaseSnapshot> m_snapshot; QMap<QString, SDatabaseTable> m_tables, m_baselineTables; QSet<QString> m_sourceFieldOccurrences; QVector<SState> m_undo, m_redo; QByteArray m_sourceArchiveBaseline, m_tablesLuaBaseline; QString m_expectedSourceSha256, m_expectedTablesLuaSha256; mutable bool m_buildingReplacementCandidate{false};
 };
 }
 #endif

@@ -91,6 +91,22 @@ struct SMaterialDatabaseRecord
     int id{-1};
 };
 
+struct SJmvUnitPerkRecord
+{
+    QString prototype;
+    // Lua fields 2..N. Field 1 is the prototype string.
+    QVector<int> values;
+    int physicalOccurrences{1};
+};
+
+struct SJmvUnitStatRecord
+{
+    QString prototype;
+    // Lua fields 2..N. UnitStat rows are intentionally sparse/variable-length.
+    QVector<double> values;
+    int physicalOccurrences{1};
+};
+
 struct SProfileDatabaseSnapshot
 {
     QString providerId;
@@ -116,6 +132,8 @@ struct SProfileDatabaseSnapshot
     QMap<QString, SDatabaseProvenance> actionTableProvenance;
     EJmvUnitPerkTableStatus jmvUnitPerkTableStatus{
         EJmvUnitPerkTableStatus::NotApplicable};
+    QMap<QString, SJmvUnitPerkRecord> jmvUnitPerksByPrototype;
+    QMap<QString, SJmvUnitStatRecord> jmvUnitStatsByPrototype;
     QMap<QString, int> jmvStrongManByPrototype;
     QString jmvUnitPerkSourcePath;
     QString jmvUnitPerkSha256;
