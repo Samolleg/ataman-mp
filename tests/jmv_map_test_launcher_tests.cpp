@@ -232,13 +232,15 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
     input.databaseSourcePath = qEnvironmentVariable(
         "EI_ENDURANCE_RUNTIME_SMOKE_DATABASE",
         QDir(modRoot).filePath("res/database.res"));
-    input.databaseData = readAll(input.databaseSourcePath);
+    input.databaseData = readAll(qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_DATABASE_DATA",input.databaseSourcePath));
     QVERIFY2(!input.databaseData.isEmpty(),
              qPrintable("Could not read smoke database: " + input.databaseSourcePath));
     input.tablesLuaSourcePath = qEnvironmentVariable(
         "EI_ENDURANCE_RUNTIME_SMOKE_TABLES_LUA",
         QDir(modRoot).filePath("lua/tables.lua"));
-    input.tablesLuaData = readAll(input.tablesLuaSourcePath);
+    input.tablesLuaData = readAll(qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_TABLES_LUA_DATA",input.tablesLuaSourcePath));
     QVERIFY2(!input.tablesLuaData.isEmpty(),
              qPrintable("Could not read smoke tables.lua: " + input.tablesLuaSourcePath));
     // Make the staged payload observably different without changing Lua

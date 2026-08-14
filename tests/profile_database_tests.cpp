@@ -458,6 +458,13 @@ void ProfileDatabaseTests::installedSuppliedJmvUnitStatStagesAtRuntimeWidth()
     QVERIFY2(document->saveBundle(root.filePath("stage/database.res"),root.filePath("stage/tables.lua"),&diagnostic),qPrintable(diagnostic));
     QFile output(root.filePath("stage/tables.lua"));QVERIFY(output.open(QIODevice::ReadOnly));
     QVERIFY(output.readAll().contains(prototype.toUtf8()));
+    const QString retainedStage=qEnvironmentVariable("EI_TEST_JMV_STAGE_OUTPUT");
+    if(!retainedStage.isEmpty())
+    {
+        QVERIFY(QDir().mkpath(retainedStage));
+        QVERIFY2(document->saveBundle(QDir(retainedStage).filePath("database.res"),
+            QDir(retainedStage).filePath("tables.lua"),&diagnostic),qPrintable(diagnostic));
+    }
 }
 
 void ProfileDatabaseTests::jmvMonsterLuaDataClonesUndoesAndPublishesAtomically()
