@@ -262,8 +262,12 @@ void ItemSpellConstructorDialog::rebuildMaterialChoices(const QString& selected)
         if(!materialRequired)m_material->addItem(tr("No material"),QString());
         for(const auto&material:materials)
         {
-            m_material->addItem(tr("%1 (%2, code %3)").arg(
-                material.displayName,material.name,material.code),material.name);
+            const bool authoredException=material.type.compare(
+                item->materialType,Qt::CaseInsensitive)!=0;
+            m_material->addItem(authoredException
+                ? tr("%1 (%2, authored compatibility)").arg(material.displayName,material.name)
+                : tr("%1 (%2, code %3)").arg(material.displayName,material.name,material.code),
+                material.name);
             if(material.name.compare(selected,Qt::CaseInsensitive)==0)
                 m_material->setCurrentIndex(m_material->count()-1);
         }

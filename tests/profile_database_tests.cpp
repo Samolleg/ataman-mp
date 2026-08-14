@@ -202,6 +202,7 @@ private slots:
     void installedDatabaseInteractiveLatency();
     void itemSpellConstructorParsesCanonicalAndLegacyCodes();
     void itemSpellConstructorRestrictsMaterialsAndReportsSoftLimits();
+    void itemSpellConstructorPreservesAuthoredMaterialExceptions();
     void itemSpellConstructorUsesGameTextKeys();
     void databaseEditorExposesConstructorEntryPoint();
     void itemSpellConstructorUsesVerifiedPreviewFamilies();
@@ -1281,6 +1282,28 @@ void ProfileDatabaseTests::itemSpellConstructorRestrictsMaterialsAndReportsSoftL
     QCOMPARE(limits.warnings.size(), 2);
 }
 
+void ProfileDatabaseTests::itemSpellConstructorPreservesAuthoredMaterialExceptions()
+{
+    QTemporaryDir directory;
+    const QString path=directory.filePath("database.res");
+    write(path,resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="constructor-authored-material";
+    request.resourceDirectories<<directory.path();
+    const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    const auto* armors=document->table("items.armors");QVERIFY(armors&&!armors->rows.isEmpty());
+    QString diagnostic;
+    QVERIFY2(document->setValue("items.armors",armors->rows.first().stableKey,
+                                "fld.3.0","Leather",&diagnostic),qPrintable(diagnostic));
+    const auto catalog=ei::ItemSpellConstructorCatalog::fromDocument(*document);
+    const auto* armor=catalog.findItem("armor_leather");QVERIFY(armor);
+    QVERIFY(catalog.isAuthoredMaterialCompatibility("armor_leather","iron"));
+    const auto compatible=catalog.compatibleMaterials(*armor);
+    QCOMPARE(compatible.size(),1);
+    QCOMPARE(compatible.front().name,QString("iron"));
+}
+
 void ProfileDatabaseTests::itemSpellConstructorUsesGameTextKeys()
 {
     ei::ItemSpellConstructorCatalog catalog;
@@ -1358,7 +1381,8 @@ void ProfileDatabaseTests::installedConstructorCatalogCoverage()
     QVERIFY2(catalog.runes.size()>=20,qPrintable(QString("runes=%1").arg(catalog.runes.size())));
     for(const auto& item:catalog.items)
         for(const auto& material:catalog.compatibleMaterials(item))
-            QCOMPARE(material.type.compare(item.materialType,Qt::CaseInsensitive),0);
+            QVERIFY(material.type.compare(item.materialType,Qt::CaseInsensitive)==0
+                    || catalog.isAuthoredMaterialCompatibility(item.name,material.name));
 }
 
 void ProfileDatabaseTests::gameTextCatalogComposesProfileOverlays()

@@ -2,6 +2,7 @@
 #define ITEM_SPELL_CONSTRUCTOR_H
 
 #include <QMap>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -78,6 +79,8 @@ public:
     QString itemDisplayName(const SConstructorItem& item,
                             const SConstructorMaterial* material = nullptr) const;
     QVector<SConstructorMaterial> compatibleMaterials(const SConstructorItem& item) const;
+    bool isAuthoredMaterialCompatibility(const QString& itemName,
+                                         const QString& materialName) const;
     SConstructorLimitReport limits(const SConstructorItem& item,
                                     const SConstructorMaterial* material,
                                     const SConstructorSpell* spell,
@@ -93,6 +96,7 @@ public:
     QVector<SConstructorRune> runes;
 private:
     QMap<QString, QString> m_gameTexts;
+    QMap<QString, QSet<QString>> m_authoredMaterialsByItem;
 };
 
 }

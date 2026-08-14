@@ -646,6 +646,7 @@ int runHeadlessCommand(QApplication& app)
                         {
                             prototypeOpenAction = action;
                             action->trigger();
+                            menu->close();
                             return;
                         }
             });
@@ -658,26 +659,6 @@ int runHeadlessCommand(QApplication& app)
         const bool databasePrototypeMenuEmissionWorks =
             prototypeMenuAccepted && prototypeOpenAction && routedCombo
             && routedPrototype == QStringLiteral("Human Test");
-
-        // Exercise the production receiver chain.  The old regression stopped
-        // at CTableManager and therefore passed while MainWindow had attempted
-        // to connect a null CView before constructing it.
-        qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", true);
-        qApp->setProperty("enduranceDatabasePrototypeNavigationReceived", QString());
-        {
-            MainWindow productionWindow;
-            const bool invoked = productionWindow.view()
-                && QMetaObject::invokeMethod(productionWindow.view(),
-                    "openDatabasePrototypeRequested", Qt::DirectConnection,
-                    Q_ARG(QString, QStringLiteral("Human Test")));
-            QApplication::processEvents();
-            qApp->setProperty("enduranceDatabasePrototypeNavigationInvoked", invoked);
-        }
-        const bool databasePrototypeMainWindowRouteWorks =
-            qApp->property("enduranceDatabasePrototypeNavigationInvoked").toBool()
-            && qApp->property("enduranceDatabasePrototypeNavigationReceived").toString()
-                == QStringLiteral("Human Test");
-        qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", false);
 
         QSharedPointer<IPropertyBase> textureValue(new propStr(eObjParam_PRIM_TXTR, "original_texture"));
         CComboDynItem textureCombo(textureValue);
@@ -2355,6 +2336,25 @@ int runHeadlessCommand(QApplication& app)
                 && (!floatingDockHost || !floatingDockHost->isVisible());
         const bool routineDockDiagnosticsSuppressed =
                 dockDiagnosticCount() == dockDiagnosticsBefore;
+
+        // Exercise the production receiver chain after the isolated widget
+        // checks. MainWindow initializes process-wide UI/render services, so
+        // constructing it earlier contaminates otherwise independent probes.
+        qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", true);
+        qApp->setProperty("enduranceDatabasePrototypeNavigationReceived", QString());
+        MainWindow* productionWindow = new MainWindow;
+        const bool productionRouteInvoked = productionWindow->view()
+            && QMetaObject::invokeMethod(productionWindow->view(),
+                "openDatabasePrototypeRequested", Qt::DirectConnection,
+                Q_ARG(QString, QStringLiteral("Human Test")));
+        QApplication::processEvents();
+        const bool databasePrototypeMainWindowRouteWorks = productionRouteInvoked
+            && qApp->property("enduranceDatabasePrototypeNavigationReceived").toString()
+                == QStringLiteral("Human Test");
+        qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", false);
+        // This unshown production probe owns process-wide UI/render services;
+        // retain it for the remaining few statements and let process exit
+        // reclaim it, matching application lifetime.
 
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild

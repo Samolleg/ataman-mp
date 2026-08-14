@@ -1,6 +1,8 @@
 #include "item_spell_constructor.h"
 
 #include "database_document.h"
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QRegExp>
 
 namespace {
@@ -46,6 +48,31 @@ void appendItems(const ei::DatabaseDocument& document, const QString& tableKey,
         if(category == QStringLiteral("Quick Item")) item.builtInSpell = field(row, 25).toString();
         output->append(item);
     }
+}
+
+QStringList itemReferences(const QVariant& value)
+{
+    if(value.type() == QVariant::StringList) return value.toStringList();
+    const QString text = value.toString().trimmed();
+    const QJsonDocument json = QJsonDocument::fromJson(text.toUtf8());
+    if(json.isArray())
+    {
+        QStringList result;
+        for(const QJsonValue& entry : json.array())
+            if(entry.isString()) result << entry.toString();
+        return result;
+    }
+    return text.isEmpty() ? QStringList() : QStringList{text};
+}
+
+QPair<QString, QString> itemAndMaterial(const QString& reference)
+{
+    QString base = reference.trimmed();
+    const int payload = base.indexOf('[');
+    if(payload >= 0) base = base.left(payload).trimmed();
+    const int dot = base.lastIndexOf('.');
+    if(dot <= 0 || dot == base.size() - 1) return {};
+    return {folded(base.left(dot)), folded(base.mid(dot + 1))};
 }
 }
 
@@ -99,6 +126,18 @@ ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const Data
             rune.mana = field(row, 4).toDouble();
             rune.complexity = field(row, 6).toInt();
             if(!rune.code.isEmpty()) result.runes.append(rune);
+        }
+    if(const SDatabaseTable* table = document.table(QStringLiteral("units.monsters")))
+        for(const SDatabaseRow& row : table->rows)
+        {
+            if(row.deleted) continue;
+            for(int id : {29, 32, 33, 42})
+                for(const QString& reference : itemReferences(field(row, id)))
+                {
+                    const auto pair = itemAndMaterial(reference);
+                    if(!pair.first.isEmpty() && !pair.second.isEmpty())
+                        result.m_authoredMaterialsByItem[pair.first].insert(pair.second);
+                }
         }
     return result;
 }
@@ -270,9 +309,16 @@ QVector<SConstructorMaterial> ItemSpellConstructorCatalog::compatibleMaterials(c
     if(item.materialType.trimmed().isEmpty() || item.materialType.compare(QStringLiteral("None"), Qt::CaseInsensitive) == 0)
         return result;
     for(const SConstructorMaterial& material : materials)
-        if(material.type.compare(item.materialType, Qt::CaseInsensitive) == 0)
+        if(material.type.compare(item.materialType, Qt::CaseInsensitive) == 0
+           || isAuthoredMaterialCompatibility(item.name, material.name))
             result.append(material);
     return result;
+}
+
+bool ItemSpellConstructorCatalog::isAuthoredMaterialCompatibility(
+    const QString& itemName, const QString& materialName) const
+{
+    return m_authoredMaterialsByItem.value(folded(itemName)).contains(folded(materialName));
 }
 
 SConstructorLimitReport ItemSpellConstructorCatalog::limits(const SConstructorItem& item,
