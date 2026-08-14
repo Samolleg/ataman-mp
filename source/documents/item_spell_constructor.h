@@ -30,7 +30,7 @@ struct SConstructorSpell
     QString name, displayName, code, subtype, school;
     int recordType{-1}, textureType{-1}, slotCapacity{0}, complexity{0};
     int durationSegments{0}, targets{0}, actions{0};
-    double mana{0.0}, speed{0.0}, range{0.0}, area{0.0}, effect{0.0};
+    double mana{0.0}, speed{0.0}, range{0.0}, area{0.0}, effect{0.0}, effectBonus{0.0};
 };
 
 struct SConstructorRune
@@ -63,6 +63,7 @@ struct SConstructorLimitReport
     double itemMana{0.0}, itemManaRegenerationPerSecond{0.0};
     int spellComplexity{0}, spellSlots{0}, itemSlots{0};
     double range{0.0}, area{0.0}, areaRadius{0.0}, effect{0.0};
+    double effectBase{0.0}, effectBonus{0.0};
     int durationSegments{0}, targets{0};
     QStringList warnings;
 };

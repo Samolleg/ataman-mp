@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QCoreApplication>
 #include <QRegExp>
+#include <QRegularExpression>
 #include <QtMath>
 
 namespace {
@@ -34,6 +35,36 @@ QString textEntry(const QMap<QString, QString>& texts, const QStringList& candid
             if(it.key().compare(candidate, Qt::CaseInsensitive) == 0)
                 return firstLine(it.value());
     return QString();
+}
+QString textIdentity(QString value)
+{
+    value=value.trimmed();
+    value.replace(QRegularExpression(QStringLiteral("[\\s-]+")),QStringLiteral("_"));
+    return value;
+}
+QMap<QString,double> jmvSpellAdds(const QByteArray& lua)
+{
+    QMap<QString,double> result;
+    const QString text=QString::fromUtf8(lua);
+    const QRegularExpression assignment(QStringLiteral("\\bSpellAdds\\s*=\\s*\\{"),
+                                        QRegularExpression::CaseInsensitiveOption);
+    const auto match=assignment.match(text);if(!match.hasMatch())return result;
+    int close=-1,depth=1;QChar quote;bool escaped=false;
+    for(int cursor=match.capturedEnd();cursor<text.size();++cursor)
+    {
+        const QChar ch=text.at(cursor);
+        if(!quote.isNull())
+        {if(escaped)escaped=false;else if(ch=='\\')escaped=true;else if(ch==quote)quote=QChar();continue;}
+        if(ch=='\''||ch=='"'){quote=ch;continue;}
+        if(ch=='{')++depth;else if(ch=='}'&&--depth==0){close=cursor;break;}
+    }
+    if(close<0)return result;
+    const QString body=text.mid(match.capturedEnd(),close-match.capturedEnd());
+    const QRegularExpression row(QStringLiteral(
+        "\\{\\s*[\\\"']([^\\\"']+)[\\\"']\\s*,\\s*([-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))\\s*\\}"));
+    auto it=row.globalMatch(body);while(it.hasNext()){const auto entry=it.next();
+        result.insert(folded(entry.captured(1)),entry.captured(2).toDouble());}
+    return result;
 }
 void appendItems(const ei::DatabaseDocument& document, const QString& tableKey,
                  const QString& category, QVector<ei::SConstructorItem>* output)
@@ -121,6 +152,8 @@ ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const Data
     appendItems(document, QStringLiteral("items.armors"), QStringLiteral("Armor"), &result.items);
     appendItems(document, QStringLiteral("items.quickitems"), QStringLiteral("Quick Item"), &result.items);
 
+    const QMap<QString,double> spellAdds=result.m_isJmvProfile
+        ?jmvSpellAdds(document.buildTablesLua()):QMap<QString,double>();
     if(const SDatabaseTable* table = document.table(QStringLiteral("spells.spellprototypes")))
         for(const SDatabaseRow& row : table->rows)
         {
@@ -138,6 +171,7 @@ ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const Data
             spell.range = field(row, 8).toDouble();
             spell.area = field(row, 9).toDouble();
             spell.effect = field(row, 10).toDouble();
+            spell.effectBonus = spellAdds.value(folded(spell.code));
             spell.targets = field(row, 12).toInt();
             spell.durationSegments = field(row, 13).toInt();
             spell.actions = field(row, 14).toInt();
@@ -370,7 +404,8 @@ void ItemSpellConstructorCatalog::applyGameTexts(const QMap<QString, QString>& e
     m_gameTexts = entries;
     for(SConstructorMaterial& material : materials)
     {
-        const QString name = textEntry(entries, {QStringLiteral("MATERIAL ") + material.name});
+        const QString name = textEntry(entries, {QStringLiteral("MATERIAL ") + material.name,
+                                                  QStringLiteral("MATERIAL ") + textIdentity(material.name)});
         if(!name.isEmpty()) material.displayName = name;
     }
     for(SConstructorSpell& spell : spells)
@@ -481,7 +516,8 @@ SConstructorLimitReport ItemSpellConstructorCatalog::spellReport(
     result.spellComplexity = spell.complexity;
     result.range = spell.range;
     result.area = spell.area;
-    result.effect = spell.effect;
+    result.effectBase = spell.effect;
+    result.effectBonus = spell.effectBonus;
     result.durationSegments = spell.durationSegments;
     result.targets = spell.targets;
     for(const QString& code : runeCodes)
@@ -497,7 +533,7 @@ SConstructorLimitReport ItemSpellConstructorCatalog::spellReport(
         if(rune->type == 0) result.range = qMax(0.0, result.range + spell.range * rune->value);
         else if(rune->type == 1) result.targets = qMax(0, result.targets + int(spell.targets * rune->value));
         else if(rune->type == 2) result.area = qMax(0.0, result.area + spell.area * rune->value);
-        else if(rune->type == 3) result.effect = qMax(0.0, result.effect + spell.effect * rune->value);
+        else if(rune->type == 3) result.effectBase = qMax(0.0, result.effectBase + spell.effect * rune->value);
         else if(rune->type == 4)
             result.durationSegments = qMax(0, result.durationSegments
                                                + int(spell.durationSegments * rune->value));
@@ -509,7 +545,7 @@ SConstructorLimitReport ItemSpellConstructorCatalog::spellReport(
         if(m_isJmvProfile && (code.compare(QStringLiteral("it"),Qt::CaseInsensitive)==0
                               || code.compare(QStringLiteral("ic"),Qt::CaseInsensitive)==0))
         {
-            result.effect = qMax(0.0, result.effect - spell.effect * 0.75);
+            result.effectBase = qMax(0.0, result.effectBase - spell.effect * 0.75);
             result.durationSegments = qMax(0, result.durationSegments
                                                - int(spell.durationSegments * 0.25));
         }
@@ -517,6 +553,7 @@ SConstructorLimitReport ItemSpellConstructorCatalog::spellReport(
         result.spellComplexity += rune->complexity;
         result.spellMana += rune->mana;
     }
+    result.effect=result.effectBase+result.effectBonus;
     result.spellMana = qMax(spell.mana, result.spellMana);
     if(result.durationSegments > 0)
         result.spellManaPerSecond = result.spellMana / (result.durationSegments / 15.0);

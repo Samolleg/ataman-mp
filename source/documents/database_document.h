@@ -56,7 +56,8 @@ public:
     QSharedPointer<const SProfileDatabaseSnapshot> currentSnapshot(QString* = nullptr) const;
     bool replaceTables(const QMap<QString, SDatabaseTable>&, const QString&, QString* = nullptr);
     bool replaceTablesWithLua(const QMap<QString, SDatabaseTable>&, const QByteArray&,
-                              const QString&, QString* = nullptr);
+                              const QString&, QString* = nullptr,
+                              bool preserveTableLuaValues = false);
     bool importNativeBundle(const QByteArray& archiveBytes, const QByteArray& tablesLuaBytes,
                             const QString&, QString* = nullptr);
 private:

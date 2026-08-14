@@ -45,6 +45,7 @@ private slots:
     void openItemSpellInTab();
     void importCode();
     void copyCode();
+    void resetItemCamera();
     void updateOutput();
 
 private:
@@ -77,6 +78,7 @@ private:
     CPreview* m_itemPreview{nullptr};
     CWorldObj* m_previewObject{nullptr};
     CView* m_view{nullptr};
+    bool m_itemPreviewInitialized{false};
 
     QLineEdit* m_spellFilter{nullptr};
     QComboBox* m_spellSchool{nullptr};

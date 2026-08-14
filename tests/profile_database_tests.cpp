@@ -4,6 +4,8 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtGui/private/qzipreader_p.h>
+#include <QtGui/private/qzipwriter_p.h>
+#include <QBuffer>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -26,6 +28,8 @@
 #include <QTableView>
 #include <QComboBox>
 #include <QAbstractItemDelegate>
+#include <QXmlStreamReader>
+#include <QRegularExpression>
 #include <cmath>
 
 #include "profile_database.h"
@@ -157,6 +161,21 @@ void write(const QString& path, const QByteArray& bytes)
     file.close();
 }
 
+void replaceZipPart(const QString& path,const QString& part,const QByteArray& replacement)
+{
+    QZipReader reader(path);QVERIFY(reader.exists());
+    QBuffer package;QVERIFY(package.open(QIODevice::WriteOnly));
+    QZipWriter writer(&package);writer.setCompressionPolicy(QZipWriter::AutoCompress);
+    for(const auto& info:reader.fileInfoList())
+    {
+        if(info.isDir)writer.addDirectory(info.filePath);
+        else if(info.isFile)writer.addFile(info.filePath,
+            info.filePath==part?replacement:reader.fileData(info.filePath));
+    }
+    reader.close();writer.close();QCOMPARE(writer.status(),QZipWriter::NoError);
+    write(path,package.data());
+}
+
 }
 
 class ProfileDatabaseTests : public QObject
@@ -186,6 +205,7 @@ private slots:
     void installedWearsEditPreservesStructuralTagIdentity();
     void authoringDocumentPublishesCloneAndUndoRestoresOriginal();
     void workbookImportIsOneValidatedUndoableTransaction();
+    void workbookRoundTripsClonedRowsWithoutSourceCollision();
     void nativeDatabaseAndLuaImportsAreValidatedUndoableTransactions();
     void jmvWorkbookCarriesLinkedLuaPayload();
     void workbookUsesEidbCompatibleListAndSharedStringSyntax();
@@ -219,6 +239,7 @@ private slots:
     void itemSpellConstructorDoesNotTreatAuthoredCodesAsCraftingExceptions();
     void databaseValidationReportsInvalidConstructedItems();
     void itemSpellConstructorUsesGameTextKeys();
+    void itemSpellConstructorNormalizesMaterialTextKeys();
     void databaseEditorExposesConstructorEntryPoint();
     void databaseEditorUsesCleanImportAndSchemaLabels();
     void itemSpellConstructorUsesVerifiedPreviewFamilies();
@@ -827,6 +848,41 @@ void ProfileDatabaseTests::workbookImportIsOneValidatedUndoableTransaction()
     tables=imported.tables;tables["monsters"].rows[monsterRow].values["baseRace"]="missing race";QVERIFY(!document->replaceTables(tables,"Invalid workbook",&diagnostic));QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("baseRace").toString(),QString("Human Male"));
 }
 
+void ProfileDatabaseTests::workbookRoundTripsClonedRowsWithoutSourceCollision()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());
+    write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="base";
+    request.resourceDirectories<<temporary.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    QString diagnostic;QMap<QString,ei::SDatabaseTable> tables;
+    for(const QString& key:document->tableKeys())tables.insert(key,*document->table(key));
+    auto& physical=tables["units.monsters"];QVERIFY(!physical.rows.isEmpty());
+    ei::SDatabaseRow clone=physical.rows.first();clone.added=true;clone.deleted=false;
+    clone.values["fld.0.0"]="Human Workbook Clone";
+    clone.stableKey="human workbook clone#new";physical.rows<<clone;
+    QVERIFY2(document->replaceTables(tables,"Synthetic workbook clone",&diagnostic),
+             qPrintable(diagnostic));
+    const QString workbook=QDir(temporary.path()).filePath("database.xlsx");
+    QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));
+    replaceZipPart(workbook,"eidbeditor/sheets.sha256",QByteArray(64,'0'));
+
+    ei::SDatabaseWorkbookImport imported;
+    QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),
+             qPrintable(diagnostic));
+    int originals=0,clones=0;
+    for(const auto& row:imported.tables.value("units.monsters").rows)
+    {
+        if(row.deleted)continue;
+        const QString identity=row.values.value("fld.0.0").toString();
+        originals+=identity==QStringLiteral("Human Test");
+        clones+=identity==QStringLiteral("Human Workbook Clone");
+    }
+    QCOMPARE(originals,1);
+    QCOMPARE(clones,1);
+}
+
 void ProfileDatabaseTests::nativeDatabaseAndLuaImportsAreValidatedUndoableTransactions()
 {
     QTemporaryDir base;QVERIFY(base.isValid());
@@ -870,8 +926,13 @@ void ProfileDatabaseTests::nativeDatabaseAndLuaImportsAreValidatedUndoableTransa
 void ProfileDatabaseTests::jmvWorkbookCarriesLinkedLuaPayload()
 {
     QTemporaryDir root;QVERIFY(root.isValid());QVERIFY(QDir(root.path()).mkpath("mod/Res"));QVERIFY(QDir(root.path()).mkpath("mod/lua"));
-    write(root.filePath("mod/Res/database.res"),resArchive(relationalMembers()));
-    write(root.filePath("mod/lua/tables.lua"),unitPerkLua("Human Test",1));
+    auto members=relationalMembers();
+    members["spells.sdb"]=database({record(stringField(0,"Weaken")
+        +stringField(1,"weak")+stringField(2,"acid")
+        +tag(10,QByteArray::fromHex("00004041")))});
+    write(root.filePath("mod/Res/database.res"),resArchive(members));
+    write(root.filePath("mod/lua/tables.lua"),unitPerkLua("Human Test",1)
+        +QByteArray("\nSpellAdds = { {\"weak\", 20.0}, }\n"));
     ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
     request.providerId="jmv.v1";request.profileId="jamais-vu";request.resourceDirectories<<root.filePath("mod/Res");
     auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
@@ -883,6 +944,50 @@ void ProfileDatabaseTests::jmvWorkbookCarriesLinkedLuaPayload()
     QZipReader zip(workbook);QVERIFY(zip.exists());
     QVERIFY(zip.fileData("[Content_Types].xml").contains("Extension=\"lua\""));
     QVERIFY(zip.fileData("ei-mapper/_rels/manifest.txt.rels").contains("Target=\"tables.lua\""));
+    const QByteArray shared=zip.fileData("xl/sharedStrings.xml");
+    QVERIFY(shared.contains("JMV Lua [42]"));
+    QVERIFY(shared.contains("JMV:jmv.perk.strongMan"));
+    QByteArray monsterSheet;QString monsterSheetPath;
+    int sharedIndex=-1,currentIndex=-1;QXmlStreamReader stringReader(shared);
+    while(!stringReader.atEnd())
+    {
+        stringReader.readNext();
+        if(stringReader.isStartElement()&&stringReader.name()=="si")++currentIndex;
+        else if(stringReader.isStartElement()&&stringReader.name()=="t"
+                &&stringReader.readElementText()==QStringLiteral("JMV:jmv.perk.strongMan"))
+            sharedIndex=currentIndex;
+    }
+    QVERIFY(sharedIndex>=0);
+    const QRegularExpression header(QStringLiteral(
+        "<c r=\"([A-Z]+)2\" t=\"s\"><v>%1</v></c>").arg(sharedIndex));
+    QRegularExpressionMatch headerMatch;QString sheetText;
+    for(int index=1;index<=ei::workbookTableKeys(*document).size();++index)
+    {
+        const QString candidate=QStringLiteral("xl/worksheets/sheet%1.xml").arg(index);
+        const QByteArray bytes=zip.fileData(candidate);
+        const auto match=header.match(QString::fromUtf8(bytes));
+        if(match.hasMatch()){monsterSheetPath=candidate;monsterSheet=bytes;headerMatch=match;break;}
+    }
+    zip.close();QVERIFY(!monsterSheetPath.isEmpty());sheetText=QString::fromUtf8(monsterSheet);
+    const QString cell=headerMatch.captured(1)+QStringLiteral("3");
+    const QRegularExpression value(QStringLiteral(
+        "<c r=\"%1\"><v>[^<]*</v></c>").arg(cell));
+    QVERIFY(value.match(sheetText).hasMatch());
+    sheetText.replace(value,QStringLiteral("<c r=\"%1\"><v>7</v></c>").arg(cell));
+    replaceZipPart(workbook,monsterSheetPath,sheetText.toUtf8());
+    ei::SDatabaseWorkbookImport imported;
+    QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),
+             qPrintable(diagnostic));
+    QCOMPARE(imported.tables.value("units.monsters").rows.first()
+                 .values.value("jmv.perk.strongMan").toInt(),7);
+    QVERIFY2(document->replaceTablesWithLua(imported.tables,
+                 ei::DatabaseWorkbook::embeddedTablesLua(workbook),
+                 QStringLiteral("Imported workbook"),&diagnostic,true),qPrintable(diagnostic));
+    QCOMPARE(document->table("units.monsters")->rows.first()
+                 .values.value("jmv.perk.strongMan").toInt(),7);
+    const auto importedSnapshot=document->currentSnapshot(&diagnostic);
+    QVERIFY2(importedSnapshot,qPrintable(diagnostic));
+    QCOMPARE(importedSnapshot->jmvStrongManByPrototype.value("human test"),7);
 }
 
 void ProfileDatabaseTests::workbookUsesEidbCompatibleListAndSharedStringSyntax()
@@ -1824,8 +1929,13 @@ void ProfileDatabaseTests::itemSpellConstructorAppliesJmvItemRunePenalties()
     QVERIFY(root.isValid());
     QVERIFY(QDir(root.path()).mkpath("mod/Res"));
     QVERIFY(QDir(root.path()).mkpath("mod/lua"));
-    write(root.filePath("mod/Res/database.res"),resArchive(relationalMembers()));
-    write(root.filePath("mod/lua/tables.lua"),unitPerkLua("Human Test",1));
+    auto members=relationalMembers();
+    members["spells.sdb"]=database({record(stringField(0,"Weaken")
+        +stringField(1,"weak")+stringField(2,"acid")
+        +tag(10,QByteArray::fromHex("00004041")))});
+    write(root.filePath("mod/Res/database.res"),resArchive(members));
+    write(root.filePath("mod/lua/tables.lua"),unitPerkLua("Human Test",1)
+        +QByteArray("\nSpellAdds = { {\"weak\", 20.0}, }\n"));
     ei::ProfileDatabaseService service;
     ei::SProfileDatabaseLoadRequest request;
     request.providerId="jmv.v1";
@@ -1835,6 +1945,8 @@ void ProfileDatabaseTests::itemSpellConstructorAppliesJmvItemRunePenalties()
     QVERIFY(document);
     ei::ItemSpellConstructorCatalog catalog=ei::ItemSpellConstructorCatalog::fromDocument(*document);
     QVERIFY(catalog.isJmvProfile());
+    const auto* weak=catalog.findSpell("weak");QVERIFY(weak);
+    QCOMPARE(weak->effect,12.0);QCOMPARE(weak->effectBonus,20.0);
     ei::SConstructorSpell spell;
     spell.code="continuous";
     spell.mana=20.0;
@@ -1854,6 +1966,14 @@ void ProfileDatabaseTests::itemSpellConstructorAppliesJmvItemRunePenalties()
     const auto continuous = catalog.spellReport(spell,{"ic"});
     QCOMPARE(continuous.effect,10.0);
     QCOMPARE(continuous.durationSegments,45);
+
+    ei::SConstructorRune effectRune;effectRune.code="e3";effectRune.type=3;
+    effectRune.value=1.0;catalog.runes<<effectRune;
+    spell.effect=12.0;spell.effectBonus=20.0;
+    const auto jmvAddedEffect=catalog.spellReport(spell,{"ic","e3","e3"});
+    QCOMPARE(jmvAddedEffect.effectBase,27.0);
+    QCOMPARE(jmvAddedEffect.effectBonus,20.0);
+    QCOMPARE(jmvAddedEffect.effect,47.0);
 }
 
 void ProfileDatabaseTests::itemSpellConstructorDoesNotTreatAuthoredCodesAsCraftingExceptions()
@@ -1903,6 +2023,8 @@ void ProfileDatabaseTests::itemSpellConstructorUsesGameTextKeys()
     ei::ItemSpellConstructorCatalog catalog;
     ei::SConstructorMaterial material; material.name="Iron"; material.displayName="Iron";
     material.type="Metal"; material.code="ir"; catalog.materials << material;
+    ei::SConstructorMaterial ogre;ogre.name="ogre black leather";
+    ogre.displayName=ogre.name;catalog.materials<<ogre;
     ei::SConstructorSpell spell; spell.name="Fireball"; spell.displayName="Fireball";
     spell.code="fireball"; spell.subtype="fire"; spell.school="Fire"; spell.textureType=3;
     catalog.spells << spell;
@@ -1912,6 +2034,7 @@ void ProfileDatabaseTests::itemSpellConstructorUsesGameTextKeys()
     item.category="Armor"; item.type="shirt"; item.materialType="Cloth";
     item.typeId=3; catalog.items << item;
     catalog.applyGameTexts({
+        {"MATERIAL Ogre_Black_Leather",QStringLiteral("Tanned ogre leather\r\nDescription")},
         {"MATERIAL Iron", QString::fromUtf8("Железо\r\nDescription")},
         {"SPELL fireball", QString::fromUtf8("Огненный шар\r\nDescription")},
         {"MODIFIER e0", QString::fromUtf8("Усиление\r\n\r\nDescription\r\n\r\nПр\r\n")},
@@ -1922,6 +2045,16 @@ void ProfileDatabaseTests::itemSpellConstructorUsesGameTextKeys()
     QCOMPARE(catalog.runes.front().displayName, QString::fromUtf8("Усиление"));
     QCOMPARE(catalog.runes.front().tag, QString::fromUtf8("Пр"));
     QCOMPARE(catalog.items.front().displayName, QString::fromUtf8("Безрукавка"));
+}
+
+void ProfileDatabaseTests::itemSpellConstructorNormalizesMaterialTextKeys()
+{
+    ei::ItemSpellConstructorCatalog catalog;
+    ei::SConstructorMaterial material;material.name="ogre black leather";
+    material.displayName=material.name;catalog.materials<<material;
+    catalog.applyGameTexts({{"MATERIAL Ogre_Black_Leather",
+                             QStringLiteral("Tanned ogre leather\r\nDescription")}});
+    QCOMPARE(catalog.materials.front().displayName,QString("Tanned ogre leather"));
 }
 
 void ProfileDatabaseTests::databaseEditorExposesConstructorEntryPoint()
@@ -2115,6 +2248,31 @@ void ProfileDatabaseTests::installedConstructorImportsAgilityStaffIron()
     QSet<QString> codes;for(const auto& finding:document->validate())codes.insert(finding.code);
     QVERIFY(codes.contains("database.item.spell_energy_exceeded"));
     QVERIFY(codes.contains("database.item.spell_difficulty_exceeded"));
+
+    QVERIFY(document->undo());
+    const auto* container=catalog.findItem("spell container");QVERIFY(container);
+    const QString droppedSpell=ei::ItemSpellConstructorCatalog::formatItemCode(
+        container->name,QString(),ei::ItemSpellConstructorCatalog::formatSpellCode(
+            overLimit.spell.prototypeCode,overLimit.spell.runeCodes));
+    QVERIFY2(document->setValue("units.monsters",rowKey,"fld.29.0",
+        QStringLiteral("[\"")+droppedSpell+QStringLiteral("\"]"),&diagnostic),qPrintable(diagnostic));
+    bool capacityWarning=false;
+    for(const auto& finding:document->validate())
+        if(finding.rowKey==rowKey&&finding.message.contains(droppedSpell)
+           &&(finding.code=="database.item.spell_energy_exceeded"
+              ||finding.code=="database.item.spell_difficulty_exceeded"))
+            capacityWarning=true;
+    QVERIFY(!capacityWarning);
+
+    const QString tooManyRunes=QStringLiteral("spell container[speed{e3;e3;e3;e3;e3;e3;e3;e3;e3}]");
+    QVERIFY2(document->setValue("units.monsters",rowKey,"fld.29.0",
+        QStringLiteral("[\"")+tooManyRunes+QStringLiteral("\"]"),&diagnostic),qPrintable(diagnostic));
+    bool syntaxWarning=false;
+    for(const auto& finding:document->validate())
+        syntaxWarning|=finding.rowKey==rowKey
+            &&finding.code==QStringLiteral("database.item.syntax_invalid")
+            &&finding.message.contains(tooManyRunes);
+    QVERIFY(syntaxWarning);
 }
 
 void ProfileDatabaseTests::gameTextCatalogComposesProfileOverlays()

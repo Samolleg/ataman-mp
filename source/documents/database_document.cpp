@@ -470,7 +470,15 @@ QVector<SDatabaseValidationFinding> DatabaseDocument::validate()const
                 for(const QString& code:storedItemCodes(row.values.value(field.key)))
                 {
                     const SParsedItemCode parsed=ItemSpellConstructorCatalog::parseItemCode(code);
-                    if(!parsed.valid)continue;
+                    if(!parsed.valid)
+                    {
+                        findings.append({SDatabaseValidationFinding::Severity::Warning,
+                            QStringLiteral("database.item.syntax_invalid"),monsters->key,row.stableKey,
+                            QCoreApplication::translate("DatabaseDocument",
+                                "%1.%2 contains invalid item or spell code '%3': %4")
+                                .arg(monster,field.label,code,parsed.diagnostics.join(QStringLiteral(" "))),true});
+                        continue;
+                    }
                     const SConstructorItem* item=catalog.findItem(parsed.prototypeName);
                     const SConstructorMaterial* material=parsed.materialName.isEmpty()?nullptr:catalog.findMaterial(parsed.materialName);
                     if(item&&material&&item->materialType.compare(material->type,Qt::CaseInsensitive)!=0)
@@ -481,7 +489,24 @@ QVector<SDatabaseValidationFinding> DatabaseDocument::validate()const
                                 .arg(monster,field.label,code,item->materialType,material->name,material->type),true});
                     if(!item||!parsed.spell.valid)continue;
                     const SConstructorSpell* spell=catalog.findSpell(parsed.spell.prototypeCode);
-                    if(!spell)continue;
+                    if(!spell)
+                    {
+                        findings.append({SDatabaseValidationFinding::Severity::Warning,
+                            QStringLiteral("database.item.spell_invalid"),monsters->key,row.stableKey,
+                            QCoreApplication::translate("DatabaseDocument",
+                                "%1.%2 contains '%3': spell prototype '%4' is unknown.")
+                                .arg(monster,field.label,code,parsed.spell.prototypeCode),true});
+                        continue;
+                    }
+                    const SConstructorLimitReport spellReport=catalog.spellReport(*spell,parsed.spell.runeCodes);
+                    for(const QString& warning:spellReport.warnings)
+                        findings.append({SDatabaseValidationFinding::Severity::Warning,
+                            QStringLiteral("database.item.spell_invalid"),monsters->key,row.stableKey,
+                            QCoreApplication::translate("DatabaseDocument",
+                                "%1.%2 contains '%3': %4").arg(monster,field.label,code,warning),true});
+                    const bool unrestrictedDroppedSpell=field.storageId==29
+                        && item->name.compare(QStringLiteral("spell container"),Qt::CaseInsensitive)==0;
+                    if(unrestrictedDroppedSpell)continue;
                     const SConstructorLimitReport report=catalog.limits(*item,material,spell,parsed.spell.runeCodes);
                     if(report.spellMana>report.itemMana)
                         findings.append({SDatabaseValidationFinding::Severity::Warning,
@@ -617,7 +642,8 @@ bool DatabaseDocument::replaceTables(const QMap<QString,SDatabaseTable>& tables,
 bool DatabaseDocument::replaceTablesWithLua(const QMap<QString,SDatabaseTable>& sourceTables,
                                             const QByteArray& luaBytes,
                                             const QString& description,
-                                            QString* diagnostic)
+                                            QString* diagnostic,
+                                            bool preserveTableLuaValues)
 {
     if(luaBytes.isEmpty())return replaceTables(sourceTables,description,diagnostic);
     if(m_tablesLuaBaseline.isEmpty())
@@ -637,6 +663,10 @@ bool DatabaseDocument::replaceTablesWithLua(const QMap<QString,SDatabaseTable>& 
             for(const SDatabaseFieldSchema& field:table->fields)
             {
                 if(field.storageId!=-2&&field.storageId!=-3)continue;
+                // XLSX exposes JMV values as real worksheet columns. In that
+                // path the embedded Lua is the lossless package baseline, but
+                // an explicitly present worksheet value is authoritative.
+                if(preserveTableLuaValues&&row.values.contains(field.key))continue;
                 row.values.remove(field.key);
                 if(field.storageOccurrence<2)continue;
                 if(field.storageId==-2&&perks.contains(identity))

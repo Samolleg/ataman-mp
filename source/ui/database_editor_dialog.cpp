@@ -531,7 +531,7 @@ void DatabaseEditorDialog::importXlsx()
         QFileInfo(path).completeBaseName()+QStringLiteral(".tables.lua"));
     if(QFileInfo::exists(companion)){QFile lua(companion);if(lua.open(QIODevice::ReadOnly))luaBytes=lua.readAll();}
     const QString description=tr("Imported %1").arg(QFileInfo(path).fileName());
-    if(!m_document->replaceTablesWithLua(imported.tables,luaBytes,description,&diagnostic))
+    if(!m_document->replaceTablesWithLua(imported.tables,luaBytes,description,&diagnostic,true))
     {QMessageBox::critical(this,tr("XLSX import cancelled"),tr("No database changes were applied.\n\n%1").arg(diagnostic));return;}
     finishImport(tr("XLSX import completed with warnings"),description);
 }

@@ -16,12 +16,21 @@ CPreview::CPreview(QWidget *parent, const QGLWidget* shareWidget):
     m_cam.reset(new CCamera(QVector3D(0.0, 0.5, 5.0), QVector3D(0.0, 0.0, 0.0), -70.0f, -45.0f));
 }
 
-void CPreview::attachNode(CNode *pNode)
+void CPreview::attachNode(CNode *pNode, bool resetView)
 {
     m_pNode = pNode;
+    if(resetView)
+        this->resetView();
+    else
+        updateGL();
+}
+
+void CPreview::resetView(const QVector3D& cameraRotation,float modelPitch,float modelYaw)
+{
     m_pan = QVector3D();
-    m_modelYaw = 0.0f;
-    m_modelPitch = 0.0f;
+    m_modelYaw = modelYaw;
+    m_modelPitch = modelPitch;
+    m_resetCameraRotation=cameraRotation;
     if(m_pNode)
         refreshCam(m_pNode->getBBox());
 }
@@ -151,8 +160,7 @@ void CPreview::refreshCam(CBox box)
 {
     const float distance=qMax(0.25f,box.radius()*2.6f);
     const QVector3D pivot=box.center();
-    m_cam->setLocation(pivot+QVector3D(0.0f,0.0f,distance),pivot,
-                       QVector3D(-70.0f,0.0f,-45.0f));
+    m_cam->setLocation(pivot+QVector3D(0.0f,0.0f,distance),pivot,m_resetCameraRotation);
     updateGL();
 }
 

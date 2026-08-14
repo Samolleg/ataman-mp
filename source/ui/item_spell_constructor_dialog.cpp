@@ -182,9 +182,14 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
         m_previewObject = new CConstructorPreviewObject;
         // The constructor is a separate top-level window, so explicitly share
         // the main viewport's figures, textures, and shader resources.
+        auto* previewControls=new QHBoxLayout;previewControls->addStretch();
+        auto* resetCamera=new QPushButton(tr("Reset camera"),itemTab);
+        resetCamera->setObjectName(QStringLiteral("constructorResetCamera"));
+        previewControls->addWidget(resetCamera);itemRight->addLayout(previewControls);
         m_itemPreview = new CPreview(itemTab, m_view); m_itemPreview->attachView(m_view);
         m_itemPreview->setMinimumHeight(220);itemRight->addWidget(m_itemPreview,2);
         m_itemSpellBadge=new QLabel(m_itemPreview);m_itemSpellBadge->setFixedSize(144,144);m_itemSpellBadge->setAlignment(Qt::AlignCenter);m_itemSpellBadge->setFrameStyle(QFrame::StyledPanel|QFrame::Sunken);m_itemSpellBadge->move(8,8);m_itemSpellBadge->hide();m_itemSpellBadge->raise();
+        connect(resetCamera,&QPushButton::clicked,this,&ItemSpellConstructorDialog::resetItemCamera);
     }
     itemRoot->addLayout(itemRight, 2);
     m_tabs->addTab(itemTab, tr("Items & Quick Items"));
@@ -379,6 +384,17 @@ void ItemSpellConstructorDialog::selectItem(){rebuildMaterialChoices();const aut
 void ItemSpellConstructorDialog::selectMaterial(){updateItemPreview();updateOutput();}
 void ItemSpellConstructorDialog::selectSpell(){updateSpellPreview();updateOutput();}
 
+void ItemSpellConstructorDialog::resetItemCamera()
+{
+    if(!m_itemPreview)return;
+    const auto* item=currentItem();
+    if(item&&item->category==QStringLiteral("Weapon"))
+        m_itemPreview->resetView(QVector3D(-25.0f,0.0f,45.0f));
+    else
+        m_itemPreview->resetView();
+    m_itemPreviewInitialized=true;
+}
+
 void ItemSpellConstructorDialog::addRune(){if(!m_availableRunes->currentItem()||m_selectedRunes->count()>=8)return;const QString code=m_availableRunes->currentItem()->data(Qt::UserRole).toString();if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes,runePixmap(m_catalog,*rune));updateSpellPreview();updateOutput();}
 void ItemSpellConstructorDialog::removeRune(){delete m_selectedRunes->takeItem(m_selectedRunes->currentRow());updateSpellPreview();updateOutput();}
 void ItemSpellConstructorDialog::moveRuneUp(){const int row=m_selectedRunes->currentRow();if(row<=0)return;auto*item=m_selectedRunes->takeItem(row);m_selectedRunes->insertItem(row-1,item);m_selectedRunes->setCurrentRow(row-1);updateOutput();}
@@ -441,7 +457,8 @@ void ItemSpellConstructorDialog::updateItemPreview()
             m_itemPreview->makeCurrent();
             static_cast<CConstructorPreviewObject*>(m_previewObject)->applyResolvedItem(
                 model,primary,components,textures,bodyTextureLayers,emissions);
-            m_itemPreview->attachNode(m_previewObject);
+            m_itemPreview->attachNode(m_previewObject,false);
+            if(!m_itemPreviewInitialized)resetItemCamera();
             m_itemPreview->updateGL();
             if(m_itemSpellBadge){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(m_itemSpell->text());const auto*spell=parsed.valid?m_catalog.findSpell(parsed.prototypeCode):nullptr;if(spell){m_itemSpellBadge->setPixmap(spellPixmap(m_catalog,*spell,parsed.runeCodes,140));m_itemSpellBadge->show();m_itemSpellBadge->raise();}else m_itemSpellBadge->hide();}
             return;
@@ -455,10 +472,10 @@ void ItemSpellConstructorDialog::updateItemPreview()
         {
             m_itemPreview->makeCurrent();
             ei::CFigure* raw=CObjectList::getInstance()->getFigureResource(figure+QStringLiteral(".fig"));
-            if(raw){m_previewObject->setModelName(figure);m_previewObject->updateFigure(raw);m_previewObject->setTexture(CTextureList::getInstance()->texture(texture));m_itemPreview->attachNode(m_previewObject);}else m_itemPreview->attachNode(nullptr);
+            if(raw){m_previewObject->setModelName(figure);m_previewObject->updateFigure(raw);m_previewObject->setTexture(CTextureList::getInstance()->texture(texture));m_itemPreview->attachNode(m_previewObject,false);if(!m_itemPreviewInitialized)resetItemCamera();}else m_itemPreview->attachNode(nullptr,false);
         }
         m_itemPreview->updateGL();
-    }else if(m_itemPreview)m_itemPreview->attachNode(nullptr);
+    }else if(m_itemPreview)m_itemPreview->attachNode(nullptr,false);
     if(m_itemSpellBadge){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(m_itemSpell->text());const auto*spell=parsed.valid?m_catalog.findSpell(parsed.prototypeCode):nullptr;if(spell){m_itemSpellBadge->setPixmap(spellPixmap(m_catalog,*spell,parsed.runeCodes,140));m_itemSpellBadge->show();m_itemSpellBadge->raise();}else m_itemSpellBadge->hide();}
 }
 
@@ -489,6 +506,11 @@ void ItemSpellConstructorDialog::updateSpellPreview()
         if(const auto* rune=m_catalog.findRune(code))
             verifiedLines<<tr("%1 - %2 (%3)").arg(
                 rune->code,rune->displayName,runeTypeName(rune->type));
+    const QString effect=report.effectBonus==0.0
+        ?QString::number(report.effect,'g',8)
+        :tr("%1 + %2 = %3").arg(QString::number(report.effectBase,'g',8),
+                                 QString::number(report.effectBonus,'g',8),
+                                 QString::number(report.effect,'g',8));
     m_spellDetails->setText(tr(
         "%1\nCode: %2\nSchool: %3 | %4\n"
         "Energy: %5 (%6 per second) | difficulty: %7\n"
@@ -497,7 +519,7 @@ void ItemSpellConstructorDialog::updateSpellPreview()
         "Runes:\n%15")
         .arg(spell->displayName,spell->code).arg(spell->school).arg(spell->subtype)
         .arg(report.spellMana,0,'g',8).arg(report.spellManaPerSecond,0,'g',8).arg(report.spellComplexity)
-        .arg(report.effect,0,'g',8).arg(report.durationSegments/15.0,0,'g',8)
+        .arg(effect).arg(report.durationSegments/15.0,0,'g',8)
         .arg(report.durationSegments).arg(report.range,0,'g',8).arg(report.area,0,'g',8)
         .arg(report.areaRadius,0,'g',8).arg(report.targets).arg(verifiedLines.join('\n')));
 }

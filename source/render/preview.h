@@ -23,7 +23,9 @@ public:
     explicit CPreview(QWidget* parent=nullptr, const QGLWidget* shareWidget=nullptr);
     //explicit CPreview(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
     void attachView(CView* pView) {m_pView = pView;}
-    void attachNode(CNode* pNode);
+    void attachNode(CNode* pNode, bool resetView = true);
+    void resetView(const QVector3D& cameraRotation = QVector3D(-70.0f, 0.0f, -45.0f),
+                   float modelPitch = 0.0f, float modelYaw = 0.0f);
     void attachSettings(CSettings* pSet);
     ~CPreview();
 
@@ -56,6 +58,7 @@ private:
     QVector3D m_pan;
     float m_modelYaw{0.0f};
     float m_modelPitch{0.0f};
+    QVector3D m_resetCameraRotation{-70.0f,0.0f,-45.0f};
 };
 
 
