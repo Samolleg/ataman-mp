@@ -10,6 +10,7 @@ class DatabaseWorkbook {
 public:
     static bool exportXlsx(const DatabaseDocument& document,const QString& path,QString* diagnostic=nullptr);
     static bool importXlsx(const DatabaseDocument& document,const QString& path,SDatabaseWorkbookImport* result,QString* diagnostic=nullptr);
+    static QByteArray embeddedTablesLua(const QString& path);
 };
 }
 #endif

@@ -9,6 +9,8 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QTextCodec>
+#include <QTemporaryDir>
+#include <QDir>
 #include <cmath>
 #include "lossless_database_member.h"
 #include "database_schema.h"
@@ -600,6 +602,133 @@ bool DatabaseDocument::replaceTables(const QMap<QString,SDatabaseTable>& tables,
     const auto baselineFindings=validate();QSet<QString> baselineErrors;for(const auto& finding:baselineFindings)if(finding.severity==SDatabaseValidationFinding::Severity::Error)baselineErrors.insert(finding.code+'|'+finding.tableKey+'|'+finding.rowKey+'|'+finding.message);m_tables=tables;QSet<QString> candidateErrors;for(const auto& finding:validate())if(finding.severity==SDatabaseValidationFinding::Severity::Error)candidateErrors.insert(finding.code+'|'+finding.tableKey+'|'+finding.rowKey+'|'+finding.message);for(const QString& error:candidateErrors)if(!baselineErrors.contains(error)){m_tables=before;if(diagnostic)*diagnostic=error.section('|',3);return false;}
     QString publicationDiagnostic;m_buildingReplacementCandidate=true;const QByteArray candidate=buildArchive(&publicationDiagnostic);m_buildingReplacementCandidate=false;if(candidate.isEmpty()){m_tables=before;if(diagnostic)*diagnostic=publicationDiagnostic;return false;}
     commit(before,{"workbook",{}, {}, {}, {},description});return true;
+}
+bool DatabaseDocument::replaceTablesWithLua(const QMap<QString,SDatabaseTable>& sourceTables,
+                                            const QByteArray& luaBytes,
+                                            const QString& description,
+                                            QString* diagnostic)
+{
+    if(luaBytes.isEmpty())return replaceTables(sourceTables,description,diagnostic);
+    if(m_tablesLuaBaseline.isEmpty())
+    {if(diagnostic)*diagnostic="The active profile does not use JMV tables.lua.";return false;}
+    QMap<QString,SJmvUnitPerkRecord> perks;
+    QMap<QString,SJmvUnitStatRecord> stats;
+    if(!parseJmvUnitTables(luaBytes,&perks,&stats,diagnostic))return false;
+    QMap<QString,SDatabaseTable> tables=sourceTables;
+    for(const QString& tableKey:{QString("monsters"),QString("units.monsters")})
+    {
+        auto table=tables.find(tableKey);if(table==tables.end())continue;
+        const QString identityKey=table->identityFieldId>=0
+            ?QString("fld.%1.0").arg(table->identityFieldId):QString("name");
+        for(SDatabaseRow& row:table->rows)
+        {
+            const QString identity=fold(row.values.value(identityKey).toString());
+            for(const SDatabaseFieldSchema& field:table->fields)
+            {
+                if(field.storageId!=-2&&field.storageId!=-3)continue;
+                row.values.remove(field.key);
+                if(field.storageOccurrence<2)continue;
+                if(field.storageId==-2&&perks.contains(identity))
+                {
+                    const int index=field.storageOccurrence-2;
+                    if(index<perks.value(identity).values.size())
+                        row.values.insert(field.key,perks.value(identity).values.at(index));
+                }
+                if(field.storageId==-3&&stats.contains(identity))
+                {
+                    const int index=field.storageOccurrence-2;
+                    if(index<stats.value(identity).values.size())
+                        row.values.insert(field.key,stats.value(identity).values.at(index));
+                }
+            }
+        }
+    }
+    return replaceTables(tables,description,diagnostic);
+}
+bool DatabaseDocument::importNativeBundle(const QByteArray& archiveBytes,
+                                          const QByteArray& tablesLuaBytes,
+                                          const QString& description,
+                                          QString* diagnostic)
+{
+    const QByteArray database=archiveBytes.isEmpty()?buildArchive(diagnostic):archiveBytes;
+    if(database.isEmpty())return false;
+    QByteArray lua=tablesLuaBytes;
+    if(!m_tablesLuaBaseline.isEmpty()&&lua.isEmpty())lua=buildTablesLua(diagnostic);
+    if(!m_tablesLuaBaseline.isEmpty()&&lua.isEmpty())return false;
+    QTemporaryDir temporary;
+    if(!temporary.isValid())
+    {if(diagnostic)*diagnostic="Could not create an isolated native import workspace.";return false;}
+    const QString resDirectory=QDir(temporary.path()).filePath("mod/Res");
+    const QString luaDirectory=QDir(temporary.path()).filePath("mod/lua");
+    if(!QDir().mkpath(resDirectory)||(!m_tablesLuaBaseline.isEmpty()&&!QDir().mkpath(luaDirectory)))
+    {if(diagnostic)*diagnostic="Could not prepare the isolated native import workspace.";return false;}
+    if(!writeAtomically(QDir(resDirectory).filePath("database.res"),database,diagnostic))return false;
+    if(!m_tablesLuaBaseline.isEmpty()
+       && !writeAtomically(QDir(luaDirectory).filePath("tables.lua"),lua,diagnostic))return false;
+    ProfileDatabaseService service;
+    SProfileDatabaseLoadRequest request;
+    request.providerId=providerId();request.profileId=profileId();
+    request.resourceDirectories<<resDirectory;
+    const auto imported=DatabaseDocument::fromSnapshot(service.snapshot(request),diagnostic);
+    if(!imported)return false;
+    QMap<QString,SDatabaseTable> tables;
+    for(const QString& key:imported->tableKeys())
+    {
+        SDatabaseTable candidate=*imported->table(key);
+        const SDatabaseTable* current=table(key);
+        if(!current){tables.insert(key,candidate);continue;}
+        // Full physical tables own publication. The compact legacy projection
+        // mirrors the same records and reconciling both would publish a native
+        // clone twice into one member.
+        if(candidate.physicalTable<0){tables.insert(key,*current);continue;}
+        const QString identityKey=candidate.identityFieldId>=0
+            ?QString("fld.%1.0").arg(candidate.identityFieldId):QString("name");
+        QVector<SDatabaseRow> reconciled;QSet<int> matched;
+        for(const SDatabaseRow& importedRow:candidate.rows)
+        {
+            const QString identity=fold(importedRow.values.value(identityKey).toString());
+            int currentIndex=-1;
+            for(int index=0;index<current->rows.size();++index)
+                if(!matched.contains(index)&&!current->rows.at(index).deleted
+                   && fold(current->rows.at(index).values.value(identityKey).toString())==identity)
+                {currentIndex=index;break;}
+            SDatabaseRow row=importedRow;
+            if(currentIndex>=0)
+            {
+                const SDatabaseRow& source=current->rows.at(currentIndex);matched.insert(currentIndex);
+                row.stableKey=source.stableKey;row.sourceStableKey=source.sourceStableKey;
+                row.sourceRecordIndex=source.sourceRecordIndex;row.added=source.added;row.deleted=false;
+            }
+            else
+            {
+                int cloneIndex=-1;
+                for(int index=0;index<current->rows.size()&&cloneIndex<0;++index)
+                {
+                    const SDatabaseRow& source=current->rows.at(index);if(source.deleted)continue;
+                    bool compatible=true;
+                    for(const SDatabaseFieldSchema& field:candidate.fields)
+                    {
+                        if(importedRow.values.contains(field.key)&&!source.values.contains(field.key))
+                        {compatible=false;break;}
+                        if(!field.writable&&importedRow.values.value(field.key)!=source.values.value(field.key))
+                        {compatible=false;break;}
+                    }
+                    if(compatible)cloneIndex=index;
+                }
+                if(cloneIndex<0)
+                {if(diagnostic)*diagnostic=QString("Native row '%1' in %2 has no structurally compatible clone source; import was cancelled to preserve unknown fields losslessly.").arg(identity,key);return false;}
+                const SDatabaseRow& source=current->rows.at(cloneIndex);
+                row.stableKey=identity+QString("#native%1").arg(reconciled.size());
+                row.sourceStableKey=source.sourceStableKey.isEmpty()?source.stableKey:source.sourceStableKey;
+                row.sourceRecordIndex=source.sourceRecordIndex;row.added=true;row.deleted=false;
+            }
+            reconciled.append(row);
+        }
+        for(int index=0;index<current->rows.size();++index)if(!matched.contains(index))
+        {SDatabaseRow removed=current->rows.at(index);removed.deleted=true;reconciled.append(removed);}
+        candidate.rows=reconciled;tables.insert(key,candidate);
+    }
+    return replaceTablesWithLua(tables,lua,description,diagnostic);
 }
 QMap<QString,SJmvUnitPerkRecord> DatabaseDocument::desiredJmvUnitPerks()const
 {

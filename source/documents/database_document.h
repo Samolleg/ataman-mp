@@ -55,6 +55,10 @@ public:
     bool applyToSource(QString* = nullptr);
     QSharedPointer<const SProfileDatabaseSnapshot> currentSnapshot(QString* = nullptr) const;
     bool replaceTables(const QMap<QString, SDatabaseTable>&, const QString&, QString* = nullptr);
+    bool replaceTablesWithLua(const QMap<QString, SDatabaseTable>&, const QByteArray&,
+                              const QString&, QString* = nullptr);
+    bool importNativeBundle(const QByteArray& archiveBytes, const QByteArray& tablesLuaBytes,
+                            const QString&, QString* = nullptr);
 private:
     struct SState { QMap<QString, SDatabaseTable> tables; SDatabaseChange change; };
     explicit DatabaseDocument(const QSharedPointer<const SProfileDatabaseSnapshot>&);

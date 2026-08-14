@@ -10,6 +10,8 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFile>
+#include <QSaveFile>
 #include <QComboBox>
 #include <QCompleter>
 #include <QAction>
@@ -358,6 +360,19 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QSharedPointer<DatabaseDocument
     auto* split=new QSplitter(this);m_tables=new QListWidget(split);m_tables->setMinimumWidth(190);m_grid=new DatabaseFrozenTableView(split);m_grid->setObjectName("databaseGrid");m_model=new DatabaseTableModel(document,m_grid);m_proxy=new DatabaseFilterModel(m_grid);m_proxy->setObjectName("databaseFilterModel");m_proxy->setSourceModel(m_model);m_grid->setModel(m_proxy);m_grid->setSharedDelegate(new DatabaseValueDelegate(m_grid));m_grid->setSortingEnabled(true);m_grid->setSelectionBehavior(QAbstractItemView::SelectRows);m_grid->setSelectionMode(QAbstractItemView::SingleSelection);m_grid->setAlternatingRowColors(true);m_grid->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->frozenView()->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->setEditTriggers(QAbstractItemView::DoubleClicked|QAbstractItemView::EditKeyPressed|QAbstractItemView::SelectedClicked);m_grid->verticalHeader()->setDefaultSectionSize(22);m_grid->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);m_grid->horizontalHeader()->setDefaultSectionSize(150);m_grid->horizontalHeader()->setMinimumSectionSize(45);m_grid->horizontalHeader()->setMaximumSectionSize(300);m_grid->horizontalHeader()->setSectionsMovable(false);m_grid->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->frozenView()->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);split->setStretchFactor(1,1);layout->addWidget(split,1);
     auto* constructorButton=new QPushButton(tr("Item / Spell Constructor…"),this);constructorButton->setObjectName("databaseItemSpellConstructorButton");layout->addWidget(constructorButton,0,Qt::AlignLeft);connect(constructorButton,&QPushButton::clicked,this,[this](){emit itemSpellConstructorRequested(QString());});
     auto* buttons=new QDialogButtonBox(this);m_cloneButton=buttons->addButton(tr("Clone Row…"),QDialogButtonBox::ActionRole);m_deleteButton=buttons->addButton(tr("Delete Row"),QDialogButtonBox::ActionRole);auto* reviewButton=buttons->addButton(tr("Review Changes…"),QDialogButtonBox::ActionRole);auto* exportButton=buttons->addButton(tr("Export XLSX…"),QDialogButtonBox::ActionRole);auto* importButton=buttons->addButton(tr("Import XLSX…"),QDialogButtonBox::ActionRole);auto* applyButton=buttons->addButton(tr("Apply Database"),QDialogButtonBox::ActionRole);auto* saveButton=buttons->addButton(tr("Save Database As…"),QDialogButtonBox::ActionRole);saveButton->setObjectName("databaseSaveAsButton");buttons->addButton(QDialogButtonBox::Close);layout->addWidget(buttons);m_status=new QLabel(this);m_status->setWordWrap(true);layout->addWidget(m_status);
+    importButton->setText(tr("ImportвЂ¦"));
+    auto* importMenu=new QMenu(importButton);
+    auto* importXlsxAction=importMenu->addAction(tr("Import XLSXвЂ¦"));
+    auto* importResAction=importMenu->addAction(tr("Import database.resвЂ¦"));
+    auto* importLuaAction=importMenu->addAction(tr("Import tables.luaвЂ¦"));
+    auto* importBundleAction=importMenu->addAction(tr("Import database.res + tables.luaвЂ¦"));
+    importLuaAction->setEnabled(!m_document->sourceTablesLuaPath().isEmpty());
+    importBundleAction->setEnabled(!m_document->sourceTablesLuaPath().isEmpty());
+    importButton->setMenu(importMenu);
+    connect(importXlsxAction,&QAction::triggered,this,&DatabaseEditorDialog::importXlsx);
+    connect(importResAction,&QAction::triggered,this,&DatabaseEditorDialog::importDatabaseRes);
+    connect(importLuaAction,&QAction::triggered,this,&DatabaseEditorDialog::importTablesLua);
+    connect(importBundleAction,&QAction::triggered,this,&DatabaseEditorDialog::importDatabaseBundle);
     for(const QString& key:document->tableKeys()){const auto* table=document->table(key);if(table->physicalTable<0)continue;auto* item=new QListWidgetItem(tr("%1 (%2)").arg(table->label).arg(table->rows.size()),m_tables);item->setData(Qt::UserRole,key);}
     m_model->setCommitHandler([this](const QString& row,const QString& field,const QVariant& value){return commitGridValue(row,field,value);});
     m_filterTimer=new QTimer(this);m_filterTimer->setSingleShot(true);m_filterTimer->setInterval(80);connect(m_filterTimer,&QTimer::timeout,this,[this](){m_proxy->setSearchText(m_filter->text());});connect(m_tables,&QListWidget::currentRowChanged,this,&DatabaseEditorDialog::selectTable);connect(m_filter,&QLineEdit::textChanged,this,[this](){m_filterTimer->start();});const auto editCell=[this](const QModelIndex& index){const QModelIndex source=m_proxy->mapToSource(index);const auto* field=m_model->fieldForIndex(source);if(!field)return;if(!field->referenceTable.isEmpty()||!source.data(ChoicesRole).toStringList().isEmpty())m_grid->edit(index);else editFieldDialog(index);};connect(m_grid,&QTableView::doubleClicked,this,editCell);connect(m_grid->frozenView(),&QTableView::doubleClicked,this,editCell);connect(m_grid,&QTableView::customContextMenuRequested,this,&DatabaseEditorDialog::showRowContextMenu);connect(m_grid->frozenView(),&QTableView::customContextMenuRequested,this,[this](const QPoint& point){const QModelIndex index=m_grid->frozenView()->indexAt(point);if(!index.isValid())return;m_grid->setCurrentIndex(index);m_grid->selectRow(index.row());showRowContextMenu(m_grid->visualRect(index).center());});const auto headerMenu=[this](QHeaderView* header,const QPoint& point){const int logical=header->logicalIndexAt(point);if(logical>=0)showColumnContextMenu(logical,header->mapToGlobal(point));};connect(m_grid->horizontalHeader(),&QHeaderView::customContextMenuRequested,this,[this,headerMenu](const QPoint& point){headerMenu(m_grid->horizontalHeader(),point);});connect(m_grid->frozenView()->horizontalHeader(),&QHeaderView::customContextMenuRequested,this,[this,headerMenu](const QPoint& point){headerMenu(m_grid->frozenView()->horizontalHeader(),point);});connect(m_grid->horizontalHeader(),&QHeaderView::sectionResized,this,[this](){m_grid->syncFrozenColumns();saveCurrentColumnState();});connect(m_grid->horizontalHeader(),&QHeaderView::sectionMoved,this,[this](){saveCurrentColumnState();});connect(m_cloneButton,&QPushButton::clicked,this,&DatabaseEditorDialog::cloneSelected);connect(m_deleteButton,&QPushButton::clicked,this,&DatabaseEditorDialog::deleteSelected);connect(reviewButton,&QPushButton::clicked,this,&DatabaseEditorDialog::review);connect(exportButton,&QPushButton::clicked,this,&DatabaseEditorDialog::exportXlsx);connect(importButton,&QPushButton::clicked,this,&DatabaseEditorDialog::importXlsx);connect(applyButton,&QPushButton::clicked,this,&DatabaseEditorDialog::apply);connect(saveButton,&QPushButton::clicked,this,&DatabaseEditorDialog::saveAs);connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::close);
@@ -481,7 +496,70 @@ void DatabaseEditorDialog::review(){QString text;QSet<QString> seen;for(const au
 bool DatabaseEditorDialog::applyDocument(QString* backupPath,QString* diagnostic){CBackupManager backups;QStringList backupPaths;const SBackupResult backup=backups.snapshotBeforeSave(QFileInfo(m_document->sourceArchivePath()));if(!backup.success&&!backup.skipped){if(diagnostic)*diagnostic=backup.error;return false;}backupPaths<<backup.backupPath;if(!m_document->sourceTablesLuaPath().isEmpty()){const SBackupResult luaBackup=backups.snapshotBeforeSave(QFileInfo(m_document->sourceTablesLuaPath()));if(!luaBackup.success&&!luaBackup.skipped){if(diagnostic)*diagnostic=luaBackup.error;return false;}backupPaths<<luaBackup.backupPath;}if(!m_document->applyToSource(diagnostic))return false;if(backupPath)*backupPath=backupPaths.join('\n');return true;}
 void DatabaseEditorDialog::apply(){QString backup,diagnostic;if(!applyDocument(&backup,&diagnostic)){QMessageBox::critical(this,tr("Database apply failed"),diagnostic);return;}QMessageBox::information(this,tr("Database applied"),tr("The active database and linked JMV Lua data were updated as one recoverable transaction.\n\nBackups:\n%1").arg(backup));}
 void DatabaseEditorDialog::saveAs(){const QString suggested=QFileInfo(m_document->sourceArchivePath()).fileName();const QString path=QFileDialog::getSaveFileName(this,tr("Save Database As"),suggested,tr("Evil Islands database (*.res)"));if(path.isEmpty())return;if(QFileInfo(path).canonicalFilePath().compare(QFileInfo(m_document->sourceArchivePath()).canonicalFilePath(),Qt::CaseInsensitive)==0){QMessageBox::warning(this,tr("Choose a staging path"),tr("Saving over the opened database is blocked. Choose a separate staging path so the source remains recoverable."));return;}QString luaPath;if(!m_document->sourceTablesLuaPath().isEmpty()){luaPath=QFileDialog::getSaveFileName(this,tr("Save linked JMV tables.lua As"),QDir(QFileInfo(path).absolutePath()).filePath(QStringLiteral("tables.lua")),tr("Lua table (*.lua)"));if(luaPath.isEmpty())return;if(QFileInfo(luaPath).canonicalFilePath().compare(QFileInfo(m_document->sourceTablesLuaPath()).canonicalFilePath(),Qt::CaseInsensitive)==0){QMessageBox::warning(this,tr("Choose a staging path"),tr("Saving over the opened tables.lua is blocked. Choose a separate staging path so the source remains recoverable."));return;}}QString diagnostic;const bool saved=luaPath.isEmpty()?m_document->saveArchive(path,&diagnostic):m_document->saveBundle(path,luaPath,&diagnostic);if(!saved){QMessageBox::critical(this,tr("Database save failed"),diagnostic);return;}const QString destinations=luaPath.isEmpty()?path:tr("%1\n%2").arg(path,luaPath);QMessageBox::information(this,tr("Database saved"),tr("The database bundle was staged successfully at:\n%1\n\nThe source files were not modified.").arg(destinations));}
-void DatabaseEditorDialog::exportXlsx(){const QString path=QFileDialog::getSaveFileName(this,tr("Export Database XLSX"),QStringLiteral("database.xlsx"),tr("Excel workbook (*.xlsx)"));if(path.isEmpty())return;QString diagnostic;if(!DatabaseWorkbook::exportXlsx(*m_document,path,&diagnostic))QMessageBox::critical(this,tr("XLSX export failed"),diagnostic);}
-void DatabaseEditorDialog::importXlsx(){const QString path=QFileDialog::getOpenFileName(this,tr("Import Database XLSX"),QString(),tr("Excel workbook (*.xlsx)"));if(path.isEmpty())return;SDatabaseWorkbookImport imported;QString diagnostic;if(!DatabaseWorkbook::importXlsx(*m_document,path,&imported,&diagnostic)||!m_document->replaceTables(imported.tables,tr("Imported %1").arg(QFileInfo(path).fileName()),&diagnostic)){QMessageBox::critical(this,tr("XLSX import cancelled"),tr("No database changes were applied.\n\n%1").arg(diagnostic));return;}publishLive();rebuildGrid();emit transactionCommitted(m_document->changes().last().description,QString(),QString());if(!m_document->validate().isEmpty())QMessageBox::warning(this,tr("XLSX import completed with warnings"),tr("The workbook was imported as one undoable change. Existing source-data findings are retained for review; only newly introduced critical issues cancel import."));}
+void DatabaseEditorDialog::exportXlsx()
+{
+    const QString path=QFileDialog::getSaveFileName(this,tr("Export Database XLSX"),QStringLiteral("database.xlsx"),tr("Excel workbook (*.xlsx)"));
+    if(path.isEmpty())return;
+    QString diagnostic;
+    if(!DatabaseWorkbook::exportXlsx(*m_document,path,&diagnostic))
+    {QMessageBox::critical(this,tr("XLSX export failed"),diagnostic);return;}
+    if(!m_document->sourceTablesLuaPath().isEmpty())
+    {
+        const QString luaPath=QDir(QFileInfo(path).absolutePath()).filePath(
+            QFileInfo(path).completeBaseName()+QStringLiteral(".tables.lua"));
+        QSaveFile lua(luaPath);const QByteArray bytes=m_document->buildTablesLua(&diagnostic);
+        if(bytes.isEmpty()||!lua.open(QIODevice::WriteOnly)||lua.write(bytes)!=bytes.size()||!lua.commit())
+            QMessageBox::warning(this,tr("JMV Lua companion export failed"),
+                tr("The XLSX was exported, but its editable Lua companion could not be written.\n\n%1").arg(diagnostic.isEmpty()?lua.errorString():diagnostic));
+    }
+}
+void DatabaseEditorDialog::finishImport(const QString& warningTitle,const QString& description)
+{
+    publishLive();rebuildGrid();emit transactionCommitted(description,QString(),QString());
+    if(!m_document->validate().isEmpty())
+        QMessageBox::warning(this,warningTitle,tr("The import was applied as one undoable change. Existing source-data findings are retained for review; only newly introduced critical issues cancel import."));
+}
+void DatabaseEditorDialog::importXlsx()
+{
+    const QString path=QFileDialog::getOpenFileName(this,tr("Import Database XLSX"),QString(),tr("Excel workbook (*.xlsx)"));
+    if(path.isEmpty())return;
+    SDatabaseWorkbookImport imported;QString diagnostic;
+    if(!DatabaseWorkbook::importXlsx(*m_document,path,&imported,&diagnostic))
+    {QMessageBox::critical(this,tr("XLSX import cancelled"),tr("No database changes were applied.\n\n%1").arg(diagnostic));return;}
+    QByteArray luaBytes=DatabaseWorkbook::embeddedTablesLua(path);
+    const QString companion=QDir(QFileInfo(path).absolutePath()).filePath(
+        QFileInfo(path).completeBaseName()+QStringLiteral(".tables.lua"));
+    if(QFileInfo::exists(companion)){QFile lua(companion);if(lua.open(QIODevice::ReadOnly))luaBytes=lua.readAll();}
+    const QString description=tr("Imported %1").arg(QFileInfo(path).fileName());
+    if(!m_document->replaceTablesWithLua(imported.tables,luaBytes,description,&diagnostic))
+    {QMessageBox::critical(this,tr("XLSX import cancelled"),tr("No database changes were applied.\n\n%1").arg(diagnostic));return;}
+    finishImport(tr("XLSX import completed with warnings"),description);
+}
+bool DatabaseEditorDialog::importNative(const QByteArray& databaseBytes,const QByteArray& luaBytes,const QString& description)
+{
+    QString diagnostic;
+    if(!m_document->importNativeBundle(databaseBytes,luaBytes,description,&diagnostic))
+    {QMessageBox::critical(this,tr("Native database import cancelled"),tr("No database or Lua changes were applied.\n\n%1").arg(diagnostic));return false;}
+    finishImport(tr("Native import completed with warnings"),description);return true;
+}
+void DatabaseEditorDialog::importDatabaseRes()
+{
+    const QString path=QFileDialog::getOpenFileName(this,tr("Import database.res"),QString(),tr("Evil Islands database (*.res)"));if(path.isEmpty())return;
+    QFile file(path);if(!file.open(QIODevice::ReadOnly)){QMessageBox::critical(this,tr("Native database import cancelled"),file.errorString());return;}
+    importNative(file.readAll(),QByteArray(),tr("Imported %1").arg(QFileInfo(path).fileName()));
+}
+void DatabaseEditorDialog::importTablesLua()
+{
+    const QString path=QFileDialog::getOpenFileName(this,tr("Import tables.lua"),QString(),tr("Lua table (*.lua)"));if(path.isEmpty())return;
+    QFile file(path);if(!file.open(QIODevice::ReadOnly)){QMessageBox::critical(this,tr("Native database import cancelled"),file.errorString());return;}
+    importNative(QByteArray(),file.readAll(),tr("Imported %1").arg(QFileInfo(path).fileName()));
+}
+void DatabaseEditorDialog::importDatabaseBundle()
+{
+    const QString databasePath=QFileDialog::getOpenFileName(this,tr("Import database.res"),QString(),tr("Evil Islands database (*.res)"));if(databasePath.isEmpty())return;
+    const QString luaPath=QFileDialog::getOpenFileName(this,tr("Import linked tables.lua"),QFileInfo(databasePath).absolutePath(),tr("Lua table (*.lua)"));if(luaPath.isEmpty())return;
+    QFile database(databasePath),lua(luaPath);if(!database.open(QIODevice::ReadOnly)||!lua.open(QIODevice::ReadOnly)){QMessageBox::critical(this,tr("Native database import cancelled"),tr("The selected database/Lua pair could not be read."));return;}
+    importNative(database.readAll(),lua.readAll(),tr("Imported %1 + %2").arg(QFileInfo(databasePath).fileName(),QFileInfo(luaPath).fileName()));
+}
 void DatabaseEditorDialog::updateStatus(){int errors=0;for(const auto&f:m_document->validate())errors+=f.severity==SDatabaseValidationFinding::Severity::Error;m_status->setText(tr("%1 pending change(s) • %2 verified source finding(s) • Full schema authoring: 26 database tables. Descriptor-unknown fields remain visible as hexadecimal and serialize without touching unrelated data.").arg(m_document->changes().size()).arg(errors));}
 }

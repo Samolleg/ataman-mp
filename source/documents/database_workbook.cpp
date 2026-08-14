@@ -113,8 +113,17 @@ QStringList workbookTableKeys(const DatabaseDocument& document){return physicalK
 bool DatabaseWorkbook::exportXlsx(const DatabaseDocument& document,const QString& path,QString* diagnostic)
 {
     const QStringList keys=physicalKeys(document);if(keys.isEmpty()){if(diagnostic)*diagnostic="No schema-described database tables are available.";return false;}
+    const bool hasLua=!document.sourceTablesLuaPath().isEmpty();
+    const QByteArray tablesLua=hasLua?document.buildTablesLua(diagnostic):QByteArray();
+    if(hasLua&&tablesLua.isEmpty())return false;
     QBuffer package;package.open(QIODevice::WriteOnly);QZipWriter zip(&package);zip.setCompressionPolicy(QZipWriter::AutoCompress);
-    QString types="<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"res\" ContentType=\"application/octet-stream\"/><Default Extension=\"txt\" ContentType=\"text/plain\"/><Default Extension=\"sha256\" ContentType=\"text/plain\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>";
+    if(hasLua)
+    {
+        zip.addFile("ei-mapper/tables.lua",tablesLua);
+        zip.addFile("ei-mapper/_rels/manifest.txt.rels",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"urn:ei-mapper-endurance:relationships:jmv-tables-lua\" Target=\"tables.lua\"/></Relationships>");
+    }
+    QString types="<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"res\" ContentType=\"application/octet-stream\"/><Default Extension=\"lua\" ContentType=\"text/plain\"/><Default Extension=\"txt\" ContentType=\"text/plain\"/><Default Extension=\"sha256\" ContentType=\"text/plain\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>";
     QString workbook="<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>";
     QString rels="<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">";
     QSet<QString> names;QStringList orderedNames,strings;QVector<QByteArray> sheetsXml;
@@ -143,5 +152,10 @@ bool DatabaseWorkbook::importXlsx(const DatabaseDocument& document,const QString
         for(int sourceIndex=0;sourceIndex<original->rows.size();++sourceIndex)if(!usedSources.contains(sourceIndex)){SDatabaseRow removed=original->rows.at(sourceIndex);removed.deleted=true;candidate.rows.append(removed);}tables[keys[i]]=candidate;
     }
     result->tables=tables;return true;
+}
+QByteArray DatabaseWorkbook::embeddedTablesLua(const QString& path)
+{
+    QZipReader zip(path);
+    return zip.exists()?zip.fileData("ei-mapper/tables.lua"):QByteArray();
 }
 }

@@ -184,6 +184,8 @@ private slots:
     void installedWearsEditPreservesStructuralTagIdentity();
     void authoringDocumentPublishesCloneAndUndoRestoresOriginal();
     void workbookImportIsOneValidatedUndoableTransaction();
+    void nativeDatabaseAndLuaImportsAreValidatedUndoableTransactions();
+    void jmvWorkbookCarriesLinkedLuaPayload();
     void workbookUsesEidbCompatibleListAndSharedStringSyntax();
     void workbookNoOpAllowsPreexistingReferenceFindings();
     void authoringDocumentApplyIsAtomicAndUndoCanRestoreSource();
@@ -211,6 +213,7 @@ private slots:
     void itemSpellConstructorParsesCanonicalAndLegacyCodes();
     void itemSpellConstructorRestrictsMaterialsAndReportsSoftLimits();
     void itemSpellConstructorCalculatesRuntimeSpellValues();
+    void itemSpellConstructorAppliesJmvItemRunePenalties();
     void itemSpellConstructorDoesNotTreatAuthoredCodesAsCraftingExceptions();
     void databaseValidationReportsInvalidConstructedItems();
     void itemSpellConstructorUsesGameTextKeys();
@@ -770,6 +773,64 @@ void ProfileDatabaseTests::workbookImportIsOneValidatedUndoableTransaction()
 {
     QTemporaryDir temporary;QVERIFY(temporary.isValid());write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QString diagnostic;const QString workbook=QDir(temporary.path()).filePath("database.xlsx");QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));ei::SDatabaseWorkbookImport imported;QVERIFY2(ei::DatabaseWorkbook::importXlsx(*document,workbook,&imported,&diagnostic),qPrintable(diagnostic));auto tables=imported.tables;int monsterRow=-1;for(int index=0;index<tables["monsters"].rows.size();++index)if(tables["monsters"].rows[index].stableKey=="human test")monsterRow=index;QVERIFY(monsterRow>=0);tables["monsters"].rows[monsterRow].values["skinIndex"]=11;QVERIFY2(document->replaceTables(tables,"Imported database.xlsx",&diagnostic),qPrintable(diagnostic));QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("skinIndex").toInt(),11);QVERIFY(document->undo());QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("skinIndex").toInt(),2);
     tables=imported.tables;tables["monsters"].rows[monsterRow].values["baseRace"]="missing race";QVERIFY(!document->replaceTables(tables,"Invalid workbook",&diagnostic));QCOMPARE(document->table("monsters")->rows[monsterRow].values.value("baseRace").toString(),QString("Human Male"));
+}
+
+void ProfileDatabaseTests::nativeDatabaseAndLuaImportsAreValidatedUndoableTransactions()
+{
+    QTemporaryDir base;QVERIFY(base.isValid());
+    const QString basePath=QDir(base.path()).filePath("database.res");
+    write(basePath,resArchive(relationalMembers()));
+    ei::ProfileDatabaseService baseService;ei::SProfileDatabaseLoadRequest baseRequest;
+    baseRequest.providerId="base.standard.v1";baseRequest.profileId="base";baseRequest.resourceDirectories<<base.path();
+    auto baseDocument=ei::DatabaseDocument::fromSnapshot(baseService.snapshot(baseRequest));QVERIFY(baseDocument);
+    auto changedMembers=relationalMembers();
+    changedMembers["units.udb"].replace(intField(3,2),intField(3,7));
+    QString diagnostic;
+    const QByteArray changedArchive=resArchive(changedMembers);
+    QVERIFY2(baseDocument->importNativeBundle(changedArchive,QByteArray(),"Imported database.res",&diagnostic),qPrintable(diagnostic));
+    QCOMPARE(baseDocument->table("units.monsters")->rows.first().values.value("fld.3.0").toInt(),7);
+    QCOMPARE(baseDocument->buildArchive(&diagnostic),changedArchive);
+    QVERIFY(baseDocument->undo());
+    QCOMPARE(baseDocument->table("units.monsters")->rows.first().values.value("fld.3.0").toInt(),2);
+    QVERIFY2(baseDocument->cloneRow("units.monsters",baseDocument->table("units.monsters")->rows.first().stableKey,"Native Clone",&diagnostic),qPrintable(diagnostic));
+    const QByteArray clonedArchive=baseDocument->buildArchive(&diagnostic);QVERIFY2(!clonedArchive.isEmpty(),qPrintable(diagnostic));
+    QVERIFY(baseDocument->undo());
+    QVERIFY2(baseDocument->importNativeBundle(clonedArchive,QByteArray(),"Reimported cloned database.res",&diagnostic),qPrintable(diagnostic));
+    bool foundClone=false;for(const auto& row:baseDocument->table("units.monsters")->rows)foundClone|=!row.deleted&&row.values.value("fld.0.0").toString()=="Native Clone";
+    QVERIFY(foundClone);QCOMPARE(baseDocument->buildArchive(&diagnostic),clonedArchive);
+    QVERIFY(baseDocument->undo());
+
+    QTemporaryDir jmv;QVERIFY(jmv.isValid());QVERIFY(QDir(jmv.path()).mkpath("mod/Res"));QVERIFY(QDir(jmv.path()).mkpath("mod/lua"));
+    write(jmv.filePath("mod/Res/database.res"),resArchive(relationalMembers()));
+    write(jmv.filePath("mod/lua/tables.lua"),unitPerkLua("Human Test",1));
+    ei::ProfileDatabaseService jmvService;ei::SProfileDatabaseLoadRequest jmvRequest;
+    jmvRequest.providerId="jmv.v1";jmvRequest.profileId="jamais-vu";jmvRequest.resourceDirectories<<jmv.filePath("mod/Res");
+    auto jmvDocument=ei::DatabaseDocument::fromSnapshot(jmvService.snapshot(jmvRequest));QVERIFY(jmvDocument);
+    QVERIFY2(jmvDocument->importNativeBundle(QByteArray(),unitPerkLua("Human Test",0),"Imported tables.lua",&diagnostic),qPrintable(diagnostic));
+    const auto* monsters=jmvDocument->table("units.monsters");QVERIFY(monsters);
+    QString rowKey;for(const auto& row:monsters->rows)if(row.sourceStableKey=="Human Test")rowKey=row.stableKey;
+    QVERIFY(!rowKey.isEmpty());
+    QCOMPARE(jmvDocument->table("units.monsters")->rows.first().values.value("jmv.perk.strongMan").toInt(),0);
+    QVERIFY(jmvDocument->undo());
+    QCOMPARE(jmvDocument->table("units.monsters")->rows.first().values.value("jmv.perk.strongMan").toInt(),1);
+}
+
+void ProfileDatabaseTests::jmvWorkbookCarriesLinkedLuaPayload()
+{
+    QTemporaryDir root;QVERIFY(root.isValid());QVERIFY(QDir(root.path()).mkpath("mod/Res"));QVERIFY(QDir(root.path()).mkpath("mod/lua"));
+    write(root.filePath("mod/Res/database.res"),resArchive(relationalMembers()));
+    write(root.filePath("mod/lua/tables.lua"),unitPerkLua("Human Test",1));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="jmv.v1";request.profileId="jamais-vu";request.resourceDirectories<<root.filePath("mod/Res");
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    QString diagnostic;const QString workbook=root.filePath("database.xlsx");
+    QVERIFY2(ei::DatabaseWorkbook::exportXlsx(*document,workbook,&diagnostic),qPrintable(diagnostic));
+    const QString retained=qEnvironmentVariable("EI_TEST_RETAIN_JMV_XLSX");
+    if(!retained.isEmpty()){QFile::remove(retained);QVERIFY2(QFile::copy(workbook,retained),qPrintable(retained));}
+    QCOMPARE(ei::DatabaseWorkbook::embeddedTablesLua(workbook),document->buildTablesLua(&diagnostic));
+    QZipReader zip(workbook);QVERIFY(zip.exists());
+    QVERIFY(zip.fileData("[Content_Types].xml").contains("Extension=\"lua\""));
+    QVERIFY(zip.fileData("ei-mapper/_rels/manifest.txt.rels").contains("Target=\"tables.lua\""));
 }
 
 void ProfileDatabaseTests::workbookUsesEidbCompatibleListAndSharedStringSyntax()
@@ -1703,6 +1764,44 @@ void ProfileDatabaseTests::itemSpellConstructorCalculatesRuntimeSpellValues()
     QCOMPARE(jmvReport.durationSegments,67);
     QCOMPARE(jmvReport.effect,50.0);
     QVERIFY(qAbs(jmvReport.spellManaPerSecond-(20.0/(67.0/15.0)))<0.000001);
+}
+
+void ProfileDatabaseTests::itemSpellConstructorAppliesJmvItemRunePenalties()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QVERIFY(QDir(root.path()).mkpath("mod/Res"));
+    QVERIFY(QDir(root.path()).mkpath("mod/lua"));
+    write(root.filePath("mod/Res/database.res"),resArchive(relationalMembers()));
+    write(root.filePath("mod/lua/tables.lua"),unitPerkLua("Human Test",1));
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId="jmv.v1";
+    request.profileId="jamais-vu";
+    request.resourceDirectories << root.filePath("mod/Res");
+    const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    ei::ItemSpellConstructorCatalog catalog=ei::ItemSpellConstructorCatalog::fromDocument(*document);
+    QVERIFY(catalog.isJmvProfile());
+    ei::SConstructorSpell spell;
+    spell.code="continuous";
+    spell.mana=20.0;
+    spell.effect=40.0;
+    spell.durationSegments=60;
+    auto rune=[](const char* code){
+        ei::SConstructorRune result;
+        result.code=code;
+        result.type=7;
+        return result;
+    };
+    catalog.runes << rune("it") << rune("ic");
+
+    const auto trigger = catalog.spellReport(spell,{"it"});
+    QCOMPARE(trigger.effect,10.0);
+    QCOMPARE(trigger.durationSegments,45);
+    const auto continuous = catalog.spellReport(spell,{"ic"});
+    QCOMPARE(continuous.effect,10.0);
+    QCOMPARE(continuous.durationSegments,45);
 }
 
 void ProfileDatabaseTests::itemSpellConstructorDoesNotTreatAuthoredCodesAsCraftingExceptions()

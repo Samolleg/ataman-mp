@@ -16,8 +16,10 @@ signals: void transactionCommitted(const QString& description, const QString& ta
     void itemSpellConstructorRequested(const QString& initialCode);
     void undoRequested();
     void redoRequested();
-private slots: void selectTable(); void rebuildGrid(); void editFieldDialog(const QModelIndex&); void showRowContextMenu(const QPoint&); void copySelectedRowId(); void cloneSelected(); void deleteSelected(); void review(); void apply(); void saveAs(); void exportXlsx(); void importXlsx();
+private slots: void selectTable(); void rebuildGrid(); void editFieldDialog(const QModelIndex&); void showRowContextMenu(const QPoint&); void copySelectedRowId(); void cloneSelected(); void deleteSelected(); void review(); void apply(); void saveAs(); void exportXlsx(); void importXlsx(); void importDatabaseRes(); void importTablesLua(); void importDatabaseBundle();
 private: QString currentTableKey() const; QString selectedRowKey() const; void updateStatus(); void publishLive(); bool applyDocument(QString* backupPath=nullptr,QString* diagnostic=nullptr);
+    bool importNative(const QByteArray& databaseBytes,const QByteArray& luaBytes,const QString& description);
+    void finishImport(const QString& warningTitle,const QString& description);
     QString runtimeRowIdentity(const QString& tableKey,const QString& rowKey) const;
     bool commitGridValue(const QString& rowKey,const QString& fieldKey,const QVariant& value);
     bool selectTableRow(const QString& tableKey,const QString& identity);

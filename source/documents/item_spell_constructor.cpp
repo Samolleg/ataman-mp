@@ -503,6 +503,16 @@ SConstructorLimitReport ItemSpellConstructorCatalog::spellReport(
                                                + int(spell.durationSegments * rune->value));
         else if(rune->type == 5)
             result.spellMana = qMax(0.0, result.spellMana + spell.mana * rune->value);
+        // JMV redefines the item trigger/continuous runes as explicit spell
+        // penalties in addition to setting their item activation flags.
+        // Both retain 25% effect power and 75% duration.
+        if(m_isJmvProfile && (code.compare(QStringLiteral("it"),Qt::CaseInsensitive)==0
+                              || code.compare(QStringLiteral("ic"),Qt::CaseInsensitive)==0))
+        {
+            result.effect = qMax(0.0, result.effect - spell.effect * 0.75);
+            result.durationSegments = qMax(0, result.durationSegments
+                                               - int(spell.durationSegments * 0.25));
+        }
         ++result.spellSlots;
         result.spellComplexity += rune->complexity;
         result.spellMana += rune->mana;

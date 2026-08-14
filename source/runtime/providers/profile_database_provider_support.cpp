@@ -608,6 +608,28 @@ void applyJmvUnitPerkTable(const QStringList& resourceDirectories,
     snapshot->jmvUnitPerkTableStatus = EJmvUnitPerkTableStatus::Valid;
 }
 
+bool parseJmvUnitTables(const QByteArray& source,
+                        QMap<QString, SJmvUnitPerkRecord>* perks,
+                        QMap<QString, SJmvUnitStatRecord>* stats,
+                        QString* diagnostic)
+{
+    QMap<QString, SJmvUnitPerkRecord> parsedPerks;
+    QMap<QString, SJmvUnitStatRecord> parsedStats;
+    if(!parseJmvUnitPerks(source, &parsedPerks, nullptr, diagnostic))
+        return false;
+    bool statsFound = false;
+    if(!parseJmvUnitStats(source, &parsedStats, &statsFound, diagnostic))
+        return false;
+    if(!statsFound)
+    {
+        if(diagnostic) *diagnostic = "tables.lua has no UnitStat table.";
+        return false;
+    }
+    if(perks) *perks = parsedPerks;
+    if(stats) *stats = parsedStats;
+    return true;
+}
+
 QByteArray rewriteJmvUnitPerkTable(
     const QByteArray& source,
     const QMap<QString, SJmvUnitPerkRecord>& desiredRecords,
