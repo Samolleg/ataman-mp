@@ -35,6 +35,12 @@ enum class ETerrainTileLayer
     Overlay
 };
 
+enum class ETerrainMaterialFieldRecovery
+{
+    RequireExactTopology,
+    RecoverDeterministically
+};
+
 enum class ETerrainTileBrushShape
 {
     Circle,
@@ -472,8 +478,12 @@ public:
         bool requireComplete = true) const;
     bool initializeVirtualMaterialField(
         ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
-        CValidationReport* report = nullptr);
+        CValidationReport* report = nullptr,
+        ETerrainMaterialFieldRecovery recovery =
+            ETerrainMaterialFieldRecovery::RequireExactTopology);
     bool virtualMaterialFieldActive(ETerrainTileLayer layer) const;
+    bool virtualMaterialCellChanged(
+        ETerrainTileLayer layer, int cellX, int cellY) const;
     STerrainTileCommand makeSemanticCornerMaterialPaint(
         int selectedCellX, int selectedCellY, int vertexX, int vertexY,
         ETerrainTileLayer layer, qint32 materialId,

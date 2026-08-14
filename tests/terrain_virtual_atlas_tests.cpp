@@ -3648,6 +3648,36 @@ void TerrainVirtualAtlasTests::identityBaselineRequiresExactSharedCornerTopology
     QVERIFY(!contradictoryModel.initializeVirtualMaterialField(
         ETerrainTileLayer::Land, fixture.catalog, &contradictoryReport));
     QVERIFY(contradictoryReport.hasErrors());
+    CValidationReport recoveryReport;
+    QVERIFY2(contradictoryModel.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, fixture.catalog, &recoveryReport,
+                 ETerrainMaterialFieldRecovery::RecoverDeterministically),
+             qPrintable(recoveryReport.toText()));
+    CTerrainVirtualMaterialField recovered;
+    QVERIFY(contradictoryModel.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &recovered));
+    QCOMPARE(recovered.cellSignature(0, 0), signature(1, 1, 1, 1));
+
+    QVector<QImage> sourceImages = fixture.images;
+    sourceImages.append(solid(qRgba(90, 80, 70, 255)));
+    const QVector<qint32> sourceTypes = reviewedFixtureTileTypes(5);
+    CTerrainVirtualAtlas atlas(
+        fixture.catalog, sourceImages, 0x44524146u, {}, {}, true,
+        sourceTypes, reviewedFixtureMaterialTypes(fixture.catalog));
+    const QVector<quint16> preferredCells(16 * 16,
+                                          contradictoryPacked.encode());
+    const QVector<qint32> preferredTypes(16 * 16, sourceTypes.at(4));
+    const QVector<bool> preserveCells(16 * 16, true);
+    const STerrainAtlasFinalization preserved = atlas.finalize(
+        recovered, QStringLiteral("ContradictoryDraft"), 512,
+        sourceTypes, &recoveryReport, {}, preferredTypes, preferredCells, {},
+        &fixture.catalog, preserveCells);
+    QVERIFY2(preserved.success,
+             qPrintable(preserved.error + QStringLiteral("\n")
+                        + recoveryReport.toText()));
+    QCOMPARE(preserved.requiredSlots, 1);
+    QCOMPARE(preserved.tiles.front().canonicalSignature,
+             contradictory.signature);
 }
 
 void TerrainVirtualAtlasTests::exactOnlyNoOpPreservesPixels()
@@ -4156,6 +4186,10 @@ void TerrainVirtualAtlasTests::uniformStrokeDistributesPureVariantsAndRotationsD
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QVERIFY(model.apply(resolution, true, &report));
     const QVector<quint16> finalPacked = packedField(model);
+    QVERIFY(model.virtualMaterialCellChanged(
+        ETerrainTileLayer::Land, 8, 8));
+    QVERIFY(!model.virtualMaterialCellChanged(
+        ETerrainTileLayer::Land, 0, 0));
 
     CTerrainVirtualMaterialField field;
     QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land, &field));

@@ -4375,33 +4375,10 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
         ?m_virtualLandMaterials:m_virtualOverlayMaterials;
     const qint32 unset=std::numeric_limits<qint32>::min();
     const int vertexWidth=tileCountX()+1;
-    if(active.isEmpty())
-    {
-        QVector<QMap<qint32,int>> votes(vertexWidth*(tileCountY()+1));
-        for(int y=0;y<tileCountY();++y)for(int x=0;x<tileCountX();++x)
-        {
-            bool available=false,decoded=false;
-            const quint16 packed=packedTile(x,y,layer,&available);
-            const STerrainTransitionSignature sig=available
-                ?catalog.gridSignatureForPacked(packed,&decoded):STerrainTransitionSignature();
-            if(!decoded)continue;
-            const qint32 values[4]={sig.northWest,sig.northEast,sig.southEast,sig.southWest};
-            const int keys[4]={y*vertexWidth+x,y*vertexWidth+x+1,
-                (y+1)*vertexWidth+x+1,(y+1)*vertexWidth+x};
-            for(int corner=0;corner<4;++corner)++votes[keys[corner]][values[corner]];
-        }
-        active.fill(unset,votes.size());
-        for(int index=0;index<votes.size();++index)
-        {
-            int bestCount=-1;qint32 best=unset;
-            for(auto it=votes[index].constBegin();it!=votes[index].constEnd();++it)
-                if(it.value()>bestCount||(it.value()==bestCount&&it.key()<best))
-                {bestCount=it.value();best=it.key();}
-            active[index]=best;
-        }
-        if(layer==ETerrainTileLayer::Land)m_originalVirtualLandMaterials=active;
-        else m_originalVirtualOverlayMaterials=active;
-    }
+    if(active.isEmpty() && !initializeVirtualMaterialField(
+           layer, catalog, report,
+           ETerrainMaterialFieldRecovery::RecoverDeterministically))
+        return command;
     QVector<qint32> desired=active;
     const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
     const int minX=qMax(0,int(std::ceil(brush.centerX-brush.radius)));
@@ -4584,6 +4561,30 @@ bool CTerrainEditModel::virtualMaterialFieldActive(ETerrainTileLayer layer) cons
     const QVector<qint32>& baseline=layer==ETerrainTileLayer::Land
         ?m_originalVirtualLandMaterials:m_originalVirtualOverlayMaterials;
     return !current.isEmpty()&&current!=baseline;
+}
+
+bool CTerrainEditModel::virtualMaterialCellChanged(
+    ETerrainTileLayer layer, int cellX, int cellY) const
+{
+    if(cellX < 0 || cellX >= tileCountX()
+       || cellY < 0 || cellY >= tileCountY())
+        return true;
+    const QVector<qint32>& current = layer == ETerrainTileLayer::Land
+        ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    const QVector<qint32>& baseline = layer == ETerrainTileLayer::Land
+        ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+    const int vertexWidth = tileCountX() + 1;
+    const int expected = vertexWidth * (tileCountY() + 1);
+    if(current.size() != expected || baseline.size() != expected)
+        return true;
+    const int northWest = cellY * vertexWidth + cellX;
+    const int northEast = northWest + 1;
+    const int southWest = (cellY + 1) * vertexWidth + cellX;
+    const int southEast = southWest + 1;
+    return current.at(northWest) != baseline.at(northWest)
+        || current.at(northEast) != baseline.at(northEast)
+        || current.at(southEast) != baseline.at(southEast)
+        || current.at(southWest) != baseline.at(southWest);
 }
 
 bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,

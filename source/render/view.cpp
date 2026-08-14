@@ -8229,7 +8229,11 @@ void CView::finalizeVirtualTerrainAtlas()
     CTerrainVirtualMaterialField field;
     if((identityOnlyRequest||persistedDraft)
        && !m_terrainEdit.virtualMaterialFieldActive(layer)
-       && !m_terrainEdit.initializeVirtualMaterialField(layer, catalog, &report))
+       && !m_terrainEdit.initializeVirtualMaterialField(
+           layer, catalog, &report,
+           persistedDraft
+               ? ETerrainMaterialFieldRecovery::RecoverDeterministically
+               : ETerrainMaterialFieldRecovery::RequireExactTopology))
     {
         QMessageBox::critical(this, tr("Modern MPR save refused"),
             tr("This MPR cannot be converted to an exact shared-corner material "
@@ -8294,8 +8298,10 @@ void CView::finalizeVirtualTerrainAtlas()
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QVector<qint32> placedCellTypes;
     QVector<quint16> placedPackedCells;
+    QVector<bool> preservePlacedCells;
     placedCellTypes.reserve(field.tileWidth()*field.tileHeight());
     placedPackedCells.reserve(field.tileWidth()*field.tileHeight());
+    preservePlacedCells.reserve(field.tileWidth()*field.tileHeight());
     for(int y=0;y<field.tileHeight();++y)
         for(int x=0;x<field.tileWidth();++x)
         {
@@ -8306,6 +8312,8 @@ void CView::finalizeVirtualTerrainAtlas()
                 ?m_terrainEdit.tileType(packed,&typeFound):-1;
             placedCellTypes.append(typeFound?type:-1);
             placedPackedCells.append(available?packed:quint16(0));
+            preservePlacedCells.append(
+                !m_terrainEdit.virtualMaterialCellChanged(layer,x,y));
         }
     const CTerrainTransitionCatalog* finalizedDecodeCatalog =
         m_workingTerrainAtlas
@@ -8315,7 +8323,7 @@ void CView::finalizeVirtualTerrainAtlas()
         field,m_mprDocument.mapInfo().innerNamespace,
         kMprPackedTerrainAtlasSlotLimit,
         authoredTypes,&report,pinned,placedCellTypes,placedPackedCells,{},
-        finalizedDecodeCatalog);
+        finalizedDecodeCatalog,preservePlacedCells);
     if(!finalized.success)
     {
         const QString findings=report.findings().isEmpty()

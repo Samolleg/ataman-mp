@@ -1656,7 +1656,7 @@ bool CTerrainEditModel::copyVirtualMaterialField(
 
 bool CTerrainEditModel::initializeVirtualMaterialField(
     ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
-    CValidationReport* report)
+    CValidationReport* report, ETerrainMaterialFieldRecovery recovery)
 {
     QVector<qint32>& active = layer == ETerrainTileLayer::Land
         ? m_virtualLandMaterials : m_virtualOverlayMaterials;
@@ -1678,13 +1678,22 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
                 : STerrainTransitionSignature();
             if(!decoded)
             {
+                if(recovery == ETerrainMaterialFieldRecovery::RequireExactTopology)
+                {
+                    if(report)
+                        report->add("terrain.virtual_identity_baseline",
+                            EValidationSeverity::Error,
+                            "The current atlas contains a cell that the semantic profile cannot decode",
+                            QStringLiteral("%1,%2").arg(x).arg(y));
+                    active.clear();
+                    return false;
+                }
                 if(report)
                     report->add("terrain.virtual_identity_baseline",
-                        EValidationSeverity::Error,
-                        "The current atlas contains a cell that the semantic profile cannot decode",
+                        EValidationSeverity::Warning,
+                        "A working draft cell could not vote in deterministic material-field recovery",
                         QStringLiteral("%1,%2").arg(x).arg(y));
-                active.clear();
-                return false;
+                continue;
             }
             const qint32 values[4] = {signature.northWest,
                 signature.northEast, signature.southEast,
@@ -1712,6 +1721,8 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
             }
         active[index] = best;
     }
+    int recoveredConflicts = 0;
+    QString firstRecoveredConflict;
     for(int y = 0; y < tileCountY(); ++y)
         for(int x = 0; x < tileCountX(); ++x)
         {
@@ -1738,15 +1749,26 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
                 && recovered.southWest == actual.southWest;
             if(!decoded || !same)
             {
-                if(report)
-                    report->add("terrain.virtual_identity_topology",
-                        EValidationSeverity::Error,
-                        "The current packed cells do not form one exact shared-corner semantic field; identity finalization was refused",
-                        QStringLiteral("%1,%2").arg(x).arg(y));
-                active.clear();
-                return false;
+                if(recovery == ETerrainMaterialFieldRecovery::RequireExactTopology)
+                {
+                    if(report)
+                        report->add("terrain.virtual_identity_topology",
+                            EValidationSeverity::Error,
+                            "The current packed cells do not form one exact shared-corner semantic field; identity finalization was refused",
+                            QStringLiteral("%1,%2").arg(x).arg(y));
+                    active.clear();
+                    return false;
+                }
+                ++recoveredConflicts;
+                if(firstRecoveredConflict.isEmpty())
+                    firstRecoveredConflict = QStringLiteral("%1,%2").arg(x).arg(y);
             }
         }
+    if(recoveredConflicts > 0 && report)
+        report->add("terrain.virtual_identity_topology_recovered",
+            EValidationSeverity::Info,
+            QStringLiteral("Recovered one deterministic working-draft material field across %1 packed topology conflict(s)")
+                .arg(recoveredConflicts), firstRecoveredConflict);
     if(layer == ETerrainTileLayer::Land)
         m_originalVirtualLandMaterials = active;
     else
@@ -2945,7 +2967,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     const QVector<qint32>& preferredCellTypes,
     const QVector<quint16>& preferredPackedCells,
     const QVector<qint32>& preferredPaintMaterials,
-    const CTerrainTransitionCatalog* authoredDecodeCatalog)
+    const CTerrainTransitionCatalog* authoredDecodeCatalog,
+    const QVector<bool>& preservePreferredPackedCells)
 {
     STerrainAtlasFinalization result;
     result.capacityLimit = capacityLimit;
@@ -2956,6 +2979,9 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
                 != field.tileWidth() * field.tileHeight())
        || (!preferredPaintMaterials.isEmpty()
            && preferredPaintMaterials.size()
+                != field.tileWidth() * field.tileHeight())
+       || (!preservePreferredPackedCells.isEmpty()
+           && preservePreferredPackedCells.size()
                 != field.tileWidth() * field.tileHeight()))
     {
         result.error = !m_valid ? m_error
@@ -3085,13 +3111,28 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
                 const quint16 preferredPacked = preferredPackedCells.at(cellIndex);
                 bool decoded = false;
                 const STerrainTransitionSignature existing =
-                    m_catalog.gridSignatureForPacked(preferredPacked, &decoded);
+                    decodeCatalog.gridSignatureForPacked(preferredPacked, &decoded);
                 const int preferredSlot = SMprPackedTile::decode(
                     preferredPacked).atlasSlot();
-                if(decoded && existing == desired && preferredSlot >= 0
+                const bool preserveExisting =
+                    !preservePreferredPackedCells.isEmpty()
+                    && preservePreferredPackedCells.at(cellIndex);
+                if(preserveExisting && (!decoded || preferredSlot < 0
+                   || preferredSlot >= m_authoredTiles.size()))
+                {
+                    result.error = QStringLiteral(
+                        "An untouched working-draft cell cannot be decoded from its exact packed atlas identity.");
+                    if(report) report->add(
+                        "terrain.finalized_preserved_cell",
+                        EValidationSeverity::Error, result.error,
+                        QStringLiteral("%1,%2").arg(x).arg(y));
+                    return result;
+                }
+                if(decoded && (preserveExisting || existing == desired)
+                   && preferredSlot >= 0
                    && preferredSlot < m_authoredTiles.size())
                 {
-                    tile.signature = desired;
+                    tile.signature = preserveExisting ? existing : desired;
                     tile.authored = true;
                     tile.authoredPacked = preferredPacked;
                     tile.runtimeTerrainType = preferredSlot

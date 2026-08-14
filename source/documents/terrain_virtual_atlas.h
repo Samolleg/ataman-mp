@@ -281,7 +281,8 @@ public:
                                        const QVector<qint32>& preferredCellTypes = {},
                                        const QVector<quint16>& preferredPackedCells = {},
                                        const QVector<qint32>& preferredPaintMaterials = {},
-                                       const CTerrainTransitionCatalog* authoredDecodeCatalog = nullptr);
+                                       const CTerrainTransitionCatalog* authoredDecodeCatalog = nullptr,
+                                       const QVector<bool>& preservePreferredPackedCells = {});
 
     static QImage composePage(const QVector<QImage>& tiles, int firstTile,
                               int tileSize);

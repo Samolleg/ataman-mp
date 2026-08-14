@@ -13,6 +13,7 @@
 #include "mmp_codec.h"
 #include "operation_history_policy.h"
 #include "portable_diagnostic_writer.h"
+#include "res_archive_document.h"
 #include "terrain_edit_model.h"
 #include "terrain_tile_information_policy.h"
 #include "terrain_atlas_analyzer.h"
@@ -365,6 +366,7 @@ private slots:
     void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
     void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void workingAtlasProfileBindsExtensionSignaturesForDraftReopen();
+    void externalReopenedDraftTopologyProbe();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
     void semanticAtlasPartialCatalogRejectsCrossLayerCornersInline();
@@ -6864,6 +6866,144 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
     QCOMPARE(analysis.landCatalog.gridSignatureForPacked(
                  packed.encode(), &found), visible);
     QVERIFY(found);
+}
+
+void EnduranceDocumentTests::externalReopenedDraftTopologyProbe()
+{
+    const QString mprPath = qEnvironmentVariable("EI_MAPPER_REAL_DRAFT_MPR");
+    const QString profilePath =
+        qEnvironmentVariable("EI_MAPPER_REAL_DRAFT_PROFILE");
+    const QString atlasPath =
+        qEnvironmentVariable("EI_MAPPER_REAL_DRAFT_ATLAS");
+    if(mprPath.isEmpty() || profilePath.isEmpty() || atlasPath.isEmpty())
+        QSKIP("Set EI_MAPPER_REAL_DRAFT_MPR, EI_MAPPER_REAL_DRAFT_PROFILE, and EI_MAPPER_REAL_DRAFT_ATLAS for the read-only integration probe");
+
+    CValidationReport report;
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    STerrainAtlasProfile profile;
+    QVERIFY2(STerrainAtlasProfile::load(profilePath, &profile, &report),
+             qPrintable(report.toText()));
+    const STerrainAtlasAnalysis analysis = profile.usableAnalysis(&report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    QVERIFY2(terrain.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, analysis.landCatalog, &report,
+                 ETerrainMaterialFieldRecovery::RecoverDeterministically),
+             qPrintable(report.toText()));
+    CTerrainVirtualMaterialField field;
+    QVERIFY(terrain.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &field));
+
+    QFile atlasFile(atlasPath);
+    QVERIFY(atlasFile.open(QIODevice::ReadOnly));
+    CResArchiveDocument atlasArchive;
+    QStringList archiveErrors;
+    QVERIFY2(atlasArchive.loadBytes(atlasFile.readAll(), atlasPath,
+                                    &archiveErrors),
+             qPrintable(archiveErrors.join(QStringLiteral("\n"))));
+    QVector<QImage> physicalTiles;
+    const int textureCount = (profile.atlasSlotCount + 63) / 64;
+    for(int page = 0; page < textureCount; ++page)
+    {
+        const QString memberName = QStringLiteral("%1%2.mmp")
+            .arg(document.mapInfo().innerNamespace.toLower())
+            .arg(page, 3, 10, QLatin1Char('0'));
+        const QByteArray pageBytes = atlasArchive.memberPayload(memberName);
+        QVERIFY2(!pageBytes.isEmpty(), qPrintable(memberName));
+        for(int localSlot = 0; localSlot < 64; ++localSlot)
+        {
+            QImage tile;
+            QString diagnostic;
+            QVERIFY2(ei::decodeMmpDxt1AtlasTile(
+                         pageBytes, localSlot, &tile, &diagnostic),
+                     qPrintable(diagnostic));
+            physicalTiles.append(tile.convertToFormat(
+                QImage::Format_RGBA8888));
+        }
+    }
+    QCOMPARE(physicalTiles.size(), textureCount * 64);
+
+    QMap<qint32, qint32> materialRuntimeTypes;
+    QMap<qint32, QString> materialNames;
+    for(const STerrainAtlasProfileFamily& family : profile.families)
+    {
+        materialRuntimeTypes.insert(family.id, family.tileType);
+        materialNames.insert(family.id, family.name);
+    }
+    const QVector<qint32> physicalTypes = document.mapInfo().tileTypes;
+    CTerrainVirtualAtlas atlas(
+        analysis.landCatalog, physicalTiles, 0x52313332u, {}, {}, true,
+        physicalTypes, materialRuntimeTypes);
+    QVERIFY2(atlas.isValid(), qPrintable(atlas.error()));
+
+    QVector<quint16> pinnedOverlay;
+    QVector<qint32> placedCellTypes;
+    QVector<quint16> placedPackedCells;
+    QVector<bool> preservePlacedCells;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool landAvailable = false;
+            const quint16 landPacked = terrain.packedTile(
+                x, y, ETerrainTileLayer::Land, &landAvailable);
+            bool typeFound = false;
+            const qint32 type = landAvailable
+                ? terrain.tileType(landPacked, &typeFound) : -1;
+            placedCellTypes.append(typeFound ? type : -1);
+            placedPackedCells.append(landAvailable ? landPacked : quint16(0));
+            preservePlacedCells.append(true);
+
+            bool overlayAvailable = false;
+            const quint16 overlayPacked = terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &overlayAvailable);
+            if(overlayAvailable && overlayPacked != 0xffffu)
+                pinnedOverlay.append(overlayPacked);
+        }
+    STerrainAtlasFinalization finalized = atlas.finalize(
+        field, document.mapInfo().innerNamespace,
+        kMprPackedTerrainAtlasSlotLimit, physicalTypes, &report,
+        pinnedOverlay, placedCellTypes, placedPackedCells, {},
+        &analysis.overlayCompatibleCatalog, preservePlacedCells);
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n")
+                        + report.toText()));
+    CTerrainWorkingAtlas workingAtlas(
+        analysis.overlayCompatibleCatalog, physicalTiles, 0x52313332u,
+        kMprPackedTerrainAtlasSlotLimit, {}, {}, physicalTypes,
+        materialRuntimeTypes);
+    STerrainWorkingFinalizationOrigins origins;
+    QVERIFY2(workingAtlas.restoreFinalizedProvenance(
+                 &finalized, &origins,
+                 document.mapInfo().innerNamespace, field.stableSha256(),
+                 pinnedOverlay, &report), qPrintable(report.toText()));
+    QVector<QImage> finalizedPhysicalTiles;
+    QVERIFY2(CTerrainVirtualAtlas::decodePhysicalTileImages(
+                 finalized, &finalizedPhysicalTiles, &report),
+             qPrintable(report.toText()));
+    const STerrainAtlasProfile publishedProfile =
+        CTerrainAtlasProfileStore::portableFinalizedProfile(
+            finalized, finalizedPhysicalTiles, profile,
+            ETerrainAtlasLayer::Land, materialNames, materialRuntimeTypes,
+            &report);
+    QCOMPARE(publishedProfile.assignedSlotCount(), finalized.requiredSlots);
+    const STerrainAtlasAnalysis publishedAnalysis =
+        publishedProfile.usableAnalysis(&report);
+    QVERIFY2(publishedAnalysis.usable, qPrintable(report.toText()));
+    const STerrainPortableAtlasPackage package =
+        CTerrainVirtualAtlas::buildPortablePackage(
+            document, terrain, finalized, ETerrainTileLayer::Land, &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + QStringLiteral("\n")
+                        + report.toText()));
+    CMprDocument reopened;
+    QVERIFY2(reopened.loadBytes(package.mprBytes,
+                                QStringLiteral("zone3obr-published-probe.mpr"),
+                                &report), qPrintable(report.toText()));
+    QCOMPARE(reopened.mapInfo().innerNamespace,
+             finalized.isolatedNamespace);
 }
 
 void EnduranceDocumentTests::overlaySculptChangesOnlyActiveOverlayGeometry()
