@@ -4717,7 +4717,7 @@ void MainWindow::updateDocumentActionAvailability()
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
     const bool dirtyMpr = terrainMprSaveActionEnabled(
         hasMpr, CLandscape::getInstance()->isDirty(),
-        m_pView && m_pView->hasPendingTerrainIdentityPublication());
+        m_pView && m_pView->hasPendingTerrainPublication());
     m_ui->actionOpen->setEnabled(idle);
     m_ui->actionOpen_MPR->setEnabled(idle);
     m_ui->actionOpen_MOB->setEnabled(idle);

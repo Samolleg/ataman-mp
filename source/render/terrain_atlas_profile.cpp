@@ -897,6 +897,17 @@ int STerrainAtlasProfile::assignedSlotCount() const
     return count;
 }
 
+QString CTerrainAtlasProfileStore::workingAtlasProvenance()
+{
+    return QStringLiteral("portable-working-modern-atlas-v1");
+}
+
+bool CTerrainAtlasProfileStore::isWorkingAtlasProfile(
+    const STerrainAtlasProfile& profile)
+{
+    return profile.provenance == workingAtlasProvenance();
+}
+
 STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
     const STerrainAtlasFinalization& finalization,
     const QVector<QImage>& decodedPhysicalTiles,
@@ -1028,7 +1039,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
     profile.atlasPixelSha256 =
         CTerrainAtlasProfileInference::pixelSha256(decodedPhysicalTiles);
     profile.atlasSlotCount = decodedPhysicalTiles.size();
-    profile.provenance = QStringLiteral("portable-finalized-modern-atlas-v1");
+    profile.provenance = workingAtlasProvenance();
     profile.approved = true;
 
     QMap<qint32, STerrainAtlasProfileFamily> families;
@@ -1168,11 +1179,13 @@ bool CTerrainAtlasProfileStore::loadExplicitOverride(
         == QStringLiteral("portable-exact-stock-atlas-clone-v1");
     const bool portableFinalizedAtlas = loaded.provenance
         == QStringLiteral("portable-finalized-modern-atlas-v1");
-    if(!explicitUserProfile && !portableExactClone && !portableFinalizedAtlas)
+    const bool portableWorkingAtlas = isWorkingAtlasProfile(loaded);
+    if(!explicitUserProfile && !portableExactClone && !portableFinalizedAtlas
+       && !portableWorkingAtlas)
     {
         if(report) report->add("terrain.atlas_profile_not_explicit_override",
             EValidationSeverity::Warning,
-            "A stored generated/default profile was ignored; only an explicitly edited local profile or an exact-bound portable stock clone may override the built-in Material atlas",
+            "A stored generated/default profile was ignored; only an explicitly edited local profile or an exact-bound portable stock, working, or finalized atlas may override the built-in Material atlas",
             path);
         return false;
     }

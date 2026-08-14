@@ -160,6 +160,8 @@ struct STerrainAtlasProfile
 class CTerrainAtlasProfileStore
 {
 public:
+    static QString workingAtlasProvenance();
+    static bool isWorkingAtlasProfile(const STerrainAtlasProfile& profile);
     static STerrainAtlasProfile portableFinalizedProfile(
         const STerrainAtlasFinalization& finalization,
         const QVector<QImage>& decodedPhysicalTiles,

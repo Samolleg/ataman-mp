@@ -16,13 +16,27 @@ inline ETerrainMprSaveRoute terrainMprSaveRoute(
     bool landMaterialFieldActive,
     bool overlayMaterialFieldActive,
     bool landUsesWorkingExtension,
-    bool overlayUsesWorkingExtension)
+    bool overlayUsesWorkingExtension,
+    bool persistedWorkingDraft = false)
 {
     return identityPublicationRequested || landMaterialFieldActive
             || overlayMaterialFieldActive || landUsesWorkingExtension
-            || overlayUsesWorkingExtension
+            || overlayUsesWorkingExtension || persistedWorkingDraft
         ? ETerrainMprSaveRoute::PublishModernAtlas
         : ETerrainMprSaveRoute::PlainMpr;
+}
+
+inline bool terrainMprUsesAdjacentModernAtlas(
+    const QString& mprPath, const QString& terrainArchivePath)
+{
+    if(mprPath.trimmed().isEmpty() || terrainArchivePath.trimmed().isEmpty())
+        return false;
+    const QFileInfo mpr(mprPath);
+    const QString expected = QDir::cleanPath(mpr.dir().filePath(
+        mpr.completeBaseName() + QStringLiteral("-atlas.res")));
+    const QString actual = QDir::cleanPath(
+        QFileInfo(terrainArchivePath).absoluteFilePath());
+    return QString::compare(expected, actual, Qt::CaseInsensitive) == 0;
 }
 
 inline bool terrainMprSaveActionEnabled(bool hasMpr, bool mprDirty,

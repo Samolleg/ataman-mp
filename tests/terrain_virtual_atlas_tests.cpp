@@ -551,6 +551,7 @@ private slots:
     void uniformStrokeDistributesPureVariantsAndRotationsDeterministically();
     void preservedLayerSlotsArePinnedAndRemapped();
     void combinedLandAndOverlayPublicationPreservesBothExactFields();
+    void reopenedDraftCanInitializeAndPublishWithoutNewPaint();
     void inactiveOverlaySentinelSurvivesLandFinalization();
     void gradedAlphaIsRefusedWithoutFlattening();
     void dxt1TerrainPagesMatchShippedMipContract();
@@ -4425,6 +4426,79 @@ void TerrainVirtualAtlasTests::combinedLandAndOverlayPublicationPreservesBothExa
         1, 0, ETerrainTileLayer::Overlay, &available);
     QVERIFY(available);
     QCOMPARE(finalizedSignature(finalized, untouchedOverlay, &found),
+             signature(4, 4, 4, 4));
+    QVERIFY(found);
+}
+
+void TerrainVirtualAtlasTests::reopenedDraftCanInitializeAndPublishWithoutNewPaint()
+{
+    Fixture fixture;
+    CValidationReport report;
+    SMprPackedTile landSource;
+    landSource.tileIndex = 0;
+    SMprPackedTile overlaySource;
+    overlaySource.tileIndex = 3;
+    CMprDocument reopenedDraft;
+    QVERIFY2(reopenedDraft.loadBytes(portableMprWithActiveOverlay(
+                 landSource.encode(), overlaySource.encode()),
+                 "reopened-working-draft.mpr", &report),
+             qPrintable(report.toText()));
+
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(reopenedDraft, &report), qPrintable(report.toText()));
+    QVERIFY(!terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land));
+    QVERIFY2(terrain.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, fixture.catalog, &report),
+             qPrintable(report.toText()));
+    CTerrainVirtualMaterialField field;
+    QVERIFY(terrain.copyVirtualMaterialField(ETerrainTileLayer::Land, &field));
+
+    QVector<quint16> pinnedOverlay;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 packed = terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &available);
+            if(available && packed != 0xffffu
+               && !pinnedOverlay.contains(packed))
+                pinnedOverlay.append(packed);
+        }
+    QVERIFY(!pinnedOverlay.isEmpty());
+
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, "ReopenedDraft", 512, {1, 2, 3, 4}, &report,
+        pinnedOverlay);
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n")
+                        + report.toText()));
+    const STerrainPortableAtlasPackage package =
+        CTestTerrainVirtualAtlas::buildPortablePackage(
+            reopenedDraft, terrain, finalized, ETerrainTileLayer::Land,
+            &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + QStringLiteral("\n")
+                        + report.toText()));
+
+    CMprDocument published;
+    QVERIFY2(published.loadBytes(package.mprBytes, "published-draft.mpr",
+                                 &report), qPrintable(report.toText()));
+    CTerrainEditModel publishedTerrain;
+    QVERIFY2(publishedTerrain.load(published, &report),
+             qPrintable(report.toText()));
+    bool available = false;
+    bool found = false;
+    const quint16 publishedLand = publishedTerrain.packedTile(
+        0, 0, ETerrainTileLayer::Land, &available);
+    QVERIFY(available);
+    QCOMPARE(finalizedSignature(finalized, publishedLand, &found),
+             signature(1, 1, 1, 1));
+    QVERIFY(found);
+    const quint16 publishedOverlay = publishedTerrain.packedTile(
+        0, 0, ETerrainTileLayer::Overlay, &available);
+    QVERIFY(available);
+    QCOMPARE(finalizedSignature(finalized, publishedOverlay, &found),
              signature(4, 4, 4, 4));
     QVERIFY(found);
 }

@@ -515,6 +515,14 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
              ETerrainMprSaveRoute::PublishModernAtlas);
     QCOMPARE(terrainMprSaveRoute(false, false, false, false, true),
              ETerrainMprSaveRoute::PublishModernAtlas);
+    QCOMPARE(terrainMprSaveRoute(false, false, false, false, false, true),
+             ETerrainMprSaveRoute::PublishModernAtlas);
+    QVERIFY(terrainMprUsesAdjacentModernAtlas(
+        QStringLiteral("C:/Maps/zone3obr test.mpr"),
+        QStringLiteral("C:/Maps/zone3obr test-atlas.res")));
+    QVERIFY(!terrainMprUsesAdjacentModernAtlas(
+        QStringLiteral("C:/Maps/zone3obr test.mpr"),
+        QStringLiteral("C:/Res/textures.res")));
 
     QVERIFY(terrainMprSaveActionEnabled(true, true, false));
     QVERIFY(terrainMprSaveActionEnabled(true, false, true));
@@ -6831,10 +6839,21 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
     QCOMPARE(profile.assignedSlotCount(), 1);
     QCOMPARE(profile.slotDefinitions.at(64).signature, visible);
     QCOMPARE(profile.provenance,
-             QStringLiteral("portable-finalized-modern-atlas-v1"));
+             CTerrainAtlasProfileStore::workingAtlasProvenance());
     QVERIFY(profile.validateBinding(
         QStringLiteral("zone_draft"),
         CTerrainAtlasProfileInference::pixelSha256(tiles), 128, &report));
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QVERIFY(CTerrainAtlasProfileStore::save(
+        profile, directory.path(), &report));
+    STerrainAtlasProfile reopenedProfile;
+    QVERIFY(CTerrainAtlasProfileStore::loadExplicitOverride(
+        QStringLiteral("zone_draft"),
+        CTerrainAtlasProfileInference::pixelSha256(tiles), 128,
+        &reopenedProfile, directory.path(), nullptr, &report));
+    QCOMPARE(reopenedProfile.provenance,
+             CTerrainAtlasProfileStore::workingAtlasProvenance());
     const STerrainAtlasAnalysis analysis = profile.usableAnalysis(&report);
     QVERIFY2(analysis.usable, qPrintable(report.toText()));
     bool found = false;

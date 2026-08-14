@@ -142,9 +142,9 @@ public:
                              const QString& commandText);
     void notifyMobScriptChanged(CMob* mob);
     bool hasActiveMob() const { return m_activeMob != nullptr; }
-    bool hasPendingTerrainIdentityPublication() const
+    bool hasPendingTerrainPublication() const
     {
-        return m_requestedTerrainIdentityFinalization;
+        return modernTerrainPublicationRequired();
     }
     void unloadMob(QString mobName);
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
@@ -310,6 +310,7 @@ private:
                                       bool adoptAsOpenBaseline,
                                       bool allowModernDraft = false);
     bool modernTerrainPublicationRequired() const;
+    bool persistedModernDraftRequiresPublication() const;
     bool adoptCommittedLandscapeBaseline(const QFileInfo& destination,
                                          const SMprSaveCommitResult& commit);
     bool adoptCompleteTerrainBaseline(

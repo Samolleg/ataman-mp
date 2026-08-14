@@ -5561,6 +5561,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     const qint64 tileTableMs = phaseTimer.elapsed();
     phaseTimer.restart();
     rebuildTerrainAutoCatalog();
+    emit mprSaveStateChanged();
     const qint64 materialCatalogMs = phaseTimer.elapsed();
     ei::log(eLogInfo, QString(
         "MPR editor load phases file:%1 rendererAtlasAndSectorsMs:%2 canonicalMs:%3 tileTableMs:%4 materialCatalogMs:%5 totalMs:%6")
@@ -5709,8 +5710,18 @@ bool CView::modernTerrainPublicationRequired() const
         m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land),
         m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay),
         terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
-        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay))
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
+        persistedModernDraftRequiresPublication())
         == ETerrainMprSaveRoute::PublishModernAtlas;
+}
+
+bool CView::persistedModernDraftRequiresPublication() const
+{
+    return CTerrainAtlasProfileStore::isWorkingAtlasProfile(
+               m_terrainAtlasProfile)
+        || (m_pLand && terrainMprUsesAdjacentModernAtlas(
+               m_pLand->filePath().absoluteFilePath(),
+               m_activeTerrainArchivePath));
 }
 
 bool CView::saveLandscapeDocument(const QFileInfo& destination)
@@ -8165,10 +8176,21 @@ void CView::finalizeVirtualTerrainAtlas()
                "modern terrain publication begins. No file was changed."));
         return;
     }
+    const bool persistedDraft = persistedModernDraftRequiresPublication();
     bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
-        ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land);
+        ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
+        ||persistedDraft;
     bool overlayActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay)
         ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay);
+    if(persistedDraft)
+        for(int y=0;y<m_terrainEdit.tileCountY()&&!overlayActive;++y)
+            for(int x=0;x<m_terrainEdit.tileCountX()&&!overlayActive;++x)
+            {
+                bool available=false;
+                const quint16 packed=m_terrainEdit.packedTile(
+                    x,y,ETerrainTileLayer::Overlay,&available);
+                overlayActive=available&&packed!=0xffffu;
+            }
     if(identityOnlyRequest && !landActive && !overlayActive)
         landActive = true;
     if(!m_terrainEditAvailable||!m_pTileForm||m_pTileForm->tileImages().isEmpty()
@@ -8205,7 +8227,8 @@ void CView::finalizeVirtualTerrainAtlas()
         :(layer==ETerrainTileLayer::Land
             ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog);
     CTerrainVirtualMaterialField field;
-    if(identityOnlyRequest
+    if((identityOnlyRequest||persistedDraft)
+       && !m_terrainEdit.virtualMaterialFieldActive(layer)
        && !m_terrainEdit.initializeVirtualMaterialField(layer, catalog, &report))
     {
         QMessageBox::critical(this, tr("Modern MPR save refused"),
@@ -8341,7 +8364,7 @@ void CView::finalizeVirtualTerrainAtlas()
             QDir::cleanPath(preselectedMprDestination.absoluteFilePath()),
             QDir::cleanPath(m_pLand->filePath().absoluteFilePath()),
             Qt::CaseInsensitive) == 0;
-    if(selectedIdentity.isEmpty() && saveOverCurrentMpr
+    if(selectedIdentity.isEmpty() && saveOverCurrentMpr && !persistedDraft
        && m_terrainAtlasProfile.provenance.startsWith(
               QStringLiteral("portable-finalized-modern-atlas-v1")))
     {
