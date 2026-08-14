@@ -8,6 +8,8 @@ SOURCES += \
     profile_database_tests.cpp \
     ../source/documents/database_document.cpp \
     ../source/documents/database_workbook.cpp \
+    ../source/documents/item_spell_constructor.cpp \
+    ../source/resources/game_text_catalog.cpp \
     ../source/documents/database_schema.cpp \
     ../source/documents/database_value_codec.cpp \
     ../source/documents/lossless_database_member.cpp \
@@ -24,6 +26,8 @@ HEADERS += \
     ../source/resources/profile_database.h \
     ../source/documents/database_document.h \
     ../source/documents/database_workbook.h \
+    ../source/documents/item_spell_constructor.h \
+    ../source/resources/game_text_catalog.h \
     ../source/documents/database_schema.h \
     ../source/documents/database_value_codec.h \
     ../source/documents/lossless_database_member.h \

@@ -107,6 +107,7 @@
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
 #include "database_editor_dialog.h"
+#include "item_spell_constructor_dialog.h"
 #include "database_document.h"
 #include "minimap_export_dialog.h"
 #include "viewport_minimap_widget.h"
@@ -477,6 +478,44 @@ void MainWindow::on_toolButton_2_clicked()
     ei::log(eLogDebug, "btn test end");
 }
 
+void MainWindow::showItemSpellConstructor(const QString& initialCode)
+{
+    const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+    QString diagnostic;
+    if(!m_databaseDocument || !snapshot
+       || QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath().compare(
+              QFileInfo(snapshot->sourceArchivePath).absoluteFilePath(), Qt::CaseInsensitive) != 0)
+        m_databaseDocument = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
+    if(!m_databaseDocument)
+    {
+        QMessageBox::warning(this, tr("Item / Spell Constructor"),
+            tr("The active profile database cannot be opened.\n\n%1").arg(diagnostic));
+        return;
+    }
+    const QString source = QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath();
+    if(m_itemSpellConstructorDialog
+       && m_itemSpellConstructorDialog->property("databaseSource").toString().compare(
+              source, Qt::CaseInsensitive) != 0)
+    {
+        delete m_itemSpellConstructorDialog;
+        m_itemSpellConstructorDialog = nullptr;
+    }
+    if(!m_itemSpellConstructorDialog)
+    {
+        QStringList roots;
+        if(COptStringList* option = dynamic_cast<COptStringList*>(
+               m_settings->opt(eOptSetResource, "resourceRoots")))
+            for(const QString& root : option->value()) roots << root;
+        m_itemSpellConstructorDialog = new ei::ItemSpellConstructorDialog(
+            m_databaseDocument, roots, m_pView, nullptr);
+        m_itemSpellConstructorDialog->setProperty("databaseSource", source);
+    }
+    if(!initialCode.trimmed().isEmpty()) m_itemSpellConstructorDialog->setCode(initialCode);
+    m_itemSpellConstructorDialog->show();
+    m_itemSpellConstructorDialog->raise();
+    m_itemSpellConstructorDialog->activateWindow();
+}
+
 void MainWindow::showDatabaseEditor(const QString& prototype)
 {
     ei::log(eLogInfo, QString("Database editor navigation requested for prototype '%1'")
@@ -513,6 +552,8 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
                 description, tableKey, rowKey));
             m_pView->refreshDatabaseVisuals(tableKey, rowKey);
         });
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::itemSpellConstructorRequested,
+                this, &MainWindow::showItemSpellConstructor);
     }
 
     m_databaseEditorDialog->show();
@@ -1071,6 +1112,8 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* repairMobFamily = new QAction(tr("Review and Repair Object IDs..."), this);
     QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
     QAction* openDatabaseEditor = new QAction(tr("Database Editor..."), this);
+    QAction* openItemSpellConstructor = new QAction(tr("Item / Spell Constructor..."), this);
+    openItemSpellConstructor->setObjectName(QStringLiteral("openItemSpellConstructorAction"));
     QAction* generateMinimapAction = new QAction(tr("Export Minimap..."), this);
     QAction* persistAiGraphAction = new QAction(tr("Bake / Export AI Graph..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
@@ -1088,6 +1131,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(repairMobFamily);
     m_ui->menuTools->addAction(openMapCatalog);
     m_ui->menuTools->addAction(openDatabaseEditor);
+    m_ui->menuTools->addAction(openItemSpellConstructor);
     m_ui->menuTools->addAction(generateMinimapAction);
     m_ui->menuTools->addAction(persistAiGraphAction);
     m_ui->menuTools->addAction(m_mapTestAction);
@@ -1111,6 +1155,8 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(openDatabaseEditor, &QAction::triggered, this,
             [this]() { showDatabaseEditor(); });
+    connect(openItemSpellConstructor, &QAction::triggered, this,
+            [this]() { showItemSpellConstructor(); });
     connect(generateMinimapAction, &QAction::triggered,
             this, &MainWindow::generateMinimap);
     connect(persistAiGraphAction, &QAction::triggered,
@@ -1864,6 +1910,8 @@ MainWindow::MainWindow(QWidget* parent) :
 MainWindow::~MainWindow()
 {
     saveUiState();
+    delete m_itemSpellConstructorDialog;
+    m_itemSpellConstructorDialog=nullptr;
     delete m_databaseEditorDialog;
     m_databaseEditorDialog=nullptr;
     delete m_minimapExportDialog;

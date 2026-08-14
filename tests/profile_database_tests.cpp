@@ -33,6 +33,8 @@
 #include "lossless_database_member.h"
 #include "res_archive_document.h"
 #include "database_editor_dialog.h"
+#include "item_spell_constructor.h"
+#include "game_text_catalog.h"
 #include "profile_database_provider_support.h"
 
 namespace {
@@ -198,6 +200,13 @@ private slots:
     void databaseEditorUsesLazyModelAndNavigatesReferences();
     void installedVerifiedReferenceMappingsResolve();
     void installedDatabaseInteractiveLatency();
+    void itemSpellConstructorParsesCanonicalAndLegacyCodes();
+    void itemSpellConstructorRestrictsMaterialsAndReportsSoftLimits();
+    void itemSpellConstructorUsesGameTextKeys();
+    void databaseEditorExposesConstructorEntryPoint();
+    void itemSpellConstructorUsesVerifiedPreviewFamilies();
+    void installedConstructorCatalogCoverage();
+    void gameTextCatalogComposesProfileOverlays();
 };
 
 QByteArray unitPerkLua(const QString& prototype, int strongMan)
@@ -1215,6 +1224,158 @@ void ProfileDatabaseTests::installedVerifiedReferenceMappingsResolve()
         }
     }
     QVERIFY(mappedFields>=1);
+}
+
+void ProfileDatabaseTests::itemSpellConstructorParsesCanonicalAndLegacyCodes()
+{
+    const ei::SParsedSpellCode spell = ei::ItemSpellConstructorCatalog::parseSpellCode(
+        " acid_ray { e0,e1 ; im2 } ");
+    QVERIFY(spell.valid);
+    QCOMPARE(spell.prototypeCode, QString("acid_ray"));
+    QCOMPARE(spell.runeCodes, QStringList({"e0", "e1", "im2"}));
+    QCOMPARE(ei::ItemSpellConstructorCatalog::formatSpellCode(spell.prototypeCode,
+                                                              spell.runeCodes),
+             QString("acid_ray{e0;e1;im2}"));
+
+    const ei::SParsedItemCode item = ei::ItemSpellConstructorCatalog::parseItemCode(
+        "vlfsh.black wolf hide[prot_fire{it;m0;im0}]");
+    QVERIFY(item.valid);
+    QCOMPARE(item.prototypeName, QString("vlfsh"));
+    QCOMPARE(item.materialName, QString("black wolf hide"));
+    QVERIFY(item.spell.valid);
+    QCOMPARE(ei::ItemSpellConstructorCatalog::formatItemCode(
+                 item.prototypeName, item.materialName,
+                 ei::ItemSpellConstructorCatalog::formatSpellCode(
+                     item.spell.prototypeCode, item.spell.runeCodes)),
+             QString("vlfsh.black wolf hide[prot_fire{it;m0;im0}]"));
+}
+
+void ProfileDatabaseTests::itemSpellConstructorRestrictsMaterialsAndReportsSoftLimits()
+{
+    ei::ItemSpellConstructorCatalog catalog;
+    ei::SConstructorMaterial wool; wool.name="wool"; wool.displayName="Wool";
+    wool.type="Cloth"; wool.code="wo"; wool.mana=2.0; wool.slotCapacity=2;
+    ei::SConstructorMaterial thin; thin.name="thin"; thin.displayName="Thin leather";
+    thin.type="Leather"; thin.code="le"; thin.mana=3.0; thin.slotCapacity=3;
+    ei::SConstructorMaterial bones; bones.name="bones"; bones.displayName="Bones";
+    bones.type="Bone"; bones.code="bn"; bones.mana=100.0; bones.slotCapacity=100;
+    catalog.materials << wool << thin << bones;
+    ei::SConstructorItem item;
+    item.name = "shirt"; item.materialType = "Leather"; item.mana = 5.0;
+    item.slotCapacity = 4; item.components = 2;
+    const QVector<ei::SConstructorMaterial> choices = catalog.compatibleMaterials(item);
+    QCOMPARE(choices.size(), 1);
+    QCOMPARE(choices.front().name, QString("thin"));
+
+    ei::SConstructorRune rune; rune.name="effect"; rune.displayName="Effect";
+    rune.code="e0"; rune.type=3; rune.complexity=3; rune.mana=7.0;
+    catalog.runes << rune;
+    ei::SConstructorSpell spell;
+    spell.code = "fire"; spell.mana = 20.0; spell.complexity = 20;
+    const ei::SConstructorLimitReport limits = catalog.limits(
+        item, &choices.front(), &spell, {"e0"});
+    QCOMPARE(limits.itemMana, 11.0);
+    QCOMPARE(limits.itemSlots, 10);
+    QCOMPARE(limits.spellMana, 27.0);
+    QCOMPARE(limits.spellComplexity, 23);
+    QCOMPARE(limits.warnings.size(), 2);
+}
+
+void ProfileDatabaseTests::itemSpellConstructorUsesGameTextKeys()
+{
+    ei::ItemSpellConstructorCatalog catalog;
+    ei::SConstructorMaterial material; material.name="Iron"; material.displayName="Iron";
+    material.type="Metal"; material.code="ir"; catalog.materials << material;
+    ei::SConstructorSpell spell; spell.name="Fireball"; spell.displayName="Fireball";
+    spell.code="fireball"; spell.subtype="fire"; spell.school=0; spell.textureType=3;
+    catalog.spells << spell;
+    ei::SConstructorRune rune; rune.name="Cut Effect"; rune.displayName="Cut Effect";
+    rune.code="e0"; rune.type=3; catalog.runes << rune;
+    ei::SConstructorItem item; item.name="vlcsh"; item.displayName="vlcsh";
+    item.category="Armor"; item.type="shirt"; item.materialType="Cloth";
+    item.typeId=3; catalog.items << item;
+    catalog.applyGameTexts({
+        {"MATERIAL Iron", QString::fromUtf8("Железо\r\nDescription")},
+        {"SPELL fireball", QString::fromUtf8("Огненный шар\r\nDescription")},
+        {"MODIFIER e0", QString::fromUtf8("Усиление\r\nDescription")},
+        {"INSTR vlcsh", QString::fromUtf8("Безрукавка\r\nDescription")}
+    });
+    QCOMPARE(catalog.materials.front().displayName, QString::fromUtf8("Железо"));
+    QCOMPARE(catalog.spells.front().displayName, QString::fromUtf8("Огненный шар"));
+    QCOMPARE(catalog.runes.front().displayName, QString::fromUtf8("Усиление"));
+    QCOMPARE(catalog.items.front().displayName, QString::fromUtf8("Безрукавка"));
+}
+
+void ProfileDatabaseTests::databaseEditorExposesConstructorEntryPoint()
+{
+    QTemporaryDir directory;
+    const QString path=directory.filePath("database.res");
+    write(path,resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="base";
+    request.resourceDirectories<<directory.path();
+    const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    ei::DatabaseEditorDialog dialog(document);
+    QPushButton* button=dialog.findChild<QPushButton*>("databaseItemSpellConstructorButton");
+    QVERIFY(button);
+    QSignalSpy requested(&dialog,&ei::DatabaseEditorDialog::itemSpellConstructorRequested);
+    button->click();
+    QCOMPARE(requested.count(),1);
+}
+
+void ProfileDatabaseTests::itemSpellConstructorUsesVerifiedPreviewFamilies()
+{
+    ei::SConstructorItem weapon;weapon.category="Weapon";weapon.typeId=1;
+    weapon.textureType1=5;weapon.textureType2=0;
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemFigureName(weapon),QString("initweax5weapon"));
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(weapon),QString("ax_05.0"));
+    ei::SConstructorItem armor;armor.category="Armor";armor.type="shirt";
+    armor.textureType1=3;armor.textureType2=1;
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemFigureName(armor),QString("initarsh3armor"));
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(armor),QString("sh_03.1"));
+    ei::SConstructorItem quick;quick.category="Quick Item";quick.textureType1=17;
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemFigureName(quick),QString("initqi17item"));
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(quick),QString("quitem0017"));
+    ei::SConstructorSpell spell;spell.textureType=3;
+    QCOMPARE(ei::ItemSpellConstructorCatalog::spellTextureName(spell),QString("spell0003"));
+}
+
+void ProfileDatabaseTests::installedConstructorCatalogCoverage()
+{
+    const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);
+    if(archives.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run constructor corpus coverage.");
+    const QFileInfo info(archives.first());QVERIFY(info.isFile());
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="constructor-corpus";
+    request.resourceDirectories<<info.absolutePath();
+    const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    const auto catalog=ei::ItemSpellConstructorCatalog::fromDocument(*document);
+    QVERIFY2(catalog.materials.size()>=20,qPrintable(QString("materials=%1").arg(catalog.materials.size())));
+    QVERIFY2(catalog.items.size()>=100,qPrintable(QString("items=%1").arg(catalog.items.size())));
+    QVERIFY2(catalog.spells.size()>=20,qPrintable(QString("spells=%1").arg(catalog.spells.size())));
+    QVERIFY2(catalog.runes.size()>=20,qPrintable(QString("runes=%1").arg(catalog.runes.size())));
+    for(const auto& item:catalog.items)
+        for(const auto& material:catalog.compatibleMaterials(item))
+            QCOMPARE(material.type.compare(item.materialType,Qt::CaseInsensitive),0);
+}
+
+void ProfileDatabaseTests::gameTextCatalogComposesProfileOverlays()
+{
+    QTemporaryDir directory;QVERIFY(directory.isValid());
+    QDir root(directory.path());QVERIFY(root.mkpath("base"));QVERIFY(root.mkpath("jmv"));
+    write(root.filePath("base/texts.res"),resArchive({
+        {"SPELL fireball",QByteArray("Base Fireball\r\nDescription")},
+        {"MATERIAL Iron",QByteArray("Base Iron\r\nDescription")}
+    }));
+    write(root.filePath("jmv/texts.res"),resArchive({
+        {"SPELL fireball",QByteArray("JMV Fireball\r\nDescription")}
+    }));
+    const ei::SGameTextCatalog catalog=ei::loadGameTextCatalog(
+        {root.filePath("jmv"),root.filePath("base")});
+    QCOMPARE(catalog.entries.value("SPELL fireball"),QString("JMV Fireball\r\nDescription"));
+    QCOMPARE(catalog.entries.value("MATERIAL Iron"),QString("Base Iron\r\nDescription"));
 }
 
 QTEST_MAIN(ProfileDatabaseTests)
