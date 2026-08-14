@@ -17,6 +17,7 @@ class QTabWidget;
 
 namespace ei {
 class DatabaseDocument;
+struct SProfileDatabaseSnapshot;
 class ItemSpellConstructorDialog : public QDialog
 {
     Q_OBJECT
@@ -57,6 +58,9 @@ private:
     void showImportDiagnostic(const QStringList& messages);
 
     ItemSpellConstructorCatalog m_catalog;
+    QSharedPointer<const SProfileDatabaseSnapshot> m_databaseSnapshot;
+    QString m_providerId;
+    QString m_profileId;
     QTabWidget* m_tabs{nullptr};
     QLineEdit* m_codeEdit{nullptr};
     QLabel* m_validation{nullptr};

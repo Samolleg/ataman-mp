@@ -58,6 +58,7 @@ private slots:
     void currentSessionSnapshotRejectsUnsafePath();
     void authoritativeResultAcceptsVerifiedRun();
     void authoritativeResultAcceptsLatestHotReloadGeneration();
+    void authoritativeResultRequiresStagedTablesLuaRead();
     void authoritativeResultRejectsWrongZone();
     void analyzesPersistedAuthoritativeResult();
     void runtimeSmokeReachesGameplayReady();
@@ -234,6 +235,12 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
     input.databaseData = readAll(input.databaseSourcePath);
     QVERIFY2(!input.databaseData.isEmpty(),
              qPrintable("Could not read smoke database: " + input.databaseSourcePath));
+    input.tablesLuaSourcePath = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_TABLES_LUA",
+        QDir(modRoot).filePath("lua/tables.lua"));
+    input.tablesLuaData = readAll(input.tablesLuaSourcePath);
+    QVERIFY2(!input.tablesLuaData.isEmpty(),
+             qPrintable("Could not read smoke tables.lua: " + input.tablesLuaSourcePath));
     input.mapEntry.zoneId = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_ZONE", "gz1g");
     input.mapEntry.mprName = qEnvironmentVariable(
         "EI_ENDURANCE_RUNTIME_SMOKE_MPR_NAME",
@@ -638,6 +645,35 @@ void JmvMapTestLauncherTests::authoritativeResultAcceptsLatestHotReloadGeneratio
     QStringList findings;
     QVERIFY2(CJmvMapTestLauncher::validateAutomatedResult(report, &findings),
              qPrintable(findings.join('\n')));
+}
+
+void JmvMapTestLauncherTests::authoritativeResultRequiresStagedTablesLuaRead()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    QJsonObject manifest = resultManifest(temp.path(), source);
+    QJsonObject tablesLua;
+    tablesLua.insert("sourcePath", "D:/JMV/lua/tables.lua");
+    tablesLua.insert("stagedPath", QDir(temp.path()).filePath("database/tables.lua"));
+    manifest.insert("tablesLua", tablesLua);
+
+    const QJsonObject missing = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, successfulBridgeEvidence(temp.path()), 0,
+        int(QProcess::NormalExit), false, QString());
+    QVERIFY(!missing.value("passed").toBool());
+    QVERIFY(!missing.value("tablesLuaRedirectObserved").toBool());
+    QVERIFY(QJsonDocument(missing.value("errors").toArray()).toJson()
+            .contains("staged tables.lua was not read"));
+
+    const QString observed = successfulBridgeEvidence(temp.path())
+        + QStringLiteral("TABLES_LUA_REDIRECT seq=1 from=\"D:/JMV/lua/tables.lua\" to=\"%1\"\n")
+              .arg(tablesLua.value("stagedPath").toString());
+    const QJsonObject accepted = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, observed, 0, int(QProcess::NormalExit), false, QString());
+    QVERIFY(accepted.value("tablesLuaRedirectObserved").toBool());
+    QVERIFY(accepted.value("passed").toBool());
 }
 
 void JmvMapTestLauncherTests::authoritativeResultRejectsWrongZone()

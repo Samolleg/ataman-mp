@@ -89,8 +89,9 @@ public:
     QString itemDisplayName(const SConstructorItem& item,
                             const SConstructorMaterial* material = nullptr) const;
     QVector<SConstructorMaterial> compatibleMaterials(const SConstructorItem& item) const;
-    bool isAuthoredMaterialCompatibility(const QString& itemName,
-                                         const QString& materialName) const;
+    bool isAuthoredMaterialReference(const QString& itemName,
+                                     const QString& materialName) const;
+    QStringList authoredMaterialTypeMismatches() const;
     SConstructorLimitReport spellReport(const SConstructorSpell& spell,
                                         const QStringList& runeCodes) const;
     SConstructorLimitReport limits(const SConstructorItem& item,

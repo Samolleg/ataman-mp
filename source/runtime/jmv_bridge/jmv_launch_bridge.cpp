@@ -3197,6 +3197,19 @@ bool ActivateRuntime()
         return true;
     if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
         return true;
+    // JMV loads addon.dll while the suspended host briefly resumes for its
+    // executable-patch phase. Preparation cannot patch a module which does not
+    // exist yet, so refresh the import hooks now, before normal game/database
+    // initialization reads addon-owned tables.lua.
+    const int newlyPatchedImports = InstallFileObservationHooks();
+    g_patchedImports += newlyPatchedImports;
+    {
+        wchar_t refresh[256]{};
+        _snwprintf_s(refresh, sizeof(refresh) / sizeof(refresh[0]), _TRUNCATE,
+                     L"TRANSITION_PROBE refreshed post-addon imports newly_patched=%d total_patched=%d",
+                     newlyPatchedImports, g_patchedImports);
+        Log(refresh);
+    }
     Log(L"RUNTIME_ACTIVATION phase=install-map-detours begin module=cached");
     const bool directLaunch = InstallMapLoadDetour();
     Log(directLaunch

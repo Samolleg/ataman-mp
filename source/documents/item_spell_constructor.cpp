@@ -415,16 +415,35 @@ QVector<SConstructorMaterial> ItemSpellConstructorCatalog::compatibleMaterials(c
     if(item.materialType.trimmed().isEmpty() || item.materialType.compare(QStringLiteral("None"), Qt::CaseInsensitive) == 0)
         return result;
     for(const SConstructorMaterial& material : materials)
-        if(material.type.compare(item.materialType, Qt::CaseInsensitive) == 0
-           || isAuthoredMaterialCompatibility(item.name, material.name))
+        if(material.type.compare(item.materialType, Qt::CaseInsensitive) == 0)
             result.append(material);
     return result;
 }
 
-bool ItemSpellConstructorCatalog::isAuthoredMaterialCompatibility(
+bool ItemSpellConstructorCatalog::isAuthoredMaterialReference(
     const QString& itemName, const QString& materialName) const
 {
     return m_authoredMaterialsByItem.value(folded(itemName)).contains(folded(materialName));
+}
+
+QStringList ItemSpellConstructorCatalog::authoredMaterialTypeMismatches() const
+{
+    QStringList result;
+    for(auto itemIt=m_authoredMaterialsByItem.constBegin();itemIt!=m_authoredMaterialsByItem.constEnd();++itemIt)
+    {
+        const SConstructorItem* item=findItem(itemIt.key());
+        if(!item)continue;
+        for(const QString& materialName:itemIt.value())
+        {
+            const SConstructorMaterial* material=findMaterial(materialName);
+            if(material&&material->type.compare(item->materialType,Qt::CaseInsensitive)!=0)
+                result<<QStringLiteral("%1.%2 (%3 != %4)")
+                    .arg(item->name,material->name,item->materialType,material->type);
+        }
+    }
+    result.removeDuplicates();
+    result.sort(Qt::CaseInsensitive);
+    return result;
 }
 
 SConstructorLimitReport ItemSpellConstructorCatalog::limits(const SConstructorItem& item,

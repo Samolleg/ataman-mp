@@ -393,12 +393,6 @@ void DatabaseEditorDialog::showColumnContextMenu(int logicalColumn,const QPoint&
     if(logicalColumn<0||logicalColumn>=m_model->columnCount())return;
     PersistentColumnMenu menu(this);menu.setObjectName(QStringLiteral("databaseColumnMenu"));
     const auto stayOpen=[](QAction* action){action->setProperty("databaseStayOpen",true);return action;};
-    const auto setVisible=[this](const QString& source,bool visible){for(int column=0;column<m_model->columnCount();++column){if(source.isEmpty()&&column==0)continue;if(source.isEmpty()||m_model->columnSource(column)==source)m_grid->setColumnHidden(column,!visible);}m_grid->syncFrozenColumns();saveCurrentColumnState();};
-    QAction* showAll=stayOpen(menu.addAction(tr("Show all columns")));showAll->setObjectName(QStringLiteral("databaseShowAllColumnsAction"));
-    connect(showAll,&QAction::triggered,this,[setVisible](){setVisible(QString(),true);});
-    QAction* hideAll=stayOpen(menu.addAction(tr("Hide all columns")));hideAll->setObjectName(QStringLiteral("databaseHideAllColumnsAction"));
-    connect(hideAll,&QAction::triggered,this,[setVisible](){setVisible(QString(),false);});
-    menu.addSeparator();
     QAction* lock=menu.addAction(tr("Lock columns through “%1”")
         .arg(m_model->headerData(logicalColumn,Qt::Horizontal,Qt::DisplayRole).toString()));
     stayOpen(lock);
@@ -411,18 +405,22 @@ void DatabaseEditorDialog::showColumnContextMenu(int logicalColumn,const QPoint&
     {
         bool present=false;for(int column=0;column<m_model->columnCount();++column)present|=m_model->columnSource(column)==source;if(!present)return;
         auto* columns=new PersistentColumnMenu(&menu);columns->setTitle(title);columns->setObjectName(objectName);menu.addMenu(columns);
-        QAction* showSource=stayOpen(columns->addAction(tr("Show this source")));showSource->setObjectName(QStringLiteral("databaseShowSource_%1").arg(source));connect(showSource,&QAction::triggered,this,[setVisible,source](){setVisible(source,true);});
-        QAction* hideSource=stayOpen(columns->addAction(tr("Hide this source")));hideSource->setObjectName(QStringLiteral("databaseHideSource_%1").arg(source));connect(hideSource,&QAction::triggered,this,[setVisible,source](){setVisible(source,false);});
+        QAction* showSource=stayOpen(columns->addAction(tr("Show all")));showSource->setObjectName(QStringLiteral("databaseShowAllColumns_%1").arg(source));
+        QAction* hideSource=stayOpen(columns->addAction(tr("Hide all")));hideSource->setObjectName(QStringLiteral("databaseHideAllColumns_%1").arg(source));
         if(source==QStringLiteral("database.res"))
         {
             QAction* showUnknown=stayOpen(columns->addAction(tr("Show unknown/raw columns")));showUnknown->setObjectName(QStringLiteral("databaseShowUnknownColumnsAction"));connect(showUnknown,&QAction::triggered,this,[this](){for(int column=0;column<m_model->columnCount();++column)if(m_model->isOpaqueColumn(column))m_grid->setColumnHidden(column,false);m_grid->syncFrozenColumns();saveCurrentColumnState();});
             QAction* hideUnknown=stayOpen(columns->addAction(tr("Hide unknown/raw columns")));hideUnknown->setObjectName(QStringLiteral("databaseHideUnknownColumnsAction"));connect(hideUnknown,&QAction::triggered,this,[this](){for(int column=0;column<m_model->columnCount();++column)if(m_model->isOpaqueColumn(column))m_grid->setColumnHidden(column,true);m_grid->syncFrozenColumns();saveCurrentColumnState();});
         }
         columns->addSeparator();
+        QVector<QAction*> visibilityActions;
         for(int column=0;column<m_model->columnCount();++column)if(m_model->columnSource(column)==source)
         {
-            QAction* visible=stayOpen(columns->addAction(m_model->headerData(column,Qt::Horizontal,Qt::DisplayRole).toString()));visible->setObjectName(QStringLiteral("databaseColumnVisibilityAction_%1").arg(column));visible->setCheckable(true);visible->setChecked(!m_grid->isColumnHidden(column));visible->setData(column);connect(visible,&QAction::toggled,this,[this,column](bool checked){m_grid->setColumnHidden(column,!checked);m_grid->syncFrozenColumns();saveCurrentColumnState();});
+            QAction* visible=stayOpen(columns->addAction(m_model->headerData(column,Qt::Horizontal,Qt::DisplayRole).toString()));visible->setObjectName(QStringLiteral("databaseColumnVisibilityAction_%1").arg(column));visible->setCheckable(true);visible->setChecked(!m_grid->isColumnHidden(column));visible->setData(column);visibilityActions.append(visible);connect(visible,&QAction::toggled,this,[this,column](bool checked){m_grid->setColumnHidden(column,!checked);m_grid->syncFrozenColumns();saveCurrentColumnState();});
         }
+        const auto setSourceVisible=[this,visibilityActions](bool visible){for(QAction* action:visibilityActions){const QSignalBlocker blocker(action);action->setChecked(visible);m_grid->setColumnHidden(action->data().toInt(),!visible);}m_grid->syncFrozenColumns();saveCurrentColumnState();};
+        connect(showSource,&QAction::triggered,this,[setSourceVisible](){setSourceVisible(true);});
+        connect(hideSource,&QAction::triggered,this,[setSourceVisible](){setSourceVisible(false);});
     };
     addSourceMenu(QStringLiteral("database.res"),tr("database.res"),QStringLiteral("databaseResColumnsSubmenu"));
     addSourceMenu(QStringLiteral("tables.lua"),tr("tables.lua (JMV)"),QStringLiteral("databaseLuaColumnsSubmenu"));

@@ -208,7 +208,7 @@ private slots:
     void itemSpellConstructorParsesCanonicalAndLegacyCodes();
     void itemSpellConstructorRestrictsMaterialsAndReportsSoftLimits();
     void itemSpellConstructorCalculatesRuntimeSpellValues();
-    void itemSpellConstructorPreservesAuthoredMaterialExceptions();
+    void itemSpellConstructorDoesNotTreatAuthoredCodesAsCraftingExceptions();
     void itemSpellConstructorUsesGameTextKeys();
     void databaseEditorExposesConstructorEntryPoint();
     void itemSpellConstructorUsesVerifiedPreviewFamilies();
@@ -1381,11 +1381,14 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
             if(!menu)return;
             hasDatabaseSource=menu->findChild<QMenu*>("databaseResColumnsSubmenu");
             hasEditorSource=menu->findChild<QMenu*>("databaseEditorColumnsSubmenu");
-            for(QAction* action:menu->actions())if(action->objectName()==objectName)
+            for(QAction* action:menu->findChildren<QAction*>())if(action->objectName()==objectName)
             {
-                clicked=true;poll.stop();QTest::mouseClick(menu,Qt::LeftButton,Qt::NoModifier,
-                    menu->actionGeometry(action).center());
-                QTimer::singleShot(0,[menu,&stayedOpen](){stayedOpen=menu->isVisible();menu->close();});return;
+                QMenu* owner=qobject_cast<QMenu*>(action->parent());if(!owner)continue;
+                clicked=true;poll.stop();
+                if(owner!=menu){owner->popup(menu->mapToGlobal(QPoint(menu->width(),0)));QCoreApplication::processEvents();}
+                QTest::mouseClick(owner,Qt::LeftButton,Qt::NoModifier,
+                    owner->actionGeometry(action).center());
+                QTimer::singleShot(0,[menu,owner,&stayedOpen](){stayedOpen=menu->isVisible();owner->close();menu->close();});return;
             }
         });
         QTimer::singleShot(1000,[](){for(QWidget* widget:QApplication::allWidgets())if(QMenu* menu=qobject_cast<QMenu*>(widget))menu->close();});
@@ -1412,10 +1415,13 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
         QVERIFY(!grid->wordWrap());QVERIFY(!frozen->wordWrap());
         for(int row=0;row<grid->model()->rowCount();++row)
             QCOMPARE(frozen->rowHeight(row),grid->rowHeight(row));
-        QVERIFY(clickHeaderActionStaysOpen(grid->horizontalHeader(),"databaseHideAllColumnsAction",0));
-        int hiddenAfterAll=0;for(int column=1;column<grid->model()->columnCount();++column)hiddenAfterAll+=grid->isColumnHidden(column);
-        QCOMPARE(hiddenAfterAll,grid->model()->columnCount()-1);
-        QVERIFY(clickHeaderActionStaysOpen(grid->horizontalHeader(),"databaseShowAllColumnsAction",0));
+        QVERIFY(clickHeaderActionStaysOpen(grid->horizontalHeader(),"databaseHideAllColumns_database.res",0));
+        int hiddenDatabaseColumns=0;
+        for(int column=1;column<grid->model()->columnCount();++column)
+            hiddenDatabaseColumns+=grid->isColumnHidden(column);
+        QCOMPARE(hiddenDatabaseColumns,grid->model()->columnCount()-1);
+        QVERIFY(!grid->isColumnHidden(0));
+        QVERIFY(clickHeaderActionStaysOpen(grid->horizontalHeader(),"databaseShowAllColumns_database.res",0));
         QVERIFY(triggerHeaderAction(grid->horizontalHeader(),"databaseColumnVisibilityAction_3",2));
         int hidden=0;for(int column=0;column<grid->model()->columnCount();++column)
             hidden+=grid->isColumnHidden(column);
@@ -1573,7 +1579,7 @@ void ProfileDatabaseTests::itemSpellConstructorCalculatesRuntimeSpellValues()
     QCOMPARE(report.targets,2);
 }
 
-void ProfileDatabaseTests::itemSpellConstructorPreservesAuthoredMaterialExceptions()
+void ProfileDatabaseTests::itemSpellConstructorDoesNotTreatAuthoredCodesAsCraftingExceptions()
 {
     QTemporaryDir directory;
     const QString path=directory.filePath("database.res");
@@ -1589,10 +1595,11 @@ void ProfileDatabaseTests::itemSpellConstructorPreservesAuthoredMaterialExceptio
                                 "fld.3.0","Leather",&diagnostic),qPrintable(diagnostic));
     const auto catalog=ei::ItemSpellConstructorCatalog::fromDocument(*document);
     const auto* armor=catalog.findItem("armor_leather");QVERIFY(armor);
-    QVERIFY(catalog.isAuthoredMaterialCompatibility("armor_leather","iron"));
+    QVERIFY(catalog.isAuthoredMaterialReference("armor_leather","iron"));
+    QCOMPARE(catalog.authoredMaterialTypeMismatches(),
+             QStringList({QStringLiteral("armor_leather.iron (Leather != Metal)")}));
     const auto compatible=catalog.compatibleMaterials(*armor);
-    QCOMPARE(compatible.size(),1);
-    QCOMPARE(compatible.front().name,QString("iron"));
+    QVERIFY(compatible.isEmpty());
 }
 
 void ProfileDatabaseTests::itemSpellConstructorUsesGameTextKeys()
@@ -1715,8 +1722,24 @@ void ProfileDatabaseTests::installedConstructorCatalogCoverage()
     QVERIFY2(catalog.runes.size()>=20,qPrintable(QString("runes=%1").arg(catalog.runes.size())));
     for(const auto& item:catalog.items)
         for(const auto& material:catalog.compatibleMaterials(item))
-            QVERIFY(material.type.compare(item.materialType,Qt::CaseInsensitive)==0
-                    || catalog.isAuthoredMaterialCompatibility(item.name,material.name));
+            QCOMPARE(material.type.compare(item.materialType,Qt::CaseInsensitive),0);
+    const QStringList authoredMismatches=catalog.authoredMaterialTypeMismatches();
+    qInfo()<<"authored item/material references which the runtime constructor rejects"
+           <<authoredMismatches;
+    if(const auto* agilityStaff=catalog.findItem(QStringLiteral("agility staff")))
+    {
+        bool metalAvailable=false;
+        QStringList names;
+        for(const auto& material:catalog.compatibleMaterials(*agilityStaff))
+        {
+            names<<material.name;
+            metalAvailable|=material.type.compare(QStringLiteral("Metal"),Qt::CaseInsensitive)==0
+                || material.type.compare(QStringLiteral("Metall"),Qt::CaseInsensitive)==0;
+        }
+        QVERIFY2(metalAvailable,qPrintable(QStringLiteral(
+            "The authored agility staff supports metal materials; choices were: %1")
+            .arg(names.join(QStringLiteral(", ")))));
+    }
 }
 
 void ProfileDatabaseTests::gameTextCatalogComposesProfileOverlays()

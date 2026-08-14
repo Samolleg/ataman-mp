@@ -67,6 +67,7 @@
 #include "ui/dock_hidden_tab.h"
 #include "ui/viewport_minimap_widget.h"
 #include "ui/minimap_export_dialog.h"
+#include "ui/item_spell_constructor_dialog.h"
 #include "objects/object_base.h"
 #include "window_lifecycle.h"
 #include "settings.h"
@@ -2338,6 +2339,21 @@ int runHeadlessCommand(QApplication& app)
         const bool routineDockDiagnosticsSuppressed =
                 dockDiagnosticCount() == dockDiagnosticsBefore;
 
+        // Reproduce closing and immediately reopening the modeless constructor
+        // before Qt dispatches deferred-delete events. The window is meant to
+        // be reusable for the lifetime of MainWindow.
+        QPointer<ei::ItemSpellConstructorDialog> constructorLifecycleProbe =
+            new ei::ItemSpellConstructorDialog({}, {}, nullptr, nullptr);
+        constructorLifecycleProbe->show();
+        QApplication::processEvents();
+        constructorLifecycleProbe->close();
+        constructorLifecycleProbe->show();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QApplication::processEvents();
+        const bool itemConstructorCloseReopenSafe = constructorLifecycleProbe
+            && constructorLifecycleProbe->isVisible();
+        delete constructorLifecycleProbe;
+
         // Exercise the production receiver chain after the isolated widget
         // checks. MainWindow initializes process-wide UI/render services, so
         // constructing it earlier contaminates otherwise independent probes.
@@ -2383,6 +2399,7 @@ int runHeadlessCommand(QApplication& app)
                 && enterCommit && clickCommit && databasePrototypeMenuEmissionWorks
                 && databasePrototypeMainWindowRouteWorks
                 && detachedPreviewSharesViewportContext
+                && itemConstructorCloseReopenSafe
                 && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
@@ -2496,6 +2513,8 @@ int runHeadlessCommand(QApplication& app)
                << databasePrototypeMainWindowRouteWorks
                << " detachedPreviewSharesViewportContext="
                << detachedPreviewSharesViewportContext
+               << " itemConstructorCloseReopenSafe="
+               << itemConstructorCloseReopenSafe
                << " staticChoiceItemDataStored=" << staticChoiceItemDataStored
                << " staticChoicePopupTooltipClear=" << staticChoicePopupTooltipClear
                << " staticChoiceItemTooltipsWork=" << staticChoiceItemTooltipsWork

@@ -3,6 +3,8 @@
 #include "database_document.h"
 #include "game_text_catalog.h"
 #include "objects/worldobj.h"
+#include "runtime/providers/profile_visual_resolver_support.h"
+#include "runtime_providers.h"
 #include "property.h"
 #include "preview.h"
 #include "view.h"
@@ -12,6 +14,7 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QJsonArray>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -30,6 +33,19 @@
 #include <algorithm>
 
 namespace {
+class CConstructorPreviewObject final : public CWorldObj
+{
+public:
+    void applyResolvedItem(const QString& modelName,const QString& primaryTexture,
+                           const QStringList& parts,
+                           const QMap<QString,QString>& partTextures,
+                           const QStringList& bodyTextureLayers,
+                           const QMap<QString,QVector3D>& emissions)
+    {
+        applyTransientVisual(modelName,primaryTexture,parts,QVector3D(1,1,1),
+                             partTextures,QString(),bodyTextureLayers,emissions);
+    }
+};
 QString searchable(const QStringList& values) { return values.join(QLatin1Char(' ')).toCaseFolded(); }
 QString runeTypeName(int type)
 {
@@ -96,13 +112,19 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
                       Qt::WindowCloseButtonHint),
       m_catalog(document ? ItemSpellConstructorCatalog::fromDocument(*document)
                          : ItemSpellConstructorCatalog()),
+      m_databaseSnapshot(document ? document->currentSnapshot() : QSharedPointer<const SProfileDatabaseSnapshot>()),
+      m_providerId(document ? document->providerId() : QString()),
+      m_profileId(document ? document->profileId() : QString()),
       m_view(view)
 {
     Q_UNUSED(parent);
     setObjectName(QStringLiteral("itemSpellConstructorDialog"));
     setWindowTitle(tr("Item / Spell Constructor"));
     setWindowIcon(QApplication::windowIcon());
-    setAttribute(Qt::WA_DeleteOnClose);
+    // Keep this reusable top-level window alive. WA_DeleteOnClose posts a
+    // deferred delete; reopening before that event ran could resurrect the
+    // closing OpenGL child and then destroy it while visible.
+    setAttribute(Qt::WA_DeleteOnClose, false);
     resize(1100, 720);
     setMinimumSize(780, 520);
     const SGameTextCatalog texts = loadGameTextCatalog(resourceRoots);
@@ -157,7 +179,7 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     itemRight->addWidget(m_itemDetails);
     if(m_view)
     {
-        m_previewObject = new CWorldObj;
+        m_previewObject = new CConstructorPreviewObject;
         // The constructor is a separate top-level window, so explicitly share
         // the main viewport's figures, textures, and shader resources.
         m_itemPreview = new CPreview(itemTab, m_view); m_itemPreview->attachView(m_view);
@@ -245,7 +267,17 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     refreshItemFilterChoices();refreshItemFilter(); refreshSpellFilter();
 }
 
-ItemSpellConstructorDialog::~ItemSpellConstructorDialog() { delete m_previewObject; }
+ItemSpellConstructorDialog::~ItemSpellConstructorDialog()
+{
+    if(m_itemPreview)
+    {
+        m_itemPreview->makeCurrent();
+        m_itemPreview->attachNode(nullptr);
+    }
+    delete m_previewObject;
+    m_previewObject=nullptr;
+    if(m_itemPreview)m_itemPreview->doneCurrent();
+}
 QString ItemSpellConstructorDialog::code() const { return m_codeEdit->text().trimmed(); }
 void ItemSpellConstructorDialog::setCode(const QString& value) { m_codeEdit->setText(value); importCode(); }
 
@@ -369,6 +401,57 @@ void ItemSpellConstructorDialog::updateItemPreview()
 {
     const auto* item=currentItem();
     if(!item)return;
+    if(m_itemPreview&&m_previewObject&&m_catalog.isJmvProfile()
+       &&item->category!=QStringLiteral("Quick Item")&&currentMaterial()
+       &&m_databaseSnapshot)
+    {
+        const QString model=m_catalog.previewModelName();
+        SEquipmentLayoutRequest request;
+        request.profileId=m_profileId;
+        request.runtimeManifestId=m_databaseSnapshot->runtimeManifestId;
+        request.prototype=item->name;
+        request.model=model;
+        request.assemblyParts=CObjectList::getInstance()->figurePartNames(model);
+        request.dataSource=EUnitVisualDataSource::ProfileDatabase;
+        if(ei::CFigure* assembly=CObjectList::getInstance()->getFigure(model))
+        {
+            QMap<QString,QVector3D> ignoredOffsets;
+            QVector3D ignoredComplexion(1,1,1);
+            assembly->getAssemblyHierarchy(request.assemblyParents,ignoredOffsets,
+                                           ignoredComplexion);
+        }
+        const QString reference=ItemSpellConstructorCatalog::formatItemCode(
+            item->name,currentMaterial()->name);
+        if(item->category==QStringLiteral("Weapon"))request.weapons<<reference;
+        else request.armor<<reference;
+        QJsonObject resolved;
+        const SRuntimeProviderResult resolution=resolveEquipmentLayout(
+            m_providerId,true,SJmvEquipmentGates(),m_databaseSnapshot,request,&resolved);
+        QStringList components;
+        for(const QJsonValue& value:resolved.value("components").toArray())
+            components<<value.toString();
+        QMap<QString,QString> textures;
+        const QJsonObject textureObject=resolved.value("componentTextures").toObject();
+        for(auto it=textureObject.constBegin();it!=textureObject.constEnd();++it)
+            textures.insert(it.key(),it.value().toString());
+        const QString primary=m_catalog.previewTextureName();
+        const QJsonArray bodyLayers=resolved.value("bodyTextureLayers").toArray();
+        QStringList bodyTextureLayers;
+        for(const QJsonValue& value:bodyLayers)bodyTextureLayers<<value.toString();
+        QMap<QString,QVector3D> emissions;
+        for(const QJsonValue& value:resolved.value("emissiveParts").toArray())
+            emissions.insert(value.toString().toLower(),QVector3D(1,1,1));
+        if(resolution.success&&!components.isEmpty())
+        {
+            m_itemPreview->makeCurrent();
+            static_cast<CConstructorPreviewObject*>(m_previewObject)->applyResolvedItem(
+                model,primary,components,textures,bodyTextureLayers,emissions);
+            m_itemPreview->attachNode(m_previewObject);
+            m_itemPreview->updateGL();
+            if(m_itemSpellBadge){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(m_itemSpell->text());const auto*spell=parsed.valid?m_catalog.findSpell(parsed.prototypeCode):nullptr;if(spell){m_itemSpellBadge->setPixmap(spellPixmap(m_catalog,*spell,parsed.runeCodes,140));m_itemSpellBadge->show();m_itemSpellBadge->raise();}else m_itemSpellBadge->hide();}
+            return;
+        }
+    }
     const QString figure=ItemSpellConstructorCatalog::itemFigureName(*item);
     const QString texture=ItemSpellConstructorCatalog::itemTextureName(*item,currentMaterial());
     if(m_itemPreview&&!figure.isEmpty()&&!texture.isEmpty())

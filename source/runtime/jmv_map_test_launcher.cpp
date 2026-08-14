@@ -958,6 +958,9 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const bool stagedLoaderObserved = bridgeResult.contains(
         "DIRECT_LAUNCH staged map loader returned result=1")
         || completedReloadSequence != 0;
+    const bool tablesLuaStaged = manifest.contains("tablesLua");
+    const bool tablesLuaRedirectObserved = !tablesLuaStaged
+        || bridgeResult.contains("TABLES_LUA_REDIRECT");
     const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
         && QFileInfo(actualMprPath).absoluteFilePath().compare(
             QFileInfo(expectedMprPath).absoluteFilePath(),
@@ -1021,6 +1024,8 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         addUnique(&errors, "The runtime did not prove a completed staged gameplay load.");
     if(stagedLoaderObserved && !payloadHashesValidated)
         addUnique(&errors, "The runtime loader paths could not be matched to the hash-verified staged payloads.");
+    if(tablesLuaStaged && !tablesLuaRedirectObserved)
+        addUnique(&errors, "The staged tables.lua was not read by the JMV runtime.");
     if(actualZone.isEmpty())
         addUnique(&errors, "The runtime did not report the actually initialized zone.");
     else if(!requestedZone.isEmpty()
@@ -1073,6 +1078,8 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("gameplayReady", gameplayReady);
     report.insert("stagedLoaderObserved", stagedLoaderObserved);
     report.insert("payloadHashesValidated", payloadHashesValidated);
+    report.insert("tablesLuaStaged", tablesLuaStaged);
+    report.insert("tablesLuaRedirectObserved", tablesLuaRedirectObserved);
     report.insert("playerInitializationCount", playerInitializations);
     report.insert("reportedPlayerCount", playerInitializations > 0 ? 1 : -1);
     report.insert("playerCountEvidence", playerInitializations > 0
