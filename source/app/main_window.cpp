@@ -88,6 +88,7 @@
 #include "endurance_document.h"
 #include "landscape_tools.h"
 #include "collection_document.h"
+#include "terrain_save_flow_policy.h"
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
 #include "script_reference_analyzer.h"
@@ -1016,6 +1017,8 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::loadedMapStateChanged,
             this, &MainWindow::updateLoadedMapPanel);
+    connect(m_pView, &CView::mprSaveStateChanged,
+            this, &MainWindow::updateDocumentActionAvailability);
     connect(m_pView, &CView::updateMsg, this, [this](const QString& message)
     {
         statusBar()->showMessage(message, 5000);
@@ -4712,7 +4715,9 @@ void MainWindow::updateDocumentActionAvailability()
     const bool hasActiveMob = m_pView && m_pView->hasActiveMob();
     const bool hasAnyMob = m_pView && !m_pView->mobs().isEmpty();
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
-    const bool dirtyMpr = hasMpr && CLandscape::getInstance()->isDirty();
+    const bool dirtyMpr = terrainMprSaveActionEnabled(
+        hasMpr, CLandscape::getInstance()->isDirty(),
+        m_pView && m_pView->hasPendingTerrainIdentityPublication());
     m_ui->actionOpen->setEnabled(idle);
     m_ui->actionOpen_MPR->setEnabled(idle);
     m_ui->actionOpen_MOB->setEnabled(idle);

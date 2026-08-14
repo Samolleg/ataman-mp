@@ -516,10 +516,49 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QCOMPARE(terrainMprSaveRoute(false, false, false, false, true),
              ETerrainMprSaveRoute::PublishModernAtlas);
 
-    // File > Save and File > Save As already own the destination. Publication
-    // must not ask for a second MPR path after either action.
-    QVERIFY(!terrainPublishNeedsMprDestinationDialog(true));
-    QVERIFY(terrainPublishNeedsMprDestinationDialog(false));
+    QVERIFY(terrainMprSaveActionEnabled(true, true, false));
+    QVERIFY(terrainMprSaveActionEnabled(true, false, true));
+    QVERIFY(!terrainMprSaveActionEnabled(true, false, false));
+    QVERIFY(!terrainMprSaveActionEnabled(false, true, true));
+
+    const STerrainPublicationLayerPlan landOnly =
+        terrainPublicationLayerPlan(true, false);
+    QVERIFY(landOnly.valid);
+    QCOMPARE(landOnly.primary, ETerrainPublicationPrimaryLayer::Land);
+    QVERIFY(landOnly.publishLand);
+    QVERIFY(!landOnly.publishOverlay);
+
+    const STerrainPublicationLayerPlan overlayOnly =
+        terrainPublicationLayerPlan(false, true);
+    QVERIFY(overlayOnly.valid);
+    QCOMPARE(overlayOnly.primary, ETerrainPublicationPrimaryLayer::Overlay);
+    QVERIFY(!overlayOnly.publishLand);
+    QVERIFY(overlayOnly.publishOverlay);
+
+    // One Save publishes both modern-painted layers. Ground is the canonical
+    // rebuild and the staged Overlay grid is pinned/remapped into the same
+    // physical atlas; there is no second destination prompt or second Save.
+    const STerrainPublicationLayerPlan combined =
+        terrainPublicationLayerPlan(true, true);
+    QVERIFY(combined.valid);
+    QCOMPARE(combined.primary, ETerrainPublicationPrimaryLayer::Land);
+    QVERIFY(combined.publishLand);
+    QVERIFY(combined.publishOverlay);
+
+    QTemporaryDir resources;
+    QVERIFY(resources.isValid());
+    const QString missing = QDir(resources.path()).filePath("missing");
+    const QString modRes = QDir(resources.path()).filePath("mod/res");
+    QVERIFY(QDir().mkpath(modRes));
+    const QString mprPath = QDir(resources.path()).filePath("maps/zone2.mpr");
+    const QString target = terrainPublicationInitialResourcePath(
+        {missing, modRes}, mprPath);
+    QCOMPARE(QDir::cleanPath(target),
+             QDir::cleanPath(QDir(modRes).filePath("textures.res")));
+    QVERIFY(terrainPublicationPathInResourceRoots(target, {missing, modRes}));
+    QVERIFY(!terrainPublicationPathInResourceRoots(
+        QDir(resources.path()).filePath("external/textures.res"),
+        {missing, modRes}));
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

@@ -329,6 +329,60 @@ QByteArray portableMpr(bool withInactiveOverlay = false,
         ?second:QByteArray();
 }
 
+QByteArray portableMprWithActiveOverlay(quint16 landPacked,
+                                        quint16 overlayPacked)
+{
+    QByteArray mp;
+    QDataStream stream(&mp, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream << quint32(0xCE4AF672) << float(100.0f) << quint32(1) << quint32(1)
+           << quint32(4) << quint32(64) << quint32(4) << quint32(8)
+           << quint16(1) << quint32(0);
+    mp.append(QByteArray(44, '\0'));
+    stream.device()->seek(mp.size());
+    stream << qint32(1) << qint32(2) << qint32(3) << qint32(4);
+
+    QByteArray sector;
+    QDataStream sec(&sector, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(3);
+    sector.append(QByteArray(33 * 33 * 8 * 2, '\0'));
+    QByteArray landTiles(16 * 16 * 2, '\0');
+    QByteArray overlayTiles(16 * 16 * 2, '\0');
+    QByteArray overlayMaterials(16 * 16 * 2, '\0');
+    for(int cell = 0; cell < 16 * 16; ++cell)
+    {
+        qToLittleEndian<quint16>(landPacked,
+            reinterpret_cast<uchar*>(landTiles.data() + cell * 2));
+        qToLittleEndian<quint16>(overlayPacked,
+            reinterpret_cast<uchar*>(overlayTiles.data() + cell * 2));
+        qToLittleEndian<qint16>(0,
+            reinterpret_cast<uchar*>(overlayMaterials.data() + cell * 2));
+    }
+    sector.append(landTiles);
+    sector.append(overlayTiles);
+    sector.append(overlayMaterials);
+
+    QByteArray empty(16, '\0');
+    qToLittleEndian<quint32>(0x019CE23C,
+        reinterpret_cast<uchar*>(empty.data()));
+    qToLittleEndian<quint32>(16,
+        reinterpret_cast<uchar*>(empty.data() + 8));
+    CResArchiveDocument archive;
+    QStringList errors;
+    if(!archive.loadBytes(empty, "empty", &errors))
+        return {};
+    QByteArray first;
+    if(!archive.buildWithAppendedMember("CaveSet.MP", mp, 0, &first, &errors)
+       || !archive.loadBytes(first, "first", &errors))
+        return {};
+    QByteArray second;
+    return archive.buildWithAppendedMember(
+               "CaveSet000000.SEC", sector, 0, &second, &errors)
+        ? second : QByteArray();
+}
+
 STerrainTransitionSignature finalizedSignature(
     const STerrainAtlasFinalization& finalization, quint16 packed, bool* found)
 {
@@ -496,6 +550,7 @@ private slots:
     void overlappingVirtualPaintDoesNotReplaceUnchangedEdgeBlendWithUniformPreview();
     void uniformStrokeDistributesPureVariantsAndRotationsDeterministically();
     void preservedLayerSlotsArePinnedAndRemapped();
+    void combinedLandAndOverlayPublicationPreservesBothExactFields();
     void inactiveOverlaySentinelSurvivesLandFinalization();
     void gradedAlphaIsRefusedWithoutFlattening();
     void dxt1TerrainPagesMatchShippedMipContract();
@@ -4296,6 +4351,82 @@ void TerrainVirtualAtlasTests::preservedLayerSlotsArePinnedAndRemapped()
     QVERIFY(result.authoredSlotRemap.contains(0));
     QVERIFY(result.authoredSlotRemap.contains(3));
     QVERIFY(result.authoredSlotRemap.value(0)!=result.authoredSlotRemap.value(3));
+}
+
+void TerrainVirtualAtlasTests::combinedLandAndOverlayPublicationPreservesBothExactFields()
+{
+    Fixture fixture;
+    CValidationReport report;
+    SMprPackedTile sourceLand;
+    sourceLand.tileIndex = 0;
+    SMprPackedTile sourceOverlay;
+    sourceOverlay.tileIndex = 3;
+    CMprDocument source;
+    QVERIFY2(source.loadBytes(portableMprWithActiveOverlay(
+                 sourceLand.encode(), sourceOverlay.encode()),
+                 "combined-source.mpr", &report), qPrintable(report.toText()));
+
+    CTerrainEditModel edited;
+    QVERIFY2(edited.load(source, &report), qPrintable(report.toText()));
+    SMprPackedTile paintedLand;
+    paintedLand.tileIndex = 1;
+    SMprPackedTile paintedOverlay;
+    paintedOverlay.tileIndex = 2;
+    STerrainTileCommand command;
+    STerrainTileDelta landDelta;
+    landDelta.globalX = 0;
+    landDelta.globalY = 0;
+    landDelta.layer = ETerrainTileLayer::Land;
+    landDelta.before = sourceLand.encode();
+    landDelta.after = paintedLand.encode();
+    command.deltas.append(landDelta);
+    STerrainTileDelta overlayDelta;
+    overlayDelta.globalX = 0;
+    overlayDelta.globalY = 0;
+    overlayDelta.layer = ETerrainTileLayer::Overlay;
+    overlayDelta.before = sourceOverlay.encode();
+    overlayDelta.after = paintedOverlay.encode();
+    command.deltas.append(overlayDelta);
+    QVERIFY2(edited.apply(command, true, &report), qPrintable(report.toText()));
+
+    CTerrainVirtualMaterialField landField;
+    QVERIFY(landField.resize(16, 16, 2));
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        landField, "CombinedLayers", 512, {1, 2, 3, 4}, &report,
+        {paintedOverlay.encode(), sourceOverlay.encode()});
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
+
+    const STerrainPortableAtlasPackage package =
+        CTestTerrainVirtualAtlas::buildPortablePackage(
+            source, edited, finalized, ETerrainTileLayer::Land, &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + QStringLiteral("\n") + report.toText()));
+    CMprDocument reopened;
+    QVERIFY2(reopened.loadBytes(package.mprBytes, "combined-result.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel result;
+    QVERIFY2(result.load(reopened, &report), qPrintable(report.toText()));
+
+    bool available = false;
+    const quint16 land = result.packedTile(
+        0, 0, ETerrainTileLayer::Land, &available);
+    QVERIFY(available);
+    bool found = false;
+    QCOMPARE(finalizedSignature(finalized, land, &found), signature(2, 2, 2, 2));
+    QVERIFY(found);
+    const quint16 overlay = result.packedTile(
+        0, 0, ETerrainTileLayer::Overlay, &available);
+    QVERIFY(available);
+    QCOMPARE(finalizedSignature(finalized, overlay, &found), signature(3, 3, 3, 3));
+    QVERIFY(found);
+    const quint16 untouchedOverlay = result.packedTile(
+        1, 0, ETerrainTileLayer::Overlay, &available);
+    QVERIFY(available);
+    QCOMPARE(finalizedSignature(finalized, untouchedOverlay, &found),
+             signature(4, 4, 4, 4));
+    QVERIFY(found);
 }
 
 void TerrainVirtualAtlasTests::inactiveOverlaySentinelSurvivesLandFinalization()

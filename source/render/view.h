@@ -142,6 +142,10 @@ public:
                              const QString& commandText);
     void notifyMobScriptChanged(CMob* mob);
     bool hasActiveMob() const { return m_activeMob != nullptr; }
+    bool hasPendingTerrainIdentityPublication() const
+    {
+        return m_requestedTerrainIdentityFinalization;
+    }
     void unloadMob(QString mobName);
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
     void attachLandscapeTools(CLandscapeTools* tools);
@@ -435,6 +439,7 @@ signals:
     void selectionStateChanged(bool hasSelection);
     void mobStateChanged();
     void loadedMapStateChanged();
+    void mprSaveStateChanged();
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
     void cameraSpeedMultiplierChanged(double multiplier);

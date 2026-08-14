@@ -7483,7 +7483,7 @@ void CView::reviewTerrainAtlasProfile()
        || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay))
     {
         QMessageBox::information(this, tr("Material atlas is in use"),
-            tr("Finalize or undo the current semantic terrain edits before changing the Material atlas profile. "
+            tr("Save or undo the current semantic terrain edits before changing the Material atlas profile. "
                "This keeps every generated working tile and undo reference bound to the atlas that created it."));
         return;
     }
@@ -8157,10 +8157,14 @@ void CView::finalizeVirtualTerrainAtlas()
     const bool identityOnlyRequest = m_requestedTerrainIdentityFinalization;
     const QFileInfo preselectedMprDestination =
         m_requestedTerrainMprDestination;
-    m_requestedTerrainResourceIdentity.clear();
-    m_requestedTerrainIdentityReplacement = false;
-    m_requestedTerrainIdentityFinalization = false;
     m_requestedTerrainMprDestination = QFileInfo();
+    if(preselectedMprDestination.filePath().isEmpty())
+    {
+        QMessageBox::critical(this, tr("Modern MPR save refused"),
+            tr("Save MPR or Save MPR As must select the destination before "
+               "modern terrain publication begins. No file was changed."));
+        return;
+    }
     bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
         ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land);
     bool overlayActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay)
@@ -8170,19 +8174,18 @@ void CView::finalizeVirtualTerrainAtlas()
     if(!m_terrainEditAvailable||!m_pTileForm||m_pTileForm->tileImages().isEmpty()
        ||(!landActive&&!overlayActive))
     {
-        QMessageBox::information(this,tr("No virtual atlas changes"),
-            tr("Paint at least one semantic terrain material before finalizing a map-specific atlas."));
+        QMessageBox::information(this,tr("Nothing to publish"),
+            tr("Paint at least one semantic terrain material before saving a modern MPR."));
         return;
     }
-    if(landActive&&overlayActive)
-    {
-        QMessageBox::warning(this,tr("Capacity review required"),
-            tr("This MVP can finalize one changed terrain layer per isolated package. "
-               "Both Ground and Overlay contain virtual material edits. Undo or save one layer "
-               "as a separate editing session; no identities were substituted."));
-        return;
-    }
-    const ETerrainTileLayer layer=landActive?ETerrainTileLayer::Land:ETerrainTileLayer::Overlay;
+    const STerrainPublicationLayerPlan layerPlan =
+        terrainPublicationLayerPlan(landActive, overlayActive);
+    const ETerrainTileLayer layer =
+        layerPlan.primary == ETerrainPublicationPrimaryLayer::Land
+        ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+    const QString publishedLayers = layerPlan.publishLand
+        ? (layerPlan.publishOverlay ? tr("Ground + Overlay") : tr("Ground"))
+        : tr("Overlay");
     // Finalization is a save operation. Commit any live drag preview before
     // taking the terrain snapshot so sculpted heights and the last paint stroke
     // cannot be omitted from the portable MPR.
@@ -8190,7 +8193,7 @@ void CView::finalizeVirtualTerrainAtlas()
     endTileBrushGroup();
     QProgressDialog finalizeProgress(
         tr("Preparing map-specific terrain atlas..."),QString(),0,0,this);
-    finalizeProgress.setWindowTitle(tr("Finalizing terrain atlas"));
+    finalizeProgress.setWindowTitle(tr("Saving modern MPR"));
     finalizeProgress.setCancelButton(nullptr);
     finalizeProgress.setWindowModality(Qt::WindowModal);
     finalizeProgress.setMinimumDuration(0);
@@ -8205,7 +8208,7 @@ void CView::finalizeVirtualTerrainAtlas()
     if(identityOnlyRequest
        && !m_terrainEdit.initializeVirtualMaterialField(layer, catalog, &report))
     {
-        QMessageBox::critical(this, tr("Identity finalization refused"),
+        QMessageBox::critical(this, tr("Modern MPR save refused"),
             tr("This MPR cannot be converted to an exact shared-corner material "
                "field without changing terrain meaning. No identity or file was "
                "changed.\n\n%1").arg(report.toText()));
@@ -8213,7 +8216,7 @@ void CView::finalizeVirtualTerrainAtlas()
     }
     if(!m_terrainEdit.copyVirtualMaterialField(layer,&field))
     {
-        QMessageBox::critical(this,tr("Atlas finalization refused"),
+        QMessageBox::critical(this,tr("Modern MPR save refused"),
             tr("The virtual material field is incomplete; no package was written."));
         return;
     }
@@ -8258,7 +8261,7 @@ void CView::finalizeVirtualTerrainAtlas()
                imported.value().first, imported.value().second,
                QStringLiteral("stock-jmv-finalization"), &report))
         {
-            QMessageBox::critical(this,tr("Atlas finalization refused"),
+            QMessageBox::critical(this,tr("Modern MPR save refused"),
                 tr("An authored stock transition used by this map could not be imported into the isolated final atlas.\n\n%1")
                     .arg(report.toText()));
             return;
@@ -8294,7 +8297,7 @@ void CView::finalizeVirtualTerrainAtlas()
     {
         const QString findings=report.findings().isEmpty()
             ?QString():QStringLiteral("\n\n")+report.toText();
-        QMessageBox::critical(this,tr("Atlas finalization refused"),
+        QMessageBox::critical(this,tr("Modern MPR save refused"),
             finalized.error+findings);
         return;
     }
@@ -8307,7 +8310,7 @@ void CView::finalizeVirtualTerrainAtlas()
                m_mprDocument.mapInfo().innerNamespace,
                field.stableSha256(), pinned, &report))
         {
-            QMessageBox::critical(this,tr("Atlas finalization refused"),
+            QMessageBox::critical(this,tr("Modern MPR save refused"),
                 tr("The working atlas provenance could not be restored after compaction. "
                    "No package was written.\n\n%1").arg(report.toText()));
             return;
@@ -8330,6 +8333,7 @@ void CView::finalizeVirtualTerrainAtlas()
     const int originalSourceSlotCount=m_workingTerrainAtlas
         ?m_authoredTerrainTileImages.size():authoredImages.size();
     const int evictedAuthored=qMax(0,originalSourceSlotCount-retainedAuthored);
+    const QFileInfo mprDestination = preselectedMprDestination;
     QString selectedIdentity = requestedIdentity;
     bool replaceIdentity = requestedReplacement;
     const bool saveOverCurrentMpr = !preselectedMprDestination.filePath().isEmpty()
@@ -8352,20 +8356,20 @@ void CView::finalizeVirtualTerrainAtlas()
     preview.resize(900,700);
     QVBoxLayout* previewLayout=new QVBoxLayout(&preview);
     QLabel* summary=new QLabel(tr(
-        "Final atlas: %1 slots (%2 pages)\n"
+        "Published atlas: %1 slots (%2 pages)  |  Layers: %7\n"
         "Retained original-map tiles: %3  |  Evicted/merged original-map tiles: %4\n"
         "Included stock JMV blends: %5  |  Included generated exact blends: %6")
         .arg(finalized.requiredSlots).arg(finalized.textureCount)
         .arg(retainedAuthored).arg(evictedAuthored)
-        .arg(importedStockCount).arg(generatedCount),&preview);
+        .arg(importedStockCount).arg(generatedCount).arg(publishedLayers),&preview);
     summary->setWordWrap(true);
     previewLayout->addWidget(summary);
     QLabel* saveExplanation=new QLabel(tr(
-        "Save result: the selected .mpr and the textures.res already supplying its "
-        "terrain identity are updated together. The MPR includes every current "
-        "landscape edit, including sculpted heights and the latest paint stroke. "
-        "Resource identity: %1 (%2). Editor-side JSON review metadata stays beside "
-        "the MPR and is never put inside the runtime RES archive.")
+        "Save result: the selected MPR and textures.res will be updated together. "
+        "The MPR includes every current landscape edit, including sculpted heights "
+        "and the latest paint stroke. Resource identity: %1 (%2). Editor-side JSON "
+        "review metadata stays beside the MPR and is never put inside the runtime "
+        "RES archive.")
         .arg(selectedIdentity.isEmpty()
             ? tr("choose after this review") : selectedIdentity,
             replaceIdentity ? tr("use / replace") : tr("new content")),
@@ -8472,13 +8476,11 @@ void CView::finalizeVirtualTerrainAtlas()
     QDialogButtonBox* buttons=new QDialogButtonBox(
         QDialogButtonBox::Save|QDialogButtonBox::Cancel,&preview);
     buttons->button(QDialogButtonBox::Save)->setText(
-        preselectedMprDestination.filePath().isEmpty()
-            ? tr("Continue publication...") : tr("Continue Save MPR"));
+        tr("Save modern MPR"));
     connect(buttons,&QDialogButtonBox::accepted,&preview,&QDialog::accept);
     connect(buttons,&QDialogButtonBox::rejected,&preview,&QDialog::reject);
     previewLayout->addWidget(buttons);
     finalizeProgress.hide();
-    if(preview.exec()!=QDialog::Accepted)return;
 
     if(selectedIdentity.isEmpty())
     {
@@ -8563,25 +8565,58 @@ void CView::finalizeVirtualTerrainAtlas()
     }
 
     QString texturesPath;
+    QStringList resourceRoots;
+    if(m_pSettings)
+        if(COptStringList* configured = dynamic_cast<COptStringList*>(
+               m_pSettings->opt(eOptSetResource, "resourceRoots")))
+            for(const QString& root : configured->value())
+                if(!root.trimmed().isEmpty())
+                    resourceRoots.append(root);
     const QFileInfo activeArchive(m_activeTerrainArchivePath);
     if(activeArchive.exists()
        && activeArchive.fileName().compare(
               QStringLiteral("textures.res"), Qt::CaseInsensitive) == 0)
         texturesPath = activeArchive.absoluteFilePath();
-    if(texturesPath.isEmpty() && m_pLand)
-    {
-        const QFileInfo siblingTextures(m_pLand->filePath().dir().filePath(
-            QStringLiteral("textures.res")));
-        if(siblingTextures.exists())
-            texturesPath = siblingTextures.absoluteFilePath();
-    }
     if(texturesPath.isEmpty())
         texturesPath = QFileDialog::getOpenFileName(
             this, tr("Choose textures.res to update in place"),
-            m_pLand ? m_pLand->filePath().absolutePath() : QDir::homePath(),
+            terrainPublicationInitialResourcePath(
+                resourceRoots, mprDestination.absoluteFilePath()),
             tr("Evil Islands resources (*.res)"));
     if(texturesPath.isEmpty())
         return;
+
+    const bool resourceVisible = terrainPublicationPathInResourceRoots(
+        texturesPath, resourceRoots);
+    saveExplanation->setText(tr(
+        "Save will publish every current landscape edit in one operation.\n\n"
+        "MPR: %1\n"
+        "textures.res: %2\n"
+        "Resource identity: %3 (%4)\n"
+        "Layers: %5\n\n"
+        "Editor-side JSON review metadata stays beside the MPR and is never "
+        "put inside the runtime RES archive.")
+        .arg(QDir::toNativeSeparators(mprDestination.absoluteFilePath()),
+             QDir::toNativeSeparators(texturesPath), selectedIdentity,
+             replaceIdentity ? tr("use / replace") : tr("new content"),
+             publishedLayers));
+    if(!resourceVisible)
+    {
+        QLabel* visibilityWarning = new QLabel(resourceRoots.isEmpty()
+            ? tr("No active resource-profile folder is configured. This RES is "
+                 "still allowed, but the editor and game will not resolve it "
+                 "until that location is installed or configured.")
+            : tr("The selected RES is outside the active resource profile. It is "
+                 "still allowed, but the editor and game will not resolve it "
+                 "until that location is installed or configured."), &preview);
+        visibilityWarning->setWordWrap(true);
+        visibilityWarning->setStyleSheet(QStringLiteral(
+            "QLabel { color: #efb24a; font-weight: bold; padding: 5px; }"));
+        previewLayout->insertWidget(2, visibilityWarning);
+    }
+    if(preview.exec()!=QDialog::Accepted)
+        return;
+
     QFile sourceTextures(texturesPath);
     QByteArray originalTexturesBytes;
     CResArchiveDocument sourceArchive;
@@ -8608,37 +8643,6 @@ void CView::finalizeVirtualTerrainAtlas()
         member.name = memberName;
         member.payload = pageArchive.memberPayload(memberName);
         pages.append(member);
-    }
-
-    QFileInfo mprDestination = preselectedMprDestination;
-    if(terrainPublishNeedsMprDestinationDialog(
-           !mprDestination.filePath().isEmpty()))
-    {
-        QMessageBox mprChoice(QMessageBox::Question,
-            tr("Choose finalized MPR destination"),
-            tr("Save over the current MPR, or choose a new MPR name?"),
-            QMessageBox::NoButton, this);
-        QAbstractButton* overwriteMpr = mprChoice.addButton(
-            tr("Overwrite current MPR"), QMessageBox::AcceptRole);
-        QAbstractButton* saveAsMpr = mprChoice.addButton(
-            tr("Save MPR as..."), QMessageBox::ActionRole);
-        mprChoice.addButton(QMessageBox::Cancel);
-        mprChoice.setDefaultButton(qobject_cast<QPushButton*>(overwriteMpr));
-        mprChoice.exec();
-        if(mprChoice.clickedButton() != overwriteMpr
-           && mprChoice.clickedButton() != saveAsMpr)
-            return;
-        mprDestination = m_pLand->filePath();
-        if(mprChoice.clickedButton() == saveAsMpr)
-        {
-            const QString selectedMprPath = QFileDialog::getSaveFileName(
-                this, tr("Save finalized MPR as"),
-                m_pLand->filePath().absoluteFilePath(),
-                tr("Landscape (*.mpr)"));
-            if(selectedMprPath.isEmpty())
-                return;
-            mprDestination = QFileInfo(selectedMprPath);
-        }
     }
 
     QMessageBox backupChoice(QMessageBox::Question,
@@ -8675,9 +8679,27 @@ void CView::finalizeVirtualTerrainAtlas()
                 .arg(portableProfileReport.toText()));
         return;
     }
+    STerrainAtlasProfile publicationSourceProfile = m_terrainAtlasProfile;
+    QSet<qint32> describedFamilies;
+    for(const STerrainAtlasProfileFamily& family :
+        publicationSourceProfile.families)
+        describedFamilies.insert(family.id);
+    for(const STerrainGlobalMaterialFamily& global : m_terrainGlobalFamilies)
+        if(!describedFamilies.contains(global.id))
+        {
+            STerrainAtlasProfileFamily family;
+            family.id = global.id;
+            family.name = global.name;
+            family.layer = global.layer;
+            family.landAllowed = global.layer == ETerrainAtlasLayer::Land;
+            family.overlayAllowed = global.layer == ETerrainAtlasLayer::Overlay;
+            family.paintSelectable = true;
+            family.tileType = global.runtimeTerrainType;
+            publicationSourceProfile.families.append(family);
+        }
     STerrainAtlasProfile portableProfile=
         CTerrainAtlasProfileStore::portableFinalizedProfile(
-            finalized,physicalTiles,m_terrainAtlasProfile,
+            finalized,physicalTiles,publicationSourceProfile,
             layer==ETerrainTileLayer::Land?ETerrainAtlasLayer::Land
                                           :ETerrainAtlasLayer::Overlay,
             materialNames,
@@ -8746,7 +8768,7 @@ void CView::finalizeVirtualTerrainAtlas()
     QProgressDialog publishProgress(
         tr("Building and reopening the complete textures.res candidate..."),
         QString(), 0, 0, this);
-    publishProgress.setWindowTitle(tr("Publishing finalized terrain atlas"));
+    publishProgress.setWindowTitle(tr("Saving modern MPR"));
     publishProgress.setWindowModality(Qt::ApplicationModal);
     publishProgress.setCancelButton(nullptr);
     publishProgress.setMinimumDuration(0);
@@ -8859,7 +8881,7 @@ void CView::finalizeVirtualTerrainAtlas()
             && restore.write(previousMprBytes) == previousMprBytes.size()
             && restore.commit();
     };
-    publishProgress.setLabelText(tr("Saving finalized MPR and editor profile..."));
+    publishProgress.setLabelText(tr("Saving modern MPR and editor profile..."));
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     CValidationReport profileSaveReport;
     if(!CTerrainAtlasProfileStore::save(
@@ -8898,27 +8920,32 @@ void CView::finalizeVirtualTerrainAtlas()
                      mprResult.phase, mprResult.error));
         return;
     }
-    publishProgress.setLabelText(tr("Adopting the finalized map in this session..."));
+    publishProgress.setLabelText(tr("Adopting the saved map in this session..."));
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     if(!adoptCompleteTerrainBaseline(
            mprDestination, mprResult.candidateSha256,
            physicalTiles, texturesPath))
     {
         publishProgress.close();
-        QMessageBox::critical(this, tr("Finalized map saved; reopen required"),
+        QMessageBox::critical(this, tr("Modern MPR saved; reopen required"),
             tr("The validated textures.res and MPR are saved, but this session "
                "could not adopt them. Reopen the MPR before editing further."));
         return;
     }
     publishProgress.close();
-    emit updateMsg(tr("Finalized atlas published in place: %1")
+    m_requestedTerrainResourceIdentity.clear();
+    m_requestedTerrainIdentityReplacement = false;
+    m_requestedTerrainIdentityFinalization = false;
+    refreshMprSettingsDock();
+    emit mprSaveStateChanged();
+    emit updateMsg(tr("Modern terrain atlas published in place: %1")
         .arg(QDir::toNativeSeparators(texturesPath)));
-    QMessageBox::information(this, tr("Terrain atlas finalized"),
-        tr("textures.res was updated in place and the finalized MPR is now the "
+    QMessageBox::information(this, tr("Modern MPR saved"),
+        tr("textures.res was updated in place and the saved MPR is now the "
            "open editing baseline. No reload is required.\n\n"
            "MPR: %1\ntextures.res: %2\nIdentity: %3\n"
            "Used tiles: %4 / %5\nTexture pages: %6\n\n"
-           "Undo history was cleared because finalization changed external "
+           "Undo history was cleared because publication changed external "
            "resource identity and physical atlas ownership.")
             .arg(QDir::toNativeSeparators(mprDestination.absoluteFilePath()),
                  QDir::toNativeSeparators(texturesPath),
@@ -10128,6 +10155,11 @@ void CView::openMapParameters()
         identityPage);
     identityExplanation->setWordWrap(true);
     identityLayout->addWidget(identityExplanation);
+    QPushButton* resetIdentity = new QPushButton(
+        tr("Reset to current identity"), identityPage);
+    resetIdentity->setObjectName(
+        QStringLiteral("mprResetTerrainResourceIdentity"));
+    identityLayout->addWidget(resetIdentity, 0, Qt::AlignRight);
     identityEdit->setObjectName(QStringLiteral("mprTerrainResourceIdentity"));
     identityLayout->addStretch(1);
     tabs->addTab(identityPage, tr("Resource identity"));
@@ -10259,6 +10291,19 @@ void CView::openMapParameters()
             ? QStringLiteral("QLabel { color: #69c37d; }")
             : QStringLiteral("QLabel { color: #df6b62; }"));
     };
+    connect(resetIdentity, &QPushButton::clicked, dock,
+            [this, identityEdit, refreshIdentityStatus]() {
+        {
+            const QSignalBlocker blocker(identityEdit);
+            identityEdit->setText(
+                m_mprDocument.mapInfo().innerNamespace.toLower());
+        }
+        m_requestedTerrainResourceIdentity.clear();
+        m_requestedTerrainIdentityReplacement = false;
+        m_requestedTerrainIdentityFinalization = false;
+        refreshIdentityStatus();
+        emit mprSaveStateChanged();
+    });
     connect(identityEdit, &QLineEdit::textChanged, dock,
             [this, identityEdit, refreshIdentityStatus](const QString&) {
         QString error;
@@ -10269,6 +10314,7 @@ void CView::openMapParameters()
             m_requestedTerrainIdentityReplacement = false;
             m_requestedTerrainIdentityFinalization = true;
             refreshIdentityStatus();
+            emit mprSaveStateChanged();
             return;
         }
         if(CTerrainVirtualAtlas::validateResourceIdentity(identity, &error))
@@ -10286,6 +10332,7 @@ void CView::openMapParameters()
             m_requestedTerrainIdentityFinalization = false;
         }
         refreshIdentityStatus();
+        emit mprSaveStateChanged();
     });
 
     const auto refreshSummary = [this, dimensionsValue, rangeValue, scaleValue,
@@ -10486,10 +10533,13 @@ void CView::openMapParameters()
         sourceValue->setText(m_pLand->filePath().absoluteFilePath());
         namespaceValue->setText(m_mprDocument.mapInfo().innerNamespace);
         currentIdentityValue->setText(m_mprDocument.mapInfo().innerNamespace);
-        if(!identityEdit->hasFocus() && identityEdit->text().isEmpty()
+        if(!identityEdit->hasFocus()
            && !m_requestedTerrainIdentityFinalization)
+        {
+            const QSignalBlocker blocker(identityEdit);
             identityEdit->setText(
                 m_mprDocument.mapInfo().innerNamespace.toLower());
+        }
         refreshIdentityStatus();
         refreshSummary();
         refreshPreview();
