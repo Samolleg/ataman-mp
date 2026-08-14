@@ -83,6 +83,11 @@ public:
 
     static QString testRunsRootPath();
     static QString generationSavesPath(const QString& runRoot, quint64 generation);
+    static bool validateJmvGameRootPaths(const QString& selectedGameRoot,
+                                         const QString& workPath,
+                                         const QString& resourcesPath,
+                                         const QString& cdRomPath,
+                                         QString* error = nullptr);
     static bool resolveMapGraphSource(const QByteArray& primaryMobData,
                                       const QFileInfo& sourceMpr,
                                       const QString& logicalMprName,

@@ -29,6 +29,7 @@ private slots:
     void injectsActualAutorunRuntimeBootstrap();
     void exposesTestRunsQuickAccessPath();
     void createsGenerationScopedSavePaths();
+    void rejectsMixedJmvGameRootRegistryPaths();
     void validatesExternalGraphEnvelope();
     void recognizesGraphlessBridgeProtocolMarker();
     void detectsAutoSpellMobCapability();
@@ -161,6 +162,24 @@ void JmvMapTestLauncherTests::createsGenerationScopedSavePaths()
     QVERIFY(QDir::fromNativeSeparators(initial).endsWith("generations/000000/saves"));
     QVERIFY(QDir::fromNativeSeparators(reload).endsWith("generations/000017/saves"));
     QVERIFY(initial != reload);
+}
+
+void JmvMapTestLauncherTests::rejectsMixedJmvGameRootRegistryPaths()
+{
+    QString error;
+    QVERIFY(!CJmvMapTestLauncher::validateJmvGameRootPaths(
+        "D:/Evil Islands",
+        "C:/Users/test/Documents/EI Renderer/work/runtime-clone/",
+        "C:/Users/test/Documents/EI Renderer/work/runtime-clone/Res/",
+        "C:/Users/test/Documents/EI Renderer/work/runtime-clone/",
+        &error));
+    QVERIFY(error.contains("runtime-clone"));
+    QVERIFY(error.contains("D:\\Evil Islands"));
+
+    error.clear();
+    QVERIFY2(CJmvMapTestLauncher::validateJmvGameRootPaths(
+        "D:/Evil Islands", "D:/Evil Islands/", "D:/Evil Islands/Res/",
+        "D:/Evil Islands/", &error), qPrintable(error));
 }
 
 void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()

@@ -262,8 +262,29 @@ QString testRunsRoot()
 
 QString normalized(const QString& path)
 {
-    return QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath());
+    return QDir::cleanPath(
+        QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()));
 }
+
+#ifdef Q_OS_WIN
+QString registry32String(HKEY root, const wchar_t* subkey, const wchar_t* valueName)
+{
+    HKEY key = nullptr;
+    if(RegOpenKeyExW(root, subkey, 0, KEY_QUERY_VALUE | KEY_WOW64_32KEY, &key)
+       != ERROR_SUCCESS)
+        return QString();
+    wchar_t value[MAX_PATH * 4]{};
+    DWORD type = 0;
+    DWORD size = DWORD(sizeof(value));
+    const LSTATUS status = RegQueryValueExW(
+        key, valueName, nullptr, &type, reinterpret_cast<LPBYTE>(value), &size);
+    RegCloseKey(key);
+    if(status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ))
+        return QString();
+    value[(sizeof(value) / sizeof(value[0])) - 1] = L'\0';
+    return QString::fromWCharArray(value);
+}
+#endif
 
 QString saveGenerationPath(const QString& runRoot, quint64 generation)
 {
@@ -604,6 +625,38 @@ QString CJmvMapTestLauncher::generationSavesPath(const QString& runRoot,
                                                  quint64 generation)
 {
     return saveGenerationPath(runRoot, generation);
+}
+
+bool CJmvMapTestLauncher::validateJmvGameRootPaths(
+    const QString& selectedGameRoot, const QString& workPath,
+    const QString& resourcesPath, const QString& cdRomPath, QString* error)
+{
+    const QString selected = normalized(selectedGameRoot);
+    const QString expectedResources = normalized(QDir(selected).filePath("Res"));
+    const auto matches = [](const QString& actual, const QString& expected) {
+        return !actual.trimmed().isEmpty()
+            && normalized(actual).compare(expected, Qt::CaseInsensitive) == 0;
+    };
+    if(matches(workPath, selected) && matches(resourcesPath, expectedResources)
+       && matches(cdRomPath, selected))
+        return true;
+    if(error)
+    {
+        *error = QCoreApplication::translate("CJmvMapTestLauncher",
+            "The 32-bit Evil Islands runtime paths do not match the selected Endurance game. "
+            "Launching this mixed-root configuration can load incompatible resources and report "
+            "missing prototypes.\n\nSelected game root:\n%1\n\n32-bit registry paths:\n"
+            "Work path: %2\nResources path: %3\nCD-ROM Path: %4\n\n"
+            "Restore the runtime paths for the selected installation, then retry Test Current Map.")
+            .arg(QDir::toNativeSeparators(selected),
+                 workPath.isEmpty() ? QString("<not configured>")
+                                    : QDir::toNativeSeparators(workPath),
+                 resourcesPath.isEmpty() ? QString("<not configured>")
+                                         : QDir::toNativeSeparators(resourcesPath),
+                 cdRomPath.isEmpty() ? QString("<not configured>")
+                                     : QDir::toNativeSeparators(cdRomPath));
+    }
+    return false;
 }
 
 bool CJmvMapTestLauncher::validateExternalGraph(const QByteArray& bytes,
@@ -1735,6 +1788,19 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
             }
             return false;
         }
+#ifdef Q_OS_WIN
+        const wchar_t* pathSettings =
+            L"Software\\Gipat.Ru\\EI_Starter\\EvilIslands\\Path Settings";
+        const QString workPath = registry32String(
+            HKEY_CURRENT_USER, pathSettings, L"Work path");
+        const QString resourcesPath = registry32String(
+            HKEY_CURRENT_USER, pathSettings, L"Resources path");
+        const QString cdRomPath = registry32String(
+            HKEY_CURRENT_USER, pathSettings, L"CD-ROM Path");
+        if(!validateJmvGameRootPaths(input.profile.gameRoot, workPath,
+                                     resourcesPath, cdRomPath, error))
+            return false;
+#endif
     }
     if(isBase)
     {
