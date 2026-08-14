@@ -489,7 +489,7 @@
 3	30	2	0	Skills Astral
 3	31	0	0	Spells
 3	32	0	0	Equipment Wears
-3	33	0	0	Equipment Weapon в„–1
+3	33	0	0	Equipment Weapon 1
 3	34	0	0	Graphics Data Info Window Scale
 3	35	0	0	Graphics Data Altitude
 3	36	0	0	Tuning To hit Random
@@ -499,7 +499,7 @@
 3	39	0	0	Attack Real Weapon Type Id
 3	40	0	0	Graphics Data Detonation
 3	41	0	0	Base Level
-3	42	0	0	Equipment Weapon в„–2
+3	42	0	0	Equipment Weapon 2
 3	43	0	0	Stats Exp
 # NPCs
 4	0	0	150	Name

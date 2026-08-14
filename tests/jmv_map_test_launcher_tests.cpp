@@ -663,22 +663,23 @@ void JmvMapTestLauncherTests::authoritativeResultRequiresStagedTablesLuaRead()
     QJsonObject tablesLua;
     tablesLua.insert("sourcePath", "D:/JMV/lua/tables.lua");
     tablesLua.insert("stagedPath", QDir(temp.path()).filePath("database/tables.lua"));
+    tablesLua.insert("stagedSha256", QStringLiteral("pending-lua-hash"));
+    tablesLua.insert("loadEvidencePath", QDir(temp.path()).filePath("tables-lua-loaded.txt"));
     manifest.insert("tablesLua", tablesLua);
 
     const QJsonObject missing = CJmvMapTestLauncher::buildAuthoritativeResult(
         manifest, successfulBridgeEvidence(temp.path()), 0,
         int(QProcess::NormalExit), false, QString());
     QVERIFY(!missing.value("passed").toBool());
-    QVERIFY(!missing.value("tablesLuaRedirectObserved").toBool());
+    QVERIFY(!missing.value("tablesLuaLoadObserved").toBool());
     QVERIFY(QJsonDocument(missing.value("errors").toArray()).toJson()
             .contains("staged tables.lua was not read"));
 
-    const QString observed = successfulBridgeEvidence(temp.path())
-        + QStringLiteral("TABLES_LUA_REDIRECT seq=1 from=\"D:/JMV/lua/tables.lua\" to=\"%1\"\n")
-              .arg(tablesLua.value("stagedPath").toString());
+    writeFile(tablesLua.value("loadEvidencePath").toString(), QByteArray("pending-lua-hash\n"));
+    const QString observed = successfulBridgeEvidence(temp.path());
     const QJsonObject accepted = CJmvMapTestLauncher::buildAuthoritativeResult(
         manifest, observed, 0, int(QProcess::NormalExit), false, QString());
-    QVERIFY(accepted.value("tablesLuaRedirectObserved").toBool());
+    QVERIFY(accepted.value("tablesLuaLoadObserved").toBool());
     QVERIFY(accepted.value("passed").toBool());
 }
 

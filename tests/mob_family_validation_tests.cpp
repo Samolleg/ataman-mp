@@ -314,7 +314,7 @@ private slots:
     void importWithoutTemplateHairEvidenceDoesNotReportMissingHair();
     void databaseCreatureResolutionSuppressesWearableMaskRules();
     void jmvUnitPerkTableFailuresAreCritical();
-    void missingDatabasePrototypeIsCrashClassAndBlocksRuntime();
+    void missingDatabasePrototypeIsCrashClassButDoesNotBlockRuntime();
 };
 
 void MobFamilyValidationTests::authoredZeroNidIsCriticalAndBlocksRuntimePreflight()
@@ -442,7 +442,7 @@ void MobFamilyValidationTests::jmvUnitPerkTableFailuresAreCritical()
         { return item.code.startsWith("jmv.tables."); }));
 }
 
-void MobFamilyValidationTests::missingDatabasePrototypeIsCrashClassAndBlocksRuntime()
+void MobFamilyValidationTests::missingDatabasePrototypeIsCrashClassButDoesNotBlockRuntime()
 {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
@@ -472,8 +472,8 @@ void MobFamilyValidationTests::missingDatabasePrototypeIsCrashClassAndBlocksRunt
     QCOMPARE(finding->nid, quint32(997570));
     QVERIFY(!finding->locations.isEmpty());
     QVERIFY(finding->locations.first().startsWith(path + ":"));
-    QVERIFY(report.hasBlockingRuntimeFindings());
-    QCOMPARE(report.blockingRuntimeFindings().size(), 1);
+    QVERIFY(!report.hasBlockingRuntimeFindings());
+    QCOMPARE(report.blockingRuntimeFindings().size(), 0);
 }
 
 void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()

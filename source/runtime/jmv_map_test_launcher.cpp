@@ -959,8 +959,17 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         "DIRECT_LAUNCH staged map loader returned result=1")
         || completedReloadSequence != 0;
     const bool tablesLuaStaged = manifest.contains("tablesLua");
-    const bool tablesLuaRedirectObserved = !tablesLuaStaged
-        || bridgeResult.contains("TABLES_LUA_REDIRECT");
+    const QJsonObject tablesLuaJournal = manifest.value("tablesLua").toObject();
+    const bool tablesLuaRedirectObserved = bridgeResult.contains("TABLES_LUA_REDIRECT");
+    bool tablesLuaLoadObserved = !tablesLuaStaged;
+    if(tablesLuaStaged)
+    {
+        QFile evidence(tablesLuaJournal.value("loadEvidencePath").toString());
+        tablesLuaLoadObserved = evidence.open(QIODevice::ReadOnly)
+            && QString::fromLatin1(evidence.readAll()).trimmed().compare(
+                tablesLuaJournal.value("stagedSha256").toString(),
+                Qt::CaseInsensitive) == 0;
+    }
     const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
         && QFileInfo(actualMprPath).absoluteFilePath().compare(
             QFileInfo(expectedMprPath).absoluteFilePath(),
@@ -1024,7 +1033,7 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         addUnique(&errors, "The runtime did not prove a completed staged gameplay load.");
     if(stagedLoaderObserved && !payloadHashesValidated)
         addUnique(&errors, "The runtime loader paths could not be matched to the hash-verified staged payloads.");
-    if(tablesLuaStaged && !tablesLuaRedirectObserved)
+    if(tablesLuaStaged && !tablesLuaLoadObserved)
         addUnique(&errors, "The staged tables.lua was not read by the JMV runtime.");
     if(actualZone.isEmpty())
         addUnique(&errors, "The runtime did not report the actually initialized zone.");
@@ -1080,6 +1089,7 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("payloadHashesValidated", payloadHashesValidated);
     report.insert("tablesLuaStaged", tablesLuaStaged);
     report.insert("tablesLuaRedirectObserved", tablesLuaRedirectObserved);
+    report.insert("tablesLuaLoadObserved", tablesLuaLoadObserved);
     report.insert("playerInitializationCount", playerInitializations);
     report.insert("reportedPlayerCount", playerInitializations > 0 ? 1 : -1);
     report.insert("playerCountEvidence", playerInitializations > 0
@@ -1623,6 +1633,14 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     {
         environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_SOURCE",m_tablesLuaSourcePath);
         environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_STAGE",m_stagedTablesLuaPath);
+        const QJsonObject luaJournal=m_manifest.value("tablesLua").toObject();
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_PAYLOAD",m_stagedTablesLuaPath);
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_EVIDENCE",
+                           luaJournal.value("loadEvidencePath").toString());
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_SHA256",
+                           m_stagedTablesLuaSha256);
+        environment.insert("LUA_PATH",
+                           QDir(m_runRoot).filePath("lua-override/?.lua")+";;");
     }
     if(!m_livePlaceholderResourcePath.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_TEMP_TEXTURE_RES",
@@ -1918,7 +1936,21 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         m_stagedTablesLuaPath=QDir(databaseDirectory).filePath("tables.lua");m_tablesLuaSourceSha256=sha256(sourceLua);m_stagedTablesLuaSha256=sha256(input.tablesLuaData);
         if(input.tablesLuaData.isEmpty()||!atomicWrite(m_stagedTablesLuaPath,input.tablesLuaData,error)||fileSha256(m_stagedTablesLuaPath).compare(m_stagedTablesLuaSha256,Qt::CaseInsensitive)!=0)
         {if(error&&error->isEmpty())*error="The staged active tables.lua failed its post-write SHA-256 check.";return false;}
-        QJsonObject luaJournal;luaJournal.insert("policy","read-only-exact-source-path-redirection");luaJournal.insert("sourcePath",m_tablesLuaSourcePath);luaJournal.insert("sourceSha256",m_tablesLuaSourceSha256);luaJournal.insert("stagedPath",m_stagedTablesLuaPath);luaJournal.insert("stagedSha256",m_stagedTablesLuaSha256);luaJournal.insert("installedLuaModified",false);m_manifest.insert("tablesLua",luaJournal);
+        const QString overrideDirectory=QDir(m_runRoot).filePath("lua-override");
+        const QString overridePath=QDir(overrideDirectory).filePath("tables.lua");
+        const QString evidencePath=QDir(m_runRoot).filePath("tables-lua-loaded.txt");
+        const QByteArray wrapper=
+            "local payload = assert(os.getenv('EI_MAPPER_ENDURANCE_TABLES_LUA_PAYLOAD'))\n"
+            "local chunk = assert(loadfile(payload))\n"
+            "local result = chunk()\n"
+            "local evidence = assert(os.getenv('EI_MAPPER_ENDURANCE_TABLES_LUA_EVIDENCE'))\n"
+            "local marker = assert(io.open(evidence, 'wb'))\n"
+            "marker:write(assert(os.getenv('EI_MAPPER_ENDURANCE_TABLES_LUA_SHA256')))\n"
+            "marker:close()\n"
+            "return result\n";
+        if(!QDir().mkpath(overrideDirectory)||!atomicWrite(overridePath,wrapper,error))
+        {if(error&&error->isEmpty())*error="The run-owned tables.lua loader could not be staged.";return false;}
+        QJsonObject luaJournal;luaJournal.insert("policy","pre-initialization-lua-module-override");luaJournal.insert("sourcePath",m_tablesLuaSourcePath);luaJournal.insert("sourceSha256",m_tablesLuaSourceSha256);luaJournal.insert("stagedPath",m_stagedTablesLuaPath);luaJournal.insert("stagedSha256",m_stagedTablesLuaSha256);luaJournal.insert("overridePath",overridePath);luaJournal.insert("loadEvidencePath",evidencePath);luaJournal.insert("installedLuaModified",false);m_manifest.insert("tablesLua",luaJournal);
     }
 
     // Journal every live artifact before creating it. A crash at any later

@@ -14,7 +14,7 @@ namespace ei {
 enum class EDatabaseFieldType { Text, Integer, Decimal, Reference, TextList };
 struct SDatabaseFieldSchema { QString key, label; EDatabaseFieldType type{EDatabaseFieldType::Text}; QString referenceTable; bool writable{true}; bool opaque{false}; int storageId{-1}; int storageOccurrence{0}; };
 struct SDatabaseRow { QString stableKey, sourceStableKey; int sourceRecordIndex{-1}; QMap<QString, QVariant> values; bool added{false}; bool deleted{false}; };
-struct SDatabaseTable { QString key, label, sourceMember, schemaFamily; int physicalTable{-1}; int blockId{-1}; int identityFieldId{-1}; QVector<SDatabaseFieldSchema> fields; QVector<SDatabaseRow> rows; bool structuralEditing{true}; };
+struct SDatabaseTable { QString key, label, sourceMember, schemaFamily; int physicalTable{-1}; int blockId{-1}; int identityFieldId{-1}; QVector<SDatabaseFieldSchema> fields; QVector<SDatabaseRow> rows; bool structuralEditing{true}; bool uniqueIdentity{false}; };
 struct SDatabaseChange {
     SDatabaseChange() = default;
     SDatabaseChange(const QString&t,const QString&r,const QString&f,const QVariant&b,const QVariant&a,const QString&d):tableKey(t),rowKey(r),fieldKey(f),before(b),after(a),description(d){}

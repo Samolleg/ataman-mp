@@ -277,6 +277,19 @@ QString sourceIdentity(const QVector<ei::SLosslessDatabaseField>& fields,int id)
     for(const auto& field:fields)if(field.id==id&&field.occurrence==0)return decodedRawIdentity(field.payload);
     return {};
 }
+int verifiedIdentityField(const QString& tableKey)
+{
+    static const QMap<QString,int> fields={
+        {"items.materials",0},{"items.weapons",0},{"items.armors",0},
+        {"items.quickitems",0},{"items.questitems",0},{"items.lootitems",0},
+        {"spells.spellprototypes",1},{"spells.spellmodifiers",1},
+        {"units.racemodels",0},{"units.monsters",0}};
+    return fields.value(tableKey,-1);
+}
+bool verifiedUniqueIdentity(const QString& tableKey)
+{
+    return verifiedIdentityField(tableKey)>=0;
+}
 void addSchemaDatabaseTables(const QSharedPointer<const ei::SProfileDatabaseSnapshot>& snapshot,
                              QMap<QString,ei::SDatabaseTable>* tables,QString* diagnostic)
 {
@@ -290,7 +303,7 @@ void addSchemaDatabaseTables(const QSharedPointer<const ei::SProfileDatabaseSnap
             QVector<ei::SDatabaseStorageHeader> headers=schema.headers(storage.family,storage.blockId,storageField.id);int occurrences=1;
             for(int occurrence=0;occurrence<occurrences;++occurrence){ei::SDatabaseFieldSchema field;field.key=QString("fld.%1.%2").arg(storageField.id).arg(occurrence);const auto matches=schema.headers(storage.family,storage.blockId,storageField.id);field.label=matches.value(occurrence).name;if(field.label.isEmpty())field.label=QString("FLD%1-%2").arg(storageField.id).arg(occurrence);field.type=displayType(storageField.type);field.storageId=storageField.id;field.storageOccurrence=occurrence;field.opaque=storageField.type==ei::EDatabaseStorageType::Hex;field.referenceTable=verifiedReferenceTable(table.key,storageField.id);if(!field.referenceTable.isEmpty())field.type=ei::EDatabaseFieldType::Reference;table.fields.append(field);}
         }
-        table.identityFieldId=-1;for(const auto& field:storage.fields)if(field.id==0&&field.type==ei::EDatabaseStorageType::String){table.identityFieldId=0;break;}if(table.identityFieldId<0)for(const auto& field:storage.fields)if((field.id==0||field.id==1)&&field.type==ei::EDatabaseStorageType::String){table.identityFieldId=field.id;break;}
+        table.identityFieldId=verifiedIdentityField(table.key);table.uniqueIdentity=verifiedUniqueIdentity(table.key);if(table.identityFieldId<0)for(const auto& field:storage.fields)if(field.id==0&&field.type==ei::EDatabaseStorageType::String){table.identityFieldId=0;break;}if(table.identityFieldId<0)for(const auto& field:storage.fields)if((field.id==0||field.id==1)&&field.type==ei::EDatabaseStorageType::String){table.identityFieldId=field.id;break;}
         for(int recordIndex=0;recordIndex<member.recordCount(storage.physicalIndex);++recordIndex)
         {
             const auto sourceFields=member.fields(storage.physicalIndex,recordIndex);ei::SDatabaseRow row;row.sourceRecordIndex=recordIndex;row.stableKey=QString("record.%1").arg(recordIndex);row.sourceStableKey=sourceIdentity(sourceFields,table.identityFieldId);if(!row.sourceStableKey.isEmpty())row.stableKey=fold(row.sourceStableKey)+QString("#%1").arg(recordIndex);
@@ -308,7 +321,7 @@ void addJmvCharacterLuaFields(const QSharedPointer<const ei::SProfileDatabaseSna
                              QMap<QString,ei::SDatabaseTable>* tables)
 {
     if(!snapshot || snapshot->jmvUnitPerkTableStatus != ei::EJmvUnitPerkTableStatus::Valid) return;
-    int maximumPerkIndex=44, maximumStatIndex=1;
+    int maximumPerkIndex=44, maximumStatIndex=21;
     for(const auto& record:snapshot->jmvUnitPerksByPrototype) maximumPerkIndex=qMax(maximumPerkIndex,record.values.size()+1);
     for(const auto& record:snapshot->jmvUnitStatsByPrototype) maximumStatIndex=qMax(maximumStatIndex,record.values.size()+1);
     const QStringList perkKeys=jmvPerkKeys(),perkLabels=jmvPerkLabels();
@@ -336,7 +349,7 @@ void addJmvCharacterLuaFields(const QSharedPointer<const ei::SProfileDatabaseSna
             const auto perks=snapshot->jmvUnitPerksByPrototype.constFind(sourceKey);
             if(perks!=snapshot->jmvUnitPerksByPrototype.constEnd())for(int offset=0;offset<perks->values.size();++offset){const int luaIndex=offset+2;const QString key=QString("jmv.perk.%1").arg(luaIndex<perkKeys.size()?perkKeys.at(luaIndex):QString("field%1").arg(luaIndex));row.values.insert(key,perks->values.at(offset));}
             const auto stats=snapshot->jmvUnitStatsByPrototype.constFind(sourceKey);
-            if(stats!=snapshot->jmvUnitStatsByPrototype.constEnd())for(int offset=0;offset<stats->values.size();++offset){const int luaIndex=offset+2;const QString key=QString("jmv.stat.%1").arg(luaIndex<statKeys.size()?statKeys.at(luaIndex):QString("field%1").arg(luaIndex));row.values.insert(key,stats->values.at(offset));}
+            if(stats!=snapshot->jmvUnitStatsByPrototype.constEnd())for(int luaIndex=2;luaIndex<=maximumStatIndex;++luaIndex){const int offset=luaIndex-2;const QString key=QString("jmv.stat.%1").arg(luaIndex<statKeys.size()?statKeys.at(luaIndex):QString("field%1").arg(luaIndex));row.values.insert(key,stats->values.value(offset,0.0));}
         }
     }
 }
@@ -347,10 +360,10 @@ QSharedPointer<DatabaseDocument> DatabaseDocument::fromSnapshot(const QSharedPoi
 {
     if(!s || !s->usable()) { if(d)*d="The active profile database is unavailable or invalid."; return {}; }
     QSharedPointer<DatabaseDocument> out(new DatabaseDocument(s));
-    SDatabaseTable races; races.key="raceModels"; races.label="Race models"; races.sourceMember="units.udb";
+    SDatabaseTable races; races.key="raceModels"; races.label="Race models"; races.sourceMember="units.udb"; races.uniqueIdentity=true;
     races.fields={fs("name","Name / ID",EDatabaseFieldType::Text),fs("model","Model",EDatabaseFieldType::Text),ro(fs("primaryTextures","Primary textures",EDatabaseFieldType::TextList)),ro(fs("secondaryTextures","Secondary textures",EDatabaseFieldType::TextList))};
     for(const auto& x:s->raceModels){SDatabaseRow r;r.stableKey=fold(x.name);r.sourceStableKey=x.name;r.values={{"name",x.name},{"model",x.model},{"primaryTextures",x.primaryTextures},{"secondaryTextures",x.secondaryTextures}};addOpaqueFields(&races,&r,x.opaqueFields);races.rows<<r;} out->m_tables[races.key]=races;
-    SDatabaseTable monsters; monsters.key="monsters"; monsters.label="Monster prototypes"; monsters.sourceMember="units.udb";
+    SDatabaseTable monsters; monsters.key="monsters"; monsters.label="Monster prototypes"; monsters.sourceMember="units.udb"; monsters.uniqueIdentity=true;
     monsters.fields={fs("name","Name / ID",EDatabaseFieldType::Text),fs("baseRace","Base race",EDatabaseFieldType::Reference,"raceModels"),fs("skinIndex","Skin",EDatabaseFieldType::Integer),fs("hairIndex","Hair",EDatabaseFieldType::Integer),fs("complexionX","Complexion X",EDatabaseFieldType::Decimal),fs("complexionY","Complexion Y",EDatabaseFieldType::Decimal),fs("complexionZ","Complexion Z",EDatabaseFieldType::Decimal),fs("items","Items",EDatabaseFieldType::TextList),fs("wears","Wears",EDatabaseFieldType::TextList),ro(fs("weapon","Weapon",EDatabaseFieldType::Text)),fs("secondWeapon","Second weapon",EDatabaseFieldType::Text)};
     for(const auto& x:s->monsters){SDatabaseRow r;r.stableKey=fold(x.name);r.sourceStableKey=x.name;r.values={{"name",x.name},{"baseRace",x.baseRace},{"skinIndex",x.skinIndex},{"hairIndex",x.hairIndex},{"complexionX",x.complexionX},{"complexionY",x.complexionY},{"complexionZ",x.complexionZ},{"items",x.items},{"wears",x.wears},{"weapon",x.weapon},{"secondWeapon",x.secondWeapon}};addOpaqueFields(&monsters,&r,x.opaqueFields);monsters.rows<<r;} out->m_tables[monsters.key]=monsters;
     SDatabaseTable items; items.key="items"; items.label="Items"; items.sourceMember="items.idb";
@@ -377,7 +390,7 @@ QString DatabaseDocument::sourceTablesLuaPath()const{return m_snapshot->jmvUnitP
 QStringList DatabaseDocument::tableKeys()const{return m_tables.keys();} const SDatabaseTable* DatabaseDocument::table(const QString& k)const{auto i=m_tables.constFind(k);return i==m_tables.constEnd()?nullptr:&i.value();}
 bool DatabaseDocument::isDirty()const{return !m_undo.isEmpty();} bool DatabaseDocument::canUndo()const{return !m_undo.isEmpty();} bool DatabaseDocument::canRedo()const{return !m_redo.isEmpty();}
 bool DatabaseDocument::hasUnappliedChanges(QString* diagnostic)const{const QByteArray candidate=buildArchive(diagnostic);if(candidate.isEmpty())return true;QFile live(sourceArchivePath());if(!live.open(QIODevice::ReadOnly)){if(diagnostic)*diagnostic="The active database cannot be read.";return true;}if(live.readAll()!=candidate)return true;if(!m_tablesLuaBaseline.isEmpty()){const QByteArray luaCandidate=buildTablesLua(diagnostic);QFile lua(sourceTablesLuaPath());if(luaCandidate.isEmpty()||!lua.open(QIODevice::ReadOnly))return true;return lua.readAll()!=luaCandidate;}return false;}
-bool DatabaseDocument::identityAvailable(const QString&t,const QString&identity,const QString&except)const{const auto*tb=table(t);const QString wanted=fold(identity),ignored=fold(except);if(!tb||wanted.isEmpty())return false;const QString identityKey=tb->identityFieldId>=0?QString("fld.%1.0").arg(tb->identityFieldId):QString("name");for(const auto&r:tb->rows)if(!r.deleted&&fold(r.values.value(identityKey).toString())==wanted&&r.stableKey!=ignored)return false;return true;}
+bool DatabaseDocument::identityAvailable(const QString&t,const QString&identity,const QString&except)const{const auto*tb=table(t);const QString wanted=fold(identity),ignored=fold(except);if(!tb||wanted.isEmpty())return false;if(!tb->uniqueIdentity)return true;const QString identityKey=tb->identityFieldId>=0?QString("fld.%1.0").arg(tb->identityFieldId):QString("name");for(const auto&r:tb->rows)if(!r.deleted&&fold(r.values.value(identityKey).toString())==wanted&&r.stableKey!=ignored)return false;return true;}
 QString DatabaseDocument::displayIdentity(const QString&t,const QString&k)const{const auto*tb=table(t);if(!tb)return QString();const QString wanted=fold(k);for(const auto&r:tb->rows)if(r.stableKey==wanted){if(tb->identityFieldId>=0)return r.values.value(QString("fld.%1.0").arg(tb->identityFieldId)).toString();return r.values.value("name").toString();}return QString();}
 bool DatabaseDocument::fieldEditable(const QString&t,const QString&r,const QString&f,QString*d)const
 {
@@ -427,9 +440,7 @@ QVector<SDatabaseValidationFinding> DatabaseDocument::validate()const
         {
             if(row.deleted)continue;
             const QString identity=fold(row.values.value(identityKey).toString());
-            const bool identified=table.identityFieldId>=0||table.key=="raceModels"
-                ||table.key=="monsters"||table.key=="items";
-            if(identified&&(identity.isEmpty()||++duplicateCounts[identity]>1))
+            if(table.uniqueIdentity&&(identity.isEmpty()||++duplicateCounts[identity]>1))
                 findings.append({SDatabaseValidationFinding::Severity::Error,
                     "database.identity.invalid",table.key,row.stableKey,
                     "Stable name is empty or duplicated.",true});
@@ -637,8 +648,7 @@ bool DatabaseDocument::replaceTablesWithLua(const QMap<QString,SDatabaseTable>& 
                 if(field.storageId==-3&&stats.contains(identity))
                 {
                     const int index=field.storageOccurrence-2;
-                    if(index<stats.value(identity).values.size())
-                        row.values.insert(field.key,stats.value(identity).values.at(index));
+                    row.values.insert(field.key,stats.value(identity).values.value(index,0.0));
                 }
             }
         }
@@ -753,6 +763,9 @@ QMap<QString,SJmvUnitStatRecord> DatabaseDocument::desiredJmvUnitStats()const
 {
     QMap<QString,SJmvUnitStatRecord> records=m_snapshot->jmvUnitStatsByPrototype;
     if(m_tablesLuaBaseline.isEmpty())return records;
+    const int runtimeWidth=jmvStatKeys().size()-2;
+    for(auto it=records.begin();it!=records.end();++it)
+        while(it->values.size()<runtimeWidth)it->values.append(0.0);
     for(const QString& tableKey:{QString("monsters"),QString("units.monsters")})
     {
         const SDatabaseTable* monsters=table(tableKey);const SDatabaseTable baseline=m_baselineTables.value(tableKey);

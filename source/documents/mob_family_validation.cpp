@@ -833,8 +833,7 @@ QVector<SMobFamilyFinding> CMobFamilyValidationReport::blockingRuntimeFindings()
     QVector<SMobFamilyFinding> result;
     for(const SMobFamilyFinding& finding : findings)
     {
-        if(finding.code != "nid.zero_reserved"
-           && finding.code != "database.prototype.missing")
+        if(finding.code != "nid.zero_reserved")
             continue;
         bool active = false;
         for(const SMobNidOwner& owner : nidOwners.value(finding.nid))
