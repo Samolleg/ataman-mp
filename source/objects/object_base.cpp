@@ -1012,7 +1012,8 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
 
 void CObjectBase::applyTransientStandaloneVisual(ei::CFigure* figure,
                                                   const QString& modelName,
-                                                  const QStringList& textureCandidates)
+                                                  const QStringList& textureCandidates,
+                                                  bool preserveAuthoredUvs)
 {
     m_modelName=modelName;
     m_secondaryTexture=nullptr;
@@ -1025,6 +1026,11 @@ void CObjectBase::applyTransientStandaloneVisual(ei::CFigure* figure,
     if(!figure)return;
     for(CPart* part:m_aPart)
     {
+        if(preserveAuthoredUvs)
+        {
+            part->setTextureUvScale(1.0f);
+            continue;
+        }
         float minU=0.0f,maxU=0.0f,minV=0.0f,maxV=0.0f;
         if(!part->vertData().isEmpty())
         {

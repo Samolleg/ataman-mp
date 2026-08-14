@@ -243,6 +243,8 @@ private slots:
     void databaseEditorExposesConstructorEntryPoint();
     void databaseEditorUsesCleanImportAndSchemaLabels();
     void itemSpellConstructorUsesVerifiedPreviewFamilies();
+    void itemSpellConstructorPreviewPoliciesAreCategoryAware();
+    void itemSpellConstructorDoesNotDirtySparseJmvDocument();
     void itemSpellConstructorUsesEffectiveJmvSpellCatalog();
     void installedConstructorCatalogCoverage();
     void installedConstructorImportsAgilityStaffIron();
@@ -1028,7 +1030,7 @@ void ProfileDatabaseTests::authoringDocumentApplyIsAtomicAndUndoCanRestoreSource
 }
 void ProfileDatabaseTests::authoringDocumentRenamesStableIdentityAndTracksAppliedState()
 {
-    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");write(path,resArchive(relationalMembers()));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QVERIFY(!document->identityAvailable("monsters","Human Test"));QVERIFY(document->identityAvailable("monsters","Human Test Copy"));QString diagnostic;QVERIFY2(document->setValue("monsters","human test","name","Human Test Renamed",&diagnostic),qPrintable(diagnostic));QVERIFY(!document->identityAvailable("monsters","human test renamed"));QVERIFY(document->hasUnappliedChanges(&diagnostic));QVERIFY2(document->applyToSource(&diagnostic),qPrintable(diagnostic));QVERIFY(!document->hasUnappliedChanges(&diagnostic));QVERIFY(document->undo());QVERIFY(document->hasUnappliedChanges(&diagnostic));
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString path=QDir(temporary.path()).filePath("database.res");write(path,resArchive(relationalMembers()));ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);QVERIFY(!document->identityAvailable("monsters","Human Test"));QVERIFY(document->identityAvailable("monsters","Human Test Copy"));QString diagnostic;QVERIFY2(document->setValue("monsters","human test","name","Human Test Renamed",&diagnostic),qPrintable(diagnostic));QVERIFY(!document->identityAvailable("monsters","human test renamed"));QVERIFY(document->hasUnappliedChanges(&diagnostic));QVERIFY2(document->applyToSource(&diagnostic),qPrintable(diagnostic));QVERIFY(!document->hasUnappliedChanges(&diagnostic));QVERIFY(document->undo());QVERIFY(document->hasUnappliedChanges(&diagnostic));QVERIFY(document->redo());QVERIFY(!document->hasUnappliedChanges(&diagnostic));
 }
 
 void ProfileDatabaseTests::authoringDocumentPreservesNestedWearsTagIdentity()
@@ -2142,6 +2144,39 @@ void ProfileDatabaseTests::itemSpellConstructorUsesVerifiedPreviewFamilies()
     QStringList codes={"ee1","e10","e3","e2"};
     std::sort(codes.begin(),codes.end(),ei::ItemSpellConstructorCatalog::naturalCodeLess);
     QCOMPARE(codes,QStringList({"e2","e3","e10","ee1"}));
+}
+
+void ProfileDatabaseTests::itemSpellConstructorPreviewPoliciesAreCategoryAware()
+{
+    ei::SConstructorItem quick;quick.category="Quick Item";
+    ei::SConstructorItem weapon;weapon.category="Weapon";
+    QVERIFY(ei::ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(quick));
+    QVERIFY(!ei::ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(weapon));
+    QVERIFY(ei::ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset({},"Weapon"));
+    QVERIFY(!ei::ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset("Weapon","Weapon"));
+    QVERIFY(ei::ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset("Weapon","Armor"));
+    QVERIFY(ei::ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset("Armor","Quick Item"));
+}
+
+void ProfileDatabaseTests::itemSpellConstructorDoesNotDirtySparseJmvDocument()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());QDir root(temporary.path());
+    QVERIFY(root.mkpath("mod/res"));QVERIFY(root.mkpath("mod/lua"));
+    write(root.filePath("mod/res/database.res"),resArchive(relationalMembers()));
+    QByteArray lua=unitPerkLua("Human Test",0);
+    const int statStart=lua.indexOf("UnitStat = {");QVERIFY(statStart>=0);
+    lua=lua.left(statStart)+QByteArray("UnitStat = {\n{\"Human Test\",100,10.5,},\n}\n");
+    write(root.filePath("mod/lua/tables.lua"),lua);
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="jmv.v1";request.profileId="jamais-vu";
+    request.resourceDirectories<<root.filePath("mod/res");
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    QString diagnostic;
+    QVERIFY2(!document->hasUnappliedChanges(&diagnostic),qPrintable(diagnostic));
+    const auto catalog=ei::ItemSpellConstructorCatalog::fromDocument(*document);
+    QVERIFY(!catalog.items.isEmpty());
+    QVERIFY(!document->isDirty());
+    QVERIFY2(!document->hasUnappliedChanges(&diagnostic),qPrintable(diagnostic));
 }
 
 void ProfileDatabaseTests::itemSpellConstructorUsesEffectiveJmvSpellCatalog()

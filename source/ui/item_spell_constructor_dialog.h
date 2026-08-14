@@ -79,6 +79,7 @@ private:
     CWorldObj* m_previewObject{nullptr};
     CView* m_view{nullptr};
     bool m_itemPreviewInitialized{false};
+    QString m_itemPreviewCategory;
 
     QLineEdit* m_spellFilter{nullptr};
     QComboBox* m_spellSchool{nullptr};

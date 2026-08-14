@@ -82,6 +82,9 @@ public:
                                    const SConstructorMaterial* material);
     QStringList itemTextureCandidates(const SConstructorItem& item,
                                       const SConstructorMaterial* material) const;
+    static bool preservesStandaloneTextureUvs(const SConstructorItem& item);
+    static bool previewCategoryNeedsCameraReset(const QString& previousCategory,
+                                                const QString& currentCategory);
     QStringList spellTextureCandidates(const SConstructorSpell& spell) const;
     QString spellTextureName(const SConstructorSpell& spell) const;
     QStringList runeTextureCandidates(const SConstructorRune& rune) const;

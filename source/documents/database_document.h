@@ -61,12 +61,19 @@ public:
     bool importNativeBundle(const QByteArray& archiveBytes, const QByteArray& tablesLuaBytes,
                             const QString&, QString* = nullptr);
 private:
-    struct SState { QMap<QString, SDatabaseTable> tables; SDatabaseChange change; };
+    struct SState {
+        SState() = default;
+        SState(const QMap<QString, SDatabaseTable>& t, const SDatabaseChange& c, quint64 id)
+            : tables(t), change(c), stateId(id) {}
+        QMap<QString, SDatabaseTable> tables;
+        SDatabaseChange change;
+        quint64 stateId{0};
+    };
     explicit DatabaseDocument(const QSharedPointer<const SProfileDatabaseSnapshot>&);
     SDatabaseRow* row(const QString&, const QString&); void commit(const QMap<QString, SDatabaseTable>&, const SDatabaseChange&);
     QMap<QString, SJmvUnitPerkRecord> desiredJmvUnitPerks() const;
     QMap<QString, SJmvUnitStatRecord> desiredJmvUnitStats() const;
-    QSharedPointer<const SProfileDatabaseSnapshot> m_snapshot; QMap<QString, SDatabaseTable> m_tables, m_baselineTables; QSet<QString> m_sourceFieldOccurrences; QVector<SState> m_undo, m_redo; QByteArray m_sourceArchiveBaseline, m_tablesLuaBaseline; QString m_expectedSourceSha256, m_expectedTablesLuaSha256; mutable bool m_buildingReplacementCandidate{false};
+    QSharedPointer<const SProfileDatabaseSnapshot> m_snapshot; QMap<QString, SDatabaseTable> m_tables, m_baselineTables; QSet<QString> m_sourceFieldOccurrences; QVector<SState> m_undo, m_redo; QByteArray m_sourceArchiveBaseline, m_tablesLuaBaseline; QString m_expectedSourceSha256, m_expectedTablesLuaSha256; quint64 m_stateSerial{0}, m_currentStateId{0}, m_publishedStateId{0}; mutable bool m_buildingReplacementCandidate{false};
 };
 }
 #endif

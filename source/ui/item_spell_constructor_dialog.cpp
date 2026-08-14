@@ -46,9 +46,11 @@ public:
                              partTextures,QString(),bodyTextureLayers,emissions);
     }
     void applyStandaloneItem(ei::CFigure* figure,const QString& modelName,
-                             const QStringList& textureCandidates)
+                             const QStringList& textureCandidates,
+                             bool preserveAuthoredUvs)
     {
-        applyTransientStandaloneVisual(figure,modelName,textureCandidates);
+        applyTransientStandaloneVisual(figure,modelName,textureCandidates,
+                                       preserveAuthoredUvs);
     }
 };
 QString searchable(const QStringList& values) { return values.join(QLatin1Char(' ')).toCaseFolded(); }
@@ -398,6 +400,7 @@ void ItemSpellConstructorDialog::resetItemCamera()
     else
         m_itemPreview->resetView();
     m_itemPreviewInitialized=true;
+    m_itemPreviewCategory=item?item->category:QString();
 }
 
 void ItemSpellConstructorDialog::addRune(){if(!m_availableRunes->currentItem()||m_selectedRunes->count()>=8)return;const QString code=m_availableRunes->currentItem()->data(Qt::UserRole).toString();if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes,runePixmap(m_catalog,*rune));updateSpellPreview();updateOutput();}
@@ -417,6 +420,9 @@ void ItemSpellConstructorDialog::updateItemPreview()
 {
     const auto* item=currentItem();
     if(!item)return;
+    const bool resetForCategory=
+        ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset(
+            m_itemPreviewCategory,item->category);
     if(m_itemPreview&&m_previewObject&&m_catalog.isJmvProfile()
        &&item->category!=QStringLiteral("Quick Item")&&currentMaterial()
        &&m_databaseSnapshot)
@@ -463,7 +469,7 @@ void ItemSpellConstructorDialog::updateItemPreview()
             static_cast<CConstructorPreviewObject*>(m_previewObject)->applyResolvedItem(
                 model,primary,components,textures,bodyTextureLayers,emissions);
             m_itemPreview->attachNode(m_previewObject,false);
-            if(!m_itemPreviewInitialized)resetItemCamera();
+            if(!m_itemPreviewInitialized||resetForCategory)resetItemCamera();
             m_itemPreview->updateGL();
             if(m_itemSpellBadge){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(m_itemSpell->text());const auto*spell=parsed.valid?m_catalog.findSpell(parsed.prototypeCode):nullptr;if(spell){m_itemSpellBadge->setPixmap(spellPixmap(m_catalog,*spell,parsed.runeCodes,140));m_itemSpellBadge->show();m_itemSpellBadge->raise();}else m_itemSpellBadge->hide();}
             return;
@@ -477,7 +483,7 @@ void ItemSpellConstructorDialog::updateItemPreview()
         {
             m_itemPreview->makeCurrent();
             ei::CFigure* raw=CObjectList::getInstance()->getFigureResource(figure+QStringLiteral(".fig"));
-            if(raw){static_cast<CConstructorPreviewObject*>(m_previewObject)->applyStandaloneItem(raw,figure,textures);m_itemPreview->attachNode(m_previewObject,false);if(!m_itemPreviewInitialized)resetItemCamera();}else m_itemPreview->attachNode(nullptr,false);
+            if(raw){static_cast<CConstructorPreviewObject*>(m_previewObject)->applyStandaloneItem(raw,figure,textures,ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(*item));m_itemPreview->attachNode(m_previewObject,false);if(!m_itemPreviewInitialized||resetForCategory)resetItemCamera();}else m_itemPreview->attachNode(nullptr,false);
         }
         m_itemPreview->updateGL();
     }else if(m_itemPreview)m_itemPreview->attachNode(nullptr,false);
