@@ -164,6 +164,13 @@ contract. It must not be redesigned without direct user authorization:
   tile magnified or reduced into the same CSS box.
 - Every concrete family offered by a selector has a titled reference visible on
   that same card. Only **Different family/name** may omit a reference.
+- Family references are global across every reviewed atlas. When the user asks
+  to see a named family, show its best trustworthy HD and original anchors even
+  when they come from another zone; do not restrict references to the target
+  atlas unless the user explicitly requests a same-atlas comparison.
+- Global lookup supplements rather than replaces local evidence. Show every
+  trustworthy uniform variant from the target atlas first, then useful
+  cross-atlas anchors; catalog iteration order must never hide a local variant.
 - The card order is target whole tile, horizontal comparison row, controls, then
   optional expanded evidence.
 - Corners display as NW/NE above SW/SE and serialize as NW, NE, SE, SW.

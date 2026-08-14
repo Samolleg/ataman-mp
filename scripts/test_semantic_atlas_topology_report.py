@@ -101,11 +101,18 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # R108 removes the three exhausted transition-only family records;
         # their 25 zero-coverage pair rows no longer inflate the denominator.
         # R109 removes the final Bz7g Ground / Common corner and prunes that
-        # now-unreferenced brush, removing five topology pairs. R111 restores
-        # the reviewed transition-only Ground / Tan identity in bz15h and
-        # Zone17. R112 separates Zone10 slot 396 into one genuine uniform
-        # Slabs / Faces irregular family and moves three reviewed pair rows
-        # between topology-coverage buckets.
+        # now-unreferenced brush, removing five topology pairs.
+        # R110 exhausts six further family rows across exact atlas bindings.
+        # Their removal eliminates 42 now-impossible pair rows: 37 with zero
+        # support and five with one supported topology.
+        # R111 restores the reviewed transition-only Ground / Tan identity in
+        # bz15h and Zone17. Six pair rows return; one prior single-topology row
+        # becomes a zero-coverage row after the slot-248 corner split.
+        # R112 separates Zone10 slot 396 into one genuine uniform
+        # Slabs / Faces irregular family. Its eight relationships with the
+        # existing Zone10 families are now represented explicitly; reviewed
+        # corner corrections also move three existing pair rows between
+        # topology-coverage buckets.
         # R114 changes only reviewed corner ownership. It retains the same
         # family/pair denominator while moving seven pair rows among topology
         # coverage buckets.
@@ -114,12 +121,58 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # Zone7 Sand / Dark pink), then applies 158 exact-owner corrections.
         # The two exact bz2g/Zone2 bindings each add 12 relationships and the
         # Zone7 family adds four, for 28 additional pair rows.
-        # R120 adds transition-only Stone / Gray where the explicitly reviewed
-        # family was absent locally, after resolving every remaining exact
-        # connection disagreement through R117-R120.
-        self.assertEqual(1282, report["totalPairCount"])
+        # R116 resolves the five held R115 decisions across eleven exact owner
+        # corners. The denominator is unchanged; two previously unsupported
+        # relationships gain one authored topology.
+        # R117 adds the reviewed transition-only Zone3Obr Stone / Grayish
+        # identity and applies 439 exact-owner corner corrections. The new
+        # identity adds eight honest pair rows; changed ownership also restores
+        # twenty previously pruned relationships across the reviewed atlases.
+        # R119 changes reviewed corner ownership only. The family/pair
+        # denominator remains stable while eight relationships move between
+        # authored-topology coverage buckets.
+        # R122 changes reviewed corner ownership and renames one cross-atlas
+        # water identity without changing the pair denominator. Two pair rows
+        # move from one authored topology to zero.
+        # R125 changes reviewed corner ownership only. The pair denominator is
+        # unchanged; seven relationship rows move among authored-topology
+        # coverage buckets.
+        # R126 completes the exact bz15h/Zone17 signature alignment. Those two
+        # namespaces now share one byte-identical runtime profile, so its 21
+        # family-pair rows are counted once rather than twice. R126 corner
+        # corrections also redistribute coverage inside the retained rows.
+        # R127 changes two reviewed corners only. The pair denominator remains
+        # stable; bz3g slot 272 reduces one relationship from two authored
+        # topology classes to one.
+        # R128 applies 15 ownership-corroborated decisions across their exact
+        # artwork owners. One retained family pair loses its last two authored
+        # topology classes; the denominator remains stable.
+        # R129 adds Bz7g Stone / Dark as explicit one-corner support and
+        # applies 126 exact-owner corner corrections. The new family has five
+        # honest relationships; reviewed rewrites redistribute four existing
+        # rows among coverage buckets.
+        # R132 adds Zone20 Stone / Dark as an explicitly reviewed,
+        # transition-only identity at slot 189 SW and applies 75 exact-owner
+        # corner corrections. The new identity adds four honest pair rows.
+        # R133 applies 31 exact-owner corner rows and resolves the Zone7
+        # byte-identical 86/87 mapping conflict. No family pair is added or
+        # removed; the accepted rewrites only redistribute coverage classes.
+        # R138 applies 46 exact-owner corner rows. Zone18 slot 347 introduces
+        # one explicitly reviewed transition-only Ground / Tan corner where
+        # Zone18 previously had no such family record. That deliberately
+        # separates Zone18's runtime profile from bz16h and exposes its honest
+        # family-pair denominator instead of hiding the cross-atlas identity.
+        # R139 restores transition-only Stone / Desert in the byte-identical
+        # bz14h/bz18h/Zone16 profile for slot 21's two explicitly reviewed
+        # north corners. That adds four honest family-pair rows and moves one
+        # existing pair from one topology class to two; no unreviewed Beige
+        # corner is propagated.
+        # R140 accepts Stone / Desert only at slot 30 NW and slot 31 NW across
+        # those exact owners. The family-pair denominator remains stable, and
+        # one existing relationship gains a second authored topology class.
+        self.assertEqual(1309, report["totalPairCount"])
         self.assertEqual(
-            {"0": 698, "1": 93, "2": 69, "3": 192, "4": 230},
+            {"0": 734, "1": 87, "2": 64, "3": 187, "4": 237},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

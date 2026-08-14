@@ -1,0 +1,41 @@
+{
+  "schema": "ei-semantic-atlas-r97-reviewed-decisions-v1",
+  "cornerOrder": ["NW", "NE", "SE", "SW"],
+  "explicitGroundSignatures": [
+    {"namespace": "zone9", "slot": 163, "signature": ["Stone / Grayish", "Ground / Dead", "Ground / Dead", "Ground / Dead"]},
+    {"namespace": "zone9", "slot": 198, "signature": ["Ground / Dead", "Ground / Dead", "Stone / Grayish", "Ground / Dead"]},
+    {"namespace": "zone9", "slot": 297, "signature": ["Stone / Grayish", "Grass / Sparse dark", "Stone / Grayish", "Ground / Dead"]},
+    {"namespace": "zone9", "slot": 476, "signature": ["Stone / Grayish", "Grass / Sparse dark", "Ground / Dead", "Ground / Dead"]},
+    {"namespace": "bz3g", "slot": 163, "signature": ["Stone / Grayish", "Ground / Dead", "Ground / Dead", "Ground / Dead"]},
+    {"namespace": "bz3g", "slot": 198, "signature": ["Ground / Dead", "Ground / Dead", "Stone / Grayish", "Ground / Dead"]},
+    {"namespace": "bz3g", "slot": 297, "signature": ["Stone / Grayish", "Grass / Sparse dark", "Stone / Grayish", "Ground / Dead"]}
+  ],
+  "explicitSandIrregularCorners": {
+    "194": ["NE", "SE"],
+    "195": ["NE", "SE"],
+    "196": ["NE", "SE"],
+    "220": ["NW", "NE", "SE", "SW"],
+    "374": ["SE", "SW"],
+    "375": ["SE", "SW"],
+    "384": ["NE", "SE", "SW"],
+    "385": ["NE", "SE", "SW"],
+    "392": ["SE", "SW"],
+    "395": ["SW"],
+    "396": ["SE"],
+    "397": ["SE"],
+    "459": ["SW"],
+    "507": ["SW"],
+    "508": ["NE", "SW"]
+  },
+  "sharedSandOwners": ["bz11k", "Zone14"],
+  "provisionalCommentFollowUp": [
+    {"namespace": "bz11k", "sharedOwner": "Zone14", "slot": 194, "corner": "SW", "comment": "seems to be sand irregular too"},
+    {"namespace": "bz11k", "sharedOwner": "Zone14", "slot": 195, "corner": "SW", "comment": "SW is sand irregular too"},
+    {"namespace": "bz11k", "sharedOwner": "Zone14", "slot": 196, "corner": "SW", "comment": "SW also"}
+  ],
+  "explicitlyUntouched": [
+    {"namespace": "bz3g", "slot": 476, "reason": "No R97 selection; approved HD differs from Zone9"},
+    {"namespace": "bz3g", "slot": 445, "reason": "No R97 selection"},
+    {"namespace": "bz3g", "slot": 468, "reason": "No R97 selection"}
+  ]
+}

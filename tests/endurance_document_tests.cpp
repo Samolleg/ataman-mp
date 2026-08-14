@@ -6210,12 +6210,12 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     // one reviewed, paint-selectable Zone10 Slabs / Faces irregular family.
     // R115 adds three honest transition-only rows. R117-R120 then add four
     // reviewed local identities while later authored evidence makes the two
-    // exact Zone2 Ground / Dirt brushes structurally paint-selectable. R123
-    // separates BaseGipat's lighter Water / Still artwork from Still dark.
-    QCOMPARE(totalFamilies, 401);
+    // exact Zone2 Ground / Dirt brushes structurally paint-selectable. R140
+    // also retains the reviewed split between BaseGipat Water / Still variants.
+    QCOMPARE(totalFamilies, 407);
     // A referenced family remains transition-only when it has neither a
     // uniform tile nor a one-on-three authored stamp.
-    QCOMPARE(transitionSupportFamilies, 17);
+    QCOMPARE(transitionSupportFamilies, 18);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()

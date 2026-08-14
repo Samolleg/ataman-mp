@@ -1,0 +1,64 @@
+{
+  "schema": "ei-semantic-atlas-r128-consolidated-decisions-v1",
+  "source": "scripts/semantic_atlas_r128_user_answers.txt",
+  "queue": "artifacts/semantic-atlas-r128-corner-ownership-review/questionnaire/r128-corner-ownership-queue.json",
+  "policy": "Apply only submitted values differing from currentMapping. Propagate only through queue-recorded exact artwork owners.",
+  "counts": {
+    "submittedCards": 13,
+    "auditFlaggedCorners": 15,
+    "auditMatchedReviewed": 15,
+    "auditAgreementPercent": 100.0,
+    "changedCardCorners": 15,
+    "serializedOwnerCornerRows": 30,
+    "additionalUnflaggedHumanCorners": 0
+  },
+  "cornerCorrections": {
+    "bz13h": {
+      "366": {"SW": "Sand / Yellow"},
+      "467": {"SW": "Sand / Yellow"}
+    },
+    "Zone15": {
+      "366": {"SW": "Sand / Yellow"},
+      "467": {"SW": "Sand / Yellow"}
+    },
+    "bz3g": {
+      "282": {"NW": "Grass / Sparse dark", "NE": "Grass / Sparse light"},
+      "442": {"NW": "Grass / Sparse dark"}
+    },
+    "zone9": {
+      "282": {"NW": "Grass / Sparse dark", "NE": "Grass / Sparse light"},
+      "385": {"SE": "Grass / Sparse dark"},
+      "442": {"NW": "Grass / Sparse dark"}
+    },
+    "bz4g": {
+      "205": {"SW": "Ground / Gravel greenish"},
+      "369": {"SW": "Ground / Gravel greenish"}
+    },
+    "Zone4": {
+      "205": {"SW": "Ground / Gravel greenish"},
+      "369": {"SW": "Ground / Gravel greenish"}
+    },
+    "bz5g": {
+      "259": {"NE": "Ground / Common"},
+      "340": {"SE": "Sand / Common"},
+      "347": {"NE": "Ground / Common"},
+      "402": {"SW": "Sand / Grainy"}
+    },
+    "bz6g": {
+      "259": {"NE": "Ground / Common"},
+      "340": {"SE": "Sand / Common"},
+      "347": {"NE": "Ground / Common"},
+      "402": {"SW": "Sand / Grainy"}
+    },
+    "Zone8": {
+      "259": {"NE": "Ground / Common"},
+      "340": {"SE": "Sand / Common"},
+      "347": {"NE": "Ground / Common"},
+      "402": {"SW": "Sand / Grainy"}
+    },
+    "Zone7": {
+      "276": {"SE": "Sand / Grainy", "SW": "Sand / Dark pink"},
+      "332": {"SW": "Sand / Dark pink"}
+    }
+  }
+}

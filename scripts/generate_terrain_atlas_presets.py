@@ -115,6 +115,86 @@ R123_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r123_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R124_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r124_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R125_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r125_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R126_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r126_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R127_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r127_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R128_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r128_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R129_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r129_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R130_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r130_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R131_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r131_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R132_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r132_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R133_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r133_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R134_QUARANTINE_KEEP_CURRENT = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r134_quarantine_keep_current_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R135_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r135_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R136_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r136_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R138_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r138_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R139_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r139_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R140_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r140_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -1619,11 +1699,12 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         family_renames.update(renames)
 
     if namespace in {"bz14h", "bz18h", "zone16"}:
-        # These recipe fragments are sides of the established beige/red stone
-        # transition or tan ground, not independent paint materials.
+        # Most recipe fragments here are sides of the established beige/red
+        # stone transition or tan ground, not independent paint materials.
+        # R139 subsequently restores family 6 as transition-only Stone /
+        # Desert for the explicitly reviewed north corners of slot 21.
         corrections = {
-            (21, 0): 1, (21, 1): 1, (31, 0): 1,
-            (30, 0): 1,
+            (31, 0): 1, (30, 0): 1,
             (179, 0): 4, (187, 1): 4,
 
             # The nominally uniform Rubble / Red group contains repeated
@@ -1639,7 +1720,7 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             # NE. The complete tile and independent HD/map evidence agree.
             (186, 1): 4,
         }
-        removed_ids = {6, 7, 8}
+        removed_ids = {7, 8}
 
     if namespace in {"bz15h", "zone17"}:
         # Slot 134 is the only occurrence of the recipe's Ground / Tan
@@ -3147,10 +3228,267 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                 "NW": 0, "NE": 1, "SE": 2, "SW": 3,
             }[corner_name])] = family_name
 
+    # R124 applies only values that differ from the R123 catalog. Exact
+    # artwork/mapping aliases were serialized by the reviewed queue; no
+    # similarity-based or sibling-zone propagation is inferred here.
+    r124_key = next((key for key in R124_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R124_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r124_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R125 applies only explicit reviewed values differing from the R124
+    # catalog. Exact artwork owners come from the questionnaire queue; audit
+    # distance bands do not authorize any additional inference.
+    r125_key = next((key for key in R125_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R125_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r125_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R126 applies only explicit reviewed values differing from the R125
+    # catalog. Exact artwork owners come from the questionnaire queue; neither
+    # the broad nor vertex-weighted audit signal authorizes extra inference.
+    r126_key = next((key for key in R126_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R126_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r126_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R127 applies the complete conservative residual review. Only its two
+    # submitted corner deltas are authoritative; no additional audit inference
+    # is propagated.
+    r127_key = next((key for key in R127_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R127_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r127_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R128 applies the complete ownership-corroborated review. The user
+    # confirmed every one of the 15 audit suggestions. Only the submitted
+    # deltas and queue-recorded exact artwork owners are authoritative.
+    r128_key = next((key for key in R128_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R128_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r128_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R129 applies only the submitted mapping differences and the exact
+    # artwork-owner locations recorded by the grouped questionnaire. Audit
+    # rejections and reviewed uniform confirmations remain evidence in the
+    # decision record; they do not manufacture catalog writes.
+    r129_key = next((key for key in R129_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R129_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r129_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R130 applies the reviewed follow-up queue after the audit learned R129.
+    # The record preserves five user-supplied companion corrections that the
+    # audit did not flag, including the explicitly named Sand / Yellow corner.
+    r130_key = next((key for key in R130_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R130_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r130_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R131 applies only explicitly submitted T1/T2 mappings. Exact rejected
+    # audit suggestions remain provenance memory; omitted cards remain open.
+    r131_key = next((key for key in R131_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R131_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r131_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R132 applies only the 112 submitted all-T3 cards. The one omitted card
+    # remains unresolved. Exact audit rejections are provenance memory and do
+    # not manufacture catalog changes.
+    r132_key = next((key for key in R132_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R132_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r132_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R133 applies all 21 explicitly submitted residual-review cards. The two
+    # rejected audit suggestions remain review memory and produce no catalog
+    # mutation; exact queue-recorded artwork owners share accepted mappings.
+    r133_key = next((key for key in R133_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R133_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r133_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R135 applies the complete 30-card Tier-4 sample. Twenty-eight cards
+    # explicitly reject the shown audit proposal, while concrete per-corner
+    # changes still remain authoritative. Two escape values are resolved from
+    # the user's adjacent family-name comments in the replayable decision file.
+    # Propagation is limited to queue-recorded exact artwork owners.
+    r135_key = next((key for key in R135_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R135_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r135_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R136 applies every explicit selected value from the complete bounded
+    # post-R135 queue. The first twelve cards accept 13 audit-flagged corner
+    # changes involving Stone / Pink or Stone / Mossy; the remaining eighteen
+    # cards preserve current mappings and become audit-rejection memory.
+    # Propagation remains limited to the queue-recorded exact artwork owners.
+    r136_key = next((key for key in R136_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R136_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r136_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R138 applies the concrete selections from all sixty balanced Tier-4
+    # cards. A retained reject-audit comment does not override a subsequently
+    # selected concrete value. Definite adjacent family comments resolve four
+    # escape values; the one tentative "might be" corner remains unresolved
+    # and is deliberately absent. Propagation is restricted to exact owners
+    # recorded in the review queue.
+    r138_key = next((key for key in R138_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R138_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r138_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R139 applies every explicit selection from the direct-evidence batch.
+    # The only human correction beyond its 75 audit-flagged corners is bz14h
+    # slot 21 NW -> Stone / Desert. Exact byte-identical owners bz18h and
+    # Zone16 inherit it. The other 63 Stone / Beige corners whose raw audit
+    # leader is Desert remain unchanged because they were not reviewed.
+    r139_key = next((key for key in R139_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R139_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r139_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R140 exhaustively reviews all 65 Beige corners led by Desert in this
+    # exact artwork group. The user accepts Desert only at slots 30 and 31 NW,
+    # explicitly rejects 61 other flagged corners, and leaves the re-presented
+    # slot 21 card untouched. Only the two concrete accepted mappings apply.
+    r140_key = next((key for key in R140_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R140_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r140_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
     if (not corrections and not family_renames and not family_aliases
             and not family_metadata_corrections):
         return recipe
     result = copy.deepcopy(recipe)
+    r139_family_key = next((
+        key for key in R139_CONSOLIDATED_REVIEW.get("newFamilies", {})
+        if key.casefold() == namespace
+    ), result["namespace"])
+    for family_spec in R139_CONSOLIDATED_REVIEW.get(
+            "newFamilies", {}).get(r139_family_key, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        result["families"] = [
+            family for family in result["families"]
+            if family["id"] != family_id
+        ]
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    for family_spec in R138_CONSOLIDATED_REVIEW.get(
+            "newFamilies", {}).get(result["namespace"], []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        if any(family["id"] == family_id for family in result["families"]):
+            existing = next(family for family in result["families"]
+                            if family["id"] == family_id)
+            if existing.get("suggestedName") != family_spec["name"]:
+                raise ValueError(
+                    f"{result['namespace']}: R138 family ID {family_id} "
+                    f"already belongs to {existing.get('suggestedName')!r}")
+            continue
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
     if namespace == "zone7" and any(
             family["id"] == 17 for family in result["families"]):
         # The original recipe's transition-only fragment IDs were previously
@@ -3346,6 +3684,64 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             if existing.get("suggestedName") != family_spec["name"]:
                 raise ValueError(
                     f"{result['namespace']}: R123 family ID {family_id} "
+                    f"already belongs to {existing.get('suggestedName')!r}")
+            continue
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]
+            or family_renames.get(family["id"]) == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        template["paintSelectable"] = bool(family_spec["paintSelectable"])
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    for family_spec in R129_CONSOLIDATED_REVIEW.get(
+            "newFamilies", {}).get(namespace, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        if any(family["id"] == family_id for family in result["families"]):
+            existing = next(family for family in result["families"]
+                            if family["id"] == family_id)
+            if existing.get("suggestedName") != family_spec["name"]:
+                raise ValueError(
+                    f"{result['namespace']}: R129 family ID {family_id} "
+                    f"already belongs to {existing.get('suggestedName')!r}")
+            continue
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]
+            or family_renames.get(family["id"]) == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        template["paintSelectable"] = bool(family_spec["paintSelectable"])
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    r132_family_key = next((key for key in R132_CONSOLIDATED_REVIEW.get(
+        "newFamilies", {}) if key.casefold() == namespace), namespace)
+    for family_spec in R132_CONSOLIDATED_REVIEW.get(
+            "newFamilies", {}).get(r132_family_key, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        if any(family["id"] == family_id for family in result["families"]):
+            existing = next(family for family in result["families"]
+                            if family["id"] == family_id)
+            if existing.get("suggestedName") != family_spec["name"]:
+                raise ValueError(
+                    f"{result['namespace']}: R132 family ID {family_id} "
                     f"already belongs to {existing.get('suggestedName')!r}")
             continue
         template = copy.deepcopy(next(
@@ -3775,6 +4171,17 @@ def editor_material_is_paintable(recipe: dict, family_id: int) -> bool:
     return False
 
 
+REVIEWED_UNIFORM_THUMBNAILS = {
+    # Modern's brush-source audit caught these legacy thumbnail declarations
+    # pointing at mixed transition artwork.  Both replacements are genuine
+    # four-corner uniforms in the same approved-HD bz4g binding.
+    ("bz4g", 14): 353,  # Ground / Gray
+    ("bz4g", 18): 204,  # Ground / Gravel greenish
+    ("Zone4", 14): 353,  # exact physical alias of bz4g
+    ("Zone4", 18): 204,  # exact physical alias of bz4g
+}
+
+
 def resolved_thumbnail_slot(recipe: dict, family: dict) -> int:
     """Preserve a valid authored choice, otherwise choose a truthful fallback.
 
@@ -3786,6 +4193,15 @@ def resolved_thumbnail_slot(recipe: dict, family: dict) -> int:
     family_id = family["id"]
     by_slot = {slot["slot"]: list(slot["signature"].values())
                for slot in recipe["slots"]}
+    reviewed_uniform = REVIEWED_UNIFORM_THUMBNAILS.get(
+        (recipe["namespace"], family_id))
+    if reviewed_uniform is not None:
+        corners = by_slot.get(reviewed_uniform)
+        if corners != [family_id] * 4:
+            raise ValueError(
+                f"reviewed thumbnail {recipe['namespace']}:{reviewed_uniform} "
+                f"is not uniform family {family_id}: {corners}")
+        return reviewed_uniform
     selected = family.get("thumbnailSlot", -1)
     if family_id in by_slot.get(selected, []):
         return selected
@@ -3805,6 +4221,33 @@ def resolved_thumbnail_slot(recipe: dict, family: dict) -> int:
     if stamps:
         return min(stamps)
     return min(slot for slot, _ in occurrences)
+
+
+def validate_r134_quarantine_keep_current(recipes: list[dict]) -> None:
+    """Pin R134's empty changed-only export as explicit keep-current evidence."""
+    by_namespace = {recipe["namespace"].casefold(): recipe for recipe in recipes}
+    names = ("northWest", "northEast", "southEast", "southWest")
+    reviewed = R134_QUARANTINE_KEEP_CURRENT["reviewedMappings"]
+    cards = {
+        "quarantine-zone11-slot274": ("Zone11", 274),
+        "quarantine-zone11-slot35": ("Zone11", 35),
+        "quarantine-zone11-slot297": ("Zone11", 297),
+        "quarantine-bz11k-slot246-nw": ("bz11k", 246),
+        "quarantine-bz3g-slot468": ("bz3g", 468),
+    }
+    if set(reviewed) != set(cards):
+        raise ValueError("R134 keep-current decision/card mismatch")
+    for key, (namespace, slot) in cards.items():
+        recipe = by_namespace[namespace.casefold()]
+        families = {int(row["id"]): row["suggestedName"]
+                    for row in recipe["families"]}
+        signature = recipe["slots"][slot]["signature"]
+        actual = {corner: families[signature[name]]
+                  for corner, name in zip(("NW", "NE", "SE", "SW"), names)}
+        if actual != reviewed[key]:
+            raise ValueError(
+                f"R134 explicit keep-current mapping drift for {key}: "
+                f"expected {reviewed[key]}, got {actual}")
 
 
 def main() -> int:
@@ -3846,6 +4289,7 @@ def main() -> int:
         by_namespace[CANONICAL_IDENTITY_NAMESPACE.get(
             recipe["namespace"].lower(), recipe["namespace"].lower())])
         for recipe in recipes]
+    validate_r134_quarantine_keep_current(recipes)
     finalize_identity_decisions(identity_decisions, recipes)
 
     presets = []

@@ -1,0 +1,15 @@
+{
+  "schema": "ei-semantic-atlas-r98-reviewed-decisions-v1",
+  "family": "Sand / Irregular",
+  "sharedOwners": ["bz11k", "Zone14"],
+  "explicitCorners": [
+    {"slot": 194, "corner": "SW"},
+    {"slot": 195, "corner": "SW"},
+    {"slot": 196, "corner": "SW"},
+    {"slot": 292, "corner": "SW"},
+    {"slot": 394, "corner": "SW"},
+    {"slot": 396, "corner": "SW"}
+  ],
+  "untouchedDefaultsConfirmed": false,
+  "remainingQuestionnaireCorners": []
+}

@@ -1,0 +1,182 @@
+{
+  "schema": "ei-semantic-atlas-r124-consolidated-decisions-v1",
+  "source": "scripts\\semantic_atlas_r124_user_answers.txt",
+  "queue": "artifacts\\semantic-atlas-r124-top20-disagreements\\questionnaire\\r124-top20-queue.json",
+  "policy": "Apply only submitted values differing from currentMapping. Propagate only through queue-recorded byte-identical owners.",
+  "counts": {
+    "submittedCards": 20,
+    "changedCardCorners": 22,
+    "serializedOwnerCornerRows": 39,
+    "auditFlaggedCorners": 21,
+    "auditMatchedReviewed": 21,
+    "auditHumanAdjustments": 0,
+    "additionalUnflaggedHumanCorners": 1
+  },
+  "cornerCorrections": {
+    "bz11k": {
+      "477": {
+        "SW": "Rock / Black"
+      },
+      "497": {
+        "SW": "Rock / Black"
+      }
+    },
+    "Zone14": {
+      "477": {
+        "SW": "Rock / Black"
+      },
+      "497": {
+        "SW": "Rock / Black"
+      }
+    },
+    "bz13h": {
+      "426": {
+        "NE": "Sand / Gravel"
+      }
+    },
+    "Zone15": {
+      "426": {
+        "NE": "Sand / Gravel"
+      }
+    },
+    "bz14h": {
+      "238": {
+        "SW": "Rubble / Red"
+      }
+    },
+    "bz18h": {
+      "238": {
+        "SW": "Rubble / Red"
+      }
+    },
+    "Zone16": {
+      "238": {
+        "SW": "Rubble / Red"
+      }
+    },
+    "bz15h": {
+      "251": {
+        "NE": "Rubble / Dry"
+      }
+    },
+    "bz16h": {
+      "444": {
+        "NW": "Sand / Grass",
+        "SE": "Sand / Common grayish"
+      }
+    },
+    "bz2g": {
+      "180": {
+        "NE": "Grass / Fresh"
+      },
+      "359": {
+        "SW": "Stone / Mossy"
+      }
+    },
+    "Zone2": {
+      "180": {
+        "NE": "Grass / Fresh"
+      },
+      "359": {
+        "SW": "Stone / Mossy"
+      }
+    },
+    "bz3g": {
+      "222": {
+        "SW": "Ground / Dead"
+      },
+      "330": {
+        "SW": "Ground / Dead"
+      }
+    },
+    "bz4g": {
+      "152": {
+        "SW": "Grass / Fresh"
+      },
+      "232": {
+        "NE": "Grass / Fresh"
+      },
+      "314": {
+        "NE": "Grass / Fresh"
+      },
+      "490": {
+        "SW": "Grass / Fresh"
+      }
+    },
+    "Zone4": {
+      "152": {
+        "SW": "Grass / Fresh"
+      },
+      "232": {
+        "NE": "Grass / Fresh"
+      },
+      "314": {
+        "NE": "Grass / Fresh"
+      },
+      "490": {
+        "SW": "Grass / Fresh"
+      }
+    },
+    "bz8k": {
+      "341": {
+        "SW": "Paving / Square"
+      },
+      "419": {
+        "NW": "Stone / Gray",
+        "SE": "Stone / Gray"
+      }
+    },
+    "bz9k": {
+      "341": {
+        "SW": "Paving / Square"
+      },
+      "419": {
+        "NW": "Stone / Gray",
+        "SE": "Stone / Gray"
+      }
+    },
+    "Zone11": {
+      "341": {
+        "SW": "Paving / Square"
+      },
+      "419": {
+        "NW": "Stone / Gray",
+        "SE": "Stone / Gray"
+      }
+    },
+    "Zone18": {
+      "352": {
+        "SW": "Ground / Plant soil"
+      }
+    },
+    "Zone3Obr": {
+      "352": {
+        "SW": "Stone / Gray"
+      }
+    },
+    "Zone6_2": {
+      "390": {
+        "NE": "Ground / Common"
+      }
+    },
+    "zone9": {
+      "236": {
+        "SE": "Ground / Dark underwater"
+      }
+    }
+  },
+  "humanAdjustmentsBeyondAudit": [],
+  "additionalUnflaggedHumanCorners": [
+    {
+      "key": "r124-bz16h-slot444-dfb2812a5e",
+      "owners": [
+        "bz16h"
+      ],
+      "slot": 444,
+      "corner": "SE",
+      "current": "Sand / Dark",
+      "reviewed": "Sand / Common grayish",
+      "auditFlagged": false
+    }
+  ]
+}

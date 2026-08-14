@@ -1,0 +1,51 @@
+{
+  "schema": "ei-semantic-atlas-r94-reviewed-decisions-v1",
+  "resolved": [
+    {
+      "slot": 445,
+      "corners": {
+        "NE": "Ground / Dark",
+        "SW": "Ground / Dark"
+      }
+    },
+    {
+      "slot": 468,
+      "corners": {
+        "NE": "Stone / Grayish"
+      }
+    }
+  ],
+  "followUp": [
+    {
+      "key": "bz3g:445:NW",
+      "decision": "Different existing family",
+      "requiredComparison": ["Ground / Brownish", "Ground / Dark"],
+      "catalogAssignmentConfirmed": false
+    },
+    {
+      "key": "bz3g:445:SE",
+      "decision": "Different existing family",
+      "requiredComparison": ["Ground / Brownish", "Ground / Dark"],
+      "catalogAssignmentConfirmed": false
+    },
+    {
+      "key": "bz3g:468:NW",
+      "decision": "Different existing family",
+      "requiredComparison": ["Ground / Brownish", "Ground / Dark"],
+      "catalogAssignmentConfirmed": false
+    },
+    {
+      "key": "bz3g:468:SE",
+      "decision": "Different existing family",
+      "requiredComparison": ["Ground / Brownish", "Ground / Dark"],
+      "catalogAssignmentConfirmed": false
+    },
+    {
+      "key": "bz3g:468:SW",
+      "decision": "Different existing family",
+      "requiredComparison": ["Ground / Brownish", "Ground / Dark"],
+      "catalogAssignmentConfirmed": false
+    }
+  ],
+  "catalogMutation": "none until a concrete family is selected"
+}
