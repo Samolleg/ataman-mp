@@ -35,6 +35,9 @@ public:
     void readFigure(const QByteArray& file, const QString& name);
     void readAssembly(const QMap<QString, QByteArray>& aFile, const QString& assemblyRoot);
     ei::CFigure* getFigure(const QString& name);
+    // Resolve a specific figure resource, including standalone inventory .fig
+    // assets. Unlike getFigure(), this never rewrites the requested extension.
+    ei::CFigure* getFigureResource(const QString& resourceName);
     CSettings* settings(){Q_ASSERT(m_pSettings); return m_pSettings;}
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     QList<QString>& figureList() {return m_arrFigureForComboBox;}

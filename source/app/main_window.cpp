@@ -3899,6 +3899,24 @@ void MainWindow::launchCurrentMapTest()
                 .arg(databaseDiagnostic));
         return;
     }
+    if(isJmv)
+    {
+        input.tablesLuaSourcePath=m_databaseDocument?m_databaseDocument->sourceTablesLuaPath()
+            :databaseSnapshot->jmvUnitPerkSourcePath;
+        if(m_databaseDocument&&!input.tablesLuaSourcePath.isEmpty())
+            input.tablesLuaData=m_databaseDocument->buildTablesLua(&databaseDiagnostic);
+        else if(!input.tablesLuaSourcePath.isEmpty())
+        {
+            QFile luaFile(input.tablesLuaSourcePath);
+            if(luaFile.open(QIODevice::ReadOnly))input.tablesLuaData=luaFile.readAll();
+            else databaseDiagnostic=luaFile.errorString();
+        }
+        if(input.tablesLuaSourcePath.isEmpty()||input.tablesLuaData.isEmpty())
+        {
+            QMessageBox::critical(this,tr("Map test launch"),tr("The active JMV tables.lua could not be staged safely.\n\n%1").arg(databaseDiagnostic));
+            return;
+        }
+    }
     input.supplementalMobs = supplementalMobs;
     input.embeddedScript = mob->script();
     input.mapEntry = entry;

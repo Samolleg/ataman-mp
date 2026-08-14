@@ -1503,6 +1503,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_stagedMapTablePath.clear();
     m_databaseSourcePath.clear();
     m_stagedDatabasePath.clear();
+    m_tablesLuaSourcePath.clear();
+    m_stagedTablesLuaPath.clear();
     m_livePlaceholderResourcePath.clear();
     m_bridgeResultPath.clear();
     m_testSavesPath.clear();
@@ -1514,6 +1516,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_stagedMapTableSha256.clear();
     m_databaseSourceSha256.clear();
     m_stagedDatabaseSha256.clear();
+    m_tablesLuaSourceSha256.clear();
+    m_stagedTablesLuaSha256.clear();
     m_livePlaceholderResourceSha256.clear();
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
@@ -1607,6 +1611,11 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
                            m_databaseSourcePath);
         environment.insert("EI_MAPPER_ENDURANCE_DATABASE_STAGE",
                            m_stagedDatabasePath);
+    }
+    if(!m_tablesLuaSourcePath.isEmpty())
+    {
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_SOURCE",m_tablesLuaSourcePath);
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_STAGE",m_stagedTablesLuaPath);
     }
     if(!m_livePlaceholderResourcePath.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_TEMP_TEXTURE_RES",
@@ -1893,6 +1902,17 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     databaseJournal.insert("stagedSha256", m_stagedDatabaseSha256);
     databaseJournal.insert("installedArchiveModified", false);
     m_manifest.insert("database", databaseJournal);
+
+    if(isJmv)
+    {
+        m_tablesLuaSourcePath=QFileInfo(input.tablesLuaSourcePath).absoluteFilePath();QByteArray sourceLua;
+        if(!QFileInfo(m_tablesLuaSourcePath).isFile()||QFileInfo(m_tablesLuaSourcePath).fileName().compare("tables.lua",Qt::CaseInsensitive)!=0||!readFile(m_tablesLuaSourcePath,&sourceLua,error))
+        {if(error&&error->isEmpty())*error="The active JMV tables.lua source could not be resolved for owned test staging.";return false;}
+        m_stagedTablesLuaPath=QDir(databaseDirectory).filePath("tables.lua");m_tablesLuaSourceSha256=sha256(sourceLua);m_stagedTablesLuaSha256=sha256(input.tablesLuaData);
+        if(input.tablesLuaData.isEmpty()||!atomicWrite(m_stagedTablesLuaPath,input.tablesLuaData,error)||fileSha256(m_stagedTablesLuaPath).compare(m_stagedTablesLuaSha256,Qt::CaseInsensitive)!=0)
+        {if(error&&error->isEmpty())*error="The staged active tables.lua failed its post-write SHA-256 check.";return false;}
+        QJsonObject luaJournal;luaJournal.insert("policy","read-only-exact-source-path-redirection");luaJournal.insert("sourcePath",m_tablesLuaSourcePath);luaJournal.insert("sourceSha256",m_tablesLuaSourceSha256);luaJournal.insert("stagedPath",m_stagedTablesLuaPath);luaJournal.insert("stagedSha256",m_stagedTablesLuaSha256);luaJournal.insert("installedLuaModified",false);m_manifest.insert("tablesLua",luaJournal);
+    }
 
     // Journal every live artifact before creating it. A crash at any later
     // staging point can therefore be recovered without guessing ownership.
@@ -2360,6 +2380,11 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
            m_databaseSourcePath, Qt::CaseInsensitive) != 0)
     {
         if(error) *error = "The active database source differs from the running test profile.";
+        return false;
+    }
+    if(!m_tablesLuaSourcePath.isEmpty()&&(QFileInfo(input.tablesLuaSourcePath).absoluteFilePath().compare(m_tablesLuaSourcePath,Qt::CaseInsensitive)!=0||sha256(input.tablesLuaData).compare(m_stagedTablesLuaSha256,Qt::CaseInsensitive)!=0))
+    {
+        if(error)*error="Pending tables.lua changes require a fresh Test Current Map process because the JMV Lua state is initialized once at process startup.";
         return false;
     }
     if(!input.profile.valid || !input.profile.runtimeStackValidated

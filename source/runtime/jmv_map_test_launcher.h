@@ -44,6 +44,8 @@ struct SJmvMapTestLaunchInput
     QByteArray generatedAiGraphData;
     QString databaseSourcePath;
     QByteArray databaseData;
+    QString tablesLuaSourcePath;
+    QByteArray tablesLuaData;
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     QString embeddedScript;
     SMapCatalogEntry mapEntry;
@@ -180,6 +182,8 @@ private:
     QString m_stagedMapTablePath;
     QString m_databaseSourcePath;
     QString m_stagedDatabasePath;
+    QString m_tablesLuaSourcePath;
+    QString m_stagedTablesLuaPath;
     QString m_livePlaceholderResourcePath;
     QString m_bridgeSourcePath;
     QString m_bridgeLivePath;
@@ -193,6 +197,8 @@ private:
     QString m_stagedMapTableSha256;
     QString m_databaseSourceSha256;
     QString m_stagedDatabaseSha256;
+    QString m_tablesLuaSourceSha256;
+    QString m_stagedTablesLuaSha256;
     QString m_livePlaceholderResourceSha256;
     QString m_gameExePath;
     QString m_engineDirectory;

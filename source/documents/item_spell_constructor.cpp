@@ -352,6 +352,19 @@ QImage ItemSpellConstructorCatalog::orientPreviewImage(const QImage& image)
     return image.mirrored(false, true);
 }
 
+bool ItemSpellConstructorCatalog::naturalCodeLess(const QString& left,const QString& right)
+{
+    QRegExp token(QStringLiteral("(\\d+)|(\\D+)"));int li=0,ri=0;
+    while(li<left.size()&&ri<right.size())
+    {
+        token.indexIn(left,li);const QString l=token.cap(0);token.indexIn(right,ri);const QString r=token.cap(0);
+        const bool ln=!l.isEmpty()&&l.at(0).isDigit(),rn=!r.isEmpty()&&r.at(0).isDigit();int comparison=0;
+        if(ln&&rn)comparison=l.toLongLong()<r.toLongLong()?-1:(l.toLongLong()>r.toLongLong()?1:0);else comparison=QString::compare(l,r,Qt::CaseInsensitive);
+        if(comparison)return comparison<0;li+=l.size();ri+=r.size();
+    }
+    return left.size()<right.size();
+}
+
 void ItemSpellConstructorCatalog::applyGameTexts(const QMap<QString, QString>& entries)
 {
     m_gameTexts = entries;
@@ -431,11 +444,11 @@ SConstructorLimitReport ItemSpellConstructorCatalog::limits(const SConstructorIt
                            "ItemSpellConstructorCatalog",
                            "Spell energy %1 exceeds the constructed item's energy %2.")
                            .arg(result.spellMana, 0, 'g', 8).arg(result.itemMana, 0, 'g', 8);
-    if(result.spellSlots > result.itemSlots)
+    if(result.spellComplexity > result.itemSlots)
         result.warnings << QCoreApplication::translate(
                            "ItemSpellConstructorCatalog",
-                           "Spell uses %1 slots but the constructed item has %2.")
-                           .arg(result.spellSlots).arg(result.itemSlots);
+                           "Spell difficulty %1 exceeds the constructed item's maximum difficulty %2.")
+                           .arg(result.spellComplexity).arg(result.itemSlots);
     return result;
 }
 

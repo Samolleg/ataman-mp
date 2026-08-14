@@ -50,6 +50,8 @@ public:
     QByteArray buildArchive(QString* = nullptr) const;
     QByteArray buildTablesLua(QString* = nullptr) const;
     bool saveArchive(const QString&, QString* = nullptr) const;
+    bool saveBundle(const QString& archivePath, const QString& tablesLuaPath,
+                    QString* diagnostic = nullptr) const;
     bool applyToSource(QString* = nullptr);
     QSharedPointer<const SProfileDatabaseSnapshot> currentSnapshot(QString* = nullptr) const;
     bool replaceTables(const QMap<QString, SDatabaseTable>&, const QString&, QString* = nullptr);

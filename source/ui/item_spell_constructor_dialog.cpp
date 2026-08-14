@@ -26,6 +26,7 @@
 #include <QPixmap>
 #include <QTextCursor>
 #include <QPainter>
+#include <QSizePolicy>
 #include <algorithm>
 
 namespace {
@@ -63,6 +64,27 @@ QPixmap runePixmap(const ei::ItemSpellConstructorCatalog& catalog,
             40,40,Qt::KeepAspectRatio,Qt::SmoothTransformation);
     }
     return {};
+}
+QPixmap spellPixmap(const ei::ItemSpellConstructorCatalog& catalog,
+                    const ei::SConstructorSpell& spell,const QStringList& runes,int side)
+{
+    QImage source;for(const QString& candidate:catalog.spellTextureCandidates(spell))
+    {source=ei::ItemSpellConstructorCatalog::orientPreviewImage(CTextureList::getInstance()->textureImage(candidate,QString()));if(!source.isNull())break;}
+    if(source.isNull())return {};
+    QPixmap result(side,side);result.fill(QColor(24,24,28));QPainter painter(&result);
+    const int margin=qMax(4,side/32);const QPixmap icon=QPixmap::fromImage(source).scaled(side-margin*2,side-margin*2,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+    painter.drawPixmap((side-icon.width())/2,(side-icon.height())/2,icon);
+    const int runeSide=qMax(24,side/5),gap=qMax(2,side/80),columns=4;
+    const int startY=side-gap-((runes.size()+columns-1)/columns)*(runeSide+gap);
+    for(int i=0;i<runes.size();++i)
+    {
+        const QRect square(gap+(i%columns)*(runeSide+gap),startY+(i/columns)*(runeSide+gap),runeSide,runeSide);
+        QPixmap runeIcon;if(const auto* rune=catalog.findRune(runes.at(i)))runeIcon=runePixmap(catalog,*rune);
+        painter.setPen(QPen(QColor(230,200,95),1));painter.setBrush(QColor(20,20,24,220));painter.drawRect(square);
+        if(!runeIcon.isNull())painter.drawPixmap(square.adjusted(2,2,-2,-2),runeIcon);
+        else{painter.setPen(Qt::white);painter.drawText(square,Qt::AlignCenter,runes.at(i));}
+    }
+    return result;
 }
 }
 
@@ -126,7 +148,8 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     m_material = new QComboBox(itemTab);
     m_itemSpell = new QLineEdit(itemTab); m_itemSpell->setPlaceholderText(tr("Optional spell code"));
     auto* useSpell = new QPushButton(tr("Use spell from Spell tab"), itemTab);
-    auto* spellRow = new QHBoxLayout; spellRow->addWidget(m_itemSpell, 1); spellRow->addWidget(useSpell);
+    auto* openSpell = new QPushButton(tr("Open in Spell tab"), itemTab);openSpell->setObjectName(QStringLiteral("constructorOpenInsertedSpell"));
+    auto* spellRow = new QHBoxLayout; spellRow->addWidget(m_itemSpell, 1); spellRow->addWidget(useSpell);spellRow->addWidget(openSpell);
     itemForm->addRow(tr("Compatible material:"), m_material);
     itemForm->addRow(tr("Inserted spell:"), spellRow);
     itemRight->addLayout(itemForm);
@@ -138,7 +161,8 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
         // The constructor is a separate top-level window, so explicitly share
         // the main viewport's figures, textures, and shader resources.
         m_itemPreview = new CPreview(itemTab, m_view); m_itemPreview->attachView(m_view);
-        m_itemPreview->setMinimumHeight(220); itemRight->addWidget(m_itemPreview, 2);
+        m_itemPreview->setMinimumHeight(220);itemRight->addWidget(m_itemPreview,2);
+        m_itemSpellBadge=new QLabel(m_itemPreview);m_itemSpellBadge->setFixedSize(144,144);m_itemSpellBadge->setAlignment(Qt::AlignCenter);m_itemSpellBadge->setFrameStyle(QFrame::StyledPanel|QFrame::Sunken);m_itemSpellBadge->move(8,8);m_itemSpellBadge->hide();m_itemSpellBadge->raise();
     }
     itemRoot->addLayout(itemRight, 2);
     m_tabs->addTab(itemTab, tr("Items & Quick Items"));
@@ -178,8 +202,8 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
 
     auto* spellRight = new QVBoxLayout;
     m_spellIcon = new QLabel(spellTab); m_spellIcon->setAlignment(Qt::AlignCenter);
-    m_spellIcon->setMinimumSize(240, 240); m_spellIcon->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
-    spellRight->addWidget(m_spellIcon, 1);
+    m_spellIcon->setFixedSize(240,240);m_spellIcon->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);m_spellIcon->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
+    spellRight->addWidget(m_spellIcon,0,Qt::AlignHCenter);
     m_spellDetails = new QLabel(spellTab); m_spellDetails->setWordWrap(true); m_spellDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
     spellRight->addWidget(m_spellDetails);
     spellRoot->addLayout(spellRight, 2);
@@ -197,8 +221,9 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     connect(m_armorLayer,QOverload<int>::of(&QComboBox::currentIndexChanged),this,&ItemSpellConstructorDialog::refreshItemFilter);
     connect(m_itemList,&QListWidget::currentRowChanged,this,&ItemSpellConstructorDialog::selectItem);
     connect(m_material,QOverload<int>::of(&QComboBox::currentIndexChanged),this,&ItemSpellConstructorDialog::selectMaterial);
-    connect(m_itemSpell,&QLineEdit::textChanged,this,&ItemSpellConstructorDialog::updateOutput);
+    connect(m_itemSpell,&QLineEdit::textChanged,this,[this](){updateOutput();updateItemPreview();});
     connect(useSpell,&QPushButton::clicked,this,&ItemSpellConstructorDialog::useSpellInItem);
+    connect(openSpell,&QPushButton::clicked,this,&ItemSpellConstructorDialog::openItemSpellInTab);
     connect(m_spellFilter,&QLineEdit::textChanged,this,&ItemSpellConstructorDialog::refreshSpellFilter);
     connect(m_spellSchool,QOverload<int>::of(&QComboBox::currentIndexChanged),this,&ItemSpellConstructorDialog::refreshSpellFilter);
     connect(m_runeFilter,&QLineEdit::textChanged,this,&ItemSpellConstructorDialog::refreshSpellFilter);
@@ -290,7 +315,7 @@ void ItemSpellConstructorDialog::refreshSpellFilter()
     for(const auto& spell:m_catalog.spells){if(!school.isEmpty()&&spell.school.compare(school,Qt::CaseInsensitive)!=0)continue;if(!query.isEmpty()&&!searchable({spell.name,spell.displayName,spell.code,spell.subtype,spell.school}).contains(query))continue;auto*row=catalogItem(spell.displayName,tr("code: %1 • school: %2 • subtype: %3").arg(spell.code,spell.school,spell.subtype),spell.code,m_spellList);if(spell.code.compare(previous,Qt::CaseInsensitive)==0)m_spellList->setCurrentItem(row);}
     if(m_spellList->currentRow()<0&&m_spellList->count())m_spellList->setCurrentRow(0);
     m_availableRunes->clear();const QString runeQuery=m_runeFilter->text().trimmed().toCaseFolded();const int type=m_runeType->currentData().toInt();
-    for(const auto&rune:m_catalog.runes){if(type!=-999&&rune.type!=type)continue;if(!runeQuery.isEmpty()&&!searchable({rune.name,rune.displayName,rune.code,rune.tag,runeTypeName(rune.type)}).contains(runeQuery))continue;const QString identity=rune.tag.isEmpty()?rune.code:tr("%1 • %2").arg(rune.tag,rune.code);catalogItem(rune.displayName,tr("%1 • %2").arg(identity,runeTypeName(rune.type)),rune.code,m_availableRunes,runePixmap(m_catalog,rune));}
+    QVector<const SConstructorRune*> visibleRunes;for(const auto&rune:m_catalog.runes){if(type!=-999&&rune.type!=type)continue;if(!runeQuery.isEmpty()&&!searchable({rune.name,rune.displayName,rune.code,rune.tag,runeTypeName(rune.type)}).contains(runeQuery))continue;visibleRunes.append(&rune);}std::sort(visibleRunes.begin(),visibleRunes.end(),[](const SConstructorRune*left,const SConstructorRune*right){return ItemSpellConstructorCatalog::naturalCodeLess(left->code,right->code);});for(const auto*rune:visibleRunes){const QString identity=rune->tag.isEmpty()?rune->code:tr("%1 • %2").arg(rune->tag,rune->code);catalogItem(rune->displayName,tr("%1 • %2").arg(identity,runeTypeName(rune->type)),rune->code,m_availableRunes,runePixmap(m_catalog,*rune));}
     if(m_availableRunes->count())m_availableRunes->setCurrentRow(0); updateOutput();
 }
 
@@ -332,6 +357,13 @@ void ItemSpellConstructorDialog::removeRune(){delete m_selectedRunes->takeItem(m
 void ItemSpellConstructorDialog::moveRuneUp(){const int row=m_selectedRunes->currentRow();if(row<=0)return;auto*item=m_selectedRunes->takeItem(row);m_selectedRunes->insertItem(row-1,item);m_selectedRunes->setCurrentRow(row-1);updateOutput();}
 void ItemSpellConstructorDialog::moveRuneDown(){const int row=m_selectedRunes->currentRow();if(row<0||row+1>=m_selectedRunes->count())return;auto*item=m_selectedRunes->takeItem(row);m_selectedRunes->insertItem(row+1,item);m_selectedRunes->setCurrentRow(row+1);updateOutput();}
 void ItemSpellConstructorDialog::useSpellInItem(){if(const auto*spell=currentSpell()){m_itemSpell->setText(ItemSpellConstructorCatalog::formatSpellCode(spell->code,selectedRuneCodes()));m_tabs->setCurrentIndex(0);}}
+void ItemSpellConstructorDialog::openItemSpellInTab()
+{
+    const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(m_itemSpell->text());if(!parsed.valid){showImportDiagnostic(parsed.diagnostics);return;}
+    const auto*spell=m_catalog.findSpell(parsed.prototypeCode);if(!spell){showImportDiagnostic({tr("Unknown spell prototype '%1'.").arg(parsed.prototypeCode)});return;}
+    m_tabs->setCurrentIndex(1);for(int i=0;i<m_spellList->count();++i)if(m_spellList->item(i)->data(Qt::UserRole).toString().compare(spell->code,Qt::CaseInsensitive)==0){m_spellList->setCurrentRow(i);break;}
+    m_selectedRunes->clear();for(const QString&code:parsed.runeCodes)if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes,runePixmap(m_catalog,*rune));updateOutput();
+}
 
 void ItemSpellConstructorDialog::updateItemPreview()
 {
@@ -343,13 +375,13 @@ void ItemSpellConstructorDialog::updateItemPreview()
     {
         if(m_previewObject)
         {
-            m_previewObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE,figure)));
-            m_previewObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR,texture)));
             m_itemPreview->makeCurrent();
-            m_itemPreview->attachNode(m_previewObject);
+            ei::CFigure* raw=CObjectList::getInstance()->getFigureResource(figure+QStringLiteral(".fig"));
+            if(raw){m_previewObject->setModelName(figure);m_previewObject->updateFigure(raw);m_previewObject->setTexture(CTextureList::getInstance()->texture(texture));m_itemPreview->attachNode(m_previewObject);}else m_itemPreview->attachNode(nullptr);
         }
         m_itemPreview->updateGL();
-    }
+    }else if(m_itemPreview)m_itemPreview->attachNode(nullptr);
+    if(m_itemSpellBadge){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(m_itemSpell->text());const auto*spell=parsed.valid?m_catalog.findSpell(parsed.prototypeCode):nullptr;if(spell){m_itemSpellBadge->setPixmap(spellPixmap(m_catalog,*spell,parsed.runeCodes,140));m_itemSpellBadge->show();m_itemSpellBadge->raise();}else m_itemSpellBadge->hide();}
 }
 
 void ItemSpellConstructorDialog::updateSpellPreview()
@@ -371,23 +403,7 @@ void ItemSpellConstructorDialog::updateSpellPreview()
     }
     else
     {
-        QPixmap orientedPreview(240,240);orientedPreview.fill(QColor(24,24,28));
-        QPainter painter(&orientedPreview);
-        const QPixmap icon=QPixmap::fromImage(image).scaled(
-            220,220,Qt::KeepAspectRatio,Qt::SmoothTransformation);
-        painter.drawPixmap((orientedPreview.width()-icon.width())/2,4,icon);
-        const QStringList runes=selectedRuneCodes();
-        const int chipWidth=54,chipHeight=24,gap=4;
-        for(int i=0;i<runes.size();++i)
-        {
-            const int row=i/4,column=i%4;
-            const QRect chip(6+column*(chipWidth+gap),184+row*(chipHeight+gap),
-                             chipWidth,chipHeight);
-            painter.setPen(QPen(QColor(230,200,95),1));
-            painter.setBrush(QColor(20,20,24,220));painter.drawRoundedRect(chip,4,4);
-            painter.setPen(Qt::white);painter.drawText(chip,Qt::AlignCenter,runes.at(i));
-        }
-        painter.end();m_spellIcon->setText(QString());m_spellIcon->setPixmap(orientedPreview);
+        m_spellIcon->setText(QString());m_spellIcon->setPixmap(spellPixmap(m_catalog,*spell,selectedRuneCodes(),240));
     }
     const auto report=m_catalog.spellReport(*spell,selectedRuneCodes());
     QStringList verifiedLines;
@@ -424,7 +440,7 @@ void ItemSpellConstructorDialog::updateOutput()
     QStringList detail{
         tr("%1 | %2 | database code: %3").arg(
             m_catalog.itemDisplayName(*item,currentMaterial()),item->category,item->name),
-        tr("Material family: %1 | base energy: %2 | base spell slots: %3 | crafting material required: %4 components")
+        tr("Material family: %1 | base energy: %2 | maximum spell difficulty: %3 | crafting material required: %4 components")
             .arg(item->materialType).arg(item->mana,0,'g',8)
             .arg(item->slotCapacity).arg(item->components)};
     if((item->category==QStringLiteral("Weapon")||item->category==QStringLiteral("Armor"))&&currentMaterial())
@@ -445,14 +461,13 @@ void ItemSpellConstructorDialog::updateOutput()
         {
             const auto report=m_catalog.limits(*item,currentMaterial(),spell,parsed.runeCodes);
             warnings+=report.warnings;
-            detail<<tr("Constructed item capacity: energy %1 | spell slots %2")
-                        .arg(report.itemMana,0,'g',8).arg(report.itemSlots)
-                  <<tr("Inserted spell: energy %1 | slots used %2 | caster difficulty %3")
-                        .arg(report.spellMana,0,'g',8).arg(report.spellSlots)
-                        .arg(report.spellComplexity);
+            const auto marked=[](const QString&value,bool exceeded){return exceeded?QStringLiteral("<span style='color:#ff6666'><b>%1</b></span>").arg(value):value;};
+            detail<<tr("Constructed item capacity: energy %1 | maximum difficulty %2").arg(report.itemMana,0,'g',8).arg(report.itemSlots)
+                  <<tr("Inserted spell: energy %1 | difficulty %2 | database slots %3")
+                        .arg(marked(QString::number(report.spellMana,'g',8),report.spellMana>report.itemMana),marked(QString::number(report.spellComplexity),report.spellComplexity>report.itemSlots),QString::number(report.spellSlots));
         }
     }
-    m_itemDetails->setText(detail.join('\n'));
+    m_itemDetails->setTextFormat(Qt::RichText);m_itemDetails->setText(detail.join(QStringLiteral("<br>")));
     m_validation->setText(warnings.isEmpty()
         ?tr("Code is structurally valid. Compatibility findings are advisory.")
         :tr("Advisory validation:\n• %1").arg(warnings.join("\n• ")));

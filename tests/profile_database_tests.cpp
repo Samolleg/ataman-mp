@@ -453,6 +453,15 @@ void ProfileDatabaseTests::jmvMonsterLuaDataClonesUndoesAndPublishesAtomically()
              .value("jmv.stat.strength").toDouble(), 10.5);
     QVERIFY(document->redo());
 
+    QVERIFY(root.mkpath("stage"));
+    const QString stagedDatabase=root.filePath("stage/database.res");
+    const QString stagedLua=root.filePath("stage/tables.lua");
+    QVERIFY(!document->saveArchive(stagedDatabase,&diagnostic));
+    QVERIFY(diagnostic.contains("tables.lua",Qt::CaseInsensitive));
+    QVERIFY2(document->saveBundle(stagedDatabase,stagedLua,&diagnostic),qPrintable(diagnostic));
+    QFile stagedLuaFile(stagedLua);QVERIFY(stagedLuaFile.open(QIODevice::ReadOnly));
+    QVERIFY(stagedLuaFile.readAll().contains("\"Human Lua Clone\""));
+
     QVERIFY2(document->applyToSource(&diagnostic), qPrintable(diagnostic));
     QFile database(databasePath), lua(luaPath);
     QVERIFY(database.open(QIODevice::ReadOnly));
@@ -1534,7 +1543,8 @@ void ProfileDatabaseTests::itemSpellConstructorRestrictsMaterialsAndReportsSoftL
     QCOMPARE(limits.spellSlots, 3);
     QCOMPARE(limits.spellComplexity, 23);
     QCOMPARE(limits.effect, 15.0);
-    QCOMPARE(limits.warnings.size(), 1);
+    QCOMPARE(limits.warnings.size(), 2);
+    QVERIFY(limits.warnings.join('\n').contains("difficulty",Qt::CaseInsensitive));
 }
 
 void ProfileDatabaseTests::itemSpellConstructorCalculatesRuntimeSpellValues()
@@ -1655,6 +1665,9 @@ void ProfileDatabaseTests::itemSpellConstructorUsesVerifiedPreviewFamilies()
     const QImage displayed=ei::ItemSpellConstructorCatalog::orientPreviewImage(orientation);
     QCOMPARE(displayed.pixelColor(0,0),QColor(Qt::blue));
     QCOMPARE(displayed.pixelColor(0,1),QColor(Qt::red));
+    QStringList codes={"ee1","e10","e3","e2"};
+    std::sort(codes.begin(),codes.end(),ei::ItemSpellConstructorCatalog::naturalCodeLess);
+    QCOMPARE(codes,QStringList({"e2","e3","e10","ee1"}));
 }
 
 void ProfileDatabaseTests::itemSpellConstructorUsesEffectiveJmvSpellCatalog()

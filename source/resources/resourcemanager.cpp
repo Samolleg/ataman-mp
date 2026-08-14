@@ -669,6 +669,20 @@ ei::CFigure* CObjectList::getFigure(const QString& name)
     return m_aFigure.contains(figureName) ? m_aFigure[figureName] : figureDefault();
 }
 
+ei::CFigure* CObjectList::getFigureResource(const QString& resourceName)
+{
+    const QString normalized = resourceName.trimmed().toLower();
+    if(normalized.isEmpty() || (!normalized.endsWith(".fig") && !normalized.endsWith(".mod")))
+        return nullptr;
+    if(!m_aFigure.contains(normalized) && !m_missingFigureNames.contains(normalized))
+    {
+        QSet<QString> requested;
+        requested.insert(normalized);
+        loadFigures(requested);
+    }
+    return m_aFigure.value(normalized, nullptr);
+}
+
 QStringList CObjectList::figurePartNames(const QString& name)
 {
     QStringList result;

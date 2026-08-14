@@ -83,6 +83,7 @@ public:
     QStringList runeTextureCandidates(const SConstructorRune& rune) const;
     static QString spellSchoolName(const QString& subtype);
     static QImage orientPreviewImage(const QImage& image);
+    static bool naturalCodeLess(const QString& left, const QString& right);
 
     void applyGameTexts(const QMap<QString, QString>& entries);
     QString itemDisplayName(const SConstructorItem& item,

@@ -595,6 +595,30 @@ bool DatabaseDocument::saveArchive(const QString& path,QString* diagnostic)const
 {
     const QByteArray bytes=buildArchive(diagnostic);if(bytes.isEmpty())return false;if(!m_tablesLuaBaseline.isEmpty()){const QByteArray lua=buildTablesLua(diagnostic);if(lua.isEmpty())return false;QFile live(sourceTablesLuaPath());if(!live.open(QIODevice::ReadOnly))return false;if(live.readAll()!=lua){if(diagnostic)*diagnostic="Save As would omit linked JMV tables.lua changes. Use Apply Database to publish the database and Lua data together.";return false;}}return writeAtomically(path,bytes,diagnostic);
 }
+bool DatabaseDocument::saveBundle(const QString& archivePath,const QString& tablesLuaPath,
+                                  QString* diagnostic)const
+{
+    if(m_tablesLuaBaseline.isEmpty())return saveArchive(archivePath,diagnostic);
+    if(archivePath.trimmed().isEmpty()||tablesLuaPath.trimmed().isEmpty())
+    {if(diagnostic)*diagnostic="Both database.res and tables.lua destinations are required.";return false;}
+    if(QFileInfo(archivePath).absoluteFilePath().compare(
+           QFileInfo(tablesLuaPath).absoluteFilePath(),Qt::CaseInsensitive)==0)
+    {if(diagnostic)*diagnostic="database.res and tables.lua must use different destinations.";return false;}
+    const QByteArray databaseBytes=buildArchive(diagnostic);if(databaseBytes.isEmpty())return false;
+    const QByteArray luaBytes=buildTablesLua(diagnostic);if(luaBytes.isEmpty())return false;
+    QByteArray previousDatabase;const bool hadDatabase=QFileInfo::exists(archivePath);
+    const bool hadLua=QFileInfo::exists(tablesLuaPath);
+    if(hadDatabase){QFile file(archivePath);if(!file.open(QIODevice::ReadOnly)){if(diagnostic)*diagnostic=file.errorString();return false;}previousDatabase=file.readAll();}
+    if(hadLua){QFile file(tablesLuaPath);if(!file.open(QIODevice::ReadOnly)){if(diagnostic)*diagnostic=file.errorString();return false;}}
+    if(!writeAtomically(archivePath,databaseBytes,diagnostic))return false;
+    if(writeAtomically(tablesLuaPath,luaBytes,diagnostic))return true;
+    QString rollbackDiagnostic;const bool databaseRestored=hadDatabase
+        ?writeAtomically(archivePath,previousDatabase,&rollbackDiagnostic):QFile::remove(archivePath);
+    if(diagnostic){const QString publicationError=*diagnostic;*diagnostic=databaseRestored
+        ?QString("tables.lua Save As failed; database.res was restored. %1").arg(publicationError)
+        :QString("tables.lua Save As failed and database.res rollback failed. %1").arg(rollbackDiagnostic);}
+    return false;
+}
 bool DatabaseDocument::applyToSource(QString* diagnostic)
 {
     if(!sourceIsCurrent(diagnostic))return false;

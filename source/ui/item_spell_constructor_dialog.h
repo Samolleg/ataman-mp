@@ -41,6 +41,7 @@ private slots:
     void moveRuneUp();
     void moveRuneDown();
     void useSpellInItem();
+    void openItemSpellInTab();
     void importCode();
     void copyCode();
     void updateOutput();
@@ -68,6 +69,7 @@ private:
     QComboBox* m_material{nullptr};
     QLineEdit* m_itemSpell{nullptr};
     QLabel* m_itemDetails{nullptr};
+    QLabel* m_itemSpellBadge{nullptr};
     CPreview* m_itemPreview{nullptr};
     CWorldObj* m_previewObject{nullptr};
     CView* m_view{nullptr};
