@@ -45,6 +45,11 @@ public:
         applyTransientVisual(modelName,primaryTexture,parts,QVector3D(1,1,1),
                              partTextures,QString(),bodyTextureLayers,emissions);
     }
+    void applyStandaloneItem(ei::CFigure* figure,const QString& modelName,
+                             const QStringList& textureCandidates)
+    {
+        applyTransientStandaloneVisual(figure,modelName,textureCandidates);
+    }
 };
 QString searchable(const QStringList& values) { return values.join(QLatin1Char(' ')).toCaseFolded(); }
 QString runeTypeName(int type)
@@ -465,14 +470,14 @@ void ItemSpellConstructorDialog::updateItemPreview()
         }
     }
     const QString figure=ItemSpellConstructorCatalog::itemFigureName(*item);
-    const QString texture=ItemSpellConstructorCatalog::itemTextureName(*item,currentMaterial());
-    if(m_itemPreview&&!figure.isEmpty()&&!texture.isEmpty())
+    const QStringList textures=m_catalog.itemTextureCandidates(*item,currentMaterial());
+    if(m_itemPreview&&!figure.isEmpty()&&!textures.isEmpty())
     {
         if(m_previewObject)
         {
             m_itemPreview->makeCurrent();
             ei::CFigure* raw=CObjectList::getInstance()->getFigureResource(figure+QStringLiteral(".fig"));
-            if(raw){m_previewObject->setModelName(figure);m_previewObject->updateFigure(raw);m_previewObject->setTexture(CTextureList::getInstance()->texture(texture));m_itemPreview->attachNode(m_previewObject,false);if(!m_itemPreviewInitialized)resetItemCamera();}else m_itemPreview->attachNode(nullptr,false);
+            if(raw){static_cast<CConstructorPreviewObject*>(m_previewObject)->applyStandaloneItem(raw,figure,textures);m_itemPreview->attachNode(m_previewObject,false);if(!m_itemPreviewInitialized)resetItemCamera();}else m_itemPreview->attachNode(nullptr,false);
         }
         m_itemPreview->updateGL();
     }else if(m_itemPreview)m_itemPreview->attachNode(nullptr,false);

@@ -1040,13 +1040,20 @@ void CTextureList::loadTexture(QSet<QString>& aName)
     }
 }
 
-QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QString& modelName)
+QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QString& modelName,
+                                                  bool* found)
 {
     const QString cacheKey = ei::textureCacheKey(name, modelName);
     if(m_aTexture.contains(cacheKey))
+    {
+        if(found)*found=true;
         return m_aTexture.value(cacheKey);
+    }
     if(m_missingTextureNames.contains(cacheKey))
+    {
+        if(found)*found=false;
         return textureDefault();
+    }
 
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
     const QStringList candidates = ei::textureResourceCandidates(name, modelName);
@@ -1064,6 +1071,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
                 ei::log(eLogInfo, QString("Resolved texture %1 %2 model:%3 -> %4 in %5")
                         .arg(candidateIndex >= 3 ? "fallback" : "alias", name, modelName,
                              candidate, sourcePath));
+            if(found)*found=true;
             return m_aTexture.value(cacheKey);
         }
     }
@@ -1083,6 +1091,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
             {
                 ei::log(eLogInfo, QString("Resolved database unit texture %1 model:%2 -> %3 (database:%4 texture:%5)")
                         .arg(name, modelName, databaseCandidate, databaseSource, textureSource));
+                if(found)*found=true;
                 return m_aTexture.value(cacheKey);
             }
         }
@@ -1091,6 +1100,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
     }
 
     m_missingTextureNames.insert(cacheKey);
+    if(found)*found=false;
     ei::log(eLogWarning, QString("Missing texture (negative cached): %1 model:%2 candidates:%3")
             .arg(name, modelName, candidates.join(", ")));
     return textureDefault();
@@ -1114,6 +1124,24 @@ QOpenGLTexture* CTextureList::texture(const QString& name)
 QOpenGLTexture* CTextureList::texture(const QString& name, const QString& modelName)
 {
     return loadTextureResource(name.toLower(), modelName.toLower());
+}
+
+QOpenGLTexture* CTextureList::texture(const QStringList& names,const QString& modelName,
+                                      QString* resolvedName)
+{
+    if(resolvedName)resolvedName->clear();
+    for(const QString& name:names)
+    {
+        bool found=false;
+        QOpenGLTexture* result=loadTextureResource(name.toLower(),modelName.toLower(),&found);
+        if(found)
+        {
+            if(resolvedName)*resolvedName=name;
+            return result;
+        }
+    }
+    if(resolvedName&&!names.isEmpty())*resolvedName=names.last();
+    return textureDefault();
 }
 
 QImage CTextureList::loadTextureImageResource(const QString& name, const QString& modelName)

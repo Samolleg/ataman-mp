@@ -128,6 +128,8 @@ public:
     void loadTexture(QSet<QString>& aName);
     QOpenGLTexture* texture(const QString& name);
     QOpenGLTexture* texture(const QString& name, const QString& modelName);
+    QOpenGLTexture* texture(const QStringList& names, const QString& modelName,
+                            QString* resolvedName);
     QOpenGLTexture* layeredTexture(const QStringList& layerNames, const QString& modelName);
     // Read-only CPU images used by diagnostics. These use the same resource
     // lookup and layer composition path as the OpenGL texture above.
@@ -160,7 +162,8 @@ private:
     ~CTextureList();
     void parse(QByteArray& data, const QString& name);
     void initAuxTexture();
-    QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName);
+    QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName,
+                                        bool* found = nullptr);
     QImage loadTextureImageResource(const QString& name, const QString& modelName);
 
 private:

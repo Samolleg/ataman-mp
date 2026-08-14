@@ -80,6 +80,8 @@ public:
     static QString itemFigureName(const SConstructorItem& item);
     static QString itemTextureName(const SConstructorItem& item,
                                    const SConstructorMaterial* material);
+    QStringList itemTextureCandidates(const SConstructorItem& item,
+                                      const SConstructorMaterial* material) const;
     QStringList spellTextureCandidates(const SConstructorSpell& spell) const;
     QString spellTextureName(const SConstructorSpell& spell) const;
     QStringList runeTextureCandidates(const SConstructorRune& rune) const;

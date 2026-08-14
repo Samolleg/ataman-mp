@@ -107,6 +107,8 @@ protected:
                               const QString& secondaryTextureName = QString(),
                               const QStringList& bodyTextureLayers = {},
                               const QMap<QString, QVector3D>& partEmissions = {});
+    void applyTransientStandaloneVisual(ei::CFigure* figure,const QString& modelName,
+                                        const QStringList& textureCandidates);
     void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
     const SAnimationSkeleton& transientAnimationSkeleton() const;
     void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);

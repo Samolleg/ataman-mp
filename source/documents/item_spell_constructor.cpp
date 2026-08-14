@@ -349,6 +349,20 @@ QString ItemSpellConstructorCatalog::itemTextureName(const SConstructorItem& ite
         .arg(material->code.trimmed().toLower()).arg(item.textureType2);
 }
 
+QStringList ItemSpellConstructorCatalog::itemTextureCandidates(
+    const SConstructorItem& item,const SConstructorMaterial* material) const
+{
+    const QString base=itemTextureName(item,material);
+    if(base.isEmpty())return {};
+    // JMV's quick-item renderer requests the ordinary database-derived name,
+    // then prefers the authored high-resolution .x2 member when one exists.
+    // Keep the logical _x2 identity so the standalone FIG receives the same
+    // twofold UV transform as the shipped asset.
+    if(m_isJmvProfile&&item.category==QStringLiteral("Quick Item"))
+        return {base+QStringLiteral("_x2"),base};
+    return {base};
+}
+
 QString ItemSpellConstructorCatalog::spellSchoolName(const QString& subtype)
 {
     const QString normalized=subtype.trimmed().toLower();

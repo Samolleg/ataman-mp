@@ -2113,6 +2113,21 @@ void ProfileDatabaseTests::itemSpellConstructorUsesVerifiedPreviewFamilies()
     QCOMPARE(ei::ItemSpellConstructorCatalog::itemFigureName(quick),QString("initqi17item"));
     QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(quick,nullptr),QString("qitem0017"));
     QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(quick,&iron),QString("qitem0017.ir"));
+    ei::ItemSpellConstructorCatalog baseCatalog;
+    QCOMPARE(baseCatalog.itemTextureCandidates(quick,&iron),QStringList({"qitem0017.ir"}));
+    QTemporaryDir jmvRoot;QVERIFY(jmvRoot.isValid());
+    QVERIFY(QDir(jmvRoot.path()).mkpath("mod/Res"));
+    QVERIFY(QDir(jmvRoot.path()).mkpath("mod/lua"));
+    write(jmvRoot.filePath("mod/Res/database.res"),resArchive(relationalMembers()));
+    write(jmvRoot.filePath("mod/lua/tables.lua"),unitPerkLua("Human Test",1));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="jmv.v1";request.profileId="jamais-vu";
+    request.resourceDirectories<<jmvRoot.filePath("mod/Res");
+    const auto jmvDocument=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(jmvDocument);
+    const auto jmvCatalog=ei::ItemSpellConstructorCatalog::fromDocument(*jmvDocument);
+    QCOMPARE(jmvCatalog.itemTextureCandidates(quick,&iron),
+             QStringList({"qitem0017.ir_x2","qitem0017.ir"}));
     ei::SConstructorSpell spell;spell.textureType=3;
     ei::ItemSpellConstructorCatalog catalog;
     QCOMPARE(catalog.spellTextureName(spell),QString("spell0003"));

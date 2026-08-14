@@ -1010,6 +1010,37 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     }
 }
 
+void CObjectBase::applyTransientStandaloneVisual(ei::CFigure* figure,
+                                                  const QString& modelName,
+                                                  const QStringList& textureCandidates)
+{
+    m_modelName=modelName;
+    m_secondaryTexture=nullptr;
+    m_partTextures.clear();
+    m_partEmissions.clear();
+    QString resolvedTexture;
+    m_texture=CTextureList::getInstance()->texture(
+        textureCandidates,modelName,&resolvedTexture);
+    updateFigure(figure);
+    if(!figure)return;
+    for(CPart* part:m_aPart)
+    {
+        float minU=0.0f,maxU=0.0f,minV=0.0f,maxV=0.0f;
+        if(!part->vertData().isEmpty())
+        {
+            minU=maxU=part->vertData().first().texCoord.x();
+            minV=maxV=part->vertData().first().texCoord.y();
+            for(const SVertexData& vertex:part->vertData())
+            {
+                minU=qMin(minU,vertex.texCoord.x());maxU=qMax(maxU,vertex.texCoord.x());
+                minV=qMin(minV,vertex.texCoord.y());maxV=qMax(maxV,vertex.texCoord.y());
+            }
+        }
+        part->setTextureUvScale(ei::textureUvScaleForBounds(
+            resolvedTexture,minU,maxU,minV,maxV));
+    }
+}
+
 void CObjectBase::recalcMinPos()
 {
     float min(0.0f);
