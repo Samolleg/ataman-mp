@@ -3,12 +3,15 @@
 #include "database_schema.h"
 #include "profile_database.h"
 #include <QAbstractItemView>
+#include <QAbstractTableModel>
 #include <QApplication>
 #include <QClipboard>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QCompleter>
 #include <QAction>
 #include <QFontDatabase>
 #include <QHeaderView>
@@ -24,34 +27,19 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QSplitter>
-#include <QTableWidget>
+#include <QSortFilterProxyModel>
+#include <QStyledItemDelegate>
+#include <QTableView>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QPlainTextEdit>
 #include <QScreen>
 #include <QSet>
 #include <QGuiApplication>
+#include <functional>
 #include "backup_manager.h"
 
 namespace ei {
-static QString translatedTableLabel(const QString& key, QObject* context)
-{
-    if(key=="raceModels") return context->tr("Race models");
-    if(key=="monsters") return context->tr("Monster prototypes");
-    if(key=="items") return context->tr("Items");
-    return key;
-}
-static QString translatedFieldLabel(const QString& key, QObject* context)
-{
-    if(key=="name") return context->tr("Name"); if(key=="model") return context->tr("Model");
-    if(key=="primaryTextures") return context->tr("Primary textures"); if(key=="secondaryTextures") return context->tr("Secondary textures");
-    if(key=="baseRace") return context->tr("Base race"); if(key=="skinIndex") return context->tr("Skin"); if(key=="hairIndex") return context->tr("Hair");
-    if(key=="complexionX") return context->tr("Complexion X"); if(key=="complexionY") return context->tr("Complexion Y"); if(key=="complexionZ") return context->tr("Complexion Z");
-    if(key=="items") return context->tr("Items"); if(key=="wears") return context->tr("Wears"); if(key=="weapon") return context->tr("Weapon"); if(key=="secondWeapon") return context->tr("Second weapon");
-    if(key=="category") return context->tr("Category"); if(key=="type") return context->tr("Type"); if(key=="typeId") return context->tr("Type ID");
-    if(key=="materialType") return context->tr("Material type"); if(key=="textureType1") return context->tr("Texture 1"); if(key=="textureType2") return context->tr("Texture 2"); if(key=="wearOrder") return context->tr("Wear order");
-    return key;
-}
 static QString boundedCellPreview(const QString& value)
 {
     QString preview=value;
@@ -90,15 +78,132 @@ static QVariant editorValue(const SDatabaseTable& table,const SDatabaseFieldSche
     const QJsonDocument document=jsonArrayDocument(original);if(document.isNull())return text;QJsonArray values=document.array();bool strings=true;for(const auto& value:values)strings&=value.isString();if(strings){QStringList result;for(const QString& line:text.split(QRegExp("[\\r\\n]+"),QString::SkipEmptyParts))if(!line.trimmed().isEmpty())result<<line.trimmed();return QString::fromUtf8(QJsonDocument(QJsonArray::fromStringList(result)).toJson(QJsonDocument::Compact));}
     int recordId=-1;const QStringList lines=text.split(QRegExp("[\\r\\n]+"));for(const QString& rawLine:lines){const QString line=rawLine.trimmed();QRegExp record("^Record \\[([0-9]+)\\]");if(record.indexIn(line)==0){recordId=record.cap(1).toInt();const int equals=line.indexOf('=');if(line.contains(" raw ")&&equals>=0)for(int i=0;i<values.size();++i){QJsonObject object=values[i].toObject();if(object.value("id").toInt()==recordId){object["raw"]=line.mid(equals+1).trimmed();values[i]=object;break;}}continue;}if(!line.startsWith('['))continue;const int close=line.indexOf(']'),equals=line.indexOf('=',close+1);bool idOk=false;const int id=close>1?line.mid(1,close-1).toInt(&idOk):-1;if(!idOk||equals<0)continue;const QString edited=line.mid(equals+1).trimmed();if(recordId>=0){for(int i=0;i<values.size();++i){QJsonObject object=values[i].toObject();if(object.value("id").toInt()!=recordId)continue;QJsonArray fields=object.value("fields").toArray();for(int j=0;j<fields.size();++j){QJsonObject child=fields[j].toObject();if(child.value("id").toInt()!=id)continue;child["value"]=editedScalar(edited,child.value("value"));fields[j]=child;break;}object["fields"]=fields;values[i]=object;break;}continue;}bool found=false;for(int i=0;i<values.size();++i){if(values[i].isObject()){QJsonObject object=values[i].toObject();if(object.value("id").toInt()!=id)continue;object["value"]=editedScalar(edited,object.value("value"));values[i]=object;found=true;break;}}if(!found&&id>=0&&id<values.size())values[id]=editedScalar(edited,values[id]);}Q_UNUSED(table);return QString::fromUtf8(QJsonDocument(values).toJson(QJsonDocument::Compact));
 }
-static QVariant typedEditorValue(const SDatabaseFieldSchema& schema,const QString& text)
+enum DatabaseGridRole {
+    RowKeyRole = Qt::UserRole,
+    FieldKeyRole,
+    FullTextRole,
+    RawValueRole,
+    ReferenceTableRole,
+    ChoicesRole,
+    FilterTextRole
+};
+
+class DatabaseTableModel final : public QAbstractTableModel
 {
-    if(schema.type==EDatabaseFieldType::Integer)return text.toLongLong();
-    if(schema.type==EDatabaseFieldType::Decimal)return text.toDouble();
-    if(schema.type!=EDatabaseFieldType::TextList)return text;
-    QStringList parts;QString part;int depth=0;
-    for(const QChar ch:text){if(ch=='['||ch=='('||ch=='{')++depth;else if(ch==']'||ch==')'||ch=='}')depth=qMax(0,depth-1);if(ch==','&&depth==0){if(!part.trimmed().isEmpty())parts<<part.trimmed();part.clear();}else part+=ch;}
-    if(!part.trimmed().isEmpty())parts<<part.trimmed();return parts;
-}
+public:
+    using CommitHandler = std::function<bool(const QString&,const QString&,const QVariant&)>;
+    explicit DatabaseTableModel(const QSharedPointer<DatabaseDocument>& document,
+                                QObject* parent=nullptr)
+        : QAbstractTableModel(parent), m_document(document) {}
+
+    void setCommitHandler(const CommitHandler& handler) { m_commit = handler; }
+    void setTable(const QString& tableKey,bool showOpaque)
+    {
+        if(m_tableKey==tableKey&&m_showOpaque==showOpaque) { refresh(); return; }
+        beginResetModel();m_tableKey=tableKey;m_showOpaque=showOpaque;rebuildIndexes();endResetModel();
+    }
+    void refresh(){beginResetModel();rebuildIndexes();endResetModel();}
+    QString tableKey()const{return m_tableKey;}
+    int rowCount(const QModelIndex& parent=QModelIndex())const override{return parent.isValid()?0:m_rows.size();}
+    int columnCount(const QModelIndex& parent=QModelIndex())const override{return parent.isValid()?0:m_fields.size();}
+    QVariant headerData(int section,Qt::Orientation orientation,int role)const override
+    {
+        if(orientation!=Qt::Horizontal||role!=Qt::DisplayRole||section<0||section>=m_fields.size())return {};
+        const auto* field=fieldAt(section);return field?(field->label.isEmpty()?field->key:field->label):QVariant();
+    }
+    QVariant data(const QModelIndex& index,int role=Qt::DisplayRole)const override
+    {
+        const SDatabaseRow* row=rowAt(index.row());const SDatabaseFieldSchema* field=fieldAt(index.column());const auto* table=m_document->table(m_tableKey);if(!row||!field||!table)return {};
+        const QVariant stored=row->values.value(field->key);const QString full=authoringText(*table,*field,stored);
+        if(role==Qt::DisplayRole){QString preview=full;preview.replace('\n',", ");return boundedCellPreview(preview);}
+        if(role==Qt::EditRole)return field->type==EDatabaseFieldType::Integer||field->type==EDatabaseFieldType::Decimal?stored:QVariant(full);
+        if(role==RowKeyRole)return row->stableKey;
+        if(role==FieldKeyRole)return field->key;
+        if(role==FullTextRole)return full;
+        if(role==RawValueRole)return stored;
+        if(role==ReferenceTableRole)return field->referenceTable;
+        if(role==ChoicesRole)return choicesForColumn(index.column());
+        if(role==FilterTextRole){QStringList values;values<<row->sourceStableKey;for(int fieldIndex:m_fields)values<<authoringText(*table,table->fields[fieldIndex],row->values.value(table->fields[fieldIndex].key));return values.join(' ').toLower();}
+        if(role==Qt::ForegroundRole&&!field->referenceTable.isEmpty())return QBrush(QColor(35,110,190));
+        if(role==Qt::FontRole&&!field->referenceTable.isEmpty()){QFont font=QApplication::font();font.setUnderline(true);return font;}
+        if(role==Qt::ToolTipRole)
+        {
+            QString reason;const bool editable=field->writable&&m_document->fieldEditable(m_tableKey,row->stableKey,field->key,&reason);
+            if(!editable)return reason.isEmpty()?tr("Read-only raw payload. It remains preserved byte-for-byte; editing is disabled until this field's type and serializer are verified."):reason;
+            if(!field->referenceTable.isEmpty())return tr("Choose a referenced row from the list. Right-click and select Open Referenced Row to follow the link.");
+            return tr("Preview limited to %1 of %2 characters. Double-click or press Enter/F2 to edit the complete value.").arg(data(index,Qt::DisplayRole).toString().size()).arg(full.size());
+        }
+        return {};
+    }
+    Qt::ItemFlags flags(const QModelIndex& index)const override
+    {
+        Qt::ItemFlags result=QAbstractTableModel::flags(index);const SDatabaseRow* row=rowAt(index.row());const auto* field=fieldAt(index.column());if(!row||!field)return result;
+        QString reason;const bool editable=field->writable&&m_document->fieldEditable(m_tableKey,row->stableKey,field->key,&reason);
+        const auto* table=m_document->table(m_tableKey);const bool inlineEditor=field->type==EDatabaseFieldType::Integer||field->type==EDatabaseFieldType::Decimal||field->type==EDatabaseFieldType::Reference||suggestedChoiceField(*field,table);
+        return editable&&inlineEditor?result|Qt::ItemIsEditable:result&~Qt::ItemIsEditable;
+    }
+    bool setData(const QModelIndex& index,const QVariant& value,int role=Qt::EditRole)override
+    {
+        if(role!=Qt::EditRole||!index.isValid()||!m_commit)return false;const SDatabaseRow* row=rowAt(index.row());const auto* field=fieldAt(index.column());if(!row||!field)return false;
+        const QString oldKey=row->stableKey;QVariant typed=value;if(field->type==EDatabaseFieldType::Integer)typed=value.toLongLong();else if(field->type==EDatabaseFieldType::Decimal)typed=value.toDouble();
+        if(!m_commit(oldKey,field->key,typed))return false;
+        const auto* table=m_document->table(m_tableKey);const QString identityKey=table&&table->identityFieldId>=0?QString("fld.%1.0").arg(table->identityFieldId):QString("name");
+        if(field->key==identityKey)refresh();else{m_choices.remove(index.column());emit dataChanged(index,index,{Qt::DisplayRole,Qt::EditRole,Qt::ToolTipRole,RawValueRole,FullTextRole,FilterTextRole,ChoicesRole});}
+        return true;
+    }
+    int rowForIdentity(const QString& identity)const
+    {
+        for(int i=0;i<m_rows.size();++i){const auto* row=rowAt(i);if(!row)continue;const QString display=m_document->displayIdentity(m_tableKey,row->stableKey);if(row->stableKey.compare(identity,Qt::CaseInsensitive)==0||display.compare(identity,Qt::CaseInsensitive)==0)return i;}return -1;
+    }
+    const SDatabaseFieldSchema* fieldForIndex(const QModelIndex& index)const{return fieldAt(index.column());}
+private:
+    const SDatabaseRow* rowAt(int modelRow)const{const auto* table=m_document->table(m_tableKey);if(!table||modelRow<0||modelRow>=m_rows.size())return nullptr;const int row=m_rows[modelRow];return row>=0&&row<table->rows.size()?&table->rows[row]:nullptr;}
+    const SDatabaseFieldSchema* fieldAt(int modelColumn)const{const auto* table=m_document->table(m_tableKey);if(!table||modelColumn<0||modelColumn>=m_fields.size())return nullptr;const int field=m_fields[modelColumn];return field>=0&&field<table->fields.size()?&table->fields[field]:nullptr;}
+    static bool suggestedChoiceField(const SDatabaseFieldSchema& field,const SDatabaseTable* table)
+    {
+        if(!table||field.type!=EDatabaseFieldType::Text||field.opaque||field.storageId==table->identityFieldId)return false;const QString label=field.label.toLower();for(const QString& token:{QStringLiteral("type"),QStringLiteral("class"),QStringLiteral("kind"),QStringLiteral("material"),QStringLiteral("terrain"),QStringLiteral("damage"),QStringLiteral("target"),QStringLiteral("school")})if(label.contains(token))return true;return false;
+    }
+    void rebuildIndexes()
+    {
+        m_rows.clear();m_fields.clear();m_choices.clear();const auto* table=m_document->table(m_tableKey);if(!table)return;
+        for(int field=0;field<table->fields.size();++field)if(!table->structuralEditing||m_showOpaque||!table->fields[field].opaque)m_fields<<field;
+        for(int row=0;row<table->rows.size();++row)if(!table->rows[row].deleted)m_rows<<row;
+    }
+    QStringList choicesForColumn(int column)const
+    {
+        if(m_choices.contains(column))return m_choices.value(column);const auto* table=m_document->table(m_tableKey);const auto* field=fieldAt(column);QStringList values;if(!table||!field)return values;
+        if(!field->referenceTable.isEmpty()){const auto* target=m_document->table(field->referenceTable);if(target)for(const auto& row:target->rows)if(!row.deleted){const QString identity=m_document->displayIdentity(field->referenceTable,row.stableKey);if(!identity.isEmpty())values<<identity;}}
+        else if(suggestedChoiceField(*field,table)){QSet<QString> unique;bool suitable=true;for(int rowIndex:m_rows){const QString value=table->rows[rowIndex].values.value(field->key).toString().trimmed();if(value.isEmpty())continue;if(value.size()>80||value.startsWith('[')||value.startsWith('{')){suitable=false;break;}unique.insert(value);if(unique.size()>64){suitable=false;break;}}if(suitable)values=unique.values();}
+        values.removeDuplicates();std::sort(values.begin(),values.end(),[](const QString&a,const QString&b){return a.compare(b,Qt::CaseInsensitive)<0;});m_choices.insert(column,values);return values;
+    }
+    QSharedPointer<DatabaseDocument> m_document;QString m_tableKey;bool m_showOpaque{true};QVector<int> m_rows,m_fields;mutable QMap<int,QStringList> m_choices;CommitHandler m_commit;
+};
+
+class DatabaseFilterModel final : public QSortFilterProxyModel
+{
+public:
+    explicit DatabaseFilterModel(QObject* parent=nullptr):QSortFilterProxyModel(parent){setDynamicSortFilter(true);setSortCaseSensitivity(Qt::CaseInsensitive);}
+    void setSearchText(const QString& text){m_search=text.trimmed().toLower();invalidateFilter();}
+protected:
+    bool filterAcceptsRow(int row,const QModelIndex& parent)const override{return m_search.isEmpty()||sourceModel()->index(row,0,parent).data(FilterTextRole).toString().contains(m_search);}
+    bool lessThan(const QModelIndex& left,const QModelIndex& right)const override
+    {
+        const QVariant a=left.data(RawValueRole),b=right.data(RawValueRole);if((a.type()==QVariant::Int||a.type()==QVariant::LongLong||a.type()==QVariant::Double)&&(b.type()==QVariant::Int||b.type()==QVariant::LongLong||b.type()==QVariant::Double))return a.toDouble()<b.toDouble();return a.toString().compare(b.toString(),Qt::CaseInsensitive)<0;
+    }
+private:QString m_search;
+};
+
+class DatabaseValueDelegate final : public QStyledItemDelegate
+{
+public:
+    explicit DatabaseValueDelegate(QObject* parent=nullptr):QStyledItemDelegate(parent){}
+    QWidget* createEditor(QWidget* parent,const QStyleOptionViewItem& option,const QModelIndex& index)const override
+    {
+        const QStringList choices=index.data(ChoicesRole).toStringList();if(choices.isEmpty())return QStyledItemDelegate::createEditor(parent,option,index);auto* combo=new QComboBox(parent);combo->setEditable(true);combo->setInsertPolicy(QComboBox::NoInsert);combo->addItems(choices);combo->setMaxVisibleItems(24);combo->completer()->setCaseSensitivity(Qt::CaseInsensitive);combo->completer()->setFilterMode(Qt::MatchContains);return combo;
+    }
+    void setEditorData(QWidget* editor,const QModelIndex& index)const override{if(auto* combo=qobject_cast<QComboBox*>(editor)){combo->setEditText(index.data(Qt::EditRole).toString());combo->lineEdit()->selectAll();return;}QStyledItemDelegate::setEditorData(editor,index);}
+    void setModelData(QWidget* editor,QAbstractItemModel* model,const QModelIndex& index)const override{if(auto* combo=qobject_cast<QComboBox*>(editor)){model->setData(index,combo->currentText(),Qt::EditRole);return;}QStyledItemDelegate::setModelData(editor,model,index);}
+};
 DatabaseEditorDialog::DatabaseEditorDialog(const QSharedPointer<DatabaseDocument>& document,QWidget* parent):QDialog(nullptr,Qt::Window|Qt::WindowSystemMenuHint|Qt::WindowMinMaxButtonsHint|Qt::WindowCloseButtonHint),m_document(document)
 {
     Q_UNUSED(parent);setWindowTitle(tr("Database Editor — %1").arg(document->profileId()));setWindowIcon(QApplication::windowIcon());setAttribute(Qt::WA_DeleteOnClose);resize(1180,720);setModal(false);
@@ -106,80 +211,55 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QSharedPointer<DatabaseDocument
     auto* filterRow=new QWidget(this);auto* filterLayout=new QHBoxLayout(filterRow);filterLayout->setContentsMargins(0,0,0,0);
     m_filter=new QLineEdit(filterRow);m_filter->setPlaceholderText(tr("Filter rows across visible fields…"));filterLayout->addWidget(m_filter,1);
     m_showOpaque=new QCheckBox(tr("Show unknown/raw columns"),filterRow);m_showOpaque->setChecked(true);m_showOpaque->setToolTip(tr("Shows descriptor-unknown fields as read-only hexadecimal data. They remain preserved even while hidden."));filterLayout->addWidget(m_showOpaque);layout->addWidget(filterRow);
-    auto* split=new QSplitter(this);m_tables=new QListWidget(split);m_tables->setMinimumWidth(190);m_grid=new QTableWidget(split);m_grid->setObjectName("databaseGrid");m_grid->setSortingEnabled(true);m_grid->setSelectionBehavior(QAbstractItemView::SelectRows);m_grid->setAlternatingRowColors(true);m_grid->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);m_grid->horizontalHeader()->setDefaultSectionSize(150);m_grid->horizontalHeader()->setMinimumSectionSize(70);m_grid->horizontalHeader()->setMaximumSectionSize(300);split->setStretchFactor(1,1);layout->addWidget(split,1);
+    auto* split=new QSplitter(this);m_tables=new QListWidget(split);m_tables->setMinimumWidth(190);m_grid=new QTableView(split);m_grid->setObjectName("databaseGrid");m_model=new DatabaseTableModel(document,m_grid);m_proxy=new DatabaseFilterModel(m_grid);m_proxy->setObjectName("databaseFilterModel");m_proxy->setSourceModel(m_model);m_grid->setModel(m_proxy);m_grid->setItemDelegate(new DatabaseValueDelegate(m_grid));m_grid->setSortingEnabled(true);m_grid->setSelectionBehavior(QAbstractItemView::SelectRows);m_grid->setSelectionMode(QAbstractItemView::SingleSelection);m_grid->setAlternatingRowColors(true);m_grid->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->setEditTriggers(QAbstractItemView::DoubleClicked|QAbstractItemView::EditKeyPressed|QAbstractItemView::SelectedClicked);m_grid->verticalHeader()->setDefaultSectionSize(22);m_grid->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);m_grid->horizontalHeader()->setDefaultSectionSize(150);m_grid->horizontalHeader()->setMinimumSectionSize(70);m_grid->horizontalHeader()->setMaximumSectionSize(300);split->setStretchFactor(1,1);layout->addWidget(split,1);
     auto* buttons=new QDialogButtonBox(this);m_cloneButton=buttons->addButton(tr("Clone Row…"),QDialogButtonBox::ActionRole);m_deleteButton=buttons->addButton(tr("Delete Row"),QDialogButtonBox::ActionRole);auto* reviewButton=buttons->addButton(tr("Review Changes…"),QDialogButtonBox::ActionRole);auto* exportButton=buttons->addButton(tr("Export XLSX…"),QDialogButtonBox::ActionRole);auto* importButton=buttons->addButton(tr("Import XLSX…"),QDialogButtonBox::ActionRole);auto* applyButton=buttons->addButton(tr("Apply Database"),QDialogButtonBox::ActionRole);auto* saveButton=buttons->addButton(tr("Save Database As…"),QDialogButtonBox::ActionRole);saveButton->setObjectName("databaseSaveAsButton");buttons->addButton(QDialogButtonBox::Close);layout->addWidget(buttons);m_status=new QLabel(this);m_status->setWordWrap(true);layout->addWidget(m_status);
     for(const QString& key:document->tableKeys()){const auto* table=document->table(key);if(table->physicalTable<0)continue;auto* item=new QListWidgetItem(tr("%1 (%2)").arg(table->label).arg(table->rows.size()),m_tables);item->setData(Qt::UserRole,key);}
-    m_filterTimer=new QTimer(this);m_filterTimer->setSingleShot(true);m_filterTimer->setInterval(120);connect(m_filterTimer,&QTimer::timeout,this,&DatabaseEditorDialog::rebuildGrid);connect(m_tables,&QListWidget::currentRowChanged,this,&DatabaseEditorDialog::selectTable);connect(m_filter,&QLineEdit::textChanged,this,[this](){m_filterTimer->start();});connect(m_showOpaque,&QCheckBox::toggled,this,&DatabaseEditorDialog::rebuildGrid);connect(m_grid,&QTableWidget::cellChanged,this,&DatabaseEditorDialog::editCell);connect(m_grid,&QTableWidget::cellDoubleClicked,this,&DatabaseEditorDialog::editFieldDialog);connect(m_grid,&QTableWidget::customContextMenuRequested,this,&DatabaseEditorDialog::showRowContextMenu);connect(m_cloneButton,&QPushButton::clicked,this,&DatabaseEditorDialog::cloneSelected);connect(m_deleteButton,&QPushButton::clicked,this,&DatabaseEditorDialog::deleteSelected);connect(reviewButton,&QPushButton::clicked,this,&DatabaseEditorDialog::review);connect(exportButton,&QPushButton::clicked,this,&DatabaseEditorDialog::exportXlsx);connect(importButton,&QPushButton::clicked,this,&DatabaseEditorDialog::importXlsx);connect(applyButton,&QPushButton::clicked,this,&DatabaseEditorDialog::apply);connect(saveButton,&QPushButton::clicked,this,&DatabaseEditorDialog::saveAs);connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::close);
-    auto*editFullValue=new QAction(tr("Edit Full Value…"),m_grid);editFullValue->setShortcuts({QKeySequence(Qt::Key_Return),QKeySequence(Qt::Key_Enter),QKeySequence(Qt::Key_F2)});editFullValue->setShortcutContext(Qt::WidgetShortcut);m_grid->addAction(editFullValue);connect(editFullValue,&QAction::triggered,this,[this](){if(m_grid->currentRow()>=0&&m_grid->currentColumn()>=0)editFieldDialog(m_grid->currentRow(),m_grid->currentColumn());});
+    m_model->setCommitHandler([this](const QString& row,const QString& field,const QVariant& value){return commitGridValue(row,field,value);});
+    m_filterTimer=new QTimer(this);m_filterTimer->setSingleShot(true);m_filterTimer->setInterval(80);connect(m_filterTimer,&QTimer::timeout,this,[this](){m_proxy->setSearchText(m_filter->text());});connect(m_tables,&QListWidget::currentRowChanged,this,&DatabaseEditorDialog::selectTable);connect(m_filter,&QLineEdit::textChanged,this,[this](){m_filterTimer->start();});connect(m_showOpaque,&QCheckBox::toggled,this,&DatabaseEditorDialog::rebuildGrid);connect(m_grid,&QTableView::doubleClicked,this,[this](const QModelIndex& index){const QModelIndex source=m_proxy->mapToSource(index);const auto* field=m_model->fieldForIndex(source);if(field&&(!field->referenceTable.isEmpty()||!source.data(ChoicesRole).toStringList().isEmpty()))m_grid->edit(index);else editFieldDialog(index);});connect(m_grid,&QTableView::customContextMenuRequested,this,&DatabaseEditorDialog::showRowContextMenu);connect(m_cloneButton,&QPushButton::clicked,this,&DatabaseEditorDialog::cloneSelected);connect(m_deleteButton,&QPushButton::clicked,this,&DatabaseEditorDialog::deleteSelected);connect(reviewButton,&QPushButton::clicked,this,&DatabaseEditorDialog::review);connect(exportButton,&QPushButton::clicked,this,&DatabaseEditorDialog::exportXlsx);connect(importButton,&QPushButton::clicked,this,&DatabaseEditorDialog::importXlsx);connect(applyButton,&QPushButton::clicked,this,&DatabaseEditorDialog::apply);connect(saveButton,&QPushButton::clicked,this,&DatabaseEditorDialog::saveAs);connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::close);
+    auto*editFullValue=new QAction(tr("Edit Full Value…"),m_grid);editFullValue->setShortcuts({QKeySequence(Qt::Key_Return),QKeySequence(Qt::Key_Enter),QKeySequence(Qt::Key_F2)});editFullValue->setShortcutContext(Qt::WidgetShortcut);m_grid->addAction(editFullValue);connect(editFullValue,&QAction::triggered,this,[this](){if(m_grid->currentIndex().isValid())editFieldDialog(m_grid->currentIndex());});
+    auto*openReference=new QAction(tr("Open Referenced Row"),m_grid);openReference->setShortcut(QKeySequence(Qt::CTRL|Qt::Key_Return));openReference->setShortcutContext(Qt::WidgetShortcut);m_grid->addAction(openReference);connect(openReference,&QAction::triggered,this,&DatabaseEditorDialog::openCurrentReference);
     if(m_tables->count())m_tables->setCurrentRow(0);updateStatus();
 }
 QString DatabaseEditorDialog::currentTableKey()const{auto*i=m_tables->currentItem();return i?i->data(Qt::UserRole).toString():QString();}
-QString DatabaseEditorDialog::selectedRowKey()const{auto*i=m_grid->item(m_grid->currentRow(),0);return i?i->data(Qt::UserRole).toString():QString();}
+QString DatabaseEditorDialog::selectedRowKey()const{return m_grid->currentIndex().isValid()?m_grid->currentIndex().data(RowKeyRole).toString():QString();}
 QString DatabaseEditorDialog::runtimeRowIdentity(const QString& tableKey,const QString& rowKey)const{return tableKey==QStringLiteral("units.monsters")?m_document->displayIdentity(tableKey,rowKey):rowKey;}
 void DatabaseEditorDialog::selectTable(){rebuildGrid();}
 bool DatabaseEditorDialog::selectPrototype(const QString& prototype)
 {
-    const QString wanted = prototype.trimmed();
-    if(wanted.isEmpty())
-        return false;
-
-    // Navigation must not inherit editor state which can hide the requested row.
-    // Clear first so the table switch/rebuild exposes every prototype.
-    if(!m_filter->text().isEmpty()){m_filter->clear();m_filterTimer->stop();rebuildGrid();}
-    for(int i = 0; i < m_tables->count(); ++i)
-        if(m_tables->item(i)->data(Qt::UserRole).toString() == "units.monsters")
-        {
-            m_tables->setCurrentRow(i);
-            break;
-        }
-
-    for(int row = 0; row < m_grid->rowCount(); ++row)
-    {
-        QTableWidgetItem* item = m_grid->item(row, 0);
-        if(item && (item->data(Qt::UserRole).toString().compare(wanted, Qt::CaseInsensitive) == 0
-                    || item->text().compare(wanted,Qt::CaseInsensitive)==0))
-        {
-            m_grid->setCurrentCell(row, 0);
-            m_grid->selectRow(row);
-            m_grid->scrollToItem(item, QAbstractItemView::PositionAtCenter);
-            return true;
-        }
-    }
-    return false;
+    return selectTableRow("units.monsters",prototype);
+}
+bool DatabaseEditorDialog::selectTableRow(const QString& tableKey,const QString& identity)
+{
+    if(identity.trimmed().isEmpty())return false;
+    if(!m_filter->text().isEmpty()){m_filter->clear();m_filterTimer->stop();m_proxy->setSearchText(QString());}
+    bool tableFound=false;for(int i=0;i<m_tables->count();++i)if(m_tables->item(i)->data(Qt::UserRole).toString().compare(tableKey,Qt::CaseInsensitive)==0){m_tables->setCurrentRow(i);tableFound=true;break;}if(!tableFound)return false;
+    if(m_model->tableKey().compare(tableKey,Qt::CaseInsensitive)!=0){m_model->setTable(tableKey,m_showOpaque->isChecked());m_proxy->setSearchText(QString());}
+    const int sourceRow=m_model->rowForIdentity(identity);if(sourceRow<0)return false;const QModelIndex source=m_model->index(sourceRow,0),view=m_proxy->mapFromSource(source);if(!view.isValid())return false;m_grid->setCurrentIndex(view);m_grid->selectRow(view.row());m_grid->scrollTo(view,QAbstractItemView::PositionAtCenter);m_grid->setFocus();return true;
 }
 void DatabaseEditorDialog::rebuildGrid()
 {
     const auto* table=m_document->table(currentTableKey());if(!table)return;
     m_cloneButton->setEnabled(table->structuralEditing);m_deleteButton->setEnabled(table->structuralEditing);
     const QString structuralReason=table->structuralEditing?QString():tr("This complete/raw table is visible for preservation review. Structural editing is disabled until its typed serializer is verified.");
-    m_cloneButton->setToolTip(structuralReason);m_deleteButton->setToolTip(structuralReason);m_refreshing=true;m_grid->setSortingEnabled(false);m_grid->clear();
-    QVector<int> visibleFields;for(int i=0;i<table->fields.size();++i)if(!table->structuralEditing||m_showOpaque->isChecked()||!table->fields[i].opaque)visibleFields<<i;
-    m_grid->setColumnCount(visibleFields.size());QStringList headers;for(int index:visibleFields)headers<<(table->fields[index].label.isEmpty()?translatedFieldLabel(table->fields[index].key,this):table->fields[index].label);m_grid->setHorizontalHeaderLabels(headers);m_grid->setRowCount(0);
-    const QString filter=m_filter->text().trimmed();
-    for(const auto&r:table->rows){if(r.deleted)continue;QStringList values;for(int index:visibleFields)values<<r.values.value(table->fields[index].key).toString();if(!filter.isEmpty()&&!values.join(' ').contains(filter,Qt::CaseInsensitive)&&!r.sourceStableKey.contains(filter,Qt::CaseInsensitive))continue;int row=m_grid->rowCount();m_grid->insertRow(row);
-        for(int c=0;c<visibleFields.size();++c){const auto&f=table->fields[visibleFields[c]];const QVariant stored=r.values.value(f.key);const QString editText=authoringText(*table,f,stored);QString previewText=editText;previewText.replace('\n',", ");auto*item=new QTableWidgetItem(boundedCellPreview(previewText));item->setData(Qt::UserRole,r.stableKey);item->setData(Qt::UserRole+1,f.key);item->setData(Qt::UserRole+2,editText);QString reason;const bool editable=f.writable&&m_document->fieldEditable(table->key,r.stableKey,f.key,&reason);const bool dialogEdit=editable&&(f.type==EDatabaseFieldType::Text||f.type==EDatabaseFieldType::TextList||f.type==EDatabaseFieldType::Reference);
-            if(!editable){item->setToolTip(reason.isEmpty()?tr("Read-only raw payload. It remains preserved byte-for-byte; editing is disabled until this field's type and serializer are verified."):reason);item->setFlags(item->flags()&~Qt::ItemIsEditable);}
-            else if(dialogEdit){item->setToolTip(tr("Preview limited to %1 of %2 characters. Double-click or press Enter/F2 to edit the complete value.").arg(item->text().size()).arg(editText.size()));item->setFlags(item->flags()&~Qt::ItemIsEditable);}
-            m_grid->setItem(row,c,item);}}
-    if(m_grid->columnCount()>0)m_grid->setColumnWidth(0,220);m_grid->setSortingEnabled(true);m_refreshing=false;updateStatus();
+    m_cloneButton->setToolTip(structuralReason);m_deleteButton->setToolTip(structuralReason);const QString selected=selectedRowKey();m_model->setTable(table->key,m_showOpaque->isChecked());m_proxy->setSearchText(m_filter->text());if(m_model->columnCount()>0)m_grid->setColumnWidth(0,220);if(!selected.isEmpty()){const int row=m_model->rowForIdentity(selected);if(row>=0){const QModelIndex view=m_proxy->mapFromSource(m_model->index(row,0));if(view.isValid()){m_grid->setCurrentIndex(view);m_grid->selectRow(view.row());}}}updateStatus();
 }
-void DatabaseEditorDialog::refreshGridValue(QTableWidgetItem*item,const QVariant&value,bool dialogEdit){if(!item)return;const auto*table=m_document->table(currentTableKey());const QString fieldKey=item->data(Qt::UserRole+1).toString();const SDatabaseFieldSchema*field=nullptr;if(table)for(const auto& candidate:table->fields)if(candidate.key==fieldKey){field=&candidate;break;}const QString full=table&&field?authoringText(*table,*field,value):value.toString();QString preview=full;preview.replace('\n',", ");m_refreshing=true;m_grid->setSortingEnabled(false);item->setText(boundedCellPreview(preview));item->setData(Qt::UserRole+2,full);if(dialogEdit)item->setToolTip(tr("Preview limited to %1 of %2 characters. Double-click or press Enter/F2 to edit the complete value.").arg(item->text().size()).arg(full.size()));m_grid->setSortingEnabled(true);m_refreshing=false;updateStatus();}
-void DatabaseEditorDialog::editCell(int row,int column)
+bool DatabaseEditorDialog::commitGridValue(const QString& rowKey,const QString& fieldKey,const QVariant& value)
 {
-    if(m_refreshing)return;const auto*table=m_document->table(currentTableKey());auto*item=m_grid->item(row,column);if(!table||!item)return;const QString rowKey=item->data(Qt::UserRole).toString(),fieldKey=item->data(Qt::UserRole+1).toString();const SDatabaseFieldSchema*schema=nullptr;for(const auto&candidate:table->fields)if(candidate.key==fieldKey){schema=&candidate;break;}if(!schema)return;const QVariant value=typedEditorValue(*schema,item->text());QString diagnostic;const int before=m_document->changes().size();if(!m_document->setValue(table->key,rowKey,schema->key,value,&diagnostic)){QMessageBox::warning(this,tr("Edit rejected"),diagnostic);rebuildGrid();}else{publishLive();if(fieldKey=="name"||fieldKey==QString("fld.%1.0").arg(table->identityFieldId))rebuildGrid();else refreshGridValue(item,value,false);if(m_document->changes().size()>before)emit transactionCommitted(m_document->changes().last().description,table->key,fieldKey=="name"?QString():runtimeRowIdentity(table->key,rowKey));}
+    const auto* table=m_document->table(currentTableKey());if(!table)return false;QString diagnostic;const int before=m_document->changes().size();if(!m_document->setValue(table->key,rowKey,fieldKey,value,&diagnostic)){QMessageBox::warning(this,tr("Edit rejected"),diagnostic);return false;}if(m_document->changes().size()==before)return true;publishLive();emit transactionCommitted(m_document->changes().last().description,table->key,fieldKey=="name"?QString():runtimeRowIdentity(table->key,rowKey));updateStatus();return true;
 }
-void DatabaseEditorDialog::editFieldDialog(int row,int column)
+void DatabaseEditorDialog::editFieldDialog(const QModelIndex& viewIndex)
 {
-    const auto*table=m_document->table(currentTableKey());QTableWidgetItem*item=m_grid->item(row,column);if(!table||!item)return;const QString rowKey=item->data(Qt::UserRole).toString(),fieldKey=item->data(Qt::UserRole+1).toString();const SDatabaseFieldSchema*schema=nullptr;for(const auto&candidate:table->fields)if(candidate.key==fieldKey){schema=&candidate;break;}QString reason;if(!schema||!schema->writable||!m_document->fieldEditable(table->key,rowKey,fieldKey,&reason)||!(schema->type==EDatabaseFieldType::Text||schema->type==EDatabaseFieldType::TextList||schema->type==EDatabaseFieldType::Reference))return;
+    if(!viewIndex.isValid())return;const QModelIndex source=m_proxy->mapToSource(viewIndex);const QModelIndex* item=&source;const auto*table=m_document->table(currentTableKey());if(!table||!source.isValid())return;const QString rowKey=source.data(RowKeyRole).toString(),fieldKey=source.data(FieldKeyRole).toString();const SDatabaseFieldSchema*schema=m_model->fieldForIndex(source);QString reason;if(!schema||!schema->writable||!m_document->fieldEditable(table->key,rowKey,fieldKey,&reason)||!(schema->type==EDatabaseFieldType::Text||schema->type==EDatabaseFieldType::TextList||schema->type==EDatabaseFieldType::Reference))return;
     QDialog dialog(this);dialog.setObjectName("databaseFieldEditorDialog");dialog.setWindowTitle(tr("Edit %1").arg(schema->label));QScreen*screen=QGuiApplication::screenAt(mapToGlobal(rect().center()));const QRect available=screen?screen->availableGeometry():QRect(0,0,1024,768);const int width=qMax(360,qMin(720,available.width()-80)),height=qMax(240,qMin(460,available.height()-100));dialog.setMinimumSize(qMin(440,width),qMin(280,height));dialog.resize(width,height);auto*layout=new QVBoxLayout(&dialog);const QString identity=m_document->displayIdentity(table->key,rowKey);auto*label=new QLabel(tr("%1 — %2").arg(identity.isEmpty()?rowKey:identity,schema->label),&dialog);label->setWordWrap(true);layout->addWidget(label);auto*editor=new QPlainTextEdit(&dialog);editor->setObjectName("databaseFieldEditorText");editor->setLineWrapMode(QPlainTextEdit::WidgetWidth);editor->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));editor->setPlainText(item->data(Qt::UserRole+2).toString());QVariant storedForEditor;for(const auto& candidate:table->rows)if(candidate.stableKey==rowKey){storedForEditor=candidate.values.value(fieldKey);break;}QStringList parsedList;const bool listEditor=schema->type==EDatabaseFieldType::TextList||jsonStringList(storedForEditor.toString(),&parsedList);editor->setToolTip(listEditor?tr("One list entry per line. The brackets and quotation marks used internally are intentionally hidden."):tr("This is the complete stored value. Long lines wrap visually."));layout->addWidget(editor,1);auto*count=new QLabel(&dialog);count->setObjectName("databaseFieldEditorCount");layout->addWidget(count);auto updateCount=[count,editor,listEditor,this](){count->setText(listEditor?tr("%1 item(s) — one per line").arg(editor->toPlainText().split(QRegExp("[\\r\\n]+"),QString::SkipEmptyParts).size()):tr("%1 character(s) — complete value").arg(editor->toPlainText().size()));};connect(editor,&QPlainTextEdit::textChanged,&dialog,updateCount);updateCount();auto*buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog);buttons->setObjectName("databaseFieldEditorButtons");buttons->button(QDialogButtonBox::Ok)->setDefault(true);layout->addWidget(buttons);connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);editor->selectAll();editor->setFocus();if(dialog.exec()!=QDialog::Accepted)return;
-    const QVariant original=table->rows.isEmpty()?QVariant():[&](){for(const auto& candidate:table->rows)if(candidate.stableKey==rowKey)return candidate.values.value(fieldKey);return QVariant();}();const QVariant value=editorValue(*table,*schema,original,editor->toPlainText());QString diagnostic;const int before=m_document->changes().size();if(!m_document->setValue(table->key,rowKey,fieldKey,value,&diagnostic)){QMessageBox::warning(this,tr("Edit rejected"),diagnostic);rebuildGrid();return;}publishLive();if(fieldKey=="name"||fieldKey==QString("fld.%1.0").arg(table->identityFieldId))rebuildGrid();else refreshGridValue(item,value,true);if(m_document->changes().size()>before)emit transactionCommitted(m_document->changes().last().description,table->key,fieldKey=="name"?QString():runtimeRowIdentity(table->key,rowKey));
+    const QVariant original=table->rows.isEmpty()?QVariant():[&](){for(const auto& candidate:table->rows)if(candidate.stableKey==rowKey)return candidate.values.value(fieldKey);return QVariant();}();const QVariant value=editorValue(*table,*schema,original,editor->toPlainText());if(!commitGridValue(rowKey,fieldKey,value))return;m_model->refresh();m_proxy->setSearchText(m_filter->text());
 }
 void DatabaseEditorDialog::showRowContextMenu(const QPoint& position)
 {
-    QTableWidgetItem*item=m_grid->itemAt(position);if(!item)return;m_grid->setCurrentCell(item->row(),item->column());m_grid->selectRow(item->row());const auto*table=m_document->table(currentTableKey());auto*menu=new QMenu(m_grid);menu->setAttribute(Qt::WA_DeleteOnClose);menu->setObjectName("databaseRowContextMenu");QAction*copy=menu->addAction(tr("Copy Row ID"));copy->setObjectName("databaseCopyRowIdAction");connect(copy,&QAction::triggered,this,&DatabaseEditorDialog::copySelectedRowId);QAction*clone=menu->addAction(tr("Duplicate / Clone Row…"));clone->setObjectName("databaseCloneRowAction");clone->setEnabled(table&&table->structuralEditing);connect(clone,&QAction::triggered,this,&DatabaseEditorDialog::cloneSelected);menu->popup(m_grid->viewport()->mapToGlobal(position));
+    const QModelIndex index=m_grid->indexAt(position);if(!index.isValid())return;m_grid->setCurrentIndex(index);m_grid->selectRow(index.row());const auto*table=m_document->table(currentTableKey());auto*menu=new QMenu(m_grid);menu->setAttribute(Qt::WA_DeleteOnClose);menu->setObjectName("databaseRowContextMenu");QAction*copy=menu->addAction(tr("Copy Row ID"));copy->setObjectName("databaseCopyRowIdAction");connect(copy,&QAction::triggered,this,&DatabaseEditorDialog::copySelectedRowId);const QModelIndex source=m_proxy->mapToSource(index);const QString referenceTable=source.data(ReferenceTableRole).toString(),referenceIdentity=source.data(Qt::EditRole).toString().trimmed();if(!referenceTable.isEmpty()&&!referenceIdentity.isEmpty()){QAction*open=menu->addAction(tr("Open Referenced Row"));open->setObjectName("databaseOpenReferenceAction");connect(open,&QAction::triggered,this,[this,referenceTable,referenceIdentity](){if(!selectTableRow(referenceTable,referenceIdentity))QMessageBox::information(this,tr("Reference not found"),tr("The referenced row '%1' is not present in %2.").arg(referenceIdentity,referenceTable));});}QAction*clone=menu->addAction(tr("Duplicate / Clone Row…"));clone->setObjectName("databaseCloneRowAction");clone->setEnabled(table&&table->structuralEditing);connect(clone,&QAction::triggered,this,&DatabaseEditorDialog::cloneSelected);menu->popup(m_grid->viewport()->mapToGlobal(position));
 }
+void DatabaseEditorDialog::openCurrentReference(){const QModelIndex view=m_grid->currentIndex();if(!view.isValid())return;const QModelIndex source=m_proxy->mapToSource(view);const QString table=source.data(ReferenceTableRole).toString(),identity=source.data(Qt::EditRole).toString().trimmed();if(table.isEmpty()||identity.isEmpty())return;if(!selectTableRow(table,identity))QMessageBox::information(this,tr("Reference not found"),tr("The referenced row '%1' is not present in %2.").arg(identity,table));}
 void DatabaseEditorDialog::copySelectedRowId(){const QString key=selectedRowKey();if(key.isEmpty())return;const QString identity=m_document->displayIdentity(currentTableKey(),key);QApplication::clipboard()->setText(identity.isEmpty()?key:identity);}
-void DatabaseEditorDialog::cloneSelected(){const QString key=selectedRowKey();if(key.isEmpty())return;const QString originalName=m_document->displayIdentity(currentTableKey(),key);QDialog dialog(this);dialog.setWindowTitle(tr("Clone row"));auto*layout=new QVBoxLayout(&dialog);auto*label=new QLabel(tr("New stable name / ID:"),&dialog);auto*name=new QLineEdit(originalName.isEmpty()?key:originalName,&dialog);auto*reason=new QLabel(&dialog);reason->setWordWrap(true);auto*buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog);layout->addWidget(label);layout->addWidget(name);layout->addWidget(reason);layout->addWidget(buttons);auto update=[&](){const QString value=name->text().trimmed();const bool unchanged=value.compare(key,Qt::CaseInsensitive)==0;const bool available=m_document->identityAvailable(currentTableKey(),value);buttons->button(QDialogButtonBox::Ok)->setEnabled(!unchanged&&available);reason->setText(value.isEmpty()?tr("The ID cannot be empty."):unchanged?tr("Enter a new ID; the original ID is already in use."):!available?tr("That ID is already used by another row."):tr("The new ID is available."));};connect(name,&QLineEdit::textChanged,&dialog,[&](const QString&){update();});connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);update();name->selectAll();name->setFocus();if(dialog.exec()!=QDialog::Accepted)return;const QString newId=name->text().trimmed();QString d;if(!m_document->cloneRow(currentTableKey(),key,newId,&d))QMessageBox::warning(this,tr("Clone rejected"),d);else{publishLive();emit transactionCommitted(m_document->changes().last().description,currentTableKey(),newId);}rebuildGrid();selectPrototype(newId);}
+void DatabaseEditorDialog::cloneSelected(){const QString key=selectedRowKey(),tableKey=currentTableKey();if(key.isEmpty())return;const QString originalName=m_document->displayIdentity(tableKey,key);QDialog dialog(this);dialog.setWindowTitle(tr("Clone row"));auto*layout=new QVBoxLayout(&dialog);auto*label=new QLabel(tr("New stable name / ID:"),&dialog);auto*name=new QLineEdit(originalName.isEmpty()?key:originalName,&dialog);auto*reason=new QLabel(&dialog);reason->setWordWrap(true);auto*buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog);layout->addWidget(label);layout->addWidget(name);layout->addWidget(reason);layout->addWidget(buttons);auto update=[&](){const QString value=name->text().trimmed();const bool unchanged=value.compare(key,Qt::CaseInsensitive)==0;const bool available=m_document->identityAvailable(tableKey,value);buttons->button(QDialogButtonBox::Ok)->setEnabled(!unchanged&&available);reason->setText(value.isEmpty()?tr("The ID cannot be empty."):unchanged?tr("Enter a new ID; the original ID is already in use."):!available?tr("That ID is already used by another row."):tr("The new ID is available."));};connect(name,&QLineEdit::textChanged,&dialog,[&](const QString&){update();});connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);update();name->selectAll();name->setFocus();if(dialog.exec()!=QDialog::Accepted)return;const QString newId=name->text().trimmed();QString d;if(!m_document->cloneRow(tableKey,key,newId,&d))QMessageBox::warning(this,tr("Clone rejected"),d);else{publishLive();emit transactionCommitted(m_document->changes().last().description,tableKey,newId);}m_model->refresh();m_proxy->setSearchText(m_filter->text());selectTableRow(tableKey,newId);updateStatus();}
 void DatabaseEditorDialog::deleteSelected(){QString key=selectedRowKey();if(key.isEmpty())return;if(QMessageBox::question(this,tr("Delete row"),tr("Mark '%1' for deletion? References will be validated before publication.").arg(key))!=QMessageBox::Yes)return;const QString tableKey=currentTableKey(),runtimeKey=runtimeRowIdentity(tableKey,key);QString d;if(!m_document->deleteRow(tableKey,key,&d))QMessageBox::warning(this,tr("Delete rejected"),d);else{publishLive();emit transactionCommitted(m_document->changes().last().description,tableKey,runtimeKey);}rebuildGrid();}
 void DatabaseEditorDialog::publishLive(){QString diagnostic;const auto snapshot=m_document->currentSnapshot(&diagnostic);if(snapshot)ProfileDatabaseContext::instance().publishEditedSnapshot(snapshot);else QMessageBox::warning(this,tr("Database refresh failed"),diagnostic);}
 void DatabaseEditorDialog::refreshFromHistory(){publishLive();rebuildGrid();}

@@ -20,6 +20,9 @@
 #include <QTimer>
 #include <QSignalSpy>
 #include <QTableWidget>
+#include <QTableView>
+#include <QComboBox>
+#include <QAbstractItemDelegate>
 #include <cmath>
 
 #include "profile_database.h"
@@ -192,6 +195,8 @@ private slots:
     void losslessMemberFixedSizePatchPreservesOriginalHeaders();
     void workbookImportRejectsReadOnlyAndUnpublishableChanges();
     void databaseEditorRowMenuAndWrappedFieldEditor();
+    void databaseEditorUsesLazyModelAndNavigatesReferences();
+    void installedVerifiedReferenceMappingsResolve();
     void installedDatabaseInteractiveLatency();
 };
 
@@ -943,9 +948,9 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
     QSignalSpy committed(&dialog,SIGNAL(transactionCommitted(QString,QString,QString)));
     dialog.show();
     QVERIFY(dialog.selectPrototype("Human Test"));
-    QTableWidget* grid = dialog.findChild<QTableWidget*>("databaseGrid");
+    QTableView* grid = dialog.findChild<QTableView*>("databaseGrid");
     QVERIFY(grid);
-    QVERIFY(grid->currentRow() >= 0);
+    QVERIFY(grid->currentIndex().isValid());
 
     bool copiedByRealMenu = false;
     bool cloneActionAvailable = false;
@@ -979,7 +984,7 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
         if(copyAction) { copyAction->trigger(); copiedByRealMenu = true; menu->close(); return; }
         menu->close();
     });
-    const QRect rowCell = grid->visualItemRect(grid->item(grid->currentRow(), 0));
+    const QRect rowCell = grid->visualRect(grid->model()->index(grid->currentIndex().row(),0));
     const QPoint local = rowCell.center();
     QContextMenuEvent menuEvent(QContextMenuEvent::Mouse, local,
         grid->viewport()->mapToGlobal(local));
@@ -990,17 +995,17 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
     QCOMPARE(QApplication::clipboard()->text(), QString("Human Test"));
 
     int wearsColumn = -1;
-    for(int column = 0; column < grid->columnCount(); ++column)
-        if(grid->horizontalHeaderItem(column)->text().contains("Wears", Qt::CaseInsensitive))
+    for(int column = 0; column < grid->model()->columnCount(); ++column)
+        if(grid->model()->headerData(column,Qt::Horizontal).toString().contains("Wears", Qt::CaseInsensitive))
             wearsColumn = column;
     QVERIFY(wearsColumn >= 0);
-    QTableWidgetItem* wearsItem = grid->item(grid->currentRow(), wearsColumn);
-    QVERIFY(wearsItem);
-    QVERIFY(!wearsItem->data(Qt::UserRole + 2).toString().contains('['));
-    QVERIFY(wearsItem->data(Qt::UserRole + 2).toString().contains('\n'));
-    QVERIFY(!wearsItem->toolTip().contains(originalLongValue));
-    grid->scrollToItem(wearsItem, QAbstractItemView::PositionAtCenter);
-    grid->setCurrentCell(wearsItem->row(), wearsColumn);
+    QModelIndex wearsItem = grid->model()->index(grid->currentIndex().row(), wearsColumn);
+    QVERIFY(wearsItem.isValid());
+    QVERIFY(!wearsItem.data(Qt::UserRole + 2).toString().contains('['));
+    QVERIFY(wearsItem.data(Qt::UserRole + 2).toString().contains('\n'));
+    QVERIFY(!wearsItem.data(Qt::ToolTipRole).toString().contains(originalLongValue));
+    grid->scrollTo(wearsItem, QAbstractItemView::PositionAtCenter);
+    grid->setCurrentIndex(wearsItem);
     QApplication::processEvents();
 
     bool openedWrappedEditor = false;
@@ -1031,10 +1036,10 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
         if(buttons)
             buttons->button(QDialogButtonBox::Ok)->click();
     });
-    const QRect wearsRect = grid->visualItemRect(wearsItem);
+    const QRect wearsRect = grid->visualRect(wearsItem);
     QVERIFY(wearsRect.isValid());
-    QMetaObject::invokeMethod(grid, "cellDoubleClicked", Qt::DirectConnection,
-        Q_ARG(int, wearsItem->row()), Q_ARG(int, wearsColumn));
+    QMetaObject::invokeMethod(grid, "doubleClicked", Qt::DirectConnection,
+        Q_ARG(QModelIndex, wearsItem));
     QApplication::processEvents();
     QVERIFY(openedWrappedEditor);
     const ei::SDatabaseTable* monsters = document->table("units.monsters");
@@ -1050,27 +1055,28 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
     QCOMPARE(committed.last().at(2).toString(),QString("Human Test"));
 
     int probabilityColumn=-1;
-    for(int column=0;column<grid->columnCount();++column)
-        if(grid->horizontalHeaderItem(column)->text().contains("Common loot Probability",Qt::CaseInsensitive))
+    QVERIFY(dialog.selectPrototype("Human Test"));
+    for(int column=0;column<grid->model()->columnCount();++column)
+        if(grid->model()->headerData(column,Qt::Horizontal).toString().contains("Common loot Probability",Qt::CaseInsensitive))
             probabilityColumn=column;
     QVERIFY(probabilityColumn>=0);
-    QTableWidgetItem* probabilityItem=grid->item(grid->currentRow(),probabilityColumn);
-    QVERIFY(probabilityItem);
-    const QString readableProbability=probabilityItem->data(Qt::UserRole+2).toString();
+    QModelIndex probabilityItem=grid->model()->index(grid->currentIndex().row(),probabilityColumn);
+    QVERIFY(probabilityItem.isValid());
+    const QString readableProbability=probabilityItem.data(Qt::UserRole+2).toString();
     QVERIFY(!readableProbability.contains('{'));
     QVERIFY(!readableProbability.contains('"'));
     QVERIFY(readableProbability.contains("[0]"));
     QVERIFY(readableProbability.contains("= 100"));
     bool editedProbability=false;
     QTimer::singleShot(0,[&editedProbability](){QDialog*editor=qobject_cast<QDialog*>(QApplication::activeModalWidget());if(!editor)return;QPlainTextEdit*text=editor->findChild<QPlainTextEdit*>("databaseFieldEditorText");QDialogButtonBox*buttons=editor->findChild<QDialogButtonBox*>("databaseFieldEditorButtons");if(text){QStringList lines=text->toPlainText().split('\n');for(QString&line:lines)if(line.trimmed().startsWith("[0]")){line="[0] Common loot Probability = 75";editedProbability=true;break;}text->setPlainText(lines.join('\n'));}if(buttons)buttons->button(QDialogButtonBox::Ok)->click();});
-    QMetaObject::invokeMethod(grid,"cellDoubleClicked",Qt::DirectConnection,Q_ARG(int,probabilityItem->row()),Q_ARG(int,probabilityColumn));
+    QMetaObject::invokeMethod(grid,"doubleClicked",Qt::DirectConnection,Q_ARG(QModelIndex,probabilityItem));
     QVERIFY(editedProbability);
     monsters=document->table("units.monsters");QVERIFY(monsters);bool probabilityStored=false;QString storedProbability;for(const auto&row:monsters->rows)if(row.stableKey.startsWith("human test#")){storedProbability=row.values.value("fld.27.0").toString();const QJsonArray value=QJsonDocument::fromJson(storedProbability.toUtf8()).array();probabilityStored=!value.isEmpty()&&value.first().toObject().value("value").toDouble()==75.0;}QVERIFY2(probabilityStored,qPrintable(storedProbability));
 
     const int changesBeforeCancel = document->changes().size();
     QVERIFY(dialog.selectPrototype("Human Test"));
-    QTableWidgetItem* cancelItem = grid->item(grid->currentRow(), wearsColumn);
-    QVERIFY(cancelItem);
+    QModelIndex cancelItem = grid->model()->index(grid->currentIndex().row(), wearsColumn);
+    QVERIFY(cancelItem.isValid());
     QTimer::singleShot(0, []() {
         QDialog* editor = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         if(!editor)
@@ -1082,9 +1088,78 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
         if(buttons)
             buttons->button(QDialogButtonBox::Cancel)->click();
     });
-    QMetaObject::invokeMethod(grid, "cellDoubleClicked", Qt::DirectConnection,
-        Q_ARG(int, cancelItem->row()), Q_ARG(int, wearsColumn));
+    QMetaObject::invokeMethod(grid, "doubleClicked", Qt::DirectConnection,
+        Q_ARG(QModelIndex, cancelItem));
     QCOMPARE(document->changes().size(), changesBeforeCancel);
+}
+
+void ProfileDatabaseTests::databaseEditorUsesLazyModelAndNavigatesReferences()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    write(QDir(temporary.path()).filePath("database.res"), resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;
+    request.providerId = "base.standard.v1";
+    request.profileId = "base";
+    request.resourceDirectories << temporary.path();
+    auto document = ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+
+    ei::DatabaseEditorDialog dialog(document);
+    dialog.show();
+    QVERIFY(dialog.selectPrototype("Human Test"));
+    QTableView* grid = dialog.findChild<QTableView*>("databaseGrid");
+    QVERIFY(grid);
+    QVERIFY2(!qobject_cast<QTableWidget*>(grid),
+             "The database grid must not eagerly allocate QTableWidgetItem objects.");
+    QVERIFY(grid->model());
+    QCOMPARE(grid->model()->objectName(), QString("databaseFilterModel"));
+
+    int baseRaceColumn = -1;
+    for(int column = 0; column < grid->model()->columnCount(); ++column)
+        if(grid->model()->headerData(column, Qt::Horizontal).toString()
+               .compare("Base Race", Qt::CaseInsensitive) == 0)
+            baseRaceColumn = column;
+    QVERIFY(baseRaceColumn >= 0);
+    const QModelIndex reference = grid->model()->index(
+        grid->currentIndex().row(), baseRaceColumn);
+    QCOMPARE(reference.data(Qt::UserRole + 4).toString(),
+             QString("units.racemodels"));
+    grid->setCurrentIndex(reference);
+    grid->edit(reference);
+    QApplication::processEvents();
+    QComboBox* picker = grid->findChild<QComboBox*>();
+    QVERIFY(picker);
+    QVERIFY(picker->isEditable());
+    QVERIFY(picker->findText("Human Male", Qt::MatchFixedString) >= 0);
+    QTest::keyClick(picker,Qt::Key_Escape);
+    QApplication::processEvents();
+    grid->setCurrentIndex(reference);
+    grid->scrollTo(reference,QAbstractItemView::PositionAtCenter);
+    QApplication::processEvents();
+
+    bool openedReference = false;
+    QTimer::singleShot(0, [&openedReference]() {
+        QMenu* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+        if(!menu)
+            return;
+        for(QAction* action : menu->actions())
+            if(action->objectName() == "databaseOpenReferenceAction") {
+                action->trigger();
+                openedReference = true;
+                return;
+            }
+        menu->close();
+    });
+    const QRect cell = grid->visualRect(reference);
+    QVERIFY(cell.isValid());
+    QContextMenuEvent menuEvent(QContextMenuEvent::Mouse, cell.center(),
+        grid->viewport()->mapToGlobal(cell.center()));
+    QApplication::sendEvent(grid->viewport(), &menuEvent);
+    QTRY_VERIFY_WITH_TIMEOUT(openedReference, 1000);
+    QCOMPARE(grid->currentIndex().data(Qt::DisplayRole).toString(),
+             QString("Human Male"));
 }
 
 void ProfileDatabaseTests::installedDatabaseInteractiveLatency()
@@ -1095,6 +1170,51 @@ void ProfileDatabaseTests::installedDatabaseInteractiveLatency()
     ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="latency";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
     const ei::SDatabaseTable* monsters=document->table("units.monsters");QVERIFY(monsters&&!monsters->rows.isEmpty());const QString rowKey=monsters->rows.first().stableKey;QString diagnostic;QElapsedTimer timer;timer.start();QVERIFY2(document->setValue("units.monsters",rowKey,"fld.3.0",monsters->rows.first().values.value("fld.3.0").toInt()+1,&diagnostic),qPrintable(diagnostic));const qint64 setValueMs=timer.restart();const auto snapshot=document->currentSnapshot(&diagnostic);const qint64 snapshotMs=timer.restart();QVERIFY2(snapshot,qPrintable(diagnostic));
     ei::DatabaseEditorDialog dialog(document);dialog.show();timer.restart();dialog.refreshFromHistory();const qint64 refreshMs=timer.elapsed();qInfo()<<"database interaction latency ms set"<<setValueMs<<"snapshot"<<snapshotMs<<"refresh"<<refreshMs<<"rows"<<monsters->rows.size();QVERIFY2(setValueMs<100,qPrintable(QString("A simple database mutation took %1 ms; expected under 100 ms.").arg(setValueMs)));QVERIFY2(snapshotMs<500,qPrintable(QString("Runtime snapshot publication took %1 ms; expected under 500 ms.").arg(snapshotMs)));QVERIFY2(refreshMs<500,qPrintable(QString("A simple database refresh took %1 ms; expected under 500 ms.").arg(refreshMs)));
+}
+
+void ProfileDatabaseTests::installedVerifiedReferenceMappingsResolve()
+{
+    const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);
+    if(archives.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run installed reference controls.");
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());const QString sourcePath=QDir(temporary.path()).filePath("database.res");QVERIFY(QFile::copy(archives.first(),sourcePath));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;request.providerId="base.standard.v1";request.profileId="references";request.resourceDirectories<<temporary.path();auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    int mappedFields=0;
+    for(const QString& tableKey:document->tableKeys())
+    {
+        const auto* table=document->table(tableKey);if(!table||table->physicalTable<0)continue;
+        for(const auto& field:table->fields)
+        {
+            if(field.referenceTable.isEmpty())
+                continue;
+            ++mappedFields;
+            QSet<QString> targets;
+            const auto* target=document->table(field.referenceTable);
+            QVERIFY2(target,qPrintable(field.referenceTable));
+            for(const auto& row:target->rows)
+                if(!row.deleted)
+                    targets.insert(document->displayIdentity(field.referenceTable,row.stableKey).trimmed().toLower());
+            int populated=0,resolved=0;
+            QStringList examples;
+            for(const auto& row:table->rows)
+            {
+                if(row.deleted)
+                    continue;
+                const QString value=row.values.value(field.key).toString().trimmed().toLower();
+                if(value.isEmpty())
+                    continue;
+                ++populated;
+                resolved+=targets.contains(value);
+                if(examples.size()<4)
+                    examples.append(value);
+            }
+            qInfo()<<"database reference coverage"<<tableKey<<field.label<<field.referenceTable
+                   <<resolved<<populated<<"values"<<examples<<"targets"<<targets.values().mid(0,4);
+            QVERIFY2(populated==0||resolved*100>=populated*90,
+                     qPrintable(QString("Only %1/%2 values in %3.%4 resolve to %5")
+                                .arg(resolved).arg(populated).arg(tableKey,field.label,field.referenceTable)));
+        }
+    }
+    QVERIFY(mappedFields>=1);
 }
 
 QTEST_MAIN(ProfileDatabaseTests)

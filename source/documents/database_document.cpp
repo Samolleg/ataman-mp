@@ -26,6 +26,12 @@ bool sameValue(const QVariant& a,const QVariant& b)
 ei::SDatabaseFieldSchema fs(const QString& key, const QString& label, ei::EDatabaseFieldType type, const QString& ref = QString())
 { ei::SDatabaseFieldSchema f; f.key=key; f.label=label; f.type=type; f.referenceTable=ref; return f; }
 ei::SDatabaseFieldSchema ro(ei::SDatabaseFieldSchema f){f.writable=false;return f;}
+QString verifiedReferenceTable(const QString& tableKey, int fieldId)
+{
+    if(tableKey == "units.monsters" && fieldId == 1)
+        return "units.racemodels";
+    return {};
+}
 ei::EDatabaseFieldType displayType(ei::EDatabaseStorageType type)
 {
     if(type==ei::EDatabaseStorageType::UnsignedLong||type==ei::EDatabaseStorageType::SignedLong||type==ei::EDatabaseStorageType::Byte)return ei::EDatabaseFieldType::Integer;
@@ -213,7 +219,7 @@ void addSchemaDatabaseTables(const QSharedPointer<const ei::SProfileDatabaseSnap
         for(const auto& storageField:storage.fields)
         {
             QVector<ei::SDatabaseStorageHeader> headers=schema.headers(storage.family,storage.blockId,storageField.id);int occurrences=1;
-            for(int occurrence=0;occurrence<occurrences;++occurrence){ei::SDatabaseFieldSchema field;field.key=QString("fld.%1.%2").arg(storageField.id).arg(occurrence);const auto matches=schema.headers(storage.family,storage.blockId,storageField.id);field.label=matches.value(occurrence).name;if(field.label.isEmpty())field.label=QString("FLD%1-%2").arg(storageField.id).arg(occurrence);field.type=displayType(storageField.type);field.storageId=storageField.id;field.storageOccurrence=occurrence;field.opaque=storageField.type==ei::EDatabaseStorageType::Hex;table.fields.append(field);}
+            for(int occurrence=0;occurrence<occurrences;++occurrence){ei::SDatabaseFieldSchema field;field.key=QString("fld.%1.%2").arg(storageField.id).arg(occurrence);const auto matches=schema.headers(storage.family,storage.blockId,storageField.id);field.label=matches.value(occurrence).name;if(field.label.isEmpty())field.label=QString("FLD%1-%2").arg(storageField.id).arg(occurrence);field.type=displayType(storageField.type);field.storageId=storageField.id;field.storageOccurrence=occurrence;field.opaque=storageField.type==ei::EDatabaseStorageType::Hex;field.referenceTable=verifiedReferenceTable(table.key,storageField.id);if(!field.referenceTable.isEmpty())field.type=ei::EDatabaseFieldType::Reference;table.fields.append(field);}
         }
         table.identityFieldId=-1;for(const auto& field:storage.fields)if(field.id==0&&field.type==ei::EDatabaseStorageType::String){table.identityFieldId=0;break;}if(table.identityFieldId<0)for(const auto& field:storage.fields)if((field.id==0||field.id==1)&&field.type==ei::EDatabaseStorageType::String){table.identityFieldId=field.id;break;}
         for(int recordIndex=0;recordIndex<member.recordCount(storage.physicalIndex);++recordIndex)
@@ -280,7 +286,54 @@ bool DatabaseDocument::setValue(const QString&t,const QString&r,const QString&f,
 bool DatabaseDocument::cloneRow(const QString&t,const QString&r,const QString&n,QString*d){SDatabaseRow*s=row(t,r);auto tb=m_tables.find(t);QString k=fold(n);if(!s||tb==m_tables.end()||!tb->structuralEditing){if(d)*d="Row cloning is unavailable for this preservation-only table.";return false;}if(k.isEmpty()||!identityAvailable(t,n)){if(d)*d="New stable name is empty or already exists.";return false;}SDatabaseRow c=*s;auto before=m_tables;tb=m_tables.find(t);c.sourceStableKey=s->sourceStableKey.isEmpty()?s->stableKey:s->sourceStableKey;c.stableKey=tb->physicalTable>=0?k+QString("#new%1").arg(tb->rows.size()):k;const QString identityKey=tb->identityFieldId>=0?QString("fld.%1.0").arg(tb->identityFieldId):QString("name");c.values[identityKey]=n;c.added=true;c.deleted=false;tb->rows<<c;commit(before,{t,c.stableKey,{}, {},n,QString("Cloned %1 as %2").arg(r,n)});return true;}
 bool DatabaseDocument::deleteRow(const QString&t,const QString&r,QString*d){auto tb=m_tables.find(t);auto*x=row(t,r);if(tb==m_tables.end()||!tb->structuralEditing){if(d)*d="Row deletion is unavailable for this preservation-only table.";return false;}if(!x||x->deleted){if(d)*d="Row is unavailable.";return false;}auto before=m_tables;x=row(t,r);x->deleted=true;commit(before,{t,r,{},false,true,QString("Deleted %1").arg(r)});return true;}
 bool DatabaseDocument::undo(){if(m_undo.isEmpty())return false;auto s=m_undo.takeLast();m_redo.append({m_tables,s.change});m_tables=s.tables;return true;} bool DatabaseDocument::redo(){if(m_redo.isEmpty())return false;auto s=m_redo.takeLast();m_undo.append({m_tables,s.change});m_tables=s.tables;return true;}
-QVector<SDatabaseValidationFinding> DatabaseDocument::validate()const{QVector<SDatabaseValidationFinding>o;for(const auto&tb:m_tables){if(!tb.structuralEditing)continue;QMap<QString,int>ids;for(const auto&r:tb.rows){if(r.deleted)continue;const QString identityKey=tb.identityFieldId>=0?QString("fld.%1.0").arg(tb.identityFieldId):QString("name");QString n=fold(r.values.value(identityKey).toString());const bool identified=tb.identityFieldId>=0||tb.key=="raceModels"||tb.key=="monsters"||tb.key=="items";if(identified&&(n.isEmpty()||++ids[n]>1))o.append({SDatabaseValidationFinding::Severity::Error,"database.identity.invalid",tb.key,r.stableKey,"Stable name is empty or duplicated.",true});for(const auto&f:tb.fields){if(f.referenceTable.isEmpty())continue;QString ref=fold(r.values.value(f.key).toString());const auto*target=table(f.referenceTable);bool found=ref.isEmpty();if(target)for(const auto&c:target->rows)found|=!c.deleted&&c.stableKey==ref;if(!found)o.append({SDatabaseValidationFinding::Severity::Error,"database.reference.missing",tb.key,r.stableKey,QString("%1 references missing %2 row '%3'.").arg(f.label,f.referenceTable,ref),true});}}}if(isDirty())o.append({SDatabaseValidationFinding::Severity::Warning,"database.impact.opaque",{}, {},"MOB, texts.res, and descriptor-unknown references require external impact review before publication.",false});return o;}
+QVector<SDatabaseValidationFinding> DatabaseDocument::validate()const
+{
+    QVector<SDatabaseValidationFinding> findings;
+    QMap<QString,QSet<QString>> identities;
+    for(const auto& table:m_tables)
+    {
+        const QString identityKey=table.identityFieldId>=0
+            ?QString("fld.%1.0").arg(table.identityFieldId):QString("name");
+        for(const auto& row:table.rows)
+            if(!row.deleted)
+            {
+                const QString identity=fold(row.values.value(identityKey).toString());
+                if(!identity.isEmpty())identities[table.key].insert(identity);
+            }
+    }
+    for(const auto& table:m_tables)
+    {
+        if(!table.structuralEditing)continue;
+        QMap<QString,int> duplicateCounts;
+        const QString identityKey=table.identityFieldId>=0
+            ?QString("fld.%1.0").arg(table.identityFieldId):QString("name");
+        for(const auto& row:table.rows)
+        {
+            if(row.deleted)continue;
+            const QString identity=fold(row.values.value(identityKey).toString());
+            const bool identified=table.identityFieldId>=0||table.key=="raceModels"
+                ||table.key=="monsters"||table.key=="items";
+            if(identified&&(identity.isEmpty()||++duplicateCounts[identity]>1))
+                findings.append({SDatabaseValidationFinding::Severity::Error,
+                    "database.identity.invalid",table.key,row.stableKey,
+                    "Stable name is empty or duplicated.",true});
+            for(const auto& field:table.fields)
+            {
+                if(field.referenceTable.isEmpty())continue;
+                const QString reference=fold(row.values.value(field.key).toString());
+                if(!reference.isEmpty()&&!identities.value(field.referenceTable).contains(reference))
+                    findings.append({SDatabaseValidationFinding::Severity::Error,
+                        "database.reference.missing",table.key,row.stableKey,
+                        QString("%1 references missing %2 row '%3'.")
+                            .arg(field.label,field.referenceTable,reference),true});
+            }
+        }
+    }
+    if(isDirty())findings.append({SDatabaseValidationFinding::Severity::Warning,
+        "database.impact.opaque",{}, {},
+        "MOB, texts.res, and descriptor-unknown references require external impact review before publication.",false});
+    return findings;
+}
 QJsonObject DatabaseDocument::pendingChangeManifest()const{QJsonObject o;o["format"]="ei-mapper-database-change-set-v1";o["providerId"]=providerId();o["profileId"]=profileId();o["sourceArchive"]=sourceArchivePath();o["sourceSha256"]=sourceArchiveSha256();QString publicationDiagnostic;o["publicationSupported"]=!buildArchive(&publicationDiagnostic).isEmpty();o["publicationDiagnostic"]=publicationDiagnostic;QJsonArray a;for(const auto&c:changes()){QJsonObject x;x["table"]=c.tableKey;x["row"]=c.rowKey;x["field"]=c.fieldKey;x["before"]=jv(c.before);x["after"]=jv(c.after);x["description"]=c.description;a<<x;}o["changes"]=a;QJsonArray p;for(auto i=m_snapshot->rawMembers.cbegin();i!=m_snapshot->rawMembers.cend();++i)p<<i.key();o["preservedRawMembers"]=p;return o;}
 bool DatabaseDocument::sourceIsCurrent(QString*d)const{QFile f(sourceArchivePath());if(!f.open(QIODevice::ReadOnly)){if(d)*d="Source archive is no longer readable.";return false;}QString h=QString::fromLatin1(QCryptographicHash::hash(f.readAll(),QCryptographicHash::Sha256).toHex());if(h.compare(m_expectedSourceSha256,Qt::CaseInsensitive)!=0){if(d)*d="Source archive changed outside this database editor session.";return false;}return true;}
 QByteArray DatabaseDocument::buildArchive(QString* diagnostic)const
