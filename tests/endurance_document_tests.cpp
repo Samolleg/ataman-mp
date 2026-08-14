@@ -6421,6 +6421,9 @@ void EnduranceDocumentTests::workingAtlasRealizesExactTransitionsBeyond512Slots(
     QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(), 512);
     QCOMPARE(working.activeTextureCount(), 9);
     QCOMPARE(working.activeTileImages().size(), 9 * 64);
+    QCOMPARE(working.activeTileCount(), 513);
+    QCOMPARE(working.activeTileTypes().size(), 513);
+    QVERIFY(working.activeTileTypes().last() >= 0);
 }
 
 void EnduranceDocumentTests::globalAuthoredTransitionLibraryIndexesRealStockBlends()

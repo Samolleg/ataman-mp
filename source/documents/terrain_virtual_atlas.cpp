@@ -3458,7 +3458,8 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
        || activeTiles.size() > kMprPackedTerrainAtlasSlotLimit
        || authoredPagePayloads.size() != int(map.textureCount)
        || activeTiles.size() < int(map.tileCount)
-       || activeTileTypes.size() != activeTiles.size())
+       || activeTileTypes.size() < int(map.tileCount)
+       || activeTileTypes.size() > activeTiles.size())
     {
         result.error = QStringLiteral(
             "The working terrain atlas does not match the staged MPR baseline.");
@@ -3516,7 +3517,7 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
         reinterpret_cast<uchar*>(replacementMp.data() + 16));
     qToLittleEndian<quint32>(quint32(tileSize.width() * 8),
         reinterpret_cast<uchar*>(replacementMp.data() + 20));
-    qToLittleEndian<quint32>(quint32(activeTiles.size()),
+    qToLittleEndian<quint32>(quint32(tileTypes.size()),
         reinterpret_cast<uchar*>(replacementMp.data() + 24));
     qToLittleEndian<quint32>(quint32(tileSize.width()),
         reinterpret_cast<uchar*>(replacementMp.data() + 28));
@@ -3596,7 +3597,7 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
                               &reopenReport)
        || reopenReport.hasErrors()
        || reopenedMpr.mapInfo().textureCount != quint32(textureCount)
-       || reopenedMpr.mapInfo().tileCount != quint32(activeTiles.size())
+       || reopenedMpr.mapInfo().tileCount != quint32(tileTypes.size())
        || !reopenedRes.loadBytes(result.resourceArchiveBytes,
                                  QStringLiteral("working.res"), &errors))
     {
@@ -3627,6 +3628,9 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     : m_authoredCatalog(authoredCatalog), m_workingCatalog(authoredCatalog),
       m_authoredImages(authoredTiles), m_workingImages(authoredTiles),
       m_workingTileTypes(sourceTileTypes),
+      m_authoredSlotCount(sourceTileTypes.isEmpty()
+          ? authoredTiles.size()
+          : qMin(sourceTileTypes.size(), authoredTiles.size())),
       m_capacityLimit(qBound(authoredTiles.size(), capacityLimit,
                              kMprPackedTerrainAtlasSlotLimit))
 {
@@ -3645,7 +3649,7 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
         m_authoredCatalog, m_authoredImages, distributionSeed,
         externalMaterialSources, materialBlendStyles, true,
         sourceTileTypes, materialRuntimeTypes));
-    for(int slot = 0; slot < m_authoredImages.size(); ++slot)
+    for(int slot = 0; slot < m_authoredSlotCount; ++slot)
     {
         const QPair<int, int> key(0, slot);
         m_virtualToWorking.insert(key, slot);
@@ -3720,9 +3724,15 @@ bool CTerrainWorkingAtlas::realizeAuthoredLibraryVariants(
 
 int CTerrainWorkingAtlas::activeTextureCount() const
 {
+    const int authoredPages = (m_authoredImages.size() + 63) / 64;
+    return qMax(qMax(1, authoredPages), (activeTileCount() + 63) / 64);
+}
+
+int CTerrainWorkingAtlas::activeTileCount() const
+{
     const int highest = m_workingToVirtual.isEmpty()
         ? -1 : m_workingToVirtual.lastKey();
-    return qMax(1, (highest + 64) / 64);
+    return qMax(m_authoredSlotCount, highest + 1);
 }
 
 QVector<QImage> CTerrainWorkingAtlas::activeTileImages() const
@@ -3732,7 +3742,24 @@ QVector<QImage> CTerrainWorkingAtlas::activeTileImages() const
 
 QVector<qint32> CTerrainWorkingAtlas::activeTileTypes() const
 {
-    return m_workingTileTypes.mid(0, activeTextureCount() * 64);
+    QVector<qint32> result = m_workingTileTypes.mid(0, activeTileCount());
+    qint32 paddingType = 0;
+    for(qint32 type : result)
+        if(type >= 0 && type < 16)
+        {
+            paddingType = type;
+            break;
+        }
+    // A partial authored page can leave physical positions between the old
+    // logical end and the first extension slot. They remain unreferenced, but
+    // MP metadata is contiguous through the highest live extension. Give only
+    // those unmapped holes a deterministic valid filler; mapped slots retain
+    // -1 so the package gate still fails closed on a real untyped tile.
+    for(int slot = 0; slot < result.size(); ++slot)
+        if((result.at(slot) < 0 || result.at(slot) >= 16)
+           && !m_workingToVirtual.contains(slot))
+            result[slot] = paddingType;
+    return result;
 }
 
 qint32 CTerrainWorkingAtlas::runtimeTerrainTypeForSlot(int slot) const

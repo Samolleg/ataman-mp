@@ -5860,11 +5860,11 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
         if(terrainAtlasPages)
             *terrainAtlasPages = package.resourceMembers.size();
         if(terrainAtlasSlots)
-            *terrainAtlasSlots = m_workingTerrainAtlas->activeTileImages().size();
+            *terrainAtlasSlots = m_workingTerrainAtlas->activeTileCount();
         ei::log(eLogInfo, QString(
             "Test Current Map staged working terrain atlas pages:%1 slots:%2 authoredPagesPreserved:%3 generatedExactTiles:%4")
             .arg(package.resourceMembers.size())
-            .arg(m_workingTerrainAtlas->activeTileImages().size())
+            .arg(m_workingTerrainAtlas->activeTileCount())
             .arg(authoredPages.size())
             .arg(m_workingTerrainAtlas->generatedTileCount()));
     }

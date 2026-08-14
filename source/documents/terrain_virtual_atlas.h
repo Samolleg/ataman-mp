@@ -376,6 +376,9 @@ public:
     QString error() const;
     const CTerrainTransitionCatalog& catalog() const { return m_workingCatalog; }
     const QVector<QImage>& tileImages() const { return m_workingImages; }
+    // MP terrain types are logical per-slot metadata, while MMP imagery is
+    // always stored in complete 64-tile physical pages.
+    int activeTileCount() const;
     QVector<QImage> activeTileImages() const;
     QVector<qint32> activeTileTypes() const;
     qint32 runtimeTerrainTypeForSlot(int slot) const;
@@ -434,6 +437,7 @@ private:
     QVector<QImage> m_authoredImages;
     QVector<QImage> m_workingImages;
     QVector<qint32> m_workingTileTypes;
+    int m_authoredSlotCount{0};
     QSharedPointer<CTerrainVirtualAtlas> m_resolver;
     QMap<QPair<int, int>, int> m_virtualToWorking;
     QMap<int, QPair<int, int>> m_workingToVirtual;

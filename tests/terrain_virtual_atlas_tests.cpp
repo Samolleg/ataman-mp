@@ -488,6 +488,7 @@ private slots:
     void portablePackageRemapsNamespaceAndReopens();
     void portablePackageStagesLiveSculptBeforeAtlasFinalization();
     void workingPreviewPackagePreservesAuthoredPagesAndAppendsExtensions();
+    void workingPreviewPackageDoesNotSerializePhysicalPagePadding();
     void workingPreviewPackageStagesSeveralGeneratedPages();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void overlayVirtualPaintAllowsSparseInactiveField();
@@ -3317,6 +3318,86 @@ void TerrainVirtualAtlasTests::workingPreviewPackagePreservesAuthoredPagesAndApp
     const ei::SMmpInspection appended = ei::inspectMmp(
         resources.memberPayload(package.resourceMembers.last()));
     QVERIFY2(appended.valid, qPrintable(appended.diagnostic));
+}
+
+void TerrainVirtualAtlasTests::workingPreviewPackageDoesNotSerializePhysicalPagePadding()
+{
+    CMprDocument source;
+    CValidationReport report;
+    QVERIFY2(source.loadBytes(portableMpr(), "working-padding-source.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(source, &report), qPrintable(report.toText()));
+
+    constexpr int physicalPages = 10;
+    constexpr int logicalSlots = 608;
+    terrain.enableWorkingAtlasSlots(physicalPages * 64);
+    bool available = false;
+    const quint16 before = terrain.packedTile(
+        0, 0, ETerrainTileLayer::Land, &available);
+    QVERIFY(available);
+    SMprPackedTile extension;
+    extension.atlasIndex = quint8((logicalSlots - 1) / 64);
+    extension.tileIndex = quint8((logicalSlots - 1) % 64);
+    STerrainTileCommand command;
+    STerrainTileDelta delta;
+    delta.globalX = 0;
+    delta.globalY = 0;
+    delta.layer = ETerrainTileLayer::Land;
+    delta.before = before;
+    delta.after = extension.encode();
+    command.deltas.append(delta);
+    QVERIFY2(terrain.apply(command, true, &report), qPrintable(report.toText()));
+    CMprEditTransaction transaction(QStringLiteral(
+        "Reference the last logical slot before physical page padding"));
+    QVERIFY2(terrain.appendSectorEdits(&transaction, &report),
+             qPrintable(report.toText()));
+    QByteArray paintedBytes;
+    QVERIFY2(source.applyTransaction(transaction, &paintedBytes, &report),
+             qPrintable(report.toText()));
+    CMprDocument paintedSource;
+    QVERIFY2(paintedSource.loadBytes(
+                 paintedBytes, "working-padding-painted.mpr", &report),
+             qPrintable(report.toText()));
+
+    QVector<QImage> tiles(physicalPages * 64,
+                          solid(qRgba(40, 80, 120, 255)));
+    QVector<QByteArray> authoredPayloads;
+    for(int page = 0; page < 4; ++page)
+    {
+        QString diagnostic;
+        const QByteArray payload = ei::encodeMmpDxt1(
+            CTestTerrainVirtualAtlas::composePage(tiles, page * 64, 8),
+            true, &diagnostic);
+        QVERIFY2(!payload.isEmpty(), qPrintable(diagnostic));
+        authoredPayloads.append(payload);
+    }
+    QVector<qint32> logicalTypes(logicalSlots, qint32(2));
+    const STerrainPortableAtlasPackage package =
+        CTestTerrainVirtualAtlas::buildWorkingPreviewPackage(
+            paintedSource, tiles, logicalTypes, authoredPayloads, &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + "\n" + report.toText()));
+    QCOMPARE(package.resourceMembers.size(), physicalPages);
+
+    CMprDocument reopened;
+    QVERIFY2(reopened.loadBytes(package.mprBytes,
+                                "working-padding-result.mpr", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(reopened.mapInfo().textureCount, quint32(physicalPages));
+    QCOMPARE(reopened.mapInfo().tileCount, quint32(logicalSlots));
+    QCOMPARE(reopened.mapInfo().tileTypes.size(), logicalSlots);
+    QCOMPARE(reopened.mapInfo().tileTypes.last(), qint32(2));
+
+    logicalTypes[logicalSlots - 1] = -1;
+    CValidationReport invalidReport;
+    const STerrainPortableAtlasPackage invalid =
+        CTestTerrainVirtualAtlas::buildWorkingPreviewPackage(
+            paintedSource, tiles, logicalTypes, authoredPayloads,
+            &invalidReport);
+    QVERIFY(!invalid.success);
+    QVERIFY(invalid.error.contains(QStringLiteral("slot 607")));
+    QVERIFY(invalidReport.hasErrors());
 }
 
 void TerrainVirtualAtlasTests::workingPreviewPackageStagesSeveralGeneratedPages()
