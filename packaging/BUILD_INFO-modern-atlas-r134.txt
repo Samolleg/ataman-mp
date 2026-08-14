@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: stock brush payload binding fix R134
+Executable source commit: 300f571e
+Semantic source commit: 7f7bb525231473466c49e2919d21d179c50f3e14
+Preset SHA-256: FA33433E5855661EED054C05EBBBF9F1A7C9495D23D58EE649ACDC99F63274D9
+Validation: semantic 151/151 + 3 intentionally unshipped questionnaire-fixture skips; topology 4/4; document 101/101 + 5 expected fixture-gated skips; virtual atlas 95/95; focused payload-coherence/local-uniform regression PASS; --ui-widget-check PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: byte-reused from the validated R133 package; runtime catalog updated to R140, with no map or mask regeneration
