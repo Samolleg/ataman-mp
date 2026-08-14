@@ -365,6 +365,58 @@ QImage CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
                            Qt::SmoothTransformation);
 }
 
+QImage CTerrainAtlasPresetCatalog::loadGlobalTransitionSource(
+    const STerrainGlobalTransitionSource& source,
+    const QSize& requiredSize,
+    QMap<QString, QByteArray>* encodedPageCache,
+    QSet<QString>* missingPageCache,
+    QMap<QString, QImage>* decodedTileCache,
+    const std::function<bool(const QString&, QByteArray*)>& pageLoader)
+{
+    if(!encodedPageCache || !missingPageCache || !decodedTileCache
+       || !pageLoader)
+        return QImage();
+    const QStringList names = ei::terrainTextureResourceNames(
+        source.mprNamespace, source.textureCount);
+    const int pageIndex = source.slot / 64;
+    if(pageIndex < 0 || pageIndex >= names.size())
+        return QImage();
+    const QString pageName = names.at(pageIndex).toCaseFolded();
+    QByteArray payload;
+    // Refresh the resource lookup before consulting decoded pixels. A
+    // persistent page-name cache can otherwise keep bytes from a previously
+    // opened map/resource profile and import unrelated artwork into a stroke.
+    if(!pageLoader(pageName, &payload) || payload.isEmpty())
+    {
+        missingPageCache->insert(pageName);
+        return QImage();
+    }
+    missingPageCache->remove(pageName);
+    const QByteArray payloadSha256 = QCryptographicHash::hash(
+        payload, QCryptographicHash::Sha256).toHex();
+    const QString payloadKey = pageName + QLatin1Char('|')
+        + QString::fromLatin1(payloadSha256);
+    encodedPageCache->insert(payloadKey, payload);
+    const int localSlot = source.slot % 64;
+    const QString tileCacheKey = QStringLiteral("%1|%2|%3|%4x%5")
+        .arg(pageName, QString::fromLatin1(payloadSha256))
+        .arg(localSlot)
+        .arg(requiredSize.width()).arg(requiredSize.height());
+    const auto cached = decodedTileCache->constFind(tileCacheKey);
+    if(cached != decodedTileCache->constEnd())
+        return cached.value();
+    QImage tile;
+    QString diagnostic;
+    if(!ei::decodeMmpDxt1AtlasTile(payload, localSlot, &tile, &diagnostic))
+        return QImage();
+    tile = tile.convertToFormat(QImage::Format_RGBA8888);
+    if(!requiredSize.isEmpty() && tile.size() != requiredSize)
+        tile = tile.scaled(requiredSize, Qt::IgnoreAspectRatio,
+                           Qt::SmoothTransformation);
+    decodedTileCache->insert(tileCacheKey, tile);
+    return tile;
+}
+
 QVector<STerrainGlobalTransitionSource>
 CTerrainAtlasPresetCatalog::globalAuthoredTransitions(CValidationReport* report)
 {

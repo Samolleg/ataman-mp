@@ -6464,6 +6464,37 @@ void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefer
         preferredPage, 0, &expectedSecond, &diagnostic));
     QCOMPARE(second, expectedSecond.convertToFormat(
         QImage::Format_RGBA8888));
+
+    // Authored-transition imports used to keep a page-name-only cache across
+    // map switches. Prove that the same member and slot resolve from the
+    // current payload rather than returning the previous map's artwork.
+    STerrainGlobalTransitionSource transition;
+    transition.mprNamespace = QStringLiteral("shared");
+    transition.textureCount = 1;
+    transition.slot = 0;
+    QMap<QString, QByteArray> transitionPages;
+    QSet<QString> transitionMissing;
+    QMap<QString, QImage> transitionTiles;
+    QByteArray currentTransitionPage = foreignPage;
+    const auto loadTransition = [&]() {
+        return CTerrainAtlasPresetCatalog::loadGlobalTransitionSource(
+            transition, QSize(8, 8), &transitionPages,
+            &transitionMissing, &transitionTiles,
+            [&](const QString& name, QByteArray* payload) {
+                if(name != QStringLiteral("shared000.mmp"))
+                    return false;
+                *payload = currentTransitionPage;
+                return true;
+            });
+    };
+    const QImage firstTransition = loadTransition();
+    currentTransitionPage = preferredPage;
+    const QImage secondTransition = loadTransition();
+    QVERIFY(!firstTransition.isNull());
+    QVERIFY(!secondTransition.isNull());
+    QVERIFY(firstTransition != secondTransition);
+    QCOMPARE(secondTransition, expectedSecond.convertToFormat(
+        QImage::Format_RGBA8888));
 }
 
 void EnduranceDocumentTests::stockInputsCannotOverrideCanonicalOneCornerMask()
@@ -7216,6 +7247,106 @@ void EnduranceDocumentTests::externalLegacyAdjacentAtlasProfileCollisionProbe()
         QFileInfo(atlasPath).absoluteFilePath());
     QVERIFY(!actual.isEmpty());
     QVERIFY(actual.toLower() != profile.atlasPixelSha256.toLower());
+
+    // The complete sibling atlas is still sufficient to rebuild an editable
+    // working field. A stale legacy JSON must not turn a finalized draft into
+    // a view-only map merely because another MPR overwrote that shared file.
+    QFile atlasFile(atlasPath);
+    QVERIFY(atlasFile.open(QIODevice::ReadOnly));
+    CResArchiveDocument atlasArchive;
+    QStringList archiveErrors;
+    QVERIFY2(atlasArchive.loadBytes(atlasFile.readAll(), atlasPath,
+                                    &archiveErrors),
+             qPrintable(archiveErrors.join(QStringLiteral("\n"))));
+    const int physicalSlotCount = document.mapInfo().tileTypes.size();
+    QVERIFY(physicalSlotCount > 0);
+    QVERIFY(physicalSlotCount <= int(document.mapInfo().textureCount) * 64);
+    QVector<QImage> physicalTiles;
+    physicalTiles.reserve(physicalSlotCount);
+    for(int slot = 0; slot < physicalSlotCount; ++slot)
+    {
+        const QString memberName = QStringLiteral("%1%2.mmp")
+            .arg(document.mapInfo().innerNamespace.toLower())
+            .arg(slot / 64, 3, 10, QLatin1Char('0'));
+        const QByteArray pageBytes = atlasArchive.memberPayload(memberName);
+        QVERIFY2(!pageBytes.isEmpty(), qPrintable(memberName));
+        QImage tile;
+        QString diagnostic;
+        QVERIFY2(ei::decodeMmpDxt1AtlasTile(
+                     pageBytes, slot % 64, &tile, &diagnostic),
+                 qPrintable(diagnostic));
+        physicalTiles.append(tile.convertToFormat(
+            QImage::Format_RGBA8888));
+    }
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    QVector<STerrainAtlasSlotUsage> usage(physicalSlotCount);
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool available = false;
+            const int landSlot = SMprPackedTile::decode(terrain.packedTile(
+                x, y, ETerrainTileLayer::Land, &available)).atlasSlot();
+            if(available && landSlot >= 0 && landSlot < usage.size())
+                ++usage[landSlot].landCount;
+            const int overlaySlot = SMprPackedTile::decode(terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &available)).atlasSlot();
+            if(available && overlaySlot >= 0 && overlaySlot < usage.size())
+                ++usage[overlaySlot].overlayCount;
+        }
+    CValidationReport inferenceReport;
+    const STerrainAtlasProfile inferred = CTerrainAtlasProfileInference::propose(
+        document.mapInfo().innerNamespace, physicalTiles,
+        document.mapInfo().tileTypes, usage, &inferenceReport);
+    const STerrainAtlasAnalysis inferredAnalysis = inferred.usableAnalysis(
+        &inferenceReport);
+    QVERIFY2(inferredAnalysis.usable, qPrintable(inferenceReport.toText()));
+    QVERIFY2(terrain.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, inferredAnalysis.landCatalog,
+                 &inferenceReport,
+                 ETerrainMaterialFieldRecovery::RecoverDeterministically),
+             qPrintable(inferenceReport.toText()));
+    CTerrainVirtualMaterialField field;
+    QVERIFY(terrain.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &field, false));
+    int unsetVertexCount = 0;
+    const qint32 unsetMaterial = std::numeric_limits<qint32>::min();
+    for(int vertexY = 0; vertexY <= field.tileHeight(); ++vertexY)
+        for(int vertexX = 0; vertexX <= field.tileWidth(); ++vertexX)
+            if(field.material(vertexX, vertexY) == unsetMaterial)
+                ++unsetVertexCount;
+    QVERIFY2(unsetVertexCount == 0,
+             qPrintable(QStringLiteral("Recovered field retained %1 unset vertices")
+                 .arg(unsetVertexCount)));
+    const int centerX = qMax(0, field.tileWidth() / 2);
+    const int centerY = qMax(0, field.tileHeight() / 2);
+    bool signatureFound = false;
+    const STerrainTransitionSignature current = field.cellSignature(
+        centerX, centerY, &signatureFound);
+    QVERIFY(signatureFound);
+    qint32 replacement = 0;
+    for(const STerrainAtlasMaterial& material : inferredAnalysis.materials)
+        if(material.layer == ETerrainAtlasLayer::Land
+           && material.id != current.northWest
+           && material.id != current.northEast
+           && material.id != current.southEast
+           && material.id != current.southWest)
+        {
+            replacement = material.id;
+            break;
+        }
+    QVERIFY(replacement != 0);
+    STerrainTileBrush brush;
+    brush.centerX = float(centerX);
+    brush.centerY = float(centerY);
+    brush.radius = 0.0f;
+    brush.shape = ETerrainTileBrushShape::Square;
+    CValidationReport paintReport;
+    const STerrainTileCommand command = terrain.makeSemanticTilePaint(
+        brush, ETerrainTileLayer::Land, replacement,
+        inferredAnalysis.landCatalog, 0x52313336u, &paintReport);
+    QVERIFY2(!paintReport.hasErrors(), qPrintable(paintReport.toText()));
+    QVERIFY(!command.isEmpty());
 }
 
 void EnduranceDocumentTests::externalReopenedDraftTopologyProbe()

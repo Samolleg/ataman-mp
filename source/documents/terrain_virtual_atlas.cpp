@@ -1718,8 +1718,74 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
             {
                 bestCount = it.value();
                 best = it.key();
-            }
+        }
         active[index] = best;
+    }
+    // A legacy draft can contain unavailable edge cells. Those cells cast no
+    // corner votes, so deterministic recovery must also close the resulting
+    // holes in the vertex field. Leaving an unset border vertex makes the
+    // model report a successful initialization while modern painting remains
+    // unusable. Propagate only from the immediately adjacent recovered field,
+    // using a snapshot per pass so traversal order cannot affect the result.
+    if(recovery == ETerrainMaterialFieldRecovery::RecoverDeterministically
+       && layer == ETerrainTileLayer::Land)
+    {
+        int recoveredUnsetVertices = 0;
+        for(;;)
+        {
+            const QVector<qint32> previous = active;
+            int filledThisPass = 0;
+            for(int y = 0; y <= tileCountY(); ++y)
+                for(int x = 0; x <= tileCountX(); ++x)
+                {
+                    const int index = y * vertexWidth + x;
+                    if(previous.at(index) != unset)
+                        continue;
+                    QMap<qint32, int> neighborVotes;
+                    if(x > 0 && previous.at(index - 1) != unset)
+                        ++neighborVotes[previous.at(index - 1)];
+                    if(x < tileCountX()
+                       && previous.at(index + 1) != unset)
+                        ++neighborVotes[previous.at(index + 1)];
+                    if(y > 0 && previous.at(index - vertexWidth) != unset)
+                        ++neighborVotes[previous.at(index - vertexWidth)];
+                    if(y < tileCountY()
+                       && previous.at(index + vertexWidth) != unset)
+                        ++neighborVotes[previous.at(index + vertexWidth)];
+                    int bestCount = -1;
+                    qint32 best = unset;
+                    for(auto it = neighborVotes.constBegin();
+                        it != neighborVotes.constEnd(); ++it)
+                        if(it.value() > bestCount
+                           || (it.value() == bestCount && it.key() < best))
+                        {
+                            bestCount = it.value();
+                            best = it.key();
+                        }
+                    if(best != unset)
+                    {
+                        active[index] = best;
+                        ++filledThisPass;
+                    }
+                }
+            recoveredUnsetVertices += filledThisPass;
+            if(filledThisPass == 0)
+                break;
+        }
+        if(active.contains(unset))
+        {
+            if(report)
+                report->add("terrain.virtual_identity_recovery_incomplete",
+                    EValidationSeverity::Error,
+                    "Deterministic material-field recovery could not assign every map vertex");
+            active.clear();
+            return false;
+        }
+        if(recoveredUnsetVertices > 0 && report)
+            report->add("terrain.virtual_identity_vertices_recovered",
+                EValidationSeverity::Info,
+                QStringLiteral("Recovered %1 material-field vertex hole(s) adjacent to unavailable legacy cells")
+                    .arg(recoveredUnsetVertices));
     }
     int recoveredConflicts = 0;
     QString firstRecoveredConflict;

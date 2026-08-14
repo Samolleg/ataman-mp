@@ -279,6 +279,16 @@ public:
         const std::function<bool(const QString&, QByteArray*)>& pageLoader,
         bool thumbnail = false,
         STerrainGlobalMaterialSource* selectedSource = nullptr);
+    // Resolve one authored transition against the current resource payload.
+    // Unlike a page-name-only cache, this remains correct when another
+    // configured RES supplies different bytes for the same MMP member.
+    static QImage loadGlobalTransitionSource(
+        const STerrainGlobalTransitionSource& source,
+        const QSize& requiredSize,
+        QMap<QString, QByteArray>* encodedPageCache,
+        QSet<QString>* missingPageCache,
+        QMap<QString, QImage>* decodedTileCache,
+        const std::function<bool(const QString&, QByteArray*)>& pageLoader);
     static QVector<STerrainGlobalTransitionSource> globalAuthoredTransitions(
         CValidationReport* report = nullptr);
     static CTerrainTransitionCatalog globalizedCatalog(

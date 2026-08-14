@@ -167,33 +167,13 @@ QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
                                 QSet<QString>* missingPageCache,
                                 QMap<QString, QImage>* decodedTileCache)
 {
-    const QStringList names = ei::terrainTextureResourceNames(
-        source.mprNamespace, source.textureCount);
-    const int pageIndex = source.slot / 64;
-    if(pageIndex < 0 || pageIndex >= names.size())
-        return {};
-    const QString pageName = names.at(pageIndex).toCaseFolded();
-    const int localSlot = source.slot % 64;
-    const QString tileCacheKey = QStringLiteral("%1|%2|%3x%4")
-        .arg(pageName).arg(localSlot)
-        .arg(requiredSize.width()).arg(requiredSize.height());
-    if(decodedTileCache && decodedTileCache->contains(tileCacheKey))
-        return decodedTileCache->value(tileCacheKey);
-    QImage tile;
-    QString diagnostic;
-    if(!ei::decodeMmpDxt1AtlasTileCached(
-           pageName, localSlot, encodedPageCache, missingPageCache,
-           [](const QString& name, QByteArray* payload) {
-               return CTextureList::getInstance()->catalogTerrainMmpPayload(
-                   name, payload);
-           }, &tile, &diagnostic))
-        return {};
-    tile = tile.convertToFormat(QImage::Format_RGBA8888);
-    if(!requiredSize.isEmpty() && tile.size() != requiredSize)
-        tile = tile.scaled(requiredSize, Qt::IgnoreAspectRatio,
-                           Qt::SmoothTransformation);
-    if(decodedTileCache) decodedTileCache->insert(tileCacheKey, tile);
-    return tile;
+    return CTerrainAtlasPresetCatalog::loadGlobalTransitionSource(
+        source, requiredSize, encodedPageCache, missingPageCache,
+        decodedTileCache,
+        [](const QString& name, QByteArray* payload) {
+            return CTextureList::getInstance()->catalogTerrainMmpPayload(
+                name, payload);
+        });
 }
 
 QVector4D aiGraphLayerColor(int layer)
@@ -7097,6 +7077,12 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainPaintActionId = 0;
     m_terrainGlobalTransitionSources.clear();
     m_importedTerrainTransitions.clear();
+    // Resource precedence can change when another MPR/profile is opened.
+    // Authored transition pages must be resolved from that current profile,
+    // never retained by a same-named MMP member from the previous map.
+    m_terrainGlobalTransitionEncodedPageCache.clear();
+    m_terrainGlobalTransitionMissingPages.clear();
+    m_terrainGlobalTransitionTileCache.clear();
     if(m_landscapeTools)
         m_landscapeTools->setPaintTerrainTypes({}, {}, {});
     QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
@@ -7178,8 +7164,7 @@ void CView::rebuildTerrainAutoCatalog()
                 ETerrainAtlasProfileSource::BuiltInDefault;
         }
     }
-    if(m_terrainAtlasProfile.slotDefinitions.isEmpty()
-       && !m_legacyTerrainProfileCollision)
+    if(m_terrainAtlasProfile.slotDefinitions.isEmpty())
     {
         m_terrainAtlasProfile = CTerrainAtlasProfileInference::propose(
             mprNamespace, m_pTileForm->tileImages(),
@@ -7355,7 +7340,9 @@ void CView::rebuildTerrainAutoCatalog()
         : tr("No structurally valid material is available for namespace '%1'. Open Material atlas to assign one; manual atlas tile mode remains available.")
               .arg(mprNamespace);
     if(m_legacyTerrainProfileCollision)
-        status = tr("This map opened with its complete sibling atlas, but an older namespace-only editor profile was overwritten by another MPR. Visual/manual tile editing is available; semantic Material painting is disabled so the mismatched profile cannot corrupt this map.");
+        status += m_terrainAtlasAnalysis.usable
+            ? tr(" The obsolete shared profile was ignored and a working Material field was rebuilt from this MPR and its complete sibling atlas; modern painting remains available.")
+            : tr(" The obsolete shared profile was ignored. This atlas could not be inferred safely, so only manual tile painting is available.");
     if(builtInDefaultActive)
         status = tr("Game-wide Material families loaded: %1 ground and %2 overlay families.")
             .arg(landChoices.size()).arg(overlayChoices.size());

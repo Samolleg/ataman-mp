@@ -3634,6 +3634,34 @@ void TerrainVirtualAtlasTests::identityBaselineRequiresExactSharedCornerTopology
     QVERIFY(exactModel.copyVirtualMaterialField(
         ETerrainTileLayer::Land, &exactField));
 
+    // Legacy drafts can omit a border sector while still retaining a usable
+    // rectangular terrain model. Recovery must close the no-vote vertex area
+    // instead of claiming success with an incomplete modern paint field.
+    STerrainSectorSource incompleteEdgeSource = makeSource(pureOne.encode());
+    SMprPackedTile unknownEdgeTile;
+    unknownEdgeTile.tileIndex = 63;
+    qToLittleEndian<quint16>(unknownEdgeTile.encode(),
+        reinterpret_cast<uchar*>(incompleteEdgeSource.payload.data()
+            + incompleteEdgeSource.landTileOffset
+            + (15 * 16 + 15) * 2));
+    CTerrainEditModel incompleteEdgeModel;
+    CValidationReport incompleteEdgeReport;
+    QVERIFY(incompleteEdgeModel.loadSources(1, 1, 100.0f,
+        {incompleteEdgeSource}, &incompleteEdgeReport,
+        1, QVector<qint32>(64, 1), 0));
+    QVERIFY2(incompleteEdgeModel.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, fixture.catalog,
+                 &incompleteEdgeReport,
+                 ETerrainMaterialFieldRecovery::RecoverDeterministically),
+             qPrintable(incompleteEdgeReport.toText()));
+    CTerrainVirtualMaterialField completedEdgeField;
+    QVERIFY2(incompleteEdgeModel.copyVirtualMaterialField(
+                 ETerrainTileLayer::Land, &completedEdgeField),
+             qPrintable(incompleteEdgeReport.toText()));
+    QCOMPARE(completedEdgeField.material(
+                 completedEdgeField.tileWidth(),
+                 completedEdgeField.tileHeight()), qint32(1));
+
     STerrainTransitionVariant contradictory;
     contradictory.signature = signature(1, 2, 1, 1);
     SMprPackedTile contradictoryPacked;
