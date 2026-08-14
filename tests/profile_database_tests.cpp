@@ -1363,6 +1363,27 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
         poll.stop();
         return triggered;
     };
+    auto clickHeaderActionStaysOpen=[](QHeaderView* header,const QString& objectName,int section) {
+        bool clicked=false,stayedOpen=false,hasDatabaseSource=false,hasEditorSource=false;
+        QTimer poll;poll.setInterval(5);
+        QObject::connect(&poll,&QTimer::timeout,[&](){
+            QMenu* menu=nullptr;for(QWidget* widget:QApplication::allWidgets())
+                if(widget->objectName()==QStringLiteral("databaseColumnMenu"))menu=qobject_cast<QMenu*>(widget);
+            if(!menu)return;
+            hasDatabaseSource=menu->findChild<QMenu*>("databaseResColumnsSubmenu");
+            hasEditorSource=menu->findChild<QMenu*>("databaseEditorColumnsSubmenu");
+            for(QAction* action:menu->actions())if(action->objectName()==objectName)
+            {
+                clicked=true;poll.stop();QTest::mouseClick(menu,Qt::LeftButton,Qt::NoModifier,
+                    menu->actionGeometry(action).center());
+                QTimer::singleShot(0,[menu,&stayedOpen](){stayedOpen=menu->isVisible();menu->close();});return;
+            }
+        });
+        QTimer::singleShot(1000,[](){for(QWidget* widget:QApplication::allWidgets())if(QMenu* menu=qobject_cast<QMenu*>(widget))menu->close();});
+        poll.start();const QPoint point(header->sectionViewportPosition(section)+header->sectionSize(section)/2,header->height()/2);
+        QMetaObject::invokeMethod(header,"customContextMenuRequested",Qt::DirectConnection,Q_ARG(QPoint,point));
+        poll.stop();return clicked&&stayedOpen&&hasDatabaseSource&&hasEditorSource;
+    };
 
     {
         ei::DatabaseEditorDialog dialog(document);dialog.show();
@@ -1378,6 +1399,14 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
 
         QVERIFY(triggerHeaderAction(grid->horizontalHeader(),"databaseLockColumnsAction",2));
         QCOMPARE(grid->property("frozenColumnCount").toInt(),3);
+        QTableView* frozen=dialog.findChild<QTableView*>("databaseFrozenGrid");QVERIFY(frozen);
+        QVERIFY(!grid->wordWrap());QVERIFY(!frozen->wordWrap());
+        for(int row=0;row<grid->model()->rowCount();++row)
+            QCOMPARE(frozen->rowHeight(row),grid->rowHeight(row));
+        QVERIFY(clickHeaderActionStaysOpen(grid->horizontalHeader(),"databaseHideAllColumnsAction",0));
+        int hiddenAfterAll=0;for(int column=1;column<grid->model()->columnCount();++column)hiddenAfterAll+=grid->isColumnHidden(column);
+        QCOMPARE(hiddenAfterAll,grid->model()->columnCount()-1);
+        QVERIFY(clickHeaderActionStaysOpen(grid->horizontalHeader(),"databaseShowAllColumnsAction",0));
         QVERIFY(triggerHeaderAction(grid->horizontalHeader(),"databaseColumnVisibilityAction_3",2));
         int hidden=0;for(int column=0;column<grid->model()->columnCount();++column)
             hidden+=grid->isColumnHidden(column);
@@ -1572,12 +1601,13 @@ void ProfileDatabaseTests::itemSpellConstructorUsesGameTextKeys()
     catalog.applyGameTexts({
         {"MATERIAL Iron", QString::fromUtf8("Железо\r\nDescription")},
         {"SPELL fireball", QString::fromUtf8("Огненный шар\r\nDescription")},
-        {"MODIFIER e0", QString::fromUtf8("Усиление\r\nDescription")},
+        {"MODIFIER e0", QString::fromUtf8("Усиление\r\n\r\nDescription\r\n\r\nПр\r\n")},
         {"INSTR vlcsh", QString::fromUtf8("Безрукавка\r\nDescription")}
     });
     QCOMPARE(catalog.materials.front().displayName, QString::fromUtf8("Железо"));
     QCOMPARE(catalog.spells.front().displayName, QString::fromUtf8("Огненный шар"));
     QCOMPARE(catalog.runes.front().displayName, QString::fromUtf8("Усиление"));
+    QCOMPARE(catalog.runes.front().tag, QString::fromUtf8("Пр"));
     QCOMPARE(catalog.items.front().displayName, QString::fromUtf8("Безрукавка"));
 }
 
@@ -1617,6 +1647,8 @@ void ProfileDatabaseTests::itemSpellConstructorUsesVerifiedPreviewFamilies()
     ei::SConstructorSpell spell;spell.textureType=3;
     ei::ItemSpellConstructorCatalog catalog;
     QCOMPARE(catalog.spellTextureName(spell),QString("spell0003"));
+    ei::SConstructorRune rune;rune.textureIndex=17;
+    QCOMPARE(catalog.runeTextureCandidates(rune),QStringList({"modifier0017"}));
 
     QImage orientation(1,2,QImage::Format_ARGB32);
     orientation.setPixelColor(0,0,Qt::red);orientation.setPixelColor(0,1,Qt::blue);
@@ -1648,6 +1680,9 @@ void ProfileDatabaseTests::itemSpellConstructorUsesEffectiveJmvSpellCatalog()
     QCOMPARE(catalog.spells.front().recordType,0);
     QCOMPARE(catalog.spellTextureCandidates(catalog.spells.front()),
              QStringList({"spell0027.x2","spell0027"}));
+    ei::SConstructorRune rune;rune.textureIndex=17;
+    QCOMPARE(catalog.runeTextureCandidates(rune),
+             QStringList({"modifier0017.x2","modifier0017"}));
 }
 
 void ProfileDatabaseTests::installedConstructorCatalogCoverage()

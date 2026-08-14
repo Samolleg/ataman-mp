@@ -8,7 +8,6 @@
 class CPreview;
 class CView;
 class CWorldObj;
-class CUnit;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -69,10 +68,8 @@ private:
     QComboBox* m_material{nullptr};
     QLineEdit* m_itemSpell{nullptr};
     QLabel* m_itemDetails{nullptr};
-    QLabel* m_itemIcon{nullptr};
     CPreview* m_itemPreview{nullptr};
     CWorldObj* m_previewObject{nullptr};
-    CUnit* m_previewUnit{nullptr};
     CView* m_view{nullptr};
 
     QLineEdit* m_spellFilter{nullptr};

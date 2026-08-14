@@ -3,7 +3,6 @@
 #include "database_document.h"
 #include "game_text_catalog.h"
 #include "objects/worldobj.h"
-#include "objects/unit.h"
 #include "property.h"
 #include "preview.h"
 #include "view.h"
@@ -45,11 +44,25 @@ QString weaponOrArmorLayer(const ei::SConstructorItem& item)
         ? QStringLiteral("Upper / heavy") : QStringLiteral("Lower / light");
 }
 QListWidgetItem* catalogItem(const QString& title, const QString& subtitle,
-                             const QString& key, QListWidget* list)
+                             const QString& key, QListWidget* list,
+                             const QPixmap& icon=QPixmap())
 {
     auto* item = new QListWidgetItem(title + QStringLiteral("\n") + subtitle, list);
     item->setData(Qt::UserRole, key);
+    if(!icon.isNull())item->setIcon(QIcon(icon));
     return item;
+}
+QPixmap runePixmap(const ei::ItemSpellConstructorCatalog& catalog,
+                   const ei::SConstructorRune& rune)
+{
+    for(const QString& texture:catalog.runeTextureCandidates(rune))
+    {
+        const QImage image=ei::ItemSpellConstructorCatalog::orientPreviewImage(
+            CTextureList::getInstance()->textureImage(texture,QString()));
+        if(!image.isNull())return QPixmap::fromImage(image).scaled(
+            40,40,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+    }
+    return {};
 }
 }
 
@@ -119,13 +132,9 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     itemRight->addLayout(itemForm);
     m_itemDetails = new QLabel(itemTab); m_itemDetails->setWordWrap(true); m_itemDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
     itemRight->addWidget(m_itemDetails);
-    m_itemIcon = new QLabel(itemTab); m_itemIcon->setAlignment(Qt::AlignCenter); m_itemIcon->setMinimumSize(220, 150);
-    m_itemIcon->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
-    itemRight->addWidget(m_itemIcon, 1);
     if(m_view)
     {
         m_previewObject = new CWorldObj;
-        m_previewUnit = new CUnit;
         // The constructor is a separate top-level window, so explicitly share
         // the main viewport's figures, textures, and shader resources.
         m_itemPreview = new CPreview(itemTab, m_view); m_itemPreview->attachView(m_view);
@@ -156,14 +165,14 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     m_runeType = new QComboBox(spellTab); m_runeType->addItem(tr("All rune types"), -999);
     for(int type=0; type<8; ++type) m_runeType->addItem(runeTypeName(type), type);
     runeFilters->addWidget(m_runeFilter, 1); runeFilters->addWidget(m_runeType); runeColumn->addLayout(runeFilters);
-    m_availableRunes = new QListWidget(spellTab); runeColumn->addWidget(m_availableRunes, 1);
+    m_availableRunes = new QListWidget(spellTab);m_availableRunes->setIconSize(QSize(40,40)); runeColumn->addWidget(m_availableRunes, 1);
     auto* runeButtons = new QHBoxLayout;
     auto* add = new QPushButton(tr("Add →"), spellTab); auto* remove = new QPushButton(tr("Remove"), spellTab);
     auto* up = new QPushButton(tr("↑"), spellTab); auto* down = new QPushButton(tr("↓"), spellTab);
     runeButtons->addWidget(add); runeButtons->addWidget(remove); runeButtons->addWidget(up); runeButtons->addWidget(down);
     runeColumn->addLayout(runeButtons);
     runeColumn->addWidget(new QLabel(tr("Runes in spell (maximum 8)"), spellTab));
-    m_selectedRunes = new QListWidget(spellTab); m_selectedRunes->setObjectName(QStringLiteral("constructorSelectedRunes"));
+    m_selectedRunes = new QListWidget(spellTab);m_selectedRunes->setIconSize(QSize(40,40)); m_selectedRunes->setObjectName(QStringLiteral("constructorSelectedRunes"));
     runeColumn->addWidget(m_selectedRunes, 1);
     spellRoot->addLayout(runeColumn, 2);
 
@@ -211,7 +220,7 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     refreshItemFilterChoices();refreshItemFilter(); refreshSpellFilter();
 }
 
-ItemSpellConstructorDialog::~ItemSpellConstructorDialog() { delete m_previewObject;delete m_previewUnit; }
+ItemSpellConstructorDialog::~ItemSpellConstructorDialog() { delete m_previewObject; }
 QString ItemSpellConstructorDialog::code() const { return m_codeEdit->text().trimmed(); }
 void ItemSpellConstructorDialog::setCode(const QString& value) { m_codeEdit->setText(value); importCode(); }
 
@@ -281,7 +290,7 @@ void ItemSpellConstructorDialog::refreshSpellFilter()
     for(const auto& spell:m_catalog.spells){if(!school.isEmpty()&&spell.school.compare(school,Qt::CaseInsensitive)!=0)continue;if(!query.isEmpty()&&!searchable({spell.name,spell.displayName,spell.code,spell.subtype,spell.school}).contains(query))continue;auto*row=catalogItem(spell.displayName,tr("code: %1 • school: %2 • subtype: %3").arg(spell.code,spell.school,spell.subtype),spell.code,m_spellList);if(spell.code.compare(previous,Qt::CaseInsensitive)==0)m_spellList->setCurrentItem(row);}
     if(m_spellList->currentRow()<0&&m_spellList->count())m_spellList->setCurrentRow(0);
     m_availableRunes->clear();const QString runeQuery=m_runeFilter->text().trimmed().toCaseFolded();const int type=m_runeType->currentData().toInt();
-    for(const auto&rune:m_catalog.runes){if(type!=-999&&rune.type!=type)continue;if(!runeQuery.isEmpty()&&!searchable({rune.name,rune.displayName,rune.code,runeTypeName(rune.type)}).contains(runeQuery))continue;catalogItem(rune.displayName,tr("%1 • %2").arg(rune.code,runeTypeName(rune.type)),rune.code,m_availableRunes);}
+    for(const auto&rune:m_catalog.runes){if(type!=-999&&rune.type!=type)continue;if(!runeQuery.isEmpty()&&!searchable({rune.name,rune.displayName,rune.code,rune.tag,runeTypeName(rune.type)}).contains(runeQuery))continue;const QString identity=rune.tag.isEmpty()?rune.code:tr("%1 • %2").arg(rune.tag,rune.code);catalogItem(rune.displayName,tr("%1 • %2").arg(identity,runeTypeName(rune.type)),rune.code,m_availableRunes,runePixmap(m_catalog,rune));}
     if(m_availableRunes->count())m_availableRunes->setCurrentRow(0); updateOutput();
 }
 
@@ -318,7 +327,7 @@ void ItemSpellConstructorDialog::selectItem(){rebuildMaterialChoices();const aut
 void ItemSpellConstructorDialog::selectMaterial(){updateItemPreview();updateOutput();}
 void ItemSpellConstructorDialog::selectSpell(){updateSpellPreview();updateOutput();}
 
-void ItemSpellConstructorDialog::addRune(){if(!m_availableRunes->currentItem()||m_selectedRunes->count()>=8)return;const QString code=m_availableRunes->currentItem()->data(Qt::UserRole).toString();if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes);updateSpellPreview();updateOutput();}
+void ItemSpellConstructorDialog::addRune(){if(!m_availableRunes->currentItem()||m_selectedRunes->count()>=8)return;const QString code=m_availableRunes->currentItem()->data(Qt::UserRole).toString();if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes,runePixmap(m_catalog,*rune));updateSpellPreview();updateOutput();}
 void ItemSpellConstructorDialog::removeRune(){delete m_selectedRunes->takeItem(m_selectedRunes->currentRow());updateSpellPreview();updateOutput();}
 void ItemSpellConstructorDialog::moveRuneUp(){const int row=m_selectedRunes->currentRow();if(row<=0)return;auto*item=m_selectedRunes->takeItem(row);m_selectedRunes->insertItem(row-1,item);m_selectedRunes->setCurrentRow(row-1);updateOutput();}
 void ItemSpellConstructorDialog::moveRuneDown(){const int row=m_selectedRunes->currentRow();if(row<0||row+1>=m_selectedRunes->count())return;auto*item=m_selectedRunes->takeItem(row);m_selectedRunes->insertItem(row+1,item);m_selectedRunes->setCurrentRow(row+1);updateOutput();}
@@ -327,49 +336,16 @@ void ItemSpellConstructorDialog::useSpellInItem(){if(const auto*spell=currentSpe
 void ItemSpellConstructorDialog::updateItemPreview()
 {
     const auto* item=currentItem();
-    if(!item){m_itemIcon->clear();return;}
+    if(!item)return;
     const QString figure=ItemSpellConstructorCatalog::itemFigureName(*item);
     const QString texture=ItemSpellConstructorCatalog::itemTextureName(*item,currentMaterial());
-    const QImage image=ItemSpellConstructorCatalog::orientPreviewImage(
-        CTextureList::getInstance()->textureImage(texture,figure));
-    if(image.isNull())
-    {
-        m_itemIcon->setPixmap(QPixmap());
-        m_itemIcon->setText(tr("No material preview texture for %1")
-                            .arg(texture.isEmpty()?item->name:texture));
-    }
-    else
-    {
-        m_itemIcon->setText(QString());
-        m_itemIcon->setPixmap(QPixmap::fromImage(image).scaled(
-            m_itemIcon->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
-    }
     if(m_itemPreview&&!figure.isEmpty()&&!texture.isEmpty())
     {
-        if((item->category==QStringLiteral("Armor")||item->category==QStringLiteral("Weapon"))
-           &&m_previewUnit)
-        {
-            const QString itemCode=ItemSpellConstructorCatalog::formatItemCode(
-                item->name,currentMaterial()?currentMaterial()->name:QString(),m_itemSpell->text());
-            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propStr(
-                eObjParam_TEMPLATE,m_catalog.previewModelName())));
-            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propStr(
-                eObjParam_PRIM_TXTR,m_catalog.previewTextureName())));
-            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propBool(
-                eObjParam_UNIT_NEED_IMPORT,true)));
-            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propStrAr(
-                eObjParam_UNIT_ARMORS,item->category==QStringLiteral("Armor")
-                    ?QStringList{itemCode}:QStringList())));
-            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propStrAr(
-                eObjParam_UNIT_WEAPONS,item->category==QStringLiteral("Weapon")
-                    ?QStringList{itemCode}:QStringList())));
-            m_itemPreview->makeCurrent();m_previewUnit->preloadVisualResources();
-            m_itemPreview->attachNode(m_previewUnit);
-        }
-        else if(m_previewObject)
+        if(m_previewObject)
         {
             m_previewObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE,figure)));
             m_previewObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR,texture)));
+            m_itemPreview->makeCurrent();
             m_itemPreview->attachNode(m_previewObject);
         }
         m_itemPreview->updateGL();
@@ -452,7 +428,7 @@ void ItemSpellConstructorDialog::updateOutput()
             .arg(item->materialType).arg(item->mana,0,'g',8)
             .arg(item->slotCapacity).arg(item->components)};
     if((item->category==QStringLiteral("Weapon")||item->category==QStringLiteral("Armor"))&&currentMaterial())
-        detail<<tr("Preview: the item is assembled through the normal unit appearance and equipment path; the image above is its material-colored inventory texture.");
+        detail<<tr("Preview: standalone inventory figure with its material texture, matching the game's item preview path.");
     QStringList warnings;
     const bool materialRequired=!item->materialType.trimmed().isEmpty()
         && item->materialType.compare(QStringLiteral("None"),Qt::CaseInsensitive)!=0;
@@ -484,7 +460,7 @@ void ItemSpellConstructorDialog::updateOutput()
 
 void ItemSpellConstructorDialog::importCode()
 {
-    const QString value=m_codeEdit->text().trimmed();if(value.contains('{')&&!value.contains('[')){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(value);if(!parsed.valid){showImportDiagnostic(parsed.diagnostics);return;}const auto*spell=m_catalog.findSpell(parsed.prototypeCode);if(!spell){showImportDiagnostic({tr("Unknown spell prototype '%1'.").arg(parsed.prototypeCode)});return;}m_tabs->setCurrentIndex(1);for(int i=0;i<m_spellList->count();++i)if(m_spellList->item(i)->data(Qt::UserRole).toString().compare(spell->code,Qt::CaseInsensitive)==0)m_spellList->setCurrentRow(i);m_selectedRunes->clear();for(const QString&code:parsed.runeCodes){if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes);else catalogItem(tr("Unknown rune"),code,code,m_selectedRunes);}updateOutput();return;}
+    const QString value=m_codeEdit->text().trimmed();if(value.contains('{')&&!value.contains('[')){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(value);if(!parsed.valid){showImportDiagnostic(parsed.diagnostics);return;}const auto*spell=m_catalog.findSpell(parsed.prototypeCode);if(!spell){showImportDiagnostic({tr("Unknown spell prototype '%1'.").arg(parsed.prototypeCode)});return;}m_tabs->setCurrentIndex(1);for(int i=0;i<m_spellList->count();++i)if(m_spellList->item(i)->data(Qt::UserRole).toString().compare(spell->code,Qt::CaseInsensitive)==0)m_spellList->setCurrentRow(i);m_selectedRunes->clear();for(const QString&code:parsed.runeCodes){if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes,runePixmap(m_catalog,*rune));else catalogItem(tr("Unknown rune"),code,code,m_selectedRunes);}updateOutput();return;}
     const auto parsed=ItemSpellConstructorCatalog::parseItemCode(value);if(!parsed.valid){showImportDiagnostic(parsed.diagnostics);return;}const auto*item=m_catalog.findItem(parsed.prototypeName);if(!item){showImportDiagnostic({tr("Unknown item prototype '%1'.").arg(parsed.prototypeName)});return;}m_tabs->setCurrentIndex(0);for(int i=0;i<m_itemList->count();++i)if(m_itemList->item(i)->data(Qt::UserRole).toString().compare(item->name,Qt::CaseInsensitive)==0)m_itemList->setCurrentRow(i);rebuildMaterialChoices(parsed.materialName);if(!parsed.materialName.isEmpty()&&m_material->currentData().toString().compare(parsed.materialName,Qt::CaseInsensitive)!=0)showImportDiagnostic({tr("Material '%1' is not compatible with %2 (%3 required).").arg(parsed.materialName,item->name,item->materialType)});m_itemSpell->setText(parsed.spell.valid?ItemSpellConstructorCatalog::formatSpellCode(parsed.spell.prototypeCode,parsed.spell.runeCodes):parsed.bracketPayload);updateOutput();
 }
 void ItemSpellConstructorDialog::copyCode(){QApplication::clipboard()->setText(code());}

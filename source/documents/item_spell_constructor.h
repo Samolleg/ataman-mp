@@ -35,8 +35,8 @@ struct SConstructorSpell
 
 struct SConstructorRune
 {
-    QString name, displayName, code;
-    int type{-1}, complexity{0};
+    QString name, displayName, code, tag;
+    int type{-1}, complexity{0}, textureIndex{-1};
     double mana{0.0}, value{0.0};
 };
 
@@ -80,6 +80,7 @@ public:
                                    const SConstructorMaterial* material);
     QStringList spellTextureCandidates(const SConstructorSpell& spell) const;
     QString spellTextureName(const SConstructorSpell& spell) const;
+    QStringList runeTextureCandidates(const SConstructorRune& rune) const;
     static QString spellSchoolName(const QString& subtype);
     static QImage orientPreviewImage(const QImage& image);
 

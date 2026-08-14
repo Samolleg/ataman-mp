@@ -18,6 +18,15 @@ QString firstLine(QString value)
     value.replace('\r', '\n');
     return value.split('\n', QString::SkipEmptyParts).value(0).trimmed();
 }
+QString runeMarker(QString value)
+{
+    value.replace('\r','\n');QStringList lines;
+    for(const QString& line:value.split('\n',QString::SkipEmptyParts))
+        if(!line.trimmed().isEmpty())lines<<line.trimmed();
+    // The runtime renders modifierNNNN art. This trailing text metadata is
+    // only its searchable transcription; never infer a marker from rune type.
+    return lines.size()>=3?lines.last():QString();
+}
 QString textEntry(const QMap<QString, QString>& texts, const QStringList& candidates)
 {
     for(const QString& candidate : candidates)
@@ -137,8 +146,9 @@ ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const Data
             if(!spell.code.isEmpty()) result.spells.append(spell);
         }
     if(const SDatabaseTable* table = document.table(QStringLiteral("spells.spellmodifiers")))
-        for(const SDatabaseRow& row : table->rows)
+        for(int rowIndex=0;rowIndex<table->rows.size();++rowIndex)
         {
+            const SDatabaseRow& row=table->rows.at(rowIndex);
             if(row.deleted) continue;
             SConstructorRune rune;
             rune.name = field(row, 0).toString();
@@ -148,6 +158,7 @@ ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const Data
             rune.mana = field(row, 4).toDouble();
             rune.value = field(row, 5).toDouble();
             rune.complexity = field(row, 6).toInt();
+            rune.textureIndex = row.sourceRecordIndex >= 0 ? row.sourceRecordIndex : rowIndex;
             if(!rune.code.isEmpty()) result.runes.append(rune);
         }
     if(const SDatabaseTable* table = document.table(QStringLiteral("units.monsters")))
@@ -327,6 +338,13 @@ QString ItemSpellConstructorCatalog::spellTextureName(const SConstructorSpell& s
     return spellTextureCandidates(spell).value(0);
 }
 
+QStringList ItemSpellConstructorCatalog::runeTextureCandidates(const SConstructorRune& rune) const
+{
+    if(rune.textureIndex<0)return {};
+    const QString base=QStringLiteral("modifier%1").arg(rune.textureIndex,4,10,QChar('0'));
+    return m_isJmvProfile?QStringList{base+QStringLiteral(".x2"),base}:QStringList{base};
+}
+
 QImage ItemSpellConstructorCatalog::orientPreviewImage(const QImage& image)
 {
     // MMP scanlines are uploaded to OpenGL after a vertical mirror. Match the
@@ -350,9 +368,12 @@ void ItemSpellConstructorCatalog::applyGameTexts(const QMap<QString, QString>& e
     }
     for(SConstructorRune& rune : runes)
     {
-        const QString name = textEntry(entries, {QStringLiteral("MODIFIER ") + rune.code,
-                                                  QStringLiteral("MODIFIER ") + rune.name});
+        const QStringList keys={QStringLiteral("MODIFIER ") + rune.code,
+                                QStringLiteral("MODIFIER ") + rune.name};
+        const QString name = textEntry(entries, keys);
         if(!name.isEmpty()) rune.displayName = name;
+        for(const QString& key:keys)for(auto it=entries.constBegin();it!=entries.constEnd();++it)
+            if(it.key().compare(key,Qt::CaseInsensitive)==0){rune.tag=runeMarker(it.value());break;}
     }
     for(SConstructorItem& item : items)
     {
