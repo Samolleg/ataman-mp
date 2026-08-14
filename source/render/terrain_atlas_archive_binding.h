@@ -2,6 +2,7 @@
 #define TERRAIN_ATLAS_ARCHIVE_BINDING_H
 
 #include <QByteArray>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 
@@ -10,9 +11,11 @@ struct STerrainAtlasArchiveBindingResult
     QString archivePath;
     QByteArray decodedAtlasPixelSha256;
     QStringList completeArchives;
+    QMap<QString, QByteArray> completeArchivePixelSha256;
     QString error;
 
     bool success() const { return !archivePath.isEmpty(); }
+    bool hasCompleteArchive(const QString& path) const;
 };
 
 class CTerrainAtlasArchiveBindingResolver

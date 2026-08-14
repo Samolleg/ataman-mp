@@ -1143,6 +1143,23 @@ QString CTerrainAtlasProfileStore::profilePath(const QString& mprNamespace,
         .arg(safe, QString::fromLatin1(namespaceSuffix)));
 }
 
+QString CTerrainAtlasProfileStore::profilePathForMpr(
+    const QString& mprNamespace, const QFileInfo& mprFile)
+{
+    QString safe = mprFile.completeBaseName().trimmed().toLower();
+    safe.replace(QRegularExpression(QStringLiteral("[^a-z0-9._-]+")),
+                 QStringLiteral("_"));
+    if(safe.isEmpty()) safe = QStringLiteral("unnamed-map");
+    const QByteArray key = mprNamespace.trimmed().toLower().toUtf8()
+        + QByteArrayLiteral("\n")
+        + mprFile.fileName().trimmed().toLower().toUtf8();
+    const QByteArray suffix = QCryptographicHash::hash(
+        key, QCryptographicHash::Sha256).toHex().left(12);
+    return mprFile.dir().filePath(
+        QStringLiteral("terrain-atlas-profiles/%1-%2.semantic-atlas.json")
+            .arg(safe, QString::fromLatin1(suffix)));
+}
+
 bool CTerrainAtlasProfileStore::save(const STerrainAtlasProfile& profile,
                                      const QString& rootDirectory,
                                      CValidationReport* report)
@@ -1158,12 +1175,88 @@ bool CTerrainAtlasProfileStore::save(const STerrainAtlasProfile& profile,
     return profile.save(path, report);
 }
 
+bool CTerrainAtlasProfileStore::saveForMpr(
+    const STerrainAtlasProfile& profile, const QFileInfo& mprFile,
+    CValidationReport* report)
+{
+    const QString path = profilePathForMpr(profile.mprNamespace, mprFile);
+    if(!QDir().mkpath(QFileInfo(path).absolutePath()))
+    {
+        if(report) report->add("terrain.atlas_profile_directory",
+            EValidationSeverity::Error,
+            "Could not create the portable semantic atlas profile directory",
+            QFileInfo(path).absolutePath());
+        return false;
+    }
+    return profile.save(path, report);
+}
+
 bool CTerrainAtlasProfileStore::load(const QString& mprNamespace,
                                      STerrainAtlasProfile* profile,
                                      const QString& rootDirectory,
                                      CValidationReport* report)
 {
     return STerrainAtlasProfile::load(profilePath(mprNamespace, rootDirectory), profile, report);
+}
+
+bool CTerrainAtlasProfileStore::loadForMpr(
+    const QString& mprNamespace, const QFileInfo& mprFile,
+    STerrainAtlasProfile* profile, QString* sourcePath,
+    bool* usedLegacyNamespacePath, CValidationReport* report)
+{
+    if(sourcePath) sourcePath->clear();
+    if(usedLegacyNamespacePath) *usedLegacyNamespacePath = false;
+    const QString exactPath = profilePathForMpr(mprNamespace, mprFile);
+    if(QFileInfo::exists(exactPath))
+    {
+        if(!STerrainAtlasProfile::load(exactPath, profile, report))
+            return false;
+        if(sourcePath) *sourcePath = exactPath;
+        return true;
+    }
+    const QString legacyPath = profilePath(
+        mprNamespace, mprFile.absolutePath());
+    if(!QFileInfo::exists(legacyPath)
+       || !STerrainAtlasProfile::load(legacyPath, profile, report))
+        return false;
+    if(sourcePath) *sourcePath = legacyPath;
+    if(usedLegacyNamespacePath) *usedLegacyNamespacePath = true;
+    return true;
+}
+
+namespace {
+bool isExplicitTerrainAtlasOverride(const STerrainAtlasProfile& loaded)
+{
+    return loaded.provenance == QStringLiteral("user-authored-custom-profile")
+        || loaded.provenance
+            == QStringLiteral("portable-exact-stock-atlas-clone-v1")
+        || loaded.provenance
+            == QStringLiteral("portable-finalized-modern-atlas-v1")
+        || CTerrainAtlasProfileStore::isWorkingAtlasProfile(loaded);
+}
+
+bool validateExplicitTerrainAtlasOverride(
+    const STerrainAtlasProfile& loaded, const QString& path,
+    const QString& mprNamespace, const QByteArray& atlasPixelSha256,
+    int atlasSlotCount, STerrainAtlasProfile* profile,
+    QString* sourcePath, CValidationReport* report)
+{
+    if(!profile || !isExplicitTerrainAtlasOverride(loaded))
+    {
+        if(report && !isExplicitTerrainAtlasOverride(loaded))
+            report->add("terrain.atlas_profile_not_explicit_override",
+                EValidationSeverity::Warning,
+                "A stored generated/default profile was ignored; only an explicitly edited local profile or an exact-bound portable stock, working, or finalized atlas may override the built-in Material atlas",
+                path);
+        return false;
+    }
+    if(!loaded.validateBinding(mprNamespace, atlasPixelSha256,
+                               atlasSlotCount, report))
+        return false;
+    *profile = loaded;
+    if(sourcePath) *sourcePath = path;
+    return true;
+}
 }
 
 bool CTerrainAtlasProfileStore::loadExplicitOverride(
@@ -1178,28 +1271,25 @@ bool CTerrainAtlasProfileStore::loadExplicitOverride(
     STerrainAtlasProfile loaded;
     if(!STerrainAtlasProfile::load(path, &loaded, report))
         return false;
-    const bool explicitUserProfile = loaded.provenance
-        == QStringLiteral("user-authored-custom-profile");
-    const bool portableExactClone = loaded.provenance
-        == QStringLiteral("portable-exact-stock-atlas-clone-v1");
-    const bool portableFinalizedAtlas = loaded.provenance
-        == QStringLiteral("portable-finalized-modern-atlas-v1");
-    const bool portableWorkingAtlas = isWorkingAtlasProfile(loaded);
-    if(!explicitUserProfile && !portableExactClone && !portableFinalizedAtlas
-       && !portableWorkingAtlas)
-    {
-        if(report) report->add("terrain.atlas_profile_not_explicit_override",
-            EValidationSeverity::Warning,
-            "A stored generated/default profile was ignored; only an explicitly edited local profile or an exact-bound portable stock, working, or finalized atlas may override the built-in Material atlas",
-            path);
+    return validateExplicitTerrainAtlasOverride(
+        loaded, path, mprNamespace, atlasPixelSha256, atlasSlotCount,
+        profile, sourcePath, report);
+}
+
+bool CTerrainAtlasProfileStore::loadExplicitOverrideForMpr(
+    const QString& mprNamespace, const QByteArray& atlasPixelSha256,
+    int atlasSlotCount, const QFileInfo& mprFile,
+    STerrainAtlasProfile* profile, QString* sourcePath,
+    bool* usedLegacyNamespacePath, CValidationReport* report)
+{
+    STerrainAtlasProfile loaded;
+    QString path;
+    if(!loadForMpr(mprNamespace, mprFile, &loaded, &path,
+                   usedLegacyNamespacePath, report))
         return false;
-    }
-    if(!loaded.validateBinding(mprNamespace, atlasPixelSha256,
-                               atlasSlotCount, report))
-        return false;
-    *profile = loaded;
-    if(sourcePath) *sourcePath = path;
-    return true;
+    return validateExplicitTerrainAtlasOverride(
+        loaded, path, mprNamespace, atlasPixelSha256, atlasSlotCount,
+        profile, sourcePath, report);
 }
 
 bool CTerrainAtlasProfileStore::removeLocalOverride(

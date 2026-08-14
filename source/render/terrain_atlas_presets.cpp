@@ -292,22 +292,18 @@ QImage CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
                == preferred)
                 appendUnique(source);
     };
-    if(thumbnail)
-    {
-        // Display metadata must not force a foreign atlas when the current
-        // atlas has a structurally proven uniform. This is important for
-        // reviewed catalogs whose legacy thumbnailSlot still points at a
-        // mixed transition: local uniform first, foreign thumbnail second.
-        appendMatching(family.thumbnailSources, true);
-        appendMatching(family.sources, true);
-        appendMatching(family.thumbnailSources, false);
-        appendMatching(family.sources, false);
-    }
-    else
-    {
-        appendMatching(family.sources, true);
-        appendMatching(family.sources, false);
-    }
+    Q_UNUSED(thumbnail);
+    // A generated blend needs one stable full-tile base even though uniform
+    // interiors may later distribute across every exact authored variant.
+    // Use the reviewed, structurally uniform thumbnail source as that base
+    // for both the icon and compositor. Previously the icon used this source
+    // while painting silently took the first same-family slot, so a corrected
+    // brush preview could still paint with a visibly mixed legacy variant.
+    // Local artwork remains preferred over a foreign thumbnail.
+    appendMatching(family.thumbnailSources, true);
+    appendMatching(family.sources, true);
+    appendMatching(family.thumbnailSources, false);
+    appendMatching(family.sources, false);
 
     QImage fallback;
     STerrainGlobalMaterialSource fallbackSource;

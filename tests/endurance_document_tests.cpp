@@ -366,10 +366,12 @@ private slots:
     void zone2TransitionOnlyGrassMapsToGlobalUniformFamily();
     void authoredPresetSeparatesZone18ReviewedLayers();
     void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
+    void portableMprProfilesDoNotCollideForSharedResourceIdentity();
     void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void workingAtlasProfileBindsExtensionSignaturesForDraftReopen();
     void publishedAtlasArchiveBindingSelectsCoherentProfileSource();
     void externalPublishedAtlasArchiveBindingProbe();
+    void externalLegacyAdjacentAtlasProfileCollisionProbe();
     void externalReopenedDraftTopologyProbe();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
@@ -6373,10 +6375,13 @@ void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefer
     preferred.uniformSlot = 1;
     STerrainGlobalMaterialFamily family;
     family.name = foreign.variantName;
-    family.sources = {foreign, preferred};
-    // The legacy display choice exists only in another atlas. The current
-    // atlas's proven uniform must still win before that foreign thumbnail.
-    family.thumbnailSources = {foreign};
+    STerrainGlobalMaterialSource preferredFirst = preferred;
+    preferredFirst.uniformSlot = 0;
+    family.sources = {foreign, preferredFirst, preferred};
+    // The reviewed local thumbnail is also the stable compositor base. This
+    // keeps a corrected icon and the actual generated blend on one artwork;
+    // same-material interiors still vary through the authored catalog.
+    family.thumbnailSources = {preferred};
 
     QMap<QString, QByteArray> encodedPages;
     QSet<QString> missingPages;
@@ -6403,6 +6408,28 @@ void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefer
     QVERIFY(ei::decodeMmpDxt1AtlasTile(
         preferredPage, 1, &expectedPreferred, &diagnostic));
     QCOMPARE(thumbnail, expectedPreferred.convertToFormat(
+        QImage::Format_RGBA8888));
+
+    encodedPages.clear();
+    missingPages.clear();
+    STerrainGlobalMaterialSource paintedSource;
+    const QImage paintedBase =
+        CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
+            family, QStringLiteral("preferred"), QSize(8, 8),
+            &encodedPages, &missingPages, &decodedTiles,
+            [&](const QString& name, QByteArray* payload) {
+                if(name == QStringLiteral("preferred000.mmp"))
+                    *payload = preferredPage;
+                else if(name == QStringLiteral("foreign000.mmp"))
+                    *payload = foreignPage;
+                else
+                    return false;
+                return true;
+            }, false, &paintedSource);
+    QVERIFY(!paintedBase.isNull());
+    QCOMPARE(paintedSource.mprNamespace, QStringLiteral("preferred"));
+    QCOMPARE(paintedSource.uniformSlot, 1);
+    QCOMPARE(paintedBase, expectedPreferred.convertToFormat(
         QImage::Format_RGBA8888));
 
     // Reusing one decoded cache across two maps used to return the first map's
@@ -6755,6 +6782,91 @@ void EnduranceDocumentTests::materialAtlasStoreLoadsOnlyExplicitLocalOverrides()
         "zone1", root.path(), &removeReport));
 }
 
+void EnduranceDocumentTests::portableMprProfilesDoNotCollideForSharedResourceIdentity()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QFileInfo draftMpr(root.filePath(QStringLiteral("zone3obr test.mpr")));
+    const QFileInfo publishedMpr(root.filePath(QStringLiteral("zone3obr.mpr")));
+
+    const auto profile = [](char hashByte, const QString& provenance) {
+        STerrainAtlasProfile value;
+        value.mprNamespace = QStringLiteral("zone3obr");
+        value.atlasPixelSha256 = QByteArray(64, hashByte);
+        value.atlasSlotCount = 1;
+        value.provenance = provenance;
+        value.approved = true;
+        STerrainAtlasProfileFamily family;
+        family.id = 1;
+        family.name = QStringLiteral("Ground / Common");
+        family.thumbnailSlot = 0;
+        family.paintSelectable = true;
+        STerrainAtlasProfileSlot slot;
+        slot.slot = 0;
+        slot.assigned = true;
+        slot.signature.northWest = slot.signature.northEast =
+            slot.signature.southEast = slot.signature.southWest = 1;
+        value.families.append(family);
+        value.slotDefinitions.append(slot);
+        value.normalizeMembership();
+        return value;
+    };
+    const STerrainAtlasProfile draft = profile(
+        'a', CTerrainAtlasProfileStore::workingAtlasProvenance());
+    const STerrainAtlasProfile published = profile(
+        'b', QStringLiteral("portable-finalized-modern-atlas-v1"));
+    CValidationReport report;
+    QVERIFY2(CTerrainAtlasProfileStore::saveForMpr(
+                 draft, draftMpr, &report), qPrintable(report.toText()));
+    QVERIFY2(CTerrainAtlasProfileStore::saveForMpr(
+                 published, publishedMpr, &report),
+             qPrintable(report.toText()));
+
+    const QString draftPath = CTerrainAtlasProfileStore::profilePathForMpr(
+        draft.mprNamespace, draftMpr);
+    const QString publishedPath = CTerrainAtlasProfileStore::profilePathForMpr(
+        published.mprNamespace, publishedMpr);
+    QVERIFY(draftPath != publishedPath);
+    QVERIFY(QFileInfo::exists(draftPath));
+    QVERIFY(QFileInfo::exists(publishedPath));
+    QVERIFY(!QFileInfo::exists(CTerrainAtlasProfileStore::profilePath(
+        draft.mprNamespace, root.path())));
+
+    STerrainAtlasProfile loaded;
+    QString sourcePath;
+    bool legacy = true;
+    QVERIFY2(CTerrainAtlasProfileStore::loadExplicitOverrideForMpr(
+                 draft.mprNamespace, draft.atlasPixelSha256,
+                 draft.atlasSlotCount, draftMpr, &loaded, &sourcePath,
+                 &legacy, &report), qPrintable(report.toText()));
+    QCOMPARE(loaded.provenance,
+             CTerrainAtlasProfileStore::workingAtlasProvenance());
+    QCOMPARE(sourcePath, draftPath);
+    QVERIFY(!legacy);
+    QVERIFY2(CTerrainAtlasProfileStore::loadExplicitOverrideForMpr(
+                 published.mprNamespace, published.atlasPixelSha256,
+                 published.atlasSlotCount, publishedMpr, &loaded,
+                 &sourcePath, &legacy, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(loaded.provenance,
+             QStringLiteral("portable-finalized-modern-atlas-v1"));
+    QCOMPARE(sourcePath, publishedPath);
+    QVERIFY(!legacy);
+
+    // Old packages remain readable when no map-specific profile exists. The
+    // caller can distinguish this namespace-only fallback and must not let a
+    // mismatching legacy JSON block a complete sibling draft atlas.
+    const QFileInfo legacyMpr(root.filePath(QStringLiteral("legacy copy.mpr")));
+    QVERIFY2(CTerrainAtlasProfileStore::save(draft, root.path(), &report),
+             qPrintable(report.toText()));
+    QVERIFY2(CTerrainAtlasProfileStore::loadForMpr(
+                 draft.mprNamespace, legacyMpr, &loaded, &sourcePath,
+                 &legacy, &report), qPrintable(report.toText()));
+    QVERIFY(legacy);
+    QCOMPARE(sourcePath, CTerrainAtlasProfileStore::profilePath(
+        draft.mprNamespace, root.path()));
+}
+
 void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding()
 {
     STerrainAtlasProfile source;
@@ -7065,6 +7177,45 @@ void EnduranceDocumentTests::externalPublishedAtlasArchiveBindingProbe()
     if(!expected.isEmpty())
         QCOMPARE(QFileInfo(binding.archivePath).canonicalFilePath(),
                  QFileInfo(expected).canonicalFilePath());
+}
+
+void EnduranceDocumentTests::externalLegacyAdjacentAtlasProfileCollisionProbe()
+{
+    const QString mprPath = qEnvironmentVariable(
+        "EI_MAPPER_REAL_LEGACY_COLLISION_MPR");
+    const QString profilePath = qEnvironmentVariable(
+        "EI_MAPPER_REAL_LEGACY_COLLISION_PROFILE");
+    const QString atlasPath = qEnvironmentVariable(
+        "EI_MAPPER_REAL_LEGACY_COLLISION_ATLAS");
+    if(mprPath.isEmpty() || profilePath.isEmpty() || atlasPath.isEmpty())
+        QSKIP("Set EI_MAPPER_REAL_LEGACY_COLLISION_MPR, EI_MAPPER_REAL_LEGACY_COLLISION_PROFILE, and EI_MAPPER_REAL_LEGACY_COLLISION_ATLAS for the read-only collision probe");
+    CValidationReport report;
+    CMprDocument document;
+    STerrainAtlasProfile profile;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    QVERIFY2(STerrainAtlasProfile::load(profilePath, &profile, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(profile.provenance,
+             QStringLiteral("portable-finalized-modern-atlas-v1"));
+    QCOMPARE(QFileInfo(profilePath).canonicalFilePath(),
+             QFileInfo(CTerrainAtlasProfileStore::profilePath(
+                 document.mapInfo().innerNamespace,
+                 QFileInfo(mprPath).absolutePath())).canonicalFilePath());
+    QVERIFY(!QFileInfo::exists(
+        CTerrainAtlasProfileStore::profilePathForMpr(
+            document.mapInfo().innerNamespace, QFileInfo(mprPath))));
+    const STerrainAtlasArchiveBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findExactArchive(
+            {atlasPath}, document.mapInfo().innerNamespace,
+            int(document.mapInfo().textureCount), profile.atlasSlotCount,
+            profile.atlasPixelSha256, atlasPath);
+    QVERIFY(!binding.success());
+    QVERIFY2(binding.hasCompleteArchive(atlasPath), qPrintable(binding.error));
+    const QByteArray actual = binding.completeArchivePixelSha256.value(
+        QFileInfo(atlasPath).absoluteFilePath());
+    QVERIFY(!actual.isEmpty());
+    QVERIFY(actual.toLower() != profile.atlasPixelSha256.toLower());
 }
 
 void EnduranceDocumentTests::externalReopenedDraftTopologyProbe()

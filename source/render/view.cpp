@@ -5383,6 +5383,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
         return;
     }
 
+    m_legacyTerrainProfileCollision = false;
     QString mapLocalAtlas = filePath.dir().filePath(
         filePath.completeBaseName() + QStringLiteral("-atlas.res"));
     if(!QFileInfo::exists(mapLocalAtlas))
@@ -5403,9 +5404,12 @@ void CView::loadLandscape(const QFileInfo& filePath)
     {
         STerrainAtlasProfile bindingProfile;
         CValidationReport bindingProfileReport;
-        if(CTerrainAtlasProfileStore::load(
-               bindingDocument.mapInfo().innerNamespace, &bindingProfile,
-               filePath.absolutePath(), &bindingProfileReport)
+        QString bindingProfilePath;
+        bool legacyBindingProfile = false;
+        if(CTerrainAtlasProfileStore::loadForMpr(
+               bindingDocument.mapInfo().innerNamespace, filePath,
+               &bindingProfile, &bindingProfilePath,
+               &legacyBindingProfile, &bindingProfileReport)
            && bindingProfile.provenance
                 == QStringLiteral("portable-finalized-modern-atlas-v1"))
         {
@@ -5439,20 +5443,43 @@ void CView::loadLandscape(const QFileInfo& filePath)
             }
             else
             {
-                const QString message = tr(
-                    "This finalized MPR references an exact published terrain "
-                    "atlas, but no single configured RES archive matches it. "
-                    "The map was not opened, so the editor cannot mix old and "
-                    "new texture pages.\n\nResource identity: %1\nExpected atlas "
-                    "hash: %2\n\n%3")
-                    .arg(bindingDocument.mapInfo().innerNamespace,
-                         QString::fromLatin1(
-                             bindingProfile.atlasPixelSha256),
-                         binding.error);
-                ei::log(eLogWarning, message);
-                QMessageBox::critical(this,
-                    tr("Finalized terrain RES unavailable"), message);
-                return;
+                const bool preferredComplete =
+                    binding.hasCompleteArchive(preferredArchive);
+                // Profiles written before map-specific sidecars were keyed
+                // only by runtime namespace. Saving another MPR with the same
+                // identity could overwrite that shared JSON while leaving
+                // this MPR and its complete sibling atlas intact. In that
+                // legacy-only case, prefer the coherent sibling archive and
+                // open visually; the mismatched profile is not allowed to
+                // drive semantic painting. A map-specific profile remains a
+                // strict publication contract and always fails closed.
+                if(legacyBindingProfile && preferredComplete)
+                {
+                    m_legacyTerrainProfileCollision = true;
+                    mapLocalAtlas = preferredArchive;
+                    ei::log(eLogWarning, QStringLiteral(
+                        "Ignored colliding legacy terrain profile %1; opening complete sibling atlas %2 without that semantic override. Expected profile hash:%3")
+                        .arg(bindingProfilePath, preferredArchive,
+                             QString::fromLatin1(
+                                 bindingProfile.atlasPixelSha256)));
+                }
+                else
+                {
+                    const QString message = tr(
+                        "This finalized MPR references an exact published terrain "
+                        "atlas, but no single configured RES archive matches it. "
+                        "The map was not opened, so the editor cannot mix old and "
+                        "new texture pages.\n\nResource identity: %1\nExpected atlas "
+                        "hash: %2\n\n%3")
+                        .arg(bindingDocument.mapInfo().innerNamespace,
+                             QString::fromLatin1(
+                                 bindingProfile.atlasPixelSha256),
+                             binding.error);
+                    ei::log(eLogWarning, message);
+                    QMessageBox::critical(this,
+                        tr("Finalized terrain RES unavailable"), message);
+                    return;
+                }
             }
         }
     }
@@ -5606,6 +5633,7 @@ void CView::unloadLand(bool promptForSave)
     m_pLand->unloadMpr();
     CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
     m_activeTerrainArchivePath.clear();
+    m_legacyTerrainProfileCollision = false;
     if(isValid())
         doneCurrent();
     refreshMprSettingsDock();
@@ -6029,6 +6057,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                 stagedDocument.mapInfo().innerNamespace, physicalDraftTiles,
                 m_workingTerrainAtlas->catalog(), m_terrainAtlasProfile,
                 m_terrainGlobalFamilies, &draftReport);
+        draftProfile.resourceArchiveHint =
+            destination.completeBaseName() + QStringLiteral("-atlas.res");
         if(draftProfile.assignedSlotCount() <= 0
            || draftReport.hasErrors())
         {
@@ -6041,9 +6071,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         const QString atlasPath = destination.dir().filePath(
             destination.completeBaseName() + QStringLiteral("-atlas.res"));
         const QString draftProfilePath =
-            CTerrainAtlasProfileStore::profilePath(
-                stagedDocument.mapInfo().innerNamespace,
-                destination.absolutePath());
+            CTerrainAtlasProfileStore::profilePathForMpr(
+                stagedDocument.mapInfo().innerNamespace, destination);
         const bool draftProfileExisted = QFileInfo::exists(draftProfilePath);
         QByteArray previousDraftProfile;
         if(draftProfileExisted)
@@ -6099,8 +6128,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                 && restore.commit();
         };
         updateProgress(tr("Saving the editor material profile..."), 5);
-        if(!CTerrainAtlasProfileStore::save(
-               draftProfile, destination.absolutePath(), &draftReport))
+        if(!CTerrainAtlasProfileStore::saveForMpr(
+               draftProfile, destination, &draftReport))
         {
             restoreDraftAtlas();
             QMessageBox::critical(this, tr("Modern draft save failed"),
@@ -7106,12 +7135,12 @@ void CView::rebuildTerrainAutoCatalog()
     STerrainAtlasProfile stored;
     QString storedPath;
     CValidationReport storedReport;
-    const QString portableProfileRoot = m_pLand
-        ? m_pLand->filePath().absolutePath() : QString();
-    const bool adjacentPortableProfile = !portableProfileRoot.isEmpty()
-        && CTerrainAtlasProfileStore::loadExplicitOverride(
-            mprNamespace, atlasHash, slotCount, &stored,
-            portableProfileRoot, &storedPath, &storedReport);
+    bool legacyAdjacentProfile = false;
+    const bool adjacentPortableProfile = m_pLand
+        && CTerrainAtlasProfileStore::loadExplicitOverrideForMpr(
+            mprNamespace, atlasHash, slotCount, m_pLand->filePath(),
+            &stored, &storedPath, &legacyAdjacentProfile, &storedReport);
+    Q_UNUSED(legacyAdjacentProfile);
     if(adjacentPortableProfile || CTerrainAtlasProfileStore::loadExplicitOverride(
            mprNamespace, atlasHash, slotCount, &stored, QString(),
            &storedPath, &storedReport))
@@ -7149,7 +7178,8 @@ void CView::rebuildTerrainAutoCatalog()
                 ETerrainAtlasProfileSource::BuiltInDefault;
         }
     }
-    if(m_terrainAtlasProfile.slotDefinitions.isEmpty())
+    if(m_terrainAtlasProfile.slotDefinitions.isEmpty()
+       && !m_legacyTerrainProfileCollision)
     {
         m_terrainAtlasProfile = CTerrainAtlasProfileInference::propose(
             mprNamespace, m_pTileForm->tileImages(),
@@ -7324,6 +7354,8 @@ void CView::rebuildTerrainAutoCatalog()
               .arg(landChoices.size()).arg(overlayChoices.size())
         : tr("No structurally valid material is available for namespace '%1'. Open Material atlas to assign one; manual atlas tile mode remains available.")
               .arg(mprNamespace);
+    if(m_legacyTerrainProfileCollision)
+        status = tr("This map opened with its complete sibling atlas, but an older namespace-only editor profile was overwritten by another MPR. Visual/manual tile editing is available; semantic Material painting is disabled so the mismatched profile cannot corrupt this map.");
     if(builtInDefaultActive)
         status = tr("Game-wide Material families loaded: %1 ground and %2 overlay families.")
             .arg(landChoices.size()).arg(overlayChoices.size());
@@ -7905,6 +7937,7 @@ bool CView::adoptCompleteTerrainBaseline(
     m_mprDocument = reopenedDocument;
     m_terrainEdit = reopenedTerrain;
     m_terrainEditAvailable = true;
+    m_legacyTerrainProfileCollision = false;
     m_authoredTerrainTileImages = physicalTiles;
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
     if(m_pUndoStack)
@@ -8748,8 +8781,8 @@ void CView::finalizeVirtualTerrainAtlas()
                 .arg(portableProfileReport.toText()));
         return;
     }
-    const QString profilePath=CTerrainAtlasProfileStore::profilePath(
-        finalized.isolatedNamespace, mprDestination.absolutePath());
+    const QString profilePath=CTerrainAtlasProfileStore::profilePathForMpr(
+        finalized.isolatedNamespace, mprDestination);
     if(!QDir().mkpath(QFileInfo(profilePath).absolutePath()))
     {
         QMessageBox::critical(this, tr("Atlas publication refused"),
@@ -8917,8 +8950,8 @@ void CView::finalizeVirtualTerrainAtlas()
     publishProgress.setLabelText(tr("Saving modern MPR and editor profile..."));
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     CValidationReport profileSaveReport;
-    if(!CTerrainAtlasProfileStore::save(
-           portableProfile, mprDestination.absolutePath(), &profileSaveReport))
+    if(!CTerrainAtlasProfileStore::saveForMpr(
+           portableProfile, mprDestination, &profileSaveReport))
     {
         const bool resRestored = restorePublishedRes();
         const bool profileRestored = restorePublishedProfile();

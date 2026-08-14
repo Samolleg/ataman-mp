@@ -75,6 +75,16 @@ QString normalizedPath(const QString& path)
 }
 }
 
+bool STerrainAtlasArchiveBindingResult::hasCompleteArchive(
+    const QString& path) const
+{
+    const QString wanted = normalizedPath(path);
+    for(const QString& complete : completeArchives)
+        if(normalizedPath(complete) == wanted)
+            return true;
+    return false;
+}
+
 STerrainAtlasArchiveBindingResult
 CTerrainAtlasArchiveBindingResolver::findExactArchive(
     const QStringList& candidateArchives,
@@ -154,6 +164,8 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
             continue;
         const QByteArray actual =
             CTerrainAtlasProfileInference::pixelSha256(tiles);
+        result.completeArchivePixelSha256.insert(
+            archive.absoluteFilePath(), actual);
         if(actual.toLower() != expectedAtlasPixelSha256.toLower())
             continue;
         result.archivePath = archive.absoluteFilePath();
@@ -162,5 +174,16 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
     }
     result.error = QStringLiteral(
         "No configured RES archive contains one complete terrain atlas matching the saved profile.");
+    if(!result.completeArchivePixelSha256.isEmpty())
+    {
+        QStringList mismatches;
+        for(auto found = result.completeArchivePixelSha256.constBegin();
+            found != result.completeArchivePixelSha256.constEnd(); ++found)
+            mismatches.append(QStringLiteral("%1 -> %2")
+                .arg(QDir::toNativeSeparators(found.key()),
+                     QString::fromLatin1(found.value())));
+        result.error += QStringLiteral("\nComplete archive hashes:\n%1")
+            .arg(mismatches.join(QStringLiteral("\n")));
+    }
     return result;
 }

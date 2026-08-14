@@ -607,6 +607,7 @@ private:
     bool m_requestedTerrainIdentityFinalization{false};
     QFileInfo m_requestedTerrainMprDestination;
     QString m_activeTerrainArchivePath;
+    bool m_legacyTerrainProfileCollision{false};
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};

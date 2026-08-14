@@ -14,6 +14,7 @@
 #include "terrain_atlas_analyzer.h"
 
 class CValidationReport;
+class QFileInfo;
 struct STerrainAtlasFinalization;
 
 struct STerrainAtlasSlotUsage
@@ -185,12 +186,27 @@ public:
         CValidationReport* report = nullptr);
     static QString profilePath(const QString& mprNamespace,
                                const QString& rootDirectory = QString());
+    // Portable draft/finalized profiles describe one exact MPR + physical
+    // atlas pair.  Key them by the MPR filename as well as the runtime
+    // namespace so two maps that intentionally reuse one published identity
+    // cannot overwrite each other's editor-side semantic contract.
+    static QString profilePathForMpr(
+        const QString& mprNamespace, const QFileInfo& mprFile);
     static bool save(const STerrainAtlasProfile& profile,
                      const QString& rootDirectory = QString(),
                      CValidationReport* report = nullptr);
+    static bool saveForMpr(const STerrainAtlasProfile& profile,
+                           const QFileInfo& mprFile,
+                           CValidationReport* report = nullptr);
     static bool load(const QString& mprNamespace, STerrainAtlasProfile* profile,
                      const QString& rootDirectory = QString(),
                      CValidationReport* report = nullptr);
+    static bool loadForMpr(const QString& mprNamespace,
+                           const QFileInfo& mprFile,
+                           STerrainAtlasProfile* profile,
+                           QString* sourcePath = nullptr,
+                           bool* usedLegacyNamespacePath = nullptr,
+                           CValidationReport* report = nullptr);
     static bool loadExplicitOverride(
         const QString& mprNamespace,
         const QByteArray& atlasPixelSha256,
@@ -198,6 +214,15 @@ public:
         STerrainAtlasProfile* profile,
         const QString& rootDirectory = QString(),
         QString* sourcePath = nullptr,
+        CValidationReport* report = nullptr);
+    static bool loadExplicitOverrideForMpr(
+        const QString& mprNamespace,
+        const QByteArray& atlasPixelSha256,
+        int atlasSlotCount,
+        const QFileInfo& mprFile,
+        STerrainAtlasProfile* profile,
+        QString* sourcePath = nullptr,
+        bool* usedLegacyNamespacePath = nullptr,
         CValidationReport* report = nullptr);
     static bool removeLocalOverride(
         const QString& mprNamespace,
