@@ -73,6 +73,7 @@
 #include "endurance_ui_scale.h"
 #include "jmv_map_test_launcher.h"
 #include "view.h"
+#include "preview.h"
 #include "render_scheduling.h"
 #include "utils.h"
 
@@ -2351,6 +2352,12 @@ int runHeadlessCommand(QApplication& app)
         const bool databasePrototypeMainWindowRouteWorks = productionRouteInvoked
             && qApp->property("enduranceDatabasePrototypeNavigationReceived").toString()
                 == QStringLiteral("Human Test");
+        CPreview detachedPreview(nullptr, productionWindow->view());
+        detachedPreview.resize(160,120);
+        detachedPreview.show();
+        QApplication::processEvents();
+        const bool detachedPreviewSharesViewportContext = detachedPreview.isSharing();
+        detachedPreview.close();
         qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", false);
         // This unshown production probe owns process-wide UI/render services;
         // retain it for the remaining few statements and let process exit
@@ -2375,6 +2382,7 @@ int runHeadlessCommand(QApplication& app)
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && enterCommit && clickCommit && databasePrototypeMenuEmissionWorks
                 && databasePrototypeMainWindowRouteWorks
+                && detachedPreviewSharesViewportContext
                 && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
@@ -2486,6 +2494,8 @@ int runHeadlessCommand(QApplication& app)
                << databasePrototypeMenuEmissionWorks
                << " databasePrototypeMainWindowRouteWorks="
                << databasePrototypeMainWindowRouteWorks
+               << " detachedPreviewSharesViewportContext="
+               << detachedPreviewSharesViewportContext
                << " staticChoiceItemDataStored=" << staticChoiceItemDataStored
                << " staticChoicePopupTooltipClear=" << staticChoicePopupTooltipClear
                << " staticChoiceItemTooltipsWork=" << staticChoiceItemTooltipsWork

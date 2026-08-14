@@ -19,7 +19,7 @@ class CPreview : public QGLWidget
     Q_OBJECT
 
 public:
-    explicit CPreview(QWidget* parent=nullptr);
+    explicit CPreview(QWidget* parent=nullptr, const QGLWidget* shareWidget=nullptr);
     //explicit CPreview(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
     void attachView(CView* pView) {m_pView = pView;}
     void attachNode(CNode* pNode);

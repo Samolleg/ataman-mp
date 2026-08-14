@@ -2,6 +2,7 @@
 #define ITEM_SPELL_CONSTRUCTOR_H
 
 #include <QMap>
+#include <QImage>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -28,14 +29,15 @@ struct SConstructorSpell
 {
     QString name, displayName, code, subtype;
     int school{-1}, textureType{-1}, slotCapacity{0}, complexity{0};
-    double mana{0.0};
+    int durationSegments{0}, targets{0}, actions{0};
+    double mana{0.0}, speed{0.0}, range{0.0}, area{0.0}, effect{0.0};
 };
 
 struct SConstructorRune
 {
     QString name, displayName, code;
     int type{-1}, complexity{0};
-    double mana{0.0};
+    double mana{0.0}, value{0.0};
 };
 
 struct SParsedSpellCode
@@ -58,7 +60,9 @@ struct SParsedItemCode
 struct SConstructorLimitReport
 {
     double spellMana{0.0}, itemMana{0.0};
-    int spellComplexity{0}, itemSlots{0};
+    int spellComplexity{0}, spellSlots{0}, itemSlots{0};
+    double range{0.0}, area{0.0}, areaRadius{0.0}, effect{0.0};
+    int durationSegments{0}, targets{0};
     QStringList warnings;
 };
 
@@ -72,8 +76,10 @@ public:
     static QString formatItemCode(const QString& prototypeName, const QString& materialName,
                                   const QString& spellCode = QString());
     static QString itemFigureName(const SConstructorItem& item);
-    static QString itemTextureName(const SConstructorItem& item);
+    static QString itemTextureName(const SConstructorItem& item,
+                                   const SConstructorMaterial* material);
     static QString spellTextureName(const SConstructorSpell& spell);
+    static QImage orientPreviewImage(const QImage& image);
 
     void applyGameTexts(const QMap<QString, QString>& entries);
     QString itemDisplayName(const SConstructorItem& item,
@@ -81,6 +87,8 @@ public:
     QVector<SConstructorMaterial> compatibleMaterials(const SConstructorItem& item) const;
     bool isAuthoredMaterialCompatibility(const QString& itemName,
                                          const QString& materialName) const;
+    SConstructorLimitReport spellReport(const SConstructorSpell& spell,
+                                        const QStringList& runeCodes) const;
     SConstructorLimitReport limits(const SConstructorItem& item,
                                     const SConstructorMaterial* material,
                                     const SConstructorSpell* spell,

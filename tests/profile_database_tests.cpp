@@ -202,6 +202,7 @@ private slots:
     void installedDatabaseInteractiveLatency();
     void itemSpellConstructorParsesCanonicalAndLegacyCodes();
     void itemSpellConstructorRestrictsMaterialsAndReportsSoftLimits();
+    void itemSpellConstructorCalculatesRuntimeSpellValues();
     void itemSpellConstructorPreservesAuthoredMaterialExceptions();
     void itemSpellConstructorUsesGameTextKeys();
     void databaseEditorExposesConstructorEntryPoint();
@@ -1270,16 +1271,46 @@ void ProfileDatabaseTests::itemSpellConstructorRestrictsMaterialsAndReportsSoftL
 
     ei::SConstructorRune rune; rune.name="effect"; rune.displayName="Effect";
     rune.code="e0"; rune.type=3; rune.complexity=3; rune.mana=7.0;
+    rune.value=0.5;
     catalog.runes << rune;
     ei::SConstructorSpell spell;
-    spell.code = "fire"; spell.mana = 20.0; spell.complexity = 20;
+    spell.code = "fire"; spell.mana = 20.0; spell.slotCapacity=2;
+    spell.complexity = 20; spell.effect=10.0;
     const ei::SConstructorLimitReport limits = catalog.limits(
         item, &choices.front(), &spell, {"e0"});
-    QCOMPARE(limits.itemMana, 11.0);
-    QCOMPARE(limits.itemSlots, 10);
+    QCOMPARE(limits.itemMana, 8.0);
+    QCOMPARE(limits.itemSlots, 7);
     QCOMPARE(limits.spellMana, 27.0);
+    QCOMPARE(limits.spellSlots, 3);
     QCOMPARE(limits.spellComplexity, 23);
-    QCOMPARE(limits.warnings.size(), 2);
+    QCOMPARE(limits.effect, 15.0);
+    QCOMPARE(limits.warnings.size(), 1);
+}
+
+void ProfileDatabaseTests::itemSpellConstructorCalculatesRuntimeSpellValues()
+{
+    ei::ItemSpellConstructorCatalog catalog;
+    ei::SConstructorSpell spell;
+    spell.code="blast"; spell.mana=20.0; spell.slotCapacity=2;
+    spell.complexity=12; spell.range=15.0; spell.area=12.566370614359172;
+    spell.effect=40.0; spell.durationSegments=45; spell.targets=2;
+    auto rune=[](const char* code,int type,double mana,double value,int complexity){
+        ei::SConstructorRune result;result.code=code;result.type=type;
+        result.mana=mana;result.value=value;result.complexity=complexity;return result;
+    };
+    catalog.runes << rune("r0",0,1.0,0.5,1) << rune("a0",2,2.0,0.5,2)
+                  << rune("e0",3,3.0,-0.25,3) << rune("d0",4,4.0,1.0,4)
+                  << rune("m0",5,-1.0,-0.25,5);
+    const auto report=catalog.spellReport(spell,{"r0","a0","e0","d0","m0"});
+    QCOMPARE(report.spellMana,24.0); // 20 + flat 9 - 25% of base mana
+    QCOMPARE(report.spellSlots,7);   // base slots plus one slot per rune
+    QCOMPARE(report.spellComplexity,27);
+    QCOMPARE(report.range,22.5);
+    QVERIFY(qAbs(report.area-18.84955592153876)<0.000001);
+    QVERIFY(qAbs(report.areaRadius-qSqrt(6.0))<0.000001);
+    QCOMPARE(report.effect,30.0);
+    QCOMPARE(report.durationSegments,90);
+    QCOMPARE(report.targets,2);
 }
 
 void ProfileDatabaseTests::itemSpellConstructorPreservesAuthoredMaterialExceptions()
@@ -1349,19 +1380,27 @@ void ProfileDatabaseTests::databaseEditorExposesConstructorEntryPoint()
 
 void ProfileDatabaseTests::itemSpellConstructorUsesVerifiedPreviewFamilies()
 {
+    ei::SConstructorMaterial iron;iron.name="iron";iron.code="ir";
     ei::SConstructorItem weapon;weapon.category="Weapon";weapon.typeId=1;
     weapon.textureType1=5;weapon.textureType2=0;
     QCOMPARE(ei::ItemSpellConstructorCatalog::itemFigureName(weapon),QString("initweax5weapon"));
-    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(weapon),QString("ax_05.0"));
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(weapon,&iron),QString("unhumaax_05.ir.0"));
     ei::SConstructorItem armor;armor.category="Armor";armor.type="shirt";
     armor.textureType1=3;armor.textureType2=1;
     QCOMPARE(ei::ItemSpellConstructorCatalog::itemFigureName(armor),QString("initarsh3armor"));
-    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(armor),QString("sh_03.1"));
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(armor,&iron),QString("unhumash_03.ir.1"));
     ei::SConstructorItem quick;quick.category="Quick Item";quick.textureType1=17;
     QCOMPARE(ei::ItemSpellConstructorCatalog::itemFigureName(quick),QString("initqi17item"));
-    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(quick),QString("quitem0017"));
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(quick,nullptr),QString("qitem0017"));
+    QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(quick,&iron),QString("qitem0017.ir"));
     ei::SConstructorSpell spell;spell.textureType=3;
     QCOMPARE(ei::ItemSpellConstructorCatalog::spellTextureName(spell),QString("spell0003"));
+
+    QImage orientation(1,2,QImage::Format_ARGB32);
+    orientation.setPixelColor(0,0,Qt::red);orientation.setPixelColor(0,1,Qt::blue);
+    const QImage displayed=ei::ItemSpellConstructorCatalog::orientPreviewImage(orientation);
+    QCOMPARE(displayed.pixelColor(0,0),QColor(Qt::blue));
+    QCOMPARE(displayed.pixelColor(0,1),QColor(Qt::red));
 }
 
 void ProfileDatabaseTests::installedConstructorCatalogCoverage()

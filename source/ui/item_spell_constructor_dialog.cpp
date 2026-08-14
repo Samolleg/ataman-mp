@@ -5,6 +5,7 @@
 #include "objects/worldobj.h"
 #include "property.h"
 #include "preview.h"
+#include "view.h"
 #include "resourcemanager.h"
 #include <QApplication>
 #include <QClipboard>
@@ -127,7 +128,9 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     if(m_view)
     {
         m_previewObject = new CWorldObj;
-        m_itemPreview = new CPreview(itemTab); m_itemPreview->attachView(m_view);
+        // The constructor is a separate top-level window, so explicitly share
+        // the main viewport's figures, textures, and shader resources.
+        m_itemPreview = new CPreview(itemTab, m_view); m_itemPreview->attachView(m_view);
         m_itemPreview->setMinimumHeight(220); itemRight->addWidget(m_itemPreview, 2);
     }
     itemRoot->addLayout(itemRight, 2);
@@ -292,31 +295,134 @@ void ItemSpellConstructorDialog::useSpellInItem(){if(const auto*spell=currentSpe
 
 void ItemSpellConstructorDialog::updateItemPreview()
 {
-    const auto*item=currentItem();if(!item){m_itemIcon->clear();return;}const QString figure=ItemSpellConstructorCatalog::itemFigureName(*item),texture=ItemSpellConstructorCatalog::itemTextureName(*item);
-    const QImage image=CTextureList::getInstance()->textureImage(texture,figure);if(image.isNull()){m_itemIcon->setPixmap(QPixmap());m_itemIcon->setText(tr("No 2D texture preview for %1").arg(texture));}else{m_itemIcon->setText(QString());m_itemIcon->setPixmap(QPixmap::fromImage(image).scaled(m_itemIcon->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));}
-    if(m_previewObject){m_previewObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE,figure)));m_previewObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR,texture)));m_itemPreview->attachNode(m_previewObject);m_itemPreview->updateGL();}
+    const auto* item=currentItem();
+    if(!item){m_itemIcon->clear();return;}
+    const QString figure=ItemSpellConstructorCatalog::itemFigureName(*item);
+    const QString texture=ItemSpellConstructorCatalog::itemTextureName(*item,currentMaterial());
+    const QImage image=ItemSpellConstructorCatalog::orientPreviewImage(
+        CTextureList::getInstance()->textureImage(texture,figure));
+    if(image.isNull())
+    {
+        m_itemIcon->setPixmap(QPixmap());
+        m_itemIcon->setText(tr("No material preview texture for %1")
+                            .arg(texture.isEmpty()?item->name:texture));
+    }
+    else
+    {
+        m_itemIcon->setText(QString());
+        m_itemIcon->setPixmap(QPixmap::fromImage(image).scaled(
+            m_itemIcon->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
+    }
+    if(m_previewObject&&!figure.isEmpty()&&!texture.isEmpty())
+    {
+        m_previewObject->applyParam(QSharedPointer<IPropertyBase>(
+            new propStr(eObjParam_TEMPLATE,figure)));
+        m_previewObject->applyParam(QSharedPointer<IPropertyBase>(
+            new propStr(eObjParam_PRIM_TXTR,texture)));
+        m_itemPreview->attachNode(m_previewObject);
+        m_itemPreview->updateGL();
+    }
 }
 
 void ItemSpellConstructorDialog::updateSpellPreview()
 {
-    const auto*spell=currentSpell();if(!spell){m_spellIcon->clear();return;}const QString texture=ItemSpellConstructorCatalog::spellTextureName(*spell);const QImage image=CTextureList::getInstance()->textureImage(texture,QString());if(image.isNull()){m_spellIcon->setPixmap(QPixmap());m_spellIcon->setText(tr("Spell icon %1 was not found in the active profile.").arg(texture));}else{QPixmap preview(240,240);preview.fill(QColor(24,24,28));QPainter painter(&preview);const QPixmap icon=QPixmap::fromImage(image).scaled(220,220,Qt::KeepAspectRatio,Qt::SmoothTransformation);painter.drawPixmap((preview.width()-icon.width())/2,4,icon);const QStringList runes=selectedRuneCodes();const int chipWidth=54,chipHeight=24,gap=4;for(int i=0;i<runes.size();++i){const int row=i/4,column=i%4;const QRect chip(6+column*(chipWidth+gap),184+row*(chipHeight+gap),chipWidth,chipHeight);painter.setPen(QPen(QColor(230,200,95),1));painter.setBrush(QColor(20,20,24,220));painter.drawRoundedRect(chip,4,4);painter.setPen(Qt::white);painter.drawText(chip,Qt::AlignCenter,runes.at(i));}painter.end();m_spellIcon->setText(QString());m_spellIcon->setPixmap(preview);}
-    QStringList runeLines;for(const QString&code:selectedRuneCodes())if(const auto*r=m_catalog.findRune(code))runeLines<<tr("%1 — %2 (%3)").arg(r->code,r->displayName,runeTypeName(r->type));m_spellDetails->setText(tr("%1\nCode: %2\nSchool: %3 • %4\nBase energy: %5 • difficulty: %6\n\nRunes:\n%7").arg(spell->displayName,spell->code).arg(spell->school).arg(spell->subtype).arg(spell->mana,0,'g',8).arg(spell->complexity).arg(runeLines.join('\n')));
+    const auto* spell=currentSpell();
+    if(!spell){m_spellIcon->clear();m_spellDetails->clear();return;}
+    const QString texture=ItemSpellConstructorCatalog::spellTextureName(*spell);
+    const QImage image=ItemSpellConstructorCatalog::orientPreviewImage(
+        CTextureList::getInstance()->textureImage(texture,QString()));
+    if(image.isNull())
+    {
+        m_spellIcon->setPixmap(QPixmap());
+        m_spellIcon->setText(tr("Spell icon %1 was not found in the active profile.").arg(texture));
+    }
+    else
+    {
+        QPixmap orientedPreview(240,240);orientedPreview.fill(QColor(24,24,28));
+        QPainter painter(&orientedPreview);
+        const QPixmap icon=QPixmap::fromImage(image).scaled(
+            220,220,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+        painter.drawPixmap((orientedPreview.width()-icon.width())/2,4,icon);
+        const QStringList runes=selectedRuneCodes();
+        const int chipWidth=54,chipHeight=24,gap=4;
+        for(int i=0;i<runes.size();++i)
+        {
+            const int row=i/4,column=i%4;
+            const QRect chip(6+column*(chipWidth+gap),184+row*(chipHeight+gap),
+                             chipWidth,chipHeight);
+            painter.setPen(QPen(QColor(230,200,95),1));
+            painter.setBrush(QColor(20,20,24,220));painter.drawRoundedRect(chip,4,4);
+            painter.setPen(Qt::white);painter.drawText(chip,Qt::AlignCenter,runes.at(i));
+        }
+        painter.end();m_spellIcon->setText(QString());m_spellIcon->setPixmap(orientedPreview);
+    }
+    const auto report=m_catalog.spellReport(*spell,selectedRuneCodes());
+    QStringList verifiedLines;
+    for(const QString& code:selectedRuneCodes())
+        if(const auto* rune=m_catalog.findRune(code))
+            verifiedLines<<tr("%1 - %2 (%3)").arg(
+                rune->code,rune->displayName,runeTypeName(rune->type));
+    m_spellDetails->setText(tr(
+        "%1\nCode: %2\nSchool: %3 | %4\n"
+        "Energy: %5 | item slots: %6 | difficulty: %7\n"
+        "Effect: %8 | duration: %9 s (%10 segments)\n"
+        "Range: %11 m | area: %12 m² (radius %13 m) | targets: %14\n\n"
+        "Runes:\n%15")
+        .arg(spell->displayName,spell->code).arg(spell->school).arg(spell->subtype)
+        .arg(report.spellMana,0,'g',8).arg(report.spellSlots).arg(report.spellComplexity)
+        .arg(report.effect,0,'g',8).arg(report.durationSegments/15.0,0,'g',8)
+        .arg(report.durationSegments).arg(report.range,0,'g',8).arg(report.area,0,'g',8)
+        .arg(report.areaRadius,0,'g',8).arg(report.targets).arg(verifiedLines.join('\n')));
 }
 
 void ItemSpellConstructorDialog::updateOutput()
 {
-    if(m_tabs->currentIndex()==1){if(const auto*spell=currentSpell())m_codeEdit->setText(ItemSpellConstructorCatalog::formatSpellCode(spell->code,selectedRuneCodes()));m_validation->clear();updateSpellPreview();return;}
-    const auto*item=currentItem();if(!item)return;QString spellCode=m_itemSpell->text().trimmed();m_codeEdit->setText(ItemSpellConstructorCatalog::formatItemCode(item->name,m_material->currentData().toString(),spellCode));
-    QStringList detail{tr("%1 • %2 • database code: %3").arg(m_catalog.itemDisplayName(*item,currentMaterial()),item->category,item->name),tr("Material family: %1 • base energy: %2 • base slots: %3 • components: %4").arg(item->materialType).arg(item->mana,0,'g',8).arg(item->slotCapacity).arg(item->components)};
+    if(m_tabs->currentIndex()==1)
+    {
+        if(const auto* spell=currentSpell())
+            m_codeEdit->setText(ItemSpellConstructorCatalog::formatSpellCode(
+                spell->code,selectedRuneCodes()));
+        m_validation->clear();updateSpellPreview();return;
+    }
+    const auto* item=currentItem();if(!item)return;
+    const QString spellCode=m_itemSpell->text().trimmed();
+    m_codeEdit->setText(ItemSpellConstructorCatalog::formatItemCode(
+        item->name,m_material->currentData().toString(),spellCode));
+    QStringList detail{
+        tr("%1 | %2 | database code: %3").arg(
+            m_catalog.itemDisplayName(*item,currentMaterial()),item->category,item->name),
+        tr("Material family: %1 | base energy: %2 | base spell slots: %3 | crafting material required: %4 components")
+            .arg(item->materialType).arg(item->mana,0,'g',8)
+            .arg(item->slotCapacity).arg(item->components)};
     if((item->category==QStringLiteral("Weapon")||item->category==QStringLiteral("Armor"))&&currentMaterial())
-        detail<<tr("Preview: the in-game standalone item model/icon. Equipped material appearance is rendered on the wearer.");
+        detail<<tr("Preview: the material-colored in-game inventory model and texture.");
     QStringList warnings;
     const bool materialRequired=!item->materialType.trimmed().isEmpty()
         && item->materialType.compare(QStringLiteral("None"),Qt::CaseInsensitive)!=0;
     if(materialRequired&&!currentMaterial())
         warnings<<tr("This item requires a supported %1 material.").arg(item->materialType);
-    const SParsedSpellCode parsed=ItemSpellConstructorCatalog::parseSpellCode(spellCode);if(!spellCode.isEmpty()){warnings+=parsed.diagnostics;const auto*spell=parsed.valid?m_catalog.findSpell(parsed.prototypeCode):nullptr;if(parsed.valid&&!spell)warnings<<tr("Unknown spell prototype code '%1'.").arg(parsed.prototypeCode);if(spell){const auto report=m_catalog.limits(*item,currentMaterial(),spell,parsed.runeCodes);warnings+=report.warnings;detail<<tr("Estimated constructed capacity: energy %1 • slots %2").arg(report.itemMana,0,'g',8).arg(report.itemSlots)<<tr("Inserted spell: energy %1 • difficulty %2").arg(report.spellMana,0,'g',8).arg(report.spellComplexity);}}
-    m_itemDetails->setText(detail.join('\n'));m_validation->setText(warnings.isEmpty()?tr("Code is structurally valid. Compatibility findings are advisory."):tr("Advisory validation:\n• %1").arg(warnings.join("\n• ")));
+    const SParsedSpellCode parsed=ItemSpellConstructorCatalog::parseSpellCode(spellCode);
+    if(!spellCode.isEmpty())
+    {
+        warnings+=parsed.diagnostics;
+        const auto* spell=parsed.valid?m_catalog.findSpell(parsed.prototypeCode):nullptr;
+        if(parsed.valid&&!spell)
+            warnings<<tr("Unknown spell prototype code '%1'.").arg(parsed.prototypeCode);
+        if(spell)
+        {
+            const auto report=m_catalog.limits(*item,currentMaterial(),spell,parsed.runeCodes);
+            warnings+=report.warnings;
+            detail<<tr("Constructed item capacity: energy %1 | spell slots %2")
+                        .arg(report.itemMana,0,'g',8).arg(report.itemSlots)
+                  <<tr("Inserted spell: energy %1 | slots used %2 | caster difficulty %3")
+                        .arg(report.spellMana,0,'g',8).arg(report.spellSlots)
+                        .arg(report.spellComplexity);
+        }
+    }
+    m_itemDetails->setText(detail.join('\n'));
+    m_validation->setText(warnings.isEmpty()
+        ?tr("Code is structurally valid. Compatibility findings are advisory.")
+        :tr("Advisory validation:\n• %1").arg(warnings.join("\n• ")));
 }
 
 void ItemSpellConstructorDialog::importCode()

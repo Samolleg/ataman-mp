@@ -3,7 +3,9 @@
 #include "database_document.h"
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QCoreApplication>
 #include <QRegExp>
+#include <QtMath>
 
 namespace {
 QString folded(const QString& value) { return value.trimmed().toCaseFolded(); }
@@ -110,6 +112,13 @@ ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const Data
             spell.school = field(row, 4).toInt();
             spell.mana = field(row, 5).toDouble();
             spell.slotCapacity = field(row, 6).toInt();
+            spell.speed = field(row, 7).toDouble();
+            spell.range = field(row, 8).toDouble();
+            spell.area = field(row, 9).toDouble();
+            spell.effect = field(row, 10).toDouble();
+            spell.targets = field(row, 12).toInt();
+            spell.durationSegments = field(row, 13).toInt();
+            spell.actions = field(row, 14).toInt();
             spell.textureType = field(row, 18).toInt();
             spell.complexity = field(row, 21).toInt();
             if(!spell.code.isEmpty()) result.spells.append(spell);
@@ -124,6 +133,7 @@ ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const Data
             rune.code = field(row, 1).toString();
             rune.type = field(row, 3).toInt();
             rune.mana = field(row, 4).toDouble();
+            rune.value = field(row, 5).toDouble();
             rune.complexity = field(row, 6).toInt();
             if(!rune.code.isEmpty()) result.runes.append(rune);
         }
@@ -238,7 +248,8 @@ QString ItemSpellConstructorCatalog::itemFigureName(const SConstructorItem& item
     return QString();
 }
 
-QString ItemSpellConstructorCatalog::itemTextureName(const SConstructorItem& item)
+QString ItemSpellConstructorCatalog::itemTextureName(const SConstructorItem& item,
+                                                       const SConstructorMaterial* material)
 {
     static const QMap<int, QString> weapons = {
         {0,"sw"},{1,"ax"},{2,"dg"},{3,"sp"},{4,"hm"},{5,"bw"},{6,"cb"},
@@ -249,17 +260,32 @@ QString ItemSpellConstructorCatalog::itemTextureName(const SConstructorItem& ite
         {"pants","pt"},{"boots","bt"},{"gloves","gl"}
     };
     if(item.category == QStringLiteral("Quick Item"))
-        return QStringLiteral("quitem%1").arg(item.textureType1, 4, 10, QChar('0'));
+    {
+        QString result = QStringLiteral("qitem%1").arg(item.textureType1, 4, 10, QChar('0'));
+        if(material && !material->code.trimmed().isEmpty())
+            result += QLatin1Char('.') + material->code.trimmed().toLower();
+        return result;
+    }
     const QString code = item.category == QStringLiteral("Weapon")
         ? weapons.value(item.typeId) : armors.value(folded(item.type));
-    return code.isEmpty() ? QString()
-        : QStringLiteral("%1_%2.%3").arg(code).arg(item.textureType1, 2, 10, QChar('0')).arg(item.textureType2);
+    if(code.isEmpty() || !material || material->code.trimmed().isEmpty())
+        return QString();
+    return QStringLiteral("unhuma%1_%2.%3.%4").arg(code)
+        .arg(item.textureType1, 2, 10, QChar('0'))
+        .arg(material->code.trimmed().toLower()).arg(item.textureType2);
 }
 
 QString ItemSpellConstructorCatalog::spellTextureName(const SConstructorSpell& spell)
 {
     return spell.textureType < 0 ? QString()
         : QStringLiteral("spell%1").arg(spell.textureType, 4, 10, QChar('0'));
+}
+
+QImage ItemSpellConstructorCatalog::orientPreviewImage(const QImage& image)
+{
+    // MMP scanlines are uploaded to OpenGL after a vertical mirror. Match the
+    // rendered game orientation when the decoded image is shown in a Qt label.
+    return image.mirrored(false, true);
 }
 
 void ItemSpellConstructorCatalog::applyGameTexts(const QMap<QString, QString>& entries)
@@ -326,26 +352,64 @@ SConstructorLimitReport ItemSpellConstructorCatalog::limits(const SConstructorIt
                                                              const SConstructorSpell* spell,
                                                              const QStringList& runeCodes) const
 {
-    SConstructorLimitReport result;
-    const int components = qMax(1, item.components);
-    result.itemMana = item.mana + (material ? material->mana * components : 0.0);
-    result.itemSlots = item.slotCapacity + (material ? material->slotCapacity * components : 0);
+    SConstructorLimitReport result = spell ? spellReport(*spell, runeCodes)
+                                           : SConstructorLimitReport();
+    // Components controls crafting material consumption and price only. The
+    // runtime adds the selected material's magic capacities exactly once.
+    result.itemMana = item.mana + (material ? material->mana : 0.0);
+    result.itemSlots = item.slotCapacity + (material ? material->slotCapacity : 0);
     if(!spell) return result;
-    result.spellMana = spell->mana;
-    result.spellComplexity = spell->complexity;
-    for(const QString& code : runeCodes)
-        if(const SConstructorRune* rune = findRune(code))
-        {
-            result.spellMana += rune->mana;
-            result.spellComplexity += rune->complexity;
-        }
-        else result.warnings << QStringLiteral("Unknown rune code '%1'.").arg(code);
     if(result.spellMana > result.itemMana)
-        result.warnings << QStringLiteral("Spell energy %1 exceeds the constructed item's estimated energy %2.")
+        result.warnings << QCoreApplication::translate(
+                           "ItemSpellConstructorCatalog",
+                           "Spell energy %1 exceeds the constructed item's energy %2.")
                            .arg(result.spellMana, 0, 'g', 8).arg(result.itemMana, 0, 'g', 8);
-    if(result.spellComplexity > result.itemSlots)
-        result.warnings << QStringLiteral("Spell difficulty %1 exceeds the constructed item's estimated slots %2.")
-                           .arg(result.spellComplexity).arg(result.itemSlots);
+    if(result.spellSlots > result.itemSlots)
+        result.warnings << QCoreApplication::translate(
+                           "ItemSpellConstructorCatalog",
+                           "Spell uses %1 slots but the constructed item has %2.")
+                           .arg(result.spellSlots).arg(result.itemSlots);
+    return result;
+}
+
+SConstructorLimitReport ItemSpellConstructorCatalog::spellReport(
+    const SConstructorSpell& spell, const QStringList& runeCodes) const
+{
+    SConstructorLimitReport result;
+    result.spellMana = spell.mana;
+    result.spellSlots = spell.slotCapacity;
+    result.spellComplexity = spell.complexity;
+    result.range = spell.range;
+    result.area = spell.area;
+    result.effect = spell.effect;
+    result.durationSegments = spell.durationSegments;
+    result.targets = spell.targets;
+    for(const QString& code : runeCodes)
+    {
+        const SConstructorRune* rune = findRune(code);
+        if(!rune)
+        {
+            result.warnings << QCoreApplication::translate(
+                               "ItemSpellConstructorCatalog",
+                               "Unknown rune code '%1'.").arg(code);
+            continue;
+        }
+        const QChar kind = rune->code.isEmpty() ? QChar() : rune->code.at(0).toLower();
+        if(kind == QLatin1Char('r')) result.range = qMax(0.0, result.range + spell.range * rune->value);
+        else if(kind == QLatin1Char('t')) result.targets = qMax(0, result.targets + int(spell.targets * rune->value));
+        else if(kind == QLatin1Char('a')) result.area = qMax(0.0, result.area + spell.area * rune->value);
+        else if(kind == QLatin1Char('e')) result.effect = qMax(0.0, result.effect + spell.effect * rune->value);
+        else if(kind == QLatin1Char('d'))
+            result.durationSegments = qMax(0, result.durationSegments
+                                               + int(spell.durationSegments * rune->value));
+        else if(kind == QLatin1Char('m'))
+            result.spellMana = qMax(0.0, result.spellMana + spell.mana * rune->value);
+        ++result.spellSlots;
+        result.spellComplexity += rune->complexity;
+        result.spellMana += rune->mana;
+    }
+    result.spellMana = qMax(spell.mana, result.spellMana);
+    result.areaRadius = result.area > 0.0 ? qSqrt(result.area / M_PI) : 0.0;
     return result;
 }
 

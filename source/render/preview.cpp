@@ -6,8 +6,8 @@
 #include <QWheelEvent>
 #include <QOpenGLContext>
 
-CPreview::CPreview(QWidget *parent):
-    QGLWidget(parent)
+CPreview::CPreview(QWidget *parent, const QGLWidget* shareWidget):
+    QGLWidget(parent, shareWidget)
   ,m_pNode(nullptr)
   ,m_pView(nullptr)
 {
