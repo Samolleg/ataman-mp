@@ -123,6 +123,9 @@ struct STerrainAtlasProfile
     QByteArray atlasPixelSha256;
     int atlasSlotCount{0};
     QString provenance;
+    // Optional portable hint to the one RES archive that owns every page of a
+    // published atlas. The decoded pixel hash remains the authority.
+    QString resourceArchiveHint;
     bool approved{false};
     QVector<STerrainAtlasProfileFamily> families;
     QVector<STerrainAtlasProfileSlot> slotDefinitions;

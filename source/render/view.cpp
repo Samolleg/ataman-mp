@@ -81,6 +81,7 @@
 #include "endurance_document.h"
 #include "staged_save_validator.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_archive_binding.h"
 #include "terrain_atlas_profile.h"
 #include "terrain_atlas_review_dialog.h"
 #include "terrain_virtual_atlas.h"
@@ -5468,6 +5469,70 @@ void CView::loadLandscape(const QFileInfo& filePath)
         if(QFileInfo::exists(publishedTextures))
             mapLocalAtlas = publishedTextures;
     }
+    // Publication stores its exact decoded atlas hash beside the MPR. Resolve
+    // that complete atlas to one RES before the renderer reads any page;
+    // per-member generic lookup can otherwise combine an old backup archive
+    // with the newly published archive under one namespace.
+    CMprDocument bindingDocument;
+    CValidationReport bindingDocumentReport;
+    if(bindingDocument.load(filePath, &bindingDocumentReport)
+       && !bindingDocumentReport.hasErrors())
+    {
+        STerrainAtlasProfile bindingProfile;
+        CValidationReport bindingProfileReport;
+        if(CTerrainAtlasProfileStore::load(
+               bindingDocument.mapInfo().innerNamespace, &bindingProfile,
+               filePath.absolutePath(), &bindingProfileReport)
+           && bindingProfile.provenance
+                == QStringLiteral("portable-finalized-modern-atlas-v1"))
+        {
+            QString preferredArchive;
+            if(!bindingProfile.resourceArchiveHint.isEmpty())
+            {
+                const QString hint = QDir::fromNativeSeparators(
+                    bindingProfile.resourceArchiveHint);
+                preferredArchive = QDir::isAbsolutePath(hint)
+                    ? hint : filePath.dir().absoluteFilePath(hint);
+            }
+            else if(QFileInfo(mapLocalAtlas).isFile())
+                preferredArchive = QFileInfo(mapLocalAtlas).absoluteFilePath();
+            const STerrainAtlasArchiveBindingResult binding =
+                CTerrainAtlasArchiveBindingResolver::findExactArchive(
+                    CTextureList::getInstance()
+                        ->configuredResourceArchivePaths(),
+                    bindingDocument.mapInfo().innerNamespace,
+                    int(bindingDocument.mapInfo().textureCount),
+                    bindingProfile.atlasSlotCount,
+                    bindingProfile.atlasPixelSha256,
+                    preferredArchive);
+            if(binding.success())
+            {
+                mapLocalAtlas = binding.archivePath;
+                ei::log(eLogInfo, QStringLiteral(
+                    "Bound finalized terrain atlas to coherent RES: %1 hash:%2")
+                    .arg(binding.archivePath,
+                         QString::fromLatin1(
+                             binding.decodedAtlasPixelSha256)));
+            }
+            else
+            {
+                const QString message = tr(
+                    "This finalized MPR references an exact published terrain "
+                    "atlas, but no single configured RES archive matches it. "
+                    "The map was not opened, so the editor cannot mix old and "
+                    "new texture pages.\n\nResource identity: %1\nExpected atlas "
+                    "hash: %2\n\n%3")
+                    .arg(bindingDocument.mapInfo().innerNamespace,
+                         QString::fromLatin1(
+                             bindingProfile.atlasPixelSha256),
+                         binding.error);
+                ei::log(eLogWarning, message);
+                QMessageBox::critical(this,
+                    tr("Finalized terrain RES unavailable"), message);
+                return;
+            }
+        }
+    }
     CTextureList::getInstance()->setMapLocalTerrainArchive(mapLocalAtlas);
     m_activeTerrainArchivePath = QFileInfo::exists(mapLocalAtlas)
         ? QFileInfo(mapLocalAtlas).absoluteFilePath() : QString();
@@ -5524,8 +5589,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
         if(atlasSources.size() == 1)
         {
             const QFileInfo source(*atlasSources.constBegin());
-            if(source.fileName().compare(
-                   QStringLiteral("textures.res"), Qt::CaseInsensitive) == 0)
+            if(source.suffix().compare(
+                   QStringLiteral("res"), Qt::CaseInsensitive) == 0)
             {
                 m_activeTerrainArchivePath = source.absoluteFilePath();
                 ei::log(eLogInfo, QStringLiteral(
@@ -5535,7 +5600,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
         }
         else if(atlasSources.size() > 1)
             ei::log(eLogWarning, QStringLiteral(
-                "Published terrain pages resolve from multiple archives; Save will request one explicit textures.res destination."));
+                "Published terrain pages resolve from multiple archives; Save will request one explicit RES destination."));
     }
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
@@ -8605,8 +8670,8 @@ void CView::finalizeVirtualTerrainAtlas()
                     resourceRoots.append(root);
     const QFileInfo activeArchive(m_activeTerrainArchivePath);
     if(activeArchive.exists()
-       && activeArchive.fileName().compare(
-              QStringLiteral("textures.res"), Qt::CaseInsensitive) == 0)
+       && activeArchive.suffix().compare(
+              QStringLiteral("res"), Qt::CaseInsensitive) == 0)
         texturesPath = activeArchive.absoluteFilePath();
     if(texturesPath.isEmpty())
         texturesPath = QFileDialog::getOpenFileName(
@@ -8737,6 +8802,12 @@ void CView::finalizeVirtualTerrainAtlas()
             materialRuntimeTypes(m_terrainAtlasProfile,
                                  m_terrainGlobalFamilies),
             &portableProfileReport);
+    QString archiveHint = QDir::fromNativeSeparators(
+        mprDestination.dir().relativeFilePath(
+            QFileInfo(texturesPath).absoluteFilePath()));
+    if(QDir::isAbsolutePath(archiveHint))
+        archiveHint = QFileInfo(texturesPath).fileName();
+    portableProfile.resourceArchiveHint = archiveHint;
     if(portableProfileReport.hasErrors()
        || portableProfile.assignedSlotCount()!=finalized.requiredSlots)
     {

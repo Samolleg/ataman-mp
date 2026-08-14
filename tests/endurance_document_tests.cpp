@@ -17,6 +17,7 @@
 #include "terrain_edit_model.h"
 #include "terrain_tile_information_policy.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_archive_binding.h"
 #include "terrain_atlas_profile.h"
 #include "terrain_virtual_atlas.h"
 #include "tile.h"
@@ -366,6 +367,8 @@ private slots:
     void materialAtlasStoreLoadsOnlyExplicitLocalOverrides();
     void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void workingAtlasProfileBindsExtensionSignaturesForDraftReopen();
+    void publishedAtlasArchiveBindingSelectsCoherentProfileSource();
+    void externalPublishedAtlasArchiveBindingProbe();
     void externalReopenedDraftTopologyProbe();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
@@ -3446,6 +3449,8 @@ void EnduranceDocumentTests::semanticAtlasReviewEditsAndStoreAreDeterministic()
     QCOMPARE(profile.families.size(), 2);
     QCOMPARE(profile.slotDefinitions.at(2).signature.northWest, qint32(1));
 
+    profile.resourceArchiveHint =
+        QStringLiteral("../res/HDPack_Terrain.res");
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString path = CTerrainAtlasProfileStore::profilePath(
@@ -6866,6 +6871,103 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
     QCOMPARE(analysis.landCatalog.gridSignatureForPacked(
                  packed.encode(), &found), visible);
     QVERIFY(found);
+}
+
+void EnduranceDocumentTests::publishedAtlasArchiveBindingSelectsCoherentProfileSource()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QVector<QImage> wrongTiles;
+    QVector<QImage> expectedTiles;
+    for(int slot = 0; slot < 128; ++slot)
+    {
+        QImage wrong(16, 16, QImage::Format_RGBA8888);
+        wrong.fill(Qt::white);
+        wrongTiles.append(wrong);
+        QImage expected(16, 16, QImage::Format_RGBA8888);
+        expected.fill(Qt::black);
+        expectedTiles.append(expected);
+    }
+    const auto archiveBytes = [](const QVector<QImage>& tiles) {
+        QByteArray empty = emptyMpr();
+        CResArchiveDocument archive;
+        QStringList errors;
+        if(!archive.loadBytes(empty, QStringLiteral("empty.res"), &errors))
+            return QByteArray();
+        QVector<SResArchiveNewMember> pages;
+        for(int page = 0; page < 2; ++page)
+        {
+            QString diagnostic;
+            SResArchiveNewMember member;
+            member.name = QStringLiteral("zone4%1.mmp")
+                .arg(page, 3, 10, QLatin1Char('0'));
+            member.payload = ei::encodeMmpDxt1(
+                CTerrainVirtualAtlas::composePage(tiles, page * 64, 16),
+                true, &diagnostic);
+            if(member.payload.isEmpty())
+                return QByteArray();
+            pages.append(member);
+        }
+        QByteArray result;
+        if(!archive.buildWithAppendedMembers(pages, &result, &errors))
+            return QByteArray();
+        return result;
+    };
+    const QString wrongPath = root.filePath(
+        QStringLiteral("HDPack_Terrain - Copy.res"));
+    const QString expectedPath = root.filePath(
+        QStringLiteral("HDPack_Terrain.res"));
+    for(const QPair<QString, QByteArray>& file : {
+         qMakePair(wrongPath, archiveBytes(wrongTiles)),
+         qMakePair(expectedPath, archiveBytes(expectedTiles))})
+    {
+        QVERIFY(!file.second.isEmpty());
+        QFile output(file.first);
+        QVERIFY(output.open(QIODevice::WriteOnly));
+        QCOMPARE(output.write(file.second), qint64(file.second.size()));
+    }
+    const STerrainAtlasArchiveBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findExactArchive(
+            {wrongPath, expectedPath}, QStringLiteral("zone4"), 2, 128,
+            CTerrainAtlasProfileInference::pixelSha256(expectedTiles),
+            wrongPath);
+    QVERIFY2(binding.success(), qPrintable(binding.error));
+    QCOMPARE(QFileInfo(binding.archivePath).canonicalFilePath(),
+             QFileInfo(expectedPath).canonicalFilePath());
+    QCOMPARE(binding.decodedAtlasPixelSha256,
+             CTerrainAtlasProfileInference::pixelSha256(expectedTiles));
+}
+
+void EnduranceDocumentTests::externalPublishedAtlasArchiveBindingProbe()
+{
+    const QString mprPath =
+        qEnvironmentVariable("EI_MAPPER_REAL_PUBLISHED_MPR");
+    const QString profilePath =
+        qEnvironmentVariable("EI_MAPPER_REAL_PUBLISHED_PROFILE");
+    const QStringList archives = qEnvironmentVariable(
+        "EI_MAPPER_REAL_RESOURCE_ARCHIVES").split(QDir::listSeparator(),
+                                                   QString::SkipEmptyParts);
+    if(mprPath.isEmpty() || profilePath.isEmpty() || archives.isEmpty())
+        QSKIP("Set EI_MAPPER_REAL_PUBLISHED_MPR, EI_MAPPER_REAL_PUBLISHED_PROFILE, and EI_MAPPER_REAL_RESOURCE_ARCHIVES for the read-only binding probe");
+    CValidationReport report;
+    CMprDocument document;
+    STerrainAtlasProfile profile;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    QVERIFY2(STerrainAtlasProfile::load(profilePath, &profile, &report),
+             qPrintable(report.toText()));
+    const STerrainAtlasArchiveBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findExactArchive(
+            archives, document.mapInfo().innerNamespace,
+            int(document.mapInfo().textureCount), profile.atlasSlotCount,
+            profile.atlasPixelSha256);
+    QVERIFY2(binding.success(), qPrintable(binding.error));
+    QCOMPARE(binding.decodedAtlasPixelSha256, profile.atlasPixelSha256);
+    const QString expected =
+        qEnvironmentVariable("EI_MAPPER_REAL_PUBLISHED_ARCHIVE");
+    if(!expected.isEmpty())
+        QCOMPARE(QFileInfo(binding.archivePath).canonicalFilePath(),
+                 QFileInfo(expected).canonicalFilePath());
 }
 
 void EnduranceDocumentTests::externalReopenedDraftTopologyProbe()

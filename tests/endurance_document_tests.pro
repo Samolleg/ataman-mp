@@ -18,6 +18,7 @@ SOURCES += \
     ../source/documents/res_archive_document.cpp \
     ../source/resources/mmp_codec.cpp \
     ../source/render/terrain_atlas_analyzer.cpp \
+    ../source/render/terrain_atlas_archive_binding.cpp \
     ../source/render/terrain_atlas_profile.cpp \
     ../source/render/terrain_atlas_presets.cpp \
     ../source/documents/staged_save_validator.cpp \
@@ -38,6 +39,7 @@ HEADERS += \
     ../source/documents/res_archive_document.h \
     ../source/resources/mmp_codec.h \
     ../source/render/terrain_atlas_analyzer.h \
+    ../source/render/terrain_atlas_archive_binding.h \
     ../source/render/terrain_atlas_profile.h \
     ../source/documents/staged_save_validator.h \
     ../source/documents/backup_manager.h \

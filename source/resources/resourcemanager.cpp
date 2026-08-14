@@ -1357,6 +1357,18 @@ bool CTextureList::terrainMmpTile(const QString& textureName, int logicalSlot,
     return true;
 }
 
+QStringList CTextureList::configuredResourceArchivePaths() const
+{
+    QStringList paths;
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    for(const QString& source : sources)
+        if(QFileInfo(source).isFile()
+           && QFileInfo(source).suffix().compare(
+                  QStringLiteral("res"), Qt::CaseInsensitive) == 0)
+            paths.append(QFileInfo(source).absoluteFilePath());
+    return paths;
+}
+
 void CTextureList::setMapLocalTerrainArchive(const QString& path)
 {
     QString resolved;

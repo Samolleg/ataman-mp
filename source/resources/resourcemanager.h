@@ -152,6 +152,9 @@ public:
     // A finalized isolated MPR may carry a sibling <mpr>-atlas.res. This
     // session-only source is searched before configured shared terrain data.
     void setMapLocalTerrainArchive(const QString& path);
+    // Expanded, ordered RES files from the active resource profile. Used to
+    // bind a finalized atlas to one coherent archive before renderer loading.
+    QStringList configuredResourceArchivePaths() const;
 
 private:
     CTextureList();

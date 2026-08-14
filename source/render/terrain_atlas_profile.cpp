@@ -265,6 +265,9 @@ QJsonObject STerrainAtlasProfile::toJson() const
     root.insert(QStringLiteral("atlasPixelSha256"), QString::fromLatin1(atlasPixelSha256));
     root.insert(QStringLiteral("atlasSlotCount"), atlasSlotCount);
     root.insert(QStringLiteral("provenance"), provenance);
+    if(!resourceArchiveHint.trimmed().isEmpty())
+        root.insert(QStringLiteral("resourceArchiveHint"),
+                    QDir::fromNativeSeparators(resourceArchiveHint.trimmed()));
     root.insert(QStringLiteral("approved"), approved);
     QJsonArray familyArray;
     for(const STerrainAtlasProfileFamily& family : families)
@@ -333,6 +336,8 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
     parsed.atlasPixelSha256 = object.value(QStringLiteral("atlasPixelSha256")).toString().toLatin1();
     parsed.atlasSlotCount = object.value(QStringLiteral("atlasSlotCount")).toInt(-1);
     parsed.provenance = object.value(QStringLiteral("provenance")).toString();
+    parsed.resourceArchiveHint = QDir::fromNativeSeparators(
+        object.value(QStringLiteral("resourceArchiveHint")).toString().trimmed());
     parsed.approved = object.value(QStringLiteral("approved")).toBool(false);
     if(schemaVersion >= 6
        && object.value(QStringLiteral("cornerSpace")).toString()

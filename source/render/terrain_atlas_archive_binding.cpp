@@ -1,0 +1,166 @@
+#include "terrain_atlas_archive_binding.h"
+
+#include <QDataStream>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QMap>
+#include <QSet>
+#include <QTextCodec>
+
+#include "mmp_codec.h"
+#include "res_file.h"
+#include "terrain_atlas_profile.h"
+
+namespace {
+struct SArchiveMemberLocation
+{
+    quint32 offset{0};
+    quint32 size{0};
+};
+
+bool archiveIndex(const QString& path,
+                  QMap<QString, SArchiveMemberLocation>* members)
+{
+    if(!members)
+        return false;
+    members->clear();
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))
+        return false;
+    QDataStream stream(&file);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    SResFileHeader header;
+    stream >> header;
+    if(header.Signature != 0x019CE23C || header.TableSize > 10000000
+       || quint64(header.TableOffset) > quint64(file.size()))
+        return false;
+    if(!file.seek(header.TableOffset))
+        return false;
+    QVector<SResHashTable> table(int(header.TableSize));
+    for(SResHashTable& entry : table)
+        stream >> entry;
+    const QByteArray names = file.read(header.NamesLenght);
+    if(names.size() != int(header.NamesLenght))
+        return false;
+    QTextCodec* codec = QTextCodec::codecForName("CP1251");
+    for(const SResHashTable& raw : table)
+    {
+        if(quint64(raw.NameOffset) + raw.NameLength > quint64(names.size())
+           || quint64(raw.DataOffset) + raw.DataSize > quint64(file.size()))
+            continue;
+        const QString name = codec->toUnicode(names.mid(
+            int(raw.NameOffset), int(raw.NameLength))).toLower();
+        SArchiveMemberLocation location;
+        location.offset = raw.DataOffset;
+        location.size = raw.DataSize;
+        members->insert(name, location);
+    }
+    return true;
+}
+
+QByteArray memberPayload(QFile* file,
+                         const SArchiveMemberLocation& member)
+{
+    if(!file || !file->seek(member.offset))
+        return QByteArray();
+    const QByteArray payload = file->read(member.size);
+    return payload.size() == int(member.size) ? payload : QByteArray();
+}
+
+QString normalizedPath(const QString& path)
+{
+    return QDir::cleanPath(QFileInfo(path).absoluteFilePath()).toLower();
+}
+}
+
+STerrainAtlasArchiveBindingResult
+CTerrainAtlasArchiveBindingResolver::findExactArchive(
+    const QStringList& candidateArchives,
+    const QString& mprNamespace,
+    int textureCount,
+    int atlasSlotCount,
+    const QByteArray& expectedAtlasPixelSha256,
+    const QString& preferredArchive)
+{
+    STerrainAtlasArchiveBindingResult result;
+    if(mprNamespace.trimmed().isEmpty() || textureCount <= 0
+       || atlasSlotCount <= 0 || atlasSlotCount > textureCount * 64
+       || expectedAtlasPixelSha256.size() != 64)
+    {
+        result.error = QStringLiteral("The saved terrain-atlas binding is incomplete.");
+        return result;
+    }
+    QStringList ordered;
+    if(QFileInfo(preferredArchive).isFile())
+        ordered.append(QFileInfo(preferredArchive).absoluteFilePath());
+    ordered.append(candidateArchives);
+    QSet<QString> seen;
+    for(const QString& candidate : ordered)
+    {
+        const QFileInfo archive(candidate);
+        if(!archive.isFile())
+            continue;
+        const QString key = normalizedPath(archive.absoluteFilePath());
+        if(seen.contains(key))
+            continue;
+        seen.insert(key);
+        QMap<QString, SArchiveMemberLocation> members;
+        if(!archiveIndex(archive.absoluteFilePath(), &members))
+            continue;
+        QVector<QByteArray> pages;
+        QFile file(archive.absoluteFilePath());
+        if(!file.open(QIODevice::ReadOnly))
+            continue;
+        bool complete = true;
+        for(int page = 0; page < textureCount; ++page)
+        {
+            const QString name = QStringLiteral("%1%2.mmp")
+                .arg(mprNamespace.toLower())
+                .arg(page, 3, 10, QLatin1Char('0'));
+            const auto found = members.constFind(name);
+            if(found == members.constEnd())
+            {
+                complete = false;
+                break;
+            }
+            const QByteArray payload = memberPayload(&file, found.value());
+            if(payload.isEmpty())
+            {
+                complete = false;
+                break;
+            }
+            pages.append(payload);
+        }
+        if(!complete)
+            continue;
+        result.completeArchives.append(archive.absoluteFilePath());
+        QVector<QImage> tiles;
+        tiles.reserve(atlasSlotCount);
+        QString diagnostic;
+        for(int slot = 0; slot < atlasSlotCount; ++slot)
+        {
+            QImage tile;
+            if(!ei::decodeMmpDxt1AtlasTile(
+                   pages.at(slot / 64), slot % 64, &tile, &diagnostic))
+            {
+                tiles.clear();
+                break;
+            }
+            tiles.append(tile.convertToFormat(QImage::Format_RGBA8888));
+        }
+        if(tiles.size() != atlasSlotCount)
+            continue;
+        const QByteArray actual =
+            CTerrainAtlasProfileInference::pixelSha256(tiles);
+        if(actual.toLower() != expectedAtlasPixelSha256.toLower())
+            continue;
+        result.archivePath = archive.absoluteFilePath();
+        result.decodedAtlasPixelSha256 = actual;
+        return result;
+    }
+    result.error = QStringLiteral(
+        "No configured RES archive contains one complete terrain atlas matching the saved profile.");
+    return result;
+}
