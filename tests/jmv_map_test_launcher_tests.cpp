@@ -241,6 +241,10 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
     input.tablesLuaData = readAll(input.tablesLuaSourcePath);
     QVERIFY2(!input.tablesLuaData.isEmpty(),
              qPrintable("Could not read smoke tables.lua: " + input.tablesLuaSourcePath));
+    // Make the staged payload observably different without changing Lua
+    // semantics. GameplayReady plus the redirect/hash evidence then proves a
+    // pending Lua document was loaded, rather than a byte-identical copy.
+    input.tablesLuaData.append("\r\n-- EI Mapper Endurance staged-Lua smoke marker\r\n");
     input.mapEntry.zoneId = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_ZONE", "gz1g");
     input.mapEntry.mprName = qEnvironmentVariable(
         "EI_ENDURANCE_RUNTIME_SMOKE_MPR_NAME",
