@@ -10,15 +10,18 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QContextMenuEvent>
+#include <QHeaderView>
 #include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTimer>
 #include <QSignalSpy>
+#include <QSettings>
 #include <QTableWidget>
 #include <QTableView>
 #include <QComboBox>
@@ -198,6 +201,7 @@ private slots:
     void workbookImportRejectsReadOnlyAndUnpublishableChanges();
     void databaseEditorRowMenuAndWrappedFieldEditor();
     void databaseEditorUsesLazyModelAndNavigatesReferences();
+    void databaseEditorPersistsVisualColumnControls();
     void installedVerifiedReferenceMappingsResolve();
     void installedDatabaseInteractiveLatency();
     void itemSpellConstructorParsesCanonicalAndLegacyCodes();
@@ -207,6 +211,7 @@ private slots:
     void itemSpellConstructorUsesGameTextKeys();
     void databaseEditorExposesConstructorEntryPoint();
     void itemSpellConstructorUsesVerifiedPreviewFamilies();
+    void itemSpellConstructorUsesEffectiveJmvSpellCatalog();
     void installedConstructorCatalogCoverage();
     void gameTextCatalogComposesProfileOverlays();
 };
@@ -1183,6 +1188,92 @@ void ProfileDatabaseTests::installedDatabaseInteractiveLatency()
     ei::DatabaseEditorDialog dialog(document);dialog.show();timer.restart();dialog.refreshFromHistory();const qint64 refreshMs=timer.elapsed();qInfo()<<"database interaction latency ms set"<<setValueMs<<"snapshot"<<snapshotMs<<"refresh"<<refreshMs<<"rows"<<monsters->rows.size();QVERIFY2(setValueMs<100,qPrintable(QString("A simple database mutation took %1 ms; expected under 100 ms.").arg(setValueMs)));QVERIFY2(snapshotMs<500,qPrintable(QString("Runtime snapshot publication took %1 ms; expected under 500 ms.").arg(snapshotMs)));QVERIFY2(refreshMs<500,qPrintable(QString("A simple database refresh took %1 ms; expected under 500 ms.").arg(refreshMs)));
 }
 
+void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
+{
+    const QString previousOrganization=QCoreApplication::organizationName();
+    const QString previousApplication=QCoreApplication::applicationName();
+    const QSettings::Format previousFormat=QSettings::defaultFormat();
+    QTemporaryDir settingsDirectory;QVERIFY(settingsDirectory.isValid());
+    QCoreApplication::setOrganizationName(QStringLiteral("EI Mapper Endurance Tests"));
+    QCoreApplication::setApplicationName(QStringLiteral("Database Column State"));
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settingsDirectory.path());
+    QSettings settings;
+    settings.remove(QStringLiteral("databaseEditor/columns/base_units.monsters"));
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());
+    write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="base";
+    request.resourceDirectories<<temporary.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    const int changesBefore=document->changes().size();
+
+    auto triggerHeaderAction=[](QHeaderView* header,const QString& objectName,int section) {
+        bool triggered=false;
+        QTimer poll;poll.setInterval(5);
+        QObject::connect(&poll,&QTimer::timeout,[&triggered,objectName,&poll](){
+            QMenu* menu=qobject_cast<QMenu*>(QApplication::activePopupWidget());
+            for(QWidget* widget:QApplication::allWidgets())
+                if(widget->objectName()==QStringLiteral("databaseColumnMenu"))
+                    menu=qobject_cast<QMenu*>(widget);
+            if(!menu)return;
+            for(QAction* action:menu->findChildren<QAction*>())
+                if(action->objectName()==objectName){action->trigger();triggered=true;poll.stop();return;}
+            menu->close();poll.stop();
+        });
+        QTimer::singleShot(1000,[](){
+            for(QWidget* widget:QApplication::allWidgets())
+                if(QMenu* menu=qobject_cast<QMenu*>(widget))menu->close();
+        });
+        poll.start();
+        const QPoint point(header->sectionViewportPosition(section)+header->sectionSize(section)/2,
+                           header->height()/2);
+        QMetaObject::invokeMethod(header,"customContextMenuRequested",Qt::DirectConnection,
+                                  Q_ARG(QPoint,point));
+        poll.stop();
+        return triggered;
+    };
+
+    {
+        ei::DatabaseEditorDialog dialog(document);dialog.show();
+        QVERIFY(dialog.selectPrototype("Human Test"));
+        QTableView* grid=dialog.findChild<QTableView*>("databaseGrid");QVERIFY(grid);
+        QCOMPARE(grid->model()->headerData(0,Qt::Horizontal).toString(),QString("#"));
+        QVERIFY(!(grid->model()->flags(grid->model()->index(0,0))&Qt::ItemIsEditable));
+        QLineEdit* filter=dialog.findChild<QLineEdit*>("databaseRowFilter");QVERIFY(filter);
+        const QString rowNumber=grid->model()->index(grid->currentIndex().row(),0).data().toString();
+        filter->setText(QStringLiteral("#")+rowNumber);
+        QTRY_COMPARE_WITH_TIMEOUT(grid->model()->rowCount(),1,1000);
+        filter->clear();QTRY_VERIFY_WITH_TIMEOUT(grid->model()->rowCount()>1,1000);
+
+        QVERIFY(triggerHeaderAction(grid->horizontalHeader(),"databaseLockColumnsAction",2));
+        QCOMPARE(grid->property("frozenColumnCount").toInt(),3);
+        QVERIFY(triggerHeaderAction(grid->horizontalHeader(),"databaseColumnVisibilityAction_3",2));
+        int hidden=0;for(int column=0;column<grid->model()->columnCount();++column)
+            hidden+=grid->isColumnHidden(column);
+        QVERIFY(hidden>0);
+        QCOMPARE(document->changes().size(),changesBefore);
+    }
+    settings.sync();
+    QCOMPARE(settings.value(QStringLiteral("databaseEditor/columns/base_units.monsters/frozenThrough")).toString(),
+             QStringLiteral("fld.1.0"));
+    {
+        ei::DatabaseEditorDialog restored(document);restored.show();
+        QVERIFY(restored.selectPrototype("Human Test"));
+        QTableView* grid=restored.findChild<QTableView*>("databaseGrid");QVERIFY(grid);
+        QCOMPARE(grid->property("frozenColumnCount").toInt(),3);
+        int hidden=0;for(int column=0;column<grid->model()->columnCount();++column)
+            hidden+=grid->isColumnHidden(column);
+        QVERIFY(hidden>0);
+        QCOMPARE(document->changes().size(),changesBefore);
+    }
+    settings.remove(QStringLiteral("databaseEditor/columns/base_units.monsters"));
+    settings.sync();
+    QCoreApplication::setOrganizationName(previousOrganization);
+    QCoreApplication::setApplicationName(previousApplication);
+    QSettings::setDefaultFormat(previousFormat);
+}
+
 void ProfileDatabaseTests::installedVerifiedReferenceMappingsResolve()
 {
     const QStringList archives=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';',QString::SkipEmptyParts);
@@ -1341,7 +1432,7 @@ void ProfileDatabaseTests::itemSpellConstructorUsesGameTextKeys()
     ei::SConstructorMaterial material; material.name="Iron"; material.displayName="Iron";
     material.type="Metal"; material.code="ir"; catalog.materials << material;
     ei::SConstructorSpell spell; spell.name="Fireball"; spell.displayName="Fireball";
-    spell.code="fireball"; spell.subtype="fire"; spell.school=0; spell.textureType=3;
+    spell.code="fireball"; spell.subtype="fire"; spell.school="Fire"; spell.textureType=3;
     catalog.spells << spell;
     ei::SConstructorRune rune; rune.name="Cut Effect"; rune.displayName="Cut Effect";
     rune.code="e0"; rune.type=3; catalog.runes << rune;
@@ -1394,13 +1485,39 @@ void ProfileDatabaseTests::itemSpellConstructorUsesVerifiedPreviewFamilies()
     QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(quick,nullptr),QString("qitem0017"));
     QCOMPARE(ei::ItemSpellConstructorCatalog::itemTextureName(quick,&iron),QString("qitem0017.ir"));
     ei::SConstructorSpell spell;spell.textureType=3;
-    QCOMPARE(ei::ItemSpellConstructorCatalog::spellTextureName(spell),QString("spell0003"));
+    ei::ItemSpellConstructorCatalog catalog;
+    QCOMPARE(catalog.spellTextureName(spell),QString("spell0003"));
 
     QImage orientation(1,2,QImage::Format_ARGB32);
     orientation.setPixelColor(0,0,Qt::red);orientation.setPixelColor(0,1,Qt::blue);
     const QImage displayed=ei::ItemSpellConstructorCatalog::orientPreviewImage(orientation);
     QCOMPARE(displayed.pixelColor(0,0),QColor(Qt::blue));
     QCOMPARE(displayed.pixelColor(0,1),QColor(Qt::red));
+}
+
+void ProfileDatabaseTests::itemSpellConstructorUsesEffectiveJmvSpellCatalog()
+{
+    QTemporaryDir directory;QVERIFY(directory.isValid());
+    QMap<QString,QByteArray> members=relationalMembers();
+    const QByteArray original=stringField(0,"Old Fire")+stringField(1,"fireball")
+        +stringField(2,"fire")+intField(4,0)+intField(18,3);
+    const QByteArray replacement=stringField(0,"JMV Fire")+stringField(1,"fireball")
+        +stringField(2,"fire")+intField(4,0)+intField(18,27);
+    members["spells.sdb"]=database({record(original)+record(replacement)});
+    write(directory.filePath("database.res"),resArchive(members));
+    write(directory.filePath("databaseJmv.res"),resArchive({}));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="jmv.v1";request.profileId="jamais-vu";
+    request.resourceDirectories<<directory.path();
+    const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    const auto catalog=ei::ItemSpellConstructorCatalog::fromDocument(*document);
+    QVERIFY(catalog.isJmvProfile());
+    QCOMPARE(catalog.spells.size(),1);
+    QCOMPARE(catalog.spells.front().name,QString("JMV Fire"));
+    QCOMPARE(catalog.spells.front().school,QString("Fire"));
+    QCOMPARE(catalog.spells.front().recordType,0);
+    QCOMPARE(catalog.spellTextureCandidates(catalog.spells.front()),
+             QStringList({"spell0027.x2","spell0027"}));
 }
 
 void ProfileDatabaseTests::installedConstructorCatalogCoverage()

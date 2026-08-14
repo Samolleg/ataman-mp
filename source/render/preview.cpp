@@ -3,6 +3,8 @@
 #include "view.h"
 #include "node.h"
 #include "camera.h"
+#include "objects/unit.h"
+#include <QMouseEvent>
 #include <QWheelEvent>
 #include <QOpenGLContext>
 
@@ -17,7 +19,11 @@ CPreview::CPreview(QWidget *parent, const QGLWidget* shareWidget):
 void CPreview::attachNode(CNode *pNode)
 {
     m_pNode = pNode;
-    refreshCam(m_pNode->getBBox());
+    m_pan = QVector3D();
+    m_modelYaw = 0.0f;
+    m_modelPitch = 0.0f;
+    if(m_pNode)
+        refreshCam(m_pNode->getBBox());
 }
 
 void CPreview::attachSettings(CSettings *pSet)
@@ -70,8 +76,48 @@ void CPreview::paintGL()
 
 void CPreview::wheelEvent(QWheelEvent *event)
 {
-    event->delta() > 0 ? m_cam->strafeForward(false) : m_cam->strafeBack(false);
+    event->angleDelta().y() > 0 ? m_cam->strafeForward(false) : m_cam->strafeBack(false);
     updateGL();
+    event->accept();
+}
+
+void CPreview::mousePressEvent(QMouseEvent *event)
+{
+    m_lastMouse = event->pos();
+    m_dragButton = event->button();
+    event->accept();
+}
+
+void CPreview::mouseMoveEvent(QMouseEvent *event)
+{
+    const QPoint delta = event->pos() - m_lastMouse;
+    m_lastMouse = event->pos();
+    if(m_dragButton == Qt::LeftButton)
+    {
+        const float scale = m_pNode ? qMax(0.1f, m_pNode->getBBox().radius()) : 1.0f;
+        m_pan += QVector3D(delta.x() * scale / qMax(1, width()), 0.0f,
+                          -delta.y() * scale / qMax(1, height()));
+    }
+    else if(m_dragButton == Qt::MiddleButton)
+    {
+        m_modelYaw += delta.x() * 0.45f;
+        m_modelPitch = qBound(-89.0f, m_modelPitch + delta.y() * 0.45f, 89.0f);
+    }
+    else if(m_dragButton == Qt::RightButton)
+    {
+        float xAngle = delta.y() * 0.4f;
+        float zAngle = delta.x() * 0.5f;
+        m_cam->xRotate(xAngle);
+        m_cam->zRotate(zAngle);
+    }
+    updateGL();
+    event->accept();
+}
+
+void CPreview::mouseReleaseEvent(QMouseEvent *event)
+{
+    m_dragButton = Qt::NoButton;
+    event->accept();
 }
 
 void CPreview::draw()
@@ -82,6 +128,9 @@ void CPreview::draw()
 
 
     QMatrix4x4 camMatrix = m_cam->update();
+    camMatrix.translate(m_pan);
+    camMatrix.rotate(m_modelPitch, 1.0f, 0.0f, 0.0f);
+    camMatrix.rotate(m_modelYaw, 0.0f, 0.0f, 1.0f);
 
     // Bind shader pipeline for use
     QOpenGLShaderProgram* pProgram = &m_pView->shaderObject();
@@ -91,7 +140,10 @@ void CPreview::draw()
     pProgram->setUniformValue("u_projMmatrix", m_projection);
     pProgram->setUniformValue("u_viewMmatrix", camMatrix);
 
-    m_pNode->draw(true, pProgram);
+    if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode))
+        unit->drawObjectVisual(true, pProgram);
+    else
+        m_pNode->draw(true, pProgram);
 
 }
 

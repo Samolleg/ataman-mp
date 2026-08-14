@@ -76,12 +76,24 @@ QPair<QString, QString> itemAndMaterial(const QString& reference)
     if(dot <= 0 || dot == base.size() - 1) return {};
     return {folded(base.left(dot)), folded(base.mid(dot + 1))};
 }
+template<typename T,typename Key>
+void keepLastIdentity(QVector<T>* values,const Key& key)
+{
+    QMap<QString,int> last;
+    for(int index=0;index<values->size();++index)last[folded(key(values->at(index)))]=index;
+    QVector<T> result;result.reserve(last.size());
+    for(int index=0;index<values->size();++index)
+        if(last.value(folded(key(values->at(index))))==index)result.append(values->at(index));
+    *values=result;
+}
 }
 
 namespace ei {
 ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const DatabaseDocument& document)
 {
     ItemSpellConstructorCatalog result;
+    result.m_isJmvProfile=document.profileId().contains(QStringLiteral("jamais"),Qt::CaseInsensitive)
+        ||document.providerId().contains(QStringLiteral("jmv"),Qt::CaseInsensitive);
     if(const SDatabaseTable* table = document.table(QStringLiteral("items.materials")))
         for(const SDatabaseRow& row : table->rows)
         {
@@ -109,7 +121,8 @@ ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const Data
             spell.displayName = spell.name;
             spell.code = field(row, 1).toString();
             spell.subtype = field(row, 2).toString();
-            spell.school = field(row, 4).toInt();
+            spell.recordType = field(row, 4).toInt();
+            spell.school = spellSchoolName(spell.subtype);
             spell.mana = field(row, 5).toDouble();
             spell.slotCapacity = field(row, 6).toInt();
             spell.speed = field(row, 7).toDouble();
@@ -149,6 +162,22 @@ ItemSpellConstructorCatalog ItemSpellConstructorCatalog::fromDocument(const Data
                         result.m_authoredMaterialsByItem[pair.first].insert(pair.second);
                 }
         }
+    if(const SDatabaseTable* table=document.table(QStringLiteral("units.racemodels")))
+        for(const SDatabaseRow& row:table->rows)
+        {
+            if(row.deleted||field(row,30).toString().compare(QStringLiteral("unhuma"),Qt::CaseInsensitive)!=0)continue;
+            result.m_previewModelName=field(row,30).toString();
+            const QStringList skins=itemReferences(field(row,31));
+            if(!skins.isEmpty())result.m_previewTextureName=skins.first();
+            break;
+        }
+    // JMV databases can retain superseded physical records for converter
+    // fidelity. Runtime identity is last-record-wins; the constructor presents
+    // only that effective record while Database Editor keeps every row visible.
+    keepLastIdentity(&result.materials,[](const SConstructorMaterial& value){return value.name;});
+    keepLastIdentity(&result.items,[](const SConstructorItem& value){return value.category+QLatin1Char('\n')+value.name;});
+    keepLastIdentity(&result.spells,[](const SConstructorSpell& value){return value.code;});
+    keepLastIdentity(&result.runes,[](const SConstructorRune& value){return value.code;});
     return result;
 }
 
@@ -275,10 +304,27 @@ QString ItemSpellConstructorCatalog::itemTextureName(const SConstructorItem& ite
         .arg(material->code.trimmed().toLower()).arg(item.textureType2);
 }
 
-QString ItemSpellConstructorCatalog::spellTextureName(const SConstructorSpell& spell)
+QString ItemSpellConstructorCatalog::spellSchoolName(const QString& subtype)
 {
-    return spell.textureType < 0 ? QString()
-        : QStringLiteral("spell%1").arg(spell.textureType, 4, 10, QChar('0'));
+    const QString normalized=subtype.trimmed().toLower();
+    if(normalized==QStringLiteral("fire"))return QCoreApplication::translate("ItemSpellConstructorCatalog","Fire");
+    if(normalized==QStringLiteral("lightning"))return QCoreApplication::translate("ItemSpellConstructorCatalog","Lightning");
+    if(normalized==QStringLiteral("acid"))return QCoreApplication::translate("ItemSpellConstructorCatalog","Acid");
+    if(normalized==QStringLiteral("domination"))return QCoreApplication::translate("ItemSpellConstructorCatalog","Domination");
+    if(normalized.isEmpty())return QCoreApplication::translate("ItemSpellConstructorCatalog","Unclassified");
+    QString display=normalized;display[0]=display.at(0).toUpper();return display;
+}
+
+QStringList ItemSpellConstructorCatalog::spellTextureCandidates(const SConstructorSpell& spell) const
+{
+    if(spell.textureType<0)return {};
+    const QString base=QStringLiteral("spell%1").arg(spell.textureType,4,10,QChar('0'));
+    return m_isJmvProfile?QStringList{base+QStringLiteral(".x2"),base}:QStringList{base};
+}
+
+QString ItemSpellConstructorCatalog::spellTextureName(const SConstructorSpell& spell) const
+{
+    return spellTextureCandidates(spell).value(0);
 }
 
 QImage ItemSpellConstructorCatalog::orientPreviewImage(const QImage& image)

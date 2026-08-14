@@ -8,6 +8,7 @@
 class CPreview;
 class CView;
 class CWorldObj;
+class CUnit;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -30,6 +31,8 @@ public:
 
 private slots:
     void refreshItemFilter();
+    void refreshItemFilterChoices();
+    void refreshArmorLayerAvailability();
     void refreshSpellFilter();
     void selectItem();
     void selectSpell();
@@ -69,6 +72,7 @@ private:
     QLabel* m_itemIcon{nullptr};
     CPreview* m_itemPreview{nullptr};
     CWorldObj* m_previewObject{nullptr};
+    CUnit* m_previewUnit{nullptr};
     CView* m_view{nullptr};
 
     QLineEdit* m_spellFilter{nullptr};

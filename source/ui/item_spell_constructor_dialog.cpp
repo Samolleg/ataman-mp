@@ -3,6 +3,7 @@
 #include "database_document.h"
 #include "game_text_catalog.h"
 #include "objects/worldobj.h"
+#include "objects/unit.h"
 #include "property.h"
 #include "preview.h"
 #include "view.h"
@@ -93,15 +94,11 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     auto* itemLeft = new QVBoxLayout;
     auto* itemFilters = new QHBoxLayout;
     m_itemFilter = new QLineEdit(itemTab); m_itemFilter->setPlaceholderText(tr("Filter name or code…"));
-    m_itemCategory = new QComboBox(itemTab); m_itemCategory->addItem(tr("All categories"), QString());
+    m_itemCategory = new QComboBox(itemTab);m_itemCategory->setObjectName(QStringLiteral("constructorItemCategory")); m_itemCategory->addItem(tr("All categories"), QString());
     m_itemCategory->addItem(tr("Weapons"), "Weapon"); m_itemCategory->addItem(tr("Armor"), "Armor");
     m_itemCategory->addItem(tr("Quick items"), "Quick Item");
-    m_itemType = new QComboBox(itemTab); m_itemType->addItem(tr("All item types"), QString());
-    QSet<QString> itemTypes;
-    for(const auto& item : m_catalog.items) itemTypes.insert(item.type);
-    QStringList sortedTypes = itemTypes.values(); sortedTypes.sort(Qt::CaseInsensitive);
-    for(const QString& type : sortedTypes) m_itemType->addItem(type, type);
-    m_armorLayer = new QComboBox(itemTab); m_armorLayer->addItem(tr("All armor layers"), QString());
+    m_itemType = new QComboBox(itemTab); m_itemType->setObjectName(QStringLiteral("constructorItemType"));m_itemType->addItem(tr("All item types"), QString());
+    m_armorLayer = new QComboBox(itemTab);m_armorLayer->setObjectName(QStringLiteral("constructorArmorLayer")); m_armorLayer->addItem(tr("All armor layers"), QString());
     m_armorLayer->addItem(tr("Upper / heavy armor"), "Upper / heavy");
     m_armorLayer->addItem(tr("Lower / light armor"), "Lower / light");
     itemFilters->addWidget(m_itemFilter, 1); itemFilters->addWidget(m_itemCategory);
@@ -128,6 +125,7 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     if(m_view)
     {
         m_previewObject = new CWorldObj;
+        m_previewUnit = new CUnit;
         // The constructor is a separate top-level window, so explicitly share
         // the main viewport's figures, textures, and shader resources.
         m_itemPreview = new CPreview(itemTab, m_view); m_itemPreview->attachView(m_view);
@@ -141,10 +139,10 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     auto* spellLeft = new QVBoxLayout;
     auto* spellFilters = new QHBoxLayout;
     m_spellFilter = new QLineEdit(spellTab); m_spellFilter->setPlaceholderText(tr("Filter spell name or code…"));
-    m_spellSchool = new QComboBox(spellTab); m_spellSchool->addItem(tr("All magic schools"), -999);
-    QSet<int> schools; for(const auto& spell : m_catalog.spells) schools.insert(spell.school);
-    QList<int> sortedSchools = schools.values(); std::sort(sortedSchools.begin(), sortedSchools.end());
-    for(int school : sortedSchools) m_spellSchool->addItem(tr("School %1").arg(school), school);
+    m_spellSchool = new QComboBox(spellTab); m_spellSchool->setObjectName(QStringLiteral("constructorSpellSchool"));m_spellSchool->addItem(tr("All magic schools"), QString());
+    QSet<QString> schools; for(const auto& spell : m_catalog.spells) schools.insert(spell.school);
+    QStringList sortedSchools = schools.values();sortedSchools.sort(Qt::CaseInsensitive);
+    for(const QString& school : sortedSchools) m_spellSchool->addItem(school, school);
     spellFilters->addWidget(m_spellFilter, 1); spellFilters->addWidget(m_spellSchool);
     spellLeft->addLayout(spellFilters);
     m_spellList = new QListWidget(spellTab); m_spellList->setObjectName(QStringLiteral("constructorSpellList"));
@@ -185,8 +183,8 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     root->addWidget(buttons);
 
     connect(m_itemFilter,&QLineEdit::textChanged,this,&ItemSpellConstructorDialog::refreshItemFilter);
-    connect(m_itemCategory,QOverload<int>::of(&QComboBox::currentIndexChanged),this,&ItemSpellConstructorDialog::refreshItemFilter);
-    connect(m_itemType,QOverload<int>::of(&QComboBox::currentIndexChanged),this,&ItemSpellConstructorDialog::refreshItemFilter);
+    connect(m_itemCategory,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){refreshItemFilterChoices();refreshItemFilter();});
+    connect(m_itemType,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){refreshArmorLayerAvailability();refreshItemFilter();});
     connect(m_armorLayer,QOverload<int>::of(&QComboBox::currentIndexChanged),this,&ItemSpellConstructorDialog::refreshItemFilter);
     connect(m_itemList,&QListWidget::currentRowChanged,this,&ItemSpellConstructorDialog::selectItem);
     connect(m_material,QOverload<int>::of(&QComboBox::currentIndexChanged),this,&ItemSpellConstructorDialog::selectMaterial);
@@ -210,10 +208,10 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     connect(m_tabs,&QTabWidget::currentChanged,this,&ItemSpellConstructorDialog::updateOutput);
     connect(buttons,&QDialogButtonBox::accepted,this,[this](){ copyCode(); accept(); });
     connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::reject);
-    refreshItemFilter(); refreshSpellFilter();
+    refreshItemFilterChoices();refreshItemFilter(); refreshSpellFilter();
 }
 
-ItemSpellConstructorDialog::~ItemSpellConstructorDialog() { delete m_previewObject; }
+ItemSpellConstructorDialog::~ItemSpellConstructorDialog() { delete m_previewObject;delete m_previewUnit; }
 QString ItemSpellConstructorDialog::code() const { return m_codeEdit->text().trimmed(); }
 void ItemSpellConstructorDialog::setCode(const QString& value) { m_codeEdit->setText(value); importCode(); }
 
@@ -225,6 +223,39 @@ const SConstructorSpell* ItemSpellConstructorDialog::currentSpell() const
 { return m_spellList->currentItem() ? m_catalog.findSpell(m_spellList->currentItem()->data(Qt::UserRole).toString()) : nullptr; }
 QStringList ItemSpellConstructorDialog::selectedRuneCodes() const
 { QStringList out; for(int i=0;i<m_selectedRunes->count();++i) out<<m_selectedRunes->item(i)->data(Qt::UserRole).toString(); return out; }
+
+void ItemSpellConstructorDialog::refreshItemFilterChoices()
+{
+    const QString category=m_itemCategory->currentData().toString();
+    const QString previousType=m_itemType->currentData().toString();
+    QSet<QString> types;
+    for(const auto& item:m_catalog.items)
+        if(category.isEmpty()||item.category==category)types.insert(item.type);
+    QStringList sorted=types.values();sorted.sort(Qt::CaseInsensitive);
+    m_itemType->blockSignals(true);m_itemType->clear();m_itemType->addItem(tr("All item types"),QString());
+    for(const QString& type:sorted)m_itemType->addItem(type,type);
+    const int restored=m_itemType->findData(previousType);if(restored>=0)m_itemType->setCurrentIndex(restored);
+    m_itemType->blockSignals(false);
+    refreshArmorLayerAvailability();
+}
+
+void ItemSpellConstructorDialog::refreshArmorLayerAvailability()
+{
+    const QString category=m_itemCategory->currentData().toString();
+    const QString type=m_itemType->currentData().toString();
+    bool layerRelevant=category.isEmpty()||category==QStringLiteral("Armor");
+    if(category.isEmpty()&&!type.isEmpty())
+    {
+        layerRelevant=false;
+        for(const auto& item:m_catalog.items)
+            if(item.category==QStringLiteral("Armor")
+               &&item.type.compare(type,Qt::CaseInsensitive)==0)
+            {layerRelevant=true;break;}
+    }
+    if(!layerRelevant)m_armorLayer->setCurrentIndex(0);
+    m_armorLayer->setEnabled(layerRelevant);
+    m_armorLayer->setToolTip(layerRelevant?QString():tr("Armor layers do not apply to this item category."));
+}
 
 void ItemSpellConstructorDialog::refreshItemFilter()
 {
@@ -246,8 +277,8 @@ void ItemSpellConstructorDialog::refreshItemFilter()
 void ItemSpellConstructorDialog::refreshSpellFilter()
 {
     const QString previous=m_spellList->currentItem()?m_spellList->currentItem()->data(Qt::UserRole).toString():QString();
-    m_spellList->clear();const QString query=m_spellFilter->text().trimmed().toCaseFolded();const int school=m_spellSchool->currentData().toInt();
-    for(const auto& spell:m_catalog.spells){if(school!=-999&&spell.school!=school)continue;if(!query.isEmpty()&&!searchable({spell.name,spell.displayName,spell.code,spell.subtype}).contains(query))continue;auto*row=catalogItem(spell.displayName,tr("code: %1 • school %2 • %3").arg(spell.code).arg(spell.school).arg(spell.subtype),spell.code,m_spellList);if(spell.code.compare(previous,Qt::CaseInsensitive)==0)m_spellList->setCurrentItem(row);}
+    m_spellList->clear();const QString query=m_spellFilter->text().trimmed().toCaseFolded();const QString school=m_spellSchool->currentData().toString();
+    for(const auto& spell:m_catalog.spells){if(!school.isEmpty()&&spell.school.compare(school,Qt::CaseInsensitive)!=0)continue;if(!query.isEmpty()&&!searchable({spell.name,spell.displayName,spell.code,spell.subtype,spell.school}).contains(query))continue;auto*row=catalogItem(spell.displayName,tr("code: %1 • school: %2 • subtype: %3").arg(spell.code,spell.school,spell.subtype),spell.code,m_spellList);if(spell.code.compare(previous,Qt::CaseInsensitive)==0)m_spellList->setCurrentItem(row);}
     if(m_spellList->currentRow()<0&&m_spellList->count())m_spellList->setCurrentRow(0);
     m_availableRunes->clear();const QString runeQuery=m_runeFilter->text().trimmed().toCaseFolded();const int type=m_runeType->currentData().toInt();
     for(const auto&rune:m_catalog.runes){if(type!=-999&&rune.type!=type)continue;if(!runeQuery.isEmpty()&&!searchable({rune.name,rune.displayName,rune.code,runeTypeName(rune.type)}).contains(runeQuery))continue;catalogItem(rune.displayName,tr("%1 • %2").arg(rune.code,runeTypeName(rune.type)),rune.code,m_availableRunes);}
@@ -313,13 +344,34 @@ void ItemSpellConstructorDialog::updateItemPreview()
         m_itemIcon->setPixmap(QPixmap::fromImage(image).scaled(
             m_itemIcon->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
     }
-    if(m_previewObject&&!figure.isEmpty()&&!texture.isEmpty())
+    if(m_itemPreview&&!figure.isEmpty()&&!texture.isEmpty())
     {
-        m_previewObject->applyParam(QSharedPointer<IPropertyBase>(
-            new propStr(eObjParam_TEMPLATE,figure)));
-        m_previewObject->applyParam(QSharedPointer<IPropertyBase>(
-            new propStr(eObjParam_PRIM_TXTR,texture)));
-        m_itemPreview->attachNode(m_previewObject);
+        if((item->category==QStringLiteral("Armor")||item->category==QStringLiteral("Weapon"))
+           &&m_previewUnit)
+        {
+            const QString itemCode=ItemSpellConstructorCatalog::formatItemCode(
+                item->name,currentMaterial()?currentMaterial()->name:QString(),m_itemSpell->text());
+            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propStr(
+                eObjParam_TEMPLATE,m_catalog.previewModelName())));
+            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propStr(
+                eObjParam_PRIM_TXTR,m_catalog.previewTextureName())));
+            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propBool(
+                eObjParam_UNIT_NEED_IMPORT,true)));
+            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propStrAr(
+                eObjParam_UNIT_ARMORS,item->category==QStringLiteral("Armor")
+                    ?QStringList{itemCode}:QStringList())));
+            m_previewUnit->applyParam(QSharedPointer<IPropertyBase>(new propStrAr(
+                eObjParam_UNIT_WEAPONS,item->category==QStringLiteral("Weapon")
+                    ?QStringList{itemCode}:QStringList())));
+            m_itemPreview->makeCurrent();m_previewUnit->preloadVisualResources();
+            m_itemPreview->attachNode(m_previewUnit);
+        }
+        else if(m_previewObject)
+        {
+            m_previewObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE,figure)));
+            m_previewObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR,texture)));
+            m_itemPreview->attachNode(m_previewObject);
+        }
         m_itemPreview->updateGL();
     }
 }
@@ -328,9 +380,14 @@ void ItemSpellConstructorDialog::updateSpellPreview()
 {
     const auto* spell=currentSpell();
     if(!spell){m_spellIcon->clear();m_spellDetails->clear();return;}
-    const QString texture=ItemSpellConstructorCatalog::spellTextureName(*spell);
-    const QImage image=ItemSpellConstructorCatalog::orientPreviewImage(
-        CTextureList::getInstance()->textureImage(texture,QString()));
+    QString texture;QImage sourceImage;
+    for(const QString& candidate:m_catalog.spellTextureCandidates(*spell))
+    {
+        const QImage candidateImage=CTextureList::getInstance()->textureImage(candidate,QString());
+        if(!candidateImage.isNull()){texture=candidate;sourceImage=candidateImage;break;}
+    }
+    if(texture.isEmpty())texture=m_catalog.spellTextureName(*spell);
+    const QImage image=ItemSpellConstructorCatalog::orientPreviewImage(sourceImage);
     if(image.isNull())
     {
         m_spellIcon->setPixmap(QPixmap());
@@ -395,7 +452,7 @@ void ItemSpellConstructorDialog::updateOutput()
             .arg(item->materialType).arg(item->mana,0,'g',8)
             .arg(item->slotCapacity).arg(item->components)};
     if((item->category==QStringLiteral("Weapon")||item->category==QStringLiteral("Armor"))&&currentMaterial())
-        detail<<tr("Preview: the material-colored in-game inventory model and texture.");
+        detail<<tr("Preview: the item is assembled through the normal unit appearance and equipment path; the image above is its material-colored inventory texture.");
     QStringList warnings;
     const bool materialRequired=!item->materialType.trimmed().isEmpty()
         && item->materialType.compare(QStringLiteral("None"),Qt::CaseInsensitive)!=0;

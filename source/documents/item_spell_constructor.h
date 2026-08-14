@@ -27,8 +27,8 @@ struct SConstructorItem
 
 struct SConstructorSpell
 {
-    QString name, displayName, code, subtype;
-    int school{-1}, textureType{-1}, slotCapacity{0}, complexity{0};
+    QString name, displayName, code, subtype, school;
+    int recordType{-1}, textureType{-1}, slotCapacity{0}, complexity{0};
     int durationSegments{0}, targets{0}, actions{0};
     double mana{0.0}, speed{0.0}, range{0.0}, area{0.0}, effect{0.0};
 };
@@ -78,7 +78,9 @@ public:
     static QString itemFigureName(const SConstructorItem& item);
     static QString itemTextureName(const SConstructorItem& item,
                                    const SConstructorMaterial* material);
-    static QString spellTextureName(const SConstructorSpell& spell);
+    QStringList spellTextureCandidates(const SConstructorSpell& spell) const;
+    QString spellTextureName(const SConstructorSpell& spell) const;
+    static QString spellSchoolName(const QString& subtype);
     static QImage orientPreviewImage(const QImage& image);
 
     void applyGameTexts(const QMap<QString, QString>& entries);
@@ -97,6 +99,9 @@ public:
     const SConstructorMaterial* findMaterial(const QString& name) const;
     const SConstructorSpell* findSpell(const QString& code) const;
     const SConstructorRune* findRune(const QString& code) const;
+    QString previewModelName() const { return m_previewModelName; }
+    QString previewTextureName() const { return m_previewTextureName; }
+    bool isJmvProfile() const { return m_isJmvProfile; }
 
     QVector<SConstructorMaterial> materials;
     QVector<SConstructorItem> items;
@@ -105,6 +110,9 @@ public:
 private:
     QMap<QString, QString> m_gameTexts;
     QMap<QString, QSet<QString>> m_authoredMaterialsByItem;
+    QString m_previewModelName{QStringLiteral("unhuma")};
+    QString m_previewTextureName{QStringLiteral("unhumaskin_00")};
+    bool m_isJmvProfile{false};
 };
 
 }

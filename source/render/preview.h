@@ -10,6 +10,7 @@ class CNode;
 class CView;
 class CCamera;
 class CSettings;
+class QMouseEvent;
 
 ///
 /// \brief The CPreview class provides a display of the currently created 3D scene node (new object creation form).
@@ -32,9 +33,9 @@ protected:
     void paintGL() override;
 //    void keyPressEvent(QKeyEvent* event) override;
 //    void keyReleaseEvent(QKeyEvent* event) override;
-//    void mousePressEvent(QMouseEvent* event) override;
-//    void mouseMoveEvent(QMouseEvent* event) override;
-//    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
 
 private:
@@ -50,6 +51,11 @@ private:
     QMatrix4x4 m_projection;
     CView* m_pView;
     QSharedPointer<CCamera> m_cam;
+    QPoint m_lastMouse;
+    Qt::MouseButton m_dragButton{Qt::NoButton};
+    QVector3D m_pan;
+    float m_modelYaw{0.0f};
+    float m_modelPitch{0.0f};
 };
 
 

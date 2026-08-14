@@ -9,7 +9,6 @@
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QCheckBox>
 #include <QComboBox>
 #include <QCompleter>
 #include <QAction>
@@ -34,6 +33,8 @@
 #include <QVBoxLayout>
 #include <QPlainTextEdit>
 #include <QScreen>
+#include <QScrollBar>
+#include <QSettings>
 #include <QSet>
 #include <QGuiApplication>
 #include <functional>
@@ -97,23 +98,35 @@ public:
         : QAbstractTableModel(parent), m_document(document) {}
 
     void setCommitHandler(const CommitHandler& handler) { m_commit = handler; }
-    void setTable(const QString& tableKey,bool showOpaque)
+    void setTable(const QString& tableKey)
     {
-        if(m_tableKey==tableKey&&m_showOpaque==showOpaque) { refresh(); return; }
-        beginResetModel();m_tableKey=tableKey;m_showOpaque=showOpaque;rebuildIndexes();endResetModel();
+        if(m_tableKey==tableKey) { refresh(); return; }
+        beginResetModel();m_tableKey=tableKey;rebuildIndexes();endResetModel();
     }
     void refresh(){beginResetModel();rebuildIndexes();endResetModel();}
     QString tableKey()const{return m_tableKey;}
     int rowCount(const QModelIndex& parent=QModelIndex())const override{return parent.isValid()?0:m_rows.size();}
-    int columnCount(const QModelIndex& parent=QModelIndex())const override{return parent.isValid()?0:m_fields.size();}
+    int columnCount(const QModelIndex& parent=QModelIndex())const override{return parent.isValid()?0:m_fields.size()+1;}
     QVariant headerData(int section,Qt::Orientation orientation,int role)const override
     {
-        if(orientation!=Qt::Horizontal||role!=Qt::DisplayRole||section<0||section>=m_fields.size())return {};
+        if(orientation!=Qt::Horizontal||role!=Qt::DisplayRole||section<0||section>=columnCount())return {};
+        if(section==0)return QStringLiteral("#");
         const auto* field=fieldAt(section);return field?(field->label.isEmpty()?field->key:field->label):QVariant();
     }
     QVariant data(const QModelIndex& index,int role=Qt::DisplayRole)const override
     {
-        const SDatabaseRow* row=rowAt(index.row());const SDatabaseFieldSchema* field=fieldAt(index.column());const auto* table=m_document->table(m_tableKey);if(!row||!field||!table)return {};
+        const SDatabaseRow* row=rowAt(index.row());const auto* table=m_document->table(m_tableKey);if(!row||!table)return {};
+        const int rowNumber=row->sourceRecordIndex>=0?row->sourceRecordIndex+1:m_rows.value(index.row())+1;
+        if(index.column()==0)
+        {
+            if(role==Qt::DisplayRole||role==Qt::EditRole||role==RawValueRole)return rowNumber;
+            if(role==RowKeyRole)return row->stableKey;
+            if(role==FilterTextRole){QStringList values;values<<QString("#%1").arg(rowNumber)<<QString::number(rowNumber)<<row->sourceStableKey;for(int fieldIndex:m_fields)values<<authoringText(*table,table->fields[fieldIndex],row->values.value(table->fields[fieldIndex].key));return values.join(' ').toLower();}
+            if(role==Qt::TextAlignmentRole)return int(Qt::AlignRight|Qt::AlignVCenter);
+            if(role==Qt::ToolTipRole)return tr("Stable physical row number. Search for #%1 to filter this row.").arg(rowNumber);
+            return {};
+        }
+        const SDatabaseFieldSchema* field=fieldAt(index.column());if(!field)return {};
         const QVariant stored=row->values.value(field->key);const QString full=authoringText(*table,*field,stored);
         if(role==Qt::DisplayRole){QString preview=full;preview.replace('\n',", ");return boundedCellPreview(preview);}
         if(role==Qt::EditRole)return field->type==EDatabaseFieldType::Integer||field->type==EDatabaseFieldType::Decimal?stored:QVariant(full);
@@ -123,7 +136,7 @@ public:
         if(role==RawValueRole)return stored;
         if(role==ReferenceTableRole)return field->referenceTable;
         if(role==ChoicesRole)return choicesForColumn(index.column());
-        if(role==FilterTextRole){QStringList values;values<<row->sourceStableKey;for(int fieldIndex:m_fields)values<<authoringText(*table,table->fields[fieldIndex],row->values.value(table->fields[fieldIndex].key));return values.join(' ').toLower();}
+        if(role==FilterTextRole){QStringList values;values<<QString("#%1").arg(rowNumber)<<QString::number(rowNumber)<<row->sourceStableKey;for(int fieldIndex:m_fields)values<<authoringText(*table,table->fields[fieldIndex],row->values.value(table->fields[fieldIndex].key));return values.join(' ').toLower();}
         if(role==Qt::ForegroundRole&&!field->referenceTable.isEmpty())return QBrush(QColor(35,110,190));
         if(role==Qt::FontRole&&!field->referenceTable.isEmpty()){QFont font=QApplication::font();font.setUnderline(true);return font;}
         if(role==Qt::ToolTipRole)
@@ -137,14 +150,14 @@ public:
     }
     Qt::ItemFlags flags(const QModelIndex& index)const override
     {
-        Qt::ItemFlags result=QAbstractTableModel::flags(index);const SDatabaseRow* row=rowAt(index.row());const auto* field=fieldAt(index.column());if(!row||!field)return result;
+        Qt::ItemFlags result=QAbstractTableModel::flags(index);const SDatabaseRow* row=rowAt(index.row());if(index.column()==0)return result&~Qt::ItemIsEditable;const auto* field=fieldAt(index.column());if(!row||!field)return result;
         QString reason;const bool editable=field->writable&&m_document->fieldEditable(m_tableKey,row->stableKey,field->key,&reason);
         const auto* table=m_document->table(m_tableKey);const bool inlineEditor=field->type==EDatabaseFieldType::Integer||field->type==EDatabaseFieldType::Decimal||field->type==EDatabaseFieldType::Reference||suggestedChoiceField(*field,table);
         return editable&&inlineEditor?result|Qt::ItemIsEditable:result&~Qt::ItemIsEditable;
     }
     bool setData(const QModelIndex& index,const QVariant& value,int role=Qt::EditRole)override
     {
-        if(role!=Qt::EditRole||!index.isValid()||!m_commit)return false;const SDatabaseRow* row=rowAt(index.row());const auto* field=fieldAt(index.column());if(!row||!field)return false;
+        if(role!=Qt::EditRole||!index.isValid()||index.column()==0||!m_commit)return false;const SDatabaseRow* row=rowAt(index.row());const auto* field=fieldAt(index.column());if(!row||!field)return false;
         const QString oldKey=row->stableKey;QVariant typed=value;if(field->type==EDatabaseFieldType::Integer)typed=value.toLongLong();else if(field->type==EDatabaseFieldType::Decimal)typed=value.toDouble();
         if(!m_commit(oldKey,field->key,typed))return false;
         const auto* table=m_document->table(m_tableKey);const QString identityKey=table&&table->identityFieldId>=0?QString("fld.%1.0").arg(table->identityFieldId):QString("name");
@@ -156,9 +169,13 @@ public:
         for(int i=0;i<m_rows.size();++i){const auto* row=rowAt(i);if(!row)continue;const QString display=m_document->displayIdentity(m_tableKey,row->stableKey);if(row->stableKey.compare(identity,Qt::CaseInsensitive)==0||display.compare(identity,Qt::CaseInsensitive)==0)return i;}return -1;
     }
     const SDatabaseFieldSchema* fieldForIndex(const QModelIndex& index)const{return fieldAt(index.column());}
+    QString fieldKeyForColumn(int column)const{return column==0?QStringLiteral("#"):(fieldAt(column)?fieldAt(column)->key:QString());}
+    int columnForFieldKey(const QString& key)const
+    {for(int column=1;column<columnCount();++column)if(fieldKeyForColumn(column)==key)return column;return 0;}
+    bool isOpaqueColumn(int column)const{const auto* field=fieldAt(column);return field&&field->opaque;}
 private:
     const SDatabaseRow* rowAt(int modelRow)const{const auto* table=m_document->table(m_tableKey);if(!table||modelRow<0||modelRow>=m_rows.size())return nullptr;const int row=m_rows[modelRow];return row>=0&&row<table->rows.size()?&table->rows[row]:nullptr;}
-    const SDatabaseFieldSchema* fieldAt(int modelColumn)const{const auto* table=m_document->table(m_tableKey);if(!table||modelColumn<0||modelColumn>=m_fields.size())return nullptr;const int field=m_fields[modelColumn];return field>=0&&field<table->fields.size()?&table->fields[field]:nullptr;}
+    const SDatabaseFieldSchema* fieldAt(int modelColumn)const{const auto* table=m_document->table(m_tableKey);const int mapped=modelColumn-1;if(!table||mapped<0||mapped>=m_fields.size())return nullptr;const int field=m_fields[mapped];return field>=0&&field<table->fields.size()?&table->fields[field]:nullptr;}
     static bool suggestedChoiceField(const SDatabaseFieldSchema& field,const SDatabaseTable* table)
     {
         if(!table||field.type!=EDatabaseFieldType::Text||field.opaque||field.storageId==table->identityFieldId)return false;const QString label=field.label.toLower();for(const QString& token:{QStringLiteral("type"),QStringLiteral("class"),QStringLiteral("kind"),QStringLiteral("material"),QStringLiteral("terrain"),QStringLiteral("damage"),QStringLiteral("target"),QStringLiteral("school")})if(label.contains(token))return true;return false;
@@ -166,17 +183,17 @@ private:
     void rebuildIndexes()
     {
         m_rows.clear();m_fields.clear();m_choices.clear();const auto* table=m_document->table(m_tableKey);if(!table)return;
-        for(int field=0;field<table->fields.size();++field)if(!table->structuralEditing||m_showOpaque||!table->fields[field].opaque)m_fields<<field;
+        for(int field=0;field<table->fields.size();++field)m_fields<<field;
         for(int row=0;row<table->rows.size();++row)if(!table->rows[row].deleted)m_rows<<row;
     }
     QStringList choicesForColumn(int column)const
     {
-        if(m_choices.contains(column))return m_choices.value(column);const auto* table=m_document->table(m_tableKey);const auto* field=fieldAt(column);QStringList values;if(!table||!field)return values;
+        if(column==0)return {};if(m_choices.contains(column))return m_choices.value(column);const auto* table=m_document->table(m_tableKey);const auto* field=fieldAt(column);QStringList values;if(!table||!field)return values;
         if(!field->referenceTable.isEmpty()){const auto* target=m_document->table(field->referenceTable);if(target)for(const auto& row:target->rows)if(!row.deleted){const QString identity=m_document->displayIdentity(field->referenceTable,row.stableKey);if(!identity.isEmpty())values<<identity;}}
         else if(suggestedChoiceField(*field,table)){QSet<QString> unique;bool suitable=true;for(int rowIndex:m_rows){const QString value=table->rows[rowIndex].values.value(field->key).toString().trimmed();if(value.isEmpty())continue;if(value.size()>80||value.startsWith('[')||value.startsWith('{')){suitable=false;break;}unique.insert(value);if(unique.size()>64){suitable=false;break;}}if(suitable)values=unique.values();}
         values.removeDuplicates();std::sort(values.begin(),values.end(),[](const QString&a,const QString&b){return a.compare(b,Qt::CaseInsensitive)<0;});m_choices.insert(column,values);return values;
     }
-    QSharedPointer<DatabaseDocument> m_document;QString m_tableKey;bool m_showOpaque{true};QVector<int> m_rows,m_fields;mutable QMap<int,QStringList> m_choices;CommitHandler m_commit;
+    QSharedPointer<DatabaseDocument> m_document;QString m_tableKey;QVector<int> m_rows,m_fields;mutable QMap<int,QStringList> m_choices;CommitHandler m_commit;
 };
 
 class DatabaseFilterModel final : public QSortFilterProxyModel
@@ -204,22 +221,156 @@ public:
     void setEditorData(QWidget* editor,const QModelIndex& index)const override{if(auto* combo=qobject_cast<QComboBox*>(editor)){combo->setEditText(index.data(Qt::EditRole).toString());combo->lineEdit()->selectAll();return;}QStyledItemDelegate::setEditorData(editor,index);}
     void setModelData(QWidget* editor,QAbstractItemModel* model,const QModelIndex& index)const override{if(auto* combo=qobject_cast<QComboBox*>(editor)){model->setData(index,combo->currentText(),Qt::EditRole);return;}QStyledItemDelegate::setModelData(editor,model,index);}
 };
+
+class DatabaseFrozenTableView final : public QTableView
+{
+public:
+    explicit DatabaseFrozenTableView(QWidget* parent=nullptr):QTableView(parent)
+    {
+        m_frozen=new QTableView(this);
+        m_frozen->setObjectName(QStringLiteral("databaseFrozenGrid"));
+        m_frozen->setFocusPolicy(Qt::NoFocus);
+        m_frozen->verticalHeader()->hide();
+        m_frozen->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_frozen->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_frozen->setSelectionBehavior(QAbstractItemView::SelectRows);
+        m_frozen->setSelectionMode(QAbstractItemView::SingleSelection);
+        m_frozen->setAlternatingRowColors(true);
+        m_frozen->setEditTriggers(QAbstractItemView::DoubleClicked|QAbstractItemView::EditKeyPressed|QAbstractItemView::SelectedClicked);
+        viewport()->stackUnder(m_frozen);
+        connect(horizontalHeader(),&QHeaderView::sectionResized,this,
+            [this](int section,int,int size){m_frozen->setColumnWidth(section,size);updateFrozenGeometry();});
+        connect(verticalHeader(),&QHeaderView::sectionResized,this,
+            [this](int section,int,int size){m_frozen->setRowHeight(section,size);});
+        connect(verticalScrollBar(),&QScrollBar::valueChanged,
+                m_frozen->verticalScrollBar(),&QScrollBar::setValue);
+        connect(m_frozen->verticalScrollBar(),&QScrollBar::valueChanged,
+                verticalScrollBar(),&QScrollBar::setValue);
+        connect(m_frozen->horizontalHeader(),&QHeaderView::sectionClicked,this,
+                [this](int section){sortByColumn(section,
+                    horizontalHeader()->sortIndicatorSection()==section
+                    && horizontalHeader()->sortIndicatorOrder()==Qt::AscendingOrder
+                        ?Qt::DescendingOrder:Qt::AscendingOrder);});
+    }
+    void setModel(QAbstractItemModel* value) override
+    {
+        QTableView::setModel(value);m_frozen->setModel(value);
+        m_frozen->setSelectionModel(selectionModel());syncFrozenColumns();
+    }
+    void setSharedDelegate(QAbstractItemDelegate* delegate)
+    {setItemDelegate(delegate);m_frozen->setItemDelegate(delegate);}
+    QTableView* frozenView()const{return m_frozen;}
+    int frozenColumnCount()const{return m_frozenColumns;}
+    void setFrozenColumnCount(int count)
+    {m_frozenColumns=qBound(0,count,model()?model()->columnCount():0);
+     setProperty("frozenColumnCount",m_frozenColumns);syncFrozenColumns();}
+    void syncFrozenColumns()
+    {
+        if(!model())return;
+        for(int column=0;column<model()->columnCount();++column)
+        {
+            m_frozen->setColumnHidden(column,column>=m_frozenColumns||isColumnHidden(column));
+            m_frozen->setColumnWidth(column,columnWidth(column));
+        }
+        m_frozen->setVisible(m_frozenColumns>0);updateFrozenGeometry();
+    }
+    void scrollTo(const QModelIndex& index,ScrollHint hint=EnsureVisible)override
+    {if(index.column()>=m_frozenColumns)QTableView::scrollTo(index,hint);}
+protected:
+    void resizeEvent(QResizeEvent* event)override
+    {QTableView::resizeEvent(event);updateFrozenGeometry();}
+    QModelIndex moveCursor(CursorAction action,Qt::KeyboardModifiers modifiers)override
+    {
+        const QModelIndex current=QTableView::moveCursor(action,modifiers);
+        if(action==MoveLeft&&current.column()>=m_frozenColumns
+           &&visualRect(current).left()<frozenWidth())
+            horizontalScrollBar()->setValue(horizontalScrollBar()->value()
+                +visualRect(current).left()-frozenWidth());
+        return current;
+    }
+private:
+    int frozenWidth()const
+    {
+        int width=0;
+        for(int column=0;model()&&column<m_frozenColumns;++column)
+            if(!isColumnHidden(column))width+=columnWidth(column);
+        return width;
+    }
+    void updateFrozenGeometry()
+    {
+        if(!m_frozen)return;
+        const int width=frozenWidth();
+        m_frozen->setGeometry(verticalHeader()->width()+frameWidth(),frameWidth(),
+            width,viewport()->height()+horizontalHeader()->height());
+    }
+    QTableView* m_frozen{nullptr};
+    int m_frozenColumns{0};
+};
+
 DatabaseEditorDialog::DatabaseEditorDialog(const QSharedPointer<DatabaseDocument>& document,QWidget* parent):QDialog(nullptr,Qt::Window|Qt::WindowSystemMenuHint|Qt::WindowMinMaxButtonsHint|Qt::WindowCloseButtonHint),m_document(document)
 {
     Q_UNUSED(parent);setWindowTitle(tr("Database Editor — %1").arg(document->profileId()));setWindowIcon(QApplication::windowIcon());setAttribute(Qt::WA_DeleteOnClose);resize(1180,720);setModal(false);
     auto* layout=new QVBoxLayout(this); auto* source=new QLabel(tr("Profile: %1  •  Provider: %2\nSource: %3").arg(document->profileId(),document->providerId(),document->sourceArchivePath()),this);source->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(source);
     auto* filterRow=new QWidget(this);auto* filterLayout=new QHBoxLayout(filterRow);filterLayout->setContentsMargins(0,0,0,0);
-    m_filter=new QLineEdit(filterRow);m_filter->setPlaceholderText(tr("Filter rows across visible fields…"));filterLayout->addWidget(m_filter,1);
-    m_showOpaque=new QCheckBox(tr("Show unknown/raw columns"),filterRow);m_showOpaque->setChecked(true);m_showOpaque->setToolTip(tr("Shows descriptor-unknown fields as read-only hexadecimal data. They remain preserved even while hidden."));filterLayout->addWidget(m_showOpaque);layout->addWidget(filterRow);
-    auto* split=new QSplitter(this);m_tables=new QListWidget(split);m_tables->setMinimumWidth(190);m_grid=new QTableView(split);m_grid->setObjectName("databaseGrid");m_model=new DatabaseTableModel(document,m_grid);m_proxy=new DatabaseFilterModel(m_grid);m_proxy->setObjectName("databaseFilterModel");m_proxy->setSourceModel(m_model);m_grid->setModel(m_proxy);m_grid->setItemDelegate(new DatabaseValueDelegate(m_grid));m_grid->setSortingEnabled(true);m_grid->setSelectionBehavior(QAbstractItemView::SelectRows);m_grid->setSelectionMode(QAbstractItemView::SingleSelection);m_grid->setAlternatingRowColors(true);m_grid->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->setEditTriggers(QAbstractItemView::DoubleClicked|QAbstractItemView::EditKeyPressed|QAbstractItemView::SelectedClicked);m_grid->verticalHeader()->setDefaultSectionSize(22);m_grid->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);m_grid->horizontalHeader()->setDefaultSectionSize(150);m_grid->horizontalHeader()->setMinimumSectionSize(70);m_grid->horizontalHeader()->setMaximumSectionSize(300);split->setStretchFactor(1,1);layout->addWidget(split,1);
+    m_filter=new QLineEdit(filterRow);m_filter->setObjectName(QStringLiteral("databaseRowFilter"));m_filter->setPlaceholderText(tr("Filter rows across all fields or enter #row…"));filterLayout->addWidget(m_filter,1);layout->addWidget(filterRow);
+    auto* split=new QSplitter(this);m_tables=new QListWidget(split);m_tables->setMinimumWidth(190);m_grid=new DatabaseFrozenTableView(split);m_grid->setObjectName("databaseGrid");m_model=new DatabaseTableModel(document,m_grid);m_proxy=new DatabaseFilterModel(m_grid);m_proxy->setObjectName("databaseFilterModel");m_proxy->setSourceModel(m_model);m_grid->setModel(m_proxy);m_grid->setSharedDelegate(new DatabaseValueDelegate(m_grid));m_grid->setSortingEnabled(true);m_grid->setSelectionBehavior(QAbstractItemView::SelectRows);m_grid->setSelectionMode(QAbstractItemView::SingleSelection);m_grid->setAlternatingRowColors(true);m_grid->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->frozenView()->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->setEditTriggers(QAbstractItemView::DoubleClicked|QAbstractItemView::EditKeyPressed|QAbstractItemView::SelectedClicked);m_grid->verticalHeader()->setDefaultSectionSize(22);m_grid->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);m_grid->horizontalHeader()->setDefaultSectionSize(150);m_grid->horizontalHeader()->setMinimumSectionSize(45);m_grid->horizontalHeader()->setMaximumSectionSize(300);m_grid->horizontalHeader()->setSectionsMovable(false);m_grid->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->frozenView()->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);split->setStretchFactor(1,1);layout->addWidget(split,1);
     auto* constructorButton=new QPushButton(tr("Item / Spell Constructor…"),this);constructorButton->setObjectName("databaseItemSpellConstructorButton");layout->addWidget(constructorButton,0,Qt::AlignLeft);connect(constructorButton,&QPushButton::clicked,this,[this](){emit itemSpellConstructorRequested(QString());});
     auto* buttons=new QDialogButtonBox(this);m_cloneButton=buttons->addButton(tr("Clone Row…"),QDialogButtonBox::ActionRole);m_deleteButton=buttons->addButton(tr("Delete Row"),QDialogButtonBox::ActionRole);auto* reviewButton=buttons->addButton(tr("Review Changes…"),QDialogButtonBox::ActionRole);auto* exportButton=buttons->addButton(tr("Export XLSX…"),QDialogButtonBox::ActionRole);auto* importButton=buttons->addButton(tr("Import XLSX…"),QDialogButtonBox::ActionRole);auto* applyButton=buttons->addButton(tr("Apply Database"),QDialogButtonBox::ActionRole);auto* saveButton=buttons->addButton(tr("Save Database As…"),QDialogButtonBox::ActionRole);saveButton->setObjectName("databaseSaveAsButton");buttons->addButton(QDialogButtonBox::Close);layout->addWidget(buttons);m_status=new QLabel(this);m_status->setWordWrap(true);layout->addWidget(m_status);
     for(const QString& key:document->tableKeys()){const auto* table=document->table(key);if(table->physicalTable<0)continue;auto* item=new QListWidgetItem(tr("%1 (%2)").arg(table->label).arg(table->rows.size()),m_tables);item->setData(Qt::UserRole,key);}
     m_model->setCommitHandler([this](const QString& row,const QString& field,const QVariant& value){return commitGridValue(row,field,value);});
-    m_filterTimer=new QTimer(this);m_filterTimer->setSingleShot(true);m_filterTimer->setInterval(80);connect(m_filterTimer,&QTimer::timeout,this,[this](){m_proxy->setSearchText(m_filter->text());});connect(m_tables,&QListWidget::currentRowChanged,this,&DatabaseEditorDialog::selectTable);connect(m_filter,&QLineEdit::textChanged,this,[this](){m_filterTimer->start();});connect(m_showOpaque,&QCheckBox::toggled,this,&DatabaseEditorDialog::rebuildGrid);connect(m_grid,&QTableView::doubleClicked,this,[this](const QModelIndex& index){const QModelIndex source=m_proxy->mapToSource(index);const auto* field=m_model->fieldForIndex(source);if(field&&(!field->referenceTable.isEmpty()||!source.data(ChoicesRole).toStringList().isEmpty()))m_grid->edit(index);else editFieldDialog(index);});connect(m_grid,&QTableView::customContextMenuRequested,this,&DatabaseEditorDialog::showRowContextMenu);connect(m_cloneButton,&QPushButton::clicked,this,&DatabaseEditorDialog::cloneSelected);connect(m_deleteButton,&QPushButton::clicked,this,&DatabaseEditorDialog::deleteSelected);connect(reviewButton,&QPushButton::clicked,this,&DatabaseEditorDialog::review);connect(exportButton,&QPushButton::clicked,this,&DatabaseEditorDialog::exportXlsx);connect(importButton,&QPushButton::clicked,this,&DatabaseEditorDialog::importXlsx);connect(applyButton,&QPushButton::clicked,this,&DatabaseEditorDialog::apply);connect(saveButton,&QPushButton::clicked,this,&DatabaseEditorDialog::saveAs);connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::close);
+    m_filterTimer=new QTimer(this);m_filterTimer->setSingleShot(true);m_filterTimer->setInterval(80);connect(m_filterTimer,&QTimer::timeout,this,[this](){m_proxy->setSearchText(m_filter->text());});connect(m_tables,&QListWidget::currentRowChanged,this,&DatabaseEditorDialog::selectTable);connect(m_filter,&QLineEdit::textChanged,this,[this](){m_filterTimer->start();});const auto editCell=[this](const QModelIndex& index){const QModelIndex source=m_proxy->mapToSource(index);const auto* field=m_model->fieldForIndex(source);if(!field)return;if(!field->referenceTable.isEmpty()||!source.data(ChoicesRole).toStringList().isEmpty())m_grid->edit(index);else editFieldDialog(index);};connect(m_grid,&QTableView::doubleClicked,this,editCell);connect(m_grid->frozenView(),&QTableView::doubleClicked,this,editCell);connect(m_grid,&QTableView::customContextMenuRequested,this,&DatabaseEditorDialog::showRowContextMenu);connect(m_grid->frozenView(),&QTableView::customContextMenuRequested,this,[this](const QPoint& point){const QModelIndex index=m_grid->frozenView()->indexAt(point);if(!index.isValid())return;m_grid->setCurrentIndex(index);m_grid->selectRow(index.row());showRowContextMenu(m_grid->visualRect(index).center());});const auto headerMenu=[this](QHeaderView* header,const QPoint& point){const int logical=header->logicalIndexAt(point);if(logical>=0)showColumnContextMenu(logical,header->mapToGlobal(point));};connect(m_grid->horizontalHeader(),&QHeaderView::customContextMenuRequested,this,[this,headerMenu](const QPoint& point){headerMenu(m_grid->horizontalHeader(),point);});connect(m_grid->frozenView()->horizontalHeader(),&QHeaderView::customContextMenuRequested,this,[this,headerMenu](const QPoint& point){headerMenu(m_grid->frozenView()->horizontalHeader(),point);});connect(m_grid->horizontalHeader(),&QHeaderView::sectionResized,this,[this](){m_grid->syncFrozenColumns();saveCurrentColumnState();});connect(m_grid->horizontalHeader(),&QHeaderView::sectionMoved,this,[this](){saveCurrentColumnState();});connect(m_cloneButton,&QPushButton::clicked,this,&DatabaseEditorDialog::cloneSelected);connect(m_deleteButton,&QPushButton::clicked,this,&DatabaseEditorDialog::deleteSelected);connect(reviewButton,&QPushButton::clicked,this,&DatabaseEditorDialog::review);connect(exportButton,&QPushButton::clicked,this,&DatabaseEditorDialog::exportXlsx);connect(importButton,&QPushButton::clicked,this,&DatabaseEditorDialog::importXlsx);connect(applyButton,&QPushButton::clicked,this,&DatabaseEditorDialog::apply);connect(saveButton,&QPushButton::clicked,this,&DatabaseEditorDialog::saveAs);connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::close);
     auto*editFullValue=new QAction(tr("Edit Full Value…"),m_grid);editFullValue->setShortcuts({QKeySequence(Qt::Key_Return),QKeySequence(Qt::Key_Enter),QKeySequence(Qt::Key_F2)});editFullValue->setShortcutContext(Qt::WidgetShortcut);m_grid->addAction(editFullValue);connect(editFullValue,&QAction::triggered,this,[this](){if(m_grid->currentIndex().isValid())editFieldDialog(m_grid->currentIndex());});
     auto*openReference=new QAction(tr("Open Referenced Row"),m_grid);openReference->setShortcut(QKeySequence(Qt::CTRL|Qt::Key_Return));openReference->setShortcutContext(Qt::WidgetShortcut);m_grid->addAction(openReference);connect(openReference,&QAction::triggered,this,&DatabaseEditorDialog::openCurrentReference);
     if(m_tables->count())m_tables->setCurrentRow(0);updateStatus();
+}
+DatabaseEditorDialog::~DatabaseEditorDialog(){saveCurrentColumnState();}
+QString DatabaseEditorDialog::columnSettingsKey(const QString& suffix)const
+{
+    QString scope=m_document->profileId()+QLatin1Char('/')+currentTableKey();
+    scope.replace(QLatin1Char('\\'),QLatin1Char('_'));scope.replace(QLatin1Char('/'),QLatin1Char('_'));
+    return QStringLiteral("databaseEditor/columns/%1/%2").arg(scope,suffix);
+}
+void DatabaseEditorDialog::saveCurrentColumnState()
+{
+    if(!m_grid||!m_model||currentTableKey().isEmpty()||m_model->tableKey()!=currentTableKey())return;
+    QSettings settings;settings.setValue(columnSettingsKey("headerState"),m_grid->horizontalHeader()->saveState());
+    const int count=m_grid->frozenColumnCount();settings.setValue(columnSettingsKey("frozenThrough"),
+        count>0?m_model->fieldKeyForColumn(count-1):QString());
+}
+void DatabaseEditorDialog::restoreCurrentColumnState()
+{
+    if(!m_grid||!m_model||currentTableKey().isEmpty())return;
+    QSettings settings;const QByteArray state=settings.value(columnSettingsKey("headerState")).toByteArray();
+    const QString frozen=settings.value(columnSettingsKey("frozenThrough")).toString();
+    if(!state.isEmpty()){const QSignalBlocker blocker(m_grid->horizontalHeader());m_grid->horizontalHeader()->restoreState(state);}
+    int frozenCount=0;for(int column=0;column<m_model->columnCount();++column)
+        if(m_model->fieldKeyForColumn(column)==frozen){frozenCount=column+1;break;}
+    m_grid->setFrozenColumnCount(frozenCount);m_grid->syncFrozenColumns();
+}
+void DatabaseEditorDialog::showColumnContextMenu(int logicalColumn,const QPoint& globalPosition)
+{
+    if(logicalColumn<0||logicalColumn>=m_model->columnCount())return;
+    QMenu menu(this);menu.setObjectName(QStringLiteral("databaseColumnMenu"));
+    QAction* lock=menu.addAction(tr("Lock columns through “%1”")
+        .arg(m_model->headerData(logicalColumn,Qt::Horizontal,Qt::DisplayRole).toString()));
+    lock->setObjectName(QStringLiteral("databaseLockColumnsAction"));
+    connect(lock,&QAction::triggered,this,[this,logicalColumn](){m_grid->setFrozenColumnCount(logicalColumn+1);saveCurrentColumnState();});
+    QAction* unlock=menu.addAction(tr("Unlock columns"));unlock->setObjectName(QStringLiteral("databaseUnlockColumnsAction"));unlock->setEnabled(m_grid->frozenColumnCount()>0);
+    connect(unlock,&QAction::triggered,this,[this](){m_grid->setFrozenColumnCount(0);saveCurrentColumnState();});
+    menu.addSeparator();
+    QAction* showUnknown=menu.addAction(tr("Show unknown/raw columns"));showUnknown->setObjectName(QStringLiteral("databaseShowUnknownColumnsAction"));
+    connect(showUnknown,&QAction::triggered,this,[this](){for(int column=0;column<m_model->columnCount();++column)if(m_model->isOpaqueColumn(column))m_grid->setColumnHidden(column,false);m_grid->syncFrozenColumns();saveCurrentColumnState();});
+    QAction* hideUnknown=menu.addAction(tr("Hide unknown/raw columns"));hideUnknown->setObjectName(QStringLiteral("databaseHideUnknownColumnsAction"));
+    connect(hideUnknown,&QAction::triggered,this,[this](){for(int column=0;column<m_model->columnCount();++column)if(m_model->isOpaqueColumn(column))m_grid->setColumnHidden(column,true);m_grid->syncFrozenColumns();saveCurrentColumnState();});
+    QMenu* columns=menu.addMenu(tr("Columns"));columns->setObjectName(QStringLiteral("databaseColumnsSubmenu"));
+    for(int column=0;column<m_model->columnCount();++column)
+    {
+        QAction* visible=columns->addAction(m_model->headerData(column,Qt::Horizontal,Qt::DisplayRole).toString());
+        visible->setObjectName(QStringLiteral("databaseColumnVisibilityAction_%1").arg(column));
+        visible->setCheckable(true);visible->setChecked(!m_grid->isColumnHidden(column));
+        visible->setData(column);connect(visible,&QAction::toggled,this,[this,column](bool checked){m_grid->setColumnHidden(column,!checked);m_grid->syncFrozenColumns();saveCurrentColumnState();});
+    }
+    menu.exec(globalPosition);
 }
 QString DatabaseEditorDialog::currentTableKey()const{auto*i=m_tables->currentItem();return i?i->data(Qt::UserRole).toString():QString();}
 QString DatabaseEditorDialog::selectedRowKey()const{return m_grid->currentIndex().isValid()?m_grid->currentIndex().data(RowKeyRole).toString():QString();}
@@ -234,15 +385,15 @@ bool DatabaseEditorDialog::selectTableRow(const QString& tableKey,const QString&
     if(identity.trimmed().isEmpty())return false;
     if(!m_filter->text().isEmpty()){m_filter->clear();m_filterTimer->stop();m_proxy->setSearchText(QString());}
     bool tableFound=false;for(int i=0;i<m_tables->count();++i)if(m_tables->item(i)->data(Qt::UserRole).toString().compare(tableKey,Qt::CaseInsensitive)==0){m_tables->setCurrentRow(i);tableFound=true;break;}if(!tableFound)return false;
-    if(m_model->tableKey().compare(tableKey,Qt::CaseInsensitive)!=0){m_model->setTable(tableKey,m_showOpaque->isChecked());m_proxy->setSearchText(QString());}
-    const int sourceRow=m_model->rowForIdentity(identity);if(sourceRow<0)return false;const QModelIndex source=m_model->index(sourceRow,0),view=m_proxy->mapFromSource(source);if(!view.isValid())return false;m_grid->setCurrentIndex(view);m_grid->selectRow(view.row());m_grid->scrollTo(view,QAbstractItemView::PositionAtCenter);m_grid->setFocus();return true;
+    if(m_model->tableKey().compare(tableKey,Qt::CaseInsensitive)!=0){saveCurrentColumnState();{const QSignalBlocker blocker(m_grid->horizontalHeader());m_model->setTable(tableKey);}restoreCurrentColumnState();m_proxy->setSearchText(QString());}
+    const int sourceRow=m_model->rowForIdentity(identity);if(sourceRow<0)return false;const auto*table=m_document->table(tableKey);const int identityColumn=table?m_model->columnForFieldKey(QStringLiteral("fld.%1.0").arg(table->identityFieldId)):0;const QModelIndex source=m_model->index(sourceRow,identityColumn),view=m_proxy->mapFromSource(source);if(!view.isValid())return false;m_grid->selectRow(view.row());m_grid->setCurrentIndex(view);m_grid->scrollTo(view,QAbstractItemView::PositionAtCenter);m_grid->setFocus();return true;
 }
 void DatabaseEditorDialog::rebuildGrid()
 {
     const auto* table=m_document->table(currentTableKey());if(!table)return;
     m_cloneButton->setEnabled(table->structuralEditing);m_deleteButton->setEnabled(table->structuralEditing);
     const QString structuralReason=table->structuralEditing?QString():tr("This complete/raw table is visible for preservation review. Structural editing is disabled until its typed serializer is verified.");
-    m_cloneButton->setToolTip(structuralReason);m_deleteButton->setToolTip(structuralReason);const QString selected=selectedRowKey();m_model->setTable(table->key,m_showOpaque->isChecked());m_proxy->setSearchText(m_filter->text());if(m_model->columnCount()>0)m_grid->setColumnWidth(0,220);if(!selected.isEmpty()){const int row=m_model->rowForIdentity(selected);if(row>=0){const QModelIndex view=m_proxy->mapFromSource(m_model->index(row,0));if(view.isValid()){m_grid->setCurrentIndex(view);m_grid->selectRow(view.row());}}}updateStatus();
+    m_cloneButton->setToolTip(structuralReason);m_deleteButton->setToolTip(structuralReason);const QString selected=selectedRowKey();const bool changedTable=m_model->tableKey()!=table->key;if(changedTable)saveCurrentColumnState();if(changedTable){const QSignalBlocker blocker(m_grid->horizontalHeader());m_model->setTable(table->key);}else m_model->setTable(table->key);m_proxy->setSearchText(m_filter->text());if(changedTable)restoreCurrentColumnState();if(m_model->columnCount()>0&&!QSettings().contains(columnSettingsKey("headerState")))m_grid->setColumnWidth(0,55);if(!selected.isEmpty()){const int row=m_model->rowForIdentity(selected);if(row>=0){const QModelIndex view=m_proxy->mapFromSource(m_model->index(row,0));if(view.isValid()){m_grid->selectRow(view.row());m_grid->setCurrentIndex(view);}}}m_grid->syncFrozenColumns();updateStatus();
 }
 bool DatabaseEditorDialog::commitGridValue(const QString& rowKey,const QString& fieldKey,const QVariant& value)
 {
