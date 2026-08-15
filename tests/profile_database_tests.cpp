@@ -188,6 +188,7 @@ private slots:
     void jmvLoadsBoundedUnitPerkOwnership();
     void jmvNewUnitStatPadsToActiveRuntimeWidth();
     void jmvExistingUnitStatBlanksSerializeAsZero();
+    void jmvAbsentLuaIdentityInitializesOnlyOnManualEdit();
     void installedSuppliedJmvUnitStatStagesAtRuntimeWidth();
     void jmvMonsterLuaDataClonesUndoesAndPublishesAtomically();
     void installedJmvTitanGripControl();
@@ -481,6 +482,53 @@ void ProfileDatabaseTests::jmvExistingUnitStatBlanksSerializeAsZero()
     for(int index=2;index<record.values.size();++index)QCOMPARE(record.values.at(index),0.0);
 }
 
+void ProfileDatabaseTests::jmvAbsentLuaIdentityInitializesOnlyOnManualEdit()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());QDir root(temporary.path());
+    QVERIFY(root.mkpath("mod/res"));QVERIFY(root.mkpath("mod/lua"));
+    write(root.filePath("mod/res/database.res"),resArchive(relationalMembers()));
+    write(root.filePath("mod/res/databaseJmv.res"),resArchive({}));
+    const QByteArray originalLua=unitPerkLua("Lua Template",1);
+    write(root.filePath("mod/lua/tables.lua"),originalLua);
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="jmv.v1";request.profileId="jamais-vu";
+    request.runtimeManifestId="jmv-absent-lua-identity";
+    request.resourceDirectories<<root.filePath("mod/res");
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    QString diagnostic;
+
+    QVERIFY2(document->fieldEditable("monsters","human test","jmv.perk.health",&diagnostic),
+             qPrintable(diagnostic));
+    QVERIFY2(document->fieldEditable("monsters","human test","jmv.stat.strength",&diagnostic),
+             qPrintable(diagnostic));
+    QCOMPARE(document->buildTablesLua(&diagnostic),originalLua);
+
+    QVERIFY2(document->cloneRow("monsters","human test","Human No Lua Clone",&diagnostic),
+             qPrintable(diagnostic));
+    QCOMPARE(document->buildTablesLua(&diagnostic),originalLua);
+    QMap<QString,ei::SJmvUnitPerkRecord> perks;QMap<QString,ei::SJmvUnitStatRecord> stats;
+    QVERIFY2(ei::parseJmvUnitTables(document->buildTablesLua(&diagnostic),
+             &perks,&stats,&diagnostic),qPrintable(diagnostic));
+    QVERIFY(!perks.contains("human no lua clone"));
+    QVERIFY(!stats.contains("human no lua clone"));
+
+    QVERIFY2(document->setValue("monsters","human no lua clone",
+             "jmv.perk.health",7,&diagnostic),qPrintable(diagnostic));
+    QVERIFY2(ei::parseJmvUnitTables(document->buildTablesLua(&diagnostic),
+             &perks,&stats,&diagnostic),qPrintable(diagnostic));
+    QCOMPARE(perks.value("human no lua clone").values.value(13),7);
+    QVERIFY(!stats.contains("human no lua clone"));
+    QVERIFY(document->undo());
+    QCOMPARE(document->buildTablesLua(&diagnostic),originalLua);
+
+    QVERIFY2(document->setValue("monsters","human test",
+             "jmv.stat.strength",12.5,&diagnostic),qPrintable(diagnostic));
+    QVERIFY2(ei::parseJmvUnitTables(document->buildTablesLua(&diagnostic),
+             &perks,&stats,&diagnostic),qPrintable(diagnostic));
+    QVERIFY(!perks.contains("human test"));
+    QCOMPARE(stats.value("human test").values.value(1),12.5);
+}
+
 void ProfileDatabaseTests::installedSuppliedJmvUnitStatStagesAtRuntimeWidth()
 {
     const QString database=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").section(';',0,0);
@@ -546,7 +594,16 @@ void ProfileDatabaseTests::jmvMonsterLuaDataClonesUndoesAndPublishesAtomically()
     QCOMPARE(document->buildTablesLua(&diagnostic), originalLua);
     QVERIFY2(document->cloneRow("monsters", "human test", "Human Concise Lua Clone",
                                 &diagnostic), qPrintable(diagnostic));
-    QVERIFY(document->buildTablesLua(&diagnostic).contains("\"Human Concise Lua Clone\""));
+    const QByteArray conciseCloneLua=document->buildTablesLua(&diagnostic);
+    QVERIFY(conciseCloneLua.contains("\"Human Concise Lua Clone\""));
+    QMap<QString,ei::SJmvUnitPerkRecord> concisePerks;
+    QMap<QString,ei::SJmvUnitStatRecord> conciseStats;
+    QVERIFY2(ei::parseJmvUnitTables(conciseCloneLua,&concisePerks,&conciseStats,&diagnostic),
+             qPrintable(diagnostic));
+    QVERIFY(concisePerks.contains("human test"));
+    QVERIFY(conciseStats.contains("human test"));
+    QVERIFY(concisePerks.contains("human concise lua clone"));
+    QVERIFY(conciseStats.contains("human concise lua clone"));
     QVERIFY(document->undo());
     QCOMPARE(document->buildTablesLua(&diagnostic), originalLua);
 
