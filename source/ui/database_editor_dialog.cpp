@@ -17,6 +17,7 @@
 #include <QAction>
 #include <QFontDatabase>
 #include <QHeaderView>
+#include <QHash>
 #include <QInputDialog>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -151,13 +152,13 @@ public:
         {
             if(role==Qt::DisplayRole||role==Qt::EditRole||role==RawValueRole)return rowNumber;
             if(role==RowKeyRole)return row->stableKey;
-            if(role==FilterTextRole){QStringList values;values<<QString("#%1").arg(rowNumber)<<QString::number(rowNumber)<<row->sourceStableKey;for(int fieldIndex:m_fields)values<<authoringText(*table,table->fields[fieldIndex],row->values.value(table->fields[fieldIndex].key));return values.join(' ').toLower();}
+            if(role==FilterTextRole)return filterText(index.row(),*table,*row,rowNumber);
             if(role==Qt::TextAlignmentRole)return int(Qt::AlignRight|Qt::AlignVCenter);
             if(role==Qt::ToolTipRole)return tr("Stable physical row number. Search for #%1 to filter this row.").arg(rowNumber);
             return {};
         }
         const SDatabaseFieldSchema* field=fieldAt(index.column());if(!field)return {};
-        const QVariant stored=row->values.value(field->key);const QString full=authoringText(*table,*field,stored);
+        const QVariant stored=row->values.value(field->key);const QString full=fullText(index,*table,*field,stored);
         if(role==Qt::DisplayRole){QString preview=full;preview.replace('\n',", ");return boundedCellPreview(preview);}
         if(role==Qt::EditRole)return field->type==EDatabaseFieldType::Integer||field->type==EDatabaseFieldType::Decimal?stored:QVariant(full);
         if(role==RowKeyRole)return row->stableKey;
@@ -169,12 +170,12 @@ public:
             ? (field->resourceExtension.isEmpty() || QFileInfo(full).suffix().compare(field->resourceExtension,Qt::CaseInsensitive)==0
                 ? full : full+QLatin1Char('.')+field->resourceExtension) : QString();
         if(role==ChoicesRole)return choicesForColumn(index.column());
-        if(role==FilterTextRole){QStringList values;values<<QString("#%1").arg(rowNumber)<<QString::number(rowNumber)<<row->sourceStableKey;for(int fieldIndex:m_fields)values<<authoringText(*table,table->fields[fieldIndex],row->values.value(table->fields[fieldIndex].key));return values.join(' ').toLower();}
+        if(role==FilterTextRole)return filterText(index.row(),*table,*row,rowNumber);
         if(role==Qt::ForegroundRole&&(!field->referenceTable.isEmpty()||field->resourceReference))return QBrush(QColor(35,110,190));
         if(role==Qt::FontRole&&(!field->referenceTable.isEmpty()||field->resourceReference)){QFont font=QApplication::font();font.setUnderline(true);return font;}
         if(role==Qt::ToolTipRole)
         {
-            QString reason;const bool editable=field->writable&&m_document->fieldEditable(m_tableKey,row->stableKey,field->key,&reason);
+            QString reason;const bool editable=editableFor(index,*row,*field,&reason);
             if(!editable)return reason.isEmpty()?tr("Read-only raw payload. It remains preserved byte-for-byte; editing is disabled until this field's type and serializer are verified."):reason;
             if(!field->referenceTable.isEmpty())return tr("Choose a referenced row from the list. Right-click and select Open Referenced Row to follow the link.");
             if(field->resourceReference)return tr("This value names a game resource. Right-click and select Open in Resource Browser to locate its active provider.");
@@ -185,7 +186,7 @@ public:
     Qt::ItemFlags flags(const QModelIndex& index)const override
     {
         Qt::ItemFlags result=QAbstractTableModel::flags(index);const SDatabaseRow* row=rowAt(index.row());if(index.column()==0)return result&~Qt::ItemIsEditable;const auto* field=fieldAt(index.column());if(!row||!field)return result;
-        QString reason;const bool editable=field->writable&&m_document->fieldEditable(m_tableKey,row->stableKey,field->key,&reason);
+        QString reason;const bool editable=editableFor(index,*row,*field,&reason);
         const auto* table=m_document->table(m_tableKey);const bool inlineEditor=field->type==EDatabaseFieldType::Integer||field->type==EDatabaseFieldType::Decimal||field->type==EDatabaseFieldType::Reference||suggestedChoiceField(*field,table);
         return editable&&inlineEditor?result|Qt::ItemIsEditable:result&~Qt::ItemIsEditable;
     }
@@ -195,7 +196,7 @@ public:
         const QString oldKey=row->stableKey;QVariant typed=value;if(field->type==EDatabaseFieldType::Integer)typed=value.toLongLong();else if(field->type==EDatabaseFieldType::Decimal)typed=value.toDouble();
         if(!m_commit(oldKey,field->key,typed))return false;
         const auto* table=m_document->table(m_tableKey);const QString identityKey=table&&table->identityFieldId>=0?QString("fld.%1.0").arg(table->identityFieldId):QString("name");
-        if(field->key==identityKey)refresh();else{m_choices.remove(index.column());emit dataChanged(index,index,{Qt::DisplayRole,Qt::EditRole,Qt::ToolTipRole,RawValueRole,FullTextRole,FilterTextRole,ChoicesRole});}
+        if(field->key==identityKey)refresh();else{clearValueCaches();m_choices.remove(index.column());emit dataChanged(index,index,{Qt::DisplayRole,Qt::EditRole,Qt::ToolTipRole,RawValueRole,FullTextRole,FilterTextRole,ChoicesRole});}
         return true;
     }
     int rowForIdentity(const QString& identity)const
@@ -221,9 +222,35 @@ private:
     {
         if(!table||field.type!=EDatabaseFieldType::Text||field.opaque||field.storageId==table->identityFieldId)return false;const QString label=field.label.toLower();for(const QString& token:{QStringLiteral("type"),QStringLiteral("class"),QStringLiteral("kind"),QStringLiteral("material"),QStringLiteral("terrain"),QStringLiteral("damage"),QStringLiteral("target"),QStringLiteral("school")})if(label.contains(token))return true;return false;
     }
+    quint64 cacheKey(const QModelIndex& index)const
+    {return (quint64(quint32(index.row()))<<32)|quint32(index.column());}
+    QString fullText(const QModelIndex& index,const SDatabaseTable& table,
+                     const SDatabaseFieldSchema& field,const QVariant& stored)const
+    {
+        const quint64 key=cacheKey(index);const auto found=m_fullText.constFind(key);
+        if(found!=m_fullText.constEnd())return found.value();
+        const QString value=authoringText(table,field,stored);m_fullText.insert(key,value);return value;
+    }
+    QString filterText(int modelRow,const SDatabaseTable& table,
+                       const SDatabaseRow& row,int rowNumber)const
+    {
+        const auto found=m_filterText.constFind(modelRow);if(found!=m_filterText.constEnd())return found.value();
+        QStringList values;values<<QString("#%1").arg(rowNumber)<<QString::number(rowNumber)<<row.sourceStableKey;
+        for(int column=1;column<columnCount();++column){const auto*field=fieldAt(column);if(field)values<<fullText(index(modelRow,column),table,*field,row.values.value(field->key));}
+        const QString value=values.join(' ').toLower();m_filterText.insert(modelRow,value);return value;
+    }
+    bool editableFor(const QModelIndex& index,const SDatabaseRow& row,
+                     const SDatabaseFieldSchema& field,QString* reason)const
+    {
+        const quint64 key=cacheKey(index);const auto found=m_editable.constFind(key);
+        if(found!=m_editable.constEnd()){if(reason)*reason=found.value().second;return found.value().first;}
+        QString detail;const bool editable=field.writable&&m_document->fieldEditable(m_tableKey,row.stableKey,field.key,&detail);
+        m_editable.insert(key,qMakePair(editable,detail));if(reason)*reason=detail;return editable;
+    }
+    void clearValueCaches(){m_fullText.clear();m_filterText.clear();m_editable.clear();}
     void rebuildIndexes()
     {
-        m_rows.clear();m_fields.clear();m_choices.clear();const auto* table=m_document->table(m_tableKey);if(!table)return;
+        m_rows.clear();m_fields.clear();m_choices.clear();clearValueCaches();const auto* table=m_document->table(m_tableKey);if(!table)return;
         for(int field=0;field<table->fields.size();++field)m_fields<<field;
         for(int row=0;row<table->rows.size();++row)if(!table->rows[row].deleted)m_rows<<row;
     }
@@ -234,7 +261,7 @@ private:
         else if(suggestedChoiceField(*field,table)){QSet<QString> unique;bool suitable=true;for(int rowIndex:m_rows){const QString value=table->rows[rowIndex].values.value(field->key).toString().trimmed();if(value.isEmpty())continue;if(value.size()>80||value.startsWith('[')||value.startsWith('{')){suitable=false;break;}unique.insert(value);if(unique.size()>64){suitable=false;break;}}if(suitable)values=unique.values();}
         values.removeDuplicates();std::sort(values.begin(),values.end(),[](const QString&a,const QString&b){return a.compare(b,Qt::CaseInsensitive)<0;});m_choices.insert(column,values);return values;
     }
-    QSharedPointer<DatabaseDocument> m_document;QString m_tableKey;QVector<int> m_rows,m_fields;mutable QMap<int,QStringList> m_choices;CommitHandler m_commit;
+    QSharedPointer<DatabaseDocument> m_document;QString m_tableKey;QVector<int> m_rows,m_fields;mutable QMap<int,QStringList> m_choices;mutable QHash<quint64,QString> m_fullText;mutable QHash<int,QString> m_filterText;mutable QHash<quint64,QPair<bool,QString>> m_editable;CommitHandler m_commit;
 };
 
 class DatabaseFilterModel final : public QSortFilterProxyModel

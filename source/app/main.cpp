@@ -5,6 +5,8 @@
 #include <QIcon>
 #include <QCommandLineParser>
 #include <QDialog>
+#include <QDataStream>
+#include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QJsonDocument>
@@ -48,6 +50,7 @@
 #include <QMainWindow>
 #include <QDockWidget>
 #include <QTabBar>
+#include <QThread>
 #include <cstdio>
 #include <cstring>
 
@@ -85,6 +88,51 @@
 #endif
 
 namespace {
+QByteArray resourceNavigationArchiveBytes()
+{
+    struct Member { QByteArray name; QByteArray payload; quint32 offset; };
+    QVector<Member> members;
+    members << Member{QByteArray("z-target.mod"),QByteArray("model"),0}
+            << Member{QByteArray("a-unrelated.wav"),QByteArray("audio"),0};
+    QByteArray bytes(16,'\0'),names;
+    for(Member& member:members)
+    {
+        bytes.append(QByteArray((16-bytes.size()%16)%16,'\0'));
+        member.offset=quint32(bytes.size());bytes.append(member.payload);
+    }
+    bytes.append(QByteArray((16-bytes.size()%16)%16,'\0'));
+    const quint32 tableOffset=quint32(bytes.size());QByteArray tableBytes;
+    QDataStream table(&tableBytes,QIODevice::WriteOnly);table.setByteOrder(QDataStream::LittleEndian);
+    for(int index=0;index<members.size();++index)
+    {
+        const Member& member=members.at(index);
+        table<<quint32(-1)<<quint32(member.payload.size())<<member.offset
+             <<quint32(0x12340000+index)<<quint16(member.name.size())<<quint32(names.size());
+        names.append(member.name);
+    }
+    bytes.append(tableBytes);bytes.append(names);QDataStream header(&bytes,QIODevice::WriteOnly);
+    header.setByteOrder(QDataStream::LittleEndian);header<<quint32(0x019CE23C)
+          <<quint32(members.size())<<tableOffset<<quint32(names.size());return bytes;
+}
+
+bool resourceNavigationExactTargetCheck()
+{
+    QTemporaryDir directory;if(!directory.isValid())return false;
+    const QString archive=directory.filePath(QStringLiteral("navigation.res"));
+    QFile file(archive);const QByteArray bytes=resourceNavigationArchiveBytes();
+    if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size())return false;
+    file.close();CResourceBrowser browser;
+    QTreeWidget* tree=browser.findChild<QTreeWidget*>(QStringLiteral("resourceContentView"));
+    browser.setActiveProfileSources({archive},QStringLiteral("test"));
+    QElapsedTimer wait;wait.start();
+    while(tree&&tree->topLevelItemCount()<2&&wait.elapsed()<3000)
+    {QApplication::processEvents();QThread::msleep(5);}
+    if(!tree)return false;
+    tree->sortItems(0,Qt::DescendingOrder);
+    return browser.selectResourceReference(QStringLiteral("z-target.mod"))
+        &&tree->currentItem()&&tree->currentItem()->text(0)==QStringLiteral("z-target.mod");
+}
+
 class CMousePressProbe final: public QWidget
 {
 public:
@@ -427,6 +475,8 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
     QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
+    QCommandLineOption resourceNavigationCheckOption("resource-navigation-check",
+        "Run the sorted Resource Browser reference-navigation regression check.");
     QCommandLineOption testRunReportOption("test-run-report",
         "Validate the authoritative result of a completed Endurance map-test run.",
         "run-root");
@@ -448,6 +498,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(profileLoadOption);
     parser.addOption(mobDiffOption);
     parser.addOption(uiWidgetCheckOption);
+    parser.addOption(resourceNavigationCheckOption);
     parser.addOption(testRunReportOption);
     parser.addOption(againstOption);
     parser.addOption(angleOpenGlOption);
@@ -486,16 +537,28 @@ int runHeadlessCommand(QApplication& app)
     const bool profileLoad = parser.isSet(profileLoadOption);
     const bool mobDiff = parser.isSet(mobDiffOption);
     const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
+    const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
     if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck
+       && !resourceNavigationCheck
        && !testRunReport)
         return -1;
     if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
             + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0)
+            + (resourceNavigationCheck ? 1 : 0)
             + (testRunReport ? 1 : 0) > 1)
     {
         QTextStream(stderr) << "Choose one headless command.\n";
         return 2;
+    }
+
+    if(resourceNavigationCheck)
+    {
+        app.setQuitOnLastWindowClosed(false);
+        const bool passed=resourceNavigationExactTargetCheck();
+        QTextStream(passed?stdout:stderr)
+            <<(passed?"PASS":"FAIL")<<": sorted resource reference selected exact target\n";
+        return passed?0:1;
     }
 
     if(testRunReport)
@@ -2359,6 +2422,12 @@ int runHeadlessCommand(QApplication& app)
                 && resourceBrowser.findChild<QTreeWidget*>(
                     QStringLiteral("resourceModelParts"));
 
+        // Catalog insertion order and the sorted visual order intentionally
+        // disagree. Resource navigation must resolve the stable entry carried
+        // by the visual item, not reuse an unsorted catalog row number.
+        const bool sortedResourceReferenceSelectsExactTarget=
+            resourceNavigationExactTargetCheck();
+
         QMainWindow resourceNavigationHost;
         QDockWidget resourceNavigationDock(&resourceNavigationHost);
         resourceNavigationHost.addDockWidget(Qt::RightDockWidgetArea,
@@ -2371,10 +2440,10 @@ int runHeadlessCommand(QApplication& app)
         ei::revealDockNavigationTarget(&resourceNavigationHost,
                                        &resourceNavigationDock);
         QApplication::processEvents();
-        const bool resourceNavigationBringsMainWindowForward =
+        const bool resourceNavigationUsesFloatingTarget =
                 resourceNavigationHost.isVisible()
                 && resourceNavigationDock.isVisible()
-                && QApplication::activeWindow() == &resourceNavigationHost;
+                && resourceNavigationDock.isFloating();
         resourceNavigationSource.close();
         resourceNavigationHost.close();
 
@@ -2419,8 +2488,8 @@ int runHeadlessCommand(QApplication& app)
         // reclaim it, matching application lifetime.
 
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
-                && resourceBrowserContract
-                && resourceNavigationBringsMainWindowForward
+                && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
+                && resourceNavigationUsesFloatingTarget
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
                 && prefixesOnly && valueStable && focusCancel && escapeCancel
                 && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork

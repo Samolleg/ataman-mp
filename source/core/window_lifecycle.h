@@ -13,14 +13,14 @@ inline void revealDockNavigationTarget(QMainWindow* window, QDockWidget* dock)
 {
     if(!window || !dock)
         return;
-    if(window->isMinimized())
-        window->showNormal();
-    else
-        window->show();
+    // Database authoring is a separate top-level window. Raising the main
+    // window to expose a dock hides that source window and looks like a
+    // minimize. Use the dock's supported floating form for cross-tool links.
+    if(!dock->isFloating())
+        dock->setFloating(true);
     dock->show();
     dock->raise();
-    window->raise();
-    window->activateWindow();
+    dock->activateWindow();
     dock->setFocus(Qt::OtherFocusReason);
 }
 

@@ -235,6 +235,7 @@ private slots:
     void databaseEditorForwardsFocusedUndoRedo();
     void installedVerifiedReferenceMappingsResolve();
     void installedDatabaseInteractiveLatency();
+    void installedRaceModelSelectionAndContextLatency();
     void itemSpellConstructorParsesCanonicalAndLegacyCodes();
     void itemSpellConstructorRestrictsMaterialsAndReportsSoftLimits();
     void itemSpellConstructorCalculatesRuntimeSpellValues();
@@ -1958,6 +1959,35 @@ void ProfileDatabaseTests::installedVerifiedReferenceMappingsResolve()
         }
     }
     QVERIFY(mappedFields>=1);
+}
+
+void ProfileDatabaseTests::installedRaceModelSelectionAndContextLatency()
+{
+    const QString archive=qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES")
+        .split(';',QString::SkipEmptyParts).value(0);
+    if(archive.isEmpty())QSKIP("Set EI_TEST_DATABASE_ARCHIVES to run Race Models UI latency.");
+    const QFileInfo source(archive);ei::ProfileDatabaseService service;
+    ei::SProfileDatabaseLoadRequest request;request.providerId="jmv.v1";
+    request.profileId="jamais-vu";request.resourceDirectories<<source.absolutePath();
+    const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    const auto* table=document->table("units.racemodels");QVERIFY(table&&table->rows.size()>2);
+    ei::DatabaseEditorDialog dialog(document);dialog.show();
+    QVERIFY(dialog.selectFinding("units.racemodels",table->rows.at(1).stableKey));
+    QTableView* grid=dialog.findChild<QTableView*>("databaseGrid");QVERIFY(grid);
+    const QModelIndex cell=grid->model()->index(grid->currentIndex().row(),
+        qMin(3,grid->model()->columnCount()-1));QVERIFY(cell.isValid());
+    QElapsedTimer timer;timer.start();grid->setCurrentIndex(cell);grid->selectRow(cell.row());
+    QApplication::processEvents();const qint64 selectionMs=timer.restart();
+    const QRect visual=grid->visualRect(cell);QVERIFY(visual.isValid());
+    QContextMenuEvent event(QContextMenuEvent::Mouse,visual.center(),
+        grid->viewport()->mapToGlobal(visual.center()));
+    QApplication::sendEvent(grid->viewport(),&event);QApplication::processEvents();
+    const qint64 contextMs=timer.elapsed();
+    if(QMenu* menu=qobject_cast<QMenu*>(QApplication::activePopupWidget()))menu->close();
+    qInfo()<<"Race Models UI latency ms selection"<<selectionMs<<"context"<<contextMs
+           <<"rows"<<table->rows.size()<<"columns"<<grid->model()->columnCount();
+    QVERIFY2(selectionMs<100,qPrintable(QString("Race Models selection took %1 ms").arg(selectionMs)));
+    QVERIFY2(contextMs<100,qPrintable(QString("Race Models context menu took %1 ms").arg(contextMs)));
 }
 
 void ProfileDatabaseTests::itemSpellConstructorParsesCanonicalAndLegacyCodes()

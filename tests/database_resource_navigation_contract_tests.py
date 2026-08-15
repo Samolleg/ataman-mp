@@ -31,6 +31,10 @@ def main() -> int:
             "Selecting the database.res archive itself must expose the Database Editor action.")
     require(browser_cpp, "emit databaseEditorRequested(archive)",
             "The action must work from an archive selection, not only a member preview.")
+    require(browser_cpp, "item->data(0, kEntryRole).toInt() != visibleEntryIndex",
+            "Reference navigation must map through each sorted visual item's stable catalog index.")
+    if "m_resources->topLevelItem(row);\n            m_resources->setCurrentItem(item)" in browser_cpp:
+        raise AssertionError("Reference navigation still treats an unsorted catalog row as a visual row.")
     classifier = browser_cpp[browser_cpp.index("bool isDedicatedDatabaseArchive"):
                              browser_cpp.index("QString suffixType")]
     if "databaseJmv.res" in classifier:

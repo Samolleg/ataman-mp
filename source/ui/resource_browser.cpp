@@ -746,15 +746,20 @@ bool CResourceBrowser::applyResourceReferenceSelection(const QString& reference)
     m_statusFilter->setCurrentIndex(0);
     if(m_archives->topLevelItemCount()) m_archives->setCurrentItem(m_archives->topLevelItem(0));
     rebuildList();
+    int visibleEntryIndex = -1;
     for(int row = 0; row < m_visibleEntries.size(); ++row)
         if(m_visibleEntries.at(row).archivePriority == target.archivePriority
            && m_visibleEntries.at(row).memberIndex == target.memberIndex)
-        {
-            QTreeWidgetItem* item = m_resources->topLevelItem(row);
-            m_resources->setCurrentItem(item);
-            m_resources->scrollToItem(item, QAbstractItemView::PositionAtCenter);
-            return true;
-        }
+        {visibleEntryIndex = row;break;}
+    for(int visualRow = 0; visibleEntryIndex >= 0
+            && visualRow < m_resources->topLevelItemCount(); ++visualRow)
+    {
+        QTreeWidgetItem* item = m_resources->topLevelItem(visualRow);
+        if(!item || item->data(0, kEntryRole).toInt() != visibleEntryIndex)continue;
+        m_resources->setCurrentItem(item);
+        m_resources->scrollToItem(item, QAbstractItemView::PositionAtCenter);
+        return true;
+    }
     return false;
 }
 
