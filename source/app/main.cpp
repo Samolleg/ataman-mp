@@ -2359,6 +2359,25 @@ int runHeadlessCommand(QApplication& app)
                 && resourceBrowser.findChild<QTreeWidget*>(
                     QStringLiteral("resourceModelParts"));
 
+        QMainWindow resourceNavigationHost;
+        QDockWidget resourceNavigationDock(&resourceNavigationHost);
+        resourceNavigationHost.addDockWidget(Qt::RightDockWidgetArea,
+                                             &resourceNavigationDock);
+        QDialog resourceNavigationSource(&resourceNavigationHost);
+        resourceNavigationHost.show();
+        resourceNavigationSource.show();
+        resourceNavigationSource.activateWindow();
+        QApplication::processEvents();
+        ei::revealDockNavigationTarget(&resourceNavigationHost,
+                                       &resourceNavigationDock);
+        QApplication::processEvents();
+        const bool resourceNavigationBringsMainWindowForward =
+                resourceNavigationHost.isVisible()
+                && resourceNavigationDock.isVisible()
+                && QApplication::activeWindow() == &resourceNavigationHost;
+        resourceNavigationSource.close();
+        resourceNavigationHost.close();
+
         // Reproduce closing and immediately reopening the modeless constructor
         // before Qt dispatches deferred-delete events. The window is meant to
         // be reusable for the lifetime of MainWindow.
@@ -2401,6 +2420,7 @@ int runHeadlessCommand(QApplication& app)
 
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract
+                && resourceNavigationBringsMainWindowForward
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
                 && prefixesOnly && valueStable && focusCancel && escapeCancel
                 && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork

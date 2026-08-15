@@ -229,6 +229,7 @@ private slots:
     void workbookImportRejectsReadOnlyAndUnpublishableChanges();
     void databaseEditorRowMenuAndWrappedFieldEditor();
     void databaseEditorOpensKnownResourceReferences();
+    void databaseEditorMarksVerifiedLeverResources();
     void databaseEditorUsesLazyModelAndNavigatesReferences();
     void databaseEditorPersistsVisualColumnControls();
     void databaseEditorForwardsFocusedUndoRedo();
@@ -1662,6 +1663,30 @@ void ProfileDatabaseTests::databaseEditorOpensKnownResourceReferences()
     QTRY_VERIFY_WITH_TIMEOUT(triggered,1000);
     QCOMPARE(requested.count(),1);
     QCOMPARE(requested.takeFirst().at(0).toString(),QStringLiteral("unhuma.mod"));
+}
+
+void ProfileDatabaseTests::databaseEditorMarksVerifiedLeverResources()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());
+    auto members=relationalMembers();
+    members["levers.ldb"]=database({record(stringField(0,"stst43")
+        +stringField(6,"Tools\\Door.wav"))});
+    write(QDir(temporary.path()).filePath("database.res"),resArchive(members));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="base";
+    request.resourceDirectories<<temporary.path();
+    const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));
+    QVERIFY(document);
+    const auto* table=document->table("levers.leverprototypes");QVERIFY(table);
+    const auto field=[table](int storageId)->const ei::SDatabaseFieldSchema* {
+        for(const auto& candidate:table->fields)
+            if(candidate.storageId==storageId&&candidate.storageOccurrence==0)return &candidate;
+        return nullptr;
+    };
+    const auto* model=field(0);QVERIFY(model);QVERIFY(model->resourceReference);
+    QCOMPARE(model->resourceExtension,QStringLiteral("mod"));
+    const auto* sound=field(6);QVERIFY(sound);QVERIFY(sound->resourceReference);
+    QVERIFY(sound->resourceExtension.isEmpty());
 }
 
 void ProfileDatabaseTests::databaseEditorUsesLazyModelAndNavigatesReferences()

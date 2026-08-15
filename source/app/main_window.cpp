@@ -569,9 +569,12 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::resourceBrowserRequested,
                 this, [this](const QString& reference)
         {
-            m_resourceBrowserDock->show();
-            m_resourceBrowserDock->raise();
-            if(!m_resourceBrowser->selectResourceReference(reference))
+            const bool selected = m_resourceBrowser->selectResourceReference(reference);
+            ei::revealDockNavigationTarget(this, m_resourceBrowserDock);
+            ei::log(selected ? eLogInfo : eLogWarning,
+                    QString("Database resource navigation reference:'%1' accepted:%2")
+                        .arg(reference).arg(selected ? 1 : 0));
+            if(!selected)
                 QMessageBox::information(this, tr("Resource not found"),
                     tr("No active-profile resource matches '%1'.").arg(reference));
         });

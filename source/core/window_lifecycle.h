@@ -2,10 +2,27 @@
 #define WINDOW_LIFECYCLE_H
 
 #include <QApplication>
+#include <QDockWidget>
+#include <QMainWindow>
 #include <QPointer>
 #include <QWidget>
 
 namespace ei {
+
+inline void revealDockNavigationTarget(QMainWindow* window, QDockWidget* dock)
+{
+    if(!window || !dock)
+        return;
+    if(window->isMinimized())
+        window->showNormal();
+    else
+        window->show();
+    dock->show();
+    dock->raise();
+    window->raise();
+    window->activateWindow();
+    dock->setFocus(Qt::OtherFocusReason);
+}
 
 inline void closeSecondaryWindows(QWidget* primaryWindow)
 {
