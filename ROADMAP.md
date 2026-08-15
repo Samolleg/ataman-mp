@@ -125,6 +125,9 @@ boundaries as MOB and MPR authoring.
   Race Models: keep the literal `#` column frozen by default, preserve explicit
   freeze/layout state, softly highlight the selected row, and avoid full-grid
   work during paint, selection, context-menu, and horizontal-scroll events.
+- [x] Consolidate viewport visibility into a collapsed-by-default **Visuals**
+  switcher with synchronized entrance, object-helper, terrain, overlay,
+  environment, particle, and animation-freeze channels.
 
 ## Remaining beta gates
 
@@ -141,6 +144,7 @@ boundaries as MOB and MPR authoring.
 - Frozen-column, paint-latency, and multi-window fixes: `e0873c97` and
   `0eebd4b1`; the r8 tester build was user-confirmed.
 - [Integrated Database Editor contract](docs/DATABASE_EDITOR_VERTICAL_SLICE.md).
+- [Viewport Visuals switcher](packaging/ALPHA26_VIEWPORT_VISUALS_R1.md).
 - [Full database editor coverage](docs/releases/0.3.0-alpha.26-full-database-editor.md).
 - Resource Browser validation:
   [r1](packaging/ALPHA26_RESOURCE_BROWSER_R1.md),

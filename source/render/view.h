@@ -204,6 +204,7 @@ public:
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
                                  int selectedIndex);
+    bool entranceOverlaysVisible() const { return m_entranceOverlaysVisible; }
     void refreshUiScale();
     void moveCameraToPoint(const QVector3D& position);
     void anchorCameraRotationToViewportCenter();
@@ -404,6 +405,10 @@ private:
     void initAiGraphPreviewWidget();
     void applyEnvironmentCompatibilityMode();
     void positionEnvironmentPreviewWidget();
+    void syncVisualChannelButtons();
+    void updateVisualChannelAvailability();
+    void persistViewportVisualState();
+    bool isObjectVisualVisible(CNode* node) const;
     void refreshAiGraphPreviewSource();
     void syncAiGraphPreviewWidget();
     void rebuildAiGraphOverlayGeometry();
@@ -474,6 +479,7 @@ signals:
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
     void cameraSpeedMultiplierChanged(double multiplier);
+    void entranceOverlayVisibilityChanged(bool visible);
     void unitVisualPreparationComplete();
     void aiGraphPersistenceRequested();
 
@@ -722,6 +728,15 @@ private:
     QWidget* m_environmentPreviewBody{nullptr};
     QToolButton* m_environmentPreviewCollapse{nullptr};
     QComboBox* m_environmentPreviewMode{nullptr};
+    QToolButton* m_entranceVisualToggle{nullptr};
+    QToolButton* m_objectHelpersVisualToggle{nullptr};
+    QToolButton* m_terrainVisualToggle{nullptr};
+    QToolButton* m_overlaysVisualToggle{nullptr};
+    QToolButton* m_fogVisualToggle{nullptr};
+    QToolButton* m_terrainShadowsVisualToggle{nullptr};
+    QToolButton* m_skyboxVisualToggle{nullptr};
+    QToolButton* m_particleVisualsToggle{nullptr};
+    QToolButton* m_freezeAnimationsToggle{nullptr};
     QFrame* m_timeOfDayWidget{nullptr};
     QLabel* m_timeOfDayLabel{nullptr};
     QSlider* m_environmentPreviewTime{nullptr};
@@ -769,6 +784,14 @@ private:
     QVector<QVector3D> m_aiGraphNodes;
     QVector<QVector3D> m_aiGraphIsolatedNodes;
     bool m_environmentPreviewSyncing{false};
+    bool m_entranceOverlaysVisible{true};
+    bool m_objectHelpersVisible{true};
+    bool m_particleVisualsVisible{true};
+    bool m_fogVisible{true};
+    bool m_terrainShadowsVisible{true};
+    bool m_skyboxVisible{true};
+    bool m_freezeAnimations{false};
+    qint64 m_animationFreezeTime{-1};
     bool m_openGlesCompatibility{false};
     int m_openGlDiagnosticFramesRemaining{0};
     quint64 m_openGlDiagnosticFrame{0};

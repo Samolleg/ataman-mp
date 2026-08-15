@@ -23,6 +23,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QSettings>
 #include <QtConcurrent>
 #include <QtEndian>
 #include <cstddef>
@@ -249,6 +250,58 @@ bool isMinimapStaticGeometry(CNode* node)
     default:
         return false;
     }
+}
+
+bool isEditorObjectHelper(CNode* node)
+{
+    if(!node)
+        return false;
+    switch(node->nodeType())
+    {
+    case ENodeType::eLight:
+    case ENodeType::eSound:
+    case ENodeType::eParticle:
+        return true;
+    default:
+        return false;
+    }
+}
+
+QIcon viewportVisibilityIcon(bool visible, const QColor& color)
+{
+    QPixmap pixmap(24, 24);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 1.8, Qt::SolidLine,
+                        Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    QPainterPath eye;
+    eye.moveTo(2.5, 12.0);
+    eye.cubicTo(7.0, 4.3, 17.0, 4.3, 21.5, 12.0);
+    eye.cubicTo(17.0, 19.7, 7.0, 19.7, 2.5, 12.0);
+    painter.drawPath(eye);
+    painter.setBrush(color);
+    painter.drawEllipse(QPointF(12.0, 12.0), 3.0, 3.0);
+    if(!visible)
+    {
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(color, 2.2, Qt::SolidLine,
+                            Qt::RoundCap, Qt::RoundJoin));
+        painter.drawLine(QPointF(4.0, 20.0), QPointF(20.0, 4.0));
+    }
+    return QIcon(pixmap);
+}
+
+void updateViewportVisibilityButton(QToolButton* button, bool visible)
+{
+    if(!button)
+        return;
+    button->setIcon(viewportVisibilityIcon(
+        visible, button->palette().color(QPalette::ButtonText)));
+    button->setAccessibleName(QStringLiteral("%1: %2")
+        .arg(button->text(), visible ? QObject::tr("shown")
+                                     : QObject::tr("hidden")));
 }
 
 QVector4D aiGraphLayerColor(int layer)
@@ -940,20 +993,30 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
 void CView::setDrawWater(bool bDraw)
 {
     if(m_bDrawWater == bDraw)
+    {
+        syncVisualChannelButtons();
         return;
+    }
     m_bDrawWater = bDraw;
     if(m_landscapeTools)
         m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
+    persistViewportVisualState();
+    syncVisualChannelButtons();
     update();
 }
 
 void CView::setDrawLand(bool bDraw)
 {
     if(m_bDrawLand == bDraw)
+    {
+        syncVisualChannelButtons();
         return;
+    }
     m_bDrawLand = bDraw;
     if(m_landscapeTools)
         m_landscapeTools->setTerrainVisibility(m_bDrawLand, m_bDrawWater);
+    persistViewportVisualState();
+    syncVisualChannelButtons();
     update();
 }
 
@@ -1495,22 +1558,47 @@ void CView::initEnvironmentPreviewWidget()
 {
     if(m_environmentPreviewWidget || !m_pSettings)
         return;
+    QSettings visualSettings;
+    m_entranceOverlaysVisible = visualSettings.value(
+        QStringLiteral("ui/viewportVisuals/entrances"),
+        visualSettings.value(QStringLiteral("ui/showEntranceOverlays"), true)).toBool();
+    m_objectHelpersVisible = visualSettings.value(
+        QStringLiteral("ui/viewportVisuals/objectHelpers"), true).toBool();
+    m_bDrawLand = visualSettings.value(
+        QStringLiteral("ui/viewportVisuals/terrain"), true).toBool();
+    m_bDrawWater = visualSettings.value(
+        QStringLiteral("ui/viewportVisuals/overlays"), true).toBool();
+    m_particleVisualsVisible = visualSettings.value(
+        QStringLiteral("ui/viewportVisuals/particleVisuals"), true).toBool();
+    m_freezeAnimations = visualSettings.value(
+        QStringLiteral("ui/viewportVisuals/freezeAnimations"), false).toBool();
+    if(m_freezeAnimations)
+        m_animationFreezeTime = QDateTime::currentMSecsSinceEpoch();
+    const auto boolOption = [this](const char* name, bool fallback) {
+        const COptBool* option = dynamic_cast<const COptBool*>(m_pSettings->opt(name));
+        return option ? option->value() : fallback;
+    };
+    m_fogVisible = boolOption("renderFog", true);
+    m_terrainShadowsVisible = boolOption("renderTerrainShadows", true);
+    m_skyboxVisible = boolOption("drawSkybox", true);
+
     m_environmentPreviewWidget = new CViewportWidget(this);
     m_environmentPreviewWidget->setObjectName("environmentPreviewWidget");
-    m_environmentPreviewWidget->setMinimumWidth(220);
+    m_environmentPreviewWidget->setMinimumWidth(250);
     m_environmentPreviewWidget->setFrameShape(QFrame::StyledPanel);
     m_environmentPreviewWidget->setStyleSheet(
         "QFrame#environmentPreviewWidget { background: rgb(25,25,25); color: white; border: 1px solid #777; }"
-        "QLabel, QComboBox, QToolButton { color: white; }");
+        "QLabel, QComboBox, QToolButton, QPushButton { color: white; }");
     QVBoxLayout* outer = new QVBoxLayout(m_environmentPreviewWidget);
     outer->setContentsMargins(7, 5, 7, 6);
     outer->setSpacing(4);
     QHBoxLayout* title = new QHBoxLayout;
     title->setContentsMargins(0, 0, 0, 0);
-    QLabel* titleLabel = new QLabel(tr("Lighting mode"), m_environmentPreviewWidget);
+    QLabel* titleLabel = new QLabel(tr("Visuals"), m_environmentPreviewWidget);
     m_environmentPreviewCollapse = new QToolButton(m_environmentPreviewWidget);
-    m_environmentPreviewCollapse->setText(QString::fromUtf8("\xE2\x88\x92"));
-    m_environmentPreviewCollapse->setToolTip(tr("Minimize lighting mode"));
+    m_environmentPreviewCollapse->setObjectName(QStringLiteral("visualsCollapse"));
+    m_environmentPreviewCollapse->setText(QStringLiteral("+"));
+    m_environmentPreviewCollapse->setToolTip(tr("Expand visuals"));
     title->addWidget(titleLabel);
     title->addStretch(1);
     title->addWidget(m_environmentPreviewCollapse);
@@ -1520,11 +1608,83 @@ void CView::initEnvironmentPreviewWidget()
     QVBoxLayout* body = new QVBoxLayout(m_environmentPreviewBody);
     body->setContentsMargins(0, 0, 0, 0);
     body->setSpacing(4);
+
+    QHBoxLayout* bulk = new QHBoxLayout;
+    bulk->setContentsMargins(0, 0, 0, 0);
+    QPushButton* showAll = new QPushButton(tr("Show all"), m_environmentPreviewBody);
+    QPushButton* hideAll = new QPushButton(tr("Hide all"), m_environmentPreviewBody);
+    showAll->setObjectName(QStringLiteral("visualsShowAll"));
+    hideAll->setObjectName(QStringLiteral("visualsHideAll"));
+    showAll->setToolTip(tr("Show every currently available viewport visual channel."));
+    hideAll->setToolTip(tr("Hide every currently available viewport visual channel."));
+    bulk->addWidget(showAll);
+    bulk->addWidget(hideAll);
+    body->addLayout(bulk);
+
+    QHBoxLayout* lighting = new QHBoxLayout;
+    lighting->setContentsMargins(0, 0, 0, 0);
+    lighting->addWidget(new QLabel(tr("Lighting mode"), m_environmentPreviewBody));
     m_environmentPreviewMode = new QComboBox(m_environmentPreviewBody);
+    m_environmentPreviewMode->setObjectName(QStringLiteral("visualsLightingMode"));
     m_environmentPreviewMode->addItem(tr("Unlit"), 0);
     m_environmentPreviewMode->addItem(tr("Simple shading"), 1);
     m_environmentPreviewMode->addItem(tr("Full environment"), 2);
-    body->addWidget(m_environmentPreviewMode);
+    lighting->addWidget(m_environmentPreviewMode, 1);
+    body->addLayout(lighting);
+
+    const auto makeToggle = [this, body](const char* objectName,
+                                        const QString& text,
+                                        const QString& tooltip,
+                                        bool checked) {
+        QToolButton* button = new QToolButton(m_environmentPreviewBody);
+        button->setObjectName(QString::fromLatin1(objectName));
+        button->setText(text);
+        button->setCheckable(true);
+        button->setChecked(checked);
+        button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        button->setProperty("availableToolTip", tooltip);
+        button->setToolTip(tooltip);
+        updateViewportVisibilityButton(button, checked);
+        connect(button, &QToolButton::toggled, button,
+                [button](bool visible) {
+            updateViewportVisibilityButton(button, visible);
+        });
+        body->addWidget(button);
+        return button;
+    };
+    m_entranceVisualToggle = makeToggle("visualsEntrances", tr("Entrances"), tr(
+        "Show map.txt entrance areas and labels in the viewport."),
+        m_entranceOverlaysVisible);
+    m_objectHelpersVisualToggle = makeToggle("visualsObjectHelpers", tr("Object helpers"), tr(
+        "Show editor helper models for light, particle, and sound objects. This does not hide their actual effects."),
+        m_objectHelpersVisible);
+    m_terrainVisualToggle = makeToggle("visualsTerrain", tr("Terrain"), tr(
+        "Show the main terrain. This stays synchronized with Landscape Tools and the M shortcut."),
+        m_bDrawLand);
+    m_overlaysVisualToggle = makeToggle("visualsOverlays", tr("Overlays"), tr(
+        "Show overlay surfaces such as water and lava. This stays synchronized with Landscape Tools and the O shortcut."),
+        m_bDrawWater);
+    m_fogVisualToggle = makeToggle("visualsFog", tr("Fog"), tr(
+        "Show authored distance fog in Full environment lighting mode."),
+        m_fogVisible);
+    m_terrainShadowsVisualToggle = makeToggle("visualsTerrainShadows", tr("Terrain shadows"), tr(
+        "Show authored terrain shadowing when a landscape, Full environment, and desktop shadow renderer are available."),
+        m_terrainShadowsVisible);
+    m_skyboxVisualToggle = makeToggle("visualsSkybox", tr("Skybox"), tr(
+        "Show the profile skybox in Full environment mode on outdoor maps."),
+        m_skyboxVisible);
+    m_particleVisualsToggle = makeToggle("visualsParticles", tr("Particle visuals"), tr(
+        "Show rendered particle effects. Particle object helper models are controlled separately."),
+        m_particleVisualsVisible);
+
+    QFrame* separator = new QFrame(m_environmentPreviewBody);
+    separator->setFrameShape(QFrame::HLine);
+    separator->setFrameShadow(QFrame::Sunken);
+    body->addWidget(separator);
+    m_freezeAnimationsToggle = makeToggle("visualsFreezeAnimations", tr("Freeze animations"), tr(
+        "Hold animated units at their current idle-cycle frame. Available only when Animate unit idle cycles is enabled in Render settings."),
+        m_freezeAnimations);
 
     m_timeOfDayWidget = new CViewportWidget(this);
     m_timeOfDayWidget->setObjectName("timeOfDayWidget");
@@ -1561,6 +1721,8 @@ void CView::initEnvironmentPreviewWidget()
         const bool show = !m_environmentPreviewBody->isVisible();
         m_environmentPreviewBody->setVisible(show);
         m_environmentPreviewCollapse->setText(show ? QString::fromUtf8("\xE2\x88\x92") : "+");
+        m_environmentPreviewCollapse->setToolTip(show
+            ? tr("Minimize visuals") : tr("Expand visuals"));
         m_environmentPreviewWidget->adjustSize();
         positionEnvironmentPreviewWidget();
     });
@@ -1572,7 +1734,72 @@ void CView::initEnvironmentPreviewWidget()
         if(COptInt* option = dynamic_cast<COptInt*>(m_pSettings->opt("renderLightingMode")))
             option->setValue(qBound(0, index, 2));
         m_pSettings->persistOptions();
+        updateVisualChannelAvailability();
         update();
+    });
+    connect(m_entranceVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_entranceOverlaysVisible = visible;
+        persistViewportVisualState();
+        emit entranceOverlayVisibilityChanged(visible);
+        update();
+    });
+    connect(m_objectHelpersVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_objectHelpersVisible = visible;
+        persistViewportVisualState();
+        update();
+    });
+    connect(m_terrainVisualToggle, &QToolButton::toggled,
+            this, &CView::setDrawLand);
+    connect(m_overlaysVisualToggle, &QToolButton::toggled,
+            this, &CView::setDrawWater);
+    connect(m_fogVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_fogVisible = visible;
+        if(COptBool* option = dynamic_cast<COptBool*>(m_pSettings->opt("renderFog")))
+            option->setValue(visible);
+        m_pSettings->persistOptions();
+        update();
+    });
+    connect(m_terrainShadowsVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_terrainShadowsVisible = visible;
+        if(COptBool* option = dynamic_cast<COptBool*>(m_pSettings->opt("renderTerrainShadows")))
+            option->setValue(visible);
+        m_pSettings->persistOptions();
+        update();
+    });
+    connect(m_skyboxVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_skyboxVisible = visible;
+        if(COptBool* option = dynamic_cast<COptBool*>(m_pSettings->opt("drawSkybox")))
+            option->setValue(visible);
+        m_pSettings->persistOptions();
+        update();
+    });
+    connect(m_particleVisualsToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_particleVisualsVisible = visible;
+        persistViewportVisualState();
+        update();
+    });
+    connect(m_freezeAnimationsToggle, &QToolButton::toggled, this, [this](bool freeze) {
+        m_freezeAnimations = freeze;
+        m_animationFreezeTime = freeze ? QDateTime::currentMSecsSinceEpoch() : -1;
+        persistViewportVisualState();
+        update();
+    });
+    const auto setAllVisible = [this](bool visible) {
+        const QList<QToolButton*> channels = {
+            m_entranceVisualToggle, m_objectHelpersVisualToggle,
+            m_terrainVisualToggle, m_overlaysVisualToggle, m_fogVisualToggle,
+            m_terrainShadowsVisualToggle, m_skyboxVisualToggle,
+            m_particleVisualsToggle
+        };
+        for(QToolButton* channel : channels)
+            if(channel && channel->isEnabled())
+                channel->setChecked(visible);
+    };
+    connect(showAll, &QPushButton::clicked, this, [setAllVisible]() {
+        setAllVisible(true);
+    });
+    connect(hideAll, &QPushButton::clicked, this, [setAllVisible]() {
+        setAllVisible(false);
     });
     connect(m_environmentPreviewTime, &QSlider::valueChanged, this, [this](int minutes)
     {
@@ -1589,6 +1816,8 @@ void CView::initEnvironmentPreviewWidget()
         m_pSettings->persistOptions();
         update();
     });
+    m_environmentPreviewBody->setVisible(false);
+    syncVisualChannelButtons();
     m_environmentPreviewWidget->adjustSize();
     m_timeOfDayWidget->adjustSize();
     positionEnvironmentPreviewWidget();
@@ -1597,6 +1826,97 @@ void CView::initEnvironmentPreviewWidget()
     m_environmentPreviewWidget->raise();
     m_timeOfDayWidget->raise();
     applyEnvironmentCompatibilityMode();
+}
+
+void CView::persistViewportVisualState()
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("ui/viewportVisuals/entrances"),
+                      m_entranceOverlaysVisible);
+    settings.setValue(QStringLiteral("ui/showEntranceOverlays"),
+                      m_entranceOverlaysVisible);
+    settings.setValue(QStringLiteral("ui/viewportVisuals/objectHelpers"),
+                      m_objectHelpersVisible);
+    settings.setValue(QStringLiteral("ui/viewportVisuals/terrain"), m_bDrawLand);
+    settings.setValue(QStringLiteral("ui/viewportVisuals/overlays"), m_bDrawWater);
+    settings.setValue(QStringLiteral("ui/viewportVisuals/particleVisuals"),
+                      m_particleVisualsVisible);
+    settings.setValue(QStringLiteral("ui/viewportVisuals/freezeAnimations"),
+                      m_freezeAnimations);
+}
+
+void CView::syncVisualChannelButtons()
+{
+    const auto optionValue = [this](const char* name, bool fallback) {
+        const COptBool* option = m_pSettings
+            ? dynamic_cast<const COptBool*>(m_pSettings->opt(name)) : nullptr;
+        return option ? option->value() : fallback;
+    };
+    m_fogVisible = optionValue("renderFog", true);
+    m_terrainShadowsVisible = optionValue("renderTerrainShadows", true);
+    m_skyboxVisible = optionValue("drawSkybox", true);
+    const auto sync = [](QToolButton* button, bool checked) {
+        if(!button)
+            return;
+        const QSignalBlocker blocker(button);
+        button->setChecked(checked);
+        updateViewportVisibilityButton(button, checked);
+    };
+    sync(m_entranceVisualToggle, m_entranceOverlaysVisible);
+    sync(m_objectHelpersVisualToggle, m_objectHelpersVisible);
+    sync(m_terrainVisualToggle, m_bDrawLand);
+    sync(m_overlaysVisualToggle, m_bDrawWater);
+    sync(m_fogVisualToggle, m_fogVisible);
+    sync(m_terrainShadowsVisualToggle, m_terrainShadowsVisible);
+    sync(m_skyboxVisualToggle, m_skyboxVisible);
+    sync(m_particleVisualsToggle, m_particleVisualsVisible);
+    sync(m_freezeAnimationsToggle, m_freezeAnimations);
+    updateVisualChannelAvailability();
+}
+
+void CView::updateVisualChannelAvailability()
+{
+    if(!m_pSettings)
+        return;
+    const COptInt* mode = dynamic_cast<const COptInt*>(
+        m_pSettings->opt("renderLightingMode"));
+    const int requestedLightingMode = qBound(0, mode ? mode->value() : 2, 2);
+    const bool fullEnvironment = requestedLightingMode == 2
+        && !m_openGlesCompatibility;
+    const COptInt* quality = dynamic_cast<const COptInt*>(
+        m_pSettings->opt("renderShadowQuality"));
+    const bool terrainShadowSupport = fullEnvironment
+        && (!quality || quality->value() > 0)
+        && m_pLand && m_pLand->isMprLoad();
+    const COptBool* animation = dynamic_cast<const COptBool*>(
+        m_pSettings->opt("animateUnits"));
+    const bool animationSupport = !animation || animation->value();
+    const auto availability = [](QToolButton* button, bool available,
+                                 const QString& reason) {
+        if(!button)
+            return;
+        button->setEnabled(available);
+        const QString normal = button->property("availableToolTip").toString();
+        button->setToolTip(available || reason.isEmpty()
+            ? normal : normal + QStringLiteral("\n\n") + reason);
+    };
+    availability(m_fogVisualToggle, fullEnvironment,
+        tr("Unavailable: switch Lighting mode to Full environment."));
+    availability(m_terrainShadowsVisualToggle, terrainShadowSupport,
+        !fullEnvironment
+            ? tr("Unavailable: Full environment requires the desktop renderer.")
+            : tr("Unavailable: load terrain and enable shadow quality in Render settings."));
+    availability(m_skyboxVisualToggle, fullEnvironment && !m_caveEnvironment,
+        !fullEnvironment
+            ? tr("Unavailable: switch Lighting mode to Full environment.")
+            : tr("Unavailable: cave environments do not render a skybox."));
+    availability(m_freezeAnimationsToggle, animationSupport,
+        tr("Unavailable: enable Animate unit idle cycles in Render settings."));
+}
+
+bool CView::isObjectVisualVisible(CNode* node) const
+{
+    return m_objectHelpersVisible || !isEditorObjectHelper(node);
 }
 
 void CView::positionEnvironmentPreviewWidget()
@@ -2357,8 +2677,13 @@ void CView::scheduleAiGraphPreviewRegeneration()
 
 void CView::applyEnvironmentCompatibilityMode()
 {
-    if(!m_openGlesCompatibility || !m_environmentPreviewMode || !m_pSettings)
+    if(!m_environmentPreviewMode || !m_pSettings)
         return;
+    if(!m_openGlesCompatibility)
+    {
+        updateVisualChannelAvailability();
+        return;
+    }
 
     // Qt 5's ANGLE fallback exposes only OpenGL ES 2.0. The desktop Full
     // environment path relies on shadow-map framebuffer formats and sky-pass
@@ -2384,6 +2709,7 @@ void CView::applyEnvironmentCompatibilityMode()
     m_environmentPreviewSyncing = false;
     m_environmentPreviewMode->setToolTip(tr(
         "ANGLE compatibility renderer: Unlit and Simple shading are available."));
+    updateVisualChannelAvailability();
 }
 
 void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
@@ -2403,6 +2729,7 @@ void CView::syncEnvironmentPreviewWidget(float mapTimeHours)
     if(!m_environmentPreviewTime->isSliderDown())
         m_environmentPreviewTime->setValue(qBound(0, minutes, 1439));
     m_environmentPreviewSyncing = false;
+    syncVisualChannelButtons();
 }
 
 void CView::resizeEvent(QResizeEvent* event)
@@ -5793,8 +6120,13 @@ void CView::draw()
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderTextureMipmapping")) : nullptr;
     CTextureList::getInstance()->setTerrainMipmappingEnabled(
         m_minimapCaptureActive || (!mipmappingOption || mipmappingOption->value()));
+    const qint64 currentAnimationTime = QDateTime::currentMSecsSinceEpoch();
+    if(m_freezeAnimations && m_animationFreezeTime < 0)
+        m_animationFreezeTime = currentAnimationTime;
+    const qint64 animationTime = m_freezeAnimations
+        ? m_animationFreezeTime : currentAnimationTime;
     AnimationFrameContext::instance().beginFrame(cameraPosition,
-        m_minimapCaptureActive ? 0 : QDateTime::currentMSecsSinceEpoch(),
+        m_minimapCaptureActive ? 0 : animationTime,
         animationEnabled, cameraMoving);
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
@@ -5831,8 +6163,10 @@ void CView::draw()
     // The viewport lighting-model selector owns environment activation. Keep
     // the resource sky in Full environment and out of the compatibility
     // modes instead of exposing a contradictory second Render setting.
-    const bool skyEnabled = environmentEnabled && !m_minimapCaptureActive;
-    const bool fogEnabled = !m_minimapCaptureActive && renderBool("renderFog", true);
+    const bool skyEnabled = environmentEnabled && !m_minimapCaptureActive
+        && m_skyboxVisible && renderBool("drawSkybox", true);
+    const bool fogEnabled = !m_minimapCaptureActive && m_fogVisible
+        && renderBool("renderFog", true);
     const bool sceneLightsEnabled = !m_minimapCaptureActive
         && renderBool("renderSceneLights", true);
     const COptInt* shadowQualityOption = m_pSettings
@@ -5845,6 +6179,7 @@ void CView::draw()
         && ensureShadowFramebuffers(shadowQuality);
     const bool terrainShadowsEnabled = !m_minimapCaptureActive
         && environmentEnabled && !m_openGlesCompatibility
+        && m_terrainShadowsVisible
         && renderBool("renderTerrainShadows", true)
         && m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand;
     const COptInt* shadowDistanceOption = m_pSettings
@@ -6105,6 +6440,8 @@ void CView::draw()
             {
                 if(!captureAllowsNode(node))
                     continue;
+                if(!isObjectVisualVisible(node))
+                    continue;
                 // Selected nodes from every visible MOB are rendered in the
                 // final depth pass below, including locked MOBs.
                 if(!m_minimapCaptureActive
@@ -6124,6 +6461,7 @@ void CView::draw()
         {
             if((m_minimapCaptureActive || isMobVisible(m_activeMob))
                && captureAllowsNode(node)
+               && isObjectVisualVisible(node)
                && (m_minimapCaptureActive
                    || node->nodeState() != ENodeState::eSelect))
             {
@@ -6168,6 +6506,7 @@ void CView::draw()
                     if(!node || colorSubmittedNodes.contains(node)
                             || node->isMarkDeleted()
                             || node->nodeState() == ENodeState::eHidden
+                            || !isObjectVisualVisible(node)
                             || !node->castsRenderShadow())
                         continue;
                     CBox bounds = node->getBBox();
@@ -6197,6 +6536,8 @@ void CView::draw()
                 for(CNode* node : mob->nodes())
                     if(node->nodeState() == ENodeState::eSelect)
                     {
+                        if(!isObjectVisualVisible(node))
+                            continue;
                         m_program.setUniformValue("u_highlightColor",
                             mob == m_activeMob ? activeHighlight : lockedHighlight);
                         node->drawObjectVisual(mob == m_activeMob, &m_program);
@@ -6285,7 +6626,8 @@ void CView::draw()
     }
 
     if(!m_minimapCaptureActive)
-        drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
+        if(m_particleVisualsVisible)
+            drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
     logOpenGlErrors(QStringLiteral("draw/particles"));
 
 
@@ -8326,7 +8668,8 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
             if(logicPicking)
                 for(CNode* node : legacyCandidates)
                 {
-                    if(node && !pickableNodes.contains(node))
+                    if(node && isObjectVisualVisible(node)
+                       && !pickableNodes.contains(node))
                     {
                         pickableNodes.append(node);
                         node->drawSelect(&m_selectProgram);
@@ -8335,7 +8678,8 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
             else
                 for(CNode* node : spatialCandidates)
                 {
-                    if(node && !pickableNodes.contains(node))
+                    if(node && isObjectVisualVisible(node)
+                       && !pickableNodes.contains(node))
                     {
                         pickableNodes.append(node);
                         node->drawSelect(&m_selectProgram);
@@ -13119,6 +13463,7 @@ void CView::setMapSkyType(const QString& skyType, const QString& region)
     m_caveEnvironment = cave;
     m_weatherRegion = normalizedRegion;
     m_shadowInitialized = false;
+    updateVisualChannelAvailability();
     m_staticShadowFingerprint.clear();
     m_farStaticShadowFingerprint.clear();
     update();
@@ -13416,6 +13761,8 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 
     for (auto node: aNode)
     {
+        if(!isObjectVisualVisible(node))
+            continue;
         bool drawNode = true;
         if(cullingEnabled && node && node->nodeState() != ENodeState::eSelect)
         {
@@ -13434,6 +13781,8 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 
     for (auto& node: aNode)
     {
+        if(!isObjectVisualVisible(node))
+            continue;
         if (node->isColorSuitable(pickedColor))
             return node;
     }

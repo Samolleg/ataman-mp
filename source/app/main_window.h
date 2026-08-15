@@ -363,7 +363,6 @@ private:
     bool m_closeAfterTestStop;
     QMap<EButtonOp, QAction*> m_operationActions;
     QComboBox* m_entranceCombo;
-    QToolButton* m_showEntrancesButton;
     QToolButton* m_playFromHereButton;
     QToolButton* m_gotoEntranceButton;
     QCheckBox* m_godmodeCheckBox;

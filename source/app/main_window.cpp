@@ -325,33 +325,6 @@ private:
     bool m_overlayTapered{false};
 };
 
-QIcon entranceVisibilityIcon(bool visible, const QColor& color)
-{
-    QPixmap pixmap(24, 24);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 1.8, Qt::SolidLine,
-                        Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-
-    QPainterPath eye;
-    eye.moveTo(2.5, 12.0);
-    eye.cubicTo(7.0, 4.3, 17.0, 4.3, 21.5, 12.0);
-    eye.cubicTo(17.0, 19.7, 7.0, 19.7, 2.5, 12.0);
-    painter.drawPath(eye);
-    painter.setBrush(color);
-    painter.drawEllipse(QPointF(12.0, 12.0), 3.0, 3.0);
-    if(!visible)
-    {
-        painter.setBrush(Qt::NoBrush);
-        painter.setPen(QPen(color, 2.2, Qt::SolidLine,
-                            Qt::RoundCap, Qt::RoundJoin));
-        painter.drawLine(QPointF(4.0, 20.0), QPointF(20.0, 4.0));
-    }
-    return QIcon(pixmap);
-}
-
 QIcon behaviorModeIcon(bool active, const QColor& foreground)
 {
     QPixmap pixmap(28, 28);
@@ -382,19 +355,6 @@ QIcon behaviorModeIcon(bool active, const QColor& foreground)
         painter.drawLine(inner, outer);
     }
     return QIcon(pixmap);
-}
-
-void updateEntranceVisibilityButtonAppearance(QToolButton* button, bool visible)
-{
-    if(!button)
-        return;
-    button->setIcon(entranceVisibilityIcon(visible,
-        button->palette().color(QPalette::ButtonText)));
-    button->setToolTip(visible
-        ? QObject::tr("Hide map.txt entrance areas and labels in the viewport.")
-        : QObject::tr("Show map.txt entrance areas and labels in the viewport."));
-    button->setAccessibleName(visible
-        ? QObject::tr("Hide entrances") : QObject::tr("Show entrances"));
 }
 
 QRect preferredDialogScreenGeometry(const QWidget* owner)
@@ -652,7 +612,6 @@ MainWindow::MainWindow(QWidget* parent) :
     m_mapTestLauncher(nullptr),
     m_closeAfterTestStop(false),
     m_entranceCombo(nullptr),
-    m_showEntrancesButton(nullptr),
     m_playFromHereButton(nullptr),
     m_gotoEntranceButton(nullptr),
     m_godmodeCheckBox(nullptr),
@@ -2960,8 +2919,7 @@ void MainWindow::updateEntranceOverlays()
         return;
     QVector<QRectF> rectangles;
     QStringList labels;
-    const bool showEntrances = !m_showEntrancesButton
-        || m_showEntrancesButton->isChecked();
+    const bool showEntrances = !m_pView || m_pView->entranceOverlaysVisible();
     if(showEntrances)
     {
         for(const SMapTravelZone& entrance : m_validEntrances)
@@ -3319,15 +3277,6 @@ void MainWindow::createViewportToolbars()
     m_entranceCombo->setMinimumContentsLength(28);
     m_entranceCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_entranceCombo->setToolTip(tr("Selects the map.txt entrance used to initialize the runtime session."));
-    m_showEntrancesButton = new QToolButton(testBar);
-    m_showEntrancesButton->setObjectName("showEntrancesButton");
-    m_showEntrancesButton->setCheckable(true);
-    m_showEntrancesButton->setAutoRaise(true);
-    m_showEntrancesButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    m_showEntrancesButton->setChecked(
-        QSettings().value("ui/showEntranceOverlays", true).toBool());
-    updateEntranceVisibilityButtonAppearance(m_showEntrancesButton,
-        m_showEntrancesButton->isChecked());
     m_playFromHereButton = new QToolButton(testBar);
     m_playFromHereButton->setText(tr("Play from Here"));
     m_playFromHereButton->setCheckable(true);
@@ -3346,7 +3295,6 @@ void MainWindow::createViewportToolbars()
     testLayout->addSpacing(8);
     testLayout->addWidget(new QLabel(tr("Entrance:"), testBar));
     testLayout->addWidget(m_entranceCombo, 1);
-    testLayout->addWidget(m_showEntrancesButton);
     testLayout->addWidget(m_gotoEntranceButton);
     testLayout->addWidget(m_playFromHereButton);
     testLayout->addWidget(m_spawnPositionLabel);
@@ -3499,12 +3447,8 @@ void MainWindow::createViewportToolbars()
         updateEntranceOverlays();
         updateMapTestAction();
     });
-    connect(m_showEntrancesButton, &QToolButton::toggled, this, [this](bool checked)
-    {
-        QSettings().setValue("ui/showEntranceOverlays", checked);
-        updateEntranceVisibilityButtonAppearance(m_showEntrancesButton, checked);
-        updateEntranceOverlays();
-    });
+    connect(m_pView, &CView::entranceOverlayVisibilityChanged,
+            this, [this](bool) { updateEntranceOverlays(); });
     connect(m_gotoEntranceButton, &QToolButton::clicked, this, [this]()
     {
         moveCameraToActiveSpawn();
