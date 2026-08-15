@@ -47,10 +47,11 @@ public:
     }
     void applyStandaloneItem(ei::CFigure* figure,const QString& modelName,
                              const QStringList& textureCandidates,
-                             bool preserveAuthoredUvs)
+                             bool preserveAuthoredUvs,
+                             bool normalizeAuthoredAtlasCell)
     {
         applyTransientStandaloneVisual(figure,modelName,textureCandidates,
-                                       preserveAuthoredUvs);
+                                       preserveAuthoredUvs,normalizeAuthoredAtlasCell);
     }
 };
 QString searchable(const QStringList& values) { return values.join(QLatin1Char(' ')).toCaseFolded(); }
@@ -483,7 +484,7 @@ void ItemSpellConstructorDialog::updateItemPreview()
         {
             m_itemPreview->makeCurrent();
             ei::CFigure* raw=CObjectList::getInstance()->getFigureResource(figure+QStringLiteral(".fig"));
-            if(raw){static_cast<CConstructorPreviewObject*>(m_previewObject)->applyStandaloneItem(raw,figure,textures,ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(*item));m_itemPreview->attachNode(m_previewObject,false);if(!m_itemPreviewInitialized||resetForCategory)resetItemCamera();}else m_itemPreview->attachNode(nullptr,false);
+            if(raw){static_cast<CConstructorPreviewObject*>(m_previewObject)->applyStandaloneItem(raw,figure,textures,ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(*item),ItemSpellConstructorCatalog::normalizesStandaloneTextureAtlasCell(*item));m_itemPreview->attachNode(m_previewObject,false);if(!m_itemPreviewInitialized||resetForCategory)resetItemCamera();}else m_itemPreview->attachNode(nullptr,false);
         }
         m_itemPreview->updateGL();
     }else if(m_itemPreview)m_itemPreview->attachNode(nullptr,false);

@@ -109,7 +109,8 @@ protected:
                               const QMap<QString, QVector3D>& partEmissions = {});
     void applyTransientStandaloneVisual(ei::CFigure* figure,const QString& modelName,
                                         const QStringList& textureCandidates,
-                                        bool preserveAuthoredUvs=false);
+                                        bool preserveAuthoredUvs=false,
+                                        bool normalizeAuthoredAtlasCell=false);
     void invalidateTransientVisual() { m_transientVisualFingerprint.clear(); }
     const SAnimationSkeleton& transientAnimationSkeleton() const;
     void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);

@@ -1013,7 +1013,8 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
 void CObjectBase::applyTransientStandaloneVisual(ei::CFigure* figure,
                                                   const QString& modelName,
                                                   const QStringList& textureCandidates,
-                                                  bool preserveAuthoredUvs)
+                                                  bool preserveAuthoredUvs,
+                                                  bool normalizeAuthoredAtlasCell)
 {
     m_modelName=modelName;
     m_secondaryTexture=nullptr;
@@ -1040,6 +1041,25 @@ void CObjectBase::applyTransientStandaloneVisual(ei::CFigure* figure,
             {
                 minU=qMin(minU,vertex.texCoord.x());maxU=qMax(maxU,vertex.texCoord.x());
                 minV=qMin(minV,vertex.texCoord.y());maxV=qMax(maxV,vertex.texCoord.y());
+            }
+        }
+        if(normalizeAuthoredAtlasCell)
+        {
+            const ei::SUvTransform transform = ei::standaloneAtlasCellUvTransform(
+                minU,maxU,minV,maxV);
+            if(transform.normalizedAtlasCell)
+            {
+                for(SVertexData& vertex:part->vertData())
+                {
+                    const float u=qBound(0.0f,vertex.texCoord.x()*transform.scaleU
+                                         +transform.offsetU,1.0f);
+                    const float v=qBound(0.0f,vertex.texCoord.y()*transform.scaleV
+                                         +transform.offsetV,1.0f);
+                    vertex.texCoord=QVector2D(u,v);
+                }
+                part->setTextureUvScale(1.0f);
+                part->update();
+                continue;
             }
         }
         part->setTextureUvScale(ei::textureUvScaleForBounds(

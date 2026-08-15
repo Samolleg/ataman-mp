@@ -356,14 +356,19 @@ QStringList ItemSpellConstructorCatalog::itemTextureCandidates(
     if(base.isEmpty())return {};
     // JMV's quick-item renderer requests the ordinary database-derived name,
     // then prefers the authored high-resolution .x2 member when one exists.
-    // The quick-item FIG keeps its authored UVs; unlike packed humanoid
-    // equipment, this suffix selects resolution rather than an atlas transform.
     if(m_isJmvProfile&&item.category==QStringLiteral("Quick Item"))
         return {base+QStringLiteral("_x2"),base};
     return {base};
 }
 
 bool ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(
+    const SConstructorItem& item)
+{
+    Q_UNUSED(item);
+    return false;
+}
+
+bool ItemSpellConstructorCatalog::normalizesStandaloneTextureAtlasCell(
     const SConstructorItem& item)
 {
     return item.category==QStringLiteral("Quick Item");

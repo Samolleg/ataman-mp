@@ -83,6 +83,7 @@ public:
     QStringList itemTextureCandidates(const SConstructorItem& item,
                                       const SConstructorMaterial* material) const;
     static bool preservesStandaloneTextureUvs(const SConstructorItem& item);
+    static bool normalizesStandaloneTextureAtlasCell(const SConstructorItem& item);
     static bool previewCategoryNeedsCameraReset(const QString& previousCategory,
                                                 const QString& currentCategory);
     QStringList spellTextureCandidates(const SConstructorSpell& spell) const;

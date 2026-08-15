@@ -2150,8 +2150,13 @@ void ProfileDatabaseTests::itemSpellConstructorPreviewPoliciesAreCategoryAware()
 {
     ei::SConstructorItem quick;quick.category="Quick Item";
     ei::SConstructorItem weapon;weapon.category="Weapon";
-    QVERIFY(ei::ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(quick));
+    // Quick-item FIGs address one authored atlas cell, while their qitem
+    // material textures are standalone frames. Preserving those UVs samples
+    // the transparent corner of the standalone texture.
+    QVERIFY(!ei::ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(quick));
     QVERIFY(!ei::ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(weapon));
+    QVERIFY(ei::ItemSpellConstructorCatalog::normalizesStandaloneTextureAtlasCell(quick));
+    QVERIFY(!ei::ItemSpellConstructorCatalog::normalizesStandaloneTextureAtlasCell(weapon));
     QVERIFY(ei::ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset({},"Weapon"));
     QVERIFY(!ei::ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset("Weapon","Weapon"));
     QVERIFY(ei::ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset("Weapon","Armor"));

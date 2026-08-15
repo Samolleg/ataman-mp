@@ -19,6 +19,7 @@ private slots:
     void acceptsMmpExtensionWithoutDuplicatingIt();
     void buildsCompleteTerrainAtlasNames();
     void derivesEquipmentAtlasUvScale();
+    void normalizesStandaloneQuickItemAtlasCell();
     void resolvesDatabaseHumanoidSkin();
     void ignoresNonHumanoidDatabaseSkin();
     void resolvesLiveBaseDatabaseWhenProvided();
@@ -247,6 +248,26 @@ void ResourceNameTests::derivesEquipmentAtlasUvScale()
         0.009657f, 0.492210f, 0.509374f, 0.993647f), 2.0f);
     QCOMPARE(ei::textureUvScaleForBounds("UnhumaTH_02.mr.0.x2.mmp",
         0.019314f, 0.984419f, 0.018749f, 0.987295f), 1.0f);
+}
+
+void ResourceNameTests::normalizesStandaloneQuickItemAtlasCell()
+{
+    // Installed initqi41item: selector 8, authored cell (0, 3).
+    const auto transform=ei::standaloneAtlasCellUvTransform(
+        0.0846407711f,0.1644984931f,0.7677384615f,0.9929272532f);
+    QVERIFY(transform.normalizedAtlasCell);
+    QCOMPARE(transform.scaleU,4.0f);
+    QCOMPARE(transform.scaleV,4.0f);
+    QCOMPARE(transform.offsetU,0.0f);
+    QCOMPARE(transform.offsetV,-3.0f);
+    QVERIFY(qAbs(0.0846407711f*transform.scaleU+transform.offsetU
+                 -0.3385630844f)<0.00001f);
+    QVERIFY(qAbs(0.7677384615f*transform.scaleV+transform.offsetV
+                 -0.070953846f)<0.00001f);
+
+    // Multi-cell equipment UVs are not a standalone quick-item atlas cell.
+    QVERIFY(!ei::standaloneAtlasCellUvTransform(
+        0.01f,0.75f,0.02f,0.98f).normalizedAtlasCell);
 }
 
 void ResourceNameTests::decodesSparsePnt3WithTrailingTransparency()
