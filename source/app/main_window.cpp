@@ -569,7 +569,8 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::resourceBrowserRequested,
                 this, [this](const QString& reference)
         {
-            ei::revealDockNavigationTarget(this, m_resourceBrowserDock);
+            ei::revealDockNavigationTarget(this, m_resourceBrowserDock,
+                                           m_databaseEditorDialog);
             // Yield once so the browser becomes visible before catalog lookup
             // and row selection. Asset decoding already runs asynchronously.
             QTimer::singleShot(0,this,[this,reference]()

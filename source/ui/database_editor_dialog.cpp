@@ -96,7 +96,8 @@ enum DatabaseGridRole {
     ReferenceTableRole,
     ResourceReferenceRole,
     ChoicesRole,
-    FilterTextRole
+    FilterTextRole,
+    PaintLinkRole
 };
 
 class PersistentColumnMenu final : public QMenu
@@ -166,6 +167,7 @@ public:
         if(role==RawValueRole)return stored;
         if(role==ReferenceTableRole)return field->referenceTable;
         if(role==ChoicesRole)return choicesForColumn(index.column());
+        if(role==PaintLinkRole)return !field->referenceTable.isEmpty()||field->resourceReference;
         if(role==FilterTextRole)return filterText(index.row(),*table,*row,rowNumber);
         if(role==Qt::ForegroundRole&&(!field->referenceTable.isEmpty()||field->resourceReference))return QBrush(QColor(35,110,190));
         if(role==Qt::FontRole&&(!field->referenceTable.isEmpty()||field->resourceReference)){QFont font=QApplication::font();font.setUnderline(true);return font;}
@@ -305,17 +307,46 @@ public:
     void paint(QPainter* painter,const QStyleOptionViewItem& option,
                const QModelIndex& index)const override
     {
-        QStyleOptionViewItem styled(option);
-        const QAbstractItemView* view=qobject_cast<const QAbstractItemView*>(
-            option.widget?option.widget->parentWidget():nullptr);
-        if(view&&view->currentIndex().row()==index.row()
-           &&!(styled.state&QStyle::State_Selected))
+        const QAbstractItemView* view=qobject_cast<const QAbstractItemView*>(option.widget);
+        if(!view&&option.widget)view=qobject_cast<const QAbstractItemView*>(option.widget->parentWidget());
+        const bool selected=option.state&QStyle::State_Selected;
+        const bool currentRow=view&&view->currentIndex().row()==index.row();
+        QColor background=option.palette.color(
+            option.features&QStyleOptionViewItem::Alternate
+                ?QPalette::AlternateBase:QPalette::Base);
+        QColor foreground=option.palette.color(QPalette::Text);
+        if(selected)
         {
-            QColor tint=styled.palette.color(QPalette::Highlight);
-            tint.setAlpha(42);
-            styled.backgroundBrush=tint;
+            background=option.palette.color(QPalette::Highlight);
+            foreground=option.palette.color(QPalette::HighlightedText);
         }
-        QStyledItemDelegate::paint(painter,styled,index);
+        else if(currentRow)
+        {
+            const QColor accent=option.palette.color(QPalette::Highlight);
+            background.setRed((background.red()*82+accent.red()*18)/100);
+            background.setGreen((background.green()*82+accent.green()*18)/100);
+            background.setBlue((background.blue()*82+accent.blue()*18)/100);
+        }
+        const bool link=index.data(PaintLinkRole).toBool();
+        if(!selected&&link)foreground=QColor(35,110,190);
+        QFont font=option.font;
+        if(link)font.setUnderline(true);
+        const int alignment=index.column()==0
+            ?int(Qt::AlignRight|Qt::AlignVCenter)
+            :int(Qt::AlignLeft|Qt::AlignVCenter);
+        const QRect textRect=option.rect.adjusted(4,0,-4,0);
+        const QString text=option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString(),
+            Qt::ElideRight,qMax(0,textRect.width()));
+        painter->save();
+        painter->fillRect(option.rect,background);
+        painter->setFont(font);painter->setPen(foreground);
+        painter->drawText(textRect,alignment,text);
+        if(option.state&QStyle::State_HasFocus)
+        {
+            QPen focus(option.palette.color(QPalette::Highlight));focus.setWidth(1);
+            painter->setPen(focus);painter->drawRect(option.rect.adjusted(0,0,-1,-1));
+        }
+        painter->restore();
     }
     QWidget* createEditor(QWidget* parent,const QStyleOptionViewItem& option,const QModelIndex& index)const override
     {
@@ -325,12 +356,19 @@ public:
     void setModelData(QWidget* editor,QAbstractItemModel* model,const QModelIndex& index)const override{if(auto* combo=qobject_cast<QComboBox*>(editor)){model->setData(index,combo->currentText(),Qt::EditRole);return;}QStyledItemDelegate::setModelData(editor,model,index);}
 };
 
+class DatabaseFrozenPaneView final : public QTableView
+{
+public:
+    explicit DatabaseFrozenPaneView(QWidget* parent=nullptr):QTableView(parent){}
+    void scrollTo(const QModelIndex&,ScrollHint=EnsureVisible)override{}
+};
+
 class DatabaseFrozenTableView final : public QTableView
 {
 public:
     explicit DatabaseFrozenTableView(QWidget* parent=nullptr):QTableView(parent)
     {
-        m_frozen=new QTableView(this);
+        m_frozen=new DatabaseFrozenPaneView(this);
         m_frozen->setObjectName(QStringLiteral("databaseFrozenGrid"));
         m_frozen->setFocusPolicy(Qt::NoFocus);
         m_frozen->verticalHeader()->hide();

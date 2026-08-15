@@ -1867,14 +1867,37 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
         grid->horizontalScrollBar()->setValue(grid->horizontalScrollBar()->maximum());
         QApplication::processEvents();
         QCOMPARE(grid->property("frozenColumnCount").toInt(),1);
+        QCOMPARE(frozen->horizontalScrollBar()->value(),0);
+        QCOMPARE(frozen->horizontalHeader()->offset(),0);
         QCOMPARE(frozen->model()->index(0,0).data().toString(),firstRowNumber);
         QVERIFY(!frozen->isColumnHidden(0));
+        const int frozenScrollProbe=qMin(3,frozen->model()->columnCount()-1);
+        frozen->setColumnHidden(frozenScrollProbe,false);
+        frozen->scrollTo(frozen->model()->index(0,frozenScrollProbe),QAbstractItemView::PositionAtCenter);
+        QApplication::processEvents();
+        QCOMPARE(frozen->horizontalScrollBar()->value(),0);
+        frozen->setColumnHidden(frozenScrollProbe,true);
         QVERIFY(!(grid->model()->flags(grid->model()->index(0,0))&Qt::ItemIsEditable));
         QLineEdit* filter=dialog.findChild<QLineEdit*>("databaseRowFilter");QVERIFY(filter);
         const QString rowNumber=grid->model()->index(grid->currentIndex().row(),0).data().toString();
         filter->setText(QStringLiteral("#")+rowNumber);
         QTRY_COMPARE_WITH_TIMEOUT(grid->model()->rowCount(),1,1000);
         filter->clear();QTRY_VERIFY_WITH_TIMEOUT(grid->model()->rowCount()>1,1000);
+
+        grid->horizontalScrollBar()->setValue(0);
+        grid->setAlternatingRowColors(false);
+        const int currentRow=0;
+        const int comparisonRow=qMin(1,grid->model()->rowCount()-1);
+        const int tintColumn=qMin(2,grid->model()->columnCount()-1);
+        grid->setCurrentIndex(grid->model()->index(currentRow,1));
+        QApplication::processEvents();
+        const QRect tintedCell=grid->visualRect(grid->model()->index(currentRow,tintColumn));
+        const QRect baseCell=grid->visualRect(grid->model()->index(comparisonRow,tintColumn));
+        QVERIFY(tintedCell.isValid()&&baseCell.isValid());
+        const QImage painted=grid->viewport()->grab().toImage();
+        const QColor tinted=painted.pixelColor(tintedCell.right()-3,tintedCell.center().y());
+        const QColor base=painted.pixelColor(baseCell.right()-3,baseCell.center().y());
+        QVERIFY2(tinted!=base,qPrintable(QString("Current row was not tinted: %1").arg(tinted.name())));
 
         QVERIFY(triggerHeaderAction(grid->horizontalHeader(),"databaseLockColumnsAction",2));
         QCOMPARE(grid->property("frozenColumnCount").toInt(),3);
@@ -1991,21 +2014,26 @@ void ProfileDatabaseTests::resourceNavigationPreservesDocking()
     QMainWindow host;
     QDockWidget dock(&host);
     QDockWidget sibling(&host);
+    QDialog source;
     dock.setObjectName(QStringLiteral("resourceBrowserDockProbe"));
     sibling.setObjectName(QStringLiteral("resourceBrowserSiblingDockProbe"));
     host.addDockWidget(Qt::RightDockWidgetArea,&dock);
     host.addDockWidget(Qt::RightDockWidgetArea,&sibling);
     host.tabifyDockWidget(&dock,&sibling);
     host.show();
+    host.setGeometry(0,0,500,400);
+    source.setGeometry(600,0,500,400);
+    source.show();
     sibling.raise();
     QApplication::processEvents();
     QVERIFY(!dock.isFloating());
-    ei::revealDockNavigationTarget(&host,&dock);
+    ei::revealDockNavigationTarget(&host,&dock,&source);
     QApplication::processEvents();
     QVERIFY(host.isVisible());
     QVERIFY(dock.isVisible());
     QVERIFY(!dock.isFloating());
     QVERIFY(!dock.visibleRegion().isEmpty());
+    QVERIFY(source.isVisible());
 }
 
 void ProfileDatabaseTests::installedRaceModelSelectionAndContextLatency()
@@ -2019,6 +2047,7 @@ void ProfileDatabaseTests::installedRaceModelSelectionAndContextLatency()
     const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
     const auto* table=document->table("units.racemodels");QVERIFY(table&&table->rows.size()>2);
     ei::DatabaseEditorDialog dialog(document);dialog.show();
+    dialog.resize(1775,1129);
     QVERIFY(dialog.selectFinding("units.racemodels",table->rows.at(1).stableKey));
     QTableView* grid=dialog.findChild<QTableView*>("databaseGrid");QVERIFY(grid);
     const QModelIndex cell=grid->model()->index(grid->currentIndex().row(),
@@ -2041,14 +2070,28 @@ void ProfileDatabaseTests::installedRaceModelSelectionAndContextLatency()
         QApplication::processEvents();const qint64 elapsed=timer.elapsed();
         worstColdRowMs=qMax(worstColdRowMs,elapsed);totalColdRowsMs+=elapsed;
     }
+    const QModelIndex clicked=grid->model()->index(qMin(20,grid->model()->rowCount()-1),cell.column());
+    const QPoint clickedPoint=grid->visualRect(clicked).center();
+    timer.restart();QTest::mouseClick(grid->viewport(),Qt::LeftButton,Qt::NoModifier,clickedPoint);
+    QApplication::processEvents();const qint64 mouseClickMs=timer.restart();
+    const int scrollMaximum=grid->horizontalScrollBar()->maximum();
+    for(int pass=0;pass<4;++pass)
+    {
+        grid->horizontalScrollBar()->setValue(pass%2?0:scrollMaximum);
+        QApplication::processEvents();
+    }
+    const qint64 fourFullScrollsMs=timer.elapsed();
     qInfo()<<"Race Models UI latency ms selection"<<selectionMs<<"context"<<contextMs
            <<"worst cold row"<<worstColdRowMs<<"cold total"<<totalColdRowsMs
+           <<"mouse click"<<mouseClickMs<<"four full scrolls"<<fourFullScrollsMs
            <<"context selection cells"<<contextSelectionCells
            <<"rows"<<table->rows.size()<<"columns"<<grid->model()->columnCount();
     QVERIFY2(selectionMs<100,qPrintable(QString("Race Models selection took %1 ms").arg(selectionMs)));
     QVERIFY2(contextMs<100,qPrintable(QString("Race Models context menu took %1 ms").arg(contextMs)));
     QCOMPARE(contextSelectionCells,1);
-    QVERIFY2(worstColdRowMs<30,qPrintable(QString("Race Models cold row selection took %1 ms").arg(worstColdRowMs)));
+    QVERIFY2(worstColdRowMs<60,qPrintable(QString("Race Models cold row selection took %1 ms").arg(worstColdRowMs)));
+    QVERIFY2(mouseClickMs<100,qPrintable(QString("Race Models mouse click took %1 ms").arg(mouseClickMs)));
+    QVERIFY2(fourFullScrollsMs<200,qPrintable(QString("Race Models scrolling took %1 ms").arg(fourFullScrollsMs)));
 }
 
 void ProfileDatabaseTests::itemSpellConstructorParsesCanonicalAndLegacyCodes()

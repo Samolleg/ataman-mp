@@ -9,7 +9,8 @@
 
 namespace ei {
 
-inline void revealDockNavigationTarget(QMainWindow* window, QDockWidget* dock)
+inline void revealDockNavigationTarget(QMainWindow* window, QDockWidget* dock,
+                                       QWidget* sourceWindow = nullptr)
 {
     if(!window || !dock)
         return;
@@ -22,13 +23,19 @@ inline void revealDockNavigationTarget(QMainWindow* window, QDockWidget* dock)
     }
     else
     {
-        if(window->isMinimized())window->showNormal();
-        else window->show();
-        window->raise();
-        window->activateWindow();
+        QMainWindow* host=qobject_cast<QMainWindow*>(dock->window());
+        if(!host)host=window;
+        if(host->isMinimized())host->showNormal();
+        else host->show();
+        host->raise();
+        host->activateWindow();
         // QDockWidget::raise() activates this dock when it is one tab in a
         // tabified dock area without changing its docking/floating state.
         dock->raise();
+        QWidget* source=sourceWindow?sourceWindow->window():nullptr;
+        if(source&&source!=host
+           &&!source->frameGeometry().intersects(host->frameGeometry()))
+            source->raise();
     }
     dock->setFocus(Qt::OtherFocusReason);
 }
