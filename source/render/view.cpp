@@ -267,6 +267,13 @@ bool isEditorObjectHelper(CNode* node)
     }
 }
 
+bool isDynamicViewportObject(CNode* node)
+{
+    // Units are the renderer's moving/animated object class and enter the
+    // dynamic shadow queue. All ordinary non-helper MOB geometry is static.
+    return node && node->nodeType() == ENodeType::eUnit;
+}
+
 QIcon viewportVisibilityIcon(bool visible, const QColor& color)
 {
     QPixmap pixmap(24, 24);
@@ -1564,12 +1571,18 @@ void CView::initEnvironmentPreviewWidget()
         visualSettings.value(QStringLiteral("ui/showEntranceOverlays"), true)).toBool();
     m_objectHelpersVisible = visualSettings.value(
         QStringLiteral("ui/viewportVisuals/objectHelpers"), true).toBool();
+    m_staticObjectsVisible = visualSettings.value(
+        QStringLiteral("ui/viewportVisuals/staticObjects"), true).toBool();
+    m_dynamicObjectsVisible = visualSettings.value(
+        QStringLiteral("ui/viewportVisuals/dynamicObjects"), true).toBool();
     m_bDrawLand = visualSettings.value(
         QStringLiteral("ui/viewportVisuals/terrain"), true).toBool();
     m_bDrawWater = visualSettings.value(
         QStringLiteral("ui/viewportVisuals/overlays"), true).toBool();
     m_particleVisualsVisible = visualSettings.value(
         QStringLiteral("ui/viewportVisuals/particleVisuals"), true).toBool();
+    m_objectShadowsVisible = visualSettings.value(
+        QStringLiteral("ui/viewportVisuals/objectShadows"), true).toBool();
     m_freezeAnimations = visualSettings.value(
         QStringLiteral("ui/viewportVisuals/freezeAnimations"), false).toBool();
     if(m_freezeAnimations)
@@ -1659,6 +1672,12 @@ void CView::initEnvironmentPreviewWidget()
     m_objectHelpersVisualToggle = makeToggle("visualsObjectHelpers", tr("Object helpers"), tr(
         "Show editor helper models for light, particle, and sound objects. This does not hide their actual effects."),
         m_objectHelpersVisible);
+    m_staticObjectsVisualToggle = makeToggle("visualsStaticObjects", tr("Static objects"), tr(
+        "Show ordinary static MOB geometry such as scenery, levers, torches, and trap locators."),
+        m_staticObjectsVisible);
+    m_dynamicObjectsVisualToggle = makeToggle("visualsDynamicObjects", tr("Dynamic objects"), tr(
+        "Show units and their animated equipment."),
+        m_dynamicObjectsVisible);
     m_terrainVisualToggle = makeToggle("visualsTerrain", tr("Terrain"), tr(
         "Show the main terrain. This stays synchronized with Landscape Tools and the M shortcut."),
         m_bDrawLand);
@@ -1671,6 +1690,9 @@ void CView::initEnvironmentPreviewWidget()
     m_terrainShadowsVisualToggle = makeToggle("visualsTerrainShadows", tr("Terrain shadows"), tr(
         "Show authored terrain shadowing when a landscape, Full environment, and desktop shadow renderer are available."),
         m_terrainShadowsVisible);
+    m_objectShadowsVisualToggle = makeToggle("visualsObjectShadows", tr("Object shadows"), tr(
+        "Show real-time shadows cast by static and dynamic objects in Full environment mode."),
+        m_objectShadowsVisible);
     m_skyboxVisualToggle = makeToggle("visualsSkybox", tr("Skybox"), tr(
         "Show the profile skybox in Full environment mode on outdoor maps."),
         m_skyboxVisible);
@@ -1682,9 +1704,14 @@ void CView::initEnvironmentPreviewWidget()
     separator->setFrameShape(QFrame::HLine);
     separator->setFrameShadow(QFrame::Sunken);
     body->addWidget(separator);
-    m_freezeAnimationsToggle = makeToggle("visualsFreezeAnimations", tr("Freeze animations"), tr(
-        "Hold animated units at their current idle-cycle frame. Available only when Animate unit idle cycles is enabled in Render settings."),
-        m_freezeAnimations);
+    m_freezeAnimationsToggle = new QCheckBox(tr("Freeze animations"), m_environmentPreviewBody);
+    m_freezeAnimationsToggle->setObjectName(QStringLiteral("visualsFreezeAnimations"));
+    m_freezeAnimationsToggle->setChecked(m_freezeAnimations);
+    const QString freezeAnimationsToolTip = tr(
+        "Hold animated units at their current idle-cycle frame. Available only when Animate unit idle cycles is enabled in Render settings.");
+    m_freezeAnimationsToggle->setProperty("availableToolTip", freezeAnimationsToolTip);
+    m_freezeAnimationsToggle->setToolTip(freezeAnimationsToolTip);
+    body->addWidget(m_freezeAnimationsToggle);
 
     m_timeOfDayWidget = new CViewportWidget(this);
     m_timeOfDayWidget->setObjectName("timeOfDayWidget");
@@ -1748,6 +1775,16 @@ void CView::initEnvironmentPreviewWidget()
         persistViewportVisualState();
         update();
     });
+    connect(m_staticObjectsVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_staticObjectsVisible = visible;
+        persistViewportVisualState();
+        update();
+    });
+    connect(m_dynamicObjectsVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_dynamicObjectsVisible = visible;
+        persistViewportVisualState();
+        update();
+    });
     connect(m_terrainVisualToggle, &QToolButton::toggled,
             this, &CView::setDrawLand);
     connect(m_overlaysVisualToggle, &QToolButton::toggled,
@@ -1766,6 +1803,11 @@ void CView::initEnvironmentPreviewWidget()
         m_pSettings->persistOptions();
         update();
     });
+    connect(m_objectShadowsVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_objectShadowsVisible = visible;
+        persistViewportVisualState();
+        update();
+    });
     connect(m_skyboxVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
         m_skyboxVisible = visible;
         if(COptBool* option = dynamic_cast<COptBool*>(m_pSettings->opt("drawSkybox")))
@@ -1778,7 +1820,7 @@ void CView::initEnvironmentPreviewWidget()
         persistViewportVisualState();
         update();
     });
-    connect(m_freezeAnimationsToggle, &QToolButton::toggled, this, [this](bool freeze) {
+    connect(m_freezeAnimationsToggle, &QCheckBox::toggled, this, [this](bool freeze) {
         m_freezeAnimations = freeze;
         m_animationFreezeTime = freeze ? QDateTime::currentMSecsSinceEpoch() : -1;
         persistViewportVisualState();
@@ -1787,8 +1829,10 @@ void CView::initEnvironmentPreviewWidget()
     const auto setAllVisible = [this](bool visible) {
         const QList<QToolButton*> channels = {
             m_entranceVisualToggle, m_objectHelpersVisualToggle,
+            m_staticObjectsVisualToggle, m_dynamicObjectsVisualToggle,
             m_terrainVisualToggle, m_overlaysVisualToggle, m_fogVisualToggle,
-            m_terrainShadowsVisualToggle, m_skyboxVisualToggle,
+            m_terrainShadowsVisualToggle, m_objectShadowsVisualToggle,
+            m_skyboxVisualToggle,
             m_particleVisualsToggle
         };
         for(QToolButton* channel : channels)
@@ -1837,10 +1881,16 @@ void CView::persistViewportVisualState()
                       m_entranceOverlaysVisible);
     settings.setValue(QStringLiteral("ui/viewportVisuals/objectHelpers"),
                       m_objectHelpersVisible);
+    settings.setValue(QStringLiteral("ui/viewportVisuals/staticObjects"),
+                      m_staticObjectsVisible);
+    settings.setValue(QStringLiteral("ui/viewportVisuals/dynamicObjects"),
+                      m_dynamicObjectsVisible);
     settings.setValue(QStringLiteral("ui/viewportVisuals/terrain"), m_bDrawLand);
     settings.setValue(QStringLiteral("ui/viewportVisuals/overlays"), m_bDrawWater);
     settings.setValue(QStringLiteral("ui/viewportVisuals/particleVisuals"),
                       m_particleVisualsVisible);
+    settings.setValue(QStringLiteral("ui/viewportVisuals/objectShadows"),
+                      m_objectShadowsVisible);
     settings.setValue(QStringLiteral("ui/viewportVisuals/freezeAnimations"),
                       m_freezeAnimations);
 }
@@ -1864,13 +1914,20 @@ void CView::syncVisualChannelButtons()
     };
     sync(m_entranceVisualToggle, m_entranceOverlaysVisible);
     sync(m_objectHelpersVisualToggle, m_objectHelpersVisible);
+    sync(m_staticObjectsVisualToggle, m_staticObjectsVisible);
+    sync(m_dynamicObjectsVisualToggle, m_dynamicObjectsVisible);
     sync(m_terrainVisualToggle, m_bDrawLand);
     sync(m_overlaysVisualToggle, m_bDrawWater);
     sync(m_fogVisualToggle, m_fogVisible);
     sync(m_terrainShadowsVisualToggle, m_terrainShadowsVisible);
+    sync(m_objectShadowsVisualToggle, m_objectShadowsVisible);
     sync(m_skyboxVisualToggle, m_skyboxVisible);
     sync(m_particleVisualsToggle, m_particleVisualsVisible);
-    sync(m_freezeAnimationsToggle, m_freezeAnimations);
+    if(m_freezeAnimationsToggle)
+    {
+        const QSignalBlocker blocker(m_freezeAnimationsToggle);
+        m_freezeAnimationsToggle->setChecked(m_freezeAnimations);
+    }
     updateVisualChannelAvailability();
 }
 
@@ -1888,10 +1945,12 @@ void CView::updateVisualChannelAvailability()
     const bool terrainShadowSupport = fullEnvironment
         && (!quality || quality->value() > 0)
         && m_pLand && m_pLand->isMprLoad();
+    const bool objectShadowSupport = fullEnvironment
+        && (!quality || quality->value() > 0);
     const COptBool* animation = dynamic_cast<const COptBool*>(
         m_pSettings->opt("animateUnits"));
     const bool animationSupport = !animation || animation->value();
-    const auto availability = [](QToolButton* button, bool available,
+    const auto availability = [](QWidget* button, bool available,
                                  const QString& reason) {
         if(!button)
             return;
@@ -1906,6 +1965,10 @@ void CView::updateVisualChannelAvailability()
         !fullEnvironment
             ? tr("Unavailable: Full environment requires the desktop renderer.")
             : tr("Unavailable: load terrain and enable shadow quality in Render settings."));
+    availability(m_objectShadowsVisualToggle, objectShadowSupport,
+        !fullEnvironment
+            ? tr("Unavailable: Full environment requires the desktop renderer.")
+            : tr("Unavailable: enable shadow quality in Render settings."));
     availability(m_skyboxVisualToggle, fullEnvironment && !m_caveEnvironment,
         !fullEnvironment
             ? tr("Unavailable: switch Lighting mode to Full environment.")
@@ -1916,7 +1979,12 @@ void CView::updateVisualChannelAvailability()
 
 bool CView::isObjectVisualVisible(CNode* node) const
 {
-    return m_objectHelpersVisible || !isEditorObjectHelper(node);
+    if(m_minimapCaptureActive)
+        return true;
+    if(isEditorObjectHelper(node))
+        return m_objectHelpersVisible;
+    return isDynamicViewportObject(node)
+        ? m_dynamicObjectsVisible : m_staticObjectsVisible;
 }
 
 void CView::positionEnvironmentPreviewWidget()
@@ -6174,6 +6242,7 @@ void CView::draw()
     const int shadowQuality = qBound(0,
         shadowQualityOption ? shadowQualityOption->value() : 2, 2);
     const bool shadowsEnabled = !m_minimapCaptureActive
+        && m_objectShadowsVisible
         && environmentEnabled && !m_openGlesCompatibility
         && shadowQuality > 0
         && ensureShadowFramebuffers(shadowQuality);

@@ -18,10 +18,13 @@ class ViewportVisualChannelsContractTests(unittest.TestCase):
             'tr("Hide all")',
             'tr("Entrances")',
             'tr("Object helpers")',
+            'tr("Static objects")',
+            'tr("Dynamic objects")',
             'tr("Terrain")',
             'tr("Overlays")',
             'tr("Fog")',
             'tr("Terrain shadows")',
+            'tr("Object shadows")',
             'tr("Skybox")',
             'tr("Particle visuals")',
             'tr("Freeze animations")',
@@ -40,6 +43,9 @@ class ViewportVisualChannelsContractTests(unittest.TestCase):
         view = source("source/render/view.cpp")
         for token in (
             "m_objectHelpersVisible",
+            "m_staticObjectsVisible",
+            "m_dynamicObjectsVisible",
+            "m_objectShadowsVisible",
             "m_particleVisualsVisible",
             "m_fogVisible",
             "m_terrainShadowsVisible",
@@ -49,6 +55,21 @@ class ViewportVisualChannelsContractTests(unittest.TestCase):
         ):
             self.assertIn(token, view)
         self.assertIn("if(m_particleVisualsVisible)", view)
+
+    def test_static_dynamic_and_object_shadow_channels_own_their_render_paths(self):
+        view = source("source/render/view.cpp")
+        self.assertIn("isDynamicViewportObject(node)", view)
+        self.assertIn("m_dynamicObjectsVisible", view)
+        self.assertIn("m_staticObjectsVisible", view)
+        self.assertIn("m_objectShadowsVisible", view)
+        self.assertIn("&& m_objectShadowsVisible", view)
+
+    def test_freeze_animations_uses_a_normal_checkbox(self):
+        view = source("source/render/view.cpp")
+        header = source("source/render/view.h")
+        self.assertIn("new QCheckBox(tr(\"Freeze animations\")", view)
+        self.assertIn("QCheckBox* m_freezeAnimationsToggle", header)
+        self.assertNotIn('makeToggle("visualsFreezeAnimations"', view)
 
     def test_landscape_tools_and_visuals_remain_bidirectionally_synchronized(self):
         view = source("source/render/view.cpp")
