@@ -7,9 +7,10 @@ validated atlas archive does not share the MPR filename.
 ## Changes
 
 - **Save MPR** and **Save MPR As...** now always show the exact RES archive
-  chooser before publishing modern terrain pages. The currently bound archive
-  is only the initial selection for an in-place save; it is never updated
-  silently.
+  chooser before publishing modern terrain pages. A currently bound archive is
+  the initial selection only when it is already inside a configured resource
+  root; a temporary Maps-folder sidecar redirects the chooser to the profile's
+  mod `Res\\textures.res`. Nothing is updated silently.
 - Publishing a persisted editable draft no longer treats its temporary
   `<draft>-atlas.res` sidecar as the implicit destination. The chooser starts
   at the configured mod resource folder with `textures.res` selected.

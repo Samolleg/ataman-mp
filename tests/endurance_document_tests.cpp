@@ -590,6 +590,21 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     // modern save must never mutate an archive without explicit confirmation.
     QVERIFY(normalSave.requiresExplicitChoice);
 
+    const QString outsideMaps = QDir(resources.path()).filePath("maps");
+    QVERIFY(QDir().mkpath(outsideMaps));
+    const QString outsideSidecar = QDir(outsideMaps).filePath(
+        "zone1test2-atlas.res");
+    QFile outsideArchive(outsideSidecar);
+    QVERIFY(outsideArchive.open(QIODevice::WriteOnly));
+    QCOMPARE(outsideArchive.write("RES", 3), qint64(3));
+    outsideArchive.close();
+    const STerrainPublicationResourceChoicePlan recoveredPublishedSave =
+        terrainPublicationResourceChoicePlan(
+            {missing, modRes}, mprPath, outsideSidecar, true, false);
+    QVERIFY(recoveredPublishedSave.requiresExplicitChoice);
+    QCOMPARE(QDir::cleanPath(recoveredPublishedSave.initialPath),
+             QDir::cleanPath(QDir(modRes).filePath("textures.res")));
+
     const QString draftSidecar = QDir(resources.path()).filePath(
         "maps/zone2 test-atlas.res");
     const STerrainPublicationResourceChoicePlan draftSaveAs =
@@ -599,7 +614,7 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QCOMPARE(QDir::cleanPath(draftSaveAs.initialPath),
              QDir::cleanPath(QDir(modRes).filePath("textures.res")));
 
-    const QString maps = QDir(resources.path()).filePath("maps");
+    const QString maps = outsideMaps;
     QVERIFY(QDir().mkpath(maps));
     const QString mapTestMpr = QDir(maps).filePath("zone1.mpr");
     const QString differentlyNamedSidecar = QDir(maps).filePath(

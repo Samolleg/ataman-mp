@@ -97,6 +97,9 @@ struct STerrainPublicationResourceChoicePlan
     bool requiresExplicitChoice{true};
 };
 
+inline bool terrainPublicationPathInResourceRoots(
+    const QString& resourcePath, const QStringList& configuredResourceRoots);
+
 inline STerrainPublicationResourceChoicePlan terrainPublicationResourceChoicePlan(
     const QStringList& configuredResourceRoots, const QString& mprPath,
     const QString& activeArchivePath, bool saveOverCurrentMpr,
@@ -107,7 +110,9 @@ inline STerrainPublicationResourceChoicePlan terrainPublicationResourceChoicePla
     const bool canReuseActiveArchive = saveOverCurrentMpr
         && !persistedModernDraft && activeArchive.isFile()
         && activeArchive.suffix().compare(
-               QStringLiteral("res"), Qt::CaseInsensitive) == 0;
+               QStringLiteral("res"), Qt::CaseInsensitive) == 0
+        && terrainPublicationPathInResourceRoots(
+               activeArchive.absoluteFilePath(), configuredResourceRoots);
     if(canReuseActiveArchive)
         plan.initialPath = activeArchive.absoluteFilePath();
     else
