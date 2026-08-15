@@ -1121,6 +1121,39 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.findChild<QScrollArea*>("overlayMaterialScroll");
         QTabWidget* materialPaletteTabs =
             landscapeTools.findChild<QTabWidget*>("materialPaletteTabs");
+        QTabWidget* modernMaterialLayerTabs =
+            landscapeTools.findChild<QTabWidget*>("modernMaterialLayerTabs");
+        QTabWidget* classicMaterialLayerTabs =
+            landscapeTools.findChild<QTabWidget*>("classicMaterialLayerTabs");
+        QLineEdit* terrainPaintFilter =
+            landscapeTools.findChild<QLineEdit*>("terrainPaintFilter");
+        QListWidget* manualAtlasTileList =
+            landscapeTools.findChild<QListWidget*>("manualAtlasTileList");
+        if(materialPaletteTabs)
+            materialPaletteTabs->setCurrentIndex(0);
+        const bool threeTerrainPaintModesAvailable = materialPaletteTabs
+            && materialPaletteTabs->count() == 3
+            && materialPaletteTabs->tabText(0) == QStringLiteral("Modern")
+            && materialPaletteTabs->tabText(1) == QStringLiteral("Classic Auto")
+            && materialPaletteTabs->tabText(2) == QStringLiteral("Manual")
+            && modernMaterialLayerTabs && classicMaterialLayerTabs
+            && terrainPaintFilter && manualAtlasTileList;
+        landscapeTools.setClassicAutoMaterials(
+            {darkGrass, freshGrass}, {}, {});
+        QVector<QImage> manualTiles(2, QImage(16, 16,
+                                             QImage::Format_RGBA8888));
+        manualTiles[0].fill(Qt::red);
+        manualTiles[1].fill(Qt::green);
+        landscapeTools.setManualAtlasTiles(
+            manualTiles, {1, 2},
+            {QStringLiteral("Grass / Dark"),
+             QStringLiteral("Stone / Lime")});
+        terrainPaintFilter->setText(QStringLiteral("Stone / Lime"));
+        const bool sharedTerrainPaintFilterWorks = manualAtlasTileList
+            && manualAtlasTileList->count() == 2
+            && manualAtlasTileList->item(0)->isHidden()
+            && !manualAtlasTileList->item(1)->isHidden();
+        terrainPaintFilter->clear();
         const QList<QToolButton*> paletteButtons =
             landscapeTools.findChildren<QToolButton*>();
         const bool materialPaletteScrollsAndFillsWidth = groundMaterialScroll
@@ -1141,7 +1174,7 @@ int runHeadlessCommand(QApplication& app)
         const bool landscapeToolsAreCompactAndPaletteFillsHeight =
             landscapeTools.minimumSizeHint().width() <= 320
             && landscapeTools.width() <= 320
-            && materialPaletteTabs && materialPaletteTabs->height() >= 300
+            && materialPaletteTabs && materialPaletteTabs->height() >= 330
             && groundMaterialScroll && groundMaterialScroll->height() >= 260;
         landscapeTools.hide();
         QLabel* atlasSourceStatus =
@@ -1468,6 +1501,8 @@ int runHeadlessCommand(QApplication& app)
             && materialVariantsRemainDistinctAndGrouped
             && materialPaletteScrollsAndFillsWidth
             && landscapeToolsAreCompactAndPaletteFillsHeight
+            && threeTerrainPaintModesAvailable
+            && sharedTerrainPaintFilterWorks
             && defaultAtlasSourceVisible
             && localAtlasSourceVisible
             && generatedAtlasCountVisible
@@ -1563,6 +1598,10 @@ int runHeadlessCommand(QApplication& app)
                << materialPaletteScrollsAndFillsWidth
                << " landscapeToolsAreCompactAndPaletteFillsHeight="
                << landscapeToolsAreCompactAndPaletteFillsHeight
+               << " threeTerrainPaintModesAvailable="
+               << threeTerrainPaintModesAvailable
+               << " sharedTerrainPaintFilterWorks="
+               << sharedTerrainPaintFilterWorks
                << " landscapeToolsMinimumWidth="
                << landscapeTools.minimumSizeHint().width()
                << " landscapeToolsWidth=" << landscapeTools.width()

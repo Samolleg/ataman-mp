@@ -85,6 +85,84 @@ bool STerrainAtlasArchiveBindingResult::hasCompleteArchive(
     return false;
 }
 
+STerrainAtlasEmbeddedBindingResult
+CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+    const QStringList& candidateArchives,
+    const QString& mprNamespace,
+    const QString& preferredArchive)
+{
+    STerrainAtlasEmbeddedBindingResult result;
+    if(mprNamespace.trimmed().isEmpty())
+    {
+        result.error = QStringLiteral(
+            "The MPR has no terrain resource identity to look up.");
+        return result;
+    }
+    QStringList ordered;
+    if(QFileInfo(preferredArchive).isFile())
+        ordered.append(QFileInfo(preferredArchive).absoluteFilePath());
+    ordered.append(candidateArchives);
+    const QString memberName =
+        CTerrainAtlasProfileStore::embeddedMemberName(mprNamespace);
+    QSet<QString> seen;
+    QStringList rejected;
+    for(const QString& candidate : ordered)
+    {
+        const QFileInfo archive(candidate);
+        if(!archive.isFile())
+            continue;
+        const QString key = normalizedPath(archive.absoluteFilePath());
+        if(seen.contains(key))
+            continue;
+        seen.insert(key);
+        QMap<QString, SArchiveMemberLocation> members;
+        if(!archiveIndex(archive.absoluteFilePath(), &members))
+            continue;
+        const auto profileMember = members.constFind(memberName.toLower());
+        if(profileMember == members.constEnd())
+            continue;
+        QFile file(archive.absoluteFilePath());
+        if(!file.open(QIODevice::ReadOnly))
+            continue;
+        const QByteArray profileBytes = memberPayload(&file,
+                                                       profileMember.value());
+        STerrainAtlasProfile profile;
+        if(profileBytes.isEmpty()
+           || !STerrainAtlasProfile::fromBytes(
+               profileBytes, &profile, nullptr,
+               archive.absoluteFilePath() + QStringLiteral(":") + memberName)
+           || profile.mprNamespace.compare(mprNamespace,
+                                           Qt::CaseInsensitive) != 0)
+        {
+            rejected.append(QStringLiteral("%1: invalid embedded profile")
+                .arg(QDir::toNativeSeparators(archive.absoluteFilePath())));
+            continue;
+        }
+        const STerrainAtlasArchiveBindingResult exact = findExactArchive(
+            {archive.absoluteFilePath()}, profile.mprNamespace,
+            profile.textureCount, profile.atlasSlotCount,
+            profile.atlasPixelSha256, archive.absoluteFilePath());
+        if(!exact.success())
+        {
+            rejected.append(QStringLiteral("%1: %2")
+                .arg(QDir::toNativeSeparators(archive.absoluteFilePath()),
+                     exact.error));
+            continue;
+        }
+        result.archivePath = exact.archivePath;
+        result.profileMemberName = memberName;
+        result.profile = profile;
+        result.decodedAtlasPixelSha256 = exact.decodedAtlasPixelSha256;
+        return result;
+    }
+    result.error = QStringLiteral(
+        "No configured RES archive contains a complete embedded terrain-atlas profile for this MPR identity.");
+    if(!rejected.isEmpty())
+        result.error += QStringLiteral("\nRejected candidates:\n%1")
+            .arg(rejected.join(QStringLiteral("\n")));
+    return result;
+}
+
 STerrainAtlasArchiveBindingResult
 CTerrainAtlasArchiveBindingResolver::findExactArchive(
     const QStringList& candidateArchives,

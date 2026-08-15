@@ -258,12 +258,14 @@ bool uniform(const STerrainTransitionSignature& signature)
 QJsonObject STerrainAtlasProfile::toJson() const
 {
     QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 8);
+    root.insert(QStringLiteral("schemaVersion"), 9);
     root.insert(QStringLiteral("cornerSpace"),
                 QStringLiteral("tile-preview-nw-ne-se-sw-v1"));
     root.insert(QStringLiteral("mprNamespace"), mprNamespace);
     root.insert(QStringLiteral("atlasPixelSha256"), QString::fromLatin1(atlasPixelSha256));
     root.insert(QStringLiteral("atlasSlotCount"), atlasSlotCount);
+    root.insert(QStringLiteral("textureCount"), textureCount > 0
+                    ? textureCount : (atlasSlotCount + 63) / 64);
     root.insert(QStringLiteral("provenance"), provenance);
     if(!resourceArchiveHint.trimmed().isEmpty())
         root.insert(QStringLiteral("resourceArchiveHint"),
@@ -318,12 +320,18 @@ QJsonObject STerrainAtlasProfile::toJson() const
     return root;
 }
 
+QByteArray STerrainAtlasProfile::toBytes(bool compact) const
+{
+    return QJsonDocument(toJson()).toJson(
+        compact ? QJsonDocument::Compact : QJsonDocument::Indented);
+}
+
 bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
                                     STerrainAtlasProfile* profile,
                                     CValidationReport* report)
 {
     const int schemaVersion = object.value(QStringLiteral("schemaVersion")).toInt();
-    if(!profile || (schemaVersion < 1 || schemaVersion > 8)
+    if(!profile || (schemaVersion < 1 || schemaVersion > 9)
        || !object.value(QStringLiteral("families")).isArray()
        || !object.value(QStringLiteral("slots")).isArray())
     {
@@ -335,6 +343,9 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
     parsed.mprNamespace = object.value(QStringLiteral("mprNamespace")).toString();
     parsed.atlasPixelSha256 = object.value(QStringLiteral("atlasPixelSha256")).toString().toLatin1();
     parsed.atlasSlotCount = object.value(QStringLiteral("atlasSlotCount")).toInt(-1);
+    parsed.textureCount = schemaVersion >= 9
+        ? object.value(QStringLiteral("textureCount")).toInt(-1)
+        : (parsed.atlasSlotCount + 63) / 64;
     parsed.provenance = object.value(QStringLiteral("provenance")).toString();
     parsed.resourceArchiveHint = QDir::fromNativeSeparators(
         object.value(QStringLiteral("resourceArchiveHint")).toString().trimmed());
@@ -349,7 +360,8 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         return false;
     }
     if(parsed.mprNamespace.trimmed().isEmpty() || parsed.atlasPixelSha256.size() != 64
-       || parsed.atlasSlotCount < 1)
+       || parsed.atlasSlotCount < 1 || parsed.textureCount < 1
+       || parsed.atlasSlotCount > parsed.textureCount * 64)
     {
         if(report) report->add("terrain.atlas_profile_binding", EValidationSeverity::Error,
                                "The semantic atlas profile has an incomplete namespace/hash binding");
@@ -495,16 +507,34 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
     }
     if(!parsed.normalizeMembership(report))
         return false;
-    parsed.schemaVersion = 8;
+    parsed.schemaVersion = 9;
     *profile = parsed;
     return true;
+}
+
+bool STerrainAtlasProfile::fromBytes(const QByteArray& bytes,
+                                     STerrainAtlasProfile* profile,
+                                     CValidationReport* report,
+                                     const QString& sourceName)
+{
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &error);
+    if(error.error != QJsonParseError::NoError || !document.isObject())
+    {
+        if(report) report->add("terrain.atlas_profile_json",
+                               EValidationSeverity::Error,
+                               "The semantic atlas profile is not valid JSON",
+                               sourceName);
+        return false;
+    }
+    return fromJson(document.object(), profile, report);
 }
 
 bool STerrainAtlasProfile::save(const QString& path, CValidationReport* report) const
 {
     QSaveFile file(path);
     if(!file.open(QIODevice::WriteOnly)
-       || file.write(QJsonDocument(toJson()).toJson(QJsonDocument::Indented)) < 0
+       || file.write(toBytes(false)) < 0
        || !file.commit())
     {
         if(report) report->add("terrain.atlas_profile_write", EValidationSeverity::Error,
@@ -524,15 +554,7 @@ bool STerrainAtlasProfile::load(const QString& path, STerrainAtlasProfile* profi
                                "Could not read the semantic atlas profile", path);
         return false;
     }
-    QJsonParseError error;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
-    if(error.error != QJsonParseError::NoError || !document.isObject())
-    {
-        if(report) report->add("terrain.atlas_profile_json", EValidationSeverity::Error,
-                               "The semantic atlas profile is not valid JSON", path);
-        return false;
-    }
-    return fromJson(document.object(), profile, report);
+    return fromBytes(file.readAll(), profile, report, path);
 }
 
 bool STerrainAtlasProfile::normalizeMembership(CValidationReport* report)
@@ -902,6 +924,22 @@ int STerrainAtlasProfile::assignedSlotCount() const
     return count;
 }
 
+QString CTerrainAtlasProfileStore::embeddedMemberName(
+    const QString& mprNamespace)
+{
+    const QString normalized = mprNamespace.trimmed().toLower();
+    QString readable = normalized;
+    readable.replace(QRegularExpression(QStringLiteral("[^a-z0-9._-]+")),
+                     QStringLiteral("_"));
+    readable = readable.left(48).trimmed();
+    if(readable.isEmpty())
+        readable = QStringLiteral("atlas");
+    const QByteArray suffix = QCryptographicHash::hash(
+        normalized.toUtf8(), QCryptographicHash::Sha256).toHex().left(16);
+    return QStringLiteral("ei_atlas_profile_%1_%2.json")
+        .arg(readable, QString::fromLatin1(suffix));
+}
+
 QString CTerrainAtlasProfileStore::workingAtlasProvenance()
 {
     return QStringLiteral("portable-working-modern-atlas-v1");
@@ -926,6 +964,8 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
     profile.atlasPixelSha256 =
         CTerrainAtlasProfileInference::pixelSha256(decodedPhysicalTiles);
     profile.atlasSlotCount = decodedPhysicalTiles.size();
+    profile.textureCount = finalization.textureCount > 0
+        ? finalization.textureCount : (profile.atlasSlotCount + 63) / 64;
     profile.provenance = QStringLiteral("portable-finalized-modern-atlas-v1");
     profile.approved = true;
 
@@ -1044,6 +1084,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
     profile.atlasPixelSha256 =
         CTerrainAtlasProfileInference::pixelSha256(decodedPhysicalTiles);
     profile.atlasSlotCount = decodedPhysicalTiles.size();
+    profile.textureCount = (profile.atlasSlotCount + 63) / 64;
     profile.provenance = workingAtlasProvenance();
     profile.approved = true;
 

@@ -35,6 +35,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "terrain_tile_information_policy.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
+#include "landscape_tools.h"
 #include "spatial_grid.h"
 #include "particle_animation.h"
 #include "ai_graph_document.h"
@@ -357,6 +358,8 @@ private:
     void clearLandscapeBrushSelection();
     void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();
+    void refreshClassicAutoPalette();
+    void refreshManualAtlasPalette();
     void refreshTerrainFamilyUsage();
     QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
     QMap<int, quint64> workingTerrainAtlasUsage() const;
@@ -588,6 +591,9 @@ private:
     QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
     QVector<STerrainGlobalMaterialFamily> m_terrainGlobalFamilies;
+    QVector<STerrainPaintMaterialChoice> m_modernLandPaintChoices;
+    QVector<STerrainPaintMaterialChoice> m_modernUnderwaterPaintChoices;
+    QVector<STerrainPaintMaterialChoice> m_modernOverlayPaintChoices;
     QMap<qint32, QImage> m_terrainGlobalMaterialSources;
     QMap<qint32, STerrainGlobalMaterialSource>
         m_terrainGlobalMaterialSourceIdentities;
@@ -615,6 +621,7 @@ private:
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};
+    bool m_tileStrokeClassicAuto{false};
     bool m_terrainPaintOutlineValid{false};
     bool m_terrainPaintProjectionLand{true};
     int m_terrainPaintOutlineX{0};

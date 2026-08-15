@@ -122,10 +122,13 @@ struct STerrainAtlasProfileSlot
 // unresolved entries remain unassigned until a user fixes or excludes them.
 struct STerrainAtlasProfile
 {
-    int schemaVersion{8};
+    int schemaVersion{9};
     QString mprNamespace;
     QByteArray atlasPixelSha256;
     int atlasSlotCount{0};
+    // Physical MMP pages owned by this exact atlas binding. Legacy profiles
+    // derive it from atlasSlotCount; embedded profiles declare it explicitly.
+    int textureCount{0};
     QString provenance;
     // Optional portable hint to the one RES archive that owns every page of a
     // published atlas. The decoded pixel hash remains the authority.
@@ -135,8 +138,13 @@ struct STerrainAtlasProfile
     QVector<STerrainAtlasProfileSlot> slotDefinitions;
 
     QJsonObject toJson() const;
+    QByteArray toBytes(bool compact = true) const;
     static bool fromJson(const QJsonObject& object, STerrainAtlasProfile* profile,
                          CValidationReport* report = nullptr);
+    static bool fromBytes(const QByteArray& bytes,
+                          STerrainAtlasProfile* profile,
+                          CValidationReport* report = nullptr,
+                          const QString& sourceName = QString());
     bool save(const QString& path, CValidationReport* report = nullptr) const;
     static bool load(const QString& path, STerrainAtlasProfile* profile,
                      CValidationReport* report = nullptr);
@@ -167,6 +175,7 @@ struct STerrainAtlasProfile
 class CTerrainAtlasProfileStore
 {
 public:
+    static QString embeddedMemberName(const QString& mprNamespace);
     static QString workingAtlasProvenance();
     static bool isWorkingAtlasProfile(const STerrainAtlasProfile& profile);
     static STerrainAtlasProfile portableFinalizedProfile(

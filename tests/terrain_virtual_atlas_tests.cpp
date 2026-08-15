@@ -545,6 +545,7 @@ private slots:
     void workingPreviewPackageDoesNotSerializePhysicalPagePadding();
     void workingPreviewPackageStagesSeveralGeneratedPages();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
+    void classicAutoStrokeRefusesMissingBlendAndRollsBackExactly();
     void overlayVirtualPaintAllowsSparseInactiveField();
     void collapsedUniformBaselineRecoversExactRotatedBlend();
     void overlappingVirtualPaintDoesNotReplaceUnchangedEdgeBlendWithUniformPreview();
@@ -3866,6 +3867,70 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     CTerrainVirtualMaterialField undone;
     QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
     QCOMPARE(undone.material(8,8),qint32(1));
+}
+
+void TerrainVirtualAtlasTests::classicAutoStrokeRefusesMissingBlendAndRollsBackExactly()
+{
+    Fixture fixture;
+    QByteArray payload;
+    QDataStream sec(&payload, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(64, 1), 0));
+    QVERIFY2(model.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, fixture.catalog, &report),
+             qPrintable(report.toText()));
+    CTerrainVirtualMaterialField baselineField;
+    QVERIFY(model.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &baselineField));
+    bool baselinePackedAvailable = false;
+    const quint16 baselinePacked = model.packedTile(
+        8, 8, ETerrainTileLayer::Land, &baselinePackedAvailable);
+    QVERIFY(baselinePackedAvailable);
+
+    STerrainTileBrush brush;
+    brush.centerX = 8;
+    brush.centerY = 8;
+    brush.radius = 1;
+    const STerrainTileCommand preview = model.makeVirtualMaterialPaint(
+        8, 8, brush, ETerrainTileLayer::Land, 2,
+        fixture.catalog, 0x434C4153u, &report);
+    QVERIFY2(!preview.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(model.apply(preview, true, &report));
+
+    CValidationReport releaseReport;
+    const STerrainTileCommand resolution = model.makeVirtualStrokeResolution(
+        preview, fixture.catalog, 0x434C4153u, &releaseReport);
+    QVERIFY(releaseReport.hasErrors());
+    QVERIFY(releaseReport.toText().contains(
+        QStringLiteral("terrain.virtual_release_unresolved")));
+
+    // Classic Auto never asks the modern resolver to synthesize the missing
+    // tuple. Its whole-stroke rollback restores both the semantic field and
+    // the exact packed preview values.
+    QVERIFY(model.apply(preview, false, &report));
+    CTerrainVirtualMaterialField restoredField;
+    QVERIFY(model.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &restoredField));
+    QCOMPARE(restoredField.stableSha256(), baselineField.stableSha256());
+    bool restoredPackedAvailable = false;
+    QCOMPARE(model.packedTile(8, 8, ETerrainTileLayer::Land,
+                              &restoredPackedAvailable), baselinePacked);
+    QVERIFY(restoredPackedAvailable);
+    QVERIFY(resolution.deltas.isEmpty());
 }
 
 void TerrainVirtualAtlasTests::overlayVirtualPaintAllowsSparseInactiveField()

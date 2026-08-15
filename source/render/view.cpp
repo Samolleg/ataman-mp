@@ -90,6 +90,7 @@
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
 #include "portable_diagnostic_writer.h"
+#include "terrain_atlas_recovery_store.h"
 
 class CLogic;
 
@@ -134,6 +135,36 @@ QMap<qint32, qint32> materialRuntimeTypes(
         if(family.runtimeTerrainType >= 0 && family.runtimeTerrainType < 16)
             result.insert(family.id, family.runtimeTerrainType);
     return result;
+}
+
+STerrainAtlasRecoveryResult saveTerrainAtlasRecoverySnapshot(
+    const STerrainAtlasProfile& profile,
+    const QVector<SResArchiveNewMember>& members,
+    const QByteArray& mprBytes,
+    const QVector<qint32>& runtimeTerrainTypes,
+    const QFileInfo& mprPath,
+    const QFileInfo& resPath)
+{
+    STerrainAtlasRecoverySnapshot snapshot;
+    snapshot.resourceIdentity = profile.mprNamespace;
+    snapshot.atlasPixelSha256 = profile.atlasPixelSha256;
+    snapshot.profileBytes = profile.toBytes();
+    snapshot.mprPath = mprPath.absoluteFilePath();
+    snapshot.resPath = resPath.absoluteFilePath();
+    snapshot.mprSha256 = QCryptographicHash::hash(
+        mprBytes, QCryptographicHash::Sha256).toHex();
+    snapshot.runtimeTerrainTypes = runtimeTerrainTypes;
+    for(const SResArchiveNewMember& member : members)
+    {
+        if(!member.name.endsWith(QStringLiteral(".mmp"),
+                                 Qt::CaseInsensitive))
+            continue;
+        STerrainAtlasRecoveryPage page;
+        page.name = member.name;
+        page.payload = member.payload;
+        snapshot.pages.append(page);
+    }
+    return CTerrainAtlasRecoveryStore().saveSnapshot(snapshot);
 }
 
 QByteArray globalTransitionKey(const STerrainTransitionSignature& signature)
@@ -764,6 +795,21 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                                                       m_lastViewportMousePos.y()), land);
             }
         });
+        connect(m_landscapeTools, &CLandscapeTools::manualAtlasTileRequested,
+                this, [this](int slot)
+        {
+            if(!m_pTileForm || !m_pTileForm->selectTile(slot))
+                return;
+            m_pTileForm->setTileRotation(0);
+            onChangeCursorTile(m_pTileForm->tileWithRot(slot));
+            if(m_hasViewportMousePos)
+            {
+                const bool land = CScene::getInstance()->isLandTileEditMode();
+                updatePreviewTile(getTerrainBrushPos(
+                    m_lastViewportMousePos.x(), m_lastViewportMousePos.y()),
+                    land);
+            }
+        });
         connect(m_landscapeTools, &CLandscapeTools::terrainVisibilityChanged,
                 this, [this](bool drawLand, bool drawWater)
         {
@@ -958,45 +1004,25 @@ void CView::clearLandscapeBrushSelection()
 void CView::ensureManualTileSelection()
 {
     if(!m_landscapeTools || !m_pTileForm
-       || !m_landscapeTools->manualTileSelectionEnabled()
-       || !m_terrainAtlasAnalysis.usable)
+       || !m_landscapeTools->manualTileSelectionEnabled())
         return;
-    const ETerrainTileLayer layer = m_landscapeTools->editMode()
-            == ELandscapeEditMode::OverlayPaint
-        ? ETerrainTileLayer::Overlay : ETerrainTileLayer::Land;
-    const CTerrainTransitionCatalog& catalog = layer == ETerrainTileLayer::Overlay
-            && m_landscapeTools->landFamiliesAllowedInOverlay()
-        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
-        : m_terrainAtlasAnalysis.catalog(layer);
     int selectedIndex = -1;
     int selectedRotation = 0;
     m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
-    bool selectedValid = false;
-    if(selectedIndex >= 0)
-    {
-        SMprPackedTile selected;
-        selected.atlasIndex = quint8(selectedIndex / 64);
-        selected.tileIndex = quint8(selectedIndex % 64);
-        selected.rotation = quint8(selectedRotation & 3);
-        catalog.signatureForPacked(selected.encode(), &selectedValid);
-    }
-    if(selectedValid)
+    Q_UNUSED(selectedRotation);
+    if(selectedIndex >= 0
+       && selectedIndex < m_pTileForm->tileTypes().size())
         return;
-    for(int slot = 0; slot < m_pTileForm->tileImages().size(); ++slot)
+    for(int slot = 0; slot < m_pTileForm->tileTypes().size(); ++slot)
     {
-        SMprPackedTile candidate;
-        candidate.atlasIndex = quint8(slot / 64);
-        candidate.tileIndex = quint8(slot % 64);
-        bool found = false;
-        catalog.signatureForPacked(candidate.encode(), &found);
-        if(!found)
-            continue;
         if(!m_pTileForm->selectTile(slot))
             continue;
+        m_pTileForm->setTileRotation(0);
         onChangeCursorTile(m_pTileForm->tileWithRot(slot));
         if(m_hasViewportMousePos)
         {
-            const bool land = layer == ETerrainTileLayer::Land;
+            const bool land = m_landscapeTools->editMode()
+                != ELandscapeEditMode::OverlayPaint;
             updatePreviewTile(getTerrainBrushPos(m_lastViewportMousePos.x(),
                                                  m_lastViewportMousePos.y()), land);
         }
@@ -5382,11 +5408,141 @@ void CView::loadLandscape(const QFileInfo& filePath)
     if(bindingDocument.load(filePath, &bindingDocumentReport)
        && !bindingDocumentReport.hasErrors())
     {
+        QStringList embeddedCandidates;
+        if(QFileInfo(mapLocalAtlas).isFile())
+            embeddedCandidates.append(
+                QFileInfo(mapLocalAtlas).absoluteFilePath());
+        embeddedCandidates.append(CTextureList::getInstance()
+            ->configuredResourceArchivePaths());
+        STerrainAtlasEmbeddedBindingResult embedded =
+            CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+                embeddedCandidates,
+                bindingDocument.mapInfo().innerNamespace,
+                QFileInfo(mapLocalAtlas).isFile() ? mapLocalAtlas : QString());
+        bool embeddedBound = embedded.success();
+        if(embeddedBound)
+        {
+            mapLocalAtlas = embedded.archivePath;
+            ei::log(eLogInfo, QStringLiteral(
+                "Bound self-describing terrain atlas RES: %1 member:%2 hash:%3")
+                .arg(embedded.archivePath, embedded.profileMemberName,
+                     QString::fromLatin1(
+                      embedded.decodedAtlasPixelSha256)));
+        }
+        bool recoveryChecked = false;
+        const auto restoreExactRecovery = [&]() -> int {
+            if(recoveryChecked)
+                return 0;
+            recoveryChecked = true;
+            const QByteArray mprSha256 = QCryptographicHash::hash(
+                bindingDocument.originalBytes(),
+                QCryptographicHash::Sha256).toHex();
+            CTerrainAtlasRecoveryStore store;
+            STerrainAtlasRecoverySnapshot snapshot;
+            QString recoveryError;
+            if(!store.findForMpr(
+                   bindingDocument.mapInfo().innerNamespace,
+                   mprSha256, &snapshot, &recoveryError))
+                return 0;
+            const QString targetPath = filePath.dir().filePath(
+                filePath.completeBaseName() + QStringLiteral("-atlas.res"));
+            const QMessageBox::StandardButton restoreChoice =
+                QMessageBox::question(
+                    this, tr("Restore exact terrain atlas"),
+                    tr("This MPR has an exact editor recovery snapshot, but "
+                       "its matching self-describing RES is not configured.\n\n"
+                       "Restore a map-local atlas now?\n%1\n\n"
+                       "Only the exact saved pages and semantic profile will "
+                       "be restored; no atlas identity will be inferred.")
+                        .arg(QDir::toNativeSeparators(targetPath)),
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::Yes);
+            if(restoreChoice != QMessageBox::Yes)
+                return -1;
+            QByteArray archiveBytes;
+            if(!store.buildStandaloneArchive(
+                   snapshot, &archiveBytes, &recoveryError))
+            {
+                QMessageBox::critical(this, tr("Terrain atlas recovery failed"),
+                    tr("The exact recovery snapshot could not be rebuilt. "
+                       "The MPR was not opened.\n\n%1").arg(recoveryError));
+                return -1;
+            }
+            const QFileInfo target(targetPath);
+            const bool targetExisted = target.exists();
+            QByteArray previousTargetBytes;
+            if(targetExisted)
+            {
+                QFile previousTarget(targetPath);
+                if(!previousTarget.open(QIODevice::ReadOnly))
+                {
+                    QMessageBox::critical(this,
+                        tr("Terrain atlas recovery failed"),
+                        tr("The existing map-local RES could not be backed up. "
+                           "The MPR was not opened."));
+                    return -1;
+                }
+                previousTargetBytes = previousTarget.readAll();
+            }
+            SResArchiveBytesSaveRequest request;
+            request.destination = target;
+            request.candidateBytes = archiveBytes;
+            request.createBackup = true;
+            const SResArchiveBytesSaveResult result =
+                commitValidatedResArchiveBytes(request);
+            if(!result.success)
+            {
+                QMessageBox::critical(this,
+                    tr("Terrain atlas recovery failed"),
+                    tr("The exact map-local RES could not be committed. "
+                       "The MPR was not opened.\n\nPhase: %1\n%2")
+                        .arg(result.phase, result.error));
+                return -1;
+            }
+            const STerrainAtlasEmbeddedBindingResult recovered =
+                CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+                    {targetPath}, snapshot.resourceIdentity, targetPath);
+            if(!recovered.success()
+               || recovered.profile.atlasPixelSha256
+                    != snapshot.atlasPixelSha256)
+            {
+                bool rolledBack = false;
+                if(targetExisted)
+                {
+                    QSaveFile restore(targetPath);
+                    rolledBack = restore.open(QIODevice::WriteOnly)
+                        && restore.write(previousTargetBytes)
+                            == previousTargetBytes.size()
+                        && restore.commit();
+                }
+                else
+                    rolledBack = QFile::remove(targetPath);
+                QMessageBox::critical(this,
+                    tr("Terrain atlas recovery failed"),
+                    tr("The rebuilt RES failed exact semantic binding and was "
+                       "rolled back: %1. The MPR was not opened.\n\n%2")
+                        .arg(rolledBack ? tr("complete") : tr("failed"),
+                             recovered.error));
+                return -1;
+            }
+            embedded = recovered;
+            embeddedBound = true;
+            mapLocalAtlas = target.absoluteFilePath();
+            ei::log(eLogInfo, QStringLiteral(
+                "Restored exact terrain atlas recovery RES: %1 hash:%2")
+                .arg(mapLocalAtlas,
+                     QString::fromLatin1(snapshot.atlasPixelSha256)));
+            QMessageBox::information(this, tr("Terrain atlas restored"),
+                tr("The exact map-local terrain atlas was restored and will "
+                   "be used to open this MPR.\n\n%1")
+                    .arg(QDir::toNativeSeparators(mapLocalAtlas)));
+            return 1;
+        };
         STerrainAtlasProfile bindingProfile;
         CValidationReport bindingProfileReport;
         QString bindingProfilePath;
         bool legacyBindingProfile = false;
-        if(CTerrainAtlasProfileStore::loadForMpr(
+        if(!embeddedBound && CTerrainAtlasProfileStore::loadForMpr(
                bindingDocument.mapInfo().innerNamespace, filePath,
                &bindingProfile, &bindingProfilePath,
                &legacyBindingProfile, &bindingProfileReport)
@@ -5414,12 +5570,13 @@ void CView::loadLandscape(const QFileInfo& filePath)
                     preferredArchive);
             if(binding.success())
             {
+                embeddedBound = true;
                 mapLocalAtlas = binding.archivePath;
                 ei::log(eLogInfo, QStringLiteral(
                     "Bound finalized terrain atlas to coherent RES: %1 hash:%2")
                     .arg(binding.archivePath,
                          QString::fromLatin1(
-                             binding.decodedAtlasPixelSha256)));
+                          binding.decodedAtlasPixelSha256)));
             }
             else
             {
@@ -5435,6 +5592,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
                 // strict publication contract and always fails closed.
                 if(legacyBindingProfile && preferredComplete)
                 {
+                    embeddedBound = true;
                     m_legacyTerrainProfileCollision = true;
                     mapLocalAtlas = preferredArchive;
                     ei::log(eLogWarning, QStringLiteral(
@@ -5445,22 +5603,31 @@ void CView::loadLandscape(const QFileInfo& filePath)
                 }
                 else
                 {
-                    const QString message = tr(
-                        "This finalized MPR references an exact published terrain "
-                        "atlas, but no single configured RES archive matches it. "
-                        "The map was not opened, so the editor cannot mix old and "
-                        "new texture pages.\n\nResource identity: %1\nExpected atlas "
-                        "hash: %2\n\n%3")
-                        .arg(bindingDocument.mapInfo().innerNamespace,
-                             QString::fromLatin1(
-                                 bindingProfile.atlasPixelSha256),
-                             binding.error);
-                    ei::log(eLogWarning, message);
-                    QMessageBox::critical(this,
-                        tr("Finalized terrain RES unavailable"), message);
-                    return;
+                    if(restoreExactRecovery() != 1)
+                    {
+                        const QString message = tr(
+                            "This finalized MPR references an exact published terrain "
+                            "atlas, but no single configured RES archive matches it. "
+                            "The map was not opened, so the editor cannot mix old and "
+                            "new texture pages.\n\nResource identity: %1\nExpected atlas "
+                            "hash: %2\n\n%3")
+                            .arg(bindingDocument.mapInfo().innerNamespace,
+                                 QString::fromLatin1(
+                                     bindingProfile.atlasPixelSha256),
+                                 binding.error);
+                        ei::log(eLogWarning, message);
+                        QMessageBox::critical(this,
+                            tr("Finalized terrain RES unavailable"), message);
+                        return;
+                    }
                 }
             }
+        }
+        if(!embeddedBound)
+        {
+            const int recoveryResult = restoreExactRecovery();
+            if(recoveryResult < 0)
+                return;
         }
     }
     CTextureList::getInstance()->setMapLocalTerrainArchive(mapLocalAtlas);
@@ -5993,7 +6160,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             m_workingTerrainAtlas->activeTileImages();
         const QVector<qint32> activeTypes =
             m_workingTerrainAtlas->activeTileTypes();
-        const STerrainPortableAtlasPackage draft =
+        STerrainPortableAtlasPackage draft =
             CTerrainVirtualAtlas::buildWorkingPreviewPackage(
                 stagedDocument, activeTiles, activeTypes,
                 authoredPages, &draftReport);
@@ -6039,6 +6206,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                 m_terrainGlobalFamilies, &draftReport);
         draftProfile.resourceArchiveHint =
             destination.completeBaseName() + QStringLiteral("-atlas.res");
+        draftProfile.textureCount = draft.resourceMembers.size();
         if(draftProfile.assignedSlotCount() <= 0
            || draftReport.hasErrors())
         {
@@ -6050,22 +6218,57 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         }
         const QString atlasPath = destination.dir().filePath(
             destination.completeBaseName() + QStringLiteral("-atlas.res"));
-        const QString draftProfilePath =
-            CTerrainAtlasProfileStore::profilePathForMpr(
-                stagedDocument.mapInfo().innerNamespace, destination);
-        const bool draftProfileExisted = QFileInfo::exists(draftProfilePath);
-        QByteArray previousDraftProfile;
-        if(draftProfileExisted)
+        SResArchiveNewMember embeddedProfileMember;
+        embeddedProfileMember.name =
+            CTerrainAtlasProfileStore::embeddedMemberName(
+                draftProfile.mprNamespace);
+        embeddedProfileMember.payload = draftProfile.toBytes();
+        QByteArray selfDescribingDraftBytes;
+        if(!draftArchive.buildWithPublishedMembers(
+               {embeddedProfileMember}, false,
+               &selfDescribingDraftBytes, &draftArchiveErrors))
         {
-            QFile previousProfile(draftProfilePath);
-            if(!previousProfile.open(QIODevice::ReadOnly))
-            {
-                QMessageBox::critical(this, tr("Modern draft save refused"),
-                    tr("The existing editor profile could not be read before "
-                       "replacement. No destination was changed."));
-                return false;
-            }
-            previousDraftProfile = previousProfile.readAll();
+            QMessageBox::critical(this, tr("Modern draft save refused"),
+                tr("The exact material profile could not be embedded in the "
+                   "map-local RES. No destination was changed.\n\n%1")
+                    .arg(draftArchiveErrors.join(QStringLiteral("\n"))));
+            return false;
+        }
+        draft.resourceArchiveBytes = selfDescribingDraftBytes;
+        QVector<SResArchiveNewMember> recoveryMembers;
+        for(const QString& memberName : draft.resourceMembers)
+        {
+            SResArchiveNewMember pageMember;
+            pageMember.name = memberName;
+            pageMember.payload = draftArchive.memberPayload(memberName);
+            recoveryMembers.append(pageMember);
+        }
+        recoveryMembers.append(embeddedProfileMember);
+        CMprDocument recoveryDocument;
+        CValidationReport recoveryDocumentReport;
+        if(!recoveryDocument.loadBytes(
+               draft.mprBytes, QStringLiteral("working-draft-recovery.mpr"),
+               &recoveryDocumentReport)
+           || recoveryDocumentReport.hasErrors())
+        {
+            QMessageBox::critical(this, tr("Modern draft save refused"),
+                tr("The paired MPR could not be validated for exact atlas "
+                   "recovery. No destination was changed.\n\n%1")
+                    .arg(recoveryDocumentReport.toText().trimmed()));
+            return false;
+        }
+        const STerrainAtlasRecoveryResult recoveryResult =
+            saveTerrainAtlasRecoverySnapshot(
+                draftProfile, recoveryMembers, draft.mprBytes,
+                recoveryDocument.mapInfo().tileTypes, destination,
+                QFileInfo(atlasPath));
+        if(!recoveryResult.success)
+        {
+            QMessageBox::critical(this, tr("Modern draft save refused"),
+                tr("The exact semantic atlas recovery snapshot could not be "
+                   "created, so no destination was changed.\n\n%1")
+                    .arg(recoveryResult.error));
+            return false;
         }
         updateProgress(tr("Staging and verifying the map-local atlas..."), 3);
         SResArchiveBytesSaveRequest atlasRequest;
@@ -6097,27 +6300,6 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                 && restore.write(previous) == previous.size()
                 && restore.commit();
         };
-        const auto restoreDraftProfile = [&]() {
-            if(!draftProfileExisted)
-                return !QFileInfo::exists(draftProfilePath)
-                    || QFile::remove(draftProfilePath);
-            QSaveFile restore(draftProfilePath);
-            return restore.open(QIODevice::WriteOnly)
-                && restore.write(previousDraftProfile)
-                    == previousDraftProfile.size()
-                && restore.commit();
-        };
-        updateProgress(tr("Saving the editor material profile..."), 5);
-        if(!CTerrainAtlasProfileStore::saveForMpr(
-               draftProfile, destination, &draftReport))
-        {
-            restoreDraftAtlas();
-            QMessageBox::critical(this, tr("Modern draft save failed"),
-                tr("The atlas was written, but its editor material profile "
-                   "could not be saved. The MPR was not changed.\n\n%1")
-                    .arg(draftReport.toText().trimmed()));
-            return false;
-        }
         updateProgress(tr("Committing and reopening the paired MPR..."), 6);
         SMprBytesSaveCommitRequest mprRequest;
         mprRequest.source = m_pLand->filePath();
@@ -6129,12 +6311,10 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         if(!mprResult.success)
         {
             const bool atlasRestored = restoreDraftAtlas();
-            const bool profileRestored = restoreDraftProfile();
             QMessageBox::critical(this, tr("Modern draft save failed"),
-                tr("The MPR was not committed. Atlas rollback: %1; profile "
-                   "rollback: %2.\n\nPhase: %3\n%4")
+                tr("The MPR was not committed. Atlas rollback: %1.\n\n"
+                   "Phase: %2\n%3")
                     .arg(atlasRestored ? tr("complete") : tr("failed"),
-                         profileRestored ? tr("complete") : tr("failed"),
                          mprResult.phase, mprResult.error));
             return false;
         }
@@ -7083,8 +7263,15 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainGlobalTransitionEncodedPageCache.clear();
     m_terrainGlobalTransitionMissingPages.clear();
     m_terrainGlobalTransitionTileCache.clear();
+    m_modernLandPaintChoices.clear();
+    m_modernUnderwaterPaintChoices.clear();
+    m_modernOverlayPaintChoices.clear();
     if(m_landscapeTools)
+    {
         m_landscapeTools->setPaintTerrainTypes({}, {}, {});
+        m_landscapeTools->setClassicAutoMaterials({}, {}, {});
+        m_landscapeTools->setManualAtlasTiles({}, {});
+    }
     QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
     quint32 seed = 2166136261u;
     for(char byte : seedText)
@@ -7122,12 +7309,30 @@ void CView::rebuildTerrainAutoCatalog()
     QString storedPath;
     CValidationReport storedReport;
     bool legacyAdjacentProfile = false;
-    const bool adjacentPortableProfile = m_pLand
+    bool embeddedPortableProfile = false;
+    if(QFileInfo(m_activeTerrainArchivePath).isFile())
+    {
+        const STerrainAtlasEmbeddedBindingResult embedded =
+            CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+                {m_activeTerrainArchivePath}, mprNamespace,
+                m_activeTerrainArchivePath);
+        if(embedded.success()
+           && embedded.profile.validateBinding(
+               mprNamespace, atlasHash, slotCount, &storedReport))
+        {
+            stored = embedded.profile;
+            storedPath = embedded.archivePath + QStringLiteral("::")
+                + embedded.profileMemberName;
+            embeddedPortableProfile = true;
+        }
+    }
+    const bool adjacentPortableProfile = !embeddedPortableProfile && m_pLand
         && CTerrainAtlasProfileStore::loadExplicitOverrideForMpr(
             mprNamespace, atlasHash, slotCount, m_pLand->filePath(),
             &stored, &storedPath, &legacyAdjacentProfile, &storedReport);
     Q_UNUSED(legacyAdjacentProfile);
-    if(adjacentPortableProfile || CTerrainAtlasProfileStore::loadExplicitOverride(
+    if(embeddedPortableProfile || adjacentPortableProfile
+       || CTerrainAtlasProfileStore::loadExplicitOverride(
            mprNamespace, atlasHash, slotCount, &stored, QString(),
            &storedPath, &storedReport))
     {
@@ -7375,6 +7580,9 @@ void CView::rebuildTerrainAutoCatalog()
         m_terrainAtlasProfile.assignedSlotCount(),
         m_terrainAtlasProfile.atlasSlotCount, status, sourceLabel,
         m_terrainAtlasProfileSource.path);
+    m_modernLandPaintChoices = landChoices;
+    m_modernUnderwaterPaintChoices = underwaterChoices;
+    m_modernOverlayPaintChoices = overlayChoices;
     updateTerrainAtlasViewerAnnotations(status);
     ei::log(report.hasErrors() ? eLogWarning : eLogInfo,
         QString("Material atlas source: %1, %2 land materials, %3 overlay materials, %4/%5 described slots%6")
@@ -7416,8 +7624,112 @@ void CView::rebuildTerrainAutoCatalog()
             .arg(m_workingTerrainAtlas->capacityLimit()
                  - m_authoredTerrainTileImages.size())
             .arg(m_workingAtlasProtectedSlots.size()));
+        refreshClassicAutoPalette();
+        refreshManualAtlasPalette();
         refreshTerrainFamilyUsage();
     }
+    else
+        refreshManualAtlasPalette();
+}
+
+void CView::refreshClassicAutoPalette()
+{
+    if(!m_landscapeTools)
+        return;
+    const auto available = [](
+        const QVector<STerrainPaintMaterialChoice>& source,
+        const CTerrainTransitionCatalog& catalog) {
+        QVector<STerrainPaintMaterialChoice> result;
+        for(const STerrainPaintMaterialChoice& choice : source)
+        {
+            STerrainTransitionSignature pure;
+            pure.northWest = pure.northEast = pure.southEast = pure.southWest
+                = choice.id;
+            if(!catalog.paintVariants(pure).isEmpty())
+                result.append(choice);
+        }
+        return result;
+    };
+    if(m_workingTerrainAtlas)
+    {
+        const CTerrainTransitionCatalog& catalog =
+            m_workingTerrainAtlas->catalog();
+        m_landscapeTools->setClassicAutoMaterials(
+            available(m_modernLandPaintChoices, catalog),
+            available(m_modernUnderwaterPaintChoices, catalog),
+            available(m_modernOverlayPaintChoices, catalog));
+        return;
+    }
+    m_landscapeTools->setClassicAutoMaterials(
+        available(m_modernLandPaintChoices,
+                  m_terrainAtlasAnalysis.landCatalog),
+        available(m_modernUnderwaterPaintChoices,
+                  m_terrainAtlasAnalysis.landCatalog),
+        available(m_modernOverlayPaintChoices,
+                  m_terrainAtlasAnalysis.overlayCatalog));
+}
+
+void CView::refreshManualAtlasPalette()
+{
+    if(!m_landscapeTools || !m_pTileForm)
+        return;
+    QVector<QImage> images;
+    QVector<qint32> runtimeTypes;
+    const CTerrainTransitionCatalog* catalog = nullptr;
+    if(m_workingTerrainAtlas)
+    {
+        images = m_workingTerrainAtlas->activeTileImages();
+        runtimeTypes = m_workingTerrainAtlas->activeTileTypes();
+        catalog = &m_workingTerrainAtlas->catalog();
+    }
+    else
+    {
+        images = m_pTileForm->tileImages();
+        for(ETileType type : m_pTileForm->tileTypes())
+            runtimeTypes.append(qint32(type));
+        if(m_terrainAtlasAnalysis.usable)
+            catalog = &m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies();
+    }
+    // Physical page padding is not an MPR-addressable tile designation.
+    if(runtimeTypes.size() < images.size())
+        images.resize(runtimeTypes.size());
+
+    QMap<qint32, QString> names;
+    for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
+        names.insert(family.id, family.name);
+    for(const STerrainAtlasProfileFamily& family :
+            m_terrainAtlasProfile.families)
+        if(!names.contains(family.id))
+            names.insert(family.id, family.name);
+    QStringList descriptions;
+    descriptions.reserve(images.size());
+    for(int slot = 0; slot < images.size(); ++slot)
+    {
+        QString description;
+        if(catalog)
+        {
+            SMprPackedTile packed;
+            packed.atlasIndex = quint8(slot / 64);
+            packed.tileIndex = quint8(slot % 64);
+            bool found = false;
+            const STerrainTransitionSignature signature =
+                catalog->gridSignatureForPacked(packed.encode(), &found);
+            if(found)
+            {
+                const auto name = [&names](qint32 id) {
+                    return names.value(id, QString::number(id));
+                };
+                description = tr("NW %1 / NE %2 / SW %3 / SE %4")
+                    .arg(name(signature.northWest),
+                         name(signature.northEast),
+                         name(signature.southWest),
+                         name(signature.southEast));
+            }
+        }
+        descriptions.append(description);
+    }
+    m_landscapeTools->setManualAtlasTiles(
+        images, runtimeTypes, descriptions);
 }
 
 void CView::refreshTerrainFamilyUsage()
@@ -8173,7 +8485,21 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
             EValidationSeverity::Error,
             "The generated exact tiles could not be installed in the live terrain renderer.");
     if(installed)
+    {
+        const QVector<qint32> activeTypes =
+            m_workingTerrainAtlas->activeTileTypes();
+        if(!m_pTileForm->adoptTileImages(activeImages, activeTypes))
+        {
+            if(report)
+                report->add("terrain.working_atlas_tile_picker",
+                    EValidationSeverity::Error,
+                    "The live atlas was uploaded, but its physical slots could not be adopted by the manual tile picker.");
+            return false;
+        }
+        refreshClassicAutoPalette();
+        refreshManualAtlasPalette();
         update();
+    }
     return installed;
 }
 
@@ -8708,10 +9034,9 @@ void CView::finalizeVirtualTerrainAtlas()
         backupChoice.clickedButton() == backupButton;
 
     // The isolated atlas has a new namespace, pixel hash, slot order, and
-    // generated signatures. Persist its exact semantic contract beside the
-    // MPR; otherwise reopening correctly finds the 704 (etc.) texture slots
-    // but has zero assignments because only the original namespace profile is
-    // known to the editor.
+    // generated signatures. Persist that exact semantic contract inside the
+    // same RES as its pages; the MPR+RES pair is therefore sufficient to keep
+    // all three painting modes stable after distribution or recovery.
     CValidationReport portableProfileReport;
     QVector<QImage> physicalTiles;
     if(!CTerrainVirtualAtlas::decodePhysicalTileImages(
@@ -8755,6 +9080,7 @@ void CView::finalizeVirtualTerrainAtlas()
     if(QDir::isAbsolutePath(archiveHint))
         archiveHint = QFileInfo(texturesPath).fileName();
     portableProfile.resourceArchiveHint = archiveHint;
+    portableProfile.textureCount = finalized.textureCount;
     if(portableProfileReport.hasErrors()
        || portableProfile.assignedSlotCount()!=finalized.requiredSlots)
     {
@@ -8764,29 +9090,12 @@ void CView::finalizeVirtualTerrainAtlas()
                 .arg(portableProfileReport.toText()));
         return;
     }
-    const QString profilePath=CTerrainAtlasProfileStore::profilePathForMpr(
-        finalized.isolatedNamespace, mprDestination);
-    if(!QDir().mkpath(QFileInfo(profilePath).absolutePath()))
-    {
-        QMessageBox::critical(this, tr("Atlas publication refused"),
-            tr("The editor profile directory could not be created. No RES or "
-               "MPR was changed."));
-        return;
-    }
-    const bool profileExisted = QFileInfo::exists(profilePath);
-    QByteArray previousProfileBytes;
-    if(profileExisted)
-    {
-        QFile previousProfile(profilePath);
-        if(!previousProfile.open(QIODevice::ReadOnly))
-        {
-            QMessageBox::critical(this, tr("Atlas publication refused"),
-                tr("The existing editor profile could not be read before "
-                   "replacement. No RES or MPR was changed."));
-            return;
-        }
-        previousProfileBytes = previousProfile.readAll();
-    }
+    SResArchiveNewMember embeddedProfileMember;
+    embeddedProfileMember.name =
+        CTerrainAtlasProfileStore::embeddedMemberName(
+            portableProfile.mprNamespace);
+    embeddedProfileMember.payload = portableProfile.toBytes();
+    pages.append(embeddedProfileMember);
     const bool mprDestinationExisted = mprDestination.exists();
     QByteArray previousMprBytes;
     if(mprDestinationExisted)
@@ -8808,6 +9117,32 @@ void CView::finalizeVirtualTerrainAtlas()
         QMessageBox::critical(this, tr("Atlas publication refused"),
             tr("The complete MPR candidate failed its fresh reopen. No output "
                "was written.\n\n%1").arg(stagedMpr.error));
+        return;
+    }
+    CMprDocument recoveryDocument;
+    CValidationReport recoveryDocumentReport;
+    if(!recoveryDocument.loadBytes(
+           package.mprBytes, QStringLiteral("published-recovery.mpr"),
+           &recoveryDocumentReport)
+       || recoveryDocumentReport.hasErrors())
+    {
+        QMessageBox::critical(this, tr("Atlas publication refused"),
+            tr("The MPR could not be bound to an exact recovery snapshot. "
+               "No output was written.\n\n%1")
+                .arg(recoveryDocumentReport.toText().trimmed()));
+        return;
+    }
+    const STerrainAtlasRecoveryResult recoveryResult =
+        saveTerrainAtlasRecoverySnapshot(
+            portableProfile, pages, package.mprBytes,
+            recoveryDocument.mapInfo().tileTypes, mprDestination,
+            QFileInfo(texturesPath));
+    if(!recoveryResult.success)
+    {
+        QMessageBox::critical(this, tr("Atlas publication refused"),
+            tr("The exact semantic atlas recovery snapshot could not be "
+               "created, so no RES or MPR was changed.\n\n%1")
+                .arg(recoveryResult.error));
         return;
     }
 
@@ -8862,6 +9197,25 @@ void CView::finalizeVirtualTerrainAtlas()
                 .arg(stagedResErrors.join(QStringLiteral("\n"))));
         return;
     }
+    STerrainAtlasProfile stagedEmbeddedProfile;
+    CValidationReport stagedEmbeddedReport;
+    if(!STerrainAtlasProfile::fromBytes(
+           stagedRes.memberPayload(embeddedProfileMember.name),
+           &stagedEmbeddedProfile, &stagedEmbeddedReport,
+           QStringLiteral("staged-textures.res:")
+               + embeddedProfileMember.name)
+       || !stagedEmbeddedProfile.validateBinding(
+           portableProfile.mprNamespace,
+           portableProfile.atlasPixelSha256,
+           portableProfile.atlasSlotCount, &stagedEmbeddedReport))
+    {
+        publishProgress.close();
+        QMessageBox::critical(this, tr("Atlas publication refused"),
+            tr("The staged textures.res did not reopen with its exact "
+               "embedded material profile. No output was written.\n\n%1")
+                .arg(stagedEmbeddedReport.toText().trimmed()));
+        return;
+    }
 
     publishProgress.setLabelText(tr(
         "Backing up and atomically replacing textures.res..."));
@@ -8906,14 +9260,6 @@ void CView::finalizeVirtualTerrainAtlas()
             && restore.write(originalTexturesBytes) == originalTexturesBytes.size()
             && restore.commit();
     };
-    const auto restorePublishedProfile = [&]() {
-        if(!profileExisted)
-            return !QFileInfo::exists(profilePath) || QFile::remove(profilePath);
-        QSaveFile restore(profilePath);
-        return restore.open(QIODevice::WriteOnly)
-            && restore.write(previousProfileBytes) == previousProfileBytes.size()
-            && restore.commit();
-    };
     const auto restorePublishedMpr = [&]() {
         QFile currentMpr(mprDestination.absoluteFilePath());
         if(!currentMpr.open(QIODevice::ReadOnly))
@@ -8930,23 +9276,8 @@ void CView::finalizeVirtualTerrainAtlas()
             && restore.write(previousMprBytes) == previousMprBytes.size()
             && restore.commit();
     };
-    publishProgress.setLabelText(tr("Saving modern MPR and editor profile..."));
+    publishProgress.setLabelText(tr("Saving modern MPR..."));
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    CValidationReport profileSaveReport;
-    if(!CTerrainAtlasProfileStore::saveForMpr(
-           portableProfile, mprDestination, &profileSaveReport))
-    {
-        const bool resRestored = restorePublishedRes();
-        const bool profileRestored = restorePublishedProfile();
-        publishProgress.close();
-        QMessageBox::critical(this, tr("MPR publication failed"),
-            tr("The editor profile could not be saved. textures.res rollback: "
-               "%1; profile rollback: %2. The MPR was not changed.\n\n%3")
-                .arg(resRestored ? tr("complete") : tr("manual recovery required"),
-                     profileRestored ? tr("complete") : tr("manual recovery required"),
-                     profileSaveReport.toText().trimmed()));
-        return;
-    }
     SMprBytesSaveCommitRequest mprRequest;
     mprRequest.source = m_pLand->filePath();
     mprRequest.destination = mprDestination;
@@ -8958,13 +9289,11 @@ void CView::finalizeVirtualTerrainAtlas()
     {
         publishProgress.close();
         const bool resRestored = restorePublishedRes();
-        const bool profileRestored = restorePublishedProfile();
         const bool mprRestored = restorePublishedMpr();
         QMessageBox::critical(this, tr("MPR publication failed"),
             tr("Publication did not complete. textures.res rollback: %1; "
-               "profile rollback: %2; MPR rollback: %3.\n\nPhase: %4\n%5")
+               "MPR rollback: %2.\n\nPhase: %3\n%4")
                 .arg(resRestored ? tr("complete") : tr("manual recovery required"),
-                     profileRestored ? tr("complete") : tr("manual recovery required"),
                      mprRestored ? tr("complete") : tr("manual recovery required"),
                      mprResult.phase, mprResult.error));
         return;
@@ -10790,10 +11119,6 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     }
     const ETerrainTileLayer layer = bLand
         ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
-    const CTerrainTransitionCatalog& manualCatalog = !bLand
-            && m_landscapeTools->landFamiliesAllowedInOverlay()
-        ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
-        : m_terrainAtlasAnalysis.catalog(layer);
     const CTerrainTransitionCatalog& semanticCatalog = m_workingTerrainAtlas
         ? m_workingTerrainAtlas->catalog()
         : (!bLand ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
@@ -10815,16 +11140,6 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         selected.atlasIndex = quint8(selectedIndex / 64);
         selected.tileIndex = quint8(selectedIndex % 64);
         selected.rotation = quint8(selectedRotation & 3);
-        bool layerCompatible = !m_terrainAtlasAnalysis.usable;
-        if(m_terrainAtlasAnalysis.usable)
-            manualCatalog.signatureForPacked(selected.encode(), &layerCompatible);
-        if(!layerCompatible)
-        {
-            emit updateMsg(layer == ETerrainTileLayer::Land
-                ? tr("That atlas slot is not a land-family tile.")
-                : tr("That atlas slot is not enabled for overlay painting."));
-            return;
-        }
         command = m_terrainEdit.makeTilePaint(
             brush, layer, selected.atlasIndex, selected.tileIndex,
             selected.rotation);
@@ -10857,11 +11172,31 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         vertexBrush.centerY = detailVertex.y();
         STerrainTransitionSignature pure;
         pure.northWest = pure.northEast = pure.southEast = pure.southWest = terrainType;
-        QMap<int, quint64> usage = workingTerrainAtlasUsage();
-        if(!realizeWorkingTerrainSignature(pure, qRound(vertexBrush.centerX),
-             qRound(vertexBrush.centerY), &usage, &report, nullptr,
-             terrainType)
-           || !syncWorkingTerrainAtlas(&report))
+        const bool classicAuto =
+            m_landscapeTools->classicAutoPaintingEnabled();
+        bool pureAvailable = false;
+        semanticCatalog.selectForPaint(
+            pure, qRound(vertexBrush.centerX), qRound(vertexBrush.centerY),
+            m_tileStrokeDistributionSeed, &pureAvailable);
+        if(classicAuto && !pureAvailable)
+            report.add("terrain.classic_auto_uniform_missing",
+                EValidationSeverity::Error,
+                "Classic Auto can paint only material families with an exact uniform tile already present in this atlas.");
+        else if(!classicAuto)
+        {
+            QMap<int, quint64> usage = workingTerrainAtlasUsage();
+            if(!realizeWorkingTerrainSignature(
+                   pure, qRound(vertexBrush.centerX),
+                   qRound(vertexBrush.centerY), &usage, &report, nullptr,
+                   terrainType)
+               || !syncWorkingTerrainAtlas(&report))
+            {
+                ++m_tileStrokeRefused;
+                emit updateMsg(report.toText());
+                return;
+            }
+        }
+        if(report.hasErrors())
         {
             ++m_tileStrokeRefused;
             emit updateMsg(report.toText());
@@ -11197,7 +11532,12 @@ void CView::endTileBrushGroup()
                 int resolvedCells = 0;
                 QMap<int,quint64> usage;
                 qint64 usageScanMs=0;
-                if(!missing.isEmpty())
+                if(m_tileStrokeClassicAuto && !missing.isEmpty())
+                    releaseReport.add("terrain.classic_auto_missing_blend",
+                        EValidationSeverity::Error,
+                        tr("Classic Auto refused the whole stroke because %1 exact blend tuple(s) are not already present in this atlas. Use Modern mode to add them.")
+                            .arg(missing.size()));
+                else if(!missing.isEmpty())
                 {
                     QElapsedTimer usageTimer;usageTimer.start();
                     usage=workingTerrainAtlasUsage();
@@ -11205,6 +11545,8 @@ void CView::endTileBrushGroup()
                 }
                 for(const SMissingSignature& item:missing)
                 {
+                    if(m_tileStrokeClassicAuto)
+                        break;
                     progress.setValue(resolvedCells);
                     progress.setLabelText(tr(
                         "Resolving exact terrain blends (%1 / %2)...")
@@ -11219,7 +11561,8 @@ void CView::endTileBrushGroup()
                     ++resolvedCells;
                 }
                 resolveElapsed = resolveTimer.elapsed();
-                if(!releaseReport.hasErrors()&&!missing.isEmpty())
+                if(!m_tileStrokeClassicAuto
+                   &&!releaseReport.hasErrors()&&!missing.isEmpty())
                 {
                     progress.setValue(missing.size());
                     progress.setLabelText(tr(
@@ -11316,6 +11659,7 @@ void CView::endTileBrushGroup()
             update();
     }
     m_lastTerrainPaintCenterValid = false;
+    m_tileStrokeClassicAuto = false;
     ++m_tileBrushCommandId;
 }
 
@@ -11324,6 +11668,8 @@ void CView::beginTileBrushGroup()
     if(m_tilePaintStrokeActive || !m_pUndoStack)
         return;
     m_tilePaintStrokeActive = true;
+    m_tileStrokeClassicAuto = m_landscapeTools
+        && m_landscapeTools->classicAutoPaintingEnabled();
     // Draw one nonce only when a new committed stroke begins. Every preview
     // recomputation within that stroke keeps this immutable seed; undo/redo
     // later replays captured packed values and never consults randomness.

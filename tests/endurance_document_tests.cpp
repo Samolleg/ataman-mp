@@ -19,6 +19,7 @@
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_archive_binding.h"
 #include "terrain_atlas_profile.h"
+#include "terrain_atlas_recovery_store.h"
 #include "terrain_virtual_atlas.h"
 #include "tile.h"
 #include "staged_save_validator.h"
@@ -369,6 +370,8 @@ private slots:
     void portableMprProfilesDoNotCollideForSharedResourceIdentity();
     void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void workingAtlasProfileBindsExtensionSignaturesForDraftReopen();
+    void embeddedTerrainAtlasProfileRoundTripsInsidePublishedRes();
+    void terrainAtlasRecoveryStoreDeduplicatesExactPayloads();
     void publishedAtlasArchiveBindingSelectsCoherentProfileSource();
     void externalPublishedAtlasArchiveBindingProbe();
     void externalLegacyAdjacentAtlasProfileCollisionProbe();
@@ -5531,7 +5534,7 @@ void EnduranceDocumentTests::semanticAtlasInferenceUsesRendererOrientationAndPre
     QVERIFY2(STerrainAtlasProfile::fromJson(legacyJson, &migrated,
                                             &migrationReport),
              qPrintable(migrationReport.toText()));
-    QCOMPARE(migrated.schemaVersion, 8);
+    QCOMPARE(migrated.schemaVersion, 9);
     QCOMPARE(migrated.slotDefinitions.at(1).signature.northWest, signature.northWest);
     QCOMPARE(migrated.slotDefinitions.at(1).signature.southWest, signature.southWest);
     const auto detail = std::find_if(analysis.materials.cbegin(), analysis.materials.cend(),
@@ -5717,7 +5720,7 @@ void EnduranceDocumentTests::authoredAtlasProfileMatchesZone1Catalog()
     QVERIFY2(STerrainAtlasProfile::fromJson(legacyAuthored, &migratedAuthored,
                                             &migrationReport),
              qPrintable(migrationReport.toText()));
-    QCOMPARE(migratedAuthored.schemaVersion, 8);
+    QCOMPARE(migratedAuthored.schemaVersion, 9);
     QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.northWest,
              qint32(4));
     QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.southWest,
@@ -6102,7 +6105,7 @@ void EnduranceDocumentTests::authoredPresetSeparatesZone18ReviewedLayers()
     for(const STerrainAtlasProfileFamily& family : reopened.families)
         reopenedSharedFamilies += family.landAllowed && family.overlayAllowed;
     QCOMPARE(reopenedSharedFamilies, 1);
-    QCOMPARE(reopened.schemaVersion, 8);
+    QCOMPARE(reopened.schemaVersion, 9);
     const STerrainAtlasAnalysis analysis = profile.approvedAnalysis(&report);
     QVERIFY2(analysis.usable, qPrintable(report.toText()));
     bool sharedSlot = false;
@@ -7073,7 +7076,7 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
                  &reopened, root.path(), nullptr, &report),
              qPrintable(report.toText()));
     QCOMPARE(reopened.assignedSlotCount(), 4);
-    QCOMPARE(reopened.schemaVersion, 8);
+    QCOMPARE(reopened.schemaVersion, 9);
     QCOMPARE(reopened.slotDefinitions.at(0).sourceNamespace,
              QStringLiteral("source"));
     QCOMPARE(reopened.slotDefinitions.at(0).sourceSlotAliases,
@@ -7193,6 +7196,201 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
     QCOMPARE(redraftAnalysis.landCatalog.gridSignatureForPacked(
                  packed.encode(), &found), grid);
     QVERIFY(found);
+}
+
+void EnduranceDocumentTests::embeddedTerrainAtlasProfileRoundTripsInsidePublishedRes()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QVector<QImage> tiles;
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        QImage tile(16, 16, QImage::Format_RGBA8888);
+        tile.fill(QColor((slot * 17) & 255, (slot * 31) & 255,
+                         (slot * 47) & 255, 255));
+        tiles.append(tile);
+    }
+    QString diagnostic;
+    const QByteArray page = ei::encodeMmpDxt1(
+        CTerrainVirtualAtlas::composePage(tiles, 0, 16), true, &diagnostic);
+    QVERIFY2(!page.isEmpty(), qPrintable(diagnostic));
+
+    // Bind the profile to the decoded, compressed artwork that the game will
+    // actually read rather than to the pre-DXT source pixels.
+    QVector<QImage> decoded;
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        QImage tile;
+        QVERIFY2(ei::decodeMmpDxt1AtlasTile(page, slot, &tile, &diagnostic),
+                 qPrintable(diagnostic));
+        decoded.append(tile.convertToFormat(QImage::Format_RGBA8888));
+    }
+    STerrainAtlasProfile profile;
+    profile.mprNamespace = QStringLiteral("zone embedded");
+    profile.atlasPixelSha256 =
+        CTerrainAtlasProfileInference::pixelSha256(decoded);
+    profile.atlasSlotCount = 64;
+    profile.textureCount = 1;
+    profile.provenance = QStringLiteral("portable-finalized-modern-atlas-v1");
+    profile.approved = true;
+    STerrainAtlasProfileFamily family;
+    family.id = 1;
+    family.name = QStringLiteral("Ground / Common");
+    family.thumbnailSlot = 0;
+    family.tileType = 1;
+    profile.families.append(family);
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        STerrainAtlasProfileSlot definition;
+        definition.slot = slot;
+        definition.assigned = true;
+        definition.signature.northWest = 1;
+        definition.signature.northEast = 1;
+        definition.signature.southEast = 1;
+        definition.signature.southWest = 1;
+        profile.slotDefinitions.append(definition);
+    }
+    CValidationReport report;
+    QVERIFY2(profile.normalizeMembership(&report), qPrintable(report.toText()));
+
+    CResArchiveDocument empty;
+    QStringList errors;
+    QVERIFY(empty.loadBytes(emptyMpr(), QStringLiteral("empty.res"), &errors));
+    SResArchiveNewMember unrelated;
+    unrelated.name = QStringLiteral("unrelated.bin");
+    unrelated.payload = QByteArray("preserve-me");
+    unrelated.lastWriteTime = 17;
+    QByteArray baselineBytes;
+    QVERIFY2(empty.buildWithAppendedMembers({unrelated}, &baselineBytes, &errors),
+             qPrintable(errors.join(QStringLiteral("\n"))));
+    CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(baselineBytes, QStringLiteral("baseline.res"),
+                               &errors));
+    QVector<SResArchiveNewMember> published;
+    SResArchiveNewMember pageMember;
+    pageMember.name = QStringLiteral("zone embedded000.mmp");
+    pageMember.payload = page;
+    pageMember.lastWriteTime = 23;
+    published.append(pageMember);
+    SResArchiveNewMember profileMember;
+    profileMember.name = CTerrainAtlasProfileStore::embeddedMemberName(
+        profile.mprNamespace);
+    profileMember.payload = profile.toBytes();
+    profileMember.lastWriteTime = 23;
+    published.append(profileMember);
+    QByteArray resultBytes;
+    QVERIFY2(baseline.buildWithPublishedMembers(
+                 published, false, &resultBytes, &errors),
+             qPrintable(errors.join(QStringLiteral("\n"))));
+    const QString archivePath = root.filePath(QStringLiteral("textures.res"));
+    QFile archiveFile(archivePath);
+    QVERIFY(archiveFile.open(QIODevice::WriteOnly));
+    QCOMPARE(archiveFile.write(resultBytes), qint64(resultBytes.size()));
+    archiveFile.close();
+
+    const STerrainAtlasEmbeddedBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+            {archivePath}, profile.mprNamespace);
+    QVERIFY2(binding.success(), qPrintable(binding.error));
+    QCOMPARE(binding.profile.mprNamespace, profile.mprNamespace);
+    QCOMPARE(binding.profile.textureCount, 1);
+    QCOMPARE(binding.profile.atlasPixelSha256, profile.atlasPixelSha256);
+    QCOMPARE(binding.profile.slotDefinitions.size(), 64);
+    CResArchiveDocument reopened;
+    QVERIFY(reopened.loadBytes(resultBytes, archivePath, &errors));
+    QCOMPARE(reopened.memberPayload(QStringLiteral("unrelated.bin")),
+             QByteArray("preserve-me"));
+
+    STerrainAtlasRecoverySnapshot recovery;
+    recovery.resourceIdentity = profile.mprNamespace;
+    recovery.atlasPixelSha256 = profile.atlasPixelSha256;
+    recovery.profileBytes = profile.toBytes();
+    recovery.mprPath = root.filePath(QStringLiteral("zone embedded.mpr"));
+    recovery.resPath = archivePath;
+    recovery.mprSha256 = QByteArray(64, 'a');
+    recovery.runtimeTerrainTypes.fill(1, 64);
+    STerrainAtlasRecoveryPage recoveryPage;
+    recoveryPage.name = pageMember.name;
+    recoveryPage.payload = pageMember.payload;
+    recovery.pages.append(recoveryPage);
+    QByteArray recoveryArchiveBytes;
+    QString recoveryError;
+    QVERIFY2(CTerrainAtlasRecoveryStore(root.filePath(
+                 QStringLiteral("recovery"))).buildStandaloneArchive(
+                 recovery, &recoveryArchiveBytes, &recoveryError),
+             qPrintable(recoveryError));
+    const QString recoveryArchivePath = root.filePath(
+        QStringLiteral("zone embedded-atlas.res"));
+    QFile recoveryArchive(recoveryArchivePath);
+    QVERIFY(recoveryArchive.open(QIODevice::WriteOnly));
+    QCOMPARE(recoveryArchive.write(recoveryArchiveBytes),
+             qint64(recoveryArchiveBytes.size()));
+    recoveryArchive.close();
+    const STerrainAtlasEmbeddedBindingResult recoveredBinding =
+        CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+            {recoveryArchivePath}, profile.mprNamespace);
+    QVERIFY2(recoveredBinding.success(), qPrintable(recoveredBinding.error));
+    QCOMPARE(recoveredBinding.profile.atlasPixelSha256,
+             profile.atlasPixelSha256);
+}
+
+void EnduranceDocumentTests::terrainAtlasRecoveryStoreDeduplicatesExactPayloads()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    STerrainAtlasRecoverySnapshot snapshot;
+    snapshot.resourceIdentity = QStringLiteral("zone2_deadbeef");
+    snapshot.atlasPixelSha256 = QByteArray(64, 'a');
+    snapshot.profileBytes = QByteArray("{\"exact\":true}");
+    snapshot.mprPath = QStringLiteral("C:/Maps/zone2.mpr");
+    snapshot.resPath = QStringLiteral("C:/Res/textures.res");
+    snapshot.mprSha256 = QByteArray(64, 'b');
+    snapshot.runtimeTerrainTypes = {1, 2, 2, 7};
+    STerrainAtlasRecoveryPage pageZero;
+    pageZero.name = QStringLiteral("zone2_deadbeef000.mmp");
+    pageZero.payload = QByteArray("exact-page-zero");
+    snapshot.pages.append(pageZero);
+    STerrainAtlasRecoveryPage pageOne;
+    pageOne.name = QStringLiteral("zone2_deadbeef001.mmp");
+    pageOne.payload = QByteArray("exact-page-one");
+    snapshot.pages.append(pageOne);
+
+    CTerrainAtlasRecoveryStore store(root.path());
+    const STerrainAtlasRecoveryResult first = store.saveSnapshot(snapshot);
+    QVERIFY2(first.success, qPrintable(first.error));
+    QVERIFY(QFileInfo::exists(first.manifestPath));
+    const STerrainAtlasRecoveryResult second = store.saveSnapshot(snapshot);
+    QVERIFY2(second.success, qPrintable(second.error));
+    QVERIFY(second.skipped);
+    QCOMPARE(second.manifestPath, first.manifestPath);
+
+    const QDir objectDirectory(store.objectDirectory());
+    // One profile payload and two distinct page payloads. The second snapshot
+    // must reuse all three content-addressed objects.
+    QCOMPARE(objectDirectory.entryList(QDir::Files).size(), 3);
+    STerrainAtlasRecoverySnapshot recovered;
+    QString error;
+    QVERIFY2(store.findExact(snapshot.resourceIdentity,
+                             snapshot.atlasPixelSha256,
+                             &recovered, &error), qPrintable(error));
+    QCOMPARE(recovered.profileBytes, snapshot.profileBytes);
+    QCOMPARE(recovered.runtimeTerrainTypes, snapshot.runtimeTerrainTypes);
+    QCOMPARE(recovered.pages.size(), snapshot.pages.size());
+    for(int index = 0; index < snapshot.pages.size(); ++index)
+    {
+        QCOMPARE(recovered.pages.at(index).name, snapshot.pages.at(index).name);
+        QCOMPARE(recovered.pages.at(index).payload,
+                 snapshot.pages.at(index).payload);
+    }
+    STerrainAtlasRecoverySnapshot recoveredFromMpr;
+    QVERIFY2(store.findForMpr(snapshot.resourceIdentity,
+                              snapshot.mprSha256,
+                              &recoveredFromMpr, &error),
+             qPrintable(error));
+    QCOMPARE(recoveredFromMpr.atlasPixelSha256,
+             snapshot.atlasPixelSha256);
+    QCOMPARE(recoveredFromMpr.profileBytes, snapshot.profileBytes);
+    QCOMPARE(recoveredFromMpr.pages.size(), snapshot.pages.size());
 }
 
 void EnduranceDocumentTests::publishedAtlasArchiveBindingSelectsCoherentProfileSource()

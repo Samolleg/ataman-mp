@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QImage>
 #include <QSet>
+#include <QStringList>
 #include <QVector>
 
 #include "landscape_edit_policy.h"
@@ -13,6 +14,8 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QLineEdit;
+class QListWidget;
 class QButtonGroup;
 class QGridLayout;
 class QProgressBar;
@@ -35,6 +38,13 @@ struct STerrainPaintMaterialChoice
     bool cornerOnly{false};
     bool contextualStamp{false};
     bool used{false};
+};
+
+enum class ETerrainPaintPaletteMode
+{
+    Modern,
+    ClassicAuto,
+    Manual
 };
 
 enum class EOverlaySurfaceOperation
@@ -78,6 +88,8 @@ public:
     float paintRadius() const;
     ETerrainTileBrushShape paintShape() const;
     bool manualTileSelectionEnabled() const;
+    bool classicAutoPaintingEnabled() const;
+    ETerrainPaintPaletteMode paintPaletteMode() const;
     bool randomizeUniformRotation() const;
     bool landFamiliesAllowedInOverlay() const;
     EOverlaySurfaceOperation overlaySurfaceOperation() const;
@@ -103,6 +115,13 @@ public:
                            const QString& status = QString(),
                            const QString& atlasSource = QString(),
                            const QString& atlasSourcePath = QString());
+    void setClassicAutoMaterials(
+        const QVector<STerrainPaintMaterialChoice>& landTypes,
+        const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
+        const QVector<STerrainPaintMaterialChoice>& overlayTypes);
+    void setManualAtlasTiles(const QVector<QImage>& tiles,
+                             const QVector<qint32>& runtimeTypes,
+                             const QStringList& descriptions = QStringList());
     void setGeneratedAtlasTileCount(int count);
     void setUsedTerrainFamilies(const QSet<qint32>& landFamilies,
                                 const QSet<qint32>& overlayFamilies);
@@ -122,6 +141,7 @@ signals:
     void saveModernDraftRequested();
     void editingStateChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
+    void manualAtlasTileRequested(int slot);
     void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
 
 protected:
@@ -137,6 +157,12 @@ private:
     QSpinBox* m_flatten;
     QCheckBox* m_flipVertical;
     QTabWidget* m_materialTabs;
+    QTabWidget* m_paintModeTabs;
+    QTabWidget* m_classicMaterialTabs;
+    QLineEdit* m_paintFilter;
+    QWidget* m_modernModePage;
+    QWidget* m_classicModePage;
+    QWidget* m_manualModePage;
     QScrollArea* m_groundMaterialScroll;
     QScrollArea* m_overlayMaterialScroll;
     QWidget* m_groundMaterialPage;
@@ -146,11 +172,20 @@ private:
     QGridLayout* m_overlayMaterialGrid;
     QButtonGroup* m_groundMaterialButtons;
     QButtonGroup* m_overlayMaterialButtons;
+    QScrollArea* m_classicGroundMaterialScroll;
+    QScrollArea* m_classicOverlayMaterialScroll;
+    QWidget* m_classicGroundMaterialPage;
+    QWidget* m_classicOverlayMaterialPage;
+    QGridLayout* m_classicGroundMaterialGrid;
+    QGridLayout* m_classicUnderwaterMaterialGrid;
+    QGridLayout* m_classicOverlayMaterialGrid;
+    QButtonGroup* m_classicGroundMaterialButtons;
+    QButtonGroup* m_classicOverlayMaterialButtons;
+    QListWidget* m_manualTileList;
     QSlider* m_paintRadius;
     QLabel* m_paintRadiusValue;
     QToolButton* m_circlePaintShape;
     QToolButton* m_squarePaintShape;
-    QCheckBox* m_manualTileSelection;
     QCheckBox* m_randomizeUniformRotation;
     QComboBox* m_paintIssueCategory;
     QToolButton* m_markPaintIssue;
@@ -170,6 +205,9 @@ private:
     QVector<STerrainPaintMaterialChoice> m_landPaintTypes;
     QVector<STerrainPaintMaterialChoice> m_underwaterPaintTypes;
     QVector<STerrainPaintMaterialChoice> m_overlayPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_classicLandPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_classicUnderwaterPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_classicOverlayPaintTypes;
     QString m_paintCatalogStatus;
     int m_paletteColumns{1};
     int m_authoredAtlasSlots{0};
@@ -180,6 +218,8 @@ private:
     void refreshAtlasCapacity(int activeSlots);
     void updatePaintIssueUi();
     void clearPaintMaterialSelection();
+    void applyPaintFilter();
+    QButtonGroup* activeMaterialButtons() const;
 };
 
 #endif

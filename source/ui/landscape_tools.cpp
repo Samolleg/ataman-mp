@@ -10,6 +10,8 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QPainter>
 #include <QProgressBar>
 #include <QPushButton>
@@ -52,6 +54,12 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_flatten(new QSpinBox(this))
     , m_flipVertical(new QCheckBox(tr("Flip image vertically"), this))
     , m_materialTabs(new QTabWidget(this))
+    , m_paintModeTabs(new QTabWidget(this))
+    , m_classicMaterialTabs(new QTabWidget(this))
+    , m_paintFilter(new QLineEdit(this))
+    , m_modernModePage(new QWidget(this))
+    , m_classicModePage(new QWidget(this))
+    , m_manualModePage(new QWidget(this))
     , m_groundMaterialScroll(new QScrollArea(this))
     , m_overlayMaterialScroll(new QScrollArea(this))
     , m_groundMaterialPage(new QWidget(this))
@@ -61,11 +69,20 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_overlayMaterialGrid(new QGridLayout)
     , m_groundMaterialButtons(new QButtonGroup(this))
     , m_overlayMaterialButtons(new QButtonGroup(this))
+    , m_classicGroundMaterialScroll(new QScrollArea(this))
+    , m_classicOverlayMaterialScroll(new QScrollArea(this))
+    , m_classicGroundMaterialPage(new QWidget(this))
+    , m_classicOverlayMaterialPage(new QWidget(this))
+    , m_classicGroundMaterialGrid(new QGridLayout)
+    , m_classicUnderwaterMaterialGrid(new QGridLayout)
+    , m_classicOverlayMaterialGrid(new QGridLayout)
+    , m_classicGroundMaterialButtons(new QButtonGroup(this))
+    , m_classicOverlayMaterialButtons(new QButtonGroup(this))
+    , m_manualTileList(new QListWidget(this))
     , m_paintRadius(new QSlider(Qt::Horizontal, this))
     , m_paintRadiusValue(new QLabel(this))
     , m_circlePaintShape(new QToolButton(this))
     , m_squarePaintShape(new QToolButton(this))
-    , m_manualTileSelection(new QCheckBox(tr("Manual atlas tile mode (no blending)"), this))
     , m_randomizeUniformRotation(new QCheckBox(
           tr("Vary uniform texture rotation across strokes"), this))
     , m_paintIssueCategory(new QComboBox(this))
@@ -151,9 +168,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QVBoxLayout* paintLayout = new QVBoxLayout(m_paintControls);
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
-        "Automatic material brushes paint terrain vertices and resolve the surrounding atlas tiles together. Size 1 paints the nearest vertex (up to four tiles); larger circles and squares select more vertices. "
-        "Each palette card is one uniform vertex-material identity. The editor uses exact authored junctions when available and automatically generates, caches, and reuses any missing corner combination on stroke release. "
-        "Manual mode paints the selected existing atlas tile and rotation without blending. Right-click samples from the map. "
+        "Modern and Classic Auto brushes paint terrain vertices and resolve the surrounding atlas tiles together. Size 1 paints the nearest vertex (up to four tiles); larger circles and squares select more vertices. "
+        "Modern reuses exact authored junctions and adds a generated exact blend only when one is missing. Classic Auto never changes the atlas: if any required exact tuple is absent, it refuses the whole stroke. "
+        "Manual paints one selected physical atlas tile and rotation directly, without semantic blending. Right-click samples from the map. "
         "Alt+Wheel changes brush size. Shift+Wheel selects the automatic material or rotates the manual tile; Wheel keeps camera zoom. "
         "Overlay surface mode adds/removes coverage. Its Terrain material selects the atlas texture; its Surface material independently controls tint, opacity, illumination, waves, and texture warp. "
         "Overlay painting only changes the atlas texture on cells that already exist."), this);
@@ -196,15 +213,94 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_overlayMaterialScroll->setObjectName(QStringLiteral("overlayMaterialScroll"));
     m_materialTabs->addTab(m_groundMaterialScroll, tr("Ground"));
     m_materialTabs->addTab(m_overlayMaterialScroll, tr("Overlay"));
-    m_materialTabs->setObjectName(QStringLiteral("materialPaletteTabs"));
+    m_materialTabs->setObjectName(QStringLiteral("modernMaterialLayerTabs"));
+
+    QVBoxLayout* classicGroundPalette = new QVBoxLayout(
+        m_classicGroundMaterialPage);
+    classicGroundPalette->setContentsMargins(6, 6, 6, 6);
+    classicGroundPalette->addWidget(new QLabel(
+        tr("Existing ground designations"), m_classicGroundMaterialPage));
+    QWidget* classicGroundGrid = new QWidget(m_classicGroundMaterialPage);
+    classicGroundGrid->setLayout(m_classicGroundMaterialGrid);
+    classicGroundPalette->addWidget(classicGroundGrid);
+    classicGroundPalette->addSpacing(8);
+    classicGroundPalette->addWidget(new QLabel(
+        tr("Existing underwater designations"),
+        m_classicGroundMaterialPage));
+    QWidget* classicUnderwaterGrid = new QWidget(
+        m_classicGroundMaterialPage);
+    classicUnderwaterGrid->setLayout(m_classicUnderwaterMaterialGrid);
+    classicGroundPalette->addWidget(classicUnderwaterGrid);
+    classicGroundPalette->addStretch(1);
+    QVBoxLayout* classicOverlayPalette = new QVBoxLayout(
+        m_classicOverlayMaterialPage);
+    classicOverlayPalette->setContentsMargins(6, 6, 6, 6);
+    classicOverlayPalette->addWidget(new QLabel(
+        tr("Existing overlay designations"),
+        m_classicOverlayMaterialPage));
+    QWidget* classicOverlayGrid = new QWidget(
+        m_classicOverlayMaterialPage);
+    classicOverlayGrid->setLayout(m_classicOverlayMaterialGrid);
+    classicOverlayPalette->addWidget(classicOverlayGrid);
+    classicOverlayPalette->addStretch(1);
+    configurePaletteScroll(m_classicGroundMaterialScroll,
+                           m_classicGroundMaterialPage);
+    configurePaletteScroll(m_classicOverlayMaterialScroll,
+                           m_classicOverlayMaterialPage);
+    m_classicGroundMaterialScroll->setObjectName(
+        QStringLiteral("classicGroundMaterialScroll"));
+    m_classicOverlayMaterialScroll->setObjectName(
+        QStringLiteral("classicOverlayMaterialScroll"));
+    m_classicMaterialTabs->addTab(m_classicGroundMaterialScroll,
+                                  tr("Ground"));
+    m_classicMaterialTabs->addTab(m_classicOverlayMaterialScroll,
+                                  tr("Overlay"));
+    m_classicMaterialTabs->setObjectName(
+        QStringLiteral("classicMaterialLayerTabs"));
+
+    QVBoxLayout* modernModeLayout = new QVBoxLayout(m_modernModePage);
+    modernModeLayout->setContentsMargins(0, 0, 0, 0);
+    modernModeLayout->addWidget(m_materialTabs);
+    QVBoxLayout* classicModeLayout = new QVBoxLayout(m_classicModePage);
+    classicModeLayout->setContentsMargins(0, 0, 0, 0);
+    QLabel* classicHelp = new QLabel(tr(
+        "Uses only exact tiles already present in this atlas. If any required "
+        "blend is missing, the whole stroke is refused and the atlas is not changed."),
+        m_classicModePage);
+    classicHelp->setWordWrap(true);
+    classicModeLayout->addWidget(classicHelp);
+    classicModeLayout->addWidget(m_classicMaterialTabs);
+    QVBoxLayout* manualModeLayout = new QVBoxLayout(m_manualModePage);
+    manualModeLayout->setContentsMargins(0, 0, 0, 0);
+    QLabel* manualHelp = new QLabel(tr(
+        "Paints one selected physical atlas slot and rotation directly, without blending."),
+        m_manualModePage);
+    manualHelp->setWordWrap(true);
+    manualModeLayout->addWidget(manualHelp);
+    m_manualTileList->setObjectName(QStringLiteral("manualAtlasTileList"));
+    m_manualTileList->setIconSize(QSize(52, 52));
+    m_manualTileList->setUniformItemSizes(true);
+    manualModeLayout->addWidget(m_manualTileList);
+
+    m_paintFilter->setObjectName(QStringLiteral("terrainPaintFilter"));
+    m_paintFilter->setPlaceholderText(tr("Filter materials or atlas slots..."));
+    m_paintFilter->setClearButtonEnabled(true);
+    paintLayout->addWidget(m_paintFilter);
+    m_paintModeTabs->addTab(m_modernModePage, tr("Modern"));
+    m_paintModeTabs->addTab(m_classicModePage, tr("Classic Auto"));
+    m_paintModeTabs->addTab(m_manualModePage, tr("Manual"));
+    m_paintModeTabs->setObjectName(QStringLiteral("materialPaletteTabs"));
     // The surrounding paint controls have large wrapped size hints at narrow
     // dock widths.  Without an explicit expanding floor Qt satisfies those
     // hints by collapsing the authoring palette to a short strip even when the
     // dock has ample vertical room.
-    m_materialTabs->setSizePolicy(QSizePolicy::Expanding,
-                                  QSizePolicy::Expanding);
-    m_materialTabs->setMinimumHeight(300);
-    paintLayout->addWidget(m_materialTabs, 1);
+    m_paintModeTabs->setSizePolicy(QSizePolicy::Expanding,
+                                   QSizePolicy::Expanding);
+    // The outer mode tabs add one tab bar above the existing layer tabs. Keep
+    // enough vertical room that the actual brush grid does not shrink below
+    // the established usable palette height.
+    m_paintModeTabs->setMinimumHeight(330);
+    paintLayout->addWidget(m_paintModeTabs, 1);
 
     m_paintRadius->setRange(1, 33);
     m_paintRadius->setValue(qBound(1,
@@ -244,7 +340,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     shapeWidget->setLayout(shapeRow);
     paintForm->addRow(tr("Brush size (vertices)"), sizeWidget);
     paintForm->addRow(tr("Brush shape"), shapeWidget);
-    paintForm->addRow(m_manualTileSelection);
     paintForm->addRow(m_randomizeUniformRotation);
     paintForm->addRow(m_overlaySurfaceOperationLabel, m_overlaySurfaceOperation);
     paintForm->addRow(m_overlayMaterialLabel, m_overlayMaterial);
@@ -351,6 +446,18 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
                 emit paintTerrainTypeChanged(selected ? material : -1);
                 emit editingStateChanged();
             });
+    const auto connectClassicGroup = [this](QButtonGroup* group) {
+        connect(group, QOverload<int>::of(&QButtonGroup::buttonClicked),
+                this, [this](int) {
+            setPaintIssueMarkingEnabled(false);
+            bool selected = false;
+            const qint32 material = paintTerrainType(&selected);
+            emit paintTerrainTypeChanged(selected ? material : -1);
+            emit editingStateChanged();
+        });
+    };
+    connectClassicGroup(m_classicGroundMaterialButtons);
+    connectClassicGroup(m_classicOverlayMaterialButtons);
     connect(m_materialTabs, &QTabWidget::currentChanged, this, [this](int index) {
         if(!m_editingActive)
             return;
@@ -359,6 +466,41 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             activateMode(ELandscapeEditMode::TilePaint);
         else if(index == 1 && editMode() == ELandscapeEditMode::TilePaint)
             activateMode(ELandscapeEditMode::OverlayPaint);
+    });
+    connect(m_classicMaterialTabs, &QTabWidget::currentChanged, this,
+            [this](int index) {
+        if(!m_editingActive)
+            return;
+        if(index == 0 && (editMode() == ELandscapeEditMode::OverlayPaint
+                          || editMode() == ELandscapeEditMode::OverlaySurface))
+            activateMode(ELandscapeEditMode::TilePaint);
+        else if(index == 1 && editMode() == ELandscapeEditMode::TilePaint)
+            activateMode(ELandscapeEditMode::OverlayPaint);
+    });
+    connect(m_paintModeTabs, &QTabWidget::currentChanged, this,
+            [this](int index) {
+        QSettings().setValue(QStringLiteral("ui/landscape/paintPaletteMode"),
+                             index);
+        setPaintIssueMarkingEnabled(false);
+        bool selected = false;
+        const qint32 material = paintTerrainType(&selected);
+        emit paintTerrainTypeChanged(selected ? material : -1);
+        emit editingStateChanged();
+        applyPaintFilter();
+    });
+    m_paintModeTabs->setCurrentIndex(qBound(0,
+        settings.value(QStringLiteral("ui/landscape/paintPaletteMode"), 0)
+            .toInt(), 2));
+    connect(m_paintFilter, &QLineEdit::textChanged, this,
+            [this](const QString&) { applyPaintFilter(); });
+    connect(m_manualTileList, &QListWidget::itemSelectionChanged, this,
+            [this]() {
+        const QListWidgetItem* item = m_manualTileList->currentItem();
+        if(!item)
+            return;
+        emit manualAtlasTileRequested(item->data(Qt::UserRole).toInt());
+        emit paintTerrainTypeChanged(-1);
+        emit editingStateChanged();
     });
     connect(m_paintRadius, &QSlider::valueChanged, this, [this](int value) {
         m_paintRadiusValue->setText(QString::number(value));
@@ -372,12 +514,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             this, [this](int)
     {
         updateModeVisibility();
-        emit editingStateChanged();
-    });
-    connect(m_manualTileSelection, &QCheckBox::toggled, this, [this](bool manual)
-    {
-        m_materialTabs->setEnabled(!manual);
-        emit paintTerrainTypeChanged(-1);
         emit editingStateChanged();
     });
     connect(m_randomizeUniformRotation, &QCheckBox::toggled, this,
@@ -487,15 +623,18 @@ void CLandscapeTools::updateModeVisibility()
         const QSignalBlocker blocker(m_materialTabs);
         m_materialTabs->setCurrentIndex(overlayMode ? 1 : 0);
     }
+    {
+        const QSignalBlocker blocker(m_classicMaterialTabs);
+        m_classicMaterialTabs->setCurrentIndex(overlayMode ? 1 : 0);
+    }
     m_overlaySurfaceOperation->setVisible(overlaySurface);
     m_overlaySurfaceOperationLabel->setVisible(overlaySurface);
     const bool activating = overlaySurface
         && overlaySurfaceOperation() == EOverlaySurfaceOperation::Activate;
     m_overlayMaterial->setVisible(activating);
     m_overlayMaterialLabel->setVisible(activating);
-    m_manualTileSelection->setVisible(!overlaySurface);
-    m_materialTabs->setEnabled((overlaySurface || !m_manualTileSelection->isChecked())
-        && (!overlaySurface || activating));
+    m_paintModeTabs->setEnabled((!overlaySurface || activating)
+                                && !paintIssueMarkingEnabled());
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {
@@ -573,7 +712,17 @@ ETerrainTileBrushShape CLandscapeTools::paintShape() const
 bool CLandscapeTools::manualTileSelectionEnabled() const
 {
     return editMode() != ELandscapeEditMode::OverlaySurface
-        && m_manualTileSelection->isChecked();
+        && paintPaletteMode() == ETerrainPaintPaletteMode::Manual;
+}
+bool CLandscapeTools::classicAutoPaintingEnabled() const
+{
+    return editMode() != ELandscapeEditMode::OverlaySurface
+        && paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto;
+}
+ETerrainPaintPaletteMode CLandscapeTools::paintPaletteMode() const
+{
+    return static_cast<ETerrainPaintPaletteMode>(
+        qBound(0, m_paintModeTabs ? m_paintModeTabs->currentIndex() : 0, 2));
 }
 bool CLandscapeTools::randomizeUniformRotation() const
 {
@@ -636,9 +785,9 @@ void CLandscapeTools::adjustPaintSize(int steps)
 }
 void CLandscapeTools::adjustPaintTerrainType(int steps)
 {
-    QButtonGroup* group = (editMode() == ELandscapeEditMode::OverlayPaint
-                           || editMode() == ELandscapeEditMode::OverlaySurface)
-        ? m_overlayMaterialButtons : m_groundMaterialButtons;
+    QButtonGroup* group = activeMaterialButtons();
+    if(!group)
+        return;
     const QList<QAbstractButton*> buttons = group->buttons();
     if(buttons.isEmpty())
         return;
@@ -649,10 +798,8 @@ void CLandscapeTools::adjustPaintTerrainType(int steps)
 }
 qint32 CLandscapeTools::paintTerrainType(bool* selected) const
 {
-    const QButtonGroup* group = (editMode() == ELandscapeEditMode::OverlayPaint
-                                 || editMode() == ELandscapeEditMode::OverlaySurface)
-        ? m_overlayMaterialButtons : m_groundMaterialButtons;
-    const QAbstractButton* button = group->checkedButton();
+    const QButtonGroup* group = activeMaterialButtons();
+    const QAbstractButton* button = group ? group->checkedButton() : nullptr;
     const int id = button ? button->property("terrainMaterialId").toInt() : -1;
     if(selected)
         *selected = id >= 0;
@@ -660,10 +807,8 @@ qint32 CLandscapeTools::paintTerrainType(bool* selected) const
 }
 qint32 CLandscapeTools::paintTerrainSupport() const
 {
-    const QButtonGroup* group = (editMode() == ELandscapeEditMode::OverlayPaint
-                                 || editMode() == ELandscapeEditMode::OverlaySurface)
-        ? m_overlayMaterialButtons : m_groundMaterialButtons;
-    const QAbstractButton* button = group->checkedButton();
+    const QButtonGroup* group = activeMaterialButtons();
+    const QAbstractButton* button = group ? group->checkedButton() : nullptr;
     return button && button->property("terrainContextualStamp").toBool()
         ? button->property("terrainSupportMaterialId").toInt() : 0;
 }
@@ -694,6 +839,20 @@ void CLandscapeTools::clearPaintMaterialSelection()
     };
     clear(m_groundMaterialButtons);
     clear(m_overlayMaterialButtons);
+    clear(m_classicGroundMaterialButtons);
+    clear(m_classicOverlayMaterialButtons);
+}
+
+QButtonGroup* CLandscapeTools::activeMaterialButtons() const
+{
+    if(paintPaletteMode() == ETerrainPaintPaletteMode::Manual)
+        return nullptr;
+    const bool overlay = editMode() == ELandscapeEditMode::OverlayPaint
+        || editMode() == ELandscapeEditMode::OverlaySurface;
+    if(paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto)
+        return overlay ? m_classicOverlayMaterialButtons
+                       : m_classicGroundMaterialButtons;
+    return overlay ? m_overlayMaterialButtons : m_groundMaterialButtons;
 }
 void CLandscapeTools::updatePaintIssueUi()
 {
@@ -707,7 +866,7 @@ void CLandscapeTools::updatePaintIssueUi()
     if(m_paintRadius) m_paintRadius->setEnabled(!marking);
     if(m_circlePaintShape) m_circlePaintShape->setEnabled(!marking);
     if(m_squarePaintShape) m_squarePaintShape->setEnabled(!marking);
-    if(m_manualTileSelection) m_manualTileSelection->setEnabled(!marking);
+    if(m_paintModeTabs) m_paintModeTabs->setEnabled(!marking);
 }
 void CLandscapeTools::setPaintTerrainTypes(
     const QVector<QPair<qint32, QString>>& landTypes,
@@ -771,6 +930,95 @@ void CLandscapeTools::setPaintMaterials(
     refreshPaintTerrainTypes();
 }
 
+void CLandscapeTools::setClassicAutoMaterials(
+    const QVector<STerrainPaintMaterialChoice>& landTypes,
+    const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
+    const QVector<STerrainPaintMaterialChoice>& overlayTypes)
+{
+    const auto uniqueIdentities = [](
+        const QVector<STerrainPaintMaterialChoice>& source) {
+        QVector<STerrainPaintMaterialChoice> result;
+        QSet<qint32> seen;
+        for(STerrainPaintMaterialChoice choice : source)
+        {
+            if(seen.contains(choice.id))
+                continue;
+            seen.insert(choice.id);
+            choice.supportId = 0;
+            choice.contextualStamp = false;
+            result.append(choice);
+        }
+        return result;
+    };
+    m_classicLandPaintTypes = uniqueIdentities(landTypes);
+    m_classicUnderwaterPaintTypes = uniqueIdentities(underwaterTypes);
+    m_classicOverlayPaintTypes = uniqueIdentities(overlayTypes);
+    rebuildMaterialPalette();
+    refreshPaintTerrainTypes();
+}
+
+void CLandscapeTools::setManualAtlasTiles(
+    const QVector<QImage>& tiles,
+    const QVector<qint32>& runtimeTypes,
+    const QStringList& descriptions)
+{
+    const int previousSlot = m_manualTileList->currentItem()
+        ? m_manualTileList->currentItem()->data(Qt::UserRole).toInt() : -1;
+    const QSignalBlocker blocker(m_manualTileList);
+    m_manualTileList->clear();
+    for(int slot = 0; slot < tiles.size(); ++slot)
+    {
+        const QString description = slot < descriptions.size()
+            ? descriptions.at(slot).trimmed() : QString();
+        const QString label = description.isEmpty()
+            ? tr("Slot %1 - runtime type %2")
+                  .arg(slot).arg(slot < runtimeTypes.size()
+                      ? runtimeTypes.at(slot) : -1)
+            : tr("Slot %1 - %2 - runtime type %3")
+                  .arg(slot).arg(description)
+                  .arg(slot < runtimeTypes.size()
+                      ? runtimeTypes.at(slot) : -1);
+        QListWidgetItem* item = new QListWidgetItem(
+            QIcon(QPixmap::fromImage(tiles.at(slot))), label,
+            m_manualTileList);
+        item->setData(Qt::UserRole, slot);
+        item->setData(Qt::UserRole + 1,
+                      QStringLiteral("%1 %2").arg(slot).arg(description));
+        if(slot == previousSlot)
+            m_manualTileList->setCurrentItem(item);
+    }
+    applyPaintFilter();
+}
+
+void CLandscapeTools::applyPaintFilter()
+{
+    const QString filter = m_paintFilter
+        ? m_paintFilter->text().trimmed() : QString();
+    const auto filterGroup = [&filter](QButtonGroup* group) {
+        if(!group)
+            return;
+        for(QAbstractButton* button : group->buttons())
+        {
+            const QString searchable = button->property(
+                "terrainFilterText").toString();
+            button->setVisible(filter.isEmpty()
+                || searchable.contains(filter, Qt::CaseInsensitive));
+        }
+    };
+    filterGroup(m_groundMaterialButtons);
+    filterGroup(m_overlayMaterialButtons);
+    filterGroup(m_classicGroundMaterialButtons);
+    filterGroup(m_classicOverlayMaterialButtons);
+    if(m_manualTileList)
+        for(int row = 0; row < m_manualTileList->count(); ++row)
+        {
+            QListWidgetItem* item = m_manualTileList->item(row);
+            item->setHidden(!filter.isEmpty()
+                && !item->data(Qt::UserRole + 1).toString().contains(
+                    filter, Qt::CaseInsensitive));
+        }
+}
+
 void CLandscapeTools::rebuildMaterialPalette()
 {
     const auto selectedMaterial = [](const QButtonGroup* group) {
@@ -780,6 +1028,10 @@ void CLandscapeTools::rebuildMaterialPalette()
     };
     const QPair<int, int> previousGround = selectedMaterial(m_groundMaterialButtons);
     const QPair<int, int> previousOverlay = selectedMaterial(m_overlayMaterialButtons);
+    const QPair<int, int> previousClassicGround =
+        selectedMaterial(m_classicGroundMaterialButtons);
+    const QPair<int, int> previousClassicOverlay =
+        selectedMaterial(m_classicOverlayMaterialButtons);
     const auto clear = [](QGridLayout* layout) {
         while(QLayoutItem* item = layout->takeAt(0))
         {
@@ -790,10 +1042,15 @@ void CLandscapeTools::rebuildMaterialPalette()
     clear(m_groundMaterialGrid);
     clear(m_underwaterMaterialGrid);
     clear(m_overlayMaterialGrid);
+    clear(m_classicGroundMaterialGrid);
+    clear(m_classicUnderwaterMaterialGrid);
+    clear(m_classicOverlayMaterialGrid);
 
     const int columns = qMax(1, m_paletteColumns);
-    const auto populate = [this, columns](QGridLayout* grid, QButtonGroup* group,
-            const QVector<STerrainPaintMaterialChoice>& choices) {
+    const auto populate = [this, columns](QGridLayout* grid,
+            QButtonGroup* group,
+            const QVector<STerrainPaintMaterialChoice>& choices,
+            bool classicAuto) {
         int row = 0;
         const auto addSection = [&](bool used, const QString& title) {
           QVector<STerrainPaintMaterialChoice> section;
@@ -819,6 +1076,9 @@ void CLandscapeTools::rebuildMaterialPalette()
               button->setProperty("terrainMaterialId", choice.id);
               button->setProperty("terrainSupportMaterialId", choice.supportId);
               button->setProperty("terrainContextualStamp", choice.contextualStamp);
+              button->setProperty("terrainFilterText",
+                  QStringLiteral("%1 %2").arg(choice.name,
+                                               choice.familyName));
               button->setCheckable(true);
               button->setAutoRaise(false);
               button->setStyleSheet(QStringLiteral(
@@ -829,7 +1089,9 @@ void CLandscapeTools::rebuildMaterialPalette()
               button->setToolTip(tr("%1 - %2 authored uniform source(s). %3")
                   .arg(choice.name).arg(choice.assignedSlots)
                   .arg(used ? tr("Currently used on this map.")
-                            : tr("Unused on this map; painting adds this material and generates exact blends as needed.")));
+                            : (classicAuto
+                                ? tr("Unused on this map; Classic Auto uses it only where every required exact blend already exists.")
+                                : tr("Unused on this map; Modern painting adds this material and generates exact blends as needed."))));
               if(!choice.thumbnail.isNull())
               {
                   button->setIcon(QPixmap::fromImage(choice.thumbnail));
@@ -854,9 +1116,20 @@ void CLandscapeTools::rebuildMaterialPalette()
             grid->setColumnStretch(column, 1);
         grid->setAlignment(Qt::AlignTop);
     };
-    populate(m_groundMaterialGrid, m_groundMaterialButtons, m_landPaintTypes);
-    populate(m_underwaterMaterialGrid, m_groundMaterialButtons, m_underwaterPaintTypes);
-    populate(m_overlayMaterialGrid, m_overlayMaterialButtons, m_overlayPaintTypes);
+    populate(m_groundMaterialGrid, m_groundMaterialButtons,
+             m_landPaintTypes, false);
+    populate(m_underwaterMaterialGrid, m_groundMaterialButtons,
+             m_underwaterPaintTypes, false);
+    populate(m_overlayMaterialGrid, m_overlayMaterialButtons,
+             m_overlayPaintTypes, false);
+    populate(m_classicGroundMaterialGrid,
+             m_classicGroundMaterialButtons, m_classicLandPaintTypes, true);
+    populate(m_classicUnderwaterMaterialGrid,
+             m_classicGroundMaterialButtons,
+             m_classicUnderwaterPaintTypes, true);
+    populate(m_classicOverlayMaterialGrid,
+             m_classicOverlayMaterialButtons,
+             m_classicOverlayPaintTypes, true);
     const auto restore = [](QButtonGroup* group, const QPair<int, int>& selection) {
         for(QAbstractButton* button : group->buttons())
             if(button->property("terrainMaterialId").toInt() == selection.first
@@ -875,7 +1148,14 @@ void CLandscapeTools::rebuildMaterialPalette()
         if(!restore(m_overlayMaterialButtons, previousOverlay)
            && !m_overlayMaterialButtons->buttons().isEmpty())
             m_overlayMaterialButtons->buttons().front()->setChecked(true);
+        if(!restore(m_classicGroundMaterialButtons, previousClassicGround)
+           && !m_classicGroundMaterialButtons->buttons().isEmpty())
+            m_classicGroundMaterialButtons->buttons().front()->setChecked(true);
+        if(!restore(m_classicOverlayMaterialButtons, previousClassicOverlay)
+           && !m_classicOverlayMaterialButtons->buttons().isEmpty())
+            m_classicOverlayMaterialButtons->buttons().front()->setChecked(true);
     }
+    applyPaintFilter();
 }
 
 void CLandscapeTools::resizeEvent(QResizeEvent* event)
@@ -916,6 +1196,9 @@ void CLandscapeTools::setUsedTerrainFamilies(
     update(&m_landPaintTypes, landFamilies);
     update(&m_underwaterPaintTypes, landFamilies);
     update(&m_overlayPaintTypes, overlayFamilies);
+    update(&m_classicLandPaintTypes, landFamilies);
+    update(&m_classicUnderwaterPaintTypes, landFamilies);
+    update(&m_classicOverlayPaintTypes, overlayFamilies);
     if(changed)
         rebuildMaterialPalette();
 }
@@ -924,14 +1207,35 @@ void CLandscapeTools::refreshPaintTerrainTypes()
 {
     const bool overlay = editMode() == ELandscapeEditMode::OverlayPaint
         || editMode() == ELandscapeEditMode::OverlaySurface;
-    const int materialCount = overlay
-        ? m_overlayPaintTypes.size()
-        : m_landPaintTypes.size() + m_underwaterPaintTypes.size();
+    int materialCount = 0;
+    if(paintPaletteMode() == ETerrainPaintPaletteMode::Manual)
+        materialCount = m_manualTileList ? m_manualTileList->count() : 0;
+    else if(paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto)
+        materialCount = overlay ? m_classicOverlayPaintTypes.size()
+            : m_classicLandPaintTypes.size()
+                + m_classicUnderwaterPaintTypes.size();
+    else
+        materialCount = overlay ? m_overlayPaintTypes.size()
+            : m_landPaintTypes.size() + m_underwaterPaintTypes.size();
     {
         const QSignalBlocker blocker(m_materialTabs);
         m_materialTabs->setCurrentIndex(overlay ? 1 : 0);
     }
-    if(!m_paintCatalogStatus.isEmpty())
+    {
+        const QSignalBlocker blocker(m_classicMaterialTabs);
+        m_classicMaterialTabs->setCurrentIndex(overlay ? 1 : 0);
+    }
+    if(paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto)
+        m_tilesetStatus->setText(materialCount == 0
+            ? tr("No existing automatic material designation is available for this layer.")
+            : tr("%1 existing material designation(s). Classic Auto never changes the atlas and refuses a whole stroke when an exact blend is missing.")
+                  .arg(materialCount));
+    else if(paintPaletteMode() == ETerrainPaintPaletteMode::Manual)
+        m_tilesetStatus->setText(materialCount == 0
+            ? tr("No physical atlas tiles are available.")
+            : tr("%1 physical atlas tile(s). Manual painting writes the selected slot and rotation directly.")
+                  .arg(materialCount));
+    else if(!m_paintCatalogStatus.isEmpty())
         m_tilesetStatus->setText(m_paintCatalogStatus);
     else
     {
@@ -945,9 +1249,9 @@ void CLandscapeTools::refreshPaintTerrainTypes()
 }
 bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
 {
-    QButtonGroup* group = (editMode() == ELandscapeEditMode::OverlayPaint
-                           || editMode() == ELandscapeEditMode::OverlaySurface)
-        ? m_overlayMaterialButtons : m_groundMaterialButtons;
+    QButtonGroup* group = activeMaterialButtons();
+    if(!group)
+        return false;
     for(QAbstractButton* button : group->buttons())
         if(button->property("terrainMaterialId").toInt() == terrainType)
         {
