@@ -236,6 +236,9 @@ class BlendMaskQuestionnaireTests(unittest.TestCase):
             self.assertEqual(result["globalQuestions"], 0)
             self.assertEqual(analysis["rowSelection"], "unapproved-only")
             self.assertNotIn('data-key="blend-compositor-gamma"', document)
+            self.assertIn("evidence/masks.png", document)
+            self.assertTrue((root / "questionnaire" / "evidence" /
+                             "uniform-materials" / "uniform-0.png").is_file())
             self.assertEqual(
                 validate(review, Path(result["html"]))["status"], "PASS")
 

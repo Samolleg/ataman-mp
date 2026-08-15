@@ -10,6 +10,7 @@ import html
 import json
 import os
 import re
+import shutil
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -236,6 +237,26 @@ def render(review: Path, output: Path, checkpoint: str = "R42-MASK",
         if not rows:
             raise ValueError("blend-mask review has no live unapproved applications")
 
+    asset_review = review
+    if only_unapproved:
+        # A focused handoff must remain usable after old tester packages are
+        # cleaned. Copy only evidence referenced by the selected rows and keep
+        # the same review-relative names so all hashes and sprite coordinates
+        # remain authoritative.
+        asset_review = output / "evidence"
+        referenced = {
+            row[field]
+            for row in rows
+            for field in (
+                "sheet", "heatmap_sheet", "result_example_sheet",
+                "linear_result_sheet", "owner_uniform", "support_uniform")
+        }
+        for relative in sorted(referenced):
+            source = review / relative
+            destination = asset_review / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+
     groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     canonical_hashes: dict[str, str] = {}
     old_to_group: dict[str, tuple[str, str]] = {}
@@ -326,21 +347,23 @@ def render(review: Path, output: Path, checkpoint: str = "R42-MASK",
         representatives = _representatives(group_rows)
         first = representatives[0]
         image_row, column = int(first["row"]), int(first["column"])
-        mask_style = _sprite(review, output, first["sheet"], image_row, column)
+        mask_style = _sprite(asset_review, output, first["sheet"], image_row, column)
         heatmap_style = _sprite(
-            review, output, first["heatmap_sheet"], image_row, column)
+            asset_review, output, first["heatmap_sheet"], image_row, column)
         examples_html: list[str] = []
         representative_keys: set[str] = set()
         for example in representatives:
             application_key = _application_key(example)
             representative_keys.add(application_key)
-            owner_uniform = _relative(review / example["owner_uniform"], output)
-            support_uniform = _relative(review / example["support_uniform"], output)
+            owner_uniform = _relative(
+                asset_review / example["owner_uniform"], output)
+            support_uniform = _relative(
+                asset_review / example["support_uniform"], output)
             result_style = _sprite(
-                review, output, example["result_example_sheet"],
+                asset_review, output, example["result_example_sheet"],
                 int(example["row"]), int(example["column"]))
             linear_style = _sprite(
-                review, output, example["linear_result_sheet"],
+                asset_review, output, example["linear_result_sheet"],
                 int(example["row"]), int(example["column"]))
             examples_html.append(f'''<section class="application-example" data-application-key="{html.escape(application_key)}">
 <h3>{html.escape(example["owner_material"])} + {html.escape(example["support_material"])}</h3>
