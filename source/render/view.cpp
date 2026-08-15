@@ -11013,16 +11013,44 @@ void CView::openAtlasTiles()
     m_pTileForm->show();
 }
 
-void CView::pickTile(QVector3D posOnLand, bool bLand)
+bool CView::pickTile(QVector3D posOnLand, bool bLand)
 {
     if(!m_pLand->isMprLoad())
-        return;
+        return false;
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
     const bool pickLand = bLand || (!bLand && m_terrainPaintProjectionLand);
     if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
-        return;
+        return false;
+
+    const int globalX = tileLoc.xSec * 16 + tileLoc.col;
+    const int globalY = tileLoc.ySec * 16 + tileLoc.row;
+    const int paletteMode = m_landscapeTools
+        ? int(m_landscapeTools->paintPaletteMode()) : -1;
+    const bool manualMode = m_landscapeTools
+        && m_landscapeTools->paintPaletteMode()
+            == ETerrainPaintPaletteMode::Manual;
+    const QPoint samplePoint = manualMode
+        ? QPoint(globalX, globalY)
+        : QPoint(tileLoc.xSec * 16
+                     + qBound(0, qRound(posOnLand.x() / 2.0f), 16),
+                 tileLoc.ySec * 16
+                     + qBound(0, qRound(posOnLand.y() / 2.0f), 16));
+    const int sampleLayer = bLand ? 0 : 1;
+    if(m_terrainSampleGestureActive
+       && !terrainContinuousSampleShouldUpdate(
+              m_terrainSampleKeyValid, m_lastTerrainSamplePoint,
+              m_lastTerrainSampleLayer, m_lastTerrainSampleMode,
+              samplePoint, sampleLayer, paletteMode))
+        return false;
+    if(m_terrainSampleGestureActive)
+    {
+        m_terrainSampleKeyValid = true;
+        m_lastTerrainSamplePoint = samplePoint;
+        m_lastTerrainSampleLayer = sampleLayer;
+        m_lastTerrainSampleMode = paletteMode;
+    }
 
     // Imported and generated working-atlas slots are valid semantic paint
     // results but do not exist in the authored atlas inspector.  The semantic
@@ -11041,8 +11069,6 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
     }
     if(m_landscapeTools && m_terrainEditAvailable)
     {
-        const int globalX = tileLoc.xSec * 16 + tileLoc.col;
-        const int globalY = tileLoc.ySec * 16 + tileLoc.row;
         bool found = false;
         const quint16 packed = m_terrainEdit.packedTile(globalX, globalY,
             bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay, &found);
@@ -11087,6 +11113,19 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
         m_pTileForm->setActiveMatIndex(pTile->materialIndex());
 
     m_pPreviewTile->updateTile(*pTile, pTile->tileIndex(), pTile->tileRotation(), pTile->materialIndex(), tileLoc.xSec, tileLoc.ySec);
+    return true;
+}
+
+void CView::beginTerrainPaintSampling()
+{
+    m_terrainSampleGestureActive = true;
+    m_terrainSampleKeyValid = false;
+}
+
+void CView::endTerrainPaintSampling()
+{
+    m_terrainSampleGestureActive = false;
+    m_terrainSampleKeyValid = false;
 }
 
 void CView::setTile(QVector3D posOnLand, bool bLand)
@@ -11543,26 +11582,31 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     }
     int index = -1;
     int rotNum = 0;
+    bool brushSelectionAvailable = false;
     if(manualTilePaintingEnabled())
+    {
         m_pTileForm->getSelectedTile(index, rotNum);
+        brushSelectionAvailable = index >= 0;
+    }
     else if(m_landscapeTools)
     {
-        bool selected = false;
-        const qint32 material = m_landscapeTools->paintTerrainType(&selected);
-        if(selected)
+        const qint32 material = m_landscapeTools->paintTerrainType(
+            &brushSelectionAvailable);
+        if(brushSelectionAvailable)
             index = m_terrainMaterialRepresentatives.value(material, -1);
-    }
-    if(index < 0)
-    {
-        m_terrainPaintOutlineValid = false;
-        setPreviewTile(false);
-        unsetCursor();
-        return;
     }
 
     m_terrainPaintOutlineX = tileLoc.xSec * 16 + tileLoc.col;
     m_terrainPaintOutlineY = tileLoc.ySec * 16 + tileLoc.row;
-    m_terrainPaintOutlineValid = true;
+    m_terrainPaintOutlineValid = terrainPaintCellOutlineVisible(
+        brushSelectionAvailable, index >= 0);
+    if(index < 0)
+    {
+        setPreviewTile(false);
+        unsetCursor();
+        update();
+        return;
+    }
 
     onChangeCursorTile(m_pTileForm->tileWithRot(index));
     int matIndex;
@@ -13990,6 +14034,7 @@ void CView::focusOutEvent(QFocusEvent *event)
 {
     Q_UNUSED(event);
     finishSculptStroke();
+    endTerrainPaintSampling();
     auto keySet = m_pOp->keyManager()->keys();
     for(auto& key : keySet)
     {

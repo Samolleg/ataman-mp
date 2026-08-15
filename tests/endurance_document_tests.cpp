@@ -4325,6 +4325,25 @@ void EnduranceDocumentTests::manualPaintShowsCellFootprintAndLiftedTilePreview()
     QCOMPARE(terrainPaintOutlineWorldCenter(4, false), 8.0f);
     QCOMPARE(terrainPaintOutlineWorldCenter(4, true), 9.0f);
     QVERIFY(terrainTilePreviewElevation() > 0.0f);
+
+    // Tile-target semantic painting retains its Manual-style cell footprint
+    // even when the selected family has no optional physical preview tile.
+    QVERIFY(terrainPaintCellOutlineVisible(true, false));
+    QVERIFY(!terrainPaintCellOutlineVisible(false, true));
+
+    // Held-RMB sampling is keyed to the logical terrain vicinity rather than
+    // raw mouse events. Layer and palette changes intentionally invalidate it.
+    const QPoint sample(12, 17);
+    QVERIFY(terrainContinuousSampleShouldUpdate(
+        false, QPoint(), -1, -1, sample, 0, 1));
+    QVERIFY(!terrainContinuousSampleShouldUpdate(
+        true, sample, 0, 1, sample, 0, 1));
+    QVERIFY(terrainContinuousSampleShouldUpdate(
+        true, sample, 0, 1, QPoint(13, 17), 0, 1));
+    QVERIFY(terrainContinuousSampleShouldUpdate(
+        true, sample, 0, 1, sample, 1, 1));
+    QVERIFY(terrainContinuousSampleShouldUpdate(
+        true, sample, 0, 1, sample, 0, 2));
 }
 
 void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValues()

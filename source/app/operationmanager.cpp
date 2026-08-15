@@ -1169,6 +1169,7 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
     }
     case Qt::RightButton:
     {
+        m_pView->beginTerrainPaintSampling();
         if(hit)
             m_pView->pickTile(m_lastLandPos, bLand);
         break;
@@ -1179,6 +1180,8 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
 void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
 {
     Q_UNUSED(pOp);
+    if(pEvent->button() == Qt::RightButton)
+        m_pView->endTerrainPaintSampling();
     if (pEvent->button() == Qt::LeftButton) {
         const bool bLand = CScene::getInstance()->isLandTileEditMode();
         // Always resolve the release position. The view de-duplicates an
@@ -1275,8 +1278,8 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
             pEvent->x(), pEvent->y(), &hit);
         if(hit)
         {
-            m_pView->pickTile(landPos, bLand);
-            m_pView->updatePreviewTile(landPos, bLand);
+            if(m_pView->pickTile(landPos, bLand))
+                m_pView->updatePreviewTile(landPos, bLand);
             m_lastLandPos = landPos;
             m_lastLandPosValid = true;
         }

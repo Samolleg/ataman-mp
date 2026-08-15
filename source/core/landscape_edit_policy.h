@@ -1,6 +1,8 @@
 #ifndef LANDSCAPE_EDIT_POLICY_H
 #define LANDSCAPE_EDIT_POLICY_H
 
+#include <QPoint>
+
 enum class ELandscapeEditMode
 {
     Sculpt,
@@ -59,6 +61,26 @@ inline bool terrainPaintOutlineEnabled(bool outlineValid,
     // preview supplements the footprint; it must not suppress it.
     (void)manualTileSelection;
     return outlineValid;
+}
+
+inline bool terrainPaintCellOutlineVisible(bool brushSelectionAvailable,
+                                           bool previewTileAvailable)
+{
+    // A semantic family can be valid even when it has no physical thumbnail
+    // in the legacy tile form (for example a generated working-atlas family).
+    // The cell footprint belongs to the brush selection, not to that optional
+    // lifted tile preview.
+    (void)previewTileAvailable;
+    return brushSelectionAvailable;
+}
+
+inline bool terrainContinuousSampleShouldUpdate(
+    bool previousValid, const QPoint& previousPoint, int previousLayer,
+    int previousMode, const QPoint& currentPoint, int currentLayer,
+    int currentMode)
+{
+    return !previousValid || previousPoint != currentPoint
+        || previousLayer != currentLayer || previousMode != currentMode;
 }
 
 inline float terrainPaintOutlineWorldCenter(int coordinate,

@@ -256,7 +256,9 @@ public:
     quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
     void openMapParameters();
     void openAtlasTiles();
-    void pickTile(QVector3D posOnLand, bool bLand = true);
+    bool pickTile(QVector3D posOnLand, bool bLand = true);
+    void beginTerrainPaintSampling();
+    void endTerrainPaintSampling();
     void setTile(QVector3D posOnLand, bool bLand = true);
     void updatePreviewTile(QVector3D posOnLand, bool bLand = true);
     void addTileRotation(int step);
@@ -634,6 +636,11 @@ private:
     bool m_terrainPaintProjectionLand{true};
     int m_terrainPaintOutlineX{0};
     int m_terrainPaintOutlineY{0};
+    bool m_terrainSampleGestureActive{false};
+    bool m_terrainSampleKeyValid{false};
+    QPoint m_lastTerrainSamplePoint;
+    int m_lastTerrainSampleLayer{-1};
+    int m_lastTerrainSampleMode{-1};
     bool m_paintIssueDragActive{false};
     bool m_paintIssueHoverValid{false};
     CTerrainTileInformationPolicy m_terrainTileInformationPolicy;
