@@ -1642,6 +1642,8 @@ void ProfileDatabaseTests::databaseEditorOpensKnownResourceReferences()
                .data(Qt::UserRole+1).toString()==QStringLiteral("fld.30.0"))
             modelColumn=column;
     QVERIFY(modelColumn>=0);
+    QCOMPARE(grid->model()->headerData(modelColumn,Qt::Horizontal).toString(),
+             QStringLiteral("Model resource"));
     const QModelIndex model=grid->model()->index(grid->currentIndex().row(),modelColumn);
     grid->setCurrentIndex(model);grid->scrollTo(model,QAbstractItemView::PositionAtCenter);
     QSignalSpy requested(&dialog,&ei::DatabaseEditorDialog::resourceBrowserRequested);

@@ -170,8 +170,8 @@ public:
                 ? full : full+QLatin1Char('.')+field->resourceExtension) : QString();
         if(role==ChoicesRole)return choicesForColumn(index.column());
         if(role==FilterTextRole){QStringList values;values<<QString("#%1").arg(rowNumber)<<QString::number(rowNumber)<<row->sourceStableKey;for(int fieldIndex:m_fields)values<<authoringText(*table,table->fields[fieldIndex],row->values.value(table->fields[fieldIndex].key));return values.join(' ').toLower();}
-        if(role==Qt::ForegroundRole&&!field->referenceTable.isEmpty())return QBrush(QColor(35,110,190));
-        if(role==Qt::FontRole&&!field->referenceTable.isEmpty()){QFont font=QApplication::font();font.setUnderline(true);return font;}
+        if(role==Qt::ForegroundRole&&(!field->referenceTable.isEmpty()||field->resourceReference))return QBrush(QColor(35,110,190));
+        if(role==Qt::FontRole&&(!field->referenceTable.isEmpty()||field->resourceReference)){QFont font=QApplication::font();font.setUnderline(true);return font;}
         if(role==Qt::ToolTipRole)
         {
             QString reason;const bool editable=field->writable&&m_document->fieldEditable(m_tableKey,row->stableKey,field->key,&reason);

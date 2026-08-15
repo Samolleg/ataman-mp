@@ -170,8 +170,7 @@ constexpr qint64 kHexPrefixBytes = 4096;
 bool isDedicatedDatabaseArchive(const QString& path)
 {
     const QString name = QFileInfo(path).fileName();
-    return name.compare(QStringLiteral("database.res"), Qt::CaseInsensitive) == 0
-        || name.compare(QStringLiteral("databaseJmv.res"), Qt::CaseInsensitive) == 0;
+    return name.compare(QStringLiteral("database.res"), Qt::CaseInsensitive) == 0;
 }
 
 QString suffixType(const QString& name, const QString& archiveName = QString())
@@ -602,6 +601,7 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
         m_imageView->setImage(QImage());
         m_previewStack->setCurrentIndex(0);
         m_previewDetails->setText(tr("Select a resource to preview it."));
+        m_databaseEditor->setVisible(isDedicatedDatabaseArchive(selectedArchivePath()));
         rebuildList();
     });
     connect(m_export, &QPushButton::clicked, this, &CResourceBrowser::exportSelected);
@@ -609,6 +609,11 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     connect(m_openLocation, &QPushButton::clicked, this, &CResourceBrowser::openSelectedLocation);
     connect(m_databaseEditor, &QPushButton::clicked, this, [this]() {
         if(const auto* entry = selectedEntry()) emit databaseEditorRequested(entry->archivePath);
+        else
+        {
+            const QString archive = selectedArchivePath();
+            if(isDedicatedDatabaseArchive(archive)) emit databaseEditorRequested(archive);
+        }
     });
     connect(m_replace, &QPushButton::clicked, this, &CResourceBrowser::replaceSelected);
     connect(m_add, &QPushButton::clicked, this, &CResourceBrowser::addMember);
@@ -1064,7 +1069,7 @@ bool CResourceBrowser::publishTransaction(CResArchiveTransaction& transaction,
     if(isDedicatedDatabaseArchive(context.archivePath))
     {
         QMessageBox::information(this, tr("Protected database archive"),
-            tr("database.res and databaseJmv.res cannot be changed by the generic resource transaction. "
+            tr("database.res cannot be changed by the generic resource transaction. "
                "Use the dedicated Database Editor integration."));
         emit databaseEditorRequested(context.archivePath);
         return false;

@@ -603,10 +603,7 @@ void MainWindow::openDatabaseArchiveFromBrowser(const QString& archivePath)
     const QFileInfo active(snapshot->sourceArchivePath);
     const bool primary = requested.absoluteFilePath().compare(
         active.absoluteFilePath(), Qt::CaseInsensitive) == 0;
-    const bool jmvOverlay = requested.fileName().compare(
-        QStringLiteral("databaseJmv.res"), Qt::CaseInsensitive) == 0
-        && requested.absolutePath().compare(active.absolutePath(), Qt::CaseInsensitive) == 0;
-    if(!primary && !jmvOverlay)
+    if(!primary)
     {
         QMessageBox::information(this, tr("External database archive"),
             tr("The integrated Database Editor authors the active profile's database.res bundle. "

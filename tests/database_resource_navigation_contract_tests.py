@@ -27,6 +27,14 @@ def main() -> int:
     require(browser_h, "bool selectResourceReference(const QString& reference)",
             "Resource Browser must expose exact resource-reference navigation.")
     require(browser_cpp, "database.res", "Database archive classification must be explicit.")
+    require(browser_cpp, "m_databaseEditor->setVisible(isDedicatedDatabaseArchive(selectedArchivePath()))",
+            "Selecting the database.res archive itself must expose the Database Editor action.")
+    require(browser_cpp, "emit databaseEditorRequested(archive)",
+            "The action must work from an archive selection, not only a member preview.")
+    classifier = browser_cpp[browser_cpp.index("bool isDedicatedDatabaseArchive"):
+                             browser_cpp.index("QString suffixType")]
+    if "databaseJmv.res" in classifier:
+        raise AssertionError("databaseJmv.res is a helper archive, not the editable database.")
     require(database_h, "void resourceBrowserRequested(const QString& reference)",
             "Database Editor must expose resource-reference navigation.")
     require(database_cpp, "databaseOpenResourceAction",
