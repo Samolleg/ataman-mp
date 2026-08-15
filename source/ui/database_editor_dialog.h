@@ -30,7 +30,7 @@ private: QString currentTableKey() const; QString selectedRowKey() const; void u
     void saveCurrentColumnState();
     void restoreCurrentColumnState();
     QString columnSettingsKey(const QString& suffix) const;
-    QSharedPointer<DatabaseDocument> m_document; QListWidget* m_tables; QLineEdit* m_filter; DatabaseFrozenTableView* m_grid; DatabaseTableModel* m_model; DatabaseFilterModel* m_proxy; QLabel* m_status; QPushButton* m_cloneButton; QPushButton* m_deleteButton; QTimer* m_filterTimer;
+    QSharedPointer<DatabaseDocument> m_document; QListWidget* m_tables; QLineEdit* m_filter; DatabaseFrozenTableView* m_grid; DatabaseTableModel* m_model; DatabaseFilterModel* m_proxy; QLabel* m_status; QPushButton* m_cloneButton; QPushButton* m_deleteButton; QTimer* m_filterTimer; QTimer* m_columnStateTimer;
 };
 }
 #endif

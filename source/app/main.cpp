@@ -2445,10 +2445,10 @@ int runHeadlessCommand(QApplication& app)
         ei::revealDockNavigationTarget(&resourceNavigationHost,
                                        &resourceNavigationDock);
         QApplication::processEvents();
-        const bool resourceNavigationUsesFloatingTarget =
+        const bool resourceNavigationPreservesDockedTarget =
                 resourceNavigationHost.isVisible()
                 && resourceNavigationDock.isVisible()
-                && resourceNavigationDock.isFloating();
+                && !resourceNavigationDock.isFloating();
         resourceNavigationSource.close();
         resourceNavigationHost.close();
 
@@ -2494,7 +2494,7 @@ int runHeadlessCommand(QApplication& app)
 
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
-                && resourceNavigationUsesFloatingTarget
+                && resourceNavigationPreservesDockedTarget
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
                 && prefixesOnly && valueStable && focusCancel && escapeCancel
                 && staticChoiceItemTooltipsWork && alarmConditionItemTooltipsWork

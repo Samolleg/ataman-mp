@@ -24,8 +24,11 @@
 #include <QTimer>
 #include <QSignalSpy>
 #include <QSettings>
+#include <QScrollBar>
 #include <QTableWidget>
 #include <QTableView>
+#include <QDockWidget>
+#include <QMainWindow>
 #include <QComboBox>
 #include <QAbstractItemDelegate>
 #include <QXmlStreamReader>
@@ -43,6 +46,7 @@
 #include "item_spell_constructor.h"
 #include "game_text_catalog.h"
 #include "profile_database_provider_support.h"
+#include "window_lifecycle.h"
 
 namespace {
 
@@ -232,6 +236,7 @@ private slots:
     void databaseEditorMarksVerifiedLeverResources();
     void databaseEditorUsesLazyModelAndNavigatesReferences();
     void databaseEditorPersistsVisualColumnControls();
+    void resourceNavigationPreservesDocking();
     void databaseEditorForwardsFocusedUndoRedo();
     void installedVerifiedReferenceMappingsResolve();
     void installedDatabaseInteractiveLatency();
@@ -1852,6 +1857,18 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
         QVERIFY(dialog.selectPrototype("Human Test"));
         QTableView* grid=dialog.findChild<QTableView*>("databaseGrid");QVERIFY(grid);
         QCOMPARE(grid->model()->headerData(0,Qt::Horizontal).toString(),QString("#"));
+        QCOMPARE(grid->property("frozenColumnCount").toInt(),1);
+        QTableView* frozen=dialog.findChild<QTableView*>("databaseFrozenGrid");QVERIFY(frozen);
+        QVERIFY(!frozen->isColumnHidden(0));
+        for(int column=1;column<frozen->model()->columnCount();++column)
+            QVERIFY(frozen->isColumnHidden(column));
+        const QString firstRowNumber=frozen->model()->index(0,0).data().toString();
+        grid->setCurrentIndex(grid->model()->index(1,qMin(3,grid->model()->columnCount()-1)));
+        grid->horizontalScrollBar()->setValue(grid->horizontalScrollBar()->maximum());
+        QApplication::processEvents();
+        QCOMPARE(grid->property("frozenColumnCount").toInt(),1);
+        QCOMPARE(frozen->model()->index(0,0).data().toString(),firstRowNumber);
+        QVERIFY(!frozen->isColumnHidden(0));
         QVERIFY(!(grid->model()->flags(grid->model()->index(0,0))&Qt::ItemIsEditable));
         QLineEdit* filter=dialog.findChild<QLineEdit*>("databaseRowFilter");QVERIFY(filter);
         const QString rowNumber=grid->model()->index(grid->currentIndex().row(),0).data().toString();
@@ -1861,7 +1878,6 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
 
         QVERIFY(triggerHeaderAction(grid->horizontalHeader(),"databaseLockColumnsAction",2));
         QCOMPARE(grid->property("frozenColumnCount").toInt(),3);
-        QTableView* frozen=dialog.findChild<QTableView*>("databaseFrozenGrid");QVERIFY(frozen);
         QVERIFY(!grid->wordWrap());QVERIFY(!frozen->wordWrap());
         for(int row=0;row<grid->model()->rowCount();++row)
             QCOMPARE(frozen->rowHeight(row),grid->rowHeight(row));
@@ -1890,6 +1906,15 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
             hidden+=grid->isColumnHidden(column);
         QVERIFY(hidden>0);
         QCOMPARE(document->changes().size(),changesBefore);
+    }
+    settings.setValue(QStringLiteral("databaseEditor/columns/base_units.monsters/frozenThrough"),
+                      QStringLiteral("removed.field.identity"));
+    settings.sync();
+    {
+        ei::DatabaseEditorDialog staleState(document);staleState.show();
+        QVERIFY(staleState.selectPrototype("Human Test"));
+        QTableView* grid=staleState.findChild<QTableView*>("databaseGrid");QVERIFY(grid);
+        QCOMPARE(grid->property("frozenColumnCount").toInt(),1);
     }
     settings.remove(QStringLiteral("databaseEditor/columns/base_units.monsters"));
     settings.sync();
@@ -1959,6 +1984,28 @@ void ProfileDatabaseTests::installedVerifiedReferenceMappingsResolve()
         }
     }
     QVERIFY(mappedFields>=1);
+}
+
+void ProfileDatabaseTests::resourceNavigationPreservesDocking()
+{
+    QMainWindow host;
+    QDockWidget dock(&host);
+    QDockWidget sibling(&host);
+    dock.setObjectName(QStringLiteral("resourceBrowserDockProbe"));
+    sibling.setObjectName(QStringLiteral("resourceBrowserSiblingDockProbe"));
+    host.addDockWidget(Qt::RightDockWidgetArea,&dock);
+    host.addDockWidget(Qt::RightDockWidgetArea,&sibling);
+    host.tabifyDockWidget(&dock,&sibling);
+    host.show();
+    sibling.raise();
+    QApplication::processEvents();
+    QVERIFY(!dock.isFloating());
+    ei::revealDockNavigationTarget(&host,&dock);
+    QApplication::processEvents();
+    QVERIFY(host.isVisible());
+    QVERIFY(dock.isVisible());
+    QVERIFY(!dock.isFloating());
+    QVERIFY(!dock.visibleRegion().isEmpty());
 }
 
 void ProfileDatabaseTests::installedRaceModelSelectionAndContextLatency()
