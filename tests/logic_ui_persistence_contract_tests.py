@@ -2,6 +2,7 @@
 """Regression contract for dock migration and unit-only logic controls."""
 
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +21,13 @@ def main() -> int:
     main_window = source("source/app/main_window.cpp")
     main_window_h = source("source/app/main_window.h")
     table_manager = source("source/layout_components/tablemanager.cpp")
+
+    ui_root = ET.fromstring(source("source/app/main_window.ui"))
+    status_help = ui_root.find(".//widget[@name='statusBar']")
+    if status_help is None:
+        raise AssertionError("missing viewport context-help widget: statusBar")
+    if status_help.get("class") != "QLabel":
+        raise AssertionError("viewport context help must be a passive QLabel")
 
     require(main_window, "const QByteArray savedMainWindowState =",
             "saved dock-state snapshot")

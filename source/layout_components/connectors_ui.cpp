@@ -20,7 +20,7 @@ CStatusConnector* CStatusConnector::getInstance()
     return m_statusHelper;
 }
 
-void CStatusConnector::attach(QLabel *pLabel, QLineEdit *pLine)
+void CStatusConnector::attach(QLabel *pLabel, QLabel *pLine)
 {
     m_pIco = pLabel;
     m_pStatus = pLine;

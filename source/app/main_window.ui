@@ -285,7 +285,17 @@
        </widget>
       </item>
       <item>
-       <widget class="QLineEdit" name="statusBar"/>
+       <widget class="QLabel" name="statusBar">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
       </item>
       <item>
        <widget class="CProgressView" name="progressBar">
