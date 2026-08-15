@@ -608,6 +608,12 @@ private:
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;
     SOverlaySurfaceCommand m_overlaySurfaceStrokeCommand;
+    STerrainTileCommand m_classicAutoStrokePreviewCommand;
+    QSet<QPair<int, int>> m_classicAutoStrokeVertices;
+    QSet<QPair<int, int>> m_classicAutoStrokeAnchors;
+    bool m_classicAutoStrokePending{false};
+    ETerrainTileLayer m_classicAutoStrokeLayer{ETerrainTileLayer::Land};
+    qint32 m_classicAutoStrokeMaterialId{-1};
     QVector<STerrainPaintAuditAction> m_terrainPaintActions;
     int m_terrainPaintActionId{0};
     quint32 m_terrainSemanticSeed{0};

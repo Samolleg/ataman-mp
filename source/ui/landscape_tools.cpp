@@ -42,6 +42,30 @@ QIcon brushShapeIcon(bool circle)
     else painter.drawRect(shape);
     return QIcon(pixmap);
 }
+
+QString normalizedTerrainFilterText(const QString& value)
+{
+    QString normalized;
+    normalized.reserve(value.size());
+    for(const QChar character : value)
+        normalized.append(character.isLetterOrNumber()
+            ? character.toLower() : QLatin1Char(' '));
+    return normalized.simplified();
+}
+
+bool terrainFilterMatches(const QString& searchable, const QString& query)
+{
+    const QString normalizedQuery = normalizedTerrainFilterText(query);
+    if(normalizedQuery.isEmpty())
+        return true;
+    const QString normalizedSearchable =
+        normalizedTerrainFilterText(searchable);
+    for(const QString& token : normalizedQuery.split(
+            QLatin1Char(' '), QString::SkipEmptyParts))
+        if(!normalizedSearchable.contains(token))
+            return false;
+    return true;
+}
 }
 
 CLandscapeTools::CLandscapeTools(QWidget* parent)
@@ -280,6 +304,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_manualTileList->setObjectName(QStringLiteral("manualAtlasTileList"));
     m_manualTileList->setIconSize(QSize(52, 52));
     m_manualTileList->setUniformItemSizes(true);
+    m_manualTileList->setViewMode(QListView::IconMode);
+    m_manualTileList->setFlow(QListView::LeftToRight);
+    m_manualTileList->setWrapping(true);
+    m_manualTileList->setResizeMode(QListView::Adjust);
+    m_manualTileList->setMovement(QListView::Static);
+    m_manualTileList->setGridSize(QSize(62, 62));
+    m_manualTileList->setSpacing(2);
+    m_manualTileList->setWordWrap(false);
+    m_manualTileList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     manualModeLayout->addWidget(m_manualTileList);
 
     m_paintFilter->setObjectName(QStringLiteral("terrainPaintFilter"));
@@ -979,11 +1012,13 @@ void CLandscapeTools::setManualAtlasTiles(
                   .arg(slot < runtimeTypes.size()
                       ? runtimeTypes.at(slot) : -1);
         QListWidgetItem* item = new QListWidgetItem(
-            QIcon(QPixmap::fromImage(tiles.at(slot))), label,
+            QIcon(QPixmap::fromImage(tiles.at(slot))), QString(),
             m_manualTileList);
         item->setData(Qt::UserRole, slot);
         item->setData(Qt::UserRole + 1,
                       QStringLiteral("%1 %2").arg(slot).arg(description));
+        item->setToolTip(label);
+        item->setData(Qt::AccessibleTextRole, label);
         if(slot == previousSlot)
             m_manualTileList->setCurrentItem(item);
     }
@@ -1001,8 +1036,7 @@ void CLandscapeTools::applyPaintFilter()
         {
             const QString searchable = button->property(
                 "terrainFilterText").toString();
-            button->setVisible(filter.isEmpty()
-                || searchable.contains(filter, Qt::CaseInsensitive));
+            button->setVisible(terrainFilterMatches(searchable, filter));
         }
     };
     filterGroup(m_groundMaterialButtons);
@@ -1013,9 +1047,8 @@ void CLandscapeTools::applyPaintFilter()
         for(int row = 0; row < m_manualTileList->count(); ++row)
         {
             QListWidgetItem* item = m_manualTileList->item(row);
-            item->setHidden(!filter.isEmpty()
-                && !item->data(Qt::UserRole + 1).toString().contains(
-                    filter, Qt::CaseInsensitive));
+            item->setHidden(!terrainFilterMatches(
+                item->data(Qt::UserRole + 1).toString(), filter));
         }
 }
 

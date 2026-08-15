@@ -1148,11 +1148,18 @@ int runHeadlessCommand(QApplication& app)
             manualTiles, {1, 2},
             {QStringLiteral("Grass / Dark"),
              QStringLiteral("Stone / Lime")});
-        terrainPaintFilter->setText(QStringLiteral("Stone / Lime"));
+        terrainPaintFilter->setText(QStringLiteral("grass dark"));
         const bool sharedTerrainPaintFilterWorks = manualAtlasTileList
             && manualAtlasTileList->count() == 2
-            && manualAtlasTileList->item(0)->isHidden()
-            && !manualAtlasTileList->item(1)->isHidden();
+            && !manualAtlasTileList->item(0)->isHidden()
+            && manualAtlasTileList->item(1)->isHidden();
+        const bool manualAtlasGridUsesTooltips = manualAtlasTileList
+            && manualAtlasTileList->viewMode() == QListView::IconMode
+            && manualAtlasTileList->flow() == QListView::LeftToRight
+            && manualAtlasTileList->isWrapping()
+            && manualAtlasTileList->item(0)->text().isEmpty()
+            && manualAtlasTileList->item(0)->toolTip().contains(
+                QStringLiteral("Grass / Dark"));
         terrainPaintFilter->clear();
         const QList<QToolButton*> paletteButtons =
             landscapeTools.findChildren<QToolButton*>();
@@ -1503,6 +1510,7 @@ int runHeadlessCommand(QApplication& app)
             && landscapeToolsAreCompactAndPaletteFillsHeight
             && threeTerrainPaintModesAvailable
             && sharedTerrainPaintFilterWorks
+            && manualAtlasGridUsesTooltips
             && defaultAtlasSourceVisible
             && localAtlasSourceVisible
             && generatedAtlasCountVisible
@@ -1602,6 +1610,8 @@ int runHeadlessCommand(QApplication& app)
                << threeTerrainPaintModesAvailable
                << " sharedTerrainPaintFilterWorks="
                << sharedTerrainPaintFilterWorks
+               << " manualAtlasGridUsesTooltips="
+               << manualAtlasGridUsesTooltips
                << " landscapeToolsMinimumWidth="
                << landscapeTools.minimumSizeHint().width()
                << " landscapeToolsWidth=" << landscapeTools.width()

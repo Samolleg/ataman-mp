@@ -3149,6 +3149,29 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
 #endif
 }
 
+QVector<QPoint> terrainVertexStrokeLine(const QPoint& from, const QPoint& to)
+{
+    QVector<QPoint> result;
+    const int dx = to.x() - from.x();
+    const int dy = to.y() - from.y();
+    const int steps = qMax(qAbs(dx), qAbs(dy));
+    if(steps == 0)
+    {
+        result.append(from);
+        return result;
+    }
+    result.reserve(steps + 1);
+    for(int step = 0; step <= steps; ++step)
+    {
+        const QPoint point(
+            from.x() + qRound(double(dx) * step / steps),
+            from.y() + qRound(double(dy) * step / steps));
+        if(result.isEmpty() || result.back() != point)
+            result.append(point);
+    }
+    return result;
+}
+
 STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
     int selectedCellX, int selectedCellY,
     const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
@@ -3551,6 +3574,511 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
             EValidationSeverity::Warning,
             "This detail material cannot occupy every requested vertex because the atlas lacks the required multi-corner tiles",
             QString::number(skippedVertices));
+    return command;
+}
+
+STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
+    const QVector<QPoint>& requestedVertices,
+    const QVector<QPoint>& anchorVertices,
+    ETerrainTileLayer layer, qint32 materialId,
+    const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+    CValidationReport* report, bool allowUniformFallback) const
+{
+    STerrainTileCommand command;
+    command.description = layer == ETerrainTileLayer::Land
+        ? QStringLiteral("Paint terrain material stroke")
+        : QStringLiteral("Paint overlay material stroke");
+    command.semanticAudit.valid = true;
+    command.semanticAudit.layer = layer;
+    command.semanticAudit.requestedMaterialId = materialId;
+    command.semanticAudit.solverMode = QStringLiteral("vertex-stroke-exact");
+
+    if(!catalog.hasMaterial(materialId))
+    {
+        if(report) report->add("terrain.semantic_stroke_material",
+            EValidationSeverity::Error,
+            "The selected material is absent from the active Material atlas");
+        return command;
+    }
+
+    const int width = tileCountX();
+    const int height = tileCountY();
+    const int vertexWidth = width + 1;
+    const auto vertexKey = [vertexWidth](const QPoint& point) {
+        return point.y() * vertexWidth + point.x();
+    };
+    QSet<int> requested;
+    for(const QPoint& point : requestedVertices)
+        if(point.x() >= 0 && point.x() <= width
+           && point.y() >= 0 && point.y() <= height)
+            requested.insert(vertexKey(point));
+    Q_UNUSED(anchorVertices);
+    if(requested.isEmpty())
+    {
+        if(report) report->add("terrain.semantic_stroke_empty",
+            EValidationSeverity::Warning,
+            "The stroke did not cover an editable terrain vertex");
+        return command;
+    }
+
+    struct SCellState
+    {
+        quint16 packed{0};
+        STerrainTransitionSignature original;
+    };
+    QMap<int, SCellState> cells;
+    QSet<int> unknownCells;
+    QSet<int> blockedVertices;
+    for(int key : requested)
+    {
+        const int vertexX = key % vertexWidth;
+        const int vertexY = key / vertexWidth;
+        for(int cellY : {vertexY - 1, vertexY})
+        {
+            for(int cellX : {vertexX - 1, vertexX})
+            {
+                if(cellX < 0 || cellX >= width || cellY < 0 || cellY >= height)
+                    continue;
+                const int cellKey = cellY * width + cellX;
+                bool available = false;
+                const quint16 packed = packedTile(cellX, cellY, layer, &available);
+                if(!available)
+                    continue;
+                bool decoded = false;
+                const STerrainTransitionSignature signature =
+                    catalog.gridSignatureForPacked(packed, &decoded);
+                if(!decoded)
+                {
+                    unknownCells.insert(cellKey);
+                    blockedVertices.insert(key);
+                    continue;
+                }
+                SCellState state;
+                state.packed = packed;
+                state.original = signature;
+                cells.insert(cellKey, state);
+            }
+        }
+    }
+    if(cells.isEmpty())
+    {
+        if(report) report->add(layer == ETerrainTileLayer::Overlay
+                ? "terrain.overlay_vertex_inactive"
+                : "terrain.semantic_stroke_unavailable",
+            EValidationSeverity::Warning,
+            layer == ETerrainTileLayer::Overlay
+                ? "The stroke did not touch an active overlay surface"
+                : "The stroke did not touch described terrain tiles");
+        return command;
+    }
+    const int originallyRequested = requested.size();
+    requested.subtract(blockedVertices);
+
+    const auto corners = [](const STerrainTransitionSignature& signature) {
+        return QVector<qint32>({signature.northWest, signature.northEast,
+                               signature.southEast, signature.southWest});
+    };
+    const auto cellCornerKeys = [width, vertexWidth](int cellKey) {
+        const int x = cellKey % width;
+        const int y = cellKey / width;
+        return QVector<int>({y * vertexWidth + x,
+                             y * vertexWidth + x + 1,
+                             (y + 1) * vertexWidth + x + 1,
+                             (y + 1) * vertexWidth + x});
+    };
+    const auto signatureFromValues = [](const QVector<qint32>& values) {
+        STerrainTransitionSignature result;
+        result.northWest = values.at(0);
+        result.northEast = values.at(1);
+        result.southEast = values.at(2);
+        result.southWest = values.at(3);
+        return result;
+    };
+
+    QMap<int, QMap<qint32, int>> observedByVertex;
+    QMap<int, SCellState> activeCells;
+    for(auto entry = cells.constBegin(); entry != cells.constEnd(); ++entry)
+    {
+        const QVector<int> keys = cellCornerKeys(entry.key());
+        bool incidentToRequest = false;
+        for(int key : keys)
+            incidentToRequest |= requested.contains(key);
+        if(!incidentToRequest)
+            continue;
+        activeCells.insert(entry.key(), entry.value());
+        const QVector<qint32> values = corners(entry.value().original);
+        for(int corner = 0; corner < 4; ++corner)
+            ++observedByVertex[keys.at(corner)][values.at(corner)];
+    }
+    QMap<int, STerrainTransitionSignature> resolvedSignatures;
+    QSet<int> unsupportedVertices = blockedVertices;
+    int solverNodes = 0;
+    QSet<int> hardEdgeCells;
+    QSet<int> repairedBoundaryCells;
+    QSet<int> compatibleBoundaryCells;
+
+    // Consult all four incident cells at each shared vertex. This repairs a
+    // prior collapsed uniform boundary only when the surrounding authored
+    // terrain provides an unambiguous material consensus.
+    QMap<int, QMap<qint32, int>> contextObservedByVertex;
+    for(auto entry = activeCells.constBegin(); entry != activeCells.constEnd(); ++entry)
+    {
+        for(int key : cellCornerKeys(entry.key()))
+        {
+            if(contextObservedByVertex.contains(key))
+                continue;
+            const int vertexX = key % vertexWidth;
+            const int vertexY = key / vertexWidth;
+            const QPoint incidentCells[] = {
+                QPoint(vertexX, vertexY),
+                QPoint(vertexX - 1, vertexY),
+                QPoint(vertexX - 1, vertexY - 1),
+                QPoint(vertexX, vertexY - 1)};
+            const int incidentCorners[] = {0, 1, 2, 3};
+            for(int index = 0; index < 4; ++index)
+            {
+                const QPoint cell = incidentCells[index];
+                if(cell.x() < 0 || cell.x() >= width
+                   || cell.y() < 0 || cell.y() >= height)
+                    continue;
+                bool available = false;
+                const quint16 packed = packedTile(
+                    cell.x(), cell.y(), layer, &available);
+                if(!available)
+                    continue;
+                bool decoded = false;
+                const STerrainTransitionSignature signature =
+                    catalog.gridSignatureForPacked(packed, &decoded);
+                if(!decoded)
+                    continue;
+                const QVector<qint32> values = corners(signature);
+                ++contextObservedByVertex[key][values.at(incidentCorners[index])];
+            }
+            const QMap<qint32, int> observedValues =
+                contextObservedByVertex.value(key);
+            for(auto observed = observedValues.constBegin();
+                observed != observedValues.constEnd(); ++observed)
+                observedByVertex[key][observed.key()] += observed.value();
+        }
+    }
+
+    const auto outsideConsensus = [&](int key, qint32 cellValue,
+                                      bool* found) {
+        QMap<qint32, int> counts = contextObservedByVertex.value(key);
+        if(counts.contains(cellValue))
+        {
+            const int remaining = counts.value(cellValue) - 1;
+            if(remaining > 0)
+                counts[cellValue] = remaining;
+            else
+                counts.remove(cellValue);
+        }
+        qint32 best = cellValue;
+        int bestCount = 0;
+        bool tied = false;
+        for(auto value = counts.constBegin(); value != counts.constEnd(); ++value)
+        {
+            if(value.value() > bestCount)
+            {
+                best = value.key();
+                bestCount = value.value();
+                tied = false;
+            }
+            else if(value.value() == bestCount)
+                tied = true;
+        }
+        if(found)
+            *found = bestCount >= 2 && !tied && best != cellValue;
+        return best;
+    };
+
+    STerrainTransitionSignature uniform;
+    uniform.northWest = uniform.northEast = materialId;
+    uniform.southEast = uniform.southWest = materialId;
+    bool uniformChecked = false;
+    bool uniformFound = false;
+    bool missingWithoutFallback = false;
+    const QVector<STerrainTransitionSignature> authoredSignatures =
+        catalog.gridSignatures();
+    for(auto entry = activeCells.constBegin();
+        entry != activeCells.constEnd(); ++entry)
+    {
+        const QVector<int> keys = cellCornerKeys(entry.key());
+        const QVector<qint32> originalValues = corners(entry.value().original);
+        QVector<qint32> values;
+        for(int corner = 0; corner < keys.size(); ++corner)
+            values.append(requested.contains(keys.at(corner))
+                ? materialId : originalValues.at(corner));
+        STerrainTransitionSignature exact = signatureFromValues(values);
+        bool found = false;
+        catalog.selectForPaint(exact, entry.key() % width,
+                               entry.key() / width, distributionSeed, &found);
+        ++solverNodes;
+
+        const bool collapsedSelected =
+            exact.northWest == materialId && exact.northEast == materialId
+            && exact.southEast == materialId && exact.southWest == materialId;
+        if(collapsedSelected || !found)
+        {
+            QVector<qint32> repaired = values;
+            bool changed = false;
+            for(int corner = 0; corner < keys.size(); ++corner)
+            {
+                if(requested.contains(keys.at(corner)))
+                    continue;
+                bool consensusFound = false;
+                const qint32 consensus = outsideConsensus(
+                    keys.at(corner), originalValues.at(corner),
+                    &consensusFound);
+                if(consensusFound)
+                {
+                    repaired[corner] = consensus;
+                    changed = true;
+                }
+            }
+            if(changed)
+            {
+                const STerrainTransitionSignature candidate =
+                    signatureFromValues(repaired);
+                bool candidateFound = false;
+                catalog.selectForPaint(candidate, entry.key() % width,
+                                       entry.key() / width, distributionSeed,
+                                       &candidateFound);
+                ++solverNodes;
+                if(candidateFound)
+                {
+                    exact = candidate;
+                    found = true;
+                    repairedBoundaryCells.insert(entry.key());
+                }
+            }
+        }
+
+        const auto isSelectedUniform = [materialId](
+            const STerrainTransitionSignature& signature) {
+            return signature.northWest == materialId
+                && signature.northEast == materialId
+                && signature.southEast == materialId
+                && signature.southWest == materialId;
+        };
+        if(!found || isSelectedUniform(exact))
+        {
+            bool compatibleFound = false;
+            int bestScore = std::numeric_limits<int>::max();
+            STerrainTransitionSignature bestCompatible;
+            for(const STerrainTransitionSignature& candidate : authoredSignatures)
+            {
+                const QVector<qint32> candidateValues = corners(candidate);
+                bool compatible = true;
+                bool uniformSelected = true;
+                int changedCorners = 0;
+                int observedSupport = 0;
+                for(int corner = 0; corner < keys.size(); ++corner)
+                {
+                    const int key = keys.at(corner);
+                    const qint32 candidateValue = candidateValues.at(corner);
+                    uniformSelected &= candidateValue == materialId;
+                    if(requested.contains(key))
+                    {
+                        if(candidateValue != materialId)
+                        {
+                            compatible = false;
+                            break;
+                        }
+                        continue;
+                    }
+                    if(candidateValue != originalValues.at(corner)
+                       && !contextObservedByVertex.value(key).contains(candidateValue))
+                    {
+                        compatible = false;
+                        break;
+                    }
+                    changedCorners += candidateValue != originalValues.at(corner);
+                    observedSupport += contextObservedByVertex.value(key)
+                        .value(candidateValue);
+                }
+                if(!compatible || uniformSelected)
+                    continue;
+                const int score = changedCorners * 1000 - observedSupport;
+                const auto lexicallyBefore = [](
+                    const STerrainTransitionSignature& left,
+                    const STerrainTransitionSignature& right) {
+                    if(left.northWest != right.northWest)
+                        return left.northWest < right.northWest;
+                    if(left.northEast != right.northEast)
+                        return left.northEast < right.northEast;
+                    if(left.southEast != right.southEast)
+                        return left.southEast < right.southEast;
+                    return left.southWest < right.southWest;
+                };
+                if(!compatibleFound || score < bestScore
+                   || (score == bestScore
+                       && lexicallyBefore(candidate, bestCompatible)))
+                {
+                    compatibleFound = true;
+                    bestScore = score;
+                    bestCompatible = candidate;
+                }
+            }
+            solverNodes += authoredSignatures.size();
+            if(compatibleFound)
+            {
+                exact = bestCompatible;
+                found = true;
+                compatibleBoundaryCells.insert(entry.key());
+            }
+        }
+        if(found)
+            resolvedSignatures.insert(entry.key(), exact);
+        else
+        {
+            if(allowUniformFallback && !uniformChecked)
+            {
+                catalog.selectForPaint(uniform, 0, 0, distributionSeed,
+                                       &uniformFound);
+                ++solverNodes;
+                uniformChecked = true;
+            }
+            if(allowUniformFallback && uniformFound)
+            {
+                resolvedSignatures.insert(entry.key(), uniform);
+                hardEdgeCells.insert(entry.key());
+            }
+            else
+            {
+                missingWithoutFallback = true;
+                for(int key : keys)
+                    if(requested.contains(key))
+                        unsupportedVertices.insert(key);
+            }
+        }
+    }
+
+    if(missingWithoutFallback)
+    {
+        resolvedSignatures.clear();
+        hardEdgeCells.clear();
+        unsupportedVertices.unite(requested);
+    }
+
+    QMap<int, QSet<qint32>> resolvedVertices;
+    QSet<int> verticesWithHardEdgeCells;
+    bool invariantFailed = false;
+    for(auto entry = resolvedSignatures.constBegin();
+        entry != resolvedSignatures.constEnd(); ++entry)
+    {
+        const QVector<int> keys = cellCornerKeys(entry.key());
+        const QVector<qint32> values = corners(entry.value());
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            const int key = keys.at(corner);
+            const qint32 value = values.at(corner);
+            resolvedVertices[key].insert(value);
+            if(hardEdgeCells.contains(entry.key()))
+                verticesWithHardEdgeCells.insert(key);
+            if(value != materialId
+               && !observedByVertex.value(key).contains(value))
+                invariantFailed = true;
+        }
+    }
+    for(auto entry = resolvedVertices.constBegin();
+        entry != resolvedVertices.constEnd(); ++entry)
+    {
+        if(!requested.contains(entry.key()) || entry.value().size() <= 1)
+            continue;
+        if(!verticesWithHardEdgeCells.contains(entry.key())
+           || !entry.value().contains(materialId))
+            invariantFailed = true;
+        for(qint32 value : entry.value())
+            if(value != materialId
+               && !observedByVertex.value(entry.key()).contains(value))
+                invariantFailed = true;
+    }
+    if(invariantFailed)
+    {
+        if(report) report->add("terrain.semantic_stroke_vertex_conflict",
+            EValidationSeverity::Error,
+            "The stroke resolver produced conflicting or unrelated material identities at a shared terrain vertex");
+        return command;
+    }
+
+    QVector<int> activeKeys = requested.values().toVector();
+    std::sort(activeKeys.begin(), activeKeys.end());
+    for(int key : activeKeys)
+        if(!unsupportedVertices.contains(key))
+            command.semanticAudit.paintedVertices.append(
+                QPoint(key % vertexWidth, key / vertexWidth));
+    command.semanticAudit.solverNodes = solverNodes;
+    if(!hardEdgeCells.isEmpty())
+        command.semanticAudit.solverMode =
+            QStringLiteral("vertex-stroke-local-hard-edge");
+    else if(!repairedBoundaryCells.isEmpty())
+        command.semanticAudit.solverMode =
+            QStringLiteral("vertex-stroke-authored-boundary-repair");
+    else if(!compatibleBoundaryCells.isEmpty())
+        command.semanticAudit.solverMode =
+            QStringLiteral("vertex-stroke-compatible-authored");
+    else if(!unsupportedVertices.isEmpty())
+        command.semanticAudit.solverMode =
+            QStringLiteral("vertex-stroke-unavailable");
+
+    QVector<int> orderedCells = resolvedSignatures.keys().toVector();
+    std::sort(orderedCells.begin(), orderedCells.end());
+    for(int cellKey : orderedCells)
+    {
+        const int x = cellKey % width;
+        const int y = cellKey / width;
+        const STerrainTransitionSignature desired =
+            resolvedSignatures.value(cellKey, cells.value(cellKey).original);
+        bool found = false;
+        const SCellState& cell = cells.value(cellKey);
+        const quint16 after = catalog.selectForPaint(
+            desired, x, y, distributionSeed, &found);
+        if(!found)
+        {
+            if(report) report->add("terrain.semantic_stroke_internal",
+                EValidationSeverity::Error,
+                "The whole-stroke resolver produced a signature absent from the Material atlas",
+                QString("%1,%2").arg(x).arg(y));
+            command.deltas.clear();
+            return command;
+        }
+        command.semanticAudit.affectedCells.append(QPoint(x, y));
+        if(after == cell.packed)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = x;
+        delta.globalY = y;
+        delta.layer = layer;
+        delta.before = cell.packed;
+        delta.after = after;
+        delta.hasSemanticRequest = true;
+        delta.requestedMaterialId = materialId;
+        delta.requestedSignature = desired;
+        command.deltas.append(delta);
+    }
+    if(!unknownCells.isEmpty() && report)
+        report->add("terrain.semantic_stroke_unknown",
+            EValidationSeverity::Warning,
+            "Some requested vertices touch atlas tiles not described by the active profile and were left unchanged",
+            QString::number(unknownCells.size()));
+    if(!unsupportedVertices.isEmpty() && report)
+        report->add(allowUniformFallback
+                ? "terrain.semantic_stroke_atlas_limit"
+                : "terrain.classic_auto_missing_blend",
+            allowUniformFallback ? EValidationSeverity::Warning
+                                 : EValidationSeverity::Error,
+            allowUniformFallback
+                ? "The Material atlas cannot represent this material across the requested adjacent vertices. Nothing was changed; use a single-vertex junction stamp or add the missing atlas transitions"
+                : "Classic Auto refused the whole stroke because the current atlas lacks one or more required exact blends. Use Modern mode to add them.",
+            QString("%1 of %2 vertices were not paintable")
+                .arg(unsupportedVertices.size()).arg(originallyRequested));
+    if(!hardEdgeCells.isEmpty() && report)
+        report->add("terrain.semantic_stroke_hard_edge",
+            EValidationSeverity::Warning,
+            "The Material atlas is missing some boundary transitions. Exact blends were preserved and only the unresolved boundary tiles used the selected material's uniform hard-edge fallback",
+            QString("%1 boundary tile(s) used hard-edge fallback")
+                .arg(hardEdgeCells.size()));
     return command;
 }
 

@@ -55,6 +55,11 @@ struct STerrainTileBrush
     ETerrainTileBrushShape shape{ETerrainTileBrushShape::Circle};
 };
 
+// Returns both endpoints and enough integer grid points that consecutive
+// samples always touch. Authored-atlas painting resolves the collected stroke
+// once, so sparse mouse events must not leave gaps between requested vertices.
+QVector<QPoint> terrainVertexStrokeLine(const QPoint& from, const QPoint& to);
+
 struct STerrainTransitionSignature
 {
     qint32 northWest{0};
@@ -458,6 +463,14 @@ public:
         quint32 distributionSeed,
         CValidationReport* report = nullptr,
         qint32 preferredSupportId = 0) const;
+    STerrainTileCommand makeSemanticVertexStrokePaint(
+        const QVector<QPoint>& requestedVertices,
+        const QVector<QPoint>& anchorVertices,
+        ETerrainTileLayer layer, qint32 materialId,
+        const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed,
+        CValidationReport* report = nullptr,
+        bool allowUniformFallback = true) const;
     // Modern flow: material identity is committed to an independent vertex
     // field. Drag preview is deliberately uniform; release prefers authored
     // exact tiles. The caller must realize absent tuples in the live working

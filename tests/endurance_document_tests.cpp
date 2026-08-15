@@ -382,6 +382,7 @@ private slots:
     void cornerOnlyMaterialPaintUsesAuthoredContextAndStaysLocal();
     void vertexMaterialBrushPaintsCircleAndConstrainsCornerOnlyFamilies();
     void semanticVertexPaintNeverUsesUniformForBlendFallback();
+    void classicAutoStrokeUsesAuthoredResolverAndRerollsExactVariants();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void overlayActivationDeactivationIsLosslessAndUndoable();
@@ -4140,6 +4141,114 @@ void EnduranceDocumentTests::semanticVertexPaintNeverUsesUniformForBlendFallback
         QVERIFY2(!uniform,
             "Legacy immediate resolver substituted uniform artwork for a blend");
     }
+}
+
+void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExactVariants()
+{
+    CTerrainTransitionCatalog catalog;
+    const auto add = [&catalog](const STerrainTransitionSignature& signature,
+                                quint16 packed) {
+        STerrainTransitionVariant variant;
+        variant.signature = signature;
+        variant.packedTile = packed;
+        return catalog.addVariant(variant);
+    };
+    STerrainTransitionSignature background;
+    background.northWest = background.northEast = 1;
+    background.southEast = background.southWest = 1;
+    STerrainTransitionSignature selected;
+    selected.northWest = selected.northEast = 2;
+    selected.southEast = selected.southWest = 2;
+    STerrainTransitionSignature authored;
+    authored.northWest = 2;
+    authored.northEast = authored.southEast = authored.southWest = 1;
+    QVERIFY(add(background, 0));
+    QVERIFY(add(selected, 1));
+    QVERIFY(add(selected, 2));
+    for(int rotation = 0; rotation < 4; ++rotation)
+        QVERIFY(add(CTerrainTransitionCatalog::rotated(authored, rotation),
+                    quint16(3 | (rotation << 14))));
+
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(16)),
+        "classic-auto-authored-stroke.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+
+    const QVector<QPoint> requested({QPoint(8, 8)});
+    CValidationReport firstReport;
+    const STerrainTileCommand first = terrain.makeSemanticVertexStrokePaint(
+        requested, requested, ETerrainTileLayer::Land, 2, catalog,
+        0x434C4153u, &firstReport, false);
+    QVERIFY2(!firstReport.hasErrors(), qPrintable(firstReport.toText()));
+    QVERIFY(!first.isEmpty());
+    for(const STerrainTileDelta& delta : first.deltas)
+    {
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            catalog.gridSignatureForPacked(delta.after, &found);
+        QVERIFY(found);
+        QVERIFY2(!(signature.northWest == 2 && signature.northEast == 2
+                   && signature.southEast == 2 && signature.southWest == 2),
+                 "Classic Auto substituted a uniform tile for an authored blend");
+    }
+    QVERIFY(terrain.apply(first, true));
+
+    STerrainTileCommand uniformSetup;
+    for(const QPoint& cell : {QPoint(7, 7), QPoint(8, 7),
+                              QPoint(7, 8), QPoint(8, 8)})
+    {
+        STerrainTileDelta delta;
+        delta.globalX = cell.x();
+        delta.globalY = cell.y();
+        delta.layer = ETerrainTileLayer::Land;
+        delta.before = terrain.packedTile(
+            cell.x(), cell.y(), ETerrainTileLayer::Land);
+        delta.after = 1;
+        if(delta.before != delta.after)
+            uniformSetup.deltas.append(delta);
+    }
+    QVERIFY(terrain.apply(uniformSetup, true));
+
+    // A later committed stroke over an already-selected semantic region must
+    // run exact candidate selection again instead of being collapsed solely
+    // because its corner identities are unchanged.
+    bool rerolled = false;
+    for(quint32 seed = 1; seed < 128 && !rerolled; ++seed)
+    {
+        CValidationReport repaintReport;
+        const STerrainTileCommand repaint =
+            terrain.makeSemanticVertexStrokePaint(
+                requested, requested, ETerrainTileLayer::Land, 2, catalog,
+                seed, &repaintReport, false);
+        QVERIFY2(!repaintReport.hasErrors(),
+                 qPrintable(repaintReport.toText()));
+        rerolled = !repaint.isEmpty();
+    }
+    QVERIFY2(rerolled,
+             "Classic Auto collapsed every same-semantic repaint to a no-op");
+
+    CTerrainTransitionCatalog missingBlend;
+    STerrainTransitionVariant backgroundOnly;
+    backgroundOnly.signature = background;
+    backgroundOnly.packedTile = 0;
+    QVERIFY(missingBlend.addVariant(backgroundOnly));
+    STerrainTransitionVariant uniformOnly;
+    uniformOnly.signature = selected;
+    uniformOnly.packedTile = 1;
+    QVERIFY(missingBlend.addVariant(uniformOnly));
+    CTerrainEditModel strictTerrain;
+    QVERIFY(strictTerrain.load(document));
+    CValidationReport strictReport;
+    const STerrainTileCommand refused =
+        strictTerrain.makeSemanticVertexStrokePaint(
+            requested, requested, ETerrainTileLayer::Land, 2,
+            missingBlend, 0x53545243u, &strictReport, false);
+    QVERIFY(refused.isEmpty());
+    QVERIFY(strictReport.hasErrors());
+    QVERIFY(strictReport.toText().contains(
+        QStringLiteral("terrain.classic_auto_missing_blend")));
 }
 
 void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValues()
