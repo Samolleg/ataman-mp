@@ -6263,6 +6263,18 @@ void MainWindow::updateLoadedMapPanel()
     updateOperationAvailability();
 }
 
+void MainWindow::updateLoadedMapMprDirtyIndicator()
+{
+    if(!m_loadedMapTree || m_loadedMapTree->topLevelItemCount() < 1)
+        return;
+    QTreeWidgetItem* root = m_loadedMapTree->topLevelItem(0);
+    if(!root || root->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMpr
+       || !CLandscape::getInstance()->isMprLoad())
+        return;
+    root->setText(0, CLandscape::getInstance()->filePath().fileName()
+                  + (CLandscape::getInstance()->isDirty() ? " *" : ""));
+}
+
 void MainWindow::updateOutlinerSelectionPath()
 {
     if(!m_outlinerSelectionPath || !m_objectPropertiesHeader
@@ -7987,6 +7999,7 @@ void MainWindow::on_actionCreate_new_object_triggered()
 
 void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
 {
+    bool stateChanged = true;
     switch (type) {
         case eTitleTypeData::eTitleTypeDataActiveMob:
     {
@@ -8008,23 +8021,30 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
     }
     case eTitleTypeData::eTitleTypeDataMprDirtyFlag:
     {
-        m_sWindowTitle.mprDirty = !data.isEmpty();
+        const bool dirty = !data.isEmpty();
+        stateChanged = m_sWindowTitle.mprDirty != dirty;
+        m_sWindowTitle.mprDirty = dirty;
         break;
     }
     case eTitleTypeData::eTitleTypeDataDirtyFlag:
     {
-        m_sWindowTitle.durty = !data.isEmpty();
+        const bool dirty = !data.isEmpty();
+        stateChanged = m_sWindowTitle.durty != dirty;
+        m_sWindowTitle.durty = dirty;
         break;
     }
     default:
         Q_ASSERT(false);
         break;
     }
+    if(!stateChanged)
+        return;
     rebuildWindowTitle();
     updateDocumentActionAvailability();
-    if(type == eTitleTypeData::eTitleTypeDataMpr
-       || type == eTitleTypeData::eTitleTypeDataMprDirtyFlag)
+    if(type == eTitleTypeData::eTitleTypeDataMpr)
         updateLoadedMapPanel();
+    else if(type == eTitleTypeData::eTitleTypeDataMprDirtyFlag)
+        updateLoadedMapMprDirtyIndicator();
     updateMapTestAction();
     if(type == eTitleTypeData::eTitleTypeDataMpr)
         refreshMapTestContext();

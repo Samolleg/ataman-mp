@@ -92,6 +92,32 @@ class LandscapeSculptPerformanceContractTests(unittest.TestCase):
         self.assertIn("if(m_sculptGestureCaptured", release)
         self.assertIn("m_sculptGestureCaptured = false", release)
 
+    def test_mpr_history_changes_do_not_reserialize_every_mob(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        history = view.split(
+            "connect(m_pUndoStack, &QUndoStack::indexChanged", 1
+        )[1].split("m_pProgress = pProgress", 1)[0]
+
+        self.assertIn("mprOnlyChange", history)
+        self.assertIn("CTerrainHeightPreviewCommand", history)
+        self.assertIn("COverlaySurfacePreviewCommand", history)
+        self.assertIn("if(!selectionOnly && !mprOnlyChange)", history)
+
+    def test_mpr_dirty_star_does_not_rebuild_the_complete_loaded_map_tree(self):
+        main_window = (ROOT / "source/app/main_window.cpp").read_text(
+            encoding="utf-8"
+        )
+        title = main_window.split("void MainWindow::updateWindowTitle", 1)[1].split(
+            "void MainWindow::rebuildWindowTitle", 1
+        )[0]
+
+        self.assertIn("updateLoadedMapMprDirtyIndicator", title)
+        self.assertNotIn(
+            "|| type == eTitleTypeData::eTitleTypeDataMprDirtyFlag)\n"
+            "        updateLoadedMapPanel();",
+            title,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

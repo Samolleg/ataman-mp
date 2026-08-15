@@ -1491,11 +1491,24 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
         for(int commandIndex = first; selectionOnly && commandIndex < last; ++commandIndex)
             selectionOnly = dynamic_cast<const CSelectionCommand*>(
                 m_pUndoStack->command(commandIndex)) != nullptr;
-        if(!selectionOnly)
+        bool mprOnlyChange = first >= 0 && first < last
+            && last <= (m_pUndoStack ? m_pUndoStack->count() : 0);
+        for(int commandIndex = first; mprOnlyChange && commandIndex < last;
+            ++commandIndex)
+        {
+            const QUndoCommand* command = m_pUndoStack->command(commandIndex);
+            mprOnlyChange = dynamic_cast<const CTerrainHeightPreviewCommand*>(command)
+                || dynamic_cast<const CTerrainVerticalScalePreviewCommand*>(command)
+                || dynamic_cast<const CTerrainTilePreviewCommand*>(command)
+                || dynamic_cast<const COverlaySurfacePreviewCommand*>(command)
+                || dynamic_cast<const CMprParametersPreviewCommand*>(command);
+        }
+        if(!selectionOnly && !mprOnlyChange)
         {
             refreshMobDirtyStates();
-            m_spatialIndexDirty = true;
         }
+        if(!selectionOnly)
+            m_spatialIndexDirty = true;
         bool navigationChange = false;
         for(int commandIndex = first; !navigationChange && commandIndex < last;
             ++commandIndex)

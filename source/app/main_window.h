@@ -167,6 +167,7 @@ private:
     bool beginWorkspaceLoad(const QString& description);
     void endWorkspaceLoad();
     void updateLoadedMapPanel();
+    void updateLoadedMapMprDirtyIndicator();
     void updateOutlinerSelectionPath();
     void updateLogicSlotBarVisibility();
     void updateBehaviorModeUi();
