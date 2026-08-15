@@ -133,8 +133,8 @@ void ResArchiveDocumentTests::replacementPreservesUntouchedMembersAndMetadata()
     QVERIFY2(baseline.replaceMember("map.txt", sha(baseline.memberPayload("map.txt")),
                                     replacement, &output, &errors), qPrintable(errors.join('\n')));
     QVERIFY(output.startsWith(bytes.left(8)));
-    QCOMPARE(output.mid(12, bytes.size() - 12), bytes.mid(12));
-    QVERIFY(output.size() > bytes.size());
+    QCOMPARE(output.size(), bytes.size() + replacement.size()
+             - baseline.memberPayload("map.txt").size());
 
     CResArchiveDocument reopened;
     QVERIFY2(reopened.loadBytes(output, "staged.res", &errors), qPrintable(errors.join('\n')));
