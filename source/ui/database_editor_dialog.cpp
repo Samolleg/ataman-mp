@@ -19,6 +19,7 @@
 #include <QHeaderView>
 #include <QHash>
 #include <QInputDialog>
+#include <QItemSelectionModel>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -38,6 +39,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QPlainTextEdit>
+#include <QPainter>
 #include <QScreen>
 #include <QShortcut>
 #include <QScrollBar>
@@ -158,17 +160,11 @@ public:
             return {};
         }
         const SDatabaseFieldSchema* field=fieldAt(index.column());if(!field)return {};
-        const QVariant stored=row->values.value(field->key);const QString full=fullText(index,*table,*field,stored);
-        if(role==Qt::DisplayRole){QString preview=full;preview.replace('\n',", ");return boundedCellPreview(preview);}
-        if(role==Qt::EditRole)return field->type==EDatabaseFieldType::Integer||field->type==EDatabaseFieldType::Decimal?stored:QVariant(full);
+        const QVariant stored=row->values.value(field->key);
         if(role==RowKeyRole)return row->stableKey;
         if(role==FieldKeyRole)return field->key;
-        if(role==FullTextRole)return full;
         if(role==RawValueRole)return stored;
         if(role==ReferenceTableRole)return field->referenceTable;
-        if(role==ResourceReferenceRole)return field->resourceReference
-            ? (field->resourceExtension.isEmpty() || QFileInfo(full).suffix().compare(field->resourceExtension,Qt::CaseInsensitive)==0
-                ? full : full+QLatin1Char('.')+field->resourceExtension) : QString();
         if(role==ChoicesRole)return choicesForColumn(index.column());
         if(role==FilterTextRole)return filterText(index.row(),*table,*row,rowNumber);
         if(role==Qt::ForegroundRole&&(!field->referenceTable.isEmpty()||field->resourceReference))return QBrush(QColor(35,110,190));
@@ -179,8 +175,22 @@ public:
             if(!editable)return reason.isEmpty()?tr("Read-only raw payload. It remains preserved byte-for-byte; editing is disabled until this field's type and serializer are verified."):reason;
             if(!field->referenceTable.isEmpty())return tr("Choose a referenced row from the list. Right-click and select Open Referenced Row to follow the link.");
             if(field->resourceReference)return tr("This value names a game resource. Right-click and select Open in Resource Browser to locate its active provider.");
+            const QString full=fullText(index,*table,*field,stored);
             return tr("Preview limited to %1 of %2 characters. Double-click or press Enter/F2 to edit the complete value.").arg(data(index,Qt::DisplayRole).toString().size()).arg(full.size());
         }
+        if(role==ResourceReferenceRole)
+        {
+            if(!field->resourceReference)return QString();
+            const QString full=fullText(index,*table,*field,stored);
+            return field->resourceExtension.isEmpty()
+                ||QFileInfo(full).suffix().compare(field->resourceExtension,Qt::CaseInsensitive)==0
+                ?full:full+QLatin1Char('.')+field->resourceExtension;
+        }
+        if(role!=Qt::DisplayRole&&role!=Qt::EditRole&&role!=FullTextRole)return {};
+        const QString full=fullText(index,*table,*field,stored);
+        if(role==Qt::DisplayRole){QString preview=full;preview.replace('\n',", ");return boundedCellPreview(preview);}
+        if(role==Qt::EditRole)return field->type==EDatabaseFieldType::Integer||field->type==EDatabaseFieldType::Decimal?stored:QVariant(full);
+        if(role==FullTextRole)return full;
         return {};
     }
     Qt::ItemFlags flags(const QModelIndex& index)const override
@@ -244,7 +254,17 @@ private:
     {
         const quint64 key=cacheKey(index);const auto found=m_editable.constFind(key);
         if(found!=m_editable.constEnd()){if(reason)*reason=found.value().second;return found.value().first;}
-        QString detail;const bool editable=field.writable&&m_document->fieldEditable(m_tableKey,row.stableKey,field.key,&detail);
+        QString detail;bool editable=false;const auto*table=m_document->table(m_tableKey);
+        // Physical fields do not need DatabaseDocument's general row/field
+        // search: presence in this already-resolved row is the complete rule.
+        if(!field.writable)detail=tr("Field is unsupported or read-only.");
+        else if(table&&table->physicalTable>=0&&field.storageId>=0
+                &&!field.key.startsWith(QStringLiteral("jmv."),Qt::CaseInsensitive))
+        {
+            editable=row.added||row.values.contains(field.key);
+            if(!editable)detail=tr("This optional field is absent from the source row; safe field insertion is not yet proven.");
+        }
+        else editable=m_document->fieldEditable(m_tableKey,row.stableKey,field.key,&detail);
         m_editable.insert(key,qMakePair(editable,detail));if(reason)*reason=detail;return editable;
     }
     void clearValueCaches(){m_fullText.clear();m_filterText.clear();m_editable.clear();}
@@ -282,6 +302,15 @@ class DatabaseValueDelegate final : public QStyledItemDelegate
 {
 public:
     explicit DatabaseValueDelegate(QObject* parent=nullptr):QStyledItemDelegate(parent){}
+    void paint(QPainter* painter,const QStyleOptionViewItem& option,
+               const QModelIndex& index)const override
+    {
+        QStyleOptionViewItem styled(option);
+        const QAbstractItemView* view=qobject_cast<const QAbstractItemView*>(
+            option.widget?option.widget->parentWidget():nullptr);
+        if(view&&view->currentIndex().row()==index.row())styled.state|=QStyle::State_Selected;
+        QStyledItemDelegate::paint(painter,styled,index);
+    }
     QWidget* createEditor(QWidget* parent,const QStyleOptionViewItem& option,const QModelIndex& index)const override
     {
         const QStringList choices=index.data(ChoicesRole).toStringList();if(choices.isEmpty())return QStyledItemDelegate::createEditor(parent,option,index);auto* combo=new QComboBox(parent);combo->setEditable(true);combo->setInsertPolicy(QComboBox::NoInsert);combo->addItems(choices);combo->setMaxVisibleItems(24);combo->completer()->setCaseSensitivity(Qt::CaseInsensitive);combo->completer()->setFilterMode(Qt::MatchContains);return combo;
@@ -301,7 +330,7 @@ public:
         m_frozen->verticalHeader()->hide();
         m_frozen->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         m_frozen->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        m_frozen->setSelectionBehavior(QAbstractItemView::SelectRows);
+        m_frozen->setSelectionBehavior(QAbstractItemView::SelectItems);
         m_frozen->setSelectionMode(QAbstractItemView::SingleSelection);
         m_frozen->setAlternatingRowColors(true);
         setWordWrap(false);m_frozen->setWordWrap(false);
@@ -334,6 +363,12 @@ public:
     void setSharedDelegate(QAbstractItemDelegate* delegate)
     {setItemDelegate(delegate);m_frozen->setItemDelegate(delegate);}
     QTableView* frozenView()const{return m_frozen;}
+    void selectRow(int row)
+    {
+        if(!model()||row<0||row>=model()->rowCount())return;
+        const int column=currentIndex().isValid()?currentIndex().column():0;
+        setCurrentIndex(model()->index(row,qBound(0,column,model()->columnCount()-1)));
+    }
     int frozenColumnCount()const{return m_frozenColumns;}
     void setFrozenColumnCount(int count)
     {m_frozenColumns=qBound(0,count,model()?model()->columnCount():0);
@@ -390,6 +425,22 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QSharedPointer<DatabaseDocument
     auto* filterRow=new QWidget(this);auto* filterLayout=new QHBoxLayout(filterRow);filterLayout->setContentsMargins(0,0,0,0);
     m_filter=new QLineEdit(filterRow);m_filter->setObjectName(QStringLiteral("databaseRowFilter"));m_filter->setPlaceholderText(tr("Filter rows across all fields or enter #row…"));filterLayout->addWidget(m_filter,1);layout->addWidget(filterRow);
     auto* split=new QSplitter(this);m_tables=new QListWidget(split);m_tables->setMinimumWidth(190);m_grid=new DatabaseFrozenTableView(split);m_grid->setObjectName("databaseGrid");m_model=new DatabaseTableModel(document,m_grid);m_proxy=new DatabaseFilterModel(m_grid);m_proxy->setObjectName("databaseFilterModel");m_proxy->setSourceModel(m_model);m_grid->setModel(m_proxy);m_grid->setSharedDelegate(new DatabaseValueDelegate(m_grid));m_grid->setSortingEnabled(true);m_grid->setSelectionBehavior(QAbstractItemView::SelectRows);m_grid->setSelectionMode(QAbstractItemView::SingleSelection);m_grid->setAlternatingRowColors(true);m_grid->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->frozenView()->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->setEditTriggers(QAbstractItemView::DoubleClicked|QAbstractItemView::EditKeyPressed|QAbstractItemView::SelectedClicked);m_grid->verticalHeader()->setDefaultSectionSize(22);m_grid->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);m_grid->horizontalHeader()->setDefaultSectionSize(150);m_grid->horizontalHeader()->setMinimumSectionSize(45);m_grid->horizontalHeader()->setMaximumSectionSize(300);m_grid->horizontalHeader()->setSectionsMovable(false);m_grid->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);m_grid->frozenView()->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);split->setStretchFactor(1,1);layout->addWidget(split,1);
+    // A database action is row-scoped, but selecting every cell in a wide raw
+    // table makes Qt synchronously resolve and repaint every column. Keep one
+    // current cell and let the delegate provide the same full-row highlight.
+    m_grid->setSelectionBehavior(QAbstractItemView::SelectItems);
+    connect(m_grid->selectionModel(),&QItemSelectionModel::currentChanged,this,
+        [this](const QModelIndex& current,const QModelIndex& previous)
+    {
+        const auto repaintRow=[](QTableView* view,int row)
+        {
+            if(!view||!view->model()||row<0||row>=view->model()->rowCount())return;
+            const QRect cell=view->visualRect(view->model()->index(row,0));
+            if(cell.isValid())view->viewport()->update(0,cell.top(),view->viewport()->width(),cell.height());
+        };
+        repaintRow(m_grid,previous.row());repaintRow(m_grid,current.row());
+        repaintRow(m_grid->frozenView(),previous.row());repaintRow(m_grid->frozenView(),current.row());
+    });
     auto* constructorButton=new QPushButton(tr("Item / Spell Constructor…"),this);constructorButton->setObjectName("databaseItemSpellConstructorButton");layout->addWidget(constructorButton,0,Qt::AlignLeft);connect(constructorButton,&QPushButton::clicked,this,[this](){emit itemSpellConstructorRequested(QString());});
     auto* buttons=new QDialogButtonBox(this);m_cloneButton=buttons->addButton(tr("Clone Row…"),QDialogButtonBox::ActionRole);m_deleteButton=buttons->addButton(tr("Delete Row"),QDialogButtonBox::ActionRole);auto* reviewButton=buttons->addButton(tr("Review Changes…"),QDialogButtonBox::ActionRole);auto* exportButton=buttons->addButton(tr("Export XLSX…"),QDialogButtonBox::ActionRole);auto* importButton=buttons->addButton(tr("Import XLSX…"),QDialogButtonBox::ActionRole);auto* applyButton=buttons->addButton(tr("Apply Database"),QDialogButtonBox::ActionRole);auto* saveButton=buttons->addButton(tr("Save Database As…"),QDialogButtonBox::ActionRole);saveButton->setObjectName("databaseSaveAsButton");buttons->addButton(QDialogButtonBox::Close);layout->addWidget(buttons);m_status=new QLabel(this);m_status->setWordWrap(true);layout->addWidget(m_status);
     importButton->setText(tr("Import…"));

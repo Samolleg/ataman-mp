@@ -33,6 +33,10 @@ def main() -> int:
             "The action must work from an archive selection, not only a member preview.")
     require(browser_cpp, "item->data(0, kEntryRole).toInt() != visibleEntryIndex",
             "Reference navigation must map through each sorted visual item's stable catalog index.")
+    require(browser_cpp, "m_search->setText(target.logicalName)",
+            "Reference navigation must filter to the exact target instead of rebuilding every visible member.")
+    require(main_window, "QTimer::singleShot(0,this,[this,reference]",
+            "Cross-tool navigation must yield so the Resource Browser can come forward before target resolution.")
     if "m_resources->topLevelItem(row);\n            m_resources->setCurrentItem(item)" in browser_cpp:
         raise AssertionError("Reference navigation still treats an unsorted catalog row as a visual row.")
     classifier = browser_cpp[browser_cpp.index("bool isDedicatedDatabaseArchive"):

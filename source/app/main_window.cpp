@@ -569,14 +569,19 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::resourceBrowserRequested,
                 this, [this](const QString& reference)
         {
-            const bool selected = m_resourceBrowser->selectResourceReference(reference);
             ei::revealDockNavigationTarget(this, m_resourceBrowserDock);
-            ei::log(selected ? eLogInfo : eLogWarning,
-                    QString("Database resource navigation reference:'%1' accepted:%2")
-                        .arg(reference).arg(selected ? 1 : 0));
-            if(!selected)
-                QMessageBox::information(this, tr("Resource not found"),
-                    tr("No active-profile resource matches '%1'.").arg(reference));
+            // Yield once so the browser becomes visible before catalog lookup
+            // and row selection. Asset decoding already runs asynchronously.
+            QTimer::singleShot(0,this,[this,reference]()
+            {
+                const bool selected=m_resourceBrowser->selectResourceReference(reference);
+                ei::log(selected ? eLogInfo : eLogWarning,
+                        QString("Database resource navigation reference:'%1' accepted:%2")
+                            .arg(reference).arg(selected ? 1 : 0));
+                if(!selected)
+                    QMessageBox::information(this,tr("Resource not found"),
+                        tr("No active-profile resource matches '%1'.").arg(reference));
+            });
         });
     }
 

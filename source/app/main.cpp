@@ -94,6 +94,8 @@ QByteArray resourceNavigationArchiveBytes()
     QVector<Member> members;
     members << Member{QByteArray("z-target.mod"),QByteArray("model"),0}
             << Member{QByteArray("a-unrelated.wav"),QByteArray("audio"),0};
+    for(int index=0;index<1000;++index)
+        members<<Member{QString("bulk-%1.wav").arg(index,4,10,QLatin1Char('0')).toLatin1(),QByteArray("x"),0};
     QByteArray bytes(16,'\0'),names;
     for(Member& member:members)
     {
@@ -129,7 +131,10 @@ bool resourceNavigationExactTargetCheck()
     {QApplication::processEvents();QThread::msleep(5);}
     if(!tree)return false;
     tree->sortItems(0,Qt::DescendingOrder);
-    return browser.selectResourceReference(QStringLiteral("z-target.mod"))
+    QElapsedTimer navigation;navigation.start();
+    const bool selected=browser.selectResourceReference(QStringLiteral("z-target.mod"));
+    const qint64 navigationMs=navigation.elapsed();
+    return selected&&navigationMs<100&&tree->topLevelItemCount()<=2
         &&tree->currentItem()&&tree->currentItem()->text(0)==QStringLiteral("z-target.mod");
 }
 

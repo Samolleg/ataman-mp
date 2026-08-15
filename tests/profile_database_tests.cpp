@@ -1983,11 +1983,25 @@ void ProfileDatabaseTests::installedRaceModelSelectionAndContextLatency()
         grid->viewport()->mapToGlobal(visual.center()));
     QApplication::sendEvent(grid->viewport(),&event);QApplication::processEvents();
     const qint64 contextMs=timer.elapsed();
+    const int contextSelectionCells=grid->selectionModel()->selectedIndexes().size();
     if(QMenu* menu=qobject_cast<QMenu*>(QApplication::activePopupWidget()))menu->close();
+    qint64 worstColdRowMs=0,totalColdRowsMs=0;
+    const int lastRow=qMin(grid->model()->rowCount()-1,100);
+    for(int row=10;row<=lastRow;row+=5)
+    {
+        const QModelIndex cold=grid->model()->index(row,cell.column());
+        timer.restart();grid->setCurrentIndex(cold);grid->selectRow(row);
+        QApplication::processEvents();const qint64 elapsed=timer.elapsed();
+        worstColdRowMs=qMax(worstColdRowMs,elapsed);totalColdRowsMs+=elapsed;
+    }
     qInfo()<<"Race Models UI latency ms selection"<<selectionMs<<"context"<<contextMs
+           <<"worst cold row"<<worstColdRowMs<<"cold total"<<totalColdRowsMs
+           <<"context selection cells"<<contextSelectionCells
            <<"rows"<<table->rows.size()<<"columns"<<grid->model()->columnCount();
     QVERIFY2(selectionMs<100,qPrintable(QString("Race Models selection took %1 ms").arg(selectionMs)));
     QVERIFY2(contextMs<100,qPrintable(QString("Race Models context menu took %1 ms").arg(contextMs)));
+    QCOMPARE(contextSelectionCells,1);
+    QVERIFY2(worstColdRowMs<30,qPrintable(QString("Race Models cold row selection took %1 ms").arg(worstColdRowMs)));
 }
 
 void ProfileDatabaseTests::itemSpellConstructorParsesCanonicalAndLegacyCodes()

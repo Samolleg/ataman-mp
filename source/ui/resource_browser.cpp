@@ -741,11 +741,21 @@ bool CResourceBrowser::applyResourceReferenceSelection(const QString& reference)
     if(bestIndex < 0) return false;
 
     const SResourceCatalogEntry target = entries.at(bestIndex);
-    m_search->clear();
-    m_typeFilter->setCurrentIndex(0);
-    m_statusFilter->setCurrentIndex(0);
-    if(m_archives->topLevelItemCount()) m_archives->setCurrentItem(m_archives->topLevelItem(0));
-    rebuildList();
+    // Do not rebuild every member in the active profile just to reveal one
+    // reference. Show the exact logical-name filter immediately; preview
+    // decoding remains on the existing background watcher.
+    {
+        const QSignalBlocker searchBlocker(m_search);
+        const QSignalBlocker typeBlocker(m_typeFilter);
+        const QSignalBlocker statusBlocker(m_statusFilter);
+        const QSignalBlocker archiveBlocker(m_archives);
+        const QSignalBlocker resourceBlocker(m_resources);
+        m_search->setText(target.logicalName);
+        m_typeFilter->setCurrentIndex(0);
+        m_statusFilter->setCurrentIndex(0);
+        if(m_archives->topLevelItemCount())m_archives->setCurrentItem(m_archives->topLevelItem(0));
+        rebuildList();
+    }
     int visibleEntryIndex = -1;
     for(int row = 0; row < m_visibleEntries.size(); ++row)
         if(m_visibleEntries.at(row).archivePriority == target.archivePriority
