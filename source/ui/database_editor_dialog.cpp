@@ -561,5 +561,5 @@ void DatabaseEditorDialog::importDatabaseBundle()
     QFile database(databasePath),lua(luaPath);if(!database.open(QIODevice::ReadOnly)||!lua.open(QIODevice::ReadOnly)){QMessageBox::critical(this,tr("Native database import cancelled"),tr("The selected database/Lua pair could not be read."));return;}
     importNative(database.readAll(),lua.readAll(),tr("Imported %1 + %2").arg(QFileInfo(databasePath).fileName(),QFileInfo(luaPath).fileName()));
 }
-void DatabaseEditorDialog::updateStatus(){int errors=0;for(const auto&f:m_document->validate())errors+=f.severity==SDatabaseValidationFinding::Severity::Error;m_status->setText(tr("%1 pending change(s) • %2 verified source finding(s) • Full schema authoring: 26 database tables. Descriptor-unknown fields remain visible as hexadecimal and serialize without touching unrelated data.").arg(m_document->changes().size()).arg(errors));}
+void DatabaseEditorDialog::updateStatus(){m_status->setText(tr("%1 pending change(s) • Use Review or the Validation panel for current findings • Full schema authoring: 26 database tables. Descriptor-unknown fields remain visible as hexadecimal and serialize without touching unrelated data.").arg(m_document->changes().size()));}
 }

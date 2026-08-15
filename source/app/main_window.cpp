@@ -135,20 +135,21 @@ public:
     CDatabaseHistoryCommand(const QSharedPointer<ei::DatabaseDocument>& document,
                             ei::DatabaseEditorDialog* dialog, CView* view,
                             const QString& description,const QString& tableKey,
-                            const QString& rowKey)
-        : QUndoCommand(description), m_document(document), m_dialog(dialog),m_view(view),m_tableKey(tableKey),m_rowKey(rowKey) {}
+                            const QString& rowKey,bool affectsVisuals)
+        : QUndoCommand(description), m_document(document), m_dialog(dialog),m_view(view),m_tableKey(tableKey),m_rowKey(rowKey),m_affectsVisuals(affectsVisuals) {}
     void undo() override { if(m_document->undo()) refresh(); }
     void redo() override { if(m_initialRedo){m_initialRedo=false;return;} if(m_document->redo()) refresh(); }
 private:
     void refresh()
     {
         if(m_dialog)m_dialog->refreshFromHistory();else{QString diagnostic;const auto snapshot=m_document->currentSnapshot(&diagnostic);if(snapshot)ei::ProfileDatabaseContext::instance().publishEditedSnapshot(snapshot);}
-        if(m_view)m_view->refreshDatabaseVisuals(m_tableKey,m_rowKey);
+        if(m_view&&m_affectsVisuals)m_view->refreshDatabaseVisuals(m_tableKey,m_rowKey);
     }
     QSharedPointer<ei::DatabaseDocument> m_document;
     QPointer<ei::DatabaseEditorDialog> m_dialog;
     QPointer<CView> m_view;
     QString m_tableKey,m_rowKey;
+    bool m_affectsVisuals{true};
     bool m_initialRedo{true};
 };
 
@@ -549,11 +550,13 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
                 this, [this](const QString& description, const QString& tableKey,
                              const QString& rowKey)
         {
+            const QVector<ei::SDatabaseChange> changes=m_databaseDocument->changes();
+            const QString fieldKey=changes.isEmpty()?QString():changes.last().fieldKey;
+            const bool affectsVisuals=fieldKey.isEmpty()||!fieldKey.startsWith(QStringLiteral("jmv."));
             m_undoStack->push(new CDatabaseHistoryCommand(
                 m_databaseDocument, m_databaseEditorDialog, m_pView,
-                description, tableKey, rowKey));
-            m_pView->refreshDatabaseVisuals(tableKey, rowKey);
-            updateMobFamilyValidationPanel();
+                description, tableKey, rowKey, affectsVisuals));
+            if(affectsVisuals)m_pView->refreshDatabaseVisuals(tableKey, rowKey);
         });
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::undoRequested,
                 m_undoStack, &QUndoStack::undo);
@@ -1310,7 +1313,7 @@ MainWindow::MainWindow(QWidget* parent) :
 
     m_undoStack = new QUndoStack(this);
     connect(m_undoStack,&QUndoStack::indexChanged,this,[this](){
-        if(m_databaseDocument)updateMobFamilyValidationPanel();
+        if(m_databaseDocument)scheduleMobFamilyValidation(180);
     });
     int undoHistoryLimit = 512;
     if(COptInt* configuredLimit = dynamic_cast<COptInt*>(m_settings->opt(eOptSetGeneral, "undoHistoryLimit")))
