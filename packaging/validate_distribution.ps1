@@ -16,12 +16,15 @@ $requiredFiles = @(
     'Qt5Core.dll',
     'Qt5Gui.dll',
     'Qt5Widgets.dll',
+    'Qt5Multimedia.dll',
     'Qt5OpenGL.dll',
     'Qt5Concurrent.dll',
     'libgcc_s_seh-1.dll',
     'libstdc++-6.dll',
     'libwinpthread-1.dll',
-    'platforms\qwindows.dll'
+    'platforms\qwindows.dll',
+    'audio\qtaudio_windows.dll',
+    'mediaservice\dsengine.dll'
 )
 foreach ($relative in $requiredFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) {
