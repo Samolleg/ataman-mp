@@ -1643,11 +1643,12 @@ int runHeadlessCommand(QApplication& app)
         const bool sculptFlattenShowsTarget = flattenTarget && sculptFalloff
             && !flattenTarget->isHidden() && !sculptFalloff->isHidden();
         const bool sculptToolOrderMatchesShortcuts = sculptTool
-            && sculptTool->count() == 4
+            && sculptTool->count() == 5
             && sculptTool->itemData(0).toInt() == int(ELandscapeSculptTool::Raise)
             && sculptTool->itemData(1).toInt() == int(ELandscapeSculptTool::Lower)
             && sculptTool->itemData(2).toInt() == int(ELandscapeSculptTool::Smooth)
-            && sculptTool->itemData(3).toInt() == int(ELandscapeSculptTool::Flatten);
+            && sculptTool->itemData(3).toInt() == int(ELandscapeSculptTool::Flatten)
+            && sculptTool->itemData(4).toInt() == int(ELandscapeSculptTool::Noise);
         landscapeTools.setFlattenHeight(43210);
         const bool flattenHeightCanBeSampled = landscapeTools.flattenHeight() == 43210;
         if(raiseLowerStep)

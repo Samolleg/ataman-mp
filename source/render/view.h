@@ -698,6 +698,7 @@ private:
     bool m_sculptStrokeChanged{false};
     int m_sculptStrokeStamps{0};
     int m_sculptStrokeVertices{0};
+    quint32 m_sculptStrokeNoiseSeed{0};
     QTimer* m_sculptRepeatTimer;
     QTimer* m_overlayPointerTimer;
     bool m_tileGridVisible;
@@ -736,6 +737,7 @@ private:
     QToolButton* m_terrainVisualToggle{nullptr};
     QToolButton* m_overlaysVisualToggle{nullptr};
     QToolButton* m_fogVisualToggle{nullptr};
+    QToolButton* m_sceneLightsVisualToggle{nullptr};
     QToolButton* m_terrainShadowsVisualToggle{nullptr};
     QToolButton* m_objectShadowsVisualToggle{nullptr};
     QToolButton* m_skyboxVisualToggle{nullptr};
@@ -794,6 +796,7 @@ private:
     bool m_dynamicObjectsVisible{true};
     bool m_particleVisualsVisible{true};
     bool m_fogVisible{true};
+    bool m_sceneLightsVisible{true};
     bool m_terrainShadowsVisible{true};
     bool m_objectShadowsVisible{true};
     bool m_skyboxVisible{true};

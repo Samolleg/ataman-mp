@@ -69,6 +69,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_tool->addItem(tr("Lower"), int(ELandscapeSculptTool::Lower));
     m_tool->addItem(tr("Smooth"), int(ELandscapeSculptTool::Smooth));
     m_tool->addItem(tr("Flatten"), int(ELandscapeSculptTool::Flatten));
+    m_tool->addItem(tr("Noise"), int(ELandscapeSculptTool::Noise));
     m_radius->setRange(0.5, 64.0);
     m_radius->setValue(4.0);
     m_radius->setSingleStep(0.5);
@@ -132,8 +133,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
 
     QLabel* help = new QLabel(tr(
         "Left-drag sculpts; right-click samples the raw height as the Flatten target. "
-        "Alt+Wheel changes radius; Shift+Wheel changes strength; Alt+Shift+Wheel changes raise/lower step or the Flatten target. "
-        "Z/X/C/V select Raise/Lower/Smooth/Flatten. Wheel keeps camera zoom. Each drag is one undo step."), this);
+        "Alt+Wheel changes radius; Shift+Wheel changes strength; Alt+Shift+Wheel changes raise/lower step, Noise range, or the Flatten target. "
+        "Z/X/C/V select Raise/Lower/Smooth/Flatten; Noise is available in the Tool list. Wheel keeps camera zoom. Each drag is one undo step."), this);
     help->setWordWrap(true);
     form->addRow(help);
 
@@ -356,12 +357,14 @@ void CLandscapeTools::updateModeVisibility()
     const bool flatten = tool == ELandscapeSculptTool::Flatten;
     const bool raiseLower = tool == ELandscapeSculptTool::Raise
         || tool == ELandscapeSculptTool::Lower;
+    const bool noise = tool == ELandscapeSculptTool::Noise;
     m_flatten->setVisible(flatten);
     m_flattenLabel->setVisible(flatten);
     m_falloff->setVisible(sculpt);
     m_falloffLabel->setVisible(sculpt);
-    m_delta->setVisible(raiseLower);
-    m_deltaLabel->setVisible(raiseLower);
+    m_deltaLabel->setText(noise ? tr("Noise range") : tr("Raise/lower step"));
+    m_delta->setVisible(raiseLower || noise);
+    m_deltaLabel->setVisible(raiseLower || noise);
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {

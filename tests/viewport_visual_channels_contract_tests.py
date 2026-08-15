@@ -25,6 +25,7 @@ class ViewportVisualChannelsContractTests(unittest.TestCase):
             'tr("Fog")',
             'tr("Terrain shadows")',
             'tr("Object shadows")',
+            'tr("Scene lights")',
             'tr("Skybox")',
             'tr("Particle visuals")',
             'tr("Freeze animations")',
@@ -84,6 +85,12 @@ class ViewportVisualChannelsContractTests(unittest.TestCase):
         self.assertIn("requestedLightingMode == 2", view)
         self.assertIn("m_openGlesCompatibility", view)
         self.assertIn('m_pSettings->opt("animateUnits")', view)
+
+    def test_scene_lights_channel_mirrors_the_render_option(self):
+        view = source("source/render/view.cpp")
+        self.assertIn("m_sceneLightsVisualToggle", view)
+        self.assertIn('m_pSettings->opt("renderSceneLights")', view)
+        self.assertIn('m_pSettings->persistOptions()', view)
 
 
 if __name__ == "__main__":

@@ -393,6 +393,10 @@ public:
     SOverlaySurfaceCommand makeOverlaySmooth(
         const STerrainBrush& brush, float strength,
         CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlayNoise(
+        const STerrainBrush& brush, float rawHeightRange, quint32 noiseSeed,
+        CValidationReport* report = nullptr,
+        bool allowSaturation = false) const;
     SOverlaySurfaceSnapshot overlaySurfaceSnapshot() const;
     SOverlaySurfaceCommand makeOverlaySurfaceCommand(
         const SOverlaySurfaceSnapshot& before,
@@ -408,6 +412,10 @@ public:
                                       float strength) const;
     STerrainHeightCommand makeSmooth(const STerrainBrush& brush,
                                      float strength) const;
+    STerrainHeightCommand makeNoise(const STerrainBrush& brush,
+                                    float rawHeightRange,
+                                    quint32 noiseSeed,
+                                    bool allowSaturation = false) const;
     STerrainHeightCommand makeRamp(float startX, float startY, quint16 startHeight,
                                    float endX, float endY, quint16 endHeight,
                                    float radius, float strength,
@@ -487,7 +495,8 @@ private:
     SOverlaySurfaceCommand makeOverlayHeightEdit(
         const QString& description, const STerrainBrush& brush,
         int operation, float value, float strength,
-        CValidationReport* report, bool allowSaturation = false) const;
+        CValidationReport* report, bool allowSaturation = false,
+        quint32 noiseSeed = 0) const;
     STerrainTileCommand makeBoundedSemanticTilePaint(
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,

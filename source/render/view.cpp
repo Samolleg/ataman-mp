@@ -1117,7 +1117,7 @@ void CView::syncLandscapeToolState()
             changeOperation(EButtonOpSelect);
         setPreviewTile(false);
         CStatusConnector::getInstance()->updateStatus("landscape.ico",
-            "LMB-sculpt, RMB-sample raw height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/flatten target, M/O-main terrain/overlays, L/Esc-close.");
+            "LMB-sculpt, RMB-sample raw height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Noise via Tool list, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/range/flatten target, M/O-main terrain/overlays, L/Esc-close.");
         emit updateMsg(tr("Landscape sculpt mode enabled."));
         break;
     case ELandscapeEditMode::TilePaint:
@@ -1141,7 +1141,7 @@ void CView::syncLandscapeToolState()
         CScene::getInstance()->setLandTileEditMode(false);
         setPreviewTile(false);
         CStatusConnector::getInstance()->updateStatus("landscape.ico",
-            "LMB-sculpt overlay, RMB-sample raw overlay height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/flatten target, M/O-main terrain/overlays, L/Esc-close.");
+            "LMB-sculpt overlay, RMB-sample raw overlay height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Noise via Tool list, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/range/flatten target, M/O-main terrain/overlays, L/Esc-close.");
         emit updateMsg(tr("Overlay-only sculpting enabled for active surfaces."));
         break;
     }
@@ -1592,6 +1592,7 @@ void CView::initEnvironmentPreviewWidget()
         return option ? option->value() : fallback;
     };
     m_fogVisible = boolOption("renderFog", true);
+    m_sceneLightsVisible = boolOption("renderSceneLights", true);
     m_terrainShadowsVisible = boolOption("renderTerrainShadows", true);
     m_skyboxVisible = boolOption("drawSkybox", true);
 
@@ -1687,6 +1688,9 @@ void CView::initEnvironmentPreviewWidget()
     m_fogVisualToggle = makeToggle("visualsFog", tr("Fog"), tr(
         "Show authored distance fog in Full environment lighting mode."),
         m_fogVisible);
+    m_sceneLightsVisualToggle = makeToggle("visualsSceneLights", tr("Scene lights"), tr(
+        "Show illumination from authored MOB point lights and torch lights. This mirrors Scene point lights in Render settings."),
+        m_sceneLightsVisible);
     m_terrainShadowsVisualToggle = makeToggle("visualsTerrainShadows", tr("Terrain shadows"), tr(
         "Show authored terrain shadowing when a landscape, Full environment, and desktop shadow renderer are available."),
         m_terrainShadowsVisible);
@@ -1796,6 +1800,13 @@ void CView::initEnvironmentPreviewWidget()
         m_pSettings->persistOptions();
         update();
     });
+    connect(m_sceneLightsVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_sceneLightsVisible = visible;
+        if(COptBool* option = dynamic_cast<COptBool*>(m_pSettings->opt("renderSceneLights")))
+            option->setValue(visible);
+        m_pSettings->persistOptions();
+        update();
+    });
     connect(m_terrainShadowsVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
         m_terrainShadowsVisible = visible;
         if(COptBool* option = dynamic_cast<COptBool*>(m_pSettings->opt("renderTerrainShadows")))
@@ -1831,6 +1842,7 @@ void CView::initEnvironmentPreviewWidget()
             m_entranceVisualToggle, m_objectHelpersVisualToggle,
             m_staticObjectsVisualToggle, m_dynamicObjectsVisualToggle,
             m_terrainVisualToggle, m_overlaysVisualToggle, m_fogVisualToggle,
+            m_sceneLightsVisualToggle,
             m_terrainShadowsVisualToggle, m_objectShadowsVisualToggle,
             m_skyboxVisualToggle,
             m_particleVisualsToggle
@@ -1903,6 +1915,7 @@ void CView::syncVisualChannelButtons()
         return option ? option->value() : fallback;
     };
     m_fogVisible = optionValue("renderFog", true);
+    m_sceneLightsVisible = optionValue("renderSceneLights", true);
     m_terrainShadowsVisible = optionValue("renderTerrainShadows", true);
     m_skyboxVisible = optionValue("drawSkybox", true);
     const auto sync = [](QToolButton* button, bool checked) {
@@ -1919,6 +1932,7 @@ void CView::syncVisualChannelButtons()
     sync(m_terrainVisualToggle, m_bDrawLand);
     sync(m_overlaysVisualToggle, m_bDrawWater);
     sync(m_fogVisualToggle, m_fogVisible);
+    sync(m_sceneLightsVisualToggle, m_sceneLightsVisible);
     sync(m_terrainShadowsVisualToggle, m_terrainShadowsVisible);
     sync(m_objectShadowsVisualToggle, m_objectShadowsVisible);
     sync(m_skyboxVisualToggle, m_skyboxVisible);
@@ -1960,6 +1974,8 @@ void CView::updateVisualChannelAvailability()
             ? normal : normal + QStringLiteral("\n\n") + reason);
     };
     availability(m_fogVisualToggle, fullEnvironment,
+        tr("Unavailable: switch Lighting mode to Full environment."));
+    availability(m_sceneLightsVisualToggle, fullEnvironment,
         tr("Unavailable: switch Lighting mode to Full environment."));
     availability(m_terrainShadowsVisualToggle, terrainShadowSupport,
         !fullEnvironment
@@ -6236,7 +6252,7 @@ void CView::draw()
     const bool fogEnabled = !m_minimapCaptureActive && m_fogVisible
         && renderBool("renderFog", true);
     const bool sceneLightsEnabled = !m_minimapCaptureActive
-        && renderBool("renderSceneLights", true);
+        && m_sceneLightsVisible && renderBool("renderSceneLights", true);
     const COptInt* shadowQualityOption = m_pSettings
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderShadowQuality")) : nullptr;
     const int shadowQuality = qBound(0,
@@ -12933,6 +12949,7 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptStrokeChanged = false;
         m_sculptStrokeStamps = 0;
         m_sculptStrokeVertices = 0;
+        m_sculptStrokeNoiseSeed = QRandomGenerator::global()->generate();
         m_sculptStrokeCommand = STerrainHeightCommand();
         m_sculptStrokeCommand.description = tr("Sculpt terrain");
         m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
@@ -12988,6 +13005,10 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
             overlayCommand = m_terrainEdit.makeOverlaySmooth(
                 brush, blendStrength, &report);
             break;
+        case ELandscapeSculptTool::Noise:
+            overlayCommand = m_terrainEdit.makeOverlayNoise(
+                brush, rawDelta, m_sculptStrokeNoiseSeed, &report, true);
+            break;
         }
         m_overlayCommandNsecs += overlayCommandTimer.nsecsElapsed();
         if(overlayCommand.isEmpty())
@@ -13031,6 +13052,12 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
             overlayCommand = m_terrainEdit.makeOverlaySmooth(
                 brush, m_landscapeTools->strength(), &report);
             break;
+        case ELandscapeSculptTool::Noise:
+            overlayCommand = m_terrainEdit.makeOverlayNoise(
+                brush, m_landscapeTools->rawDelta()
+                    * m_landscapeTools->strength(),
+                m_sculptStrokeNoiseSeed, &report, true);
+            break;
         }
         if(overlayCommand.isEmpty())
         {
@@ -13065,6 +13092,10 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
         break;
     case ELandscapeSculptTool::Smooth:
         command = m_terrainEdit.makeSmooth(brush, blendStrength);
+        break;
+    case ELandscapeSculptTool::Noise:
+        command = m_terrainEdit.makeNoise(
+            brush, rawDelta, m_sculptStrokeNoiseSeed, true);
         break;
     }
     if(command.isEmpty())
@@ -13735,11 +13766,16 @@ void CView::wheelEvent(QWheelEvent* event)
                         m_landscapeTools->flattenHeight()));
                 }
                 else if(m_landscapeTools->sculptTool() == ELandscapeSculptTool::Raise
-                        || m_landscapeTools->sculptTool() == ELandscapeSculptTool::Lower)
+                        || m_landscapeTools->sculptTool() == ELandscapeSculptTool::Lower
+                        || m_landscapeTools->sculptTool() == ELandscapeSculptTool::Noise)
                 {
                     m_landscapeTools->adjustRawDelta(step);
-                    emit updateMsg(tr("Raise/lower step: %1 raw units").arg(
-                        m_landscapeTools->rawDelta(), 0, 'f', 0));
+                    emit updateMsg(m_landscapeTools->sculptTool()
+                        == ELandscapeSculptTool::Noise
+                        ? tr("Noise range: %1 raw units").arg(
+                            m_landscapeTools->rawDelta(), 0, 'f', 0)
+                        : tr("Raise/lower step: %1 raw units").arg(
+                            m_landscapeTools->rawDelta(), 0, 'f', 0));
                 }
                 else
                 {

@@ -127,8 +127,8 @@ boundaries as MOB and MPR authoring.
   work during paint, selection, context-menu, and horizontal-scroll events.
 - [x] Consolidate viewport visibility into a collapsed-by-default **Visuals**
   switcher with synchronized entrance, static-object, dynamic-object,
-  object-helper, terrain, overlay, object-shadow, environment, particle, and
-  animation-freeze controls.
+  object-helper, scene-light, terrain, overlay, object-shadow, environment,
+  particle, and animation-freeze controls.
 
 ## Remaining beta gates
 
@@ -145,7 +145,7 @@ boundaries as MOB and MPR authoring.
 - Frozen-column, paint-latency, and multi-window fixes: `e0873c97` and
   `0eebd4b1`; the r8 tester build was user-confirmed.
 - [Integrated Database Editor contract](docs/DATABASE_EDITOR_VERTICAL_SLICE.md).
-- [Viewport Visuals switcher](packaging/ALPHA26_VIEWPORT_VISUALS_R2.md).
+- [Viewport Visuals switcher and Noise sculpt brush](packaging/ALPHA26_VIEWPORT_VISUALS_NOISE_R3.md).
 - [Full database editor coverage](docs/releases/0.3.0-alpha.26-full-database-editor.md).
 - Resource Browser validation:
   [r1](packaging/ALPHA26_RESOURCE_BROWSER_R1.md),
@@ -172,7 +172,8 @@ back to the legacy rebuilding serializer; graph persistence remains explicit.
 - [x] Stage, freshly reopen, semantically validate, back up, atomically replace,
   and rebind every changed MPR save.
 - [x] Add canonical 33x33 sector ownership, shared-seam synchronization,
-  affected-normal updates, and undoable sculpting.
+  affected-normal updates, undoable sculpting, and a deterministic per-stroke
+  Noise brush for terrain and overlays.
 - [x] Add MPR settings, global height operations, `maxZ` handling, crop/expand,
   object translation, new-MPR creation, and MPR recovery autosaves.
 - [x] Add direct tile placement and smart painting constrained to the existing

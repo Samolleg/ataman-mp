@@ -28,6 +28,20 @@ const int kOverlaySectorSize = kLandVertexOffset + 2 * kVertexBlockSize
 const quint32 kSectorSignature = 0xCF4BF774;
 const double kNewOverlayClearanceWorld = 0.02;
 
+float terrainNoiseSample(quint32 noiseSeed, int x, int y)
+{
+    // Stable signed coordinate noise: one seed owns a complete sculpt stroke,
+    // so repeated stamps strengthen one pattern instead of rerolling it.
+    quint32 value = noiseSeed ^ (quint32(x) * 0x9E3779B9u)
+        ^ (quint32(y) * 0x85EBCA6Bu);
+    value ^= value >> 16;
+    value *= 0x7FEB352Du;
+    value ^= value >> 15;
+    value *= 0x846CA68Bu;
+    value ^= value >> 16;
+    return (float(value & 0x00FFFFFFu) / 8388607.5f) - 1.0f;
+}
+
 quint16 readHeight(const QByteArray& payload, int localX, int localY)
 {
     const int offset = kLandVertexOffset + (localY * kSectorVertices + localX) * kVertexSize + 2;
@@ -931,6 +945,43 @@ STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
     return command;
 }
 
+STerrainHeightCommand CTerrainEditModel::makeNoise(
+    const STerrainBrush& brush, float rawHeightRange,
+    quint32 noiseSeed, bool allowSaturation) const
+{
+    STerrainHeightCommand command;
+    command.description = QStringLiteral("Noise terrain");
+    if(brush.radius < 0.0f || !std::isfinite(rawHeightRange)
+       || rawHeightRange < 0.0f || m_vertexCountX <= 0 || m_vertexCountY <= 0)
+        return command;
+    const int minX = qMax(0, int(std::floor(brush.centerX - brush.radius)));
+    const int maxX = qMin(m_vertexCountX - 1,
+        int(std::ceil(brush.centerX + brush.radius)));
+    const int minY = qMax(0, int(std::floor(brush.centerY - brush.radius)));
+    const int maxY = qMin(m_vertexCountY - 1,
+        int(std::ceil(brush.centerY + brush.radius)));
+    for(int y = minY; y <= maxY; ++y)
+        for(int x = minX; x <= maxX; ++x)
+        {
+            const float dx = float(x) - brush.centerX;
+            const float dy = float(y) - brush.centerY;
+            const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
+                                             brush.radius, brush.falloff);
+            if(weight <= 0.0f)
+                continue;
+            STerrainHeightDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.before = height(x, y);
+            delta.after = clampedHeight(float(delta.before)
+                + rawHeightRange * weight * terrainNoiseSample(noiseSeed, x, y),
+                allowSaturation ? nullptr : &delta.clamped);
+            if(delta.before != delta.after)
+                command.deltas.append(delta);
+        }
+    return command;
+}
+
 STerrainHeightCommand CTerrainEditModel::makeBlendedCommand(
     const QString& description, const STerrainBrush& brush,
     const QVector<float>& targets, float strength) const
@@ -1511,6 +1562,15 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySmooth(
                                  2, 0.0f, strength, report);
 }
 
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlayNoise(
+    const STerrainBrush& brush, float rawHeightRange, quint32 noiseSeed,
+    CValidationReport* report, bool allowSaturation) const
+{
+    return makeOverlayHeightEdit(QStringLiteral("Noise overlay height"), brush,
+                                 3, rawHeightRange, 1.0f, report,
+                                 allowSaturation, noiseSeed);
+}
+
 SOverlaySurfaceSnapshot CTerrainEditModel::overlaySurfaceSnapshot() const
 {
     SOverlaySurfaceSnapshot snapshot;
@@ -1574,12 +1634,13 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySurfaceCommand(
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
     const QString& description, const STerrainBrush& brush,
     int operation, float value, float strength,
-    CValidationReport* report, bool allowSaturation) const
+    CValidationReport* report, bool allowSaturation,
+    quint32 noiseSeed) const
 {
     SOverlaySurfaceCommand command;
     command.description = description;
     if(brush.radius <= 0.0f || !std::isfinite(value) || !std::isfinite(strength)
-       || strength < 0.0f || strength > 1.0f || operation < 0 || operation > 2)
+       || strength < 0.0f || strength > 1.0f || operation < 0 || operation > 3)
     {
         if(report)
             report->add("terrain.overlay_sculpt_input", EValidationSeverity::Error,
@@ -1742,7 +1803,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
             target = before + value * weight;
         else if(operation == 1)
             target = before + (value - before) * strength * weight;
-        else
+        else if(operation == 2)
         {
             float sum = 0.0f;
             int samples = 0;
@@ -1762,6 +1823,8 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
             if(samples > 0)
                 target = before + (sum / float(samples) - before) * strength * weight;
         }
+        else
+            target = before + value * weight * terrainNoiseSample(noiseSeed, x, y);
         bool clamped = false;
         const quint16 after = clampedHeight(target,
             allowSaturation ? nullptr : &clamped);

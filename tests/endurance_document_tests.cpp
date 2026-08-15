@@ -484,6 +484,7 @@ private slots:
     void unchangedExistingFileComparisonIsReadOnly();
     void canonicalTerrainSeamsAreEditedAndUndoneTogether();
     void terrainBrushToolsAreDeterministicAndFailClosed();
+    void terrainAndOverlayNoiseBrushesAreSeededAndUndoable();
     void terrainHeightmapImportIsDeterministicAndSeamAware();
     void globalTerrainHeightOperationsKeepDimensionsAndSeams();
     void terrainVerticalScalePoliciesAreUndoableAndExplicit();
@@ -3044,6 +3045,83 @@ void EnduranceDocumentTests::terrainBrushToolsAreDeterministicAndFailClosed()
     CValidationReport staleReport;
     QVERIFY(!terrain.apply(ramp, true, &staleReport));
     QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainAndOverlayNoiseBrushesAreSeededAndUndoable()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(2, 1, 100.0f, twoSectorTerrain(30000)));
+    STerrainBrush brush;
+    brush.centerX = 32.0f;
+    brush.centerY = 12.0f;
+    brush.radius = 4.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+
+    const STerrainHeightCommand first = terrain.makeNoise(
+        brush, 600.0f, 0x13572468u, true);
+    const STerrainHeightCommand same = terrain.makeNoise(
+        brush, 600.0f, 0x13572468u, true);
+    const STerrainHeightCommand other = terrain.makeNoise(
+        brush, 600.0f, 0x24681357u, true);
+    QVERIFY(!first.isEmpty());
+    QCOMPARE(first.deltas.size(), same.deltas.size());
+    bool raised = false;
+    bool lowered = false;
+    bool seedChangedPattern = first.deltas.size() != other.deltas.size();
+    for(int index = 0; index < first.deltas.size(); ++index)
+    {
+        QCOMPARE(first.deltas.at(index).globalX, same.deltas.at(index).globalX);
+        QCOMPARE(first.deltas.at(index).globalY, same.deltas.at(index).globalY);
+        QCOMPARE(first.deltas.at(index).after, same.deltas.at(index).after);
+        raised = raised || first.deltas.at(index).after > first.deltas.at(index).before;
+        lowered = lowered || first.deltas.at(index).after < first.deltas.at(index).before;
+        if(index < other.deltas.size())
+            seedChangedPattern = seedChangedPattern
+                || first.deltas.at(index).after != other.deltas.at(index).after;
+    }
+    QVERIFY(raised);
+    QVERIFY(lowered);
+    QVERIFY(seedChangedPattern);
+
+    const QByteArray before = terrain.sectorPayload(0, 0);
+    CTerrainEditHistory history;
+    QVERIFY(history.execute(&terrain, first));
+    const QByteArray after = terrain.sectorPayload(0, 0);
+    QVERIFY(after != before);
+    QVERIFY(history.undo(&terrain));
+    QCOMPARE(terrain.sectorPayload(0, 0), before);
+    QVERIFY(history.redo(&terrain));
+    QCOMPARE(terrain.sectorPayload(0, 0), after);
+
+    const QByteArray landSector = syntheticLandSector(30000);
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(landSector),
+                                "overlay-noise-baseline.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel overlay;
+    QVERIFY(overlay.load(baseline));
+    STerrainTileBrush cell;
+    cell.centerX = 2.0f;
+    cell.centerY = 3.0f;
+    cell.radius = 0.0f;
+    const SOverlaySurfaceCommand activation = overlay.makeOverlayActivation(
+        cell, 1, 0, 1, 0, &report);
+    QVERIFY(overlay.apply(activation, true, &report));
+    brush.centerX = 5.0f;
+    brush.centerY = 7.0f;
+    brush.radius = 1.5f;
+    const SOverlaySurfaceCommand overlayFirst = overlay.makeOverlayNoise(
+        brush, 600.0f, 0x13572468u, &report, true);
+    const SOverlaySurfaceCommand overlaySame = overlay.makeOverlayNoise(
+        brush, 600.0f, 0x13572468u, &report, true);
+    const SOverlaySurfaceCommand overlayOther = overlay.makeOverlayNoise(
+        brush, 600.0f, 0x24681357u, &report, true);
+    QVERIFY2(!overlayFirst.isEmpty(), qPrintable(report.toText()));
+    QCOMPARE(overlayFirst.sectors.front().afterPayload,
+             overlaySame.sectors.front().afterPayload);
+    QVERIFY(overlayFirst.sectors.front().afterPayload
+            != overlayOther.sectors.front().afterPayload);
 }
 
 void EnduranceDocumentTests::terrainHeightmapImportIsDeterministicAndSeamAware()
