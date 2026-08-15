@@ -42,6 +42,10 @@ struct SJmvMapTestLaunchInput
     QByteArray mprData;
     QByteArray mobData;
     QByteArray generatedAiGraphData;
+    QString databaseSourcePath;
+    QByteArray databaseData;
+    QString tablesLuaSourcePath;
+    QByteArray tablesLuaData;
     QVector<SJmvSupplementalMobInput> supplementalMobs;
     QString embeddedScript;
     SMapCatalogEntry mapEntry;
@@ -69,18 +73,26 @@ public:
 
     bool launch(const SJmvMapTestLaunchInput& input, QString* error = nullptr);
     bool hotReload(const SJmvMapTestLaunchInput& input, QString* error = nullptr);
+    bool restart(const SJmvMapTestLaunchInput& input, QString* error = nullptr);
     bool isRunning() const;
     bool isHotReloadReady() const;
     bool isHotReloadPending() const { return m_pendingHotReloadSequence != 0; }
+    bool isRestartPending() const { return m_restartPending; }
     bool isRecoveryPending() const { return m_recoveryPending; }
     QString runtimeState() const;
     quint64 saveGeneration() const { return m_saveGeneration; }
     QString runId() const { return m_runId; }
     QString temporaryMapName() const { return m_temporaryMapName; }
+    QStringList startupResourceChanges(const SJmvMapTestLaunchInput& input) const;
     void stop();
 
     static QString testRunsRootPath();
     static QString generationSavesPath(const QString& runRoot, quint64 generation);
+    static bool validateJmvGameRootPaths(const QString& selectedGameRoot,
+                                         const QString& workPath,
+                                         const QString& resourcesPath,
+                                         const QString& cdRomPath,
+                                         QString* error = nullptr);
     static bool resolveMapGraphSource(const QByteArray& primaryMobData,
                                       const QFileInfo& sourceMpr,
                                       const QString& logicalMprName,
@@ -98,6 +110,11 @@ public:
     static qint64 runtimeGameProcessId(bool usesRuntimeHost,
                                        const QString& gamePidPath,
                                        qint64 transportProcessId);
+    static QStringList changedStartupResources(
+        const QString& stagedDatabaseSha256,
+        const QString& stagedTablesLuaSourcePath,
+        const QString& stagedTablesLuaSha256,
+        const SJmvMapTestLaunchInput& input);
     static QJsonObject buildAuthoritativeResult(const QJsonObject& manifest,
                                                 const QString& bridgeResult,
                                                 int exitCode,
@@ -171,6 +188,10 @@ private:
     QString m_liveGrpPath;
     QString m_mapTableSourcePath;
     QString m_stagedMapTablePath;
+    QString m_databaseSourcePath;
+    QString m_stagedDatabasePath;
+    QString m_tablesLuaSourcePath;
+    QString m_stagedTablesLuaPath;
     QString m_livePlaceholderResourcePath;
     QString m_bridgeSourcePath;
     QString m_bridgeLivePath;
@@ -182,6 +203,10 @@ private:
     QString m_liveGrpSha256;
     QString m_mapTableSourceSha256;
     QString m_stagedMapTableSha256;
+    QString m_databaseSourceSha256;
+    QString m_stagedDatabaseSha256;
+    QString m_tablesLuaSourceSha256;
+    QString m_stagedTablesLuaSha256;
     QString m_livePlaceholderResourceSha256;
     QString m_gameExePath;
     QString m_engineDirectory;
@@ -207,6 +232,8 @@ private:
     bool m_recoveryPending{false};
     bool m_lastPublishedRecoveryPending{false};
     QString m_lastPublishedRecoveryStatus;
+    bool m_restartPending{false};
+    SJmvMapTestLaunchInput m_restartInput;
 };
 
 #endif // JMV_MAP_TEST_LAUNCHER_H

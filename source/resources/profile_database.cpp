@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QSet>
 #include <QTextCodec>
 
 #include "../runtime/providers/base_profile_database_provider.h"
@@ -251,6 +252,16 @@ void addNames(const QVector<QMap<int, QByteArray>>& records, const QString& cate
 
 namespace ei {
 
+static QMap<int, QByteArray> excludingFields(const QMap<int, QByteArray>& fields,
+                                             const QSet<int>& established)
+{
+    QMap<int, QByteArray> result;
+    for(auto it = fields.constBegin(); it != fields.constEnd(); ++it)
+        if(!established.contains(it.key()))
+            result.insert(it.key(), it.value());
+    return result;
+}
+
 bool SProfileDatabaseSnapshot::usable() const
 {
     if(monsters.isEmpty() || raceModels.isEmpty())
@@ -279,6 +290,7 @@ SParsedDatabaseMembers parseProfileDatabaseMembers(const QMap<QString, QByteArra
             record.model = fieldString(fields, 30);
             record.primaryTextures = stringListField(fields, 31);
             record.secondaryTextures = stringListField(fields, 32);
+            record.opaqueFields = excludingFields(fields, QSet<int>() << 0 << 30 << 31 << 32);
             if(!record.name.isEmpty())
                 output.raceModels.insert(record.name.toLower(), record);
         }
@@ -297,6 +309,8 @@ SParsedDatabaseMembers parseProfileDatabaseMembers(const QMap<QString, QByteArra
             const QStringList weapons = stringListField(fields, 33);
             record.weapon = weapons.value(0);
             record.secondWeapon = fieldString(fields, 42);
+            record.opaqueFields = excludingFields(fields,
+                QSet<int>() << 0 << 1 << 3 << 4 << 5 << 6 << 7 << 29 << 32 << 33 << 42);
             if(!record.name.isEmpty())
                 output.monsters.insert(record.name.toLower(), record);
         }
@@ -335,7 +349,9 @@ SParsedDatabaseMembers parseProfileDatabaseMembers(const QMap<QString, QByteArra
                 record.textureType1 = fieldInt(fields, 5);
                 record.textureType2 = fieldInt(fields, 6);
                 if(table == 2)
-                    record.wearOrder = fieldInt(fields, 24);
+                record.wearOrder = fieldInt(fields, 24);
+                record.opaqueFields = excludingFields(fields,
+                    QSet<int>() << 0 << 1 << 2 << 3 << 5 << 6 << 24);
                 if(!record.name.isEmpty())
                     output.items.insert(record.name.toLower(), record);
             }
@@ -480,6 +496,10 @@ void ProfileDatabaseContext::activate(const QSharedPointer<const SProfileDatabas
     m_current = snapshot;
     m_providerBindings = providerBindings;
     ++m_generation;
+}
+void ProfileDatabaseContext::publishEditedSnapshot(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot)
+{
+    QWriteLocker locker(&m_lock);m_current=snapshot;++m_generation;
 }
 
 QString ProfileDatabaseContext::providerForRole(const QString& role) const

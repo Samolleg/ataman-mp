@@ -1,0 +1,168 @@
+#include "database_workbook.h"
+#include "database_schema.h"
+
+#include <QBuffer>
+#include <QCryptographicHash>
+#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QSet>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QXmlStreamReader>
+#include <algorithm>
+#include <QtGui/private/qzipreader_p.h>
+#include <QtGui/private/qzipwriter_p.h>
+
+namespace {
+QString xml(const QString& value){QString clean=value;for(int i=0;i<clean.size();++i){const ushort u=clean.at(i).unicode();if((u<0x20&&u!='\t'&&u!='\n'&&u!='\r')||u==0xfffe||u==0xffff)clean[i]=QChar(0xfffd);}return clean.toHtmlEscaped();}
+QString column(int index){QString out;for(++index;index;index=(index-1)/26)out.prepend(QChar('A'+(index-1)%26));return out;}
+struct WorkbookColumn{int field{-1},index{0};QString key,header,label;ei::EDatabaseStorageType storageType{ei::EDatabaseStorageType::Hex};ei::EDatabaseFieldType displayType{ei::EDatabaseFieldType::Text};};
+QString cell(const QString& ref,const QVariant& value,ei::EDatabaseFieldType type,QStringList* strings)
+{
+    if((type==ei::EDatabaseFieldType::Integer||type==ei::EDatabaseFieldType::Decimal)&&value.isValid())
+        return QString("<c r=\"%1\"><v>%2</v></c>").arg(ref,xml(value.toString()));
+    const QString text=value.type()==QVariant::StringList?value.toStringList().join(","):value.toString();int index=strings->indexOf(text);if(index<0){strings->append(text);index=strings->size()-1;}return QString("<c r=\"%1\" t=\"s\"><v>%2</v></c>").arg(ref).arg(index);
+}
+QString sheetName(const ei::SDatabaseTable& table){for(const auto& storage:ei::DatabaseSchema::instance().tables())if(storage.memberName==table.sourceMember&&storage.physicalIndex==table.physicalTable)return storage.name.left(31);return table.label.left(31);}
+QVector<WorkbookColumn> columns(const ei::SDatabaseTable& table)
+{
+    QVector<WorkbookColumn> result;const auto& schema=ei::DatabaseSchema::instance();for(const auto& field:table.fields){const auto* storage=schema.field(table.schemaFamily,table.blockId,field.storageId);if(!storage){if(!field.key.startsWith(QStringLiteral("jmv.")))continue;WorkbookColumn c;c.key=field.key;c.header=QStringLiteral("JMV:%1").arg(field.key);c.label=field.label;c.displayType=field.type;result.append(c);continue;}auto headers=schema.headers(table.schemaFamily,table.blockId,field.storageId);if(headers.isEmpty()){ei::SDatabaseStorageHeader h;h.id=field.storageId;h.name=field.label;headers.append(h);}for(const auto& h:headers){WorkbookColumn c;c.field=field.storageId;c.index=h.index;c.key=QString("fld.%1.0").arg(field.storageId);c.header=QString("FLD%1-%2").arg(field.storageId).arg(h.index);c.label=h.name;c.storageType=storage->type;c.displayType=(storage->type==ei::EDatabaseStorageType::SignedLong||storage->type==ei::EDatabaseStorageType::UnsignedLong||storage->type==ei::EDatabaseStorageType::Byte)?ei::EDatabaseFieldType::Integer:(storage->type==ei::EDatabaseStorageType::Float?ei::EDatabaseFieldType::Decimal:ei::EDatabaseFieldType::Text);result.append(c);}}return result;
+}
+QJsonArray array(const QVariant& value){QJsonParseError e;const auto d=QJsonDocument::fromJson(value.toString().toUtf8(),&e);return e.error==QJsonParseError::NoError&&d.isArray()?d.array():QJsonArray();}
+QVariant compatibilityValue(const QVariant& value,const WorkbookColumn& c)
+{
+    if(c.storageType==ei::EDatabaseStorageType::StringList||c.storageType==ei::EDatabaseStorageType::FixedStringList){QStringList out;for(const auto& v:array(value))out<<v.toString().replace(',',';');return out.join(',');}
+    const QJsonArray values=array(value);if(c.storageType==ei::EDatabaseStorageType::FloatList||c.storageType==ei::EDatabaseStorageType::UnsignedLongList||c.storageType==ei::EDatabaseStorageType::ByteList||c.storageType==ei::EDatabaseStorageType::BitList)return c.index<values.size()?values.at(c.index).toVariant():QVariant();
+    if(c.storageType==ei::EDatabaseStorageType::IndexedFloatList||c.storageType==ei::EDatabaseStorageType::TypeList)for(const auto& v:values){const auto o=v.toObject();if(o.value("id").toInt()==c.index)return o.value("value").toVariant();}
+    if(c.storageType==ei::EDatabaseStorageType::AcksUniqueType){QStringList records;for(const auto& v:values){QStringList fields;for(const auto& f:v.toObject().value("fields").toArray()){const auto o=f.toObject();fields<<QString("%1=%2").arg(o.value("id").toInt()).arg(o.value("value").toVariant().toString());}records<<"{"+fields.join("##")+"}";}return records.join(QString());}
+    if(c.storageType==ei::EDatabaseStorageType::CapsulatedTypeList)for(const auto& v:values){const auto outer=v.toObject();for(const auto& f:outer.value("fields").toArray()){const auto o=f.toObject();if(o.value("id").toInt()==c.index)return o.value("value").toVariant();}}
+    return c.index==0?value:QVariant();
+}
+bool compatibilityEqual(const QString& workbookValue,const QVariant& baseline,const WorkbookColumn& c)
+{
+    if(c.displayType==ei::EDatabaseFieldType::Integer){bool leftOk=false,rightOk=false;const qlonglong left=workbookValue.toLongLong(&leftOk),right=baseline.toString().toLongLong(&rightOk);return leftOk&&rightOk&&left==right;}
+    if(c.displayType==ei::EDatabaseFieldType::Decimal){bool leftOk=false,rightOk=false;const double left=workbookValue.toDouble(&leftOk),right=baseline.toString().toDouble(&rightOk);return leftOk&&rightOk&&qAbs(left-right)<=5e-7;}
+    return workbookValue==baseline.toString();
+}
+QByteArray sheetXml(const ei::SDatabaseTable& table,QStringList* strings)
+{
+    const auto cols=columns(table);const int extra=2;int outputRow=3;for(const auto& row:table.rows)if(!row.deleted)++outputRow;const QString last=column(cols.size()+extra-1)+QString::number(qMax(2,outputRow-1));QString x="<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><dimension ref=\"A1:"+last+"\"/><sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"2\" topLeftCell=\"A3\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews><sheetData><row r=\"1\">";
+    for(int c=0;c<cols.size();++c)x+=cell(column(c)+"1",cols[c].label,ei::EDatabaseFieldType::Text,strings);x+=cell(column(cols.size())+"1","_sourceRecord",ei::EDatabaseFieldType::Text,strings)+cell(column(cols.size()+1)+"1","_sourceName",ei::EDatabaseFieldType::Text,strings)+"</row><row r=\"2\">";
+    for(int c=0;c<cols.size();++c)x+=cell(column(c)+"2",cols[c].header,ei::EDatabaseFieldType::Text,strings);x+=cell(column(cols.size())+"2","_sourceRecord",ei::EDatabaseFieldType::Text,strings)+cell(column(cols.size()+1)+"2","_sourceName",ei::EDatabaseFieldType::Text,strings)+"</row>";
+    outputRow=3;for(const auto& row:table.rows)if(!row.deleted){x+=QString("<row r=\"%1\">").arg(outputRow);for(int c=0;c<cols.size();++c){if(row.values.contains(cols[c].key)){const QVariant v=compatibilityValue(row.values.value(cols[c].key),cols[c]);if(v.isValid())x+=cell(column(c)+QString::number(outputRow),v,cols[c].displayType,strings);}}// A clone retains its template's sourceRecordIndex internally so native RES
+        // publication can duplicate the exact record. In a workbook it is a new
+        // row, however: exporting the template index makes it collide with the
+        // original row on reimport. _sourceName remains the explicit clone
+        // template identity while -1 marks the row as new.
+        const int workbookSourceRecord=row.added?-1:row.sourceRecordIndex;
+        x+=cell(column(cols.size())+QString::number(outputRow),workbookSourceRecord,ei::EDatabaseFieldType::Integer,strings)+cell(column(cols.size()+1)+QString::number(outputRow),row.sourceStableKey,ei::EDatabaseFieldType::Text,strings)+"</row>";++outputRow;}x+="</sheetData><autoFilter ref=\"A2:"+last+"\"/></worksheet>";return x.toUtf8();
+}
+QByteArray sharedStrings(const QStringList& strings){QString x=QString("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"%1\" uniqueCount=\"%1\">").arg(strings.size());for(const QString& s:strings)x+="<si><t xml:space=\"preserve\">"+xml(s)+"</t></si>";return (x+"</sst>").toUtf8();}
+QByteArray eidbSheetFingerprint(const QByteArray& workbook,const QByteArray& relationships,const QByteArray& strings,const QVector<QByteArray>& sheets)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);auto add=[&hash](const QString& path,const QByteArray& data){hash.addData(path.toUtf8());hash.addData("\0",1);hash.addData(data);};add("xl/workbook.xml",workbook);add("xl/_rels/workbook.xml.rels",relationships);add("xl/sharedStrings.xml",strings);QStringList paths;for(int index=0;index<sheets.size();++index)paths.append(QString("xl/worksheets/sheet%1.xml").arg(index+1));paths.sort();for(const QString& path:paths){const int index=path.mid(path.lastIndexOf("sheet")+5).section('.',0,0).toInt()-1;add(path,sheets[index]);}return hash.result().toHex();
+}
+QByteArray eidbSheetFingerprint(QZipReader& zip)
+{
+    QStringList sheetPaths;QRegExp sheetPattern("xl/worksheets/sheet*.xml",Qt::CaseInsensitive,QRegExp::Wildcard);for(const auto& info:zip.fileInfoList())if(info.isFile&&sheetPattern.exactMatch(info.filePath))sheetPaths.append(info.filePath);sheetPaths.sort();QCryptographicHash hash(QCryptographicHash::Sha256);const QStringList fixed={"xl/workbook.xml","xl/_rels/workbook.xml.rels","xl/sharedStrings.xml"};for(const QString& path:fixed+sheetPaths){const QByteArray data=zip.fileData(path);if(data.isEmpty())return {};hash.addData(path.toUtf8());hash.addData("\0",1);hash.addData(data);}return hash.result();
+}
+QMap<QString,QString> cells(const QByteArray& bytes,const QStringList& strings,QString* diagnostic)
+{
+    QMap<QString,QString> out;QXmlStreamReader r(bytes);QString ref,value,type;bool inCell=false;while(!r.atEnd()){r.readNext();if(r.isStartElement()&&r.name()=="c"){ref=r.attributes().value("r").toString();type=r.attributes().value("t").toString();value.clear();inCell=true;}else if(inCell&&r.isStartElement()&&(r.name()=="v"||r.name()=="t"))value+=r.readElementText();else if(r.isEndElement()&&r.name()=="c"){out[ref]=type=="s"?strings.value(value.toInt()):value;inCell=false;}}
+    if(r.hasError()&&diagnostic)*diagnostic=r.errorString();return out;
+}
+QStringList readSharedStrings(const QByteArray& bytes){QStringList out;QXmlStreamReader r(bytes);while(!r.atEnd()){r.readNext();if(r.isStartElement()&&r.name()=="t")out<<r.readElementText();}return out;}
+QPair<int,int> cellPosition(const QString& ref){int split=0,columnIndex=0;while(split<ref.size()&&ref.at(split).isLetter()){columnIndex=columnIndex*26+ref.at(split).toUpper().unicode()-'A'+1;++split;}return qMakePair(ref.mid(split).toInt()-1,columnIndex-1);}
+QByteArray semanticCellFingerprint(const QVector<QByteArray>& sheets,const QStringList& names,const QStringList& strings)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);auto add=[&hash](const QByteArray& value){hash.addData(value);hash.addData("\0",1);};
+    for(int sheetIndex=0;sheetIndex<sheets.size();++sheetIndex){add(QByteArray::number(sheetIndex));add(names.value(sheetIndex).toUtf8());QMap<QPair<int,int>,QByteArray> ordered;QXmlStreamReader r(sheets.at(sheetIndex));QString ref,value,type;bool inCell=false;while(!r.atEnd()){r.readNext();if(r.isStartElement()&&r.name()=="c"){ref=r.attributes().value("r").toString();type=r.attributes().value("t").toString();value.clear();inCell=true;}else if(inCell&&r.isStartElement()&&(r.name()=="v"||r.name()=="t"))value+=r.readElementText();else if(r.isEndElement()&&r.name()=="c"){if(type=="s")value=strings.value(value.toInt());else{bool ok=false;const double number=value.toDouble(&ok);if(ok)value=QString::number(number,'g',17);}if(!value.isEmpty())ordered[cellPosition(ref)]=value.toUtf8();inCell=false;}}for(auto it=ordered.constBegin();it!=ordered.constEnd();++it){add(QByteArray::number(it.key().first));add(QByteArray::number(it.key().second));add(it.value());}}
+    return hash.result().toHex();
+}
+QMap<QString,QString> workbookSheets(const QByteArray& bytes)
+{
+    QMap<QString,QString> out;QXmlStreamReader r(bytes);while(!r.atEnd()){r.readNext();if(r.isStartElement()&&r.name()=="sheet"){const auto a=r.attributes();const QString name=a.value("name").toString(),rid=a.value("r:id").toString();if(!name.isEmpty()&&!rid.isEmpty())out[name.toLower()]=rid;}}return out;
+}
+QMap<QString,QString> workbookRelationships(const QByteArray& bytes)
+{
+    QMap<QString,QString> out;QXmlStreamReader r(bytes);while(!r.atEnd()){r.readNext();if(r.isStartElement()&&r.name()=="Relationship"){const auto a=r.attributes();QString target=a.value("Target").toString();if(target.startsWith('/'))target=target.mid(1);else target="xl/"+target;out[a.value("Id").toString()]=target;}}return out;
+}
+QString worksheetForTable(const ei::SDatabaseTable& table,const QMap<QString,QString>& sheets,const QMap<QString,QString>& relationships)
+{
+    const QString rid=sheets.value(sheetName(table).toLower());return relationships.value(rid);
+}
+QVariant compatibilityEditedValue(const QVariant& original,const ei::SDatabaseStorageField& storage,const QVector<QPair<int,QString>>& edits)
+{
+    if(edits.isEmpty())return original;
+    if(storage.type==ei::EDatabaseStorageType::StringList||storage.type==ei::EDatabaseStorageType::FixedStringList){QStringList values;for(const QString& part:edits.first().second.split(',',QString::SkipEmptyParts))values<<part.trimmed();return QString::fromUtf8(QJsonDocument(QJsonArray::fromStringList(values)).toJson(QJsonDocument::Compact));}
+    if(storage.type==ei::EDatabaseStorageType::Hex||storage.type==ei::EDatabaseStorageType::String||storage.type==ei::EDatabaseStorageType::FixedString)return edits.first().second;
+    if(storage.type==ei::EDatabaseStorageType::SignedLong||storage.type==ei::EDatabaseStorageType::UnsignedLong||storage.type==ei::EDatabaseStorageType::Byte)return edits.first().second.toLongLong();
+    if(storage.type==ei::EDatabaseStorageType::Float)return edits.first().second.toDouble();
+    QJsonArray values=array(original);
+    if(storage.type==ei::EDatabaseStorageType::FloatList||storage.type==ei::EDatabaseStorageType::UnsignedLongList||storage.type==ei::EDatabaseStorageType::ByteList||storage.type==ei::EDatabaseStorageType::BitList){for(const auto& edit:edits){while(values.size()<=edit.first)values.append(QJsonValue());if(storage.type==ei::EDatabaseStorageType::BitList)values[edit.first]=(edit.second.toInt()!=0);else values[edit.first]=edit.second.toDouble();}return QString::fromUtf8(QJsonDocument(values).toJson(QJsonDocument::Compact));}
+    if(storage.type==ei::EDatabaseStorageType::IndexedFloatList||storage.type==ei::EDatabaseStorageType::TypeList){for(const auto& edit:edits){bool found=false;for(int i=0;i<values.size();++i){QJsonObject o=values[i].toObject();if(o.value("id").toInt()!=edit.first)continue;o["value"]=edit.second.toDouble();values[i]=o;found=true;break;}if(!found){QJsonObject o;o["id"]=edit.first;o["value"]=edit.second.toDouble();values.append(o);}}return QString::fromUtf8(QJsonDocument(values).toJson(QJsonDocument::Compact));}
+    return original;
+}
+QStringList physicalKeys(const ei::DatabaseDocument& document)
+{
+    QStringList keys;for(const QString& key:document.tableKeys()){const auto* table=document.table(key);if(table&&table->physicalTable>=0)keys.append(key);}return keys;
+}
+QByteArray manifest(const ei::DatabaseDocument& document,const QStringList& keys)
+{
+    QString text="EI Mapper Database Workbook v2\n"+document.profileId()+"\n"+document.providerId()+"\n"+document.sourceArchiveSha256()+"\n";for(const QString& key:keys)text+=key+'\n';return text.toUtf8();
+}
+}
+
+namespace ei {
+QStringList workbookTableKeys(const DatabaseDocument& document){return physicalKeys(document);}
+bool DatabaseWorkbook::exportXlsx(const DatabaseDocument& document,const QString& path,QString* diagnostic)
+{
+    const QStringList keys=physicalKeys(document);if(keys.isEmpty()){if(diagnostic)*diagnostic="No schema-described database tables are available.";return false;}
+    const bool hasLua=!document.sourceTablesLuaPath().isEmpty();
+    const QByteArray tablesLua=hasLua?document.buildTablesLua(diagnostic):QByteArray();
+    if(hasLua&&tablesLua.isEmpty())return false;
+    QBuffer package;package.open(QIODevice::WriteOnly);QZipWriter zip(&package);zip.setCompressionPolicy(QZipWriter::AutoCompress);
+    if(hasLua)
+    {
+        zip.addFile("ei-mapper/tables.lua",tablesLua);
+        zip.addFile("ei-mapper/_rels/manifest.txt.rels",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"urn:ei-mapper-endurance:relationships:jmv-tables-lua\" Target=\"tables.lua\"/></Relationships>");
+    }
+    QString types="<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"res\" ContentType=\"application/octet-stream\"/><Default Extension=\"lua\" ContentType=\"text/plain\"/><Default Extension=\"txt\" ContentType=\"text/plain\"/><Default Extension=\"sha256\" ContentType=\"text/plain\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>";
+    QString workbook="<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>";
+    QString rels="<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">";
+    QSet<QString> names;QStringList orderedNames,strings;QVector<QByteArray> sheetsXml;
+    for(int i=0;i<keys.size();++i){const auto* table=document.table(keys[i]);QString name=sheetName(*table);if(names.contains(name)){if(diagnostic)*diagnostic="Duplicate XLSX sheet title: "+name;return false;}names.insert(name);orderedNames.append(name);types+=QString("<Override PartName=\"/xl/worksheets/sheet%1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>").arg(i+1);workbook+=QString("<sheet name=\"%1\" sheetId=\"%2\" r:id=\"rId%2\"/>").arg(xml(name)).arg(i+1);rels+=QString("<Relationship Id=\"rId%1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet%1.xml\"/>").arg(i+1);sheetsXml.append(sheetXml(*table,&strings));}
+    types+="<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/></Types>";workbook+="</sheets></workbook>";rels+=QString("<Relationship Id=\"rId%1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>").arg(keys.size()+1);const QByteArray workbookBytes=workbook.toUtf8(),relationshipBytes=rels.toUtf8(),stringBytes=sharedStrings(strings);const QByteArray packageRelationships="<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/><Relationship Id=\"rId2\" Type=\"urn:ei-mapper-endurance:relationships:database-manifest\" Target=\"ei-mapper/manifest.txt\"/><Relationship Id=\"rId3\" Type=\"urn:ei-mapper-endurance:relationships:database-source\" Target=\"ei-mapper/source.res\"/><Relationship Id=\"rId4\" Type=\"urn:ei-mapper-endurance:relationships:eidbeditor-source\" Target=\"eidbeditor/source.res\"/><Relationship Id=\"rId5\" Type=\"urn:ei-mapper-endurance:relationships:eidbeditor-fingerprint\" Target=\"eidbeditor/sheets.sha256\"/><Relationship Id=\"rId6\" Type=\"urn:ei-mapper-endurance:relationships:eidbeditor-cell-fingerprint\" Target=\"eidbeditor/cells.sha256\"/></Relationships>";zip.addFile("[Content_Types].xml",types.toUtf8());zip.addFile("_rels/.rels",packageRelationships);zip.addFile("xl/workbook.xml",workbookBytes);zip.addFile("xl/_rels/workbook.xml.rels",relationshipBytes);zip.addFile("xl/sharedStrings.xml",stringBytes);for(int index=0;index<sheetsXml.size();++index)zip.addFile(QString("xl/worksheets/sheet%1.xml").arg(index+1),sheetsXml[index]);zip.addFile("ei-mapper/manifest.txt",manifest(document,keys));const QByteArray currentArchive=document.buildArchive(diagnostic);if(currentArchive.isEmpty())return false;zip.addFile("ei-mapper/source.res",currentArchive);zip.addFile("eidbeditor/source.res",currentArchive);zip.addFile("eidbeditor/sheets.sha256",eidbSheetFingerprint(workbookBytes,relationshipBytes,stringBytes,sheetsXml));zip.addFile("eidbeditor/cells.sha256",semanticCellFingerprint(sheetsXml,orderedNames,strings));zip.close();
+    if(zip.status()!=QZipWriter::NoError){if(diagnostic)*diagnostic="Could not create the XLSX package.";return false;}QSaveFile staged(path);if(!staged.open(QIODevice::WriteOnly)){if(diagnostic)*diagnostic=staged.errorString();return false;}if(staged.write(package.data())!=package.data().size()){if(diagnostic)*diagnostic=staged.errorString();return false;}return staged.commit();
+}
+bool DatabaseWorkbook::importXlsx(const DatabaseDocument& document,const QString& path,SDatabaseWorkbookImport* result,QString* diagnostic)
+{
+    if(!result)return false;QZipReader zip(path);if(!zip.exists()){if(diagnostic)*diagnostic="The XLSX package cannot be opened.";return false;}const QStringList keys=physicalKeys(document);const QByteArray workbookManifest=zip.fileData("ei-mapper/manifest.txt");if(!workbookManifest.isEmpty()&&workbookManifest!=manifest(document,keys)){if(diagnostic)*diagnostic="This workbook does not match the active profile, source archive, or full table schema.";return false;}QMap<QString,SDatabaseTable> tables;for(const QString& key:document.tableKeys())tables[key]=*document.table(key);const QByteArray embedded=zip.fileData("eidbeditor/source.res"),expectedFingerprint=QByteArray::fromHex(zip.fileData("eidbeditor/sheets.sha256").trimmed()),actualFingerprint=eidbSheetFingerprint(zip),current=document.buildArchive(diagnostic);if(!embedded.isEmpty()&&!expectedFingerprint.isEmpty()&&expectedFingerprint==actualFingerprint&&embedded==current){result->tables=tables;return true;}const QStringList strings=readSharedStrings(zip.fileData("xl/sharedStrings.xml"));const auto sheets=workbookSheets(zip.fileData("xl/workbook.xml")),relationships=workbookRelationships(zip.fileData("xl/_rels/workbook.xml.rels"));
+    for(int i=0;i<keys.size();++i)
+    {
+        const SDatabaseTable* original=document.table(keys[i]);const auto cols=columns(*original);SDatabaseTable candidate=*original;candidate.rows.clear();const QString worksheet=worksheetForTable(*original,sheets,relationships);const auto map=cells(zip.fileData(worksheet),strings,diagnostic);if(map.isEmpty()){if(diagnostic)*diagnostic=QString("Sheet '%1' is missing or invalid.").arg(sheetName(*original));return false;}
+        int headerRow=-1;for(int row=1;row<=32&&headerRow<0;++row)for(auto it=map.constBegin();it!=map.constEnd();++it)if(it.key().endsWith(QString::number(row))&&it.value().startsWith("FLD")){headerRow=row;break;}if(headerRow<0){if(diagnostic)*diagnostic=QString("Sheet '%1' has no EIDB FLD header row.").arg(sheetName(*original));return false;}
+        QMap<QString,int> headerColumns;for(int c=0;c<2048;++c){const QString value=map.value(column(c)+QString::number(headerRow));if(!value.isEmpty())headerColumns[value]=c;}QVector<int> workbookColumns;for(int c=0;c<cols.size();++c)workbookColumns.append(headerColumns.value(cols[c].header,-1));
+        const int sourceColumn=headerColumns.value("_sourceRecord",-1),nameColumn=headerColumns.value("_sourceName",-1);QSet<int> usedSources;
+        for(int outputRow=headerRow+1;;++outputRow)
+        {
+            bool populated=false;for(int c=0;c<cols.size();++c)if(workbookColumns[c]>=0)populated|=map.contains(column(workbookColumns[c])+QString::number(outputRow));if(!populated)break;
+            bool sourceOk=false;int sourceIndex=sourceColumn>=0?map.value(column(sourceColumn)+QString::number(outputRow)).toInt(&sourceOk):-1;if(!sourceOk&&original->identityFieldId>=0){int identityColumn=-1;for(int c=0;c<cols.size();++c)if(cols[c].field==original->identityFieldId&&cols[c].index==0){identityColumn=workbookColumns[c];break;}const QString identity=identityColumn>=0?map.value(column(identityColumn)+QString::number(outputRow)):QString(),identityKey=QString("fld.%1.0").arg(original->identityFieldId);for(int index=0;index<original->rows.size();++index)if(!usedSources.contains(index)&&original->rows[index].values.value(identityKey).toString().compare(identity,Qt::CaseInsensitive)==0){sourceIndex=index;sourceOk=true;break;}}const SDatabaseRow* source=sourceOk&&sourceIndex>=0&&sourceIndex<original->rows.size()?&original->rows.at(sourceIndex):nullptr;SDatabaseRow row=source?*source:SDatabaseRow();row.added=!source;row.deleted=false;row.sourceRecordIndex=source?sourceIndex:-1;row.sourceStableKey=source?source->sourceStableKey:(nameColumn>=0?map.value(column(nameColumn)+QString::number(outputRow)):QString());
+            if(source&&usedSources.contains(sourceIndex)){if(diagnostic)*diagnostic=QString("Sheet %1 contains source record %2 more than once.").arg(i+1).arg(sourceIndex);return false;}if(source)usedSources.insert(sourceIndex);
+            QMap<int,QVector<QPair<int,QString>>> edits;QMap<QString,QString> directEdits;for(int c=0;c<cols.size();++c){if(workbookColumns[c]<0)continue;const QString ref=column(workbookColumns[c])+QString::number(outputRow);if(!map.contains(ref))continue;const QVariant baseline=compatibilityValue(row.values.value(cols[c].key),cols[c]);if(compatibilityEqual(map.value(ref),baseline,cols[c]))continue;if(cols[c].field<0)directEdits[cols[c].key]=map.value(ref);else edits[cols[c].field].append(qMakePair(cols[c].index,map.value(ref)));}for(auto edit=edits.constBegin();edit!=edits.constEnd();++edit){const QString key=QString("fld.%1.0").arg(edit.key());const auto* storage=DatabaseSchema::instance().field(original->schemaFamily,original->blockId,edit.key());if(storage)row.values[key]=compatibilityEditedValue(row.values.value(key),*storage,edit.value());}for(auto edit=directEdits.constBegin();edit!=directEdits.constEnd();++edit){const auto schemaField=std::find_if(original->fields.constBegin(),original->fields.constEnd(),[&](const SDatabaseFieldSchema& field){return field.key==edit.key();});if(schemaField==original->fields.constEnd())continue;if(schemaField->type==EDatabaseFieldType::Integer)row.values[edit.key()]=edit.value().toLongLong();else if(schemaField->type==EDatabaseFieldType::Decimal)row.values[edit.key()]=edit.value().toDouble();else row.values[edit.key()]=edit.value();}
+            const QString identityKey=original->identityFieldId>=0?QString("fld.%1.0").arg(original->identityFieldId):QString();const QString identity=row.values.value(identityKey).toString().trimmed();row.stableKey=!identity.isEmpty()?identity.toLower()+QString("#%1").arg(source?sourceIndex:outputRow):QString("record.%1").arg(source?sourceIndex:outputRow);if(row.added){int clone=-1;for(int index=0;index<original->rows.size();++index)if(original->rows[index].sourceStableKey.compare(row.sourceStableKey,Qt::CaseInsensitive)==0){clone=index;break;}if(clone<0){if(diagnostic)*diagnostic=QString("New row '%1' has no valid clone source.").arg(identity);return false;}const QMap<QString,QVariant> edited=row.values;row=original->rows.at(clone);row.values=edited;row.sourceRecordIndex=clone;row.added=true;row.deleted=false;row.stableKey=identity.toLower()+QString("#new%1").arg(outputRow);}
+            candidate.rows.append(row);
+        }
+        for(int sourceIndex=0;sourceIndex<original->rows.size();++sourceIndex)if(!usedSources.contains(sourceIndex)){SDatabaseRow removed=original->rows.at(sourceIndex);removed.deleted=true;candidate.rows.append(removed);}tables[keys[i]]=candidate;
+    }
+    result->tables=tables;return true;
+}
+QByteArray DatabaseWorkbook::embeddedTablesLua(const QString& path)
+{
+    QZipReader zip(path);
+    return zip.exists()?zip.fileData("ei-mapper/tables.lua"):QByteArray();
+}
+}

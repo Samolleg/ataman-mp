@@ -20,9 +20,10 @@ void HotReloadProtocolTests::acceptsOwnedVersionedPayload()
     const QString mpr = run.filePath("reloads/1/map.mpr");
     const QString mob = run.filePath("reloads/1/map.mob");
     const QString saves = run.filePath("generations/000001/saves");
+    const QString database = run.filePath("generations/000001/database.res");
     QVERIFY(QDir().mkpath(QFileInfo(mpr).absolutePath()));
     QVERIFY(QDir().mkpath(saves));
-    for(const QString& path : {mpr, mob}) { QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); }
+    for(const QString& path : {mpr, mob, database}) { QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); }
     SMapHotReloadRequest request;
     request.sequence = 1;
     request.generation = 1;
@@ -38,6 +39,8 @@ void HotReloadProtocolTests::acceptsOwnedVersionedPayload()
     request.savePath = saves;
     request.mprSha256 = QString(64, 'a');
     request.mobSha256 = QString(64, 'b');
+    request.databasePath = database;
+    request.databaseSha256 = QString(64, 'd');
     QStringList errors;
     QVERIFY2(validateMapHotReloadRequest(request, run.path(), &errors), qPrintable(errors.join('\n')));
     SMapHotReloadRequest parsed;
@@ -53,9 +56,10 @@ void HotReloadProtocolTests::acceptsOwnedGeneratedMinimapResource()
     const QString mob = QDir(root).filePath("map.mob");
     const QString minimap = QDir(root).filePath("minimap.res");
     const QString saves = QDir(root).filePath("saves");
+    const QString database = QDir(root).filePath("database.res");
     QVERIFY(QDir().mkpath(root));
     QVERIFY(QDir().mkpath(saves));
-    for(const QString& path : {mpr, mob, minimap})
+    for(const QString& path : {mpr, mob, minimap, database})
     {
         QFile file(path);
         QVERIFY(file.open(QIODevice::WriteOnly));
@@ -79,6 +83,8 @@ void HotReloadProtocolTests::acceptsOwnedGeneratedMinimapResource()
     request.minimapTextureName = "eimmap_0123456789ab";
     request.minimapResourcePath = minimap;
     request.minimapResourceSha256 = QString(64, 'c');
+    request.databasePath = database;
+    request.databaseSha256 = QString(64, 'd');
     QStringList errors;
     QVERIFY2(validateMapHotReloadRequest(request, run.path(), &errors),
              qPrintable(errors.join('\n')));
@@ -102,6 +108,8 @@ void HotReloadProtocolTests::rejectsLiveOrEscapingPaths()
     request.savePath = "D:/Evil Islands/saves";
     request.mprSha256 = QString(64, 'a');
     request.mobSha256 = QString(64, 'b');
+    request.databasePath = "D:/Evil Islands/Res/database.res";
+    request.databaseSha256 = QString(64, 'd');
     QStringList errors;
     QVERIFY(!validateMapHotReloadRequest(request, run.path(), &errors));
     QVERIFY(!errors.isEmpty());
@@ -129,6 +137,8 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     request.minimapTextureName = "eimmap_0123456789ab";
     request.minimapResourcePath = "C:/test runs/run-19/reloads/19/minimap.res";
     request.minimapResourceSha256 = QString(64, 'd');
+    request.databasePath = "C:/test runs/run-19/reloads/19/database.res";
+    request.databaseSha256 = QString(64, 'e');
     request.savePath = "C:/test runs/run-19/generations/000007/saves";
     request.preservePosition = true;
     request.graphless = true;
@@ -156,6 +166,8 @@ void HotReloadProtocolTests::roundTripsBridgeControlFile()
     QCOMPARE(parsed.minimapTextureName, request.minimapTextureName);
     QCOMPARE(parsed.minimapResourcePath, request.minimapResourcePath);
     QCOMPARE(parsed.minimapResourceSha256, request.minimapResourceSha256);
+    QCOMPARE(parsed.databasePath, request.databasePath);
+    QCOMPARE(parsed.databaseSha256, request.databaseSha256);
     QCOMPARE(parsed.savePath, request.savePath);
     QCOMPARE(parsed.preservePosition, request.preservePosition);
     QCOMPARE(parsed.graphless, request.graphless);

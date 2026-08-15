@@ -106,6 +106,9 @@
 #include "collection_document.h"
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
+#include "database_editor_dialog.h"
+#include "item_spell_constructor_dialog.h"
+#include "database_document.h"
 #include "minimap_export_dialog.h"
 #include "viewport_minimap_widget.h"
 #include "mmp_codec.h"
@@ -121,10 +124,36 @@ constexpr int kValidationPathRole = Qt::UserRole;
 constexpr int kValidationCopyRole = Qt::UserRole + 1;
 constexpr int kValidationNidRole = Qt::UserRole + 2;
 constexpr int kValidationSectionRole = Qt::UserRole + 3;
+constexpr int kValidationDatabaseTableRole = Qt::UserRole + 4;
+constexpr int kValidationDatabaseRowRole = Qt::UserRole + 5;
 constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
 constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
 constexpr int kLoadedMapMob = 2;
+
+class CDatabaseHistoryCommand final : public QUndoCommand
+{
+public:
+    CDatabaseHistoryCommand(const QSharedPointer<ei::DatabaseDocument>& document,
+                            ei::DatabaseEditorDialog* dialog, CView* view,
+                            const QString& description,const QString& tableKey,
+                            const QString& rowKey,bool affectsVisuals)
+        : QUndoCommand(description), m_document(document), m_dialog(dialog),m_view(view),m_tableKey(tableKey),m_rowKey(rowKey),m_affectsVisuals(affectsVisuals) {}
+    void undo() override { if(m_document->undo()) refresh(); }
+    void redo() override { if(m_initialRedo){m_initialRedo=false;return;} if(m_document->redo()) refresh(); }
+private:
+    void refresh()
+    {
+        if(m_dialog)m_dialog->refreshFromHistory();else{QString diagnostic;const auto snapshot=m_document->currentSnapshot(&diagnostic);if(snapshot)ei::ProfileDatabaseContext::instance().publishEditedSnapshot(snapshot);}
+        if(m_view&&m_affectsVisuals)m_view->refreshDatabaseVisuals(m_tableKey,m_rowKey);
+    }
+    QSharedPointer<ei::DatabaseDocument> m_document;
+    QPointer<ei::DatabaseEditorDialog> m_dialog;
+    QPointer<CView> m_view;
+    QString m_tableKey,m_rowKey;
+    bool m_affectsVisuals{true};
+    bool m_initialRedo{true};
+};
 
 class CElidedPathLabel final : public QLabel
 {
@@ -452,6 +481,103 @@ void MainWindow::on_toolButton_2_clicked()
     ei::log(eLogDebug, "btn test start");
 
     ei::log(eLogDebug, "btn test end");
+}
+
+void MainWindow::showItemSpellConstructor(const QString& initialCode)
+{
+    const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+    QString diagnostic;
+    if(!m_databaseDocument || !snapshot
+       || QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath().compare(
+              QFileInfo(snapshot->sourceArchivePath).absoluteFilePath(), Qt::CaseInsensitive) != 0)
+        m_databaseDocument = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
+    if(!m_databaseDocument)
+    {
+        QMessageBox::warning(this, tr("Item / Spell Constructor"),
+            tr("The active profile database cannot be opened.\n\n%1").arg(diagnostic));
+        return;
+    }
+    const QString source = QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath();
+    if(m_itemSpellConstructorDialog
+       && m_itemSpellConstructorDialog->property("databaseSource").toString().compare(
+              source, Qt::CaseInsensitive) != 0)
+    {
+        delete m_itemSpellConstructorDialog;
+        m_itemSpellConstructorDialog = nullptr;
+    }
+    if(!m_itemSpellConstructorDialog)
+    {
+        QStringList roots;
+        if(COptStringList* option = dynamic_cast<COptStringList*>(
+               m_settings->opt(eOptSetResource, "resourceRoots")))
+            for(const QString& root : option->value()) roots << root;
+        m_itemSpellConstructorDialog = new ei::ItemSpellConstructorDialog(
+            m_databaseDocument, roots, m_pView, nullptr);
+        m_itemSpellConstructorDialog->setProperty("databaseSource", source);
+    }
+    if(!initialCode.trimmed().isEmpty()) m_itemSpellConstructorDialog->setCode(initialCode);
+    m_itemSpellConstructorDialog->show();
+    m_itemSpellConstructorDialog->raise();
+    m_itemSpellConstructorDialog->activateWindow();
+}
+
+void MainWindow::showDatabaseEditor(const QString& prototype)
+{
+    ei::log(eLogInfo, QString("Database editor navigation requested for prototype '%1'")
+                        .arg(prototype));
+    if(qApp->property("enduranceDatabasePrototypeNavigationProbe").toBool())
+    {
+        qApp->setProperty("enduranceDatabasePrototypeNavigationReceived", prototype);
+        return;
+    }
+    if(!m_databaseEditorDialog)
+    {
+        const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+        QString diagnostic;
+        if(!m_databaseDocument || !snapshot
+           || QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath()
+                .compare(QFileInfo(snapshot->sourceArchivePath).absoluteFilePath(),
+                         Qt::CaseInsensitive) != 0)
+            m_databaseDocument = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
+        if(!m_databaseDocument)
+        {
+            QMessageBox::warning(this, tr("Database Editor"),
+                tr("The active profile database cannot be opened for authoring.\n\n%1")
+                    .arg(diagnostic));
+            return;
+        }
+
+        m_databaseEditorDialog = new ei::DatabaseEditorDialog(m_databaseDocument, this);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::transactionCommitted,
+                this, [this](const QString& description, const QString& tableKey,
+                             const QString& rowKey)
+        {
+            const QVector<ei::SDatabaseChange> changes=m_databaseDocument->changes();
+            const QString fieldKey=changes.isEmpty()?QString():changes.last().fieldKey;
+            const bool affectsVisuals=fieldKey.isEmpty()||!fieldKey.startsWith(QStringLiteral("jmv."));
+            m_undoStack->push(new CDatabaseHistoryCommand(
+                m_databaseDocument, m_databaseEditorDialog, m_pView,
+                description, tableKey, rowKey, affectsVisuals));
+            if(affectsVisuals)m_pView->refreshDatabaseVisuals(tableKey, rowKey);
+        });
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::undoRequested,
+                m_undoStack, &QUndoStack::undo);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::redoRequested,
+                m_undoStack, &QUndoStack::redo);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::itemSpellConstructorRequested,
+                this, &MainWindow::showItemSpellConstructor);
+    }
+
+    m_databaseEditorDialog->show();
+    m_databaseEditorDialog->raise();
+    m_databaseEditorDialog->activateWindow();
+    if(!prototype.trimmed().isEmpty()
+       && !m_databaseEditorDialog->selectPrototype(prototype))
+    {
+        QMessageBox::warning(m_databaseEditorDialog, tr("Prototype not found"),
+            tr("The active profile database does not contain monster prototype '%1'.")
+                .arg(prototype));
+    }
 }
 
 MainWindow::MainWindow(QWidget* parent) :
@@ -1023,6 +1149,9 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
     QAction* repairMobFamily = new QAction(tr("Review and Repair Object IDs..."), this);
     QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
+    QAction* openDatabaseEditor = new QAction(tr("Database Editor..."), this);
+    QAction* openItemSpellConstructor = new QAction(tr("Item / Spell Constructor..."), this);
+    openItemSpellConstructor->setObjectName(QStringLiteral("openItemSpellConstructorAction"));
     QAction* generateMinimapAction = new QAction(tr("Export Minimap..."), this);
     QAction* persistAiGraphAction = new QAction(tr("Bake / Export AI Graph..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
@@ -1039,6 +1168,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(validateSelectedMobs);
     m_ui->menuTools->addAction(repairMobFamily);
     m_ui->menuTools->addAction(openMapCatalog);
+    m_ui->menuTools->addAction(openDatabaseEditor);
+    m_ui->menuTools->addAction(openItemSpellConstructor);
     m_ui->menuTools->addAction(generateMinimapAction);
     m_ui->menuTools->addAction(persistAiGraphAction);
     m_ui->menuTools->addAction(m_mapTestAction);
@@ -1060,6 +1191,10 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog.exec();
         processMapTableSaveReports(dialog.saveReports());
     });
+    connect(openDatabaseEditor, &QAction::triggered, this,
+            [this]() { showDatabaseEditor(); });
+    connect(openItemSpellConstructor, &QAction::triggered, this,
+            [this]() { showItemSpellConstructor(); });
     connect(generateMinimapAction, &QAction::triggered,
             this, &MainWindow::generateMinimap);
     connect(persistAiGraphAction, &QAction::triggered,
@@ -1222,6 +1357,9 @@ MainWindow::MainWindow(QWidget* parent) :
     }
 
     m_undoStack = new QUndoStack(this);
+    connect(m_undoStack,&QUndoStack::indexChanged,this,[this](){
+        if(m_databaseDocument)scheduleMobFamilyValidation(180);
+    });
     int undoHistoryLimit = 512;
     if(COptInt* configuredLimit = dynamic_cast<COptInt*>(m_settings->opt(eOptSetGeneral, "undoHistoryLimit")))
         undoHistoryLimit = qBound(1, configuredLimit->value(), 1000000);
@@ -1274,6 +1412,14 @@ MainWindow::MainWindow(QWidget* parent) :
     }
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
+    const QMetaObject::Connection databasePrototypeNavigation = connect(
+        m_pView, &CView::openDatabasePrototypeRequested,
+        this, &MainWindow::showDatabaseEditor);
+    Q_ASSERT(databasePrototypeNavigation);
+    ei::log(databasePrototypeNavigation ? eLogInfo : eLogWarning,
+            QString("Database prototype MainWindow route connected=%1 view=%2")
+                .arg(bool(databasePrototypeNavigation))
+                .arg(reinterpret_cast<quintptr>(m_pView), 0, 16));
     m_mapTestLauncher = new CJmvMapTestLauncher(this);
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)
@@ -1822,6 +1968,10 @@ MainWindow::MainWindow(QWidget* parent) :
 MainWindow::~MainWindow()
 {
     saveUiState();
+    delete m_itemSpellConstructorDialog;
+    m_itemSpellConstructorDialog=nullptr;
+    delete m_databaseEditorDialog;
+    m_databaseEditorDialog=nullptr;
     delete m_minimapExportDialog;
     m_minimapExportDialog = nullptr;
     if(m_pView && m_pView->prepareForApplicationShutdown())
@@ -3334,6 +3484,15 @@ void MainWindow::updateMapTestAction()
 {
     if(!m_mapTestAction || !m_stopMapTestAction)
         return;
+    if(m_mapTestLauncher && m_mapTestLauncher->isRestartPending())
+    {
+        m_mapTestAction->setText(tr("Restarting Test..."));
+        m_mapTestAction->setEnabled(false);
+        m_mapTestAction->setToolTip(tr(
+            "Stopping the previous Endurance-owned game process before launching the current database, JMV Lua, and map state."));
+        m_stopMapTestAction->setEnabled(false);
+        return;
+    }
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
@@ -3778,6 +3937,53 @@ void MainWindow::launchCurrentMapTest()
     input.mprData = mprData;
     input.mobData = mobData;
     input.generatedAiGraphData = generatedAiGraphData;
+    const auto databaseSnapshot = ei::ProfileDatabaseContext::instance().current();
+    if(!databaseSnapshot || databaseSnapshot->sourceArchivePath.trimmed().isEmpty())
+    {
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("The active profile database cannot be resolved for runtime staging."));
+        return;
+    }
+    input.databaseSourcePath = databaseSnapshot->sourceArchivePath;
+    QString databaseDiagnostic;
+    if(m_databaseDocument
+       && QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath().compare(
+              QFileInfo(input.databaseSourcePath).absoluteFilePath(),
+              Qt::CaseInsensitive) == 0)
+        input.databaseData = m_databaseDocument->buildArchive(&databaseDiagnostic);
+    else
+    {
+        QFile databaseFile(input.databaseSourcePath);
+        if(databaseFile.open(QIODevice::ReadOnly))
+            input.databaseData = databaseFile.readAll();
+        else
+            databaseDiagnostic = databaseFile.errorString();
+    }
+    if(input.databaseData.isEmpty())
+    {
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("The active database could not be staged safely.\n\n%1")
+                .arg(databaseDiagnostic));
+        return;
+    }
+    if(isJmv)
+    {
+        input.tablesLuaSourcePath=m_databaseDocument?m_databaseDocument->sourceTablesLuaPath()
+            :databaseSnapshot->jmvUnitPerkSourcePath;
+        if(m_databaseDocument&&!input.tablesLuaSourcePath.isEmpty())
+            input.tablesLuaData=m_databaseDocument->buildTablesLua(&databaseDiagnostic);
+        else if(!input.tablesLuaSourcePath.isEmpty())
+        {
+            QFile luaFile(input.tablesLuaSourcePath);
+            if(luaFile.open(QIODevice::ReadOnly))input.tablesLuaData=luaFile.readAll();
+            else databaseDiagnostic=luaFile.errorString();
+        }
+        if(input.tablesLuaSourcePath.isEmpty()||input.tablesLuaData.isEmpty())
+        {
+            QMessageBox::critical(this,tr("Map test launch"),tr("The active JMV tables.lua could not be staged safely.\n\n%1").arg(databaseDiagnostic));
+            return;
+        }
+    }
     input.supplementalMobs = supplementalMobs;
     input.embeddedScript = mob->script();
     input.mapEntry = entry;
@@ -3831,16 +4037,48 @@ void MainWindow::launchCurrentMapTest()
             return;
         input.baseProbeLevel = levels.indexOf(selected) + 1;
     }
+    bool fullRestartRequested = false;
+    if(hotReloadRequested)
+    {
+        const QStringList startupChanges =
+            m_mapTestLauncher->startupResourceChanges(input);
+        if(!startupChanges.isEmpty())
+        {
+            progress->hide();
+            QMessageBox restartBox(
+                QMessageBox::Question,
+                tr("Restart Test Current Map"),
+                tr("The running game cannot safely apply pending %1 changes during a map hot reload. The database and JMV Lua state are initialized once when the game process starts.\n\nRestart the Endurance-owned test process and stage the current map, database, and Lua state together?")
+                    .arg(startupChanges.join(tr(" and "))),
+                QMessageBox::NoButton, this);
+            QPushButton* restartButton = restartBox.addButton(
+                tr("Restart Test"), QMessageBox::AcceptRole);
+            restartBox.addButton(QMessageBox::Cancel);
+            restartBox.exec();
+            if(restartBox.clickedButton() != restartButton)
+                return;
+            progress->show();
+            progress->setLabelText(tr("Stopping the current test before a fresh launch..."));
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            fullRestartRequested = true;
+        }
+    }
     QString error;
-    const bool accepted = hotReloadRequested
-        ? m_mapTestLauncher->hotReload(input, &error)
-        : m_mapTestLauncher->launch(input, &error);
+    const bool accepted = fullRestartRequested
+        ? m_mapTestLauncher->restart(input, &error)
+        : hotReloadRequested
+            ? m_mapTestLauncher->hotReload(input, &error)
+            : m_mapTestLauncher->launch(input, &error);
     if(!accepted)
     {
         ei::log(eLogWarning, QString("Map test %1 refused: %2")
-            .arg(hotReloadRequested ? "hot reload" : "launch", error));
+            .arg(fullRestartRequested ? "restart" : hotReloadRequested ? "hot reload" : "launch",
+                 error));
         QMessageBox::critical(this,
-            hotReloadRequested ? tr("Hot reload") : tr("Map test launch"), error);
+            fullRestartRequested ? tr("Restart Test Current Map")
+                                 : hotReloadRequested ? tr("Hot reload")
+                                                      : tr("Map test launch"),
+            error);
     }
     else
     {
@@ -3854,6 +4092,15 @@ void MainWindow::launchCurrentMapTest()
         }
         if(hotReloadRequested)
         {
+            if(fullRestartRequested)
+            {
+                progress->setValue(6);
+                statusBar()->showMessage(tr(
+                    "Stopping the current test; a fresh process will launch automatically with the current database and JMV Lua state."),
+                    8000);
+                updateMapTestAction();
+                return;
+            }
             // Keep this application-modal progress window alive until the bridge
             // commits or rejects the staged generation. The launcher focuses the
             // game only after hotReloadFinished, so editor input stays blocked.
@@ -4812,13 +5059,20 @@ void MainWindow::updateMobFamilyValidationPanel()
     m_validationTree->clear();
     if(m_validationShowMore)
         m_validationShowMore->hide();
-    if(m_familyValidation.members.isEmpty())
+    const QVector<ei::SDatabaseValidationFinding> databaseFindings =
+        m_databaseDocument ? m_databaseDocument->validate()
+                           : QVector<ei::SDatabaseValidationFinding>();
+    if(m_familyValidation.members.isEmpty() && databaseFindings.isEmpty())
     {
         m_validationSummary->setText(tr("No active MOB family."));
         return;
     }
-    m_validationSummary->setText(m_familyValidation.summary());
-    QTreeWidgetItem* membersRoot = new QTreeWidgetItem(m_validationTree,
+    QString summary=m_familyValidation.members.isEmpty()?QString():m_familyValidation.summary();
+    if(!databaseFindings.isEmpty())summary+=tr("%1Database: %2 finding(s).")
+        .arg(summary.isEmpty()?QString():QStringLiteral("  ")).arg(databaseFindings.size());
+    m_validationSummary->setText(summary);
+    QTreeWidgetItem* membersRoot = nullptr;
+    if(!m_familyValidation.members.isEmpty())membersRoot = new QTreeWidgetItem(m_validationTree,
         QStringList() << tr("INFO") << tr("Family members")
                       << QString() << tr("%1 MOB(s)").arg(m_familyValidation.members.size()));
     for(const SMobFamilyMember& member : m_familyValidation.members)
@@ -4937,7 +5191,28 @@ void MainWindow::updateMobFamilyValidationPanel()
             .arg(m_familyValidation.findings.size() - visibleFindingCount));
         m_validationShowMore->show();
     }
-    membersRoot->setExpanded(true);
+    if(!databaseFindings.isEmpty())
+    {
+        auto* databaseRoot=new QTreeWidgetItem(m_validationTree,
+            QStringList()<<tr("INFO")<<tr("Database")<<QString()
+                         <<tr("%1 finding(s)").arg(databaseFindings.size()));
+        for(const ei::SDatabaseValidationFinding& finding:databaseFindings)
+        {
+            const bool error=finding.severity==ei::SDatabaseValidationFinding::Severity::Error;
+            const bool warning=finding.severity==ei::SDatabaseValidationFinding::Severity::Warning;
+            const QString severity=error?tr("CRITICAL"):(warning?tr("WARNING"):tr("INFO"));
+            auto* item=new QTreeWidgetItem(databaseRoot,
+                QStringList()<<severity<<finding.code<<finding.rowKey<<finding.message);
+            item->setForeground(0,QBrush(error?QColor(220,70,70):warning?QColor(230,160,45):QColor(130,160,190)));
+            item->setData(0,kValidationDatabaseTableRole,finding.tableKey);
+            item->setData(0,kValidationDatabaseRowRole,finding.rowKey);
+            item->setData(0,kValidationCopyRole,finding.message);
+            if(!finding.tableKey.isEmpty()&&!finding.rowKey.isEmpty())
+                item->setToolTip(1,tr("Double-click to open this row in the Database Editor."));
+        }
+        databaseRoot->setExpanded(true);
+    }
+    if(membersRoot)membersRoot->setExpanded(true);
     if(m_familyValidation.criticalCount() > 0 && m_validationDock)
         m_validationDock->show();
 }
@@ -5143,7 +5418,17 @@ QString MainWindow::validationWarningPreview(
 
 void MainWindow::selectValidationObject(QTreeWidgetItem* item)
 {
-    if(!item || !m_pView || !item->data(0, kValidationNidRole).isValid())
+    if(!item)return;
+    const QString databaseTable=item->data(0,kValidationDatabaseTableRole).toString();
+    const QString databaseRow=item->data(0,kValidationDatabaseRowRole).toString();
+    if(!databaseTable.isEmpty()&&!databaseRow.isEmpty())
+    {
+        showDatabaseEditor();
+        if(m_databaseEditorDialog&&!m_databaseEditorDialog->selectFinding(databaseTable,databaseRow))
+            statusBar()->showMessage(tr("The database finding's row is no longer available."),8000);
+        return;
+    }
+    if(!m_pView || !item->data(0, kValidationNidRole).isValid())
         return;
     const QString mobPath = item->data(0, kValidationPathRole).toString();
     const quint32 nid = item->data(0, kValidationNidRole).toUInt();
@@ -6333,6 +6618,7 @@ void MainWindow::closeHotReloadProgress()
 
 bool MainWindow::isExitAllowed()
 {
+    if(!isDatabaseExitAllowed())return false;
     QStringList dirtyMobs;
     if(m_pView)
         for(CMob* mob : m_pView->mobs())
@@ -6349,6 +6635,31 @@ bool MainWindow::isExitAllowed()
     else if(m_pView)
         m_pView->prepareDocumentTransition();
     return m_pView->onExit();
+}
+
+bool MainWindow::isDatabaseExitAllowed()
+{
+    if(!m_databaseDocument)return true;
+    QString diagnostic;
+    if(!m_databaseDocument->hasUnappliedChanges(&diagnostic))return true;
+    QMessageBox box(QMessageBox::Warning,tr("Unapplied database changes"),tr("The active database has unapplied changes. Apply them before deciding whether to save maps, so saved maps cannot reference database rows that were never published."),QMessageBox::NoButton,this);
+    QPushButton* apply=box.addButton(tr("Apply Database"),QMessageBox::AcceptRole);
+    QPushButton* discard=box.addButton(tr("Exit Without Applying"),QMessageBox::DestructiveRole);
+    QPushButton* cancel=box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(apply);box.setEscapeButton(cancel);box.exec();
+    if(box.clickedButton()==cancel)return false;
+    if(box.clickedButton()==discard)return true;
+    CBackupManager backups;const SBackupResult backup=backups.snapshotBeforeSave(QFileInfo(m_databaseDocument->sourceArchivePath()));
+    if(!backup.success&&!backup.skipped){QMessageBox::critical(this,tr("Database apply failed"),backup.error);return false;}
+    if(!m_databaseDocument->sourceTablesLuaPath().isEmpty())
+    {
+        const SBackupResult luaBackup=backups.snapshotBeforeSave(
+            QFileInfo(m_databaseDocument->sourceTablesLuaPath()));
+        if(!luaBackup.success&&!luaBackup.skipped)
+        {QMessageBox::critical(this,tr("Database apply failed"),luaBackup.error);return false;}
+    }
+    if(!m_databaseDocument->applyToSource(&diagnostic)){QMessageBox::critical(this,tr("Database apply failed"),diagnostic);return false;}
+    return true;
 }
 
 void MainWindow::closeAll()

@@ -68,12 +68,14 @@
 #include "ui/viewport_minimap_widget.h"
 #include "ui/minimap_export_dialog.h"
 #include "ui/resource_browser.h"
+#include "ui/item_spell_constructor_dialog.h"
 #include "objects/object_base.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "endurance_ui_scale.h"
 #include "jmv_map_test_launcher.h"
 #include "view.h"
+#include "preview.h"
 #include "render_scheduling.h"
 #include "utils.h"
 
@@ -619,6 +621,47 @@ int runHeadlessCommand(QApplication& app)
         const bool enterCommit = combo.value()->toString() == "custom_model" && appliedChanges == 1;
         combo._onChange("house");
         const bool clickCommit = combo.value()->toString() == "house" && appliedChanges == 2;
+
+        QSharedPointer<IPropertyBase> prototypeValue(
+            new propStr(eObjParam_UNIT_PROTOTYPE, "Human Test"));
+        QTableWidget prototypeTable;
+        CTableManager prototypeManager(&prototypeTable);
+        QString routedPrototype;
+        QObject::connect(&prototypeManager,
+                         &CTableManager::openDatabasePrototypeRequested,
+                         [&routedPrototype](const QString& value) {
+            routedPrototype = value;
+        });
+        prototypeManager.setNewData(
+            QList<QSharedPointer<IPropertyBase>>() << prototypeValue);
+        CComboDynItem* routedCombo = qobject_cast<CComboDynItem*>(
+            prototypeTable.cellWidget(0, 1));
+        QAction* prototypeOpenAction = nullptr;
+        bool prototypeMenuAccepted = false;
+        if(routedCombo)
+        {
+            QTimer::singleShot(0, [&prototypeOpenAction]()
+            {
+                for(QWidget* widget : QApplication::topLevelWidgets())
+                    if(QMenu* menu = qobject_cast<QMenu*>(widget))
+                        if(QAction* action = menu->findChild<QAction*>(
+                               QStringLiteral("openDatabasePrototypeAction")))
+                        {
+                            prototypeOpenAction = action;
+                            action->trigger();
+                            menu->close();
+                            return;
+                        }
+            });
+            QContextMenuEvent prototypeMenuEvent(QContextMenuEvent::Mouse,
+                QPoint(2, 2), routedCombo->lineEdit()->mapToGlobal(QPoint(2, 2)));
+            QApplication::sendEvent(routedCombo->lineEdit(), &prototypeMenuEvent);
+            prototypeMenuAccepted = prototypeMenuEvent.isAccepted();
+        }
+        QApplication::processEvents();
+        const bool databasePrototypeMenuEmissionWorks =
+            prototypeMenuAccepted && prototypeOpenAction && routedCombo
+            && routedPrototype == QStringLiteral("Human Test");
 
         QSharedPointer<IPropertyBase> textureValue(new propStr(eObjParam_PRIM_TXTR, "original_texture"));
         CComboDynItem textureCombo(textureValue);
@@ -2316,6 +2359,46 @@ int runHeadlessCommand(QApplication& app)
                 && resourceBrowser.findChild<QTreeWidget*>(
                     QStringLiteral("resourceModelParts"));
 
+        // Reproduce closing and immediately reopening the modeless constructor
+        // before Qt dispatches deferred-delete events. The window is meant to
+        // be reusable for the lifetime of MainWindow.
+        QPointer<ei::ItemSpellConstructorDialog> constructorLifecycleProbe =
+            new ei::ItemSpellConstructorDialog({}, {}, nullptr, nullptr);
+        constructorLifecycleProbe->show();
+        QApplication::processEvents();
+        constructorLifecycleProbe->close();
+        constructorLifecycleProbe->show();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QApplication::processEvents();
+        const bool itemConstructorCloseReopenSafe = constructorLifecycleProbe
+            && constructorLifecycleProbe->isVisible();
+        delete constructorLifecycleProbe;
+
+        // Exercise the production receiver chain after the isolated widget
+        // checks. MainWindow initializes process-wide UI/render services, so
+        // constructing it earlier contaminates otherwise independent probes.
+        qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", true);
+        qApp->setProperty("enduranceDatabasePrototypeNavigationReceived", QString());
+        MainWindow* productionWindow = new MainWindow;
+        const bool productionRouteInvoked = productionWindow->view()
+            && QMetaObject::invokeMethod(productionWindow->view(),
+                "openDatabasePrototypeRequested", Qt::DirectConnection,
+                Q_ARG(QString, QStringLiteral("Human Test")));
+        QApplication::processEvents();
+        const bool databasePrototypeMainWindowRouteWorks = productionRouteInvoked
+            && qApp->property("enduranceDatabasePrototypeNavigationReceived").toString()
+                == QStringLiteral("Human Test");
+        CPreview detachedPreview(nullptr, productionWindow->view());
+        detachedPreview.resize(160,120);
+        detachedPreview.show();
+        QApplication::processEvents();
+        const bool detachedPreviewSharesViewportContext = detachedPreview.isSharing();
+        detachedPreview.close();
+        qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", false);
+        // This unshown production probe owns process-wide UI/render services;
+        // retain it for the remaining few statements and let process exit
+        // reclaim it, matching application lifetime.
+
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
@@ -2334,7 +2417,11 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyResizeRepaintCoalesced && diplomacyResizeRepaintResumes
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
-                && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
+                && enterCommit && clickCommit && databasePrototypeMenuEmissionWorks
+                && databasePrototypeMainWindowRouteWorks
+                && detachedPreviewSharesViewportContext
+                && itemConstructorCloseReopenSafe
+                && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
                 && uiScaleSettingsPersist && uiScaleLiveApply && uiScaleFontApplied
@@ -2441,6 +2528,14 @@ int runHeadlessCommand(QApplication& app)
                << " escapeCancel=" << escapeCancel
                << " enterCommit=" << enterCommit
                << " clickCommit=" << clickCommit
+               << " databasePrototypeMenuEmissionWorks="
+               << databasePrototypeMenuEmissionWorks
+               << " databasePrototypeMainWindowRouteWorks="
+               << databasePrototypeMainWindowRouteWorks
+               << " detachedPreviewSharesViewportContext="
+               << detachedPreviewSharesViewportContext
+               << " itemConstructorCloseReopenSafe="
+               << itemConstructorCloseReopenSafe
                << " staticChoiceItemDataStored=" << staticChoiceItemDataStored
                << " staticChoicePopupTooltipClear=" << staticChoicePopupTooltipClear
                << " staticChoiceItemTooltipsWork=" << staticChoiceItemTooltipsWork

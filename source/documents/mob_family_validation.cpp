@@ -1269,6 +1269,27 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         }
         for(const SMobObjectSnapshot& object : member.objects)
         {
+            if(request.database && object.unit && !object.importMode)
+            {
+                const QString prototype = object.prototype.trimmed();
+                const QString key = prototype.toLower();
+                if(prototype.isEmpty() || !request.database->monsters.contains(key))
+                {
+                    SMobFamilyFinding finding;
+                    finding.severity = EMobFamilyFindingSeverity::Critical;
+                    finding.code = "database.prototype.missing";
+                    finding.category = "Database";
+                    finding.message = prototype.isEmpty()
+                        ? QString("Character NID %1 has no database prototype. The game cannot resolve this unit and may crash while loading the map.")
+                              .arg(object.hasNid ? QString::number(object.nid) : QString("unknown"))
+                        : QString("Character database prototype '%1' does not exist in the active profile database. The game cannot resolve this unit and may crash while loading the map.")
+                              .arg(prototype);
+                    finding.locations << member.path + ":" + object.sectionPath;
+                    finding.hasNid = object.hasNid;
+                    finding.nid = object.nid;
+                    report.findings.append(finding);
+                }
+            }
             if(jmvDatabase && object.unit && !object.importMode
                && request.database->jmvUnitPerkTableStatus
                     == ei::EJmvUnitPerkTableStatus::Valid)

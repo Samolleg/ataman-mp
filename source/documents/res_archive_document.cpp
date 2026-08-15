@@ -181,27 +181,32 @@ bool CResArchiveDocument::replaceMember(const QString& name,
         return true;
     }
 
-    QByteArray staged = m_originalBytes;
-    staged.append(QByteArray((16 - (staged.size() % 16)) % 16, '\0'));
-    const quint64 payloadOffset = quint64(staged.size());
-    if(payloadOffset > quint64(std::numeric_limits<quint32>::max()) ||
+    const qint64 oldEnd = qint64(member.dataOffset) + member.dataSize;
+    const qint64 delta = qint64(replacementPayload.size()) - member.dataSize;
+    const qint64 newTableOffset = qint64(m_tableOffset) + delta;
+    if(oldEnd > m_tableOffset || newTableOffset < qint64(kHeaderSize) ||
+       newTableOffset > qint64(std::numeric_limits<quint32>::max()) ||
        quint64(replacementPayload.size()) > quint64(std::numeric_limits<quint32>::max()))
     {
         addError(errors, "The staged RES payload exceeds the 32-bit archive format.");
         return false;
     }
+    // Replace the payload inside the original data region. Appending a new
+    // payload after the old RES directory leaves a stale directory embedded
+    // before the authoritative one; the shipped loader does not accept that
+    // layout reliably even though a tolerant parser can reopen it.
+    QByteArray staged = m_originalBytes.left(int(member.dataOffset));
     staged.append(replacementPayload);
-    staged.append(QByteArray((16 - (staged.size() % 16)) % 16, '\0'));
-    const quint64 newTableOffset = quint64(staged.size());
-    if(newTableOffset > quint64(std::numeric_limits<quint32>::max()))
-    {
-        addError(errors, "The staged RES table offset exceeds the archive format.");
-        return false;
-    }
+    staged.append(m_originalBytes.mid(int(oldEnd),int(m_tableOffset-oldEnd)));
     QByteArray table = m_tableBytes;
-    const quint64 entryOffset = quint64(member.tableIndex) * kEntrySize;
-    writeU32(&table, entryOffset + 4, quint32(replacementPayload.size()));
-    writeU32(&table, entryOffset + 8, quint32(payloadOffset));
+    for(const SResArchiveMember& current : m_members)
+    {
+        const quint64 entryOffset = quint64(current.tableIndex) * kEntrySize;
+        if(current.tableIndex == member.tableIndex)
+            writeU32(&table, entryOffset + 4, quint32(replacementPayload.size()));
+        else if(current.dataOffset > member.dataOffset)
+            writeU32(&table, entryOffset + 8, quint32(qint64(current.dataOffset) + delta));
+    }
     staged.append(table);
     staged.append(m_namesBytes);
     writeU32(&staged, 8, quint32(newTableOffset));

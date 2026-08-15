@@ -3,6 +3,7 @@
 
 #include "profile_database.h"
 #include "runtime_providers.h"
+#include "types.h"
 
 #include <QJsonObject>
 #include <QSharedPointer>
@@ -10,9 +11,35 @@
 
 namespace ei {
 
+inline bool unitPropertyAffectsVisual(EObjParam type)
+{
+    switch(type)
+    {
+    case eObjParam_TEMPLATE:
+    case eObjParam_PARENT_TEMPLATE:
+    case eObjParam_PRIM_TXTR:
+    case eObjParam_SEC_TXTR:
+    case eObjParam_COMPLECTION:
+    case eObjParam_BODYPARTS:
+    case eObjParam_UNIT_NEED_IMPORT:
+    case eObjParam_UNIT_PROTOTYPE:
+    case eObjParam_UNIT_ARMORS:
+    case eObjParam_UNIT_WEAPONS:
+        return true;
+    default:
+        return false;
+    }
+}
+
 inline bool shouldShowUnitAppearanceProgress(bool pending, int total, int completed)
 {
     return pending && total > 0 && completed < total;
+}
+
+inline bool canCarryResolvedVisualToDatabaseGeneration(
+        quint64 resolvedVisualRevision, quint64 visualRevision)
+{
+    return resolvedVisualRevision == visualRevision;
 }
 
 inline int completedUnitVisualCount(int total, int unresolved)

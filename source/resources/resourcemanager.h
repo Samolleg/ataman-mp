@@ -35,6 +35,9 @@ public:
     void readFigure(const QByteArray& file, const QString& name);
     void readAssembly(const QMap<QString, QByteArray>& aFile, const QString& assemblyRoot);
     ei::CFigure* getFigure(const QString& name);
+    // Resolve a specific figure resource, including standalone inventory .fig
+    // assets. Unlike getFigure(), this never rewrites the requested extension.
+    ei::CFigure* getFigureResource(const QString& resourceName);
     CSettings* settings(){Q_ASSERT(m_pSettings); return m_pSettings;}
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     QList<QString>& figureList() {return m_arrFigureForComboBox;}
@@ -125,6 +128,8 @@ public:
     void loadTexture(QSet<QString>& aName);
     QOpenGLTexture* texture(const QString& name);
     QOpenGLTexture* texture(const QString& name, const QString& modelName);
+    QOpenGLTexture* texture(const QStringList& names, const QString& modelName,
+                            QString* resolvedName);
     QOpenGLTexture* layeredTexture(const QStringList& layerNames, const QString& modelName);
     // Read-only CPU images used by diagnostics. These use the same resource
     // lookup and layer composition path as the OpenGL texture above.
@@ -157,7 +162,8 @@ private:
     ~CTextureList();
     void parse(QByteArray& data, const QString& name);
     void initAuxTexture();
-    QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName);
+    QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName,
+                                        bool* found = nullptr);
     QImage loadTextureImageResource(const QString& name, const QString& modelName);
 
 private:

@@ -7,12 +7,24 @@
 
 namespace ei {
 
+struct SUvTransform
+{
+    float scaleU{1.0f};
+    float scaleV{1.0f};
+    float offsetU{0.0f};
+    float offsetV{0.0f};
+    bool normalizedAtlasCell{false};
+};
+
 QString textureCacheKey(const QString& textureName, const QString& modelName = QString());
 QStringList textureResourceCandidates(const QString& textureName, const QString& modelName = QString());
 QStringList terrainTextureResourceNames(const QString& mapName, int textureAtlasCount);
 float textureUvScale(const QString& textureName);
 float textureUvScaleForBounds(const QString& textureName, float minU, float maxU,
                               float minV, float maxV);
+SUvTransform standaloneAtlasCellUvTransform(float minU, float maxU,
+                                             float minV, float maxV,
+                                             int columns = 4, int rows = 4);
 bool usesUnlayeredHumanoidTexture(const QString& partName);
 // Resource identity is stable for one configured profile generation. Archive
 // metadata is deliberately sampled once and invalidated by the explicit

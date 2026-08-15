@@ -15,6 +15,18 @@ void applyActionMembers(const QMap<QString, QByteArray>& members, const QString&
                         bool overlay, SProfileDatabaseSnapshot* snapshot);
 void applyJmvUnitPerkTable(const QStringList& resourceDirectories,
                            SProfileDatabaseSnapshot* snapshot);
+bool parseJmvUnitTables(const QByteArray& source,
+                        QMap<QString, SJmvUnitPerkRecord>* perks,
+                        QMap<QString, SJmvUnitStatRecord>* stats,
+                        QString* diagnostic = nullptr);
+QByteArray rewriteJmvUnitPerkTable(
+    const QByteArray& source,
+    const QMap<QString, SJmvUnitPerkRecord>& records,
+    QString* diagnostic = nullptr);
+QByteArray rewriteJmvUnitStatTable(
+    const QByteArray& source,
+    const QMap<QString, SJmvUnitStatRecord>& records,
+    QString* diagnostic = nullptr);
 SDatabaseProvenance databaseProvenance(const SProfileDatabaseSnapshot& snapshot,
                                        const QString& path, const QString& member,
                                        bool overlay);

@@ -190,6 +190,12 @@ wchar_t g_godmodeMob[MAX_PATH * 4] = {};
 wchar_t g_supplementalMobDirectory[MAX_PATH * 4] = {};
 wchar_t g_mapTableSource[MAX_PATH * 4] = {};
 wchar_t g_mapTableStage[MAX_PATH * 4] = {};
+wchar_t g_databaseSource[MAX_PATH * 4] = {};
+wchar_t g_databaseStage[MAX_PATH * 4] = {};
+wchar_t g_tablesLuaSource[MAX_PATH * 4] = {};
+wchar_t g_tablesLuaStage[MAX_PATH * 4] = {};
+volatile LONG g_databaseRedirectLogCount = 0;
+volatile LONG g_tablesLuaRedirectLogCount = 0;
 volatile LONG g_mapTableRedirectLogCount = 0;
 wchar_t g_temporaryTextureResource[MAX_PATH * 4] = {};
 volatile LONG g_temporaryTextureResourceRegistered = 0;
@@ -227,13 +233,16 @@ struct HotReloadControl
     wchar_t mobPath[MAX_PATH * 4] = {};
     wchar_t bootstrapMobPath[MAX_PATH * 4] = {};
     wchar_t minimapResourcePath[MAX_PATH * 4] = {};
+    wchar_t databasePath[MAX_PATH * 4] = {};
     wchar_t savePath[MAX_PATH * 4] = {};
     unsigned char mprSha256[32] = {};
     unsigned char mobSha256[32] = {};
     unsigned char bootstrapMobSha256[32] = {};
     unsigned char minimapResourceSha256[32] = {};
+    unsigned char databaseSha256[32] = {};
     bool hasBootstrap = false;
     bool hasMinimapResource = false;
+    bool hasDatabase = false;
     bool graphless = false;
     bool syntheticMapIdentity = false;
     int mapSizeX = 0;
@@ -728,6 +737,7 @@ bool ReadHotReloadControl(HotReloadControl* output)
     bool haveMprHash = false;
     bool haveMobHash = false;
     bool haveMinimapHash = false;
+    bool haveDatabaseHash = false;
     bool haveProfile = false;
     bool haveRunId = false;
     char* context = nullptr;
@@ -803,6 +813,13 @@ bool ReadHotReloadControl(HotReloadControl* output)
                     / sizeof(parsed.minimapResourcePath[0])));
             if(!parsed.hasMinimapResource) return false;
         }
+        else if(std::strcmp(line, "database") == 0 && value[0])
+        {
+            parsed.hasDatabase = Utf8ToWide(
+                value, parsed.databasePath,
+                int(sizeof(parsed.databasePath) / sizeof(parsed.databasePath[0])));
+            if(!parsed.hasDatabase) return false;
+        }
         else if(std::strcmp(line, "mprSha256") == 0)
             haveMprHash = ParseSha256(value, parsed.mprSha256);
         else if(std::strcmp(line, "mobSha256") == 0)
@@ -813,6 +830,8 @@ bool ReadHotReloadControl(HotReloadControl* output)
         }
         else if(std::strcmp(line, "minimapResourceSha256") == 0 && value[0])
             haveMinimapHash = ParseSha256(value, parsed.minimapResourceSha256);
+        else if(std::strcmp(line, "databaseSha256") == 0 && value[0])
+            haveDatabaseHash = ParseSha256(value, parsed.databaseSha256);
         else if(std::strcmp(line, "graphless") == 0)
             parsed.graphless = std::strcmp(value, "1") == 0;
         else if(std::strcmp(line, "syntheticMapIdentity") == 0)
@@ -843,7 +862,7 @@ bool ReadHotReloadControl(HotReloadControl* output)
        && _stricmp(parsed.bootstrapMode, "transition") != 0
        && _stricmp(parsed.bootstrapMode, "new-game") != 0)
         return false;
-    if(parsed.protocol != 4 || parsed.sequence == 0 || parsed.generation == 0
+    if(parsed.protocol != 5 || parsed.sequence == 0 || parsed.generation == 0
        || !haveProfile || !haveRunId
        || parsed.sequence <= g_hotReloadSequence || parsed.entranceId <= 0
        || parsed.entranceId > 1024
@@ -856,6 +875,10 @@ bool ReadHotReloadControl(HotReloadControl* output)
        || !IsPathInsideHotReloadRoot(parsed.savePath)
        || !HashMatches(parsed.mprPath, parsed.mprSha256)
        || !HashMatches(parsed.mobPath, parsed.mobSha256))
+        return false;
+    if(!parsed.hasDatabase || !haveDatabaseHash
+       || !IsPathInsideHotReloadRoot(parsed.databasePath)
+       || !HashMatches(parsed.databasePath, parsed.databaseSha256))
         return false;
     if(parsed.hasMinimapResource
        && (!parsed.minimapTexture[0] || !haveMinimapHash
@@ -1241,6 +1264,64 @@ bool RewriteMapTableA(LPCSTR path, char* output, size_t capacity)
         && !substituted;
 }
 
+bool RewriteDatabaseW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_databaseSource[0]
+       || !g_databaseStage[0])
+        return false;
+    wchar_t full[MAX_PATH * 4]{};
+    const DWORD length = GetFullPathNameW(
+        path, DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
+    if(!length || length >= sizeof(full) / sizeof(full[0]))
+        return false;
+    NormalizeSlashes(full);
+    if(_wcsicmp(full, g_databaseSource) != 0
+       || wcscpy_s(output, capacity, g_databaseStage) != 0)
+        return false;
+    const LONG sequence = InterlockedIncrement(&g_databaseRedirectLogCount);
+    if(sequence <= 8)
+    {
+        wchar_t message[1900]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"DATABASE_REDIRECT seq=%ld from=\"%s\" to=\"%s\"",
+                     sequence, full, output);
+        Log(message);
+    }
+    return true;
+}
+
+bool RewriteDatabaseA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0])))
+       || !RewriteDatabaseW(wide, rewritten,
+                            sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0
+        && !substituted;
+}
+
+bool RewriteTablesLuaW(LPCWSTR path,wchar_t* output,size_t capacity)
+{
+    if(!path||!output||!capacity||!g_tablesLuaSource[0]||!g_tablesLuaStage[0])return false;
+    wchar_t full[MAX_PATH*4]{};const DWORD length=GetFullPathNameW(path,DWORD(sizeof(full)/sizeof(full[0])),full,nullptr);
+    if(!length||length>=sizeof(full)/sizeof(full[0]))return false;NormalizeSlashes(full);
+    if(_wcsicmp(full,g_tablesLuaSource)!=0||wcscpy_s(output,capacity,g_tablesLuaStage)!=0)return false;
+    const LONG sequence=InterlockedIncrement(&g_tablesLuaRedirectLogCount);if(sequence<=8){wchar_t message[1900]{};_snwprintf_s(message,sizeof(message)/sizeof(message[0]),_TRUNCATE,L"TABLES_LUA_REDIRECT seq=%ld from=\"%s\" to=\"%s\"",sequence,full,output);Log(message);}return true;
+}
+bool RewriteTablesLuaA(LPCSTR path,char* output,size_t capacity)
+{
+    if(!path||!output||!capacity)return false;wchar_t wide[MAX_PATH*4]{},rewritten[MAX_PATH*4]{};
+    if(!MultiByteToWideChar(CP_ACP,0,path,-1,wide,int(sizeof(wide)/sizeof(wide[0])))||!RewriteTablesLuaW(wide,rewritten,sizeof(rewritten)/sizeof(rewritten[0])))return false;
+    BOOL substituted=FALSE;return WideCharToMultiByte(CP_ACP,WC_NO_BEST_FIT_CHARS,rewritten,-1,output,int(capacity),nullptr,&substituted)!=0&&!substituted;
+}
+
 bool CommitSaveGeneration(const HotReloadControl& request)
 {
     if(request.generation == g_saveGeneration)
@@ -1408,6 +1489,10 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
     if(RewriteMapTableW(selected, redirected,
                         sizeof(redirected) / sizeof(redirected[0])))
         selected = redirected;
+    else if(RewriteDatabaseW(selected, redirected,
+                             sizeof(redirected) / sizeof(redirected[0])))
+        selected = redirected;
+    else if(RewriteTablesLuaW(selected,redirected,sizeof(redirected)/sizeof(redirected[0])))selected=redirected;
     HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
@@ -1429,6 +1514,9 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
         || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
     if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
         selected = redirected;
+    else if(RewriteDatabaseA(selected, redirected, sizeof(redirected)))
+        selected = redirected;
+    else if(RewriteTablesLuaA(selected,redirected,sizeof(redirected)))selected=redirected;
     HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
     if(path)
@@ -1455,6 +1543,10 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
     if(RewriteMapTableW(selected, redirected,
                         sizeof(redirected) / sizeof(redirected[0])))
         selected = redirected;
+    else if(RewriteDatabaseW(selected, redirected,
+                             sizeof(redirected) / sizeof(redirected[0])))
+        selected = redirected;
+    else if(RewriteTablesLuaW(selected,redirected,sizeof(redirected)/sizeof(redirected[0])))selected=redirected;
     const DWORD result = g_originalGetFileAttributesW(selected);
     const DWORD error = GetLastError();
     Observe(L"GetFileAttributesW", path, result, error, caller);
@@ -1474,6 +1566,9 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
         || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
     if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
         selected = redirected;
+    else if(RewriteDatabaseA(selected, redirected, sizeof(redirected)))
+        selected = redirected;
+    else if(RewriteTablesLuaA(selected,redirected,sizeof(redirected)))selected=redirected;
     const DWORD result = g_originalGetFileAttributesA(selected);
     const DWORD error = GetLastError();
     if(path)
@@ -2189,6 +2284,51 @@ bool ReadDirectLaunchPaths()
         wcscpy_s(g_mapTableSource, sourceFull);
         wcscpy_s(g_mapTableStage, stageFull);
     }
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_DATABASE_SOURCE",
+                            g_databaseSource,
+                            DWORD(sizeof(g_databaseSource)
+                                  / sizeof(g_databaseSource[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_DATABASE_STAGE",
+                            g_databaseStage,
+                            DWORD(sizeof(g_databaseStage)
+                                  / sizeof(g_databaseStage[0])));
+    if(!g_databaseSource[0] || !g_databaseStage[0])
+    {
+        Log(L"DIRECT_LAUNCH disabled: active database source/stage paths are missing");
+        return false;
+    }
+    wchar_t databaseSourceFull[MAX_PATH * 4]{};
+    wchar_t databaseStageFull[MAX_PATH * 4]{};
+    const DWORD databaseSourceLength = GetFullPathNameW(
+        g_databaseSource,
+        DWORD(sizeof(databaseSourceFull) / sizeof(databaseSourceFull[0])),
+        databaseSourceFull, nullptr);
+    const DWORD databaseStageLength = GetFullPathNameW(
+        g_databaseStage,
+        DWORD(sizeof(databaseStageFull) / sizeof(databaseStageFull[0])),
+        databaseStageFull, nullptr);
+    if(!databaseSourceLength
+       || databaseSourceLength >= sizeof(databaseSourceFull) / sizeof(databaseSourceFull[0])
+       || !databaseStageLength
+       || databaseStageLength >= sizeof(databaseStageFull) / sizeof(databaseStageFull[0])
+       || GetFileAttributesW(databaseSourceFull) == INVALID_FILE_ATTRIBUTES
+       || GetFileAttributesW(databaseStageFull) == INVALID_FILE_ATTRIBUTES)
+    {
+        Log(L"DIRECT_LAUNCH disabled: active database source/stage paths are unreadable");
+        return false;
+    }
+    NormalizeSlashes(databaseSourceFull);
+    NormalizeSlashes(databaseStageFull);
+    wcscpy_s(g_databaseSource, databaseSourceFull);
+    wcscpy_s(g_databaseStage, databaseStageFull);
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TABLES_LUA_SOURCE",g_tablesLuaSource,DWORD(sizeof(g_tablesLuaSource)/sizeof(g_tablesLuaSource[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TABLES_LUA_STAGE",g_tablesLuaStage,DWORD(sizeof(g_tablesLuaStage)/sizeof(g_tablesLuaStage[0])));
+    if(g_tablesLuaSource[0]||g_tablesLuaStage[0])
+    {
+        wchar_t sourceFull[MAX_PATH*4]{},stageFull[MAX_PATH*4]{};const DWORD sourceLength=GetFullPathNameW(g_tablesLuaSource,DWORD(sizeof(sourceFull)/sizeof(sourceFull[0])),sourceFull,nullptr);const DWORD stageLength=GetFullPathNameW(g_tablesLuaStage,DWORD(sizeof(stageFull)/sizeof(stageFull[0])),stageFull,nullptr);
+        if(!sourceLength||sourceLength>=sizeof(sourceFull)/sizeof(sourceFull[0])||!stageLength||stageLength>=sizeof(stageFull)/sizeof(stageFull[0])||GetFileAttributesW(sourceFull)==INVALID_FILE_ATTRIBUTES||GetFileAttributesW(stageFull)==INVALID_FILE_ATTRIBUTES){Log(L"DIRECT_LAUNCH disabled: active tables.lua source/stage paths are incomplete or unreadable");return false;}
+        NormalizeSlashes(sourceFull);NormalizeSlashes(stageFull);wcscpy_s(g_tablesLuaSource,sourceFull);wcscpy_s(g_tablesLuaStage,stageFull);
+    }
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEMP_TEXTURE_RES",
                             g_temporaryTextureResource,
                             DWORD(sizeof(g_temporaryTextureResource)
@@ -2607,6 +2747,17 @@ bool ProcessHotReloadOnGameThread()
     if(request.hasBootstrap)
         wcscpy_s(g_godmodeMob, request.bootstrapMobPath);
     InterlockedExchange(&g_godmodeRedirectLogged, 0);
+    if(wcscpy_s(g_databaseStage, request.databasePath) != 0)
+    {
+        Log(L"HOT_RELOAD refused: generation database path is too long");
+        return false;
+    }
+    wchar_t databaseMessage[1900]{};
+    _snwprintf_s(databaseMessage,
+                 sizeof(databaseMessage) / sizeof(databaseMessage[0]), _TRUNCATE,
+                 L"HOT_RELOAD selected generation database path=\"%s\"",
+                 g_databaseStage);
+    Log(databaseMessage);
 
     RuntimeState runtimeState = CurrentRuntimeState();
     if(runtimeState == RuntimeState::Transitioning)
@@ -3046,6 +3197,19 @@ bool ActivateRuntime()
         return true;
     if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
         return true;
+    // JMV loads addon.dll while the suspended host briefly resumes for its
+    // executable-patch phase. Preparation cannot patch a module which does not
+    // exist yet, so refresh the import hooks now, before normal game/database
+    // initialization reads addon-owned tables.lua.
+    const int newlyPatchedImports = InstallFileObservationHooks();
+    g_patchedImports += newlyPatchedImports;
+    {
+        wchar_t refresh[256]{};
+        _snwprintf_s(refresh, sizeof(refresh) / sizeof(refresh[0]), _TRUNCATE,
+                     L"TRANSITION_PROBE refreshed post-addon imports newly_patched=%d total_patched=%d",
+                     newlyPatchedImports, g_patchedImports);
+        Log(refresh);
+    }
     Log(L"RUNTIME_ACTIVATION phase=install-map-detours begin module=cached");
     const bool directLaunch = InstallMapLoadDetour();
     Log(directLaunch

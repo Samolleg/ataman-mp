@@ -29,6 +29,7 @@ private slots:
     void injectsActualAutorunRuntimeBootstrap();
     void exposesTestRunsQuickAccessPath();
     void createsGenerationScopedSavePaths();
+    void rejectsMixedJmvGameRootRegistryPaths();
     void validatesExternalGraphEnvelope();
     void recognizesGraphlessBridgeProtocolMarker();
     void detectsAutoSpellMobCapability();
@@ -38,6 +39,7 @@ private slots:
     void rejectsMalformedExternalGraph();
     void resolvesActualZone6ExternalGraph();
     void resolvesHostedGamePidForHotReload();
+    void startupResourceChangesRequireFreshProcess();
     void preparesOwnedGodmodeAutoexec();
     void preservesExistingAutoexecForRecovery();
     void recoveryRemovesAutoexecCreatedByEndurance();
@@ -57,6 +59,7 @@ private slots:
     void currentSessionSnapshotRejectsUnsafePath();
     void authoritativeResultAcceptsVerifiedRun();
     void authoritativeResultAcceptsLatestHotReloadGeneration();
+    void authoritativeResultRequiresStagedTablesLuaRead();
     void authoritativeResultRejectsWrongZone();
     void analyzesPersistedAuthoritativeResult();
     void runtimeSmokeReachesGameplayReady();
@@ -163,6 +166,57 @@ void JmvMapTestLauncherTests::createsGenerationScopedSavePaths()
     QVERIFY(initial != reload);
 }
 
+void JmvMapTestLauncherTests::startupResourceChangesRequireFreshProcess()
+{
+    SJmvMapTestLaunchInput input;
+    input.databaseData = "database baseline";
+    input.tablesLuaSourcePath = "D:/Evil Islands/Starter/Mods/JamaisVu135/lua/tables.lua";
+    input.tablesLuaData = "lua baseline";
+
+    QStringList reasons = CJmvMapTestLauncher::changedStartupResources(
+        hash(input.databaseData), input.tablesLuaSourcePath,
+        hash(input.tablesLuaData), input);
+    QVERIFY(reasons.isEmpty());
+
+    input.databaseData = "database with cloned prototype";
+    reasons = CJmvMapTestLauncher::changedStartupResources(
+        hash("database baseline"), input.tablesLuaSourcePath,
+        hash(input.tablesLuaData), input);
+    QCOMPARE(reasons, QStringList{QStringLiteral("database.res")});
+
+    input.databaseData = "database baseline";
+    input.tablesLuaData = "lua with edited unit stats";
+    reasons = CJmvMapTestLauncher::changedStartupResources(
+        hash(input.databaseData), input.tablesLuaSourcePath,
+        hash("lua baseline"), input);
+    QCOMPARE(reasons, QStringList{QStringLiteral("tables.lua")});
+
+    input.databaseData = "database with edited HP";
+    reasons = CJmvMapTestLauncher::changedStartupResources(
+        hash("database baseline"), input.tablesLuaSourcePath,
+        hash("lua baseline"), input);
+    QCOMPARE(reasons, (QStringList{QStringLiteral("database.res"),
+                                  QStringLiteral("tables.lua")}));
+}
+
+void JmvMapTestLauncherTests::rejectsMixedJmvGameRootRegistryPaths()
+{
+    QString error;
+    QVERIFY(!CJmvMapTestLauncher::validateJmvGameRootPaths(
+        "D:/Evil Islands",
+        "C:/Users/test/Documents/EI Renderer/work/runtime-clone/",
+        "C:/Users/test/Documents/EI Renderer/work/runtime-clone/Res/",
+        "C:/Users/test/Documents/EI Renderer/work/runtime-clone/",
+        &error));
+    QVERIFY(error.contains("runtime-clone"));
+    QVERIFY(error.contains("D:\\Evil Islands"));
+
+    error.clear();
+    QVERIFY2(CJmvMapTestLauncher::validateJmvGameRootPaths(
+        "D:/Evil Islands", "D:/Evil Islands/", "D:/Evil Islands/Res/",
+        "D:/Evil Islands/", &error), qPrintable(error));
+}
+
 void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
 {
     const QString gameRoot = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_GAME_ROOT");
@@ -209,6 +263,24 @@ void JmvMapTestLauncherTests::runtimeSmokeReachesGameplayReady()
     input.sourceMob = QFileInfo(mobPath);
     input.mprData = mprData;
     input.mobData = mobData;
+    input.databaseSourcePath = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_DATABASE",
+        QDir(modRoot).filePath("res/database.res"));
+    input.databaseData = readAll(qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_DATABASE_DATA",input.databaseSourcePath));
+    QVERIFY2(!input.databaseData.isEmpty(),
+             qPrintable("Could not read smoke database: " + input.databaseSourcePath));
+    input.tablesLuaSourcePath = qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_TABLES_LUA",
+        QDir(modRoot).filePath("lua/tables.lua"));
+    input.tablesLuaData = readAll(qEnvironmentVariable(
+        "EI_ENDURANCE_RUNTIME_SMOKE_TABLES_LUA_DATA",input.tablesLuaSourcePath));
+    QVERIFY2(!input.tablesLuaData.isEmpty(),
+             qPrintable("Could not read smoke tables.lua: " + input.tablesLuaSourcePath));
+    // Make the staged payload observably different without changing Lua
+    // semantics. GameplayReady plus the redirect/hash evidence then proves a
+    // pending Lua document was loaded, rather than a byte-identical copy.
+    input.tablesLuaData.append("\r\n-- EI Mapper Endurance staged-Lua smoke marker\r\n");
     input.mapEntry.zoneId = qEnvironmentVariable("EI_ENDURANCE_RUNTIME_SMOKE_ZONE", "gz1g");
     input.mapEntry.mprName = qEnvironmentVariable(
         "EI_ENDURANCE_RUNTIME_SMOKE_MPR_NAME",
@@ -613,6 +685,36 @@ void JmvMapTestLauncherTests::authoritativeResultAcceptsLatestHotReloadGeneratio
     QStringList findings;
     QVERIFY2(CJmvMapTestLauncher::validateAutomatedResult(report, &findings),
              qPrintable(findings.join('\n')));
+}
+
+void JmvMapTestLauncherTests::authoritativeResultRequiresStagedTablesLuaRead()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    QJsonObject manifest = resultManifest(temp.path(), source);
+    QJsonObject tablesLua;
+    tablesLua.insert("sourcePath", "D:/JMV/lua/tables.lua");
+    tablesLua.insert("stagedPath", QDir(temp.path()).filePath("database/tables.lua"));
+    tablesLua.insert("stagedSha256", QStringLiteral("pending-lua-hash"));
+    tablesLua.insert("loadEvidencePath", QDir(temp.path()).filePath("tables-lua-loaded.txt"));
+    manifest.insert("tablesLua", tablesLua);
+
+    const QJsonObject missing = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, successfulBridgeEvidence(temp.path()), 0,
+        int(QProcess::NormalExit), false, QString());
+    QVERIFY(!missing.value("passed").toBool());
+    QVERIFY(!missing.value("tablesLuaLoadObserved").toBool());
+    QVERIFY(QJsonDocument(missing.value("errors").toArray()).toJson()
+            .contains("staged tables.lua was not read"));
+
+    writeFile(tablesLua.value("loadEvidencePath").toString(), QByteArray("pending-lua-hash\n"));
+    const QString observed = successfulBridgeEvidence(temp.path());
+    const QJsonObject accepted = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, observed, 0, int(QProcess::NormalExit), false, QString());
+    QVERIFY(accepted.value("tablesLuaLoadObserved").toBool());
+    QVERIFY(accepted.value("passed").toBool());
 }
 
 void JmvMapTestLauncherTests::authoritativeResultRejectsWrongZone()

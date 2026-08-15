@@ -262,8 +262,29 @@ QString testRunsRoot()
 
 QString normalized(const QString& path)
 {
-    return QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath());
+    return QDir::cleanPath(
+        QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()));
 }
+
+#ifdef Q_OS_WIN
+QString registry32String(HKEY root, const wchar_t* subkey, const wchar_t* valueName)
+{
+    HKEY key = nullptr;
+    if(RegOpenKeyExW(root, subkey, 0, KEY_QUERY_VALUE | KEY_WOW64_32KEY, &key)
+       != ERROR_SUCCESS)
+        return QString();
+    wchar_t value[MAX_PATH * 4]{};
+    DWORD type = 0;
+    DWORD size = DWORD(sizeof(value));
+    const LSTATUS status = RegQueryValueExW(
+        key, valueName, nullptr, &type, reinterpret_cast<LPBYTE>(value), &size);
+    RegCloseKey(key);
+    if(status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ))
+        return QString();
+    value[(sizeof(value) / sizeof(value[0])) - 1] = L'\0';
+    return QString::fromWCharArray(value);
+}
+#endif
 
 QString saveGenerationPath(const QString& runRoot, quint64 generation)
 {
@@ -535,6 +556,8 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int exitCode, QProcess::ExitStatus status)
     {
+        const bool restarting = m_restartPending;
+        const SJmvMapTestLaunchInput restartInput = m_restartInput;
         m_hotReloadReadyTimer->stop();
         m_hotReloadResultTimer->stop();
         m_pendingHotReloadSequence = 0;
@@ -564,12 +587,27 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
                      .arg(report.value("passed").toBool())
                      .arg(report.value("errorCount").toInt())
                      .arg(report.value("warningCount").toInt()).arg(resultPath));
-        emit testReportReady(report);
+        if(!restarting)
+            emit testReportReady(report);
         QString cleanupMessage = cleanupOnly;
         if(!cleanupMessage.isEmpty())
             cleanupMessage += "\n";
         cleanupMessage += bridgeResult;
         emit testFinished(m_runId, exitCode, cleanupMessage);
+        if(restarting)
+        {
+            m_restartPending = false;
+            m_restartInput = SJmvMapTestLaunchInput();
+            QTimer::singleShot(0, this, [this, restartInput]()
+            {
+                QString restartError;
+                if(!launch(restartInput, &restartError))
+                    emit testError(QCoreApplication::translate(
+                        "CJmvMapTestLauncher",
+                        "The fresh Test Current Map process could not be started after stopping the previous process.\n\n%1")
+                        .arg(restartError));
+            });
+        }
     });
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error)
     {
@@ -604,6 +642,38 @@ QString CJmvMapTestLauncher::generationSavesPath(const QString& runRoot,
                                                  quint64 generation)
 {
     return saveGenerationPath(runRoot, generation);
+}
+
+bool CJmvMapTestLauncher::validateJmvGameRootPaths(
+    const QString& selectedGameRoot, const QString& workPath,
+    const QString& resourcesPath, const QString& cdRomPath, QString* error)
+{
+    const QString selected = normalized(selectedGameRoot);
+    const QString expectedResources = normalized(QDir(selected).filePath("Res"));
+    const auto matches = [](const QString& actual, const QString& expected) {
+        return !actual.trimmed().isEmpty()
+            && normalized(actual).compare(expected, Qt::CaseInsensitive) == 0;
+    };
+    if(matches(workPath, selected) && matches(resourcesPath, expectedResources)
+       && matches(cdRomPath, selected))
+        return true;
+    if(error)
+    {
+        *error = QCoreApplication::translate("CJmvMapTestLauncher",
+            "The 32-bit Evil Islands runtime paths do not match the selected Endurance game. "
+            "Launching this mixed-root configuration can load incompatible resources and report "
+            "missing prototypes.\n\nSelected game root:\n%1\n\n32-bit registry paths:\n"
+            "Work path: %2\nResources path: %3\nCD-ROM Path: %4\n\n"
+            "Restore the runtime paths for the selected installation, then retry Test Current Map.")
+            .arg(QDir::toNativeSeparators(selected),
+                 workPath.isEmpty() ? QString("<not configured>")
+                                    : QDir::toNativeSeparators(workPath),
+                 resourcesPath.isEmpty() ? QString("<not configured>")
+                                         : QDir::toNativeSeparators(resourcesPath),
+                 cdRomPath.isEmpty() ? QString("<not configured>")
+                                     : QDir::toNativeSeparators(cdRomPath));
+    }
+    return false;
 }
 
 bool CJmvMapTestLauncher::validateExternalGraph(const QByteArray& bytes,
@@ -905,6 +975,18 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const bool stagedLoaderObserved = bridgeResult.contains(
         "DIRECT_LAUNCH staged map loader returned result=1")
         || completedReloadSequence != 0;
+    const bool tablesLuaStaged = manifest.contains("tablesLua");
+    const QJsonObject tablesLuaJournal = manifest.value("tablesLua").toObject();
+    const bool tablesLuaRedirectObserved = bridgeResult.contains("TABLES_LUA_REDIRECT");
+    bool tablesLuaLoadObserved = !tablesLuaStaged;
+    if(tablesLuaStaged)
+    {
+        QFile evidence(tablesLuaJournal.value("loadEvidencePath").toString());
+        tablesLuaLoadObserved = evidence.open(QIODevice::ReadOnly)
+            && QString::fromLatin1(evidence.readAll()).trimmed().compare(
+                tablesLuaJournal.value("stagedSha256").toString(),
+                Qt::CaseInsensitive) == 0;
+    }
     const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
         && QFileInfo(actualMprPath).absoluteFilePath().compare(
             QFileInfo(expectedMprPath).absoluteFilePath(),
@@ -968,6 +1050,8 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         addUnique(&errors, "The runtime did not prove a completed staged gameplay load.");
     if(stagedLoaderObserved && !payloadHashesValidated)
         addUnique(&errors, "The runtime loader paths could not be matched to the hash-verified staged payloads.");
+    if(tablesLuaStaged && !tablesLuaLoadObserved)
+        addUnique(&errors, "The staged tables.lua was not read by the JMV runtime.");
     if(actualZone.isEmpty())
         addUnique(&errors, "The runtime did not report the actually initialized zone.");
     else if(!requestedZone.isEmpty()
@@ -1020,6 +1104,9 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("gameplayReady", gameplayReady);
     report.insert("stagedLoaderObserved", stagedLoaderObserved);
     report.insert("payloadHashesValidated", payloadHashesValidated);
+    report.insert("tablesLuaStaged", tablesLuaStaged);
+    report.insert("tablesLuaRedirectObserved", tablesLuaRedirectObserved);
+    report.insert("tablesLuaLoadObserved", tablesLuaLoadObserved);
     report.insert("playerInitializationCount", playerInitializations);
     report.insert("reportedPlayerCount", playerInitializations > 0 ? 1 : -1);
     report.insert("playerCountEvidence", playerInitializations > 0
@@ -1105,6 +1192,45 @@ bool CJmvMapTestLauncher::isHotReloadReady() const
     const qint64 gamePid = runtimeGameProcessId();
     return ok && threadId != 0 && gamePid > 0
         && threadBelongsToProcess(threadId, quint32(gamePid));
+}
+
+QStringList CJmvMapTestLauncher::changedStartupResources(
+    const QString& stagedDatabaseSha256,
+    const QString& stagedTablesLuaSourcePath,
+    const QString& stagedTablesLuaSha256,
+    const SJmvMapTestLaunchInput& input)
+{
+    QStringList changed;
+    if(stagedDatabaseSha256.trimmed().isEmpty()
+       || sha256(input.databaseData).compare(
+              stagedDatabaseSha256, Qt::CaseInsensitive) != 0)
+        changed.append(QStringLiteral("database.res"));
+
+    const bool hadStagedLua = !stagedTablesLuaSourcePath.trimmed().isEmpty()
+        || !stagedTablesLuaSha256.trimmed().isEmpty();
+    const bool hasInputLua = !input.tablesLuaSourcePath.trimmed().isEmpty()
+        || !input.tablesLuaData.isEmpty();
+    if(hadStagedLua || hasInputLua)
+    {
+        const bool sourceChanged = QFileInfo(stagedTablesLuaSourcePath)
+            .absoluteFilePath().compare(
+                QFileInfo(input.tablesLuaSourcePath).absoluteFilePath(),
+                Qt::CaseInsensitive) != 0;
+        const bool payloadChanged = stagedTablesLuaSha256.trimmed().isEmpty()
+            || sha256(input.tablesLuaData).compare(
+                stagedTablesLuaSha256, Qt::CaseInsensitive) != 0;
+        if(sourceChanged || payloadChanged)
+            changed.append(QStringLiteral("tables.lua"));
+    }
+    return changed;
+}
+
+QStringList CJmvMapTestLauncher::startupResourceChanges(
+    const SJmvMapTestLaunchInput& input) const
+{
+    return changedStartupResources(
+        m_stagedDatabaseSha256, m_tablesLuaSourcePath,
+        m_stagedTablesLuaSha256, input);
 }
 
 QString CJmvMapTestLauncher::runtimeState() const
@@ -1448,6 +1574,10 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_liveGrpPath.clear();
     m_mapTableSourcePath.clear();
     m_stagedMapTablePath.clear();
+    m_databaseSourcePath.clear();
+    m_stagedDatabasePath.clear();
+    m_tablesLuaSourcePath.clear();
+    m_stagedTablesLuaPath.clear();
     m_livePlaceholderResourcePath.clear();
     m_bridgeResultPath.clear();
     m_testSavesPath.clear();
@@ -1457,6 +1587,10 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_liveGrpSha256.clear();
     m_mapTableSourceSha256.clear();
     m_stagedMapTableSha256.clear();
+    m_databaseSourceSha256.clear();
+    m_stagedDatabaseSha256.clear();
+    m_tablesLuaSourceSha256.clear();
+    m_stagedTablesLuaSha256.clear();
     m_livePlaceholderResourceSha256.clear();
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
@@ -1544,6 +1678,26 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         environment.insert("EI_MAPPER_ENDURANCE_MAP_TABLE_STAGE",
                            m_stagedMapTablePath);
     }
+    if(!m_databaseSourcePath.isEmpty())
+    {
+        environment.insert("EI_MAPPER_ENDURANCE_DATABASE_SOURCE",
+                           m_databaseSourcePath);
+        environment.insert("EI_MAPPER_ENDURANCE_DATABASE_STAGE",
+                           m_stagedDatabasePath);
+    }
+    if(!m_tablesLuaSourcePath.isEmpty())
+    {
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_SOURCE",m_tablesLuaSourcePath);
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_STAGE",m_stagedTablesLuaPath);
+        const QJsonObject luaJournal=m_manifest.value("tablesLua").toObject();
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_PAYLOAD",m_stagedTablesLuaPath);
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_EVIDENCE",
+                           luaJournal.value("loadEvidencePath").toString());
+        environment.insert("EI_MAPPER_ENDURANCE_TABLES_LUA_SHA256",
+                           m_stagedTablesLuaSha256);
+        environment.insert("LUA_PATH",
+                           QDir(m_runRoot).filePath("lua-override/?.lua")+";;");
+    }
     if(!m_livePlaceholderResourcePath.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_TEMP_TEXTURE_RES",
                            m_livePlaceholderResourcePath);
@@ -1572,9 +1726,10 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The active runtime stack is incomplete or does not match an exact manifest.";
         return false;
     }
-    if(!input.spawn.valid || input.mprData.isEmpty() || input.mobData.isEmpty())
+    if(!input.spawn.valid || input.mprData.isEmpty() || input.mobData.isEmpty()
+       || input.databaseSourcePath.trimmed().isEmpty() || input.databaseData.isEmpty())
     {
-        if(error) *error = "The loaded map pair or its unobstructed travel-zone spawn is incomplete.";
+        if(error) *error = "The loaded map pair, active database, or its unobstructed travel-zone spawn is incomplete.";
         return false;
     }
     if(isBase && (input.baseProbeLevel < 1 || input.baseProbeLevel > 4))
@@ -1723,6 +1878,19 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
             }
             return false;
         }
+#ifdef Q_OS_WIN
+        const wchar_t* pathSettings =
+            L"Software\\Gipat.Ru\\EI_Starter\\EvilIslands\\Path Settings";
+        const QString workPath = registry32String(
+            HKEY_CURRENT_USER, pathSettings, L"Work path");
+        const QString resourcesPath = registry32String(
+            HKEY_CURRENT_USER, pathSettings, L"Resources path");
+        const QString cdRomPath = registry32String(
+            HKEY_CURRENT_USER, pathSettings, L"CD-ROM Path");
+        if(!validateJmvGameRootPaths(input.profile.gameRoot, workPath,
+                                     resourcesPath, cdRomPath, error))
+            return false;
+#endif
     }
     if(isBase)
     {
@@ -1781,6 +1949,64 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     {
         if(error) *error = "Could not create the Endurance test-run directory.";
         return false;
+    }
+
+    m_databaseSourcePath = QFileInfo(input.databaseSourcePath).absoluteFilePath();
+    QByteArray sourceDatabase;
+    if(!QFileInfo(m_databaseSourcePath).isFile()
+       || QFileInfo(m_databaseSourcePath).fileName().compare(
+              "database.res", Qt::CaseInsensitive) != 0
+       || !readFile(m_databaseSourcePath, &sourceDatabase, error))
+    {
+        if(error && error->isEmpty())
+            *error = "The active database.res source could not be resolved for owned test staging.";
+        return false;
+    }
+    const QString databaseDirectory = QDir(m_runRoot).filePath("database");
+    m_stagedDatabasePath = QDir(databaseDirectory).filePath("database.res");
+    m_databaseSourceSha256 = sha256(sourceDatabase);
+    m_stagedDatabaseSha256 = sha256(input.databaseData);
+    if(!QDir().mkpath(databaseDirectory)
+       || !atomicWrite(m_stagedDatabasePath, input.databaseData, error)
+       || fileSha256(m_stagedDatabasePath).compare(
+              m_stagedDatabaseSha256, Qt::CaseInsensitive) != 0)
+    {
+        if(error && error->isEmpty())
+            *error = "The staged active database failed its post-write SHA-256 check.";
+        return false;
+    }
+    QJsonObject databaseJournal;
+    databaseJournal.insert("policy", "read-only-exact-source-path-redirection");
+    databaseJournal.insert("sourcePath", m_databaseSourcePath);
+    databaseJournal.insert("sourceSha256", m_databaseSourceSha256);
+    databaseJournal.insert("stagedPath", m_stagedDatabasePath);
+    databaseJournal.insert("stagedSha256", m_stagedDatabaseSha256);
+    databaseJournal.insert("installedArchiveModified", false);
+    m_manifest.insert("database", databaseJournal);
+
+    if(isJmv)
+    {
+        m_tablesLuaSourcePath=QFileInfo(input.tablesLuaSourcePath).absoluteFilePath();QByteArray sourceLua;
+        if(!QFileInfo(m_tablesLuaSourcePath).isFile()||QFileInfo(m_tablesLuaSourcePath).fileName().compare("tables.lua",Qt::CaseInsensitive)!=0||!readFile(m_tablesLuaSourcePath,&sourceLua,error))
+        {if(error&&error->isEmpty())*error="The active JMV tables.lua source could not be resolved for owned test staging.";return false;}
+        m_stagedTablesLuaPath=QDir(databaseDirectory).filePath("tables.lua");m_tablesLuaSourceSha256=sha256(sourceLua);m_stagedTablesLuaSha256=sha256(input.tablesLuaData);
+        if(input.tablesLuaData.isEmpty()||!atomicWrite(m_stagedTablesLuaPath,input.tablesLuaData,error)||fileSha256(m_stagedTablesLuaPath).compare(m_stagedTablesLuaSha256,Qt::CaseInsensitive)!=0)
+        {if(error&&error->isEmpty())*error="The staged active tables.lua failed its post-write SHA-256 check.";return false;}
+        const QString overrideDirectory=QDir(m_runRoot).filePath("lua-override");
+        const QString overridePath=QDir(overrideDirectory).filePath("tables.lua");
+        const QString evidencePath=QDir(m_runRoot).filePath("tables-lua-loaded.txt");
+        const QByteArray wrapper=
+            "local payload = assert(os.getenv('EI_MAPPER_ENDURANCE_TABLES_LUA_PAYLOAD'))\n"
+            "local chunk = assert(loadfile(payload))\n"
+            "local result = chunk()\n"
+            "local evidence = assert(os.getenv('EI_MAPPER_ENDURANCE_TABLES_LUA_EVIDENCE'))\n"
+            "local marker = assert(io.open(evidence, 'wb'))\n"
+            "marker:write(assert(os.getenv('EI_MAPPER_ENDURANCE_TABLES_LUA_SHA256')))\n"
+            "marker:close()\n"
+            "return result\n";
+        if(!QDir().mkpath(overrideDirectory)||!atomicWrite(overridePath,wrapper,error))
+        {if(error&&error->isEmpty())*error="The run-owned tables.lua loader could not be staged.";return false;}
+        QJsonObject luaJournal;luaJournal.insert("policy","pre-initialization-lua-module-override");luaJournal.insert("sourcePath",m_tablesLuaSourcePath);luaJournal.insert("sourceSha256",m_tablesLuaSourceSha256);luaJournal.insert("stagedPath",m_stagedTablesLuaPath);luaJournal.insert("stagedSha256",m_stagedTablesLuaSha256);luaJournal.insert("overridePath",overridePath);luaJournal.insert("loadEvidencePath",evidencePath);luaJournal.insert("installedLuaModified",false);m_manifest.insert("tablesLua",luaJournal);
     }
 
     // Journal every live artifact before creating it. A crash at any later
@@ -2177,6 +2403,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         m_manifest.insert("godmodeBootstrapPath", godmodeBootstrapPath);
     appendRunLog(QString("Prepared generation-scoped isolated saves generation=0 path=%1; live saves remain untouched")
                  .arg(m_testSavesPath));
+    appendRunLog(QString("Staged active database source=%1 sourceSha256=%2 staged=%3 stagedSha256=%4 installedModified=false")
+                 .arg(QDir::toNativeSeparators(m_databaseSourcePath),
+                      m_databaseSourceSha256,
+                      QDir::toNativeSeparators(m_stagedDatabasePath),
+                      m_stagedDatabaseSha256));
     if(isJmv)
         appendRunLog(QString("Starter mod target=%1 persistedSelection=%2 persistedAddonPath=%3 policy=owned-process-override persistentModified=false")
                      .arg(QDir::cleanPath(input.profile.modRoot), starterStoredSelection,
@@ -2240,8 +2471,25 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         if(error) *error = "The active editor profile differs from the running test profile.";
         return false;
     }
+    if(QFileInfo(input.databaseSourcePath).absoluteFilePath().compare(
+           m_databaseSourcePath, Qt::CaseInsensitive) != 0)
+    {
+        if(error) *error = "The active database source differs from the running test profile.";
+        return false;
+    }
+    const QStringList startupChanges = startupResourceChanges(input);
+    if(!startupChanges.isEmpty())
+    {
+        if(error)
+            *error = QCoreApplication::translate(
+                "CJmvMapTestLauncher",
+                "Pending %1 changes require a fresh Test Current Map process because database and JMV Lua state are initialized once at process startup.")
+                .arg(startupChanges.join(QStringLiteral(" + ")));
+        return false;
+    }
     if(!input.profile.valid || !input.profile.runtimeStackValidated
-       || input.mprData.isEmpty() || input.mobData.isEmpty() || !input.spawn.valid)
+       || input.mprData.isEmpty() || input.mobData.isEmpty()
+       || input.databaseData.isEmpty() || !input.spawn.valid)
     {
         if(error) *error = "The hot-reload profile, map pair, or selected entrance is incomplete.";
         return false;
@@ -2285,6 +2533,7 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     const QString payloadMob = QDir(reloadRoot).filePath("map.mob");
     const QString payloadGrp = graphSource.usesExternalGraph()
         ? QDir(reloadRoot).filePath("map.grp") : QString();
+    const QString payloadDatabase = QDir(reloadRoot).filePath("database.res");
     const bool hasGeneratedMinimap = !input.temporaryMinimapMmp.isEmpty();
     const QString minimapTextureName = hasGeneratedMinimap
         ? temporaryMinimapRuntimeTextureName(
@@ -2322,7 +2571,8 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         return false;
     if(!QDir().mkpath(generationSavePath)
        || !atomicWrite(payloadMpr, input.mprData, error)
-       || !atomicWrite(payloadMob, input.mobData, error))
+       || !atomicWrite(payloadMob, input.mobData, error)
+       || !atomicWrite(payloadDatabase, input.databaseData, error))
         return false;
     if(graphSource.usesExternalGraph()
        && !atomicWrite(payloadGrp, graphSource.externalData, error))
@@ -2430,6 +2680,8 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     request.minimapResourcePath = minimapResourcePath;
     request.minimapResourceSha256 = minimapResourcePath.isEmpty()
         ? QString() : fileSha256(minimapResourcePath);
+    request.databasePath = payloadDatabase;
+    request.databaseSha256 = sha256(input.databaseData);
     request.savePath = generationSavePath;
     // Position preservation requires a verified runtime position provider.
     // Until that provider exists, use normal entrance/custom-spawn bootstrap.
@@ -2566,6 +2818,8 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     audit.insert("minimapTextureName", minimapTextureName);
     audit.insert("minimapResourcePath", minimapResourcePath);
     audit.insert("minimapResourceSha256", request.minimapResourceSha256);
+    audit.insert("databasePath", request.databasePath);
+    audit.insert("databaseSha256", request.databaseSha256);
     audit.insert("queuedUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     reloads.append(audit);
     m_manifest.insert("hotReloads", reloads);
@@ -2597,6 +2851,44 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         appendRunLog(QString("Hot reload generation=%1 uses embedded AI_GRAPH from the primary MOB")
                      .arg(generation));
     emit hotReloadQueued(sequence, request.zoneId);
+    return true;
+}
+
+bool CJmvMapTestLauncher::restart(const SJmvMapTestLaunchInput& input,
+                                  QString* error)
+{
+    if(!isRunning())
+        return launch(input, error);
+    if(m_restartPending)
+    {
+        if(error)
+            *error = QCoreApplication::translate(
+                "CJmvMapTestLauncher",
+                "A fresh Test Current Map process is already being prepared.");
+        return false;
+    }
+    if(input.profile.profileId.compare(m_profileId, Qt::CaseInsensitive) != 0)
+    {
+        if(error)
+            *error = QCoreApplication::translate(
+                "CJmvMapTestLauncher",
+                "The active editor profile differs from the running test profile.");
+        return false;
+    }
+    m_restartInput = input;
+    m_restartPending = true;
+    appendRunLog(QString("Fresh process requested for startup resources: %1")
+        .arg(startupResourceChanges(input).join(QStringLiteral(" + "))));
+    m_stopRequested = true;
+    m_process->terminate();
+    QTimer::singleShot(5000, this, [this]()
+    {
+        if(isRunning())
+        {
+            appendRunLog("Graceful restart stop timed out; terminating the Endurance-owned process");
+            m_process->kill();
+        }
+    });
     return true;
 }
 
@@ -2679,6 +2971,12 @@ QString CJmvMapTestLauncher::cleanup()
 
 void CJmvMapTestLauncher::stop()
 {
+    if(m_restartPending)
+    {
+        appendRunLog("Pending fresh-process launch cancelled by Stop Test or editor shutdown");
+        m_restartPending = false;
+        m_restartInput = SJmvMapTestLaunchInput();
+    }
     if(!isRunning())
         return;
     m_stopRequested = true;

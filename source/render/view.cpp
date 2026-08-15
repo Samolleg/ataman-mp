@@ -1269,6 +1269,7 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperty(const QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(const QSharedPointer<IPropertyBase>&)));
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>&)),
                      this, SLOT(onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>&)));
+    connect(m_tableManager.get(),&CTableManager::openDatabasePrototypeRequested,this,&CView::openDatabasePrototypeRequested);
     connect(m_tableManager.get(), &CTableManager::onBehaviorPointSelected,
             this, [this](CNode* point)
     {
@@ -11716,6 +11717,49 @@ void CView::viewParameters()
     }
     m_tableManager->setReadOnly(!hasEditableSelection());
     emit selectionStateChanged(true);
+}
+
+void CView::refreshDatabaseVisuals(const QString& tableKey,const QString& rowKey)
+{
+    const bool monsterTable=tableKey==QStringLiteral("monsters")||tableKey==QStringLiteral("units.monsters");
+    const bool globallyVisual=tableKey.isEmpty()||tableKey==QStringLiteral("raceModels")
+        ||tableKey==QStringLiteral("items")||tableKey==QStringLiteral("units.racemodels")
+        ||tableKey.startsWith(QStringLiteral("items."));
+    if(!monsterTable&&!globallyVisual)
+        return;
+    const bool targeted=monsterTable&&!rowKey.trimmed().isEmpty();
+    QVector<CUnit*> affected;
+    for(CMob* mob:m_aMob)if(mob)for(CNode* node:mob->nodes())if(CUnit* unit=dynamic_cast<CUnit*>(node))
+        if(!targeted||unit->databaseName().compare(rowKey,Qt::CaseInsensitive)==0)
+        {
+            unit->invalidateDatabaseVisual();
+            affected.append(unit);
+        }
+        else
+            unit->carryResolvedVisualToCurrentDatabaseGeneration();
+    // End the previous generation's progress ownership before resetting its
+    // counters. A visible shared bar with total == 0 makes the scheduler's
+    // foreign-progress guard reject every subsequent preparation frame.
+    if(m_pProgress && (m_unitAppearanceProgressPending
+       || m_pProgress->format().contains(tr("Resolving full character visuals"))))
+    {
+        m_pProgress->setFormat(QStringLiteral("%p%"));
+        m_pProgress->reset();
+    }
+    if(m_unitVisualPreparationTimer)
+        m_unitVisualPreparationTimer->stop();
+    m_unitAppearanceProgressTotal=0;m_unitAppearanceProgressCompleted=0;m_unitAppearanceProgressPending=false;m_unitAppearanceLastLoggedCompleted=-1;
+    // Database publication happens on the GUI thread. Re-resolve affected
+    // loaded units immediately with the viewport context current so stale
+    // worker/cold-frame results cannot alternate with the published row when
+    // the object is moved.
+    if(isValid()&&!affected.isEmpty())
+    {
+        makeCurrent();
+        for(CUnit* unit:affected)
+            unit->preloadVisualResources();
+    }
+    viewParameters();update();
 }
 
 void CView::setLogicSlotIndex(int index)

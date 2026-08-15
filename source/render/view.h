@@ -269,6 +269,8 @@ public:
     CTreeView* objectTree() {return m_pTree;}
     int nSelectedNodes();
     QList<CNode*> selectedNodes();
+    void refreshDatabaseVisuals(const QString& tableKey = QString(),
+                                const QString& rowKey = QString());
     QList<CNode*> selectionSnapshot();
     void restoreSelection(const QList<CNode*>& selection);
     bool selectObjectByProvenance(const QString& mobPath, quint32 nid,
@@ -466,6 +468,7 @@ signals:
     void mobScriptChanged(CMob* mob, const QString& displayScript);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
     void selectionStateChanged(bool hasSelection);
+    void openDatabasePrototypeRequested(const QString& prototype);
     void mobStateChanged();
     void loadedMapStateChanged();
     void nidChangeProposed(quint32 nid, const QString& mobPath);

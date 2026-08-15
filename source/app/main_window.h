@@ -67,6 +67,7 @@ class CMinimapExportDialog;
 class CMessageLogPanel;
 class CDockHiddenTab;
 class CResourceBrowser;
+namespace ei { class DatabaseDocument; class DatabaseEditorDialog; class ItemSpellConstructorDialog; }
 
 struct SWindowTitle
 {
@@ -108,6 +109,7 @@ private:
     void initShortcuts();
     void connectUiButtons();
     bool isExitAllowed();
+    bool isDatabaseExitAllowed();
     void closeAll();
     void showGameAndModSetup();
     void generateMinimap();
@@ -209,6 +211,8 @@ private:
     void showUnitTexturePreview();
     void updateUnitTexturePreview();
     void renderUnitTexturePreview();
+    void showDatabaseEditor(const QString& prototype = QString());
+    void showItemSpellConstructor(const QString& initialCode = QString());
 
 private slots:
     void showOutliner(bool bShow);
@@ -380,6 +384,9 @@ private:
     QString m_customSpawnContextKey;
     QPointer<CViewportMinimapWidget> m_viewportMinimap;
     QPointer<CMinimapExportDialog> m_minimapExportDialog;
+    QSharedPointer<ei::DatabaseDocument> m_databaseDocument;
+    QPointer<ei::DatabaseEditorDialog> m_databaseEditorDialog;
+    QPointer<ei::ItemSpellConstructorDialog> m_itemSpellConstructorDialog;
     QTimer* m_minimapRefreshTimer{nullptr};
     QTimer* m_minimapCameraTimer{nullptr};
     QByteArray m_generatedMinimapMmp;

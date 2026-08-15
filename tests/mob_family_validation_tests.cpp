@@ -314,6 +314,7 @@ private slots:
     void importWithoutTemplateHairEvidenceDoesNotReportMissingHair();
     void databaseCreatureResolutionSuppressesWearableMaskRules();
     void jmvUnitPerkTableFailuresAreCritical();
+    void missingDatabasePrototypeIsCrashClassButDoesNotBlockRuntime();
 };
 
 void MobFamilyValidationTests::authoredZeroNidIsCriticalAndBlocksRuntimePreflight()
@@ -439,6 +440,40 @@ void MobFamilyValidationTests::jmvUnitPerkTableFailuresAreCritical()
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& item)
         { return item.code.startsWith("jmv.tables."); }));
+}
+
+void MobFamilyValidationTests::missingDatabasePrototypeIsCrashClassButDoesNotBlockRuntime()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString missingPrototype = "Missing Runtime Prototype";
+    const QString path = writeMob(directory.path(), "missing-prototype.mob", mobWithUnits({unitObject(
+        997570, "Broken unit", missingPrototype.toLatin1(), "unhuma", false, wearableParts())}));
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "missing-database-prototype";
+    request.profileId = "base";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase("Different Prototype", "unhuma", {});
+
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "database.prototype.missing"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Critical);
+    QCOMPARE(finding->category, QString("Database"));
+    QVERIFY(finding->message.contains(missingPrototype));
+    QVERIFY(finding->message.contains("crash", Qt::CaseInsensitive));
+    QVERIFY(finding->hasNid);
+    QCOMPARE(finding->nid, quint32(997570));
+    QVERIFY(!finding->locations.isEmpty());
+    QVERIFY(finding->locations.first().startsWith(path + ":"));
+    QVERIFY(!report.hasBlockingRuntimeFindings());
+    QCOMPARE(report.blockingRuntimeFindings().size(), 0);
 }
 
 void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()
