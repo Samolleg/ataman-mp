@@ -52,4 +52,21 @@ inline int landscapeWheelStep(int angleDeltaY, int legacyDelta, int pixelDeltaY)
     return delta > 0 ? 1 : (delta < 0 ? -1 : 0);
 }
 
+inline bool terrainPaintOutlineEnabled(bool outlineValid,
+                                       bool manualTileSelection)
+{
+    // Manual painting still has a multi-cell footprint. Its physical-tile
+    // preview supplements the footprint; it must not suppress it.
+    (void)manualTileSelection;
+    return outlineValid;
+}
+
+inline float terrainPaintOutlineWorldCenter(int coordinate,
+                                            bool manualTileSelection)
+{
+    // Semantic brushes are vertex-centered. Manual brushes are cell-centered
+    // and therefore sit one world unit farther along the two-unit tile grid.
+    return float(coordinate * 2 + (manualTileSelection ? 1 : 0));
+}
+
 #endif // LANDSCAPE_EDIT_POLICY_H

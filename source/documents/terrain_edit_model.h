@@ -469,8 +469,7 @@ public:
         ETerrainTileLayer layer, qint32 materialId,
         const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed,
-        CValidationReport* report = nullptr,
-        bool allowUniformFallback = true) const;
+        CValidationReport* report = nullptr) const;
     // Modern flow: material identity is committed to an independent vertex
     // field. Drag preview is deliberately uniform; release prefers authored
     // exact tiles. The caller must realize absent tuples in the live working

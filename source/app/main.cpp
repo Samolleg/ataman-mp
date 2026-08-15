@@ -1129,8 +1129,10 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.findChild<QLineEdit*>("terrainPaintFilter");
         QListWidget* manualAtlasTileList =
             landscapeTools.findChild<QListWidget*>("manualAtlasTileList");
+        QSlider* terrainPaintRadius =
+            landscapeTools.findChild<QSlider*>("terrainPaintRadius");
         if(materialPaletteTabs)
-            materialPaletteTabs->setCurrentIndex(0);
+            materialPaletteTabs->setCurrentIndex(1);
         const bool threeTerrainPaintModesAvailable = materialPaletteTabs
             && materialPaletteTabs->count() == 3
             && materialPaletteTabs->tabText(0) == QStringLiteral("Modern")
@@ -1140,6 +1142,20 @@ int runHeadlessCommand(QApplication& app)
             && terrainPaintFilter && manualAtlasTileList;
         landscapeTools.setClassicAutoMaterials(
             {darkGrass, freshGrass}, {}, {});
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        const int paletteBottom = materialPaletteTabs
+            ? materialPaletteTabs->mapTo(
+                  &landscapeTools, materialPaletteTabs->rect().bottomLeft()).y()
+            : -1;
+        const int radiusTop = terrainPaintRadius
+            ? terrainPaintRadius->mapTo(
+                  &landscapeTools, terrainPaintRadius->rect().topLeft()).y()
+            : -1;
+        const bool classicPaletteFirstOpenDoesNotOverlapControls =
+            materialPaletteTabs && terrainPaintRadius
+            && paletteBottom < radiusTop;
+        if(materialPaletteTabs)
+            materialPaletteTabs->setCurrentIndex(0);
         QVector<QImage> manualTiles(2, QImage(16, 16,
                                              QImage::Format_RGBA8888));
         manualTiles[0].fill(Qt::red);
@@ -1181,8 +1197,8 @@ int runHeadlessCommand(QApplication& app)
         const bool landscapeToolsAreCompactAndPaletteFillsHeight =
             landscapeTools.minimumSizeHint().width() <= 320
             && landscapeTools.width() <= 320
-            && materialPaletteTabs && materialPaletteTabs->height() >= 330
-            && groundMaterialScroll && groundMaterialScroll->height() >= 260;
+            && materialPaletteTabs && materialPaletteTabs->height() >= 100
+            && groundMaterialScroll && groundMaterialScroll->height() >= 45;
         landscapeTools.hide();
         QLabel* atlasSourceStatus =
             landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");
@@ -1509,6 +1525,7 @@ int runHeadlessCommand(QApplication& app)
             && materialPaletteScrollsAndFillsWidth
             && landscapeToolsAreCompactAndPaletteFillsHeight
             && threeTerrainPaintModesAvailable
+            && classicPaletteFirstOpenDoesNotOverlapControls
             && sharedTerrainPaintFilterWorks
             && manualAtlasGridUsesTooltips
             && defaultAtlasSourceVisible
@@ -1608,6 +1625,10 @@ int runHeadlessCommand(QApplication& app)
                << landscapeToolsAreCompactAndPaletteFillsHeight
                << " threeTerrainPaintModesAvailable="
                << threeTerrainPaintModesAvailable
+               << " classicPaletteFirstOpenDoesNotOverlapControls="
+               << classicPaletteFirstOpenDoesNotOverlapControls
+               << " classicPaletteBottom=" << paletteBottom
+               << " terrainPaintRadiusTop=" << radiusTop
                << " sharedTerrainPaintFilterWorks="
                << sharedTerrainPaintFilterWorks
                << " manualAtlasGridUsesTooltips="

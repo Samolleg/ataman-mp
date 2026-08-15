@@ -7181,7 +7181,10 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
         glDepthFunc(GL_LESS);
         return;
     }
-    if(!m_terrainPaintOutlineValid || m_landscapeTools->manualTileSelectionEnabled())
+    const bool manualSelection =
+        m_landscapeTools->manualTileSelectionEnabled();
+    if(!terrainPaintOutlineEnabled(m_terrainPaintOutlineValid,
+                                   manualSelection))
         return;
     const bool landLayer = m_terrainPaintProjectionLand;
     const int radius = qMax(0, int(qRound(m_landscapeTools->paintRadius())));
@@ -7209,8 +7212,10 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     // The solver samples discrete vertices, but the brush itself is a true
     // circle/square centered on the snapped vertex. Half a vertex interval is
     // included so size 1 remains visible around its single selected junction.
-    const float centerX = float(m_terrainPaintOutlineX * 2);
-    const float centerY = float(m_terrainPaintOutlineY * 2);
+    const float centerX = terrainPaintOutlineWorldCenter(
+        m_terrainPaintOutlineX, manualSelection);
+    const float centerY = terrainPaintOutlineWorldCenter(
+        m_terrainPaintOutlineY, manualSelection);
     const float footprintRadius = float(radius * 2 + 1);
     QVector<QVector3D> boundary;
     if(shape == ETerrainTileBrushShape::Circle)
@@ -7251,7 +7256,9 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             if(!included(x, y))
                 continue;
             QVector3D point;
-            if(projected(float(x * 2), float(y * 2), &point))
+            if(projected(terrainPaintOutlineWorldCenter(x, manualSelection),
+                         terrainPaintOutlineWorldCenter(y, manualSelection),
+                         &point))
             {
                 point.setZ(point.z() + 0.04f);
                 vertices.append(point);
@@ -11304,7 +11311,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 m_terrainEdit.tileCountY());
             command = m_terrainEdit.makeSemanticVertexStrokePaint(
                 points, QVector<QPoint>({detailVertex}), layer, terrainType,
-                semanticCatalog, m_tileStrokeDistributionSeed, &report, false);
+                semanticCatalog, m_tileStrokeDistributionSeed, &report);
         }
         else
             command = m_terrainEdit.makeVirtualMaterialPaint(
@@ -11460,17 +11467,20 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
         update();
         return;
     }
-    m_terrainPaintOutlineValid = false;
-
     int index = -1;
     int rotNum = 0;
     m_pTileForm->getSelectedTile(index, rotNum);
     if(index < 0)
     {
+        m_terrainPaintOutlineValid = false;
         setPreviewTile(false);
         unsetCursor();
         return;
     }
+
+    m_terrainPaintOutlineX = tileLoc.xSec * 16 + tileLoc.col;
+    m_terrainPaintOutlineY = tileLoc.ySec * 16 + tileLoc.row;
+    m_terrainPaintOutlineValid = true;
 
     onChangeCursorTile(m_pTileForm->tileWithRot(index));
     int matIndex;
@@ -11599,7 +11609,7 @@ void CView::endTileBrushGroup()
                 m_terrainEdit.makeSemanticVertexStrokePaint(
                     vertices, anchors, m_classicAutoStrokeLayer,
                     m_classicAutoStrokeMaterialId, catalog,
-                    m_tileStrokeDistributionSeed, &report, false);
+                    m_tileStrokeDistributionSeed, &report);
             // Classic Auto changes physical authored tiles, but a map that
             // has already used Modern also owns an independent exact vertex
             // field. Keep both representations in the same undoable command

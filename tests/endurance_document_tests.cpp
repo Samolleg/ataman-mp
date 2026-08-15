@@ -383,6 +383,7 @@ private slots:
     void vertexMaterialBrushPaintsCircleAndConstrainsCornerOnlyFamilies();
     void semanticVertexPaintNeverUsesUniformForBlendFallback();
     void classicAutoStrokeUsesAuthoredResolverAndRerollsExactVariants();
+    void manualPaintShowsCellFootprintAndLiftedTilePreview();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void overlayActivationDeactivationIsLosslessAndUndoable();
@@ -4180,7 +4181,7 @@ void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExac
     CValidationReport firstReport;
     const STerrainTileCommand first = terrain.makeSemanticVertexStrokePaint(
         requested, requested, ETerrainTileLayer::Land, 2, catalog,
-        0x434C4153u, &firstReport, false);
+        0x434C4153u, &firstReport);
     QVERIFY2(!firstReport.hasErrors(), qPrintable(firstReport.toText()));
     QVERIFY(!first.isEmpty());
     for(const STerrainTileDelta& delta : first.deltas)
@@ -4221,7 +4222,7 @@ void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExac
         const STerrainTileCommand repaint =
             terrain.makeSemanticVertexStrokePaint(
                 requested, requested, ETerrainTileLayer::Land, 2, catalog,
-                seed, &repaintReport, false);
+                seed, &repaintReport);
         QVERIFY2(!repaintReport.hasErrors(),
                  qPrintable(repaintReport.toText()));
         rerolled = !repaint.isEmpty();
@@ -4238,17 +4239,27 @@ void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExac
     uniformOnly.signature = selected;
     uniformOnly.packedTile = 1;
     QVERIFY(missingBlend.addVariant(uniformOnly));
-    CTerrainEditModel strictTerrain;
-    QVERIFY(strictTerrain.load(document));
-    CValidationReport strictReport;
-    const STerrainTileCommand refused =
-        strictTerrain.makeSemanticVertexStrokePaint(
+    CTerrainEditModel fallbackTerrain;
+    QVERIFY(fallbackTerrain.load(document));
+    CValidationReport fallbackReport;
+    const STerrainTileCommand fallback =
+        fallbackTerrain.makeSemanticVertexStrokePaint(
             requested, requested, ETerrainTileLayer::Land, 2,
-            missingBlend, 0x53545243u, &strictReport, false);
-    QVERIFY(refused.isEmpty());
-    QVERIFY(strictReport.hasErrors());
-    QVERIFY(strictReport.toText().contains(
-        QStringLiteral("terrain.classic_auto_missing_blend")));
+            missingBlend, 0x53545243u, &fallbackReport);
+    QVERIFY2(!fallback.isEmpty(), qPrintable(fallbackReport.toText()));
+    QVERIFY(!fallbackReport.hasErrors());
+    QVERIFY(fallbackReport.toText().contains(
+        QStringLiteral("terrain.semantic_stroke_hard_edge")));
+    QCOMPARE(fallback.semanticAudit.solverMode,
+             QStringLiteral("vertex-stroke-local-hard-edge"));
+}
+
+void EnduranceDocumentTests::manualPaintShowsCellFootprintAndLiftedTilePreview()
+{
+    QVERIFY(terrainPaintOutlineEnabled(true, true));
+    QCOMPARE(terrainPaintOutlineWorldCenter(4, false), 8.0f);
+    QCOMPARE(terrainPaintOutlineWorldCenter(4, true), 9.0f);
+    QVERIFY(terrainTilePreviewElevation() > 0.0f);
 }
 
 void EnduranceDocumentTests::terrainTileStrokeCompositionKeepsFirstAndFinalValues()

@@ -193,7 +193,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
         "Modern and Classic Auto brushes paint terrain vertices and resolve the surrounding atlas tiles together. Size 1 paints the nearest vertex (up to four tiles); larger circles and squares select more vertices. "
-        "Modern reuses exact authored junctions and adds a generated exact blend only when one is missing. Classic Auto never changes the atlas: if any required exact tuple is absent, it refuses the whole stroke. "
+        "Modern reuses exact authored junctions and adds a generated exact blend only when one is missing. Classic Auto never changes the atlas: it preserves authored blends first and uses the selected uniform tile only for boundary cells the current atlas cannot blend exactly. "
         "Manual paints one selected physical atlas tile and rotation directly, without semantic blending. Right-click samples from the map. "
         "Alt+Wheel changes brush size. Shift+Wheel selects the automatic material or rotates the manual tile; Wheel keeps camera zoom. "
         "Overlay surface mode adds/removes coverage. Its Terrain material selects the atlas texture; its Surface material independently controls tint, opacity, illumination, waves, and texture warp. "
@@ -226,6 +226,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     overlayPalette->addStretch(1);
     const auto configurePaletteScroll = [](QScrollArea* scroll, QWidget* page) {
         scroll->setWidgetResizable(true);
+        scroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+        scroll->setMinimumSize(0, 0);
+        scroll->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
         scroll->setFrameShape(QFrame::NoFrame);
         scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
@@ -288,8 +291,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QVBoxLayout* classicModeLayout = new QVBoxLayout(m_classicModePage);
     classicModeLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* classicHelp = new QLabel(tr(
-        "Uses only exact tiles already present in this atlas. If any required "
-        "blend is missing, the whole stroke is refused and the atlas is not changed."),
+        "Uses only tiles already present in this atlas. Exact authored blends "
+        "win; unresolved boundary cells use the selected uniform tile without "
+        "expanding the atlas."),
         m_classicModePage);
     classicHelp->setWordWrap(true);
     classicModeLayout->addWidget(classicHelp);
@@ -323,19 +327,17 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_paintModeTabs->addTab(m_classicModePage, tr("Classic Auto"));
     m_paintModeTabs->addTab(m_manualModePage, tr("Manual"));
     m_paintModeTabs->setObjectName(QStringLiteral("materialPaletteTabs"));
-    // The surrounding paint controls have large wrapped size hints at narrow
-    // dock widths.  Without an explicit expanding floor Qt satisfies those
-    // hints by collapsing the authoring palette to a short strip even when the
-    // dock has ample vertical room.
+    // The palette consumes the remaining height, but it must be allowed to
+    // shrink and scroll when the dock is short. A fixed minimum here makes Qt
+    // place the following brush controls inside the tab geometry on the first
+    // Classic Auto layout.
     m_paintModeTabs->setSizePolicy(QSizePolicy::Expanding,
                                    QSizePolicy::Expanding);
-    // The outer mode tabs add one tab bar above the existing layer tabs. Keep
-    // enough vertical room that the actual brush grid does not shrink below
-    // the established usable palette height.
-    m_paintModeTabs->setMinimumHeight(330);
+    m_paintModeTabs->setMinimumHeight(100);
     paintLayout->addWidget(m_paintModeTabs, 1);
 
     m_paintRadius->setRange(1, 33);
+    m_paintRadius->setObjectName(QStringLiteral("terrainPaintRadius"));
     m_paintRadius->setValue(qBound(1,
         settings.value("ui/landscape/paintSize", 1).toInt(), 33));
     m_paintRadiusValue->setText(QString::number(m_paintRadius->value()));
@@ -1123,7 +1125,7 @@ void CLandscapeTools::rebuildMaterialPalette()
                   .arg(choice.name).arg(choice.assignedSlots)
                   .arg(used ? tr("Currently used on this map.")
                             : (classicAuto
-                                ? tr("Unused on this map; Classic Auto uses it only where every required exact blend already exists.")
+                                ? tr("Unused on this map; Classic Auto preserves available authored blends and uses a local uniform hard edge where a boundary blend is absent.")
                                 : tr("Unused on this map; Modern painting adds this material and generates exact blends as needed."))));
               if(!choice.thumbnail.isNull())
               {
@@ -1261,7 +1263,7 @@ void CLandscapeTools::refreshPaintTerrainTypes()
     if(paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto)
         m_tilesetStatus->setText(materialCount == 0
             ? tr("No existing automatic material designation is available for this layer.")
-            : tr("%1 existing material designation(s). Classic Auto never changes the atlas and refuses a whole stroke when an exact blend is missing.")
+            : tr("%1 existing material designation(s). Classic Auto never changes the atlas; authored blends win and unresolved boundary cells use a local uniform hard edge.")
                   .arg(materialCount));
     else if(paintPaletteMode() == ETerrainPaintPaletteMode::Manual)
         m_tilesetStatus->setText(materialCount == 0

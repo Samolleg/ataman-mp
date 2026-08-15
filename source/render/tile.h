@@ -115,4 +115,11 @@ private:
     QMatrix4x4 m_modelMatrix;
 };
 
+inline float terrainTilePreviewElevation()
+{
+    // Keep the cursor-attached physical tile above the source terrain so the
+    // depth test cannot discard an exactly coplanar preview.
+    return 0.08f;
+}
+
 #endif // CTILE_H

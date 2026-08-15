@@ -3582,7 +3582,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
     const QVector<QPoint>& anchorVertices,
     ETerrainTileLayer layer, qint32 materialId,
     const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
-    CValidationReport* report, bool allowUniformFallback) const
+    CValidationReport* report) const
 {
     STerrainTileCommand command;
     command.description = layer == ETerrainTileLayer::Land
@@ -3932,14 +3932,14 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
             resolvedSignatures.insert(entry.key(), exact);
         else
         {
-            if(allowUniformFallback && !uniformChecked)
+            if(!uniformChecked)
             {
                 catalog.selectForPaint(uniform, 0, 0, distributionSeed,
                                        &uniformFound);
                 ++solverNodes;
                 uniformChecked = true;
             }
-            if(allowUniformFallback && uniformFound)
+            if(uniformFound)
             {
                 resolvedSignatures.insert(entry.key(), uniform);
                 hardEdgeCells.insert(entry.key());
@@ -3984,7 +3984,9 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
     for(auto entry = resolvedVertices.constBegin();
         entry != resolvedVertices.constEnd(); ++entry)
     {
-        if(!requested.contains(entry.key()) || entry.value().size() <= 1)
+        if(!requested.contains(entry.key()))
+            continue;
+        if(entry.value().size() <= 1)
             continue;
         if(!verticesWithHardEdgeCells.contains(entry.key())
            || !entry.value().contains(materialId))
@@ -4063,14 +4065,9 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
             "Some requested vertices touch atlas tiles not described by the active profile and were left unchanged",
             QString::number(unknownCells.size()));
     if(!unsupportedVertices.isEmpty() && report)
-        report->add(allowUniformFallback
-                ? "terrain.semantic_stroke_atlas_limit"
-                : "terrain.classic_auto_missing_blend",
-            allowUniformFallback ? EValidationSeverity::Warning
-                                 : EValidationSeverity::Error,
-            allowUniformFallback
-                ? "The Material atlas cannot represent this material across the requested adjacent vertices. Nothing was changed; use a single-vertex junction stamp or add the missing atlas transitions"
-                : "Classic Auto refused the whole stroke because the current atlas lacks one or more required exact blends. Use Modern mode to add them.",
+        report->add("terrain.semantic_stroke_atlas_limit",
+            EValidationSeverity::Warning,
+            "The Material atlas cannot represent this material across the requested adjacent vertices. Nothing was changed; use a single-vertex junction stamp or add the missing atlas transitions",
             QString("%1 of %2 vertices were not paintable")
                 .arg(unsupportedVertices.size()).arg(originallyRequested));
     if(!hardEdgeCells.isEmpty() && report)

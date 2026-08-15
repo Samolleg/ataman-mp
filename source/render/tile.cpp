@@ -256,6 +256,9 @@ void CPreviewTile::updateTile(const CTile& tile, int tIndex, int rotation, int m
 
     int curIndex(0);
     previewTile.generateDrawVertexData(m_arrLandVrtData, curIndex);
+    for(SVertexData& vertex : m_arrLandVrtData)
+        vertex.position.setZ(vertex.position.z()
+                             + terrainTilePreviewElevation());
     m_modelMatrix.setToIdentity();
     m_modelMatrix.translate(QVector3D(xSector*32.0f, ySector*32.0f, .0f));
 
