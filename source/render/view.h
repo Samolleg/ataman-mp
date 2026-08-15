@@ -684,7 +684,9 @@ private:
     bool m_overlayBrushPickProjectionLand{true};
     bool m_terrainPreviewBatchActive{false};
     QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
+    QMap<QPair<int, int>, QByteArray> m_pendingTerrainPreviewBefore;
     QSet<QPair<int, int>> m_pendingOverlayPreviewSectors;
+    QMap<QPair<int, int>, QByteArray> m_pendingOverlayPreviewBefore;
     QSet<QPair<int, int>> m_pendingTilePreviewSectors;
     bool m_sculptOutlineValid{false};
     bool m_sculptOutlineGeometryDirty{true};

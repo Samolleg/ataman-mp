@@ -828,6 +828,17 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
     return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
 }
 
+bool CLandscape::previewCanonicalTerrainSectorDelta(
+    int xSec, int ySec, const QByteArray& beforePayload,
+    const QByteArray& afterPayload)
+{
+    if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
+        || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
+        return false;
+    return m_aSector[ySec][xSec]->previewCanonicalTerrainDelta(
+        beforePayload, afterPayload);
+}
+
 bool CLandscape::previewCanonicalOverlaySector(
     int xSec, int ySec, const QByteArray& payload)
 {

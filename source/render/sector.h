@@ -64,6 +64,8 @@ public:
     bool existsTileIndices(const QVector<int>& arrInd); // function for find incorrect\coorrupt tile indices
     void updateDrawData();
     bool previewCanonicalPayload(const QByteArray& payload);
+    bool previewCanonicalTerrainDelta(const QByteArray& beforePayload,
+                                      const QByteArray& afterPayload);
     bool previewCanonicalOverlayPayload(const QByteArray& payload);
     bool previewCanonicalOverlayDelta(const QByteArray& beforePayload,
                                       const QByteArray& afterPayload);
@@ -71,6 +73,7 @@ public:
 
 private:
     void updatePosition();
+    void updateLandTiles(const QSet<int>& localTiles);
     void updateWaterDrawData(bool rebuildIndices = true);
     void updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices);
     void generateWaterVertexData();

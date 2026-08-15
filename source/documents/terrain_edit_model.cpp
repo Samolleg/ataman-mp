@@ -2589,6 +2589,7 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
     }
     QSet<int> commandVertices;
     QSet<int> affectedNormals;
+    QSet<int> affectedSectors;
     for(const STerrainHeightDelta& delta : command.deltas)
     {
         if(delta.globalX < 0 || delta.globalX >= m_vertexCountX ||
@@ -2661,6 +2662,7 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
         {
             SSector& sector = m_sectors[ref.sectorIndex];
             writeHeight(sector.currentPayload, ref.localX, ref.localY, value);
+            affectedSectors.insert(ref.sectorIndex);
         }
     }
 
@@ -2700,10 +2702,14 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
                 ? readPackedNormal(sector.source.payload, ref.localX, ref.localY)
                 : rebuilt;
             writePackedNormal(sector.currentPayload, ref.localX, ref.localY, value);
+            affectedSectors.insert(ref.sectorIndex);
         }
     }
-    for(SSector& sector : m_sectors)
+    for(int sectorIndex : affectedSectors)
+    {
+        SSector& sector = m_sectors[sectorIndex];
         sector.dirty = sector.currentPayload != sector.source.payload;
+    }
     return true;
 }
 

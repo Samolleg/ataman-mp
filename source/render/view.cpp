@@ -11892,16 +11892,16 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
         const QPair<int, int> sector(delta.sectorX, delta.sectorY);
         if(m_terrainPreviewBatchActive)
         {
+            if(!m_pendingOverlayPreviewBefore.contains(sector))
+                m_pendingOverlayPreviewBefore.insert(
+                    sector, forward ? delta.beforePayload : delta.afterPayload);
             m_pendingOverlayPreviewSectors.insert(sector);
             continue;
         }
-        // Use the same proven full-sector renderer refresh as ordinary terrain
-        // sculpt. The former overlay-only delta path mutated a VBO that was
-        // still owned by the in-flight frame, creating a GPU synchronization
-        // point even though its CPU-side timing appeared cheap.
-        if(!m_pLand->previewCanonicalSector(
+        if(!m_pLand->previewCanonicalOverlaySectorDelta(
                 delta.sectorX, delta.sectorY,
-                m_terrainEdit.sectorPayload(delta.sectorX, delta.sectorY)))
+                forward ? delta.beforePayload : delta.afterPayload,
+                forward ? delta.afterPayload : delta.beforePayload))
             ei::log(eLogWarning, QString(
                 "Overlay model changed but preview renderer rejected sector %1,%2")
                     .arg(delta.sectorX).arg(delta.sectorY));
@@ -11931,7 +11931,9 @@ void CView::beginTerrainPreviewBatch()
     if(m_terrainPreviewBatchActive)
         return;
     m_pendingTerrainPreviewSectors.clear();
+    m_pendingTerrainPreviewBefore.clear();
     m_pendingOverlayPreviewSectors.clear();
+    m_pendingOverlayPreviewBefore.clear();
     m_pendingTilePreviewSectors.clear();
     m_terrainPreviewBatchActive = true;
 }
@@ -11942,18 +11944,25 @@ void CView::endTerrainPreviewBatch()
         return;
     m_terrainPreviewBatchActive = false;
     const QSet<QPair<int, int>> terrainSectors = m_pendingTerrainPreviewSectors;
+    const QMap<QPair<int, int>, QByteArray> terrainBefore =
+        m_pendingTerrainPreviewBefore;
     QSet<QPair<int, int>> overlaySectors = m_pendingOverlayPreviewSectors;
+    const QMap<QPair<int, int>, QByteArray> overlayBefore =
+        m_pendingOverlayPreviewBefore;
     QSet<QPair<int, int>> tileSectors = m_pendingTilePreviewSectors;
     m_pendingTerrainPreviewSectors.clear();
+    m_pendingTerrainPreviewBefore.clear();
     m_pendingOverlayPreviewSectors.clear();
+    m_pendingOverlayPreviewBefore.clear();
     m_pendingTilePreviewSectors.clear();
 
     for(const QPair<int, int>& sector : terrainSectors)
     {
         overlaySectors.remove(sector);
         tileSectors.remove(sector);
-        if(!m_pLand->previewCanonicalSector(
+        if(!m_pLand->previewCanonicalTerrainSectorDelta(
             sector.first, sector.second,
+            terrainBefore.value(sector),
             m_terrainEdit.sectorPayload(sector.first, sector.second)))
             ei::log(eLogWarning, QString(
                 "Batched terrain preview rejected sector %1,%2")
@@ -11964,8 +11973,8 @@ void CView::endTerrainPreviewBatch()
         QElapsedTimer overlayRenderTimer;
         overlayRenderTimer.start();
         tileSectors.remove(sector);
-        if(!m_pLand->previewCanonicalSector(
-            sector.first, sector.second,
+        if(!m_pLand->previewCanonicalOverlaySectorDelta(
+            sector.first, sector.second, overlayBefore.value(sector),
             m_terrainEdit.sectorPayload(sector.first, sector.second)))
             ei::log(eLogWarning, QString(
                 "Batched overlay preview rejected sector %1,%2")
@@ -13136,13 +13145,6 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
 {
     if(!m_terrainEditAvailable)
         return false;
-    CValidationReport report;
-    if(!m_terrainEdit.apply(command, forward, &report, false))
-    {
-        ei::log(eLogWarning, "Terrain preview command refused:\n" + report.toText());
-        return false;
-    }
-
     QSet<QPair<int, int>> sectors;
     const int sectorCountX = int(m_mprDocument.mapInfo().sectorCountX);
     const int sectorCountY = int(m_mprDocument.mapInfo().sectorCountY);
@@ -13163,13 +13165,31 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
                 if(x >= 0 && y >= 0)
                     sectors.insert(qMakePair(x, y));
     }
+    QMap<QPair<int, int>, QByteArray> beforePayloads;
+    for(const QPair<int, int>& sector : sectors)
+        beforePayloads.insert(sector,
+            m_terrainEdit.sectorPayload(sector.first, sector.second));
+    CValidationReport report;
+    if(!m_terrainEdit.apply(command, forward, &report, false))
+    {
+        ei::log(eLogWarning, "Terrain preview command refused:\n" + report.toText());
+        return false;
+    }
+
     if(m_terrainPreviewBatchActive)
+    {
+        for(const QPair<int, int>& sector : sectors)
+            if(!m_pendingTerrainPreviewBefore.contains(sector))
+                m_pendingTerrainPreviewBefore.insert(
+                    sector, beforePayloads.value(sector));
         m_pendingTerrainPreviewSectors.unite(sectors);
+    }
     else
         for(const QPair<int, int>& sector : sectors)
         {
-            if(!m_pLand->previewCanonicalSector(
+            if(!m_pLand->previewCanonicalTerrainSectorDelta(
                 sector.first, sector.second,
+                beforePayloads.value(sector),
                 m_terrainEdit.sectorPayload(sector.first, sector.second)))
             {
                 ei::log(eLogWarning, QString("Terrain preview renderer rejected sector %1,%2")
@@ -15477,6 +15497,11 @@ void CView::syncMprDirtyState()
     const bool dirty = m_terrainEditAvailable
         && (m_terrainEdit.isDirty() || mprParametersDirty());
     m_pLand->setDirty(dirty);
+    // A stamp already updates the canonical dirty bit. Rebuilding the window
+    // title/layout at sculpt cadence reintroduced the UI hitch that the
+    // single-timer stroke path had removed; publish it once on release.
+    if(m_sculptStrokeActive || m_tileBrushStrokePolicy.isActive())
+        return;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                dirty ? "*" : "");
 }

@@ -265,6 +265,96 @@ bool CSector::previewCanonicalPayload(const QByteArray& payload)
     return true;
 }
 
+bool CSector::previewCanonicalTerrainDelta(const QByteArray& beforePayload,
+                                           const QByteArray& afterPayload)
+{
+    static const int vertexSize = 8;
+    static const int vertexBlockSize = nVertex * nVertex * vertexSize;
+    static const int tileBlockSize = nTile * nTile * int(sizeof(quint16));
+    static const int landVertexOffset = 5;
+    static const int landTileOffsetType0 = landVertexOffset + vertexBlockSize;
+    static const int landTileOffsetType3 = landVertexOffset + 2 * vertexBlockSize;
+    static const int landSectorSize = landTileOffsetType0 + tileBlockSize;
+    static const int overlaySectorSize = landTileOffsetType3 + 3 * tileBlockSize;
+
+    if(beforePayload.size() < 5 || afterPayload.size() < 5
+       || qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+              beforePayload.constData())) != secSignature
+       || qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(
+              afterPayload.constData())) != secSignature)
+        return previewCanonicalPayload(afterPayload);
+    const quint8 beforeType = quint8(beforePayload.at(4));
+    const quint8 afterType = quint8(afterPayload.at(4));
+    const int required = afterType == 3 ? overlaySectorSize : landSectorSize;
+    if(beforeType != afterType || (afterType != 0 && afterType != 3)
+       || beforePayload.size() < required || afterPayload.size() < required
+       || m_arrLand.size() != nTile)
+        return previewCanonicalPayload(afterPayload);
+
+    QSet<int> changedTiles;
+    const auto addVertexTiles = [&changedTiles](int vertexX, int vertexY)
+    {
+        const int maximumTileX = qMin(nTile - 1, vertexX / 2);
+        const int maximumTileY = qMin(nTile - 1, vertexY / 2);
+        const int minimumTileX = vertexX > 0 && vertexX % 2 == 0
+            ? maximumTileX - 1 : maximumTileX;
+        const int minimumTileY = vertexY > 0 && vertexY % 2 == 0
+            ? maximumTileY - 1 : maximumTileY;
+        for(int tileY = qMax(0, minimumTileY); tileY <= maximumTileY; ++tileY)
+            for(int tileX = qMax(0, minimumTileX); tileX <= maximumTileX; ++tileX)
+                changedTiles.insert(tileY * nTile + tileX);
+    };
+    for(int vertex = 0; vertex < nVertex * nVertex; ++vertex)
+    {
+        const int offset = landVertexOffset + vertex * vertexSize;
+        if(std::memcmp(beforePayload.constData() + offset,
+                       afterPayload.constData() + offset, vertexSize) != 0)
+            addVertexTiles(vertex % nVertex, vertex / nVertex);
+    }
+    const int tileOffset = afterType == 3
+        ? landTileOffsetType3 : landTileOffsetType0;
+    for(int tile = 0; tile < nTile * nTile; ++tile)
+        if(std::memcmp(beforePayload.constData() + tileOffset + tile * 2,
+                       afterPayload.constData() + tileOffset + tile * 2, 2) != 0)
+            changedTiles.insert(tile);
+    if(changedTiles.isEmpty())
+        return true;
+
+    const auto readVertex = [&afterPayload](int x, int y)
+    {
+        const int offset = landVertexOffset + (y * nVertex + x) * vertexSize;
+        const uchar* bytes = reinterpret_cast<const uchar*>(
+            afterPayload.constData() + offset);
+        SSecVertex vertex;
+        vertex.xOffset = qint8(bytes[0]);
+        vertex.yOffset = qint8(bytes[1]);
+        vertex.z = qFromLittleEndian<quint16>(bytes + 2);
+        vertex.packedNormal = qFromLittleEndian<quint32>(bytes + 4);
+        vertex.normal.setX((int((vertex.packedNormal >> 11) & 0x7ff) - 1000) / 1000.0f);
+        vertex.normal.setY((int(vertex.packedNormal & 0x7ff) - 1000) / 1000.0f);
+        vertex.normal.setZ(int(vertex.packedNormal >> 22) / 1000.0f);
+        return vertex;
+    };
+    for(int tile : changedTiles)
+    {
+        const int row = tile / nTile;
+        const int col = tile % nTile;
+        QVector<SSecVertex> vertices;
+        vertices.reserve(9);
+        for(int y = row * 2; y <= row * 2 + 2; ++y)
+            for(int x = col * 2; x <= col * 2 + 2; ++x)
+                vertices.append(readVertex(x, y));
+        m_arrLand[row][col].resetVertices(vertices);
+        const uchar* packedBytes = reinterpret_cast<const uchar*>(
+            afterPayload.constData() + tileOffset + tile * 2);
+        const STile packed(qFromLittleEndian<quint16>(packedBytes));
+        m_arrLand[row][col].setTile(
+            packed.m_index + packed.m_texture * 64, packed.m_rotation);
+    }
+    updateLandTiles(changedTiles);
+    return true;
+}
+
 bool CSector::previewCanonicalOverlayPayload(const QByteArray& payload)
 {
     QByteArray copy = payload;
@@ -886,6 +976,68 @@ void CSector::updateBounds()
         m_boundsCenter = sectorOffset + QVector3D(16.0f, 16.0f, 0.0f);
         m_boundsRadius = 23.0f;
     }
+}
+
+void CSector::updateLandTiles(const QSet<int>& localTiles)
+{
+    const int expectedVertices = nTile * nTile * 9;
+    if(m_arrLandVrtData.size() != expectedVertices
+       || m_arrLitLandVrtData.size() != expectedVertices)
+    {
+        updateDrawData();
+        return;
+    }
+    QVector<qint16> overlayMaterials;
+    overlayMaterials.reserve(nTile * nTile);
+    for(int row = 0; row < m_arrWater.size(); ++row)
+        for(int col = 0; col < m_arrWater.at(row).size(); ++col)
+            overlayMaterials.append(qint16(
+                m_arrWater.at(row).at(col).materialIndex()));
+    const bool hasWater = m_arrWater.size() == nTile
+        && m_arrWaterVrtData.size() == expectedVertices;
+    for(int tile : localTiles)
+    {
+        if(tile < 0 || tile >= nTile * nTile)
+            continue;
+        const int row = tile / nTile;
+        const int col = tile % nTile;
+        int vertexIndex = tile * 9;
+        m_arrLand[row][col].generateDrawVertexData(
+            m_arrLandVrtData, vertexIndex);
+        for(int vertex = 0; vertex < 9; ++vertex)
+        {
+            const int index = tile * 9 + vertex;
+            const SVertexData& source = m_arrLandVrtData.at(index);
+            STerrainVertexData& target = m_arrLitLandVrtData[index];
+            target.position = source.position;
+            target.normal = source.normal;
+            target.texCoord = source.texCoord;
+            target.emission = QVector3D();
+            target.opacity = 1.0f;
+            if(hasWater)
+            {
+                const int gridX = col * 2 + vertex % 3;
+                const int gridY = row * 2 + vertex / 3;
+                const int sharedMaterialIndex = ei::sharedOverlayMaterialIndex(
+                    overlayMaterials, nTile, nTile, gridX, gridY);
+                const SMaterial* sharedMaterial = m_materials
+                        && sharedMaterialIndex >= 0
+                        && sharedMaterialIndex < m_materials->size()
+                    ? &m_materials->at(sharedMaterialIndex) : nullptr;
+                if(sharedMaterial)
+                    target.emission = ei::terrainUnderlayEmission(
+                        ei::terrainMaterialEmission(sharedMaterial),
+                        source.position.z(), m_arrWaterVrtData.at(index).position.z());
+            }
+        }
+    }
+    updateBounds();
+    // Orphan the live allocation. Partial writes serialize against the VBO
+    // consumed by the in-flight frame and were the original sculpt hitch.
+    m_vertexBuf.bind();
+    m_vertexBuf.allocate(m_arrLitLandVrtData.constData(),
+        m_arrLitLandVrtData.size() * int(sizeof(STerrainVertexData)));
+    m_vertexBuf.release();
 }
 
 void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)

@@ -102,6 +102,9 @@ public:
     void setAnimTils(const QVector<SAnimTile>& arrAnimTile);
     void updateSectorDrawData(int xSec, int ySec);
     bool previewCanonicalSector(int xSec, int ySec, const QByteArray& payload);
+    bool previewCanonicalTerrainSectorDelta(int xSec, int ySec,
+                                            const QByteArray& beforePayload,
+                                            const QByteArray& afterPayload);
     bool previewCanonicalOverlaySector(int xSec, int ySec, const QByteArray& payload);
     bool previewCanonicalOverlaySectorDelta(int xSec, int ySec,
                                             const QByteArray& beforePayload,
