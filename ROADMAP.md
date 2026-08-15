@@ -97,6 +97,59 @@ history. The permanent safety and compatibility rules are in
 </details>
 
 <details open>
+<summary><strong>0.5.x — beta content and resource authoring</strong></summary>
+
+## Release goal
+
+Promote Endurance into beta with production terrain painting and integrated,
+profile-aware database/resource authoring. Database and RES changes must retain
+the same review, validation, preservation, backup, and atomic-publication
+boundaries as MOB and MPR authoring.
+
+## Completed foundation
+
+- [x] Add a schema-aware Database Editor for all 26 physical Evil Islands
+  tables, including typed and structured fields, lossless opaque-field
+  preservation, clone/delete, undo/redo, review, validation, XLSX interchange,
+  and native database publication.
+- [x] Add a dockable Resource Browser for active-profile and external archives
+  with provider provenance, search/filtering, metadata and format-aware
+  previews, export, and reviewed Save As mutation transactions.
+- [x] Integrate both tools: protected `database.res` opens in the Database
+  Editor, while established database resource fields open the exact winning
+  active-profile member in the Resource Browser.
+- [x] Preserve dock ownership and multi-window stacking during cross-tool
+  navigation; bring the destination tool and its host window forward without
+  silently undocking either tool.
+- [x] Make wide database tables interactive at normal UI latency, including
+  Race Models: keep the literal `#` column frozen by default, preserve explicit
+  freeze/layout state, softly highlight the selected row, and avoid full-grid
+  work during paint, selection, context-menu, and horizontal-scroll events.
+
+## Remaining beta gates
+
+- [ ] Ship the generated-blend terrain painter and explicit **Finalize Atlas**
+  workflow tracked in 0.4.x.
+- [ ] Run the representative Base/JMV beta acceptance matrix for database and
+  RES review, mutation, reopen, preservation, and cross-tool navigation.
+
+## Approved changelists and evidence
+
+- [Database and resource authoring beta foundation](docs/releases/0.5.0-beta-database-resource-foundation.md).
+- Database/Resource Browser integration and navigation: `6940613d` through
+  `4038ba23`.
+- Frozen-column, paint-latency, and multi-window fixes: `e0873c97` and
+  `0eebd4b1`; the r8 tester build was user-confirmed.
+- [Integrated Database Editor contract](docs/DATABASE_EDITOR_VERTICAL_SLICE.md).
+- [Full database editor coverage](docs/releases/0.3.0-alpha.26-full-database-editor.md).
+- Resource Browser validation:
+  [r1](packaging/ALPHA26_RESOURCE_BROWSER_R1.md),
+  [r2](packaging/ALPHA26_RESOURCE_BROWSER_R2.md), and
+  [r3](packaging/ALPHA26_RESOURCE_BROWSER_R3.md).
+
+</details>
+
+<details open>
 <summary><strong>0.4.x — lossless landscape and AI navigation</strong></summary>
 
 ## Release goal
