@@ -1,0 +1,1013 @@
+{
+  "schema": "ei-semantic-atlas-r141-consolidated-decisions-v1",
+  "source": "scripts\\semantic_atlas_r141_user_answers.txt",
+  "sourceSha256": "4E98D50F2C9731A16EBAE466D35747B4CD96C2CF4C770B4805D46C6B6B9CF56C",
+  "queue": "artifacts\\semantic-atlas-r141-remaining-review\\questionnaire\\r141-remaining-queue.json",
+  "queueSha256": "83EDAFA1CC786D5BAF076779BC7B5DBD04D33DAE0B9BCDB5AFED1BF0A51BC4FB",
+  "sourceAuditQueue": "artifacts\\semantic-atlas-r141-remaining-review\\questionnaire\\combined-source\\next-review-queue.json",
+  "sourceAuditQueueSha256": "3D6E6F34ADD89698BD243B31DA2B427FF8097F2BD841D44AAB8DD15EB55FAC14",
+  "policy": "Every submitted concrete mapping is authoritative. Exact card owners inherit one answer. Retained reject-audit comments do not override a subsequently selected concrete value; in this batch both rejected cards explicitly retain their current mapping. No unlisted location or default is inferred.",
+  "workflowFinding": "Eight accepted T1 rows were exact decoded-corner counterparts of R139 acceptances but had remained stale because prior application was scoped by whole-atlas/whole-tile ownership. R141 closes those locations explicitly and adds a regression gate. Four Zone19 T2 rows were repeated reviewed patterns, not exact propagation.",
+  "counts": {
+    "questionnaireCards": 14,
+    "receivedCards": 14,
+    "changedCards": 12,
+    "changedCardCorners": 12,
+    "serializedOwnerCornerRows": 12,
+    "auditFlaggedCornersDecided": 16,
+    "auditMatchedReviewed": 12,
+    "auditRejected": 4,
+    "explicitAuditRejectedCards": 2,
+    "exactPriorAcceptanceClosureRows": 8,
+    "repeatedPatternRows": 4,
+    "optionalDiagnosticRows": 4
+  },
+  "auditOutcomeByPriorityBand": {
+    "T1-EXACT-REVIEWED-CORNER-PIXELS": {
+      "flaggedCorners": 8,
+      "matched": 8,
+      "decidedCorners": 8,
+      "matchRateAmongDecided": 1.0
+    },
+    "T2-REPEATED-REVIEWED-PATTERN": {
+      "flaggedCorners": 4,
+      "matched": 4,
+      "decidedCorners": 4,
+      "matchRateAmongDecided": 1.0
+    },
+    "UNIFORM-REOPENING-DIAGNOSTIC": {
+      "flaggedCorners": 4,
+      "rejected": 4,
+      "decidedCorners": 4,
+      "matchRateAmongDecided": 0.0
+    }
+  },
+  "submittedMappings": {
+    "r141-bz3g-slot228-92f6133038": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Sparse dark",
+      "SE": "Stone / Grayish",
+      "SW": "Stone / Grayish"
+    },
+    "r141-bz3g-slot262-16e5d8681e": {
+      "NW": "Grass / Dark",
+      "NE": "Stone / Lime",
+      "SE": "Stone / Grayish",
+      "SW": "Stone / Grayish"
+    },
+    "r141-bz3g-slot268-c8065b0545": {
+      "NW": "Grass / Sparse light",
+      "NE": "Grass / Sparse light",
+      "SE": "Ground / Common",
+      "SW": "Stone / Lime"
+    },
+    "r141-bz3g-slot277-8a4aa4e669": {
+      "NW": "Stone / Lime",
+      "NE": "Grass / Dark",
+      "SE": "Stone / Grayish",
+      "SW": "Stone / Grayish"
+    },
+    "r141-bz3g-slot339-9915e4e1f2": {
+      "NW": "Grass / Sparse light",
+      "NE": "Ground / Common",
+      "SE": "Ground / Common",
+      "SW": "Ground / Gravel"
+    },
+    "r141-bz3g-slot499-09050d93a0": {
+      "NW": "Paving / Radial",
+      "NE": "Stone / Grayish",
+      "SE": "Ground / Dead",
+      "SW": "Ground / Dead"
+    },
+    "r141-zone19-slot330-dcb4c1e0b9": {
+      "NW": "Stone / Desert",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Desert",
+      "SW": "Sand / Gravel"
+    },
+    "r141-zone19-slot331-28d4115745": {
+      "NW": "Stone / Desert",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Desert",
+      "SW": "Sand / Gravel"
+    },
+    "r141-zone19-slot332-b5aba3e5b0": {
+      "NW": "Stone / Desert",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Desert",
+      "SW": "Sand / Gravel"
+    },
+    "r141-zone19-slot333-0870969365": {
+      "NW": "Stone / Desert",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Desert",
+      "SW": "Sand / Gravel"
+    },
+    "r141-zone6-slot359-d143fd9edc": {
+      "NW": "Ground / Common",
+      "NE": "Grass / Common",
+      "SE": "Grass / Sparse light",
+      "SW": "Grass / Sparse light"
+    },
+    "r141-zone6-slot398-337f94f781": {
+      "NW": "Ground / Common",
+      "NE": "Grass / Common",
+      "SE": "Ground / Gravel",
+      "SW": "Ground / Gravel"
+    },
+    "r141-basegipat-slot42-bca80be7e3": {
+      "NW": "Water / Still dark",
+      "NE": "Water / Still dark",
+      "SE": "Water / Still dark",
+      "SW": "Water / Still dark"
+    },
+    "r141-zone10-slot396-06fa0740f2": {
+      "NW": "Slabs / Faces irregular",
+      "NE": "Slabs / Faces irregular",
+      "SE": "Slabs / Faces irregular",
+      "SW": "Slabs / Faces irregular"
+    }
+  },
+  "notes": {
+    "r141-bz3g-slot228-92f6133038": "",
+    "r141-bz3g-slot262-16e5d8681e": "",
+    "r141-bz3g-slot268-c8065b0545": "",
+    "r141-bz3g-slot277-8a4aa4e669": "",
+    "r141-bz3g-slot339-9915e4e1f2": "",
+    "r141-bz3g-slot499-09050d93a0": "",
+    "r141-zone19-slot330-dcb4c1e0b9": "",
+    "r141-zone19-slot331-28d4115745": "",
+    "r141-zone19-slot332-b5aba3e5b0": "",
+    "r141-zone19-slot333-0870969365": "",
+    "r141-zone6-slot359-d143fd9edc": "",
+    "r141-zone6-slot398-337f94f781": "",
+    "r141-basegipat-slot42-bca80be7e3": "Audit recommendation rejected; keep current assignments.",
+    "r141-zone10-slot396-06fa0740f2": "Audit recommendation rejected; keep current assignments."
+  },
+  "changedRows": [
+    {
+      "key": "r141-bz3g-slot228-92f6133038",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 228,
+      "corner": "NE",
+      "current": "Stone / Grayish",
+      "reviewed": "Grass / Sparse dark",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-bz3g-slot262-16e5d8681e",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 262,
+      "corner": "NE",
+      "current": "Stone / Grayish",
+      "reviewed": "Stone / Lime",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-bz3g-slot268-c8065b0545",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 268,
+      "corner": "SE",
+      "current": "Grass / Sparse light",
+      "reviewed": "Ground / Common",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-bz3g-slot277-8a4aa4e669",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 277,
+      "corner": "NW",
+      "current": "Stone / Grayish",
+      "reviewed": "Stone / Lime",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-bz3g-slot339-9915e4e1f2",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 339,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-bz3g-slot499-09050d93a0",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 499,
+      "corner": "NE",
+      "current": "Ground / Dead",
+      "reviewed": "Stone / Grayish",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-zone19-slot330-dcb4c1e0b9",
+      "owners": [
+        "Zone19"
+      ],
+      "slot": 330,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "reviewed": "Stone / Orange",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-zone19-slot331-28d4115745",
+      "owners": [
+        "Zone19"
+      ],
+      "slot": 331,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "reviewed": "Stone / Orange",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-zone19-slot332-b5aba3e5b0",
+      "owners": [
+        "Zone19"
+      ],
+      "slot": 332,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "reviewed": "Stone / Orange",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-zone19-slot333-0870969365",
+      "owners": [
+        "Zone19"
+      ],
+      "slot": 333,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "reviewed": "Stone / Orange",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-zone6-slot359-d143fd9edc",
+      "owners": [
+        "Zone6"
+      ],
+      "slot": 359,
+      "corner": "NW",
+      "current": "Grass / Sparse light",
+      "reviewed": "Ground / Common",
+      "auditFlagged": true
+    },
+    {
+      "key": "r141-zone6-slot398-337f94f781",
+      "owners": [
+        "Zone6"
+      ],
+      "slot": 398,
+      "corner": "NW",
+      "current": "Ground / Gravel",
+      "reviewed": "Ground / Common",
+      "auditFlagged": true
+    }
+  ],
+  "auditRows": [
+    {
+      "key": "r141-bz3g-slot228-92f6133038",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 228,
+      "corner": "NE",
+      "current": "Stone / Grayish",
+      "auditRecommendation": "Grass / Sparse dark",
+      "reviewed": "Grass / Sparse dark",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS"
+    },
+    {
+      "key": "r141-bz3g-slot262-16e5d8681e",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 262,
+      "corner": "NE",
+      "current": "Stone / Grayish",
+      "auditRecommendation": "Stone / Lime",
+      "reviewed": "Stone / Lime",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS"
+    },
+    {
+      "key": "r141-bz3g-slot268-c8065b0545",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 268,
+      "corner": "SE",
+      "current": "Grass / Sparse light",
+      "auditRecommendation": "Ground / Common",
+      "reviewed": "Ground / Common",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS"
+    },
+    {
+      "key": "r141-bz3g-slot277-8a4aa4e669",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 277,
+      "corner": "NW",
+      "current": "Stone / Grayish",
+      "auditRecommendation": "Stone / Lime",
+      "reviewed": "Stone / Lime",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS"
+    },
+    {
+      "key": "r141-bz3g-slot339-9915e4e1f2",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 339,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "auditRecommendation": "Ground / Gravel",
+      "reviewed": "Ground / Gravel",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS"
+    },
+    {
+      "key": "r141-bz3g-slot499-09050d93a0",
+      "owners": [
+        "bz3g"
+      ],
+      "slot": 499,
+      "corner": "NE",
+      "current": "Ground / Dead",
+      "auditRecommendation": "Stone / Grayish",
+      "reviewed": "Stone / Grayish",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS"
+    },
+    {
+      "key": "r141-zone19-slot330-dcb4c1e0b9",
+      "owners": [
+        "Zone19"
+      ],
+      "slot": 330,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "auditRecommendation": "Stone / Orange",
+      "reviewed": "Stone / Orange",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T2-REPEATED-REVIEWED-PATTERN"
+    },
+    {
+      "key": "r141-zone19-slot331-28d4115745",
+      "owners": [
+        "Zone19"
+      ],
+      "slot": 331,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "auditRecommendation": "Stone / Orange",
+      "reviewed": "Stone / Orange",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T2-REPEATED-REVIEWED-PATTERN"
+    },
+    {
+      "key": "r141-zone19-slot332-b5aba3e5b0",
+      "owners": [
+        "Zone19"
+      ],
+      "slot": 332,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "auditRecommendation": "Stone / Orange",
+      "reviewed": "Stone / Orange",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T2-REPEATED-REVIEWED-PATTERN"
+    },
+    {
+      "key": "r141-zone19-slot333-0870969365",
+      "owners": [
+        "Zone19"
+      ],
+      "slot": 333,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "auditRecommendation": "Stone / Orange",
+      "reviewed": "Stone / Orange",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T2-REPEATED-REVIEWED-PATTERN"
+    },
+    {
+      "key": "r141-zone6-slot359-d143fd9edc",
+      "owners": [
+        "Zone6"
+      ],
+      "slot": 359,
+      "corner": "NW",
+      "current": "Grass / Sparse light",
+      "auditRecommendation": "Ground / Common",
+      "reviewed": "Ground / Common",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS"
+    },
+    {
+      "key": "r141-zone6-slot398-337f94f781",
+      "owners": [
+        "Zone6"
+      ],
+      "slot": 398,
+      "corner": "NW",
+      "current": "Ground / Gravel",
+      "auditRecommendation": "Ground / Common",
+      "reviewed": "Ground / Common",
+      "auditMatchedReviewed": true,
+      "explicitAuditRejection": false,
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS"
+    },
+    {
+      "key": "r141-basegipat-slot42-bca80be7e3",
+      "owners": [
+        "BaseGipat"
+      ],
+      "slot": 42,
+      "corner": "SW",
+      "current": "Water / Still dark",
+      "auditRecommendation": "Water / Still",
+      "reviewed": "Water / Still dark",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "priorityBand": "UNIFORM-REOPENING-DIAGNOSTIC"
+    },
+    {
+      "key": "r141-zone10-slot396-06fa0740f2",
+      "owners": [
+        "Zone10"
+      ],
+      "slot": 396,
+      "corner": "NW",
+      "current": "Slabs / Faces irregular",
+      "auditRecommendation": "Slabs / Square",
+      "reviewed": "Slabs / Faces irregular",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "priorityBand": "UNIFORM-REOPENING-DIAGNOSTIC"
+    },
+    {
+      "key": "r141-zone10-slot396-06fa0740f2",
+      "owners": [
+        "Zone10"
+      ],
+      "slot": 396,
+      "corner": "NE",
+      "current": "Slabs / Faces irregular",
+      "auditRecommendation": "Slabs / Square",
+      "reviewed": "Slabs / Faces irregular",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "priorityBand": "UNIFORM-REOPENING-DIAGNOSTIC"
+    },
+    {
+      "key": "r141-zone10-slot396-06fa0740f2",
+      "owners": [
+        "Zone10"
+      ],
+      "slot": 396,
+      "corner": "SE",
+      "current": "Slabs / Faces irregular",
+      "auditRecommendation": "Slabs / Square",
+      "reviewed": "Slabs / Faces irregular",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "priorityBand": "UNIFORM-REOPENING-DIAGNOSTIC"
+    }
+  ],
+  "exactPriorAcceptanceClosure": [
+    {
+      "targetNamespaces": [
+        "Zone6"
+      ],
+      "slot": 359,
+      "corner": "NW",
+      "current": "Grass / Sparse light",
+      "reviewed": "Ground / Common",
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS",
+      "priorAcceptances": [
+        {
+          "key": "r139-zone6_2-slot359-d143fd9edc",
+          "namespace": "Zone6_2",
+          "slot": 359,
+          "corner": "NW",
+          "historicalCurrent": "Grass / Sparse light",
+          "historicalAuditSuggestion": "Ground / Common",
+          "historicalAuditSuggestionNormalizedForTargetNamespace": "Ground / Common",
+          "reviewedFamily": "Ground / Common",
+          "disposition": "accepted",
+          "accepted": true,
+          "sourceQueue": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\worktrees\\semantic-atlas-coverage\\artifacts\\semantic-atlas-r139-direct-evidence-review\\questionnaire\\r139-actionable-queue.json",
+          "currentNormalizationChain": [
+            "Grass / Sparse light"
+          ],
+          "auditNormalizationChain": [
+            "Ground / Common"
+          ],
+          "eventIndex": 9072,
+          "round": 139,
+          "historicalCurrentMapping": {
+            "NW": "Grass / Sparse light",
+            "NE": "Grass / Common",
+            "SE": "Grass / Sparse light",
+            "SW": "Grass / Sparse light"
+          },
+          "currentTargetCornerPixelSha256": "0FE2BCC9E95B1F54DF966C5603FF038FB8D2EC4F254CDAEAE480001784B10D48"
+        }
+      ]
+    },
+    {
+      "targetNamespaces": [
+        "Zone6"
+      ],
+      "slot": 398,
+      "corner": "NW",
+      "current": "Ground / Gravel",
+      "reviewed": "Ground / Common",
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS",
+      "priorAcceptances": [
+        {
+          "key": "r139-zone6_2-slot398-337f94f781",
+          "namespace": "Zone6_2",
+          "slot": 398,
+          "corner": "NW",
+          "historicalCurrent": "Ground / Gravel",
+          "historicalAuditSuggestion": "Ground / Common",
+          "historicalAuditSuggestionNormalizedForTargetNamespace": "Ground / Common",
+          "reviewedFamily": "Ground / Common",
+          "disposition": "accepted",
+          "accepted": true,
+          "sourceQueue": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\worktrees\\semantic-atlas-coverage\\artifacts\\semantic-atlas-r139-direct-evidence-review\\questionnaire\\r139-actionable-queue.json",
+          "currentNormalizationChain": [
+            "Ground / Gravel"
+          ],
+          "auditNormalizationChain": [
+            "Ground / Common"
+          ],
+          "eventIndex": 9073,
+          "round": 139,
+          "historicalCurrentMapping": {
+            "NW": "Ground / Gravel",
+            "NE": "Grass / Common",
+            "SE": "Ground / Gravel",
+            "SW": "Ground / Gravel"
+          },
+          "currentTargetCornerPixelSha256": "3DB86A19565F9DC4DAF044A9BDF6DB6560046EAB316D1519FA07C01488B84CDD"
+        }
+      ]
+    },
+    {
+      "targetNamespaces": [
+        "bz3g"
+      ],
+      "slot": 228,
+      "corner": "NE",
+      "current": "Stone / Grayish",
+      "reviewed": "Grass / Sparse dark",
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS",
+      "priorAcceptances": [
+        {
+          "key": "r139-zone9-slot228-92f6133038",
+          "namespace": "zone9",
+          "slot": 228,
+          "corner": "NE",
+          "historicalCurrent": "Stone / Grayish",
+          "historicalAuditSuggestion": "Grass / Sparse dark",
+          "historicalAuditSuggestionNormalizedForTargetNamespace": "Grass / Sparse dark",
+          "reviewedFamily": "Grass / Sparse dark",
+          "disposition": "accepted",
+          "accepted": true,
+          "sourceQueue": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\worktrees\\semantic-atlas-coverage\\artifacts\\semantic-atlas-r139-direct-evidence-review\\questionnaire\\r139-actionable-queue.json",
+          "currentNormalizationChain": [
+            "Stone / Grayish"
+          ],
+          "auditNormalizationChain": [
+            "Grass / Sparse dark"
+          ],
+          "eventIndex": 9087,
+          "round": 139,
+          "historicalCurrentMapping": {
+            "NW": "Grass / Dark",
+            "NE": "Stone / Grayish",
+            "SE": "Stone / Grayish",
+            "SW": "Stone / Grayish"
+          },
+          "currentTargetCornerPixelSha256": "B09CF5263A6C5859D548E780471C31BF70BD91AD3E8BA46631578C482302FEAC"
+        }
+      ]
+    },
+    {
+      "targetNamespaces": [
+        "bz3g"
+      ],
+      "slot": 262,
+      "corner": "NE",
+      "current": "Stone / Grayish",
+      "reviewed": "Stone / Lime",
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS",
+      "priorAcceptances": [
+        {
+          "key": "r139-zone9-slot262-16e5d8681e",
+          "namespace": "zone9",
+          "slot": 262,
+          "corner": "NE",
+          "historicalCurrent": "Stone / Grayish",
+          "historicalAuditSuggestion": "Stone / Lime",
+          "historicalAuditSuggestionNormalizedForTargetNamespace": "Stone / Lime",
+          "reviewedFamily": "Stone / Lime",
+          "disposition": "accepted",
+          "accepted": true,
+          "sourceQueue": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\worktrees\\semantic-atlas-coverage\\artifacts\\semantic-atlas-r139-direct-evidence-review\\questionnaire\\r139-actionable-queue.json",
+          "currentNormalizationChain": [
+            "Stone / Grayish"
+          ],
+          "auditNormalizationChain": [
+            "Stone / Lime"
+          ],
+          "eventIndex": 9089,
+          "round": 139,
+          "historicalCurrentMapping": {
+            "NW": "Grass / Dark",
+            "NE": "Stone / Grayish",
+            "SE": "Stone / Grayish",
+            "SW": "Stone / Grayish"
+          },
+          "currentTargetCornerPixelSha256": "5CCDAE3E1C5DE3FED1C01BE30DB802D0FC574C8E93108A01421F6EA24A809FC3"
+        }
+      ]
+    },
+    {
+      "targetNamespaces": [
+        "bz3g"
+      ],
+      "slot": 268,
+      "corner": "SE",
+      "current": "Grass / Sparse light",
+      "reviewed": "Ground / Common",
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS",
+      "priorAcceptances": [
+        {
+          "key": "r139-zone9-slot268-c8065b0545",
+          "namespace": "zone9",
+          "slot": 268,
+          "corner": "SE",
+          "historicalCurrent": "Grass / Sparse light",
+          "historicalAuditSuggestion": "Ground / Common",
+          "historicalAuditSuggestionNormalizedForTargetNamespace": "Ground / Common",
+          "reviewedFamily": "Ground / Common",
+          "disposition": "accepted",
+          "accepted": true,
+          "sourceQueue": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\worktrees\\semantic-atlas-coverage\\artifacts\\semantic-atlas-r139-direct-evidence-review\\questionnaire\\r139-actionable-queue.json",
+          "currentNormalizationChain": [
+            "Grass / Sparse light"
+          ],
+          "auditNormalizationChain": [
+            "Ground / Common"
+          ],
+          "eventIndex": 9090,
+          "round": 139,
+          "historicalCurrentMapping": {
+            "NW": "Grass / Sparse light",
+            "NE": "Grass / Sparse light",
+            "SE": "Grass / Sparse light",
+            "SW": "Stone / Lime"
+          },
+          "currentTargetCornerPixelSha256": "5942763A5792B816403BA9B243BDDB7B82DB4AEA38B582C3A4AFDFC3F0626397"
+        }
+      ]
+    },
+    {
+      "targetNamespaces": [
+        "bz3g"
+      ],
+      "slot": 277,
+      "corner": "NW",
+      "current": "Stone / Grayish",
+      "reviewed": "Stone / Lime",
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS",
+      "priorAcceptances": [
+        {
+          "key": "r139-zone9-slot277-8a4aa4e669",
+          "namespace": "zone9",
+          "slot": 277,
+          "corner": "NW",
+          "historicalCurrent": "Stone / Grayish",
+          "historicalAuditSuggestion": "Stone / Lime",
+          "historicalAuditSuggestionNormalizedForTargetNamespace": "Stone / Lime",
+          "reviewedFamily": "Stone / Lime",
+          "disposition": "accepted",
+          "accepted": true,
+          "sourceQueue": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\worktrees\\semantic-atlas-coverage\\artifacts\\semantic-atlas-r139-direct-evidence-review\\questionnaire\\r139-actionable-queue.json",
+          "currentNormalizationChain": [
+            "Stone / Grayish"
+          ],
+          "auditNormalizationChain": [
+            "Stone / Lime"
+          ],
+          "eventIndex": 9092,
+          "round": 139,
+          "historicalCurrentMapping": {
+            "NW": "Stone / Grayish",
+            "NE": "Grass / Dark",
+            "SE": "Stone / Grayish",
+            "SW": "Stone / Grayish"
+          },
+          "currentTargetCornerPixelSha256": "68FFACB45C5A5173CBAB3103FD5588BF34045307F6584D586F6677EC21CC6AFE"
+        }
+      ]
+    },
+    {
+      "targetNamespaces": [
+        "bz3g"
+      ],
+      "slot": 339,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS",
+      "priorAcceptances": [
+        {
+          "key": "r139-zone9-slot339-9915e4e1f2",
+          "namespace": "zone9",
+          "slot": 339,
+          "corner": "SW",
+          "historicalCurrent": "Ground / Common",
+          "historicalAuditSuggestion": "Ground / Gravel",
+          "historicalAuditSuggestionNormalizedForTargetNamespace": "Ground / Gravel",
+          "reviewedFamily": "Ground / Gravel",
+          "disposition": "accepted",
+          "accepted": true,
+          "sourceQueue": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\worktrees\\semantic-atlas-coverage\\artifacts\\semantic-atlas-r139-direct-evidence-review\\questionnaire\\r139-actionable-queue.json",
+          "currentNormalizationChain": [
+            "Ground / Common"
+          ],
+          "auditNormalizationChain": [
+            "Ground / Gravel"
+          ],
+          "eventIndex": 9094,
+          "round": 139,
+          "historicalCurrentMapping": {
+            "NW": "Grass / Sparse light",
+            "NE": "Ground / Common",
+            "SE": "Ground / Common",
+            "SW": "Ground / Common"
+          },
+          "currentTargetCornerPixelSha256": "CB1761A1935E194AE953AF5791C14DE2A00F4619A56C6E03B27BD669C312FFF7"
+        }
+      ]
+    },
+    {
+      "targetNamespaces": [
+        "bz3g"
+      ],
+      "slot": 499,
+      "corner": "NE",
+      "current": "Ground / Dead",
+      "reviewed": "Stone / Grayish",
+      "priorityBand": "T1-EXACT-REVIEWED-CORNER-PIXELS",
+      "priorAcceptances": [
+        {
+          "key": "r139-zone9-slot499-09050d93a0",
+          "namespace": "zone9",
+          "slot": 499,
+          "corner": "NE",
+          "historicalCurrent": "Ground / Dead",
+          "historicalAuditSuggestion": "Stone / Grayish",
+          "historicalAuditSuggestionNormalizedForTargetNamespace": "Stone / Grayish",
+          "reviewedFamily": "Stone / Grayish",
+          "disposition": "accepted",
+          "accepted": true,
+          "sourceQueue": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\worktrees\\semantic-atlas-coverage\\artifacts\\semantic-atlas-r139-direct-evidence-review\\questionnaire\\r139-actionable-queue.json",
+          "currentNormalizationChain": [
+            "Ground / Dead"
+          ],
+          "auditNormalizationChain": [
+            "Stone / Grayish"
+          ],
+          "eventIndex": 9097,
+          "round": 139,
+          "historicalCurrentMapping": {
+            "NW": "Paving / Radial",
+            "NE": "Ground / Dead",
+            "SE": "Ground / Dead",
+            "SW": "Ground / Dead"
+          },
+          "currentTargetCornerPixelSha256": "15FE14E84C900AE939061E97FD60914F94FF246D0A9387237FE9A70EC45F716D"
+        }
+      ]
+    }
+  ],
+  "repeatedPatternEvidence": [
+    {
+      "targetNamespaces": [
+        "Zone19"
+      ],
+      "slot": 330,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "reviewed": "Stone / Orange",
+      "priorityBand": "T2-REPEATED-REVIEWED-PATTERN",
+      "patternReviewEvidence": {
+        "reviewedPhysicalCornerDecisions": 4,
+        "reviewedLocationCorners": 4,
+        "accepted": 4,
+        "rejected": 0,
+        "empiricalAgreement": 1.0,
+        "rounds": [
+          138,
+          139
+        ],
+        "deduplication": "review key + slot + corner + proposal"
+      }
+    },
+    {
+      "targetNamespaces": [
+        "Zone19"
+      ],
+      "slot": 331,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "reviewed": "Stone / Orange",
+      "priorityBand": "T2-REPEATED-REVIEWED-PATTERN",
+      "patternReviewEvidence": {
+        "reviewedPhysicalCornerDecisions": 4,
+        "reviewedLocationCorners": 4,
+        "accepted": 4,
+        "rejected": 0,
+        "empiricalAgreement": 1.0,
+        "rounds": [
+          138,
+          139
+        ],
+        "deduplication": "review key + slot + corner + proposal"
+      }
+    },
+    {
+      "targetNamespaces": [
+        "Zone19"
+      ],
+      "slot": 332,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "reviewed": "Stone / Orange",
+      "priorityBand": "T2-REPEATED-REVIEWED-PATTERN",
+      "patternReviewEvidence": {
+        "reviewedPhysicalCornerDecisions": 4,
+        "reviewedLocationCorners": 4,
+        "accepted": 4,
+        "rejected": 0,
+        "empiricalAgreement": 1.0,
+        "rounds": [
+          138,
+          139
+        ],
+        "deduplication": "review key + slot + corner + proposal"
+      }
+    },
+    {
+      "targetNamespaces": [
+        "Zone19"
+      ],
+      "slot": 333,
+      "corner": "NE",
+      "current": "Stone / Desert",
+      "reviewed": "Stone / Orange",
+      "priorityBand": "T2-REPEATED-REVIEWED-PATTERN",
+      "patternReviewEvidence": {
+        "reviewedPhysicalCornerDecisions": 4,
+        "reviewedLocationCorners": 4,
+        "accepted": 4,
+        "rejected": 0,
+        "empiricalAgreement": 1.0,
+        "rounds": [
+          138,
+          139
+        ],
+        "deduplication": "review key + slot + corner + proposal"
+      }
+    }
+  ],
+  "optionalDiagnosticRejections": [
+    {
+      "targetNamespaces": [
+        "Zone10"
+      ],
+      "slot": 396,
+      "corner": "NW",
+      "current": "Slabs / Faces irregular",
+      "reviewed": "Slabs / Square",
+      "priorityBand": "UNIFORM-REOPENING-DIAGNOSTIC",
+      "disposition": "EXPLICIT-REJECTION-KEEP-CURRENT"
+    },
+    {
+      "targetNamespaces": [
+        "Zone10"
+      ],
+      "slot": 396,
+      "corner": "NE",
+      "current": "Slabs / Faces irregular",
+      "reviewed": "Slabs / Square",
+      "priorityBand": "UNIFORM-REOPENING-DIAGNOSTIC",
+      "disposition": "EXPLICIT-REJECTION-KEEP-CURRENT"
+    },
+    {
+      "targetNamespaces": [
+        "Zone10"
+      ],
+      "slot": 396,
+      "corner": "SE",
+      "current": "Slabs / Faces irregular",
+      "reviewed": "Slabs / Square",
+      "priorityBand": "UNIFORM-REOPENING-DIAGNOSTIC",
+      "disposition": "EXPLICIT-REJECTION-KEEP-CURRENT"
+    },
+    {
+      "targetNamespaces": [
+        "BaseGipat"
+      ],
+      "slot": 42,
+      "corner": "SW",
+      "current": "Water / Still dark",
+      "reviewed": "Water / Still",
+      "priorityBand": "UNIFORM-REOPENING-DIAGNOSTIC",
+      "disposition": "EXPLICIT-REJECTION-KEEP-CURRENT"
+    }
+  ],
+  "rejectedCardKeys": [
+    "r141-basegipat-slot42-bca80be7e3",
+    "r141-zone10-slot396-06fa0740f2"
+  ],
+  "cornerCorrections": {
+    "bz3g": {
+      "228": {
+        "NE": "Grass / Sparse dark"
+      },
+      "262": {
+        "NE": "Stone / Lime"
+      },
+      "268": {
+        "SE": "Ground / Common"
+      },
+      "277": {
+        "NW": "Stone / Lime"
+      },
+      "339": {
+        "SW": "Ground / Gravel"
+      },
+      "499": {
+        "NE": "Stone / Grayish"
+      }
+    },
+    "Zone19": {
+      "330": {
+        "NE": "Stone / Orange"
+      },
+      "331": {
+        "NE": "Stone / Orange"
+      },
+      "332": {
+        "NE": "Stone / Orange"
+      },
+      "333": {
+        "NE": "Stone / Orange"
+      }
+    },
+    "Zone6": {
+      "359": {
+        "NW": "Ground / Common"
+      },
+      "398": {
+        "NW": "Ground / Common"
+      }
+    }
+  }
+}

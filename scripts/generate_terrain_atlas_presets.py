@@ -195,6 +195,41 @@ R140_CONSOLIDATED_REVIEW = json.loads(
         "semantic_atlas_r140_consolidated_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R141_CONSOLIDATED_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r141_consolidated_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R142_RETROACTIVE_EXACT_CLOSURES = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r142_retroactive_exact_closures.json"
+    ).read_text(encoding="utf-8")
+)
+R143_PARTIAL_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r143_partial_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R144_PARTIAL_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r144_partial_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R146_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r146_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R147_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r147_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R148_BATCH1_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r148_batch1_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -3433,6 +3468,102 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                 "NW": 0, "NE": 1, "SE": 2, "SW": 3,
             }[corner_name])] = family_name
 
+    # R141 closes eight exact decoded-corner counterparts that were already
+    # accepted in R139 but were outside the old whole-atlas/whole-tile
+    # propagation boundary. Four separately reviewed Zone19 repeated-pattern
+    # rows also apply. The two optional uniform-reopening cards were explicitly
+    # rejected and therefore contribute no corrections.
+    r141_key = next((key for key in R141_CONSOLIDATED_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R141_CONSOLIDATED_REVIEW[
+            "cornerCorrections"].get(r141_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R142 replays the complete recoverable decision history and closes only
+    # unambiguous byte-identical decoded HD corner occurrences. These rows may
+    # cross non-identical whole tiles/atlases; visual similarity never enters
+    # this path. Every conflicting exact group remains review-only.
+    r142_key = next((key for key in R142_RETROACTIVE_EXACT_CLOSURES[
+        "cornerCorrections"] if key.casefold() == namespace), namespace)
+    for slot_text, corner_values in R142_RETROACTIVE_EXACT_CLOSURES[
+            "cornerCorrections"].get(r142_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R143 is a deliberately partial submission. Only its 76 concrete cards
+    # and conflict-free decoded-HD byte closure are replayed. The remaining
+    # unanswered cards contribute no catalog defaults or inferred decisions.
+    r143_key = next((key for key in R143_PARTIAL_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R143_PARTIAL_REVIEW[
+            "cornerCorrections"].get(r143_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R144 applies 42 complete stable-artwork cards and the concrete corners
+    # from one partial card. Its explicitly uncertain NW remains unchanged.
+    r144_key = next((key for key in R144_PARTIAL_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R144_PARTIAL_REVIEW[
+            "cornerCorrections"].get(r144_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R146 resolves R144/R145's last uncertain corner. The source builder
+    # expands it only across the exact approved HD+original binding closure
+    # (bz4g/Zone4), never by namespace similarity alone.
+    r146_key = next((key for key in R146_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R146_REVIEW[
+            "cornerCorrections"].get(r146_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R147 applies only concrete selections from 54 submitted exact-HD cards.
+    # One omitted card and three explicitly uncertain corners remain open.
+    # Byte-identical occurrences come directly from the locked questionnaire;
+    # material-pair promotion/demotion is audit priority evidence only and
+    # never manufactures additional catalog writes.
+    r147_key = next((key for key in R147_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R147_REVIEW[
+            "cornerCorrections"].get(r147_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R148 batch 1 records 68 submitted cross-variant pixel cards. Concrete
+    # dropdown edits win over stale reject-button comments, and expand only to
+    # the exact approved-HD occurrences carried by each grouped component. One
+    # omitted card and two explicitly uncertain Sand corners remain untouched.
+    r148_key = next((key for key in R148_BATCH1_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R148_BATCH1_REVIEW[
+            "cornerCorrections"].get(r148_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
     if (not corrections and not family_renames and not family_aliases
             and not family_metadata_corrections):
         return recipe
@@ -3487,6 +3618,97 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
             int(slot) for slot in family_spec["uniformSlots"]]
         template["memberSlots"] = [
             int(slot) for slot in family_spec["memberSlots"]]
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    r143_family_key = next((
+        key for key in R143_PARTIAL_REVIEW.get("newFamilies", {})
+        if key.casefold() == namespace.casefold()
+    ), result["namespace"])
+    for family_spec in R143_PARTIAL_REVIEW.get(
+            "newFamilies", {}).get(r143_family_key, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        result["families"] = [
+            family for family in result["families"]
+            if family["id"] != family_id
+            and family.get("suggestedName") != family_spec["name"]
+        ]
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = (
+            "reviewed/r143/" + family_spec["name"].casefold()
+            .replace(" / ", "/").replace(" ", "-"))
+        template["suggestedName"] = family_spec["name"]
+        template["tileType"] = int(family_spec["tileType"])
+        template["allowedLayers"] = list(family_spec["allowedLayers"])
+        template["underwaterRole"] = family_spec["underwaterRole"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["paintSelectable"] = bool(family_spec["paintSelectable"])
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    r144_family_key = next((
+        key for key in R144_PARTIAL_REVIEW.get("newFamilies", {})
+        if key.casefold() == namespace.casefold()
+    ), result["namespace"])
+    for family_spec in R144_PARTIAL_REVIEW.get(
+            "newFamilies", {}).get(r144_family_key, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        result["families"] = [
+            family for family in result["families"]
+            if family["id"] != family_id
+            and family.get("suggestedName") != family_spec["name"]
+        ]
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = "reviewed/r144/stone-grayish"
+        template["suggestedName"] = family_spec["name"]
+        template["tileType"] = int(family_spec["tileType"])
+        template["allowedLayers"] = list(family_spec["allowedLayers"])
+        template["underwaterRole"] = family_spec["underwaterRole"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["paintSelectable"] = bool(family_spec["paintSelectable"])
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    r147_family_key = next((
+        key for key in R147_REVIEW.get("newFamilies", {})
+        if key.casefold() == namespace.casefold()
+    ), result["namespace"])
+    for family_spec in R147_REVIEW.get(
+            "newFamilies", {}).get(r147_family_key, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        matches = [family for family in result["families"]
+                   if family.get("suggestedName") == family_spec["name"]]
+        if matches:
+            if int(matches[0]["id"]) != family_id:
+                raise ValueError(
+                    f"{result['namespace']}: R147 {family_spec['name']} "
+                    "already has another ID")
+            continue
+        if any(int(family["id"]) == family_id
+               for family in result["families"]):
+            raise ValueError(
+                f"{result['namespace']}: R147 family ID {family_id} is occupied")
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        template["paintSelectable"] = bool(family_spec["paintSelectable"])
         result["families"].append(template)
         result["families"].sort(key=lambda family: family["id"])
     if namespace == "zone7" and any(

@@ -1,7 +1,9 @@
 # Alpha 26 terrain paint modes and RES profile test
 
 This revision integrates Modern, Classic Auto, and Manual terrain painting and
-makes the atlas RES the durable owner of its exact editor semantic profile.
+makes the atlas RES the durable owner of its exact editor semantic profile. It
+also carries the reviewed semantic atlas checkpoint through R148 batch 1
+(`ee5d1139`, preset SHA-256 `1D980F2D...B6223EA89`).
 
 ## Changes
 
@@ -25,6 +27,9 @@ makes the atlas RES the durable owner of its exact editor semantic profile.
   exact MPR offers to restore a validated map-local RES without inference.
 - The mode tab, layer tab, shared filter, and manual slot list are covered by
   the headless widget contract.
+- Modern and Classic Auto now use the sibling's latest committed, answered
+  material-family and corner assignments. Unanswered R148 batch 2/3 review
+  data is deliberately excluded.
 
 ## Focused manual test
 
@@ -45,6 +50,9 @@ makes the atlas RES the durable owner of its exact editor semantic profile.
    profile is read from the chosen RES. Temporarily move that RES aside, reopen
    the unchanged MPR, and accept the exact recovery prompt; the restored
    `<map>-atlas.res` must reopen with the same terrain and palettes.
+7. On two or three familiar stock zones, compare the visible Modern materials
+   with Classic Auto, paint several existing authored transitions, and confirm
+   the current family names/corners and brush thumbnails are coherent.
 
 ## Known limitations
 

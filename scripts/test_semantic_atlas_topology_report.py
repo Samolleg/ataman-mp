@@ -89,7 +89,7 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         )
         report = build_report(catalog)
         self.assertEqual(38, report["namespaceCount"])
-        self.assertEqual(27, report["runtimeProfileCount"])
+        self.assertEqual(26, report["runtimeProfileCount"])
         # R97/R98 resolve the reviewed Sand / Irregular transition corners.
         # R105 corrects six provenance-qualified authored blend signatures;
         # R106 then applies the completed 249-card review and one explicit new
@@ -170,9 +170,32 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # R140 accepts Stone / Desert only at slot 30 NW and slot 31 NW across
         # those exact owners. The family-pair denominator remains stable, and
         # one existing relationship gains a second authored topology class.
-        self.assertEqual(1309, report["totalPairCount"])
+        # R141 applies twelve reviewed corners without changing the pair
+        # denominator or aggregate coverage buckets. R142 then closes fifteen
+        # namespace-expanded, byte-identical historical corner acceptances.
+        # Those exact closures move one existing relationship from three
+        # authored topology classes to two; no family or pair is added.
+        # R143 adds explicitly selected transition identities to every exact
+        # decoded-HD alias, keeping byte-identical runtime profiles equal.
+        # R144 adds the explicitly selected transition-only Stone / Grayish
+        # identity to the exact bz2g/Zone2 owners.  One new family exposes its
+        # thirteen honest pair rows; only the reviewed slot 221 SW supplies
+        # authored topology evidence.
+        # R146 resolves bz4g/Zone4 slot 488 NW as Ground / Gravel greenish.
+        # The family-pair denominator stays fixed while one existing pair gains
+        # a second authored topology class.
+        # R147's provisional Sand / Dark interpretation for bz5g/bz6g/Zone8
+        # slot 215 SW was withdrawn for re-review, so no transition-only family
+        # or topology row is introduced.  The remaining exact reviewed corner
+        # changes remove the only authored second topology for one existing
+        # family pair.
+        # R148 batch 1 applies 52 exact-owner corrections.  Those decisions
+        # restore complete signature identity between bz15h and Zone17, so the
+        # shared 21-pair runtime profile is counted once; accepted rewrites also
+        # redistribute six retained pairs among topology coverage buckets.
+        self.assertEqual(1355, report["totalPairCount"])
         self.assertEqual(
-            {"0": 734, "1": 87, "2": 64, "3": 187, "4": 237},
+            {"0": 789, "1": 86, "2": 64, "3": 184, "4": 232},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

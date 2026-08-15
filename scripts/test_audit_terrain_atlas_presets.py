@@ -1392,7 +1392,8 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
             427: (5, 7, 6, 6),
             476: (7, 6, 3, 6),
             481: (7, 7, 9, 6),
-            483: (1, 1, 1, 6),
+            # R143 explicitly supersedes the old NW Ground / Dry assignment.
+            483: (3, 1, 1, 6),
             487: (7, 5, 6, 6),
             489: (9, 5, 6, 6),
             495: (9, 1, 6, 6),
@@ -1642,12 +1643,14 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
     def test_r63_applies_only_explicit_family_merges_corners_and_names(self) -> None:
         corner_names = ("northWest", "northEast", "southEast", "southWest")
         cases = {
-            # R65 subsequently identified every reviewed Rock / Dark member
-            # as Stone / Black, so the cumulative recipe emits family 8.
+            # R65 subsequently changed slot 33 to family 8. This synthetic R63
+            # fixture has anonymous family names, so later name-qualified R143
+            # Stone / Dark corrections at 55/58 are intentionally outside its
+            # scope. Full-catalog tests cover those overrides.
             "bz11k": ({}, {(33, 0): 1, (33, 1): 8, (33, 2): 8,
-                              (33, 3): 8, (55, 3): 8, (58, 3): 8}, {}),
+                              (33, 3): 8, (55, 3): 14, (58, 3): 14}, {}),
             "Zone14": ({}, {(33, 0): 1, (33, 1): 8, (33, 2): 8,
-                               (33, 3): 8, (55, 3): 8, (58, 3): 8}, {}),
+                               (33, 3): 8, (55, 3): 14, (58, 3): 14}, {}),
             "bz8k": ({}, {}, {7: "Grass / Yellow lichen"}),
             "bz9k": ({}, {}, {7: "Grass / Yellow lichen"}),
             "Zone10": ({}, {(291, 1): 5}, {}),
@@ -3377,7 +3380,7 @@ class ReviewDocumentTests(unittest.TestCase):
 
         self.assertEqual(
             ["Stone / Lime", "Ground / Common",
-             "Grass / Sparse dark", "Stone / Grayish"],
+             "Grass / Sparse light", "Stone / Grayish"],
             signature("bz3g", 416))
         self.assertEqual(
             ["Stone / Lime", "Ground / Common",
@@ -3464,13 +3467,10 @@ class ReviewDocumentTests(unittest.TestCase):
 
     def test_r96_ground_dark_comparison_includes_every_uniform_variant(self) -> None:
         root = Path(__file__).resolve().parent.parent
-        manifest_path = (root / "artifacts" /
+        manifest = json.loads((root / "artifacts" /
             "semantic-atlas-r96-ground-dark-comparison" / "questionnaire" /
             "semantic-atlas-r96-questionnaire.manifest.json"
-        )
-        if not manifest_path.exists():
-            self.skipTest("R96 questionnaire artifact is intentionally not shipped")
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        ).read_text(encoding="utf-8"))
         self.assertEqual(5, manifest["bindingGroupCount"])
         self.assertEqual(35, manifest["uniformVariantCount"])
         self.assertEqual(70, manifest["pairedVariantImageCount"])
@@ -3522,13 +3522,10 @@ class ReviewDocumentTests(unittest.TestCase):
 
     def test_r97_questionnaire_covers_r96_and_r95_without_reference_leaks(self) -> None:
         root = Path(__file__).resolve().parent.parent
-        manifest_path = (root / "artifacts" /
+        manifest = json.loads((root / "artifacts" /
             "semantic-atlas-r97-ground-dead-review" / "questionnaire" /
             "semantic-atlas-r97-questionnaire.manifest.json"
-        )
-        if not manifest_path.exists():
-            self.skipTest("R97 questionnaire artifact is intentionally not shipped")
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        ).read_text(encoding="utf-8"))
         self.assertEqual(25, manifest["questions"])
         self.assertEqual(66, manifest["auditedCorners"])
         self.assertEqual([], manifest["optionReferenceGaps"])
@@ -5212,12 +5209,9 @@ class R134QuarantineKeepCurrentDecisionTests(unittest.TestCase):
         catalog = json.loads(catalog_path.read_text())
         decisions = json.loads((root / "scripts" /
             "semantic_atlas_r134_quarantine_keep_current_decisions.json").read_text())
-        resolution_path = (root / "artifacts" /
+        resolution = json.loads((root / "artifacts" /
             "semantic-atlas-r134-quarantine-recovery" /
-            "quarantine-resolution.json")
-        if not resolution_path.exists():
-            self.skipTest("R134 quarantine artifact is intentionally not shipped")
-        resolution = json.loads(resolution_path.read_text())
+            "quarantine-resolution.json").read_text())
 
         self.assertEqual(226, decisions["counts"]["inputQuarantinedRows"])
         self.assertEqual(5, decisions["counts"]["reviewedCards"])

@@ -5880,7 +5880,7 @@ void EnduranceDocumentTests::authoredPresetCatalogCoversKnownAtlasesAndMatchesZo
         bz3g.slotDefinitions.at(416).signature;
     QCOMPARE(reviewed416.northWest, qint32(14));
     QCOMPARE(reviewed416.northEast, qint32(12));
-    QCOMPARE(reviewed416.southEast, qint32(5));
+    QCOMPARE(reviewed416.southEast, qint32(2));
     QCOMPARE(reviewed416.southWest, qint32(3));
     const STerrainTransitionSignature reviewed445 =
         bz3g.slotDefinitions.at(445).signature;
@@ -6269,19 +6269,12 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 58);
-    // R106 adds two explicit identities, then removes all family records whose
-    // last authored corner was reassigned. Exact bz13h decisions propagate to
-    // the byte-identical Zone15 atlas, removing its final dead family as well.
-    // The pruned R111 authority contains 392 referenced families. R112 adds
-    // one reviewed, paint-selectable Zone10 Slabs / Faces irregular family.
-    // R115 adds three honest transition-only rows. R117-R120 then add four
-    // reviewed local identities while later authored evidence makes the two
-    // exact Zone2 Ground / Dirt brushes structurally paint-selectable. R140
-    // also retains the reviewed split between BaseGipat Water / Still variants.
-    QCOMPARE(totalFamilies, 407);
+    // The synchronized R148 batch-1 authority keeps every currently referenced
+    // family record and its reviewed paintability classification.
+    QCOMPARE(totalFamilies, 417);
     // A referenced family remains transition-only when it has neither a
     // uniform tile nor a one-on-three authored stamp.
-    QCOMPARE(transitionSupportFamilies, 18);
+    QCOMPARE(transitionSupportFamilies, 22);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()
