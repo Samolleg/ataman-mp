@@ -3436,6 +3436,15 @@ void MainWindow::updateMapTestAction()
 {
     if(!m_mapTestAction || !m_stopMapTestAction)
         return;
+    if(m_mapTestLauncher && m_mapTestLauncher->isRestartPending())
+    {
+        m_mapTestAction->setText(tr("Restarting Test..."));
+        m_mapTestAction->setEnabled(false);
+        m_mapTestAction->setToolTip(tr(
+            "Stopping the previous Endurance-owned game process before launching the current database, JMV Lua, and map state."));
+        m_stopMapTestAction->setEnabled(false);
+        return;
+    }
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
@@ -3980,16 +3989,48 @@ void MainWindow::launchCurrentMapTest()
             return;
         input.baseProbeLevel = levels.indexOf(selected) + 1;
     }
+    bool fullRestartRequested = false;
+    if(hotReloadRequested)
+    {
+        const QStringList startupChanges =
+            m_mapTestLauncher->startupResourceChanges(input);
+        if(!startupChanges.isEmpty())
+        {
+            progress->hide();
+            QMessageBox restartBox(
+                QMessageBox::Question,
+                tr("Restart Test Current Map"),
+                tr("The running game cannot safely apply pending %1 changes during a map hot reload. The database and JMV Lua state are initialized once when the game process starts.\n\nRestart the Endurance-owned test process and stage the current map, database, and Lua state together?")
+                    .arg(startupChanges.join(tr(" and "))),
+                QMessageBox::NoButton, this);
+            QPushButton* restartButton = restartBox.addButton(
+                tr("Restart Test"), QMessageBox::AcceptRole);
+            restartBox.addButton(QMessageBox::Cancel);
+            restartBox.exec();
+            if(restartBox.clickedButton() != restartButton)
+                return;
+            progress->show();
+            progress->setLabelText(tr("Stopping the current test before a fresh launch..."));
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            fullRestartRequested = true;
+        }
+    }
     QString error;
-    const bool accepted = hotReloadRequested
-        ? m_mapTestLauncher->hotReload(input, &error)
-        : m_mapTestLauncher->launch(input, &error);
+    const bool accepted = fullRestartRequested
+        ? m_mapTestLauncher->restart(input, &error)
+        : hotReloadRequested
+            ? m_mapTestLauncher->hotReload(input, &error)
+            : m_mapTestLauncher->launch(input, &error);
     if(!accepted)
     {
         ei::log(eLogWarning, QString("Map test %1 refused: %2")
-            .arg(hotReloadRequested ? "hot reload" : "launch", error));
+            .arg(fullRestartRequested ? "restart" : hotReloadRequested ? "hot reload" : "launch",
+                 error));
         QMessageBox::critical(this,
-            hotReloadRequested ? tr("Hot reload") : tr("Map test launch"), error);
+            fullRestartRequested ? tr("Restart Test Current Map")
+                                 : hotReloadRequested ? tr("Hot reload")
+                                                      : tr("Map test launch"),
+            error);
     }
     else
     {
@@ -4003,6 +4044,15 @@ void MainWindow::launchCurrentMapTest()
         }
         if(hotReloadRequested)
         {
+            if(fullRestartRequested)
+            {
+                progress->setValue(6);
+                statusBar()->showMessage(tr(
+                    "Stopping the current test; a fresh process will launch automatically with the current database and JMV Lua state."),
+                    8000);
+                updateMapTestAction();
+                return;
+            }
             // Keep this application-modal progress window alive until the bridge
             // commits or rejects the staged generation. The launcher focuses the
             // game only after hotReloadFinished, so editor input stays blocked.

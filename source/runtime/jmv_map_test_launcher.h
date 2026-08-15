@@ -73,14 +73,17 @@ public:
 
     bool launch(const SJmvMapTestLaunchInput& input, QString* error = nullptr);
     bool hotReload(const SJmvMapTestLaunchInput& input, QString* error = nullptr);
+    bool restart(const SJmvMapTestLaunchInput& input, QString* error = nullptr);
     bool isRunning() const;
     bool isHotReloadReady() const;
     bool isHotReloadPending() const { return m_pendingHotReloadSequence != 0; }
+    bool isRestartPending() const { return m_restartPending; }
     bool isRecoveryPending() const { return m_recoveryPending; }
     QString runtimeState() const;
     quint64 saveGeneration() const { return m_saveGeneration; }
     QString runId() const { return m_runId; }
     QString temporaryMapName() const { return m_temporaryMapName; }
+    QStringList startupResourceChanges(const SJmvMapTestLaunchInput& input) const;
     void stop();
 
     static QString testRunsRootPath();
@@ -107,6 +110,11 @@ public:
     static qint64 runtimeGameProcessId(bool usesRuntimeHost,
                                        const QString& gamePidPath,
                                        qint64 transportProcessId);
+    static QStringList changedStartupResources(
+        const QString& stagedDatabaseSha256,
+        const QString& stagedTablesLuaSourcePath,
+        const QString& stagedTablesLuaSha256,
+        const SJmvMapTestLaunchInput& input);
     static QJsonObject buildAuthoritativeResult(const QJsonObject& manifest,
                                                 const QString& bridgeResult,
                                                 int exitCode,
@@ -224,6 +232,8 @@ private:
     bool m_recoveryPending{false};
     bool m_lastPublishedRecoveryPending{false};
     QString m_lastPublishedRecoveryStatus;
+    bool m_restartPending{false};
+    SJmvMapTestLaunchInput m_restartInput;
 };
 
 #endif // JMV_MAP_TEST_LAUNCHER_H

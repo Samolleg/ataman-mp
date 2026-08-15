@@ -39,6 +39,7 @@ private slots:
     void rejectsMalformedExternalGraph();
     void resolvesActualZone6ExternalGraph();
     void resolvesHostedGamePidForHotReload();
+    void startupResourceChangesRequireFreshProcess();
     void preparesOwnedGodmodeAutoexec();
     void preservesExistingAutoexecForRecovery();
     void recoveryRemovesAutoexecCreatedByEndurance();
@@ -163,6 +164,39 @@ void JmvMapTestLauncherTests::createsGenerationScopedSavePaths()
     QVERIFY(QDir::fromNativeSeparators(initial).endsWith("generations/000000/saves"));
     QVERIFY(QDir::fromNativeSeparators(reload).endsWith("generations/000017/saves"));
     QVERIFY(initial != reload);
+}
+
+void JmvMapTestLauncherTests::startupResourceChangesRequireFreshProcess()
+{
+    SJmvMapTestLaunchInput input;
+    input.databaseData = "database baseline";
+    input.tablesLuaSourcePath = "D:/Evil Islands/Starter/Mods/JamaisVu135/lua/tables.lua";
+    input.tablesLuaData = "lua baseline";
+
+    QStringList reasons = CJmvMapTestLauncher::changedStartupResources(
+        hash(input.databaseData), input.tablesLuaSourcePath,
+        hash(input.tablesLuaData), input);
+    QVERIFY(reasons.isEmpty());
+
+    input.databaseData = "database with cloned prototype";
+    reasons = CJmvMapTestLauncher::changedStartupResources(
+        hash("database baseline"), input.tablesLuaSourcePath,
+        hash(input.tablesLuaData), input);
+    QCOMPARE(reasons, QStringList{QStringLiteral("database.res")});
+
+    input.databaseData = "database baseline";
+    input.tablesLuaData = "lua with edited unit stats";
+    reasons = CJmvMapTestLauncher::changedStartupResources(
+        hash(input.databaseData), input.tablesLuaSourcePath,
+        hash("lua baseline"), input);
+    QCOMPARE(reasons, QStringList{QStringLiteral("tables.lua")});
+
+    input.databaseData = "database with edited HP";
+    reasons = CJmvMapTestLauncher::changedStartupResources(
+        hash("database baseline"), input.tablesLuaSourcePath,
+        hash("lua baseline"), input);
+    QCOMPARE(reasons, (QStringList{QStringLiteral("database.res"),
+                                  QStringLiteral("tables.lua")}));
 }
 
 void JmvMapTestLauncherTests::rejectsMixedJmvGameRootRegistryPaths()

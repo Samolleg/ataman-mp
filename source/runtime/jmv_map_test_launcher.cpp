@@ -556,6 +556,8 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int exitCode, QProcess::ExitStatus status)
     {
+        const bool restarting = m_restartPending;
+        const SJmvMapTestLaunchInput restartInput = m_restartInput;
         m_hotReloadReadyTimer->stop();
         m_hotReloadResultTimer->stop();
         m_pendingHotReloadSequence = 0;
@@ -585,12 +587,27 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
                      .arg(report.value("passed").toBool())
                      .arg(report.value("errorCount").toInt())
                      .arg(report.value("warningCount").toInt()).arg(resultPath));
-        emit testReportReady(report);
+        if(!restarting)
+            emit testReportReady(report);
         QString cleanupMessage = cleanupOnly;
         if(!cleanupMessage.isEmpty())
             cleanupMessage += "\n";
         cleanupMessage += bridgeResult;
         emit testFinished(m_runId, exitCode, cleanupMessage);
+        if(restarting)
+        {
+            m_restartPending = false;
+            m_restartInput = SJmvMapTestLaunchInput();
+            QTimer::singleShot(0, this, [this, restartInput]()
+            {
+                QString restartError;
+                if(!launch(restartInput, &restartError))
+                    emit testError(QCoreApplication::translate(
+                        "CJmvMapTestLauncher",
+                        "The fresh Test Current Map process could not be started after stopping the previous process.\n\n%1")
+                        .arg(restartError));
+            });
+        }
     });
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error)
     {
@@ -1175,6 +1192,45 @@ bool CJmvMapTestLauncher::isHotReloadReady() const
     const qint64 gamePid = runtimeGameProcessId();
     return ok && threadId != 0 && gamePid > 0
         && threadBelongsToProcess(threadId, quint32(gamePid));
+}
+
+QStringList CJmvMapTestLauncher::changedStartupResources(
+    const QString& stagedDatabaseSha256,
+    const QString& stagedTablesLuaSourcePath,
+    const QString& stagedTablesLuaSha256,
+    const SJmvMapTestLaunchInput& input)
+{
+    QStringList changed;
+    if(stagedDatabaseSha256.trimmed().isEmpty()
+       || sha256(input.databaseData).compare(
+              stagedDatabaseSha256, Qt::CaseInsensitive) != 0)
+        changed.append(QStringLiteral("database.res"));
+
+    const bool hadStagedLua = !stagedTablesLuaSourcePath.trimmed().isEmpty()
+        || !stagedTablesLuaSha256.trimmed().isEmpty();
+    const bool hasInputLua = !input.tablesLuaSourcePath.trimmed().isEmpty()
+        || !input.tablesLuaData.isEmpty();
+    if(hadStagedLua || hasInputLua)
+    {
+        const bool sourceChanged = QFileInfo(stagedTablesLuaSourcePath)
+            .absoluteFilePath().compare(
+                QFileInfo(input.tablesLuaSourcePath).absoluteFilePath(),
+                Qt::CaseInsensitive) != 0;
+        const bool payloadChanged = stagedTablesLuaSha256.trimmed().isEmpty()
+            || sha256(input.tablesLuaData).compare(
+                stagedTablesLuaSha256, Qt::CaseInsensitive) != 0;
+        if(sourceChanged || payloadChanged)
+            changed.append(QStringLiteral("tables.lua"));
+    }
+    return changed;
+}
+
+QStringList CJmvMapTestLauncher::startupResourceChanges(
+    const SJmvMapTestLaunchInput& input) const
+{
+    return changedStartupResources(
+        m_stagedDatabaseSha256, m_tablesLuaSourcePath,
+        m_stagedTablesLuaSha256, input);
 }
 
 QString CJmvMapTestLauncher::runtimeState() const
@@ -2421,9 +2477,14 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         if(error) *error = "The active database source differs from the running test profile.";
         return false;
     }
-    if(!m_tablesLuaSourcePath.isEmpty()&&(QFileInfo(input.tablesLuaSourcePath).absoluteFilePath().compare(m_tablesLuaSourcePath,Qt::CaseInsensitive)!=0||sha256(input.tablesLuaData).compare(m_stagedTablesLuaSha256,Qt::CaseInsensitive)!=0))
+    const QStringList startupChanges = startupResourceChanges(input);
+    if(!startupChanges.isEmpty())
     {
-        if(error)*error="Pending tables.lua changes require a fresh Test Current Map process because the JMV Lua state is initialized once at process startup.";
+        if(error)
+            *error = QCoreApplication::translate(
+                "CJmvMapTestLauncher",
+                "Pending %1 changes require a fresh Test Current Map process because database and JMV Lua state are initialized once at process startup.")
+                .arg(startupChanges.join(QStringLiteral(" + ")));
         return false;
     }
     if(!input.profile.valid || !input.profile.runtimeStackValidated
@@ -2793,6 +2854,44 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     return true;
 }
 
+bool CJmvMapTestLauncher::restart(const SJmvMapTestLaunchInput& input,
+                                  QString* error)
+{
+    if(!isRunning())
+        return launch(input, error);
+    if(m_restartPending)
+    {
+        if(error)
+            *error = QCoreApplication::translate(
+                "CJmvMapTestLauncher",
+                "A fresh Test Current Map process is already being prepared.");
+        return false;
+    }
+    if(input.profile.profileId.compare(m_profileId, Qt::CaseInsensitive) != 0)
+    {
+        if(error)
+            *error = QCoreApplication::translate(
+                "CJmvMapTestLauncher",
+                "The active editor profile differs from the running test profile.");
+        return false;
+    }
+    m_restartInput = input;
+    m_restartPending = true;
+    appendRunLog(QString("Fresh process requested for startup resources: %1")
+        .arg(startupResourceChanges(input).join(QStringLiteral(" + "))));
+    m_stopRequested = true;
+    m_process->terminate();
+    QTimer::singleShot(5000, this, [this]()
+    {
+        if(isRunning())
+        {
+            appendRunLog("Graceful restart stop timed out; terminating the Endurance-owned process");
+            m_process->kill();
+        }
+    });
+    return true;
+}
+
 bool CJmvMapTestLauncher::installBridge(QString* error)
 {
     QByteArray bridge;
@@ -2872,6 +2971,12 @@ QString CJmvMapTestLauncher::cleanup()
 
 void CJmvMapTestLauncher::stop()
 {
+    if(m_restartPending)
+    {
+        appendRunLog("Pending fresh-process launch cancelled by Stop Test or editor shutdown");
+        m_restartPending = false;
+        m_restartInput = SJmvMapTestLaunchInput();
+    }
     if(!isRunning())
         return;
     m_stopRequested = true;
