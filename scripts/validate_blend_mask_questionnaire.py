@@ -63,6 +63,12 @@ def validate(review: Path, questionnaire: Path) -> dict:
     analysis = json.loads(
         (questionnaire.parent / "blend-mask-analysis.json").read_text(
             encoding="utf-8"))
+    if analysis.get("rowSelection") == "unapproved-only":
+        rows = [
+            row for row in rows
+            if row.get("missing", "").casefold() not in {"1", "true", "yes"}
+            and "-approved" not in row.get("provenance", "").casefold()
+        ]
     errors: list[str] = []
     application_keys: set[str] = set()
     uniform_files: set[str] = set()
@@ -187,10 +193,19 @@ def validate(review: Path, questionnaire: Path) -> dict:
             "localStorage.setItem", "Apply only explicit mask decisions",
             'class="visual threshold-heatmap"',
             'class="visual resulting-blend encoded-result"',
-            'class="visual resulting-blend linear-result"',
-            'data-key="blend-compositor-gamma"'):
+            'class="visual resulting-blend linear-result"'):
         if needle not in document:
             errors.append(f"HTML missing contract marker {needle}")
+    global_questions = analysis.get("globalQuestions", [])
+    expected_global_keys = [question.get("key")
+                            for question in global_questions]
+    if expected_global_keys == ["blend-compositor-gamma"]:
+        if 'data-key="blend-compositor-gamma"' not in document:
+            errors.append("HTML missing global compositor question")
+    elif expected_global_keys:
+        errors.append("analysis contains an unknown global question")
+    elif 'data-key="blend-compositor-gamma"' in document:
+        errors.append("HTML contains an undeclared global compositor question")
     if "Not answered" in document:
         errors.append("HTML contains forbidden Not answered option")
     html_references = _validate_html_references(
@@ -242,10 +257,6 @@ def validate(review: Path, questionnaire: Path) -> dict:
             f"{len(questions)}")
     if analysis.get("maskQuestionCount") != len(questions):
         errors.append("analysis maskQuestionCount mismatch")
-    global_questions = analysis.get("globalQuestions", [])
-    if [question.get("key") for question in global_questions] != [
-            "blend-compositor-gamma"]:
-        errors.append("analysis global compositor question mismatch")
     prior_review = analysis.get("priorReview", {})
     if prior_review.get("explicitRejections", 0) != sum(
             len(question.get("priorR41Decisions", []))

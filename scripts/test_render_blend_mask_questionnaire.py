@@ -210,6 +210,35 @@ class BlendMaskQuestionnaireTests(unittest.TestCase):
             self.assertNotIn("Zone1:4", document)
             self.assertNotIn('value="Reject: bad shape/coverage" selected', document)
 
+    def test_unapproved_only_omits_reviewed_rows_and_global_question(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            review, fields = self._fixture(root)
+            index_path = review / "index.csv"
+            with index_path.open(encoding="utf-8", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            for row in rows[:-1]:
+                row["provenance"] += ":r44-approved"
+            with index_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(rows)
+
+            result = render(
+                review, root / "questionnaire", "R154-MASK-GAP",
+                only_unapproved=True)
+            document = Path(result["html"]).read_text(encoding="utf-8")
+            analysis = json.loads(
+                Path(result["analysis"]).read_text(encoding="utf-8"))
+
+            self.assertEqual(result["applications"], 1)
+            self.assertEqual(result["questions"], 1)
+            self.assertEqual(result["globalQuestions"], 0)
+            self.assertEqual(analysis["rowSelection"], "unapproved-only")
+            self.assertNotIn('data-key="blend-compositor-gamma"', document)
+            self.assertEqual(
+                validate(review, Path(result["html"]))["status"], "PASS")
+
     def test_unrelated_masks_in_one_family_topology_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

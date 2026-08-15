@@ -205,7 +205,8 @@ def _application(row: dict[str, str], canonical_hash: str) -> dict:
 
 
 def render(review: Path, output: Path, checkpoint: str = "R42-MASK",
-           previous_answers: Path | None = None) -> dict:
+           previous_answers: Path | None = None,
+           only_unapproved: bool = False) -> dict:
     review = review.resolve()
     _loaded_sheet.cache_clear()
     output.mkdir(parents=True, exist_ok=True)
@@ -226,6 +227,14 @@ def render(review: Path, output: Path, checkpoint: str = "R42-MASK",
         raise ValueError(
             "blend-mask review index is missing questionnaire fields: "
             f"{sorted(required.difference(rows[0] if rows else {}))}")
+    if only_unapproved:
+        rows = [
+            row for row in rows
+            if row.get("missing", "").casefold() not in {"1", "true", "yes"}
+            and "-approved" not in row.get("provenance", "").casefold()
+        ]
+        if not rows:
+            raise ValueError("blend-mask review has no live unapproved applications")
 
     groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     canonical_hashes: dict[str, str] = {}
@@ -409,6 +418,10 @@ def render(review: Path, output: Path, checkpoint: str = "R42-MASK",
 <p>The mask shape is identical in A and B. A is the current runtime calculation; B converts RGB to linear light for mixing and converts back. This choice is deliberately review-only until you select it here.</p>
 <div class="answer-row"><label>Decision<select class="answer form-select">{gamma_options}</select></label><label>Note<input class="note form-control" type="text" value="" placeholder="Optional global compositor note"></label></div>
 </article>'''
+    global_questions = ([{"key": gamma_key, "kind": "gamma-compositor"}]
+                        if not only_unapproved else [])
+    if only_unapproved:
+        gamma_card = ""
     script = interaction_script(checkpoint)
     document = f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Blend-mask {html.escape(checkpoint)} review</title>
 <style>
@@ -431,7 +444,8 @@ const styleFilter=document.getElementById('style-filter');const materialFilter=d
         "checkpoint": checkpoint,
         "applicationCount": len(rows),
         "maskQuestionCount": len(groups),
-        "globalQuestions": [{"key": gamma_key, "kind": "gamma-compositor"}],
+        "rowSelection": "unapproved-only" if only_unapproved else "all",
+        "globalQuestions": global_questions,
         "priorReview": {
             "explicitRejections": sum(
                 len(values) for values in prior_decisions.values()),
@@ -444,7 +458,7 @@ const styleFilter=document.getElementById('style-filter');const materialFilter=d
     }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {
         "questions": len(groups),
-        "globalQuestions": 1,
+        "globalQuestions": len(global_questions),
         "applications": len(rows),
         "materials": len(materials),
         "maskFamilies": len(mask_families),
@@ -465,9 +479,13 @@ def main() -> int:
     parser.add_argument("--answers", type=Path,
                         help="Earlier questionnaire export; only explicit "
                              "rejections are retained as context")
+    parser.add_argument(
+        "--only-unapproved", action="store_true",
+        help="Render only non-missing applications whose provenance has no "
+             "reviewed -approved suffix")
     args = parser.parse_args()
     print(json.dumps(render(args.review, args.output, args.checkpoint,
-                            args.answers), indent=2))
+                            args.answers, args.only_unapproved), indent=2))
     return 0
 
 

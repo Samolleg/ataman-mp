@@ -11,6 +11,7 @@
 
 #include "endurance_document.h"
 #include "mpr_document.h"
+#include "terrain_virtual_atlas.h"
 
 namespace {
 const int kSectorVertices = 33;
@@ -2709,8 +2710,6 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
 
     QVector<int> orderedPainted = painted.values().toVector();
     std::sort(orderedPainted.begin(), orderedPainted.end());
-    for(int index : orderedPainted)
-        command.semanticAudit.paintedCoreCells.append(QPoint(index % width, index / width));
 
     STerrainTransitionSignature pure;
     pure.northWest = pure.northEast = pure.southEast = pure.southWest = materialId;
@@ -2725,49 +2724,46 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
         return command;
     }
 
-    // The only mutable cells outside the brush are the immediate eight-neighbor
-    // ring. Missing transitions never enlarge this footprint.
     QSet<int> boundary;
-    for(int index : painted)
-    {
-        const int x = index % width;
-        const int y = index / width;
-        for(int offsetY = -1; offsetY <= 1; ++offsetY)
-        {
-            for(int offsetX = -1; offsetX <= 1; ++offsetX)
-            {
-                const int candidateX = x + offsetX;
-                const int candidateY = y + offsetY;
-                if(candidateX < 0 || candidateX >= width
-                   || candidateY < 0 || candidateY >= height)
-                    continue;
-                const int candidate = candidateY * width + candidateX;
-                if(painted.contains(candidate))
-                    continue;
-                bool available = false;
-                packedTile(candidateX, candidateY, layer, &available);
-                if(available)
-                    boundary.insert(candidate);
-            }
-        }
-    }
-    QVector<int> orderedBoundary = boundary.values().toVector();
-    std::sort(orderedBoundary.begin(), orderedBoundary.end());
-    for(int index : orderedPainted)
-        command.semanticAudit.affectedCells.append(QPoint(index % width, index / width));
-    for(int index : orderedBoundary)
-        command.semanticAudit.affectedCells.append(QPoint(index % width, index / width));
-
+    QVector<int> orderedBoundary;
     QSet<int> coreCorners;
-    for(int index : painted)
-    {
-        const int x = index % width;
-        const int y = index / width;
-        coreCorners.insert(y * (width + 1) + x);
-        coreCorners.insert(y * (width + 1) + x + 1);
-        coreCorners.insert((y + 1) * (width + 1) + x + 1);
-        coreCorners.insert((y + 1) * (width + 1) + x);
-    }
+    const auto rebuildFootprint = [&]() {
+        // The only mutable cells outside the brush are the immediate
+        // eight-neighbor ring. Missing transitions never enlarge this
+        // footprint.
+        boundary.clear();
+        coreCorners.clear();
+        for(int index : painted)
+        {
+            const int x = index % width;
+            const int y = index / width;
+            coreCorners.insert(y * (width + 1) + x);
+            coreCorners.insert(y * (width + 1) + x + 1);
+            coreCorners.insert((y + 1) * (width + 1) + x + 1);
+            coreCorners.insert((y + 1) * (width + 1) + x);
+            for(int offsetY = -1; offsetY <= 1; ++offsetY)
+                for(int offsetX = -1; offsetX <= 1; ++offsetX)
+                {
+                    const int candidateX = x + offsetX;
+                    const int candidateY = y + offsetY;
+                    if(candidateX < 0 || candidateX >= width
+                       || candidateY < 0 || candidateY >= height)
+                        continue;
+                    const int candidate = candidateY * width + candidateX;
+                    if(painted.contains(candidate))
+                        continue;
+                    bool available = false;
+                    packedTile(candidateX, candidateY, layer, &available);
+                    if(available)
+                        boundary.insert(candidate);
+                }
+        }
+        orderedPainted = painted.values().toVector();
+        std::sort(orderedPainted.begin(), orderedPainted.end());
+        orderedBoundary = boundary.values().toVector();
+        std::sort(orderedBoundary.begin(), orderedBoundary.end());
+    };
+    rebuildFootprint();
 
     QMap<int, STerrainTransitionSignature> existingSignatures;
     QMap<int, quint16> existingTiles;
@@ -2824,6 +2820,111 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     {
         if(!decodeCell(index, false))
             return command;
+    }
+
+    if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly)
+    {
+        QSet<int> unknownCells = unknownCore;
+        unknownCells.unite(unknownBoundary);
+        const int requestedCoreCount = painted.size();
+        for(;;)
+        {
+            rebuildFootprint();
+            QSet<int> blockedCore;
+            for(int index : orderedBoundary)
+            {
+                const int x = index % width;
+                const int y = index / width;
+                bool supported = !unknownCells.contains(index);
+                if(supported)
+                {
+                    const int cornerKeys[4] = {
+                        y * (width + 1) + x,
+                        y * (width + 1) + x + 1,
+                        (y + 1) * (width + 1) + x + 1,
+                        (y + 1) * (width + 1) + x};
+                    const STerrainTransitionSignature existing =
+                        existingSignatures.value(index);
+                    QVector<qint32> desired = {
+                        existing.northWest, existing.northEast,
+                        existing.southEast, existing.southWest};
+                    bool changed = false;
+                    for(int corner = 0; corner < 4; ++corner)
+                        if(coreCorners.contains(cornerKeys[corner]))
+                        {
+                            changed |= desired[corner] != materialId;
+                            desired[corner] = materialId;
+                        }
+                    if(changed)
+                    {
+                        STerrainTransitionSignature requested;
+                        requested.northWest = desired.at(0);
+                        requested.northEast = desired.at(1);
+                        requested.southEast = desired.at(2);
+                        requested.southWest = desired.at(3);
+                        bool found = false;
+                        catalog.selectForPaint(requested, x, y,
+                                               distributionSeed, &found);
+                        supported = found;
+                    }
+                }
+                if(supported)
+                    continue;
+                // Every retained core cell adjacent to this unsupported ring
+                // cell contributes at least one of its requested corners.
+                // Remove those cores and recompute: this preserves independent
+                // exact islands instead of committing a uniform hard seam.
+                for(int offsetY = -1; offsetY <= 1; ++offsetY)
+                    for(int offsetX = -1; offsetX <= 1; ++offsetX)
+                    {
+                        const int coreX = x + offsetX;
+                        const int coreY = y + offsetY;
+                        const int coreIndex = coreY * width + coreX;
+                        if(coreX >= 0 && coreX < width
+                           && coreY >= 0 && coreY < height
+                           && painted.contains(coreIndex))
+                            blockedCore.insert(coreIndex);
+                    }
+            }
+            if(blockedCore.isEmpty())
+                break;
+            painted.subtract(blockedCore);
+            if(painted.isEmpty())
+                break;
+        }
+        rebuildFootprint();
+        unknownCore = unknownCells;
+        unknownCore.intersect(painted);
+        unknownBoundary = unknownCells;
+        unknownBoundary.intersect(boundary);
+        const int skippedCoreCount = requestedCoreCount - painted.size();
+        if(skippedCoreCount > 0 && report)
+            report->add("terrain.semantic_tile_exact_only_skip",
+                EValidationSeverity::Warning,
+                "Classic Auto Safe left tile cells requiring absent authored boundary blends unchanged",
+                QString::number(skippedCoreCount));
+        if(painted.isEmpty())
+        {
+            command.semanticAudit.paintedCoreCells.clear();
+            command.semanticAudit.affectedCells.clear();
+            return command;
+        }
+    }
+
+    command.semanticAudit.paintedCoreCells.clear();
+    command.semanticAudit.affectedCells.clear();
+    for(int index : orderedPainted)
+    {
+        const QPoint point(index % width, index / width);
+        command.semanticAudit.paintedCoreCells.append(point);
+        command.semanticAudit.affectedCells.append(point);
+    }
+    for(int index : orderedBoundary)
+        command.semanticAudit.affectedCells.append(
+            QPoint(index % width, index / width));
+
+    for(int index : orderedBoundary)
+    {
         if(unknownBoundary.contains(index))
             continue;
         const STerrainTransitionSignature signature = existingSignatures.value(index);
@@ -3184,7 +3285,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
     const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed, CValidationReport* report,
-    qint32 preferredSupportId) const
+    qint32 preferredSupportId, ETerrainSemanticPaintPolicy policy) const
 {
     STerrainTileCommand command;
     command.description = layer == ETerrainTileLayer::Land
@@ -3474,6 +3575,11 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
                     continue;
                 }
                 vertexExact = false;
+                if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly)
+                {
+                    vertexPossible = false;
+                    break;
+                }
                 // Transition-only families may cover a larger brush only
                 // while every incident tile remains exact. Avoid an atlas-wide
                 // nearest-candidate scan for a vertex that must be skipped.
@@ -5182,7 +5288,9 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
 STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
     ETerrainTileLayer layer,const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed,CValidationReport* report,
-    bool randomizeUniformRotation) const
+    bool randomizeUniformRotation,
+    const CTerrainVirtualMaterialField* repairField,
+    bool allowPartialMaterialField) const
 {
     STerrainTileCommand command;
     command.description=QStringLiteral("Resolve missing terrain blends");
@@ -5194,7 +5302,16 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         ?m_virtualLandMaterials:m_virtualOverlayMaterials;
     const int vertexWidth=tileCountX()+1;
     const qint32 unset=std::numeric_limits<qint32>::min();
-    if(values.size()!=vertexWidth*(tileCountY()+1))
+    if(repairField
+       && (repairField->tileWidth()!=tileCountX()
+           ||repairField->tileHeight()!=tileCountY()))
+    {
+        if(report)report->add("terrain.virtual_map_field",
+            EValidationSeverity::Error,
+            "The conservative repair field dimensions do not match this map");
+        return command;
+    }
+    if(!repairField&&values.size()!=vertexWidth*(tileCountY()+1))
     {
         if(report)report->add("terrain.virtual_map_field",
             EValidationSeverity::Error,
@@ -5208,17 +5325,23 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         bool available=false;
         const quint16 before=packedTile(x,y,layer,&available);
         if(!available)continue;
-        const int nw=y*vertexWidth+x,ne=nw+1;
-        const int sw=(y+1)*vertexWidth+x,se=sw+1;
-        if(values.at(nw)==unset||values.at(ne)==unset
-           ||values.at(se)==unset||values.at(sw)==unset)
-        {
-            ++unresolved;
-            continue;
-        }
         STerrainTransitionSignature exact;
-        exact.northWest=values.at(nw);exact.northEast=values.at(ne);
-        exact.southEast=values.at(se);exact.southWest=values.at(sw);
+        if(repairField)
+        {
+            bool signatureFound=false;
+            exact=repairField->cellSignature(x,y,&signatureFound);
+            if(!signatureFound){++unresolved;continue;}
+        }
+        else
+        {
+            const int nw=y*vertexWidth+x,ne=nw+1;
+            const int sw=(y+1)*vertexWidth+x,se=sw+1;
+            if(values.at(nw)==unset||values.at(ne)==unset
+               ||values.at(se)==unset||values.at(sw)==unset)
+            {++unresolved;continue;}
+            exact.northWest=values.at(nw);exact.northEast=values.at(ne);
+            exact.southEast=values.at(se);exact.southWest=values.at(sw);
+        }
         bool decoded=false;
         const STerrainTransitionSignature current=
             catalog.gridSignatureForPacked(before,&decoded);
@@ -5240,10 +5363,17 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         delta.hasSemanticRequest=true;delta.requestedMaterialId=-1;
         delta.requestedSignature=exact;command.deltas.append(delta);
     }
-    if(unresolved>0&&report)report->add("terrain.virtual_map_unresolved",
-        EValidationSeverity::Error,
-        QString("%1 map cell(s) could not be resolved to an exact physical blend")
-            .arg(unresolved));
+    if(unresolved>0&&report)report->add(
+        allowPartialMaterialField
+            ? "terrain.virtual_map_ambiguous_skipped"
+            : "terrain.virtual_map_unresolved",
+        allowPartialMaterialField
+            ? EValidationSeverity::Warning : EValidationSeverity::Error,
+        allowPartialMaterialField
+            ? QString("%1 ambiguous map cell(s) were preserved rather than moving a tied material boundary")
+                  .arg(unresolved)
+            : QString("%1 map cell(s) could not be resolved to an exact physical blend")
+                  .arg(unresolved));
     return command;
 }
 

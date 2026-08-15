@@ -1183,15 +1183,49 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.findChild<QCheckBox*>("classicAutoSafeMode");
         QPushButton* resolveMissingBlends =
             landscapeTools.findChild<QPushButton*>("resolveMissingBlendsButton");
+        STerrainPaintMaterialChoice irregularStamp = irregularOnDark;
+        irregularStamp.supportId = 3;
+        irregularStamp.contextualStamp = true;
+        irregularStamp.familyName = QStringLiteral("Grass");
+        landscapeTools.setClassicAutoMaterials({irregularStamp}, {}, {});
+        landscapeTools.setPaintPaletteMode(
+            ETerrainPaintPaletteMode::ClassicAuto);
+        if(vertexPaintTarget) vertexPaintTarget->setChecked(true);
+        QToolButton* contextualStampButton = nullptr;
+        for(QToolButton* button : landscapeTools.findChildren<QToolButton*>())
+            if(button->property("terrainContextualStamp").toBool()
+               && button->property("terrainMaterialId").toInt() == 9
+               && button->property("terrainSupportMaterialId").toInt() == 3)
+            {
+                contextualStampButton = button;
+                break;
+            }
+        bool contextualSelected = false;
+        const bool contextualStampVisibleForVertex = contextualStampButton
+            && contextualStampButton->isVisible()
+            && landscapeTools.selectPaintTerrainType(9)
+            && landscapeTools.paintTerrainType(&contextualSelected) == 9
+            && contextualSelected
+            && landscapeTools.paintTerrainSupport() == 3;
         if(tilePaintTarget) tilePaintTarget->setChecked(true);
+        bool tileStampSelected = true;
+        landscapeTools.paintTerrainType(&tileStampSelected);
+        const bool contextualStampHiddenForTile = contextualStampButton
+            && !contextualStampButton->isVisible() && !tileStampSelected;
         if(classicAutoSafe) classicAutoSafe->setChecked(true);
+        const bool tilePaintTargetForcesSquare = squarePaintShape
+            && circlePaintShape && squarePaintShape->isChecked()
+            && !squarePaintShape->isEnabled()
+            && !circlePaintShape->isEnabled();
         const bool terrainPaintBetaControlsAreExplicit = circlePaintShape
             && squarePaintShape && tilePaintTarget && vertexPaintTarget
             && classicAutoSafe && resolveMissingBlends
             && circlePaintShape->styleSheet().contains(
                 QStringLiteral("QToolButton:checked"))
             && tilePaintTarget->isChecked()
-            && classicAutoSafe->isChecked();
+            && classicAutoSafe->isChecked()
+            && tilePaintTargetForcesSquare;
+        landscapeTools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         if(materialPaletteTabs)
             materialPaletteTabs->setCurrentIndex(0);
         QVector<QImage> manualTiles(2, QImage(16, 16,
@@ -1565,6 +1599,8 @@ int runHeadlessCommand(QApplication& app)
             && threeTerrainPaintModesAvailable
             && classicPaletteFirstOpenDoesNotOverlapControls
             && terrainPaintBetaControlsAreExplicit
+            && contextualStampVisibleForVertex
+            && contextualStampHiddenForTile
             && sharedTerrainPaintFilterWorks
             && manualAtlasGridUsesTooltips
             && defaultAtlasSourceVisible
@@ -1668,6 +1704,10 @@ int runHeadlessCommand(QApplication& app)
                << classicPaletteFirstOpenDoesNotOverlapControls
                << " terrainPaintBetaControlsAreExplicit="
                << terrainPaintBetaControlsAreExplicit
+               << " contextualStampVisibleForVertex="
+               << contextualStampVisibleForVertex
+               << " contextualStampHiddenForTile="
+               << contextualStampHiddenForTile
                << " classicPaletteBottom=" << paletteBottom
                << " terrainPaintRadiusTop=" << radiusTop
                << " sharedTerrainPaintFilterWorks="

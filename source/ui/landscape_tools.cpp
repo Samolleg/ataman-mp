@@ -597,6 +597,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     const auto targetChanged = [this](bool checked) {
         if(!checked)
             return;
+        updatePaintShapeUi();
         QSettings().setValue(QStringLiteral("ui/landscape/paintTargetMode"),
                              int(paintTargetMode()));
         applyPaintFilter();
@@ -646,6 +647,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             [](int value) { QSettings().setValue("ui/landscape/flattenHeight", value); });
     updateModeVisibility();
     updatePaintIssueUi();
+    updatePaintShapeUi();
 }
 
 QSize CLandscapeTools::minimumSizeHint() const
@@ -806,7 +808,8 @@ void CLandscapeTools::refreshAtlasCapacity(int activeSlots)
 }
 ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {
-    return m_squarePaintShape->isChecked()
+    return paintTargetMode() == ETerrainPaintTargetMode::Tile
+        || m_squarePaintShape->isChecked()
         ? ETerrainTileBrushShape::Square : ETerrainTileBrushShape::Circle;
 }
 bool CLandscapeTools::manualTileSelectionEnabled() const
@@ -915,7 +918,12 @@ qint32 CLandscapeTools::paintTerrainType(bool* selected) const
 {
     const QButtonGroup* group = activeMaterialButtons();
     const QAbstractButton* button = group ? group->checkedButton() : nullptr;
-    const int id = button ? button->property("terrainMaterialId").toInt() : -1;
+    const bool hiddenStamp = button
+        && paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto
+        && paintTargetMode() == ETerrainPaintTargetMode::Tile
+        && button->property("terrainCornerOnly").toBool();
+    const int id = button && !hiddenStamp
+        ? button->property("terrainMaterialId").toInt() : -1;
     if(selected)
         *selected = id >= 0;
     return id >= 0 ? id : 0;
@@ -979,11 +987,32 @@ void CLandscapeTools::updatePaintIssueUi()
             ? tr("MARKING: %1").arg(category.toUpper())
             : tr("Mark bad tiles on map"));
     if(m_paintRadius) m_paintRadius->setEnabled(!marking);
-    if(m_circlePaintShape) m_circlePaintShape->setEnabled(!marking);
-    if(m_squarePaintShape) m_squarePaintShape->setEnabled(!marking);
     if(m_tilePaintTarget) m_tilePaintTarget->setEnabled(!marking);
     if(m_vertexPaintTarget) m_vertexPaintTarget->setEnabled(!marking);
     if(m_paintModeTabs) m_paintModeTabs->setEnabled(!marking);
+    updatePaintShapeUi();
+}
+
+void CLandscapeTools::updatePaintShapeUi()
+{
+    const bool tileTarget = paintTargetMode() == ETerrainPaintTargetMode::Tile;
+    const bool enabled = !paintIssueMarkingEnabled() && !tileTarget;
+    if(tileTarget && m_squarePaintShape)
+        m_squarePaintShape->setChecked(true);
+    if(m_circlePaintShape)
+    {
+        m_circlePaintShape->setEnabled(enabled);
+        m_circlePaintShape->setToolTip(tileTarget
+            ? tr("Tile target always uses a square cell footprint")
+            : tr("Circular brush"));
+    }
+    if(m_squarePaintShape)
+    {
+        m_squarePaintShape->setEnabled(enabled);
+        m_squarePaintShape->setToolTip(tileTarget
+            ? tr("Tile target uses this square cell footprint")
+            : tr("Square brush"));
+    }
 }
 void CLandscapeTools::setPaintTerrainTypes(
     const QVector<QPair<qint32, QString>>& landTypes,
@@ -1055,14 +1084,14 @@ void CLandscapeTools::setClassicAutoMaterials(
     const auto uniqueIdentities = [](
         const QVector<STerrainPaintMaterialChoice>& source) {
         QVector<STerrainPaintMaterialChoice> result;
-        QSet<qint32> seen;
+        QSet<QPair<qint32, qint32>> seen;
         for(STerrainPaintMaterialChoice choice : source)
         {
-            if(seen.contains(choice.id))
+            const QPair<qint32, qint32> identity = qMakePair(
+                choice.id, choice.contextualStamp ? choice.supportId : 0);
+            if(seen.contains(identity))
                 continue;
-            seen.insert(choice.id);
-            choice.supportId = 0;
-            choice.contextualStamp = false;
+            seen.insert(identity);
             result.append(choice);
         }
         return result;
@@ -1212,12 +1241,18 @@ void CLandscapeTools::rebuildMaterialPalette()
                   "QToolButton:hover { border-color: #ffd34e; }"
                   "QToolButton:checked { border: 4px solid #d8ff35; "
                   "background: #315b16; padding: 0px; }"));
-              button->setToolTip(tr("%1 - %2 authored uniform source(s). %3")
+              button->setToolTip((choice.contextualStamp
+                  ? tr("%1 - exact authored one-corner stamp. Vertex target only. %2")
+                        .arg(choice.name)
+                        .arg(classicAutoSafeMode()
+                            ? tr("Safe mode applies it only when every incident authored tile is exact.")
+                            : tr("It is restricted to its reviewed support material."))
+                  : tr("%1 - %2 authored uniform source(s). %3")
                   .arg(choice.name).arg(choice.assignedSlots)
                   .arg(used ? tr("Currently used on this map.")
                             : (classicAuto
                                 ? tr("Unused on this map; Classic Auto preserves available authored blends. Safe mode leaves a boundary unchanged when its exact blend is absent.")
-                                : tr("Unused on this map; Modern painting adds this material and generates exact blends as needed."))));
+                                : tr("Unused on this map; Modern painting adds this material and generates exact blends as needed.")))));
               if(!choice.thumbnail.isNull())
               {
                   button->setIcon(QPixmap::fromImage(choice.thumbnail));
@@ -1373,7 +1408,7 @@ void CLandscapeTools::refreshPaintTerrainTypes()
         m_tilesetStatus->setText(materialCount == 0
             ? tr("No existing automatic material designation is available for this layer.")
             : (classicAutoSafeMode()
-                ? tr("%1 existing material designation(s). Safe Classic Auto applies exact authored connections and skips only unsupported boundary cells.")
+                ? tr("%1 existing material designation(s). Safe Classic Auto applies only complete exact authored placements; tiles or vertices with unsupported boundaries stay unchanged.")
                       .arg(materialCount)
                 : tr("%1 existing material designation(s). Classic Auto never changes the atlas; unresolved boundaries may use a local uniform hard edge.")
                       .arg(materialCount)));

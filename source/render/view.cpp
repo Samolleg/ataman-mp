@@ -7683,7 +7683,16 @@ void CView::refreshClassicAutoPalette()
 {
     if(!m_landscapeTools)
         return;
-    const auto available = [](
+    QMap<qint32, QString> materialNames;
+    for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
+        materialNames.insert(family.id, family.name);
+    for(const STerrainAtlasProfileFamily& family : m_terrainAtlasProfile.families)
+        if(!materialNames.contains(family.id))
+            materialNames.insert(family.id, family.name);
+    const QVector<QImage> physicalTiles = m_workingTerrainAtlas
+        ? m_workingTerrainAtlas->activeTileImages()
+        : (m_pTileForm ? m_pTileForm->tileImages() : QVector<QImage>());
+    const auto available = [&materialNames, &physicalTiles](
         const QVector<STerrainPaintMaterialChoice>& source,
         const CTerrainTransitionCatalog& catalog) {
         QVector<STerrainPaintMaterialChoice> result;
@@ -7693,7 +7702,49 @@ void CView::refreshClassicAutoPalette()
             pure.northWest = pure.northEast = pure.southEast = pure.southWest
                 = choice.id;
             if(!catalog.paintVariants(pure).isEmpty())
+            {
                 result.append(choice);
+                continue;
+            }
+
+            // A reviewed one-on-three family has no legal uniform interior,
+            // but it is still a useful authored vertex stamp. Surface one
+            // entry per exact support family; the palette hides these entries
+            // in Tile target mode, where a full-cell fill would be undefined.
+            QSet<qint32> supports;
+            for(const STerrainTransitionSignature& signature :
+                    catalog.gridSignatures())
+            {
+                const qint32 values[4] = {
+                    signature.northWest, signature.northEast,
+                    signature.southEast, signature.southWest};
+                QMap<qint32, int> counts;
+                for(qint32 value : values)
+                    ++counts[value];
+                if(counts.size() != 2 || counts.value(choice.id) != 1)
+                    continue;
+                for(auto count = counts.constBegin(); count != counts.constEnd(); ++count)
+                    if(count.key() != choice.id && count.value() == 3)
+                        supports.insert(count.key());
+            }
+            QList<qint32> orderedSupports = supports.values();
+            std::sort(orderedSupports.begin(), orderedSupports.end());
+            for(qint32 support : orderedSupports)
+            {
+                STerrainPaintMaterialChoice stamp = choice;
+                stamp.supportId = support;
+                stamp.contextualStamp = true;
+                stamp.cornerOnly = true;
+                stamp.name = tr("%1 (stamp on %2)").arg(
+                    choice.name,
+                    materialNames.value(support,
+                        tr("material %1").arg(support)));
+                const QImage junction = terrainVertexJunctionThumbnail(
+                    physicalTiles, catalog, choice.id, support, -1);
+                if(!junction.isNull())
+                    stamp.thumbnail = junction;
+                result.append(stamp);
+            }
         }
         return result;
     };
@@ -11296,11 +11347,15 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         pure.northWest = pure.northEast = pure.southEast = pure.southWest = terrainType;
         const bool classicAuto =
             m_landscapeTools->classicAutoPaintingEnabled();
+        const qint32 terrainSupport = classicAuto
+            ? m_landscapeTools->paintTerrainSupport() : 0;
+        const bool contextualClassic = classicAuto && terrainSupport > 0
+            && terrainSupport != terrainType;
         bool pureAvailable = false;
         const quint16 purePacked = semanticCatalog.selectForPaint(
             pure, qRound(vertexBrush.centerX), qRound(vertexBrush.centerY),
             m_tileStrokeDistributionSeed, &pureAvailable);
-        if(classicAuto && !pureAvailable)
+        if(classicAuto && !pureAvailable && !contextualClassic)
             report.add("terrain.classic_auto_uniform_missing",
                 EValidationSeverity::Error,
                 "Classic Auto can paint only material families with an exact uniform tile already present in this atlas.");
@@ -11324,7 +11379,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             emit updateMsg(report.toText());
             return;
         }
-        if(classicAuto && m_tilePaintStrokeActive && !tileTarget)
+        if(classicAuto && m_tilePaintStrokeActive && !tileTarget
+           && !contextualClassic)
         {
             if(!m_classicAutoStrokePending)
             {
@@ -11385,6 +11441,12 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             command = m_terrainEdit.makeSemanticTilePaint(
                 brush, layer, terrainType, semanticCatalog,
                 m_tileStrokeDistributionSeed, &report, classicPolicy);
+        else if(contextualClassic)
+            command = m_terrainEdit.makeSemanticVertexPaint(
+                qRound(brush.centerX), qRound(brush.centerY), vertexBrush,
+                layer, terrainType, semanticCatalog,
+                m_tileStrokeDistributionSeed, &report, terrainSupport,
+                classicPolicy);
         else if(classicAuto)
         {
             const QVector<QPoint> points = terrainVertexBrushPoints(
@@ -11419,6 +11481,9 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 if(finding.code == QStringLiteral(
                        "terrain.semantic_stroke_exact_only_skip"))
                     m_tileStrokeSafeSkippedVertices += count;
+                else if(finding.code == QStringLiteral(
+                            "terrain.semantic_tile_exact_only_skip"))
+                    m_tileStrokeSafeSkippedBoundaryCells += count;
                 else if(finding.code == QStringLiteral(
                             "terrain.semantic_hard_edge"))
                     m_tileStrokeSafeSkippedBoundaryCells += count;
@@ -12077,10 +12142,12 @@ void CView::resolveMissingTerrainBlends()
         return;
     }
     if(QMessageBox::question(this, tr("Resolve missing blends"), tr(
-        "Scan Ground and Overlay, reconstruct one deterministic shared-corner "
-        "material field, and replace every missing or inconsistent physical "
-        "blend with the exact Modern result?\n\nThe MPR changes will be one "
-        "undo step. Newly required atlas tiles remain in the working atlas."),
+        "Scan Ground and Overlay and replace every unambiguous missing or "
+        "inconsistent physical blend with the exact Modern result?\n\n"
+        "Disputed shared corners are preserved exactly; this repair will not "
+        "choose a side or move an existing material border. The MPR changes "
+        "will be one undo step. Newly required atlas tiles remain in the "
+        "working atlas."),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes)
        != QMessageBox::Yes)
         return;
@@ -12104,17 +12171,16 @@ void CView::resolveMissingTerrainBlends()
         int y{0};
     };
     QMap<QByteArray, SMissingMapSignature> missing;
+    CTerrainVirtualMaterialField repairFields[2];
     const ETerrainTileLayer layers[] = {
         ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
     for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
     {
         const ETerrainTileLayer layer = layers[layerIndex];
-        if(!m_terrainEdit.initializeVirtualMaterialField(
-               layer, m_workingTerrainAtlas->catalog(), &report,
-               ETerrainMaterialFieldRecovery::RecoverDeterministically))
-            break;
-        CTerrainVirtualMaterialField field;
-        if(!m_terrainEdit.copyVirtualMaterialField(layer, &field, false))
+        CTerrainVirtualMaterialField& field = repairFields[layerIndex];
+        if(!m_terrainEdit.copyVirtualMaterialField(layer, &field, false)
+           && !m_terrainEdit.recoverUnambiguousVirtualMaterialField(
+               layer, m_workingTerrainAtlas->catalog(), &field, &report))
         {
             report.add("terrain.resolve_map_field",
                 EValidationSeverity::Error,
@@ -12172,7 +12238,9 @@ void CView::resolveMissingTerrainBlends()
             const STerrainTileCommand command =
                 m_terrainEdit.makeVirtualMapResolution(layer,
                     m_workingTerrainAtlas->catalog(), m_terrainSemanticSeed,
-                    &report, false);
+                    &report, false,
+                    &repairFields[layer == ETerrainTileLayer::Land ? 0 : 1],
+                    true);
             appendTerrainTileCommand(&combined, command);
         }
     if(report.hasErrors())
@@ -12185,8 +12253,8 @@ void CView::resolveMissingTerrainBlends()
     {
         progress.setValue(5);
         QMessageBox::information(this, tr("Resolve missing blends"), tr(
-            "Every active terrain cell already matches the recovered exact "
-            "material field. No MPR change was needed."));
+            "No unambiguous terrain cell needed repair. Existing cells at "
+            "disputed shared corners were deliberately preserved."));
         return;
     }
     if(!applyTerrainTilePreview(combined, true))

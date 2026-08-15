@@ -482,6 +482,7 @@ private slots:
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
     void nonUniformResolveUsesAuthoredRotationOrGeneratesExact();
     void canonicalMasksAreAvailableWithoutStockTemplates();
+    void contextFreeResolutionUsesReviewedMaterialMask();
     void lavaUsesOnlyExplicitR123ReviewedMaskRoutes();
     void authoredMapTransitionsDoNotPopulateObsoleteMaskPool();
     void canonicalMasksMeetQuarterCoverageAndCornerContract();
@@ -547,6 +548,7 @@ private slots:
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void virtualTilePaintTargetsFourCellCorners();
     void mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly();
+    void mapResolutionDoesNotChooseAWinningSideForTiedBorders();
     void classicAutoStrokeRefusesMissingBlendAndRollsBackExactly();
     void overlayVirtualPaintAllowsSparseInactiveField();
     void collapsedUniformBaselineRecoversExactRotatedBlend();
@@ -1328,6 +1330,28 @@ void TerrainVirtualAtlasTests::canonicalMasksAreAvailableWithoutStockTemplates()
         signature(1, 2, 2, 2), 1, 0, &provenance);
     QVERIFY(!mask.isNull());
     QVERIFY(provenance.startsWith(QStringLiteral("canonical-generated:")));
+}
+
+void TerrainVirtualAtlasTests::contextFreeResolutionUsesReviewedMaterialMask()
+{
+    Fixture fixture;
+    QMap<qint32, ETerrainBlendStyle> styles;
+    styles.insert(1, ETerrainBlendStyle::Soil);
+    styles.insert(2, ETerrainBlendStyle::Grass);
+    CTestTerrainVirtualAtlas atlas(
+        fixture.catalog, fixture.images, 0x52455657u, {}, styles);
+    QVERIFY(atlas.isValid());
+
+    CValidationReport report;
+    const STerrainVirtualTile resolved = atlas.resolve(
+        signature(2, 1, 1, 1), 0, 0, &report);
+    QVERIFY2(resolved.generatedIndex >= 0, qPrintable(report.toText()));
+    const QString provenance = atlas.generatedTiles().at(
+        resolved.generatedIndex).blendProvenance;
+    QVERIFY2(provenance.contains(QStringLiteral("-approved")),
+             qPrintable(QStringLiteral(
+                 "Context-free production resolution used an unreviewed mathematical mask: %1")
+                 .arg(provenance)));
 }
 
 void TerrainVirtualAtlasTests::lavaUsesOnlyExplicitR123ReviewedMaskRoutes()
@@ -3934,6 +3958,60 @@ void TerrainVirtualAtlasTests::mapResolutionRepairsWrongPhysicalBlendAndUndoesEx
     QCOMPARE(model.packedTile(8,8,ETerrainTileLayer::Land),quint16(0));
     QVERIFY(model.apply(repair,false,&report));
     QCOMPARE(model.packedTile(8,8,ETerrainTileLayer::Land),quint16(1));
+}
+
+void TerrainVirtualAtlasTests::mapResolutionDoesNotChooseAWinningSideForTiedBorders()
+{
+    Fixture fixture;
+    STerrainTransitionVariant vertical;
+    vertical.signature = signature(1, 2, 2, 1);
+    vertical.packedTile = 4;
+    QVERIFY(fixture.catalog.addVariant(vertical));
+
+    QByteArray payload;
+    QDataStream sec(&payload, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(64, 1), 0));
+
+    STerrainTileCommand hardBorder;
+    for(int y = 0; y < 16; ++y)
+        for(int x = 8; x < 16; ++x)
+        {
+            STerrainTileDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.layer = ETerrainTileLayer::Land;
+            delta.before = 0;
+            delta.after = 1;
+            hardBorder.deltas.append(delta);
+        }
+    QVERIFY(model.apply(hardBorder, true, &report));
+    CTerrainVirtualMaterialField repairField;
+    QVERIFY(model.recoverUnambiguousVirtualMaterialField(
+        ETerrainTileLayer::Land, fixture.catalog, &repairField, &report));
+    const STerrainTileCommand repair = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x54494544u, &report,
+        false, &repairField, true);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY2(repair.isEmpty(),
+             "Map resolution arbitrarily moved a tied hard border to the lower material id");
+    for(int y = 0; y < 16; ++y)
+        for(int x = 0; x < 16; ++x)
+            QCOMPARE(model.packedTile(x, y, ETerrainTileLayer::Land),
+                     quint16(x < 8 ? 0 : 1));
 }
 
 void TerrainVirtualAtlasTests::classicAutoStrokeRefusesMissingBlendAndRollsBackExactly()

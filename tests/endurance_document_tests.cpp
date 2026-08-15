@@ -384,6 +384,7 @@ private slots:
     void vertexMaterialBrushPaintsCircleAndConstrainsCornerOnlyFamilies();
     void semanticVertexPaintNeverUsesUniformForBlendFallback();
     void classicAutoStrokeUsesAuthoredResolverAndRerollsExactVariants();
+    void classicAutoSafeTileSkipsUnsupportedCoreInsteadOfHardSeam();
     void manualPaintShowsCellFootprintAndLiftedTilePreview();
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
@@ -4318,6 +4319,57 @@ void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExac
     }
     QVERIFY2(partialApplied,
              "Safe Classic Auto discarded every valid part of a mixed-validity stroke");
+}
+
+void EnduranceDocumentTests::classicAutoSafeTileSkipsUnsupportedCoreInsteadOfHardSeam()
+{
+    CTerrainTransitionCatalog catalog;
+    STerrainTransitionSignature background;
+    background.northWest = background.northEast = 1;
+    background.southEast = background.southWest = 1;
+    STerrainTransitionVariant backgroundVariant;
+    backgroundVariant.signature = background;
+    backgroundVariant.packedTile = 0;
+    QVERIFY(catalog.addVariant(backgroundVariant));
+    STerrainTransitionSignature selected;
+    selected.northWest = selected.northEast = 2;
+    selected.southEast = selected.southWest = 2;
+    STerrainTransitionVariant selectedVariant;
+    selectedVariant.signature = selected;
+    selectedVariant.packedTile = 1;
+    QVERIFY(catalog.addVariant(selectedVariant));
+
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(16)),
+        "classic-auto-safe-tile.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+    QVector<quint16> before;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+            before.append(terrain.packedTile(x, y, ETerrainTileLayer::Land));
+
+    STerrainTileBrush brush;
+    brush.centerX = 8.0f;
+    brush.centerY = 8.0f;
+    brush.radius = 0.0f;
+    brush.shape = ETerrainTileBrushShape::Square;
+    CValidationReport report;
+    const STerrainTileCommand command = terrain.makeSemanticTilePaint(
+        brush, ETerrainTileLayer::Land, 2, catalog, 0x53414654u, &report,
+        ETerrainSemanticPaintPolicy::ExactExistingOnly);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY2(command.isEmpty(),
+             "Safe Tile painted a uniform core despite absent exact boundary blends");
+    QVERIFY(command.semanticAudit.paintedCoreCells.isEmpty());
+    QVERIFY(report.toText().contains(
+        QStringLiteral("terrain.semantic_tile_exact_only_skip")));
+    int offset = 0;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+            QCOMPARE(terrain.packedTile(x, y, ETerrainTileLayer::Land),
+                     before.at(offset++));
 }
 
 void EnduranceDocumentTests::manualPaintShowsCellFootprintAndLiftedTilePreview()

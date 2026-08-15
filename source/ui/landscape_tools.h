@@ -230,6 +230,7 @@ private:
     void rebuildMaterialPalette();
     void refreshAtlasCapacity(int activeSlots);
     void updatePaintIssueUi();
+    void updatePaintShapeUi();
     void clearPaintMaterialSelection();
     void applyPaintFilter();
     void refreshPaletteColumns(bool rebuild = true);

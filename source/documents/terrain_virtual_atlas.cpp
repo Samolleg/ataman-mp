@@ -1718,7 +1718,7 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
             {
                 bestCount = it.value();
                 best = it.key();
-        }
+            }
         active[index] = best;
     }
     // A legacy draft can contain unavailable edge cells. Those cells cast no
@@ -1839,6 +1839,65 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
         m_originalVirtualLandMaterials = active;
     else
         m_originalVirtualOverlayMaterials = active;
+    return true;
+}
+
+bool CTerrainEditModel::recoverUnambiguousVirtualMaterialField(
+    ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
+    CTerrainVirtualMaterialField* output, CValidationReport* report) const
+{
+    if(!output || !output->resize(tileCountX(), tileCountY()))
+        return false;
+    const int vertexWidth = tileCountX() + 1;
+    QVector<QSet<qint32>> observed(
+        vertexWidth * (tileCountY() + 1));
+    int undecodableCells = 0;
+    for(int y = 0; y < tileCountY(); ++y)
+        for(int x = 0; x < tileCountX(); ++x)
+        {
+            bool available = false;
+            bool decoded = false;
+            const quint16 packed = packedTile(x, y, layer, &available);
+            if(!available && layer == ETerrainTileLayer::Overlay)
+                continue;
+            const STerrainTransitionSignature signature = available
+                ? catalog.gridSignatureForPacked(packed, &decoded)
+                : STerrainTransitionSignature();
+            if(!decoded)
+            {
+                ++undecodableCells;
+                continue;
+            }
+            const qint32 values[4] = {signature.northWest,
+                signature.northEast, signature.southEast,
+                signature.southWest};
+            const int keys[4] = {y * vertexWidth + x,
+                y * vertexWidth + x + 1,
+                (y + 1) * vertexWidth + x + 1,
+                (y + 1) * vertexWidth + x};
+            for(int corner = 0; corner < 4; ++corner)
+                observed[keys[corner]].insert(values[corner]);
+        }
+
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    int ambiguousVertices = 0;
+    for(int y = 0; y <= tileCountY(); ++y)
+        for(int x = 0; x <= tileCountX(); ++x)
+        {
+            const QSet<qint32>& values = observed.at(y * vertexWidth + x);
+            if(values.size() == 1)
+                output->setMaterial(x, y, *values.constBegin());
+            else
+            {
+                output->setMaterial(x, y, unset);
+                ++ambiguousVertices;
+            }
+        }
+    if((ambiguousVertices > 0 || undecodableCells > 0) && report)
+        report->add("terrain.virtual_repair_ambiguous_vertices",
+            EValidationSeverity::Warning,
+            QStringLiteral("Preserved disputed terrain: %1 shared-corner vertex/vertices were not unanimous and %2 cell(s) could not be decoded")
+                .arg(ambiguousVertices).arg(undecodableCells));
     return true;
 }
 
@@ -2909,8 +2968,35 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
         canonicalSignature(signature, &rotation);
     const ETerrainBlendStyle style = blendStyleForSignature(
         canonical, preferredPaintMaterial);
-    const qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
+    qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
         canonical, style, preferredPaintMaterial);
+    if(reviewedStyleMaterial == 0 && preferredPaintMaterial == 0)
+    {
+        // Production repair/reopen paths have no active brush, but they must
+        // not ignore an already reviewed authored-derived mask and fall back
+        // to obsolete procedural geometry. Infer only a same-style owner that
+        // actually has this canonical topology approved; otherwise retain the
+        // explicit mathematical fallback so it remains auditable for review.
+        QMap<qint32, int> counts;
+        for(qint32 material : corners(canonical))
+            ++counts[material];
+        qint32 candidate = 0;
+        int candidateCount = std::numeric_limits<int>::max();
+        for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
+            if(m_materialBlendStyles.value(
+                   it.key(), ETerrainBlendStyle::Organic) == style
+               && (it.value() < candidateCount
+                   || (it.value() == candidateCount
+                       && (candidate == 0 || it.key() < candidate))))
+            {
+                candidate = it.key();
+                candidateCount = it.value();
+            }
+        if(counts.size() == 2 && candidate != 0
+           && !reviewedCanonicalVariations(
+               canonical, style, candidate).isEmpty())
+            reviewedStyleMaterial = candidate;
+    }
     int variation = 0;
     const QVector<int> reviewedVariations = reviewedCanonicalVariations(
         canonical, style, reviewedStyleMaterial);

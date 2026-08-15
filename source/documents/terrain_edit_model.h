@@ -470,7 +470,9 @@ public:
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed,
         CValidationReport* report = nullptr,
-        qint32 preferredSupportId = 0) const;
+        qint32 preferredSupportId = 0,
+        ETerrainSemanticPaintPolicy policy =
+            ETerrainSemanticPaintPolicy::AllowLocalHardEdges) const;
     STerrainTileCommand makeSemanticVertexStrokePaint(
         const QVector<QPoint>& requestedVertices,
         const QVector<QPoint>& anchorVertices,
@@ -503,7 +505,13 @@ public:
     STerrainTileCommand makeVirtualMapResolution(
         ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed, CValidationReport* report = nullptr,
-        bool randomizeUniformRotation = false) const;
+        bool randomizeUniformRotation = false,
+        const CTerrainVirtualMaterialField* repairField = nullptr,
+        bool allowPartialMaterialField = false) const;
+    bool recoverUnambiguousVirtualMaterialField(
+        ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
+        CTerrainVirtualMaterialField* output,
+        CValidationReport* report = nullptr) const;
     bool copyVirtualMaterialField(ETerrainTileLayer layer,
         CTerrainVirtualMaterialField* output,
         bool requireComplete = true) const;
