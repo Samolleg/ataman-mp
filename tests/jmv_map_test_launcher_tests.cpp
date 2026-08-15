@@ -224,6 +224,24 @@ struct RuntimeMemorySample
     quint64 mappedAddressBytes{0};
     quint64 imageAddressBytes{0};
     quint64 privateAddressBytes{0};
+
+    RuntimeMemorySample() = default;
+    RuntimeMemorySample(qint64 elapsed, const QString& samplePhase,
+                        quint64 workingSet, quint64 reportedPeak,
+                        quint64 privateWorking, quint64 pagefile,
+                        quint64 committed, quint64 reserved, quint64 free,
+                        quint64 largestFree, quint64 mapped, quint64 image,
+                        quint64 privateAddress)
+        : elapsedMs(elapsed), phase(samplePhase),
+          workingSetBytes(workingSet),
+          reportedPeakWorkingSetBytes(reportedPeak),
+          privateBytes(privateWorking), pagefileBytes(pagefile),
+          committedAddressBytes(committed), reservedAddressBytes(reserved),
+          freeAddressBytes(free), largestFreeRegionBytes(largestFree),
+          mappedAddressBytes(mapped), imageAddressBytes(image),
+          privateAddressBytes(privateAddress)
+    {
+    }
 };
 
 static bool sampleRuntimeMemory(qint64 processId, qint64 elapsedMs,
@@ -564,6 +582,87 @@ void JmvMapTestLauncherTests::rebasesRuntimeTerrainAtlasNamespace()
     if(sourceNamespace.compare(runtimeNamespace, Qt::CaseInsensitive) != 0)
         QVERIFY(reopenedRes.memberPayload(QStringLiteral("%1%2.mmp")
             .arg(sourceNamespace).arg(0, 3, 10, QLatin1Char('0'))).isEmpty());
+
+    // Test Current must select the MPR-declared contiguous identity from a
+    // general-purpose RES. Unrelated identities and stale higher pages are not
+    // part of this MPR and must neither block nor enter the rebased archive.
+    CResArchiveDocument archiveWithExtras;
+    QStringList extraErrors;
+    QVERIFY2(archiveWithExtras.loadBytes(sourceRes, "source-with-extras.res",
+                                         &extraErrors),
+             qPrintable(extraErrors.join('\n')));
+    QByteArray withStalePage;
+    const QString staleName = QStringLiteral("%1%2.mmp")
+        .arg(sourceNamespace).arg(pages, 3, 10, QLatin1Char('0'));
+    QVERIFY2(archiveWithExtras.buildWithAppendedMember(
+                 staleName, QByteArray("stale-higher-page"), 0,
+                 &withStalePage, &extraErrors),
+             qPrintable(extraErrors.join('\n')));
+    QVERIFY2(archiveWithExtras.loadBytes(withStalePage,
+                                         "source-with-stale-page.res",
+                                         &extraErrors),
+             qPrintable(extraErrors.join('\n')));
+    QByteArray withUnrelatedIdentity;
+    QVERIFY2(archiveWithExtras.buildWithAppendedMember(
+                 QStringLiteral("other000.mmp"), QByteArray("unrelated-page"), 0,
+                 &withUnrelatedIdentity, &extraErrors),
+             qPrintable(extraErrors.join('\n')));
+    QByteArray extraRebasedMpr;
+    QByteArray extraRebasedRes;
+    QStringList extraRebasedMembers;
+    QString extraRebaseError;
+    QVERIFY2(CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
+                 sourceMpr, withUnrelatedIdentity, QStringLiteral("ed12ef56"),
+                 pages, &extraRebasedMpr, &extraRebasedRes,
+                 &extraRebasedMembers, &extraRebaseError),
+             qPrintable(extraRebaseError));
+    QCOMPARE(extraRebasedMembers.size(), pages);
+    CResArchiveDocument extrasReopened;
+    QVERIFY2(extrasReopened.loadBytes(extraRebasedRes,
+                                      "rebased-with-extras.res", &extraErrors),
+             qPrintable(extraErrors.join('\n')));
+    QCOMPARE(extrasReopened.members().size(), pages);
+    QVERIFY(extrasReopened.memberPayload(staleName).isEmpty());
+    QVERIFY(extrasReopened.memberPayload(QStringLiteral("other000.mmp")).isEmpty());
+
+    // Optional read-only probe for a reported published pair. This runs the
+    // exact same namespace rebase used by Test Current without launching the
+    // editor or game and without copying or modifying the source files.
+    const QString externalMprPath = qEnvironmentVariable(
+        "ENDURANCE_PUBLISHED_MPR_FIXTURE");
+    const QString externalResPath = qEnvironmentVariable(
+        "ENDURANCE_PUBLISHED_TERRAIN_RES_FIXTURE");
+    if(!externalMprPath.isEmpty() || !externalResPath.isEmpty())
+    {
+        QVERIFY2(QFileInfo::exists(externalMprPath),
+                 qPrintable("Published MPR fixture is missing: " + externalMprPath));
+        QVERIFY2(QFileInfo::exists(externalResPath),
+                 qPrintable("Published terrain RES fixture is missing: " + externalResPath));
+        QFile externalMprFile(externalMprPath);
+        QFile externalResFile(externalResPath);
+        QVERIFY(externalMprFile.open(QIODevice::ReadOnly));
+        QVERIFY(externalResFile.open(QIODevice::ReadOnly));
+        const QByteArray externalMpr = externalMprFile.readAll();
+        const QByteArray externalRes = externalResFile.readAll();
+        CMprDocument externalDocument;
+        CValidationReport externalReport;
+        QVERIFY2(externalDocument.loadBytes(
+                     externalMpr, externalMprPath, &externalReport),
+                 qPrintable(externalReport.toText()));
+        QByteArray rebasedMpr;
+        QByteArray rebasedRes;
+        QStringList rebasedMembers;
+        QString externalError;
+        QVERIFY2(CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
+                     externalMpr, externalRes, QStringLiteral("ed137abc"),
+                     int(externalDocument.mapInfo().textureCount),
+                     &rebasedMpr, &rebasedRes, &rebasedMembers, &externalError),
+                 qPrintable(externalError));
+        QCOMPARE(rebasedMembers.size(),
+                 int(externalDocument.mapInfo().textureCount));
+        QVERIFY(!rebasedMpr.isEmpty());
+        QVERIFY(!rebasedRes.isEmpty());
+    }
 }
 
 void JmvMapTestLauncherTests::renderEvidenceRejectsTexturelessFrames()

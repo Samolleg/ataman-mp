@@ -2,7 +2,8 @@ QT += core testlib
 CONFIG += testcase c++11 console
 CONFIG -= app_bundle
 TEMPLATE = app
-win32:LIBS += user32.lib gdi32.lib psapi.lib
+win32-g++:LIBS += -luser32 -lgdi32 -lpsapi
+win32-msvc*:LIBS += user32.lib gdi32.lib psapi.lib
 
 INCLUDEPATH += ../source/documents ../source/resources ../source/runtime
 

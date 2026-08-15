@@ -91,6 +91,51 @@ inline QString terrainPublicationInitialResourcePath(
     return QDir(fallback).filePath(QStringLiteral("textures.res"));
 }
 
+struct STerrainPublicationResourceChoicePlan
+{
+    QString initialPath;
+    bool requiresExplicitChoice{true};
+};
+
+inline STerrainPublicationResourceChoicePlan terrainPublicationResourceChoicePlan(
+    const QStringList& configuredResourceRoots, const QString& mprPath,
+    const QString& activeArchivePath, bool saveOverCurrentMpr,
+    bool persistedModernDraft)
+{
+    STerrainPublicationResourceChoicePlan plan;
+    const QFileInfo activeArchive(activeArchivePath);
+    const bool canReuseActiveArchive = saveOverCurrentMpr
+        && !persistedModernDraft && activeArchive.isFile()
+        && activeArchive.suffix().compare(
+               QStringLiteral("res"), Qt::CaseInsensitive) == 0;
+    if(canReuseActiveArchive)
+        plan.initialPath = activeArchive.absoluteFilePath();
+    else
+        plan.initialPath = terrainPublicationInitialResourcePath(
+            configuredResourceRoots, mprPath);
+    return plan;
+}
+
+inline QString terrainMapTestResourcePath(
+    const QString& activeArchivePath, const QString& mprPath)
+{
+    const QFileInfo activeArchive(activeArchivePath);
+    if(activeArchive.isFile()
+       && activeArchive.suffix().compare(
+              QStringLiteral("res"), Qt::CaseInsensitive) == 0)
+        return activeArchive.absoluteFilePath();
+
+    const QFileInfo mpr(mprPath);
+    const QFileInfo adjacent(mpr.dir().filePath(
+        mpr.completeBaseName() + QStringLiteral("-atlas.res")));
+    if(adjacent.isFile())
+        return adjacent.absoluteFilePath();
+    const QFileInfo publishedTextures(
+        mpr.dir().filePath(QStringLiteral("textures.res")));
+    return publishedTextures.isFile()
+        ? publishedTextures.absoluteFilePath() : QString();
+}
+
 inline bool terrainPublicationPathInResourceRoots(
     const QString& resourcePath, const QStringList& configuredResourceRoots)
 {

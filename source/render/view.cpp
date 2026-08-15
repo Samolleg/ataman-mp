@@ -8611,7 +8611,6 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
 
-    QString texturesPath;
     QStringList resourceRoots;
     if(m_pSettings)
         if(COptStringList* configured = dynamic_cast<COptStringList*>(
@@ -8619,17 +8618,14 @@ void CView::finalizeVirtualTerrainAtlas()
             for(const QString& root : configured->value())
                 if(!root.trimmed().isEmpty())
                     resourceRoots.append(root);
-    const QFileInfo activeArchive(m_activeTerrainArchivePath);
-    if(activeArchive.exists()
-       && activeArchive.suffix().compare(
-              QStringLiteral("res"), Qt::CaseInsensitive) == 0)
-        texturesPath = activeArchive.absoluteFilePath();
-    if(texturesPath.isEmpty())
-        texturesPath = QFileDialog::getOpenFileName(
-            this, tr("Choose textures.res to update in place"),
-            terrainPublicationInitialResourcePath(
-                resourceRoots, mprDestination.absoluteFilePath()),
-            tr("Evil Islands resources (*.res)"));
+    const STerrainPublicationResourceChoicePlan resourceChoice =
+        terrainPublicationResourceChoicePlan(
+            resourceRoots, mprDestination.absoluteFilePath(),
+            m_activeTerrainArchivePath, saveOverCurrentMpr, persistedDraft);
+    const QString texturesPath = QFileDialog::getOpenFileName(
+        this, tr("Choose textures.res to update in place"),
+        resourceChoice.initialPath,
+        tr("Evil Islands resources (*.res)"));
     if(texturesPath.isEmpty())
         return;
 

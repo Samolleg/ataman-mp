@@ -575,6 +575,52 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QVERIFY(!terrainPublicationPathInResourceRoots(
         QDir(resources.path()).filePath("external/textures.res"),
         {missing, modRes}));
+
+    const QString publishedRes = QDir(modRes).filePath("published.res");
+    QFile publishedArchive(publishedRes);
+    QVERIFY(publishedArchive.open(QIODevice::WriteOnly));
+    QCOMPARE(publishedArchive.write("RES", 3), qint64(3));
+    publishedArchive.close();
+    const STerrainPublicationResourceChoicePlan normalSave =
+        terrainPublicationResourceChoicePlan(
+            {missing, modRes}, mprPath, publishedRes, true, false);
+    QCOMPARE(QDir::cleanPath(normalSave.initialPath),
+             QDir::cleanPath(publishedRes));
+    // Even an exactly bound published RES is only the chooser suggestion. A
+    // modern save must never mutate an archive without explicit confirmation.
+    QVERIFY(normalSave.requiresExplicitChoice);
+
+    const QString draftSidecar = QDir(resources.path()).filePath(
+        "maps/zone2 test-atlas.res");
+    const STerrainPublicationResourceChoicePlan draftSaveAs =
+        terrainPublicationResourceChoicePlan(
+            {missing, modRes}, mprPath, draftSidecar, false, true);
+    QVERIFY(draftSaveAs.requiresExplicitChoice);
+    QCOMPARE(QDir::cleanPath(draftSaveAs.initialPath),
+             QDir::cleanPath(QDir(modRes).filePath("textures.res")));
+
+    const QString maps = QDir(resources.path()).filePath("maps");
+    QVERIFY(QDir().mkpath(maps));
+    const QString mapTestMpr = QDir(maps).filePath("zone1.mpr");
+    const QString differentlyNamedSidecar = QDir(maps).filePath(
+        "zone1test2-atlas.res");
+    QFile sidecar(differentlyNamedSidecar);
+    QVERIFY(sidecar.open(QIODevice::WriteOnly));
+    QCOMPARE(sidecar.write("RES", 3), qint64(3));
+    sidecar.close();
+    // The editor has already hash-validated this exact active archive. Test
+    // Current must use that binding rather than guessing from the MPR basename.
+    QCOMPARE(QDir::cleanPath(terrainMapTestResourcePath(
+                 differentlyNamedSidecar, mapTestMpr)),
+             QDir::cleanPath(differentlyNamedSidecar));
+
+    const QString conventionalSidecar = QDir(maps).filePath("zone1-atlas.res");
+    QFile conventional(conventionalSidecar);
+    QVERIFY(conventional.open(QIODevice::WriteOnly));
+    QCOMPARE(conventional.write("RES", 3), qint64(3));
+    conventional.close();
+    QCOMPARE(QDir::cleanPath(terrainMapTestResourcePath(QString(), mapTestMpr)),
+             QDir::cleanPath(conventionalSidecar));
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()

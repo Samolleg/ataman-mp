@@ -126,6 +126,10 @@ public:
                                           QByteArray* terrainAtlasResource = nullptr,
                                           int* terrainAtlasPages = nullptr,
                                           int* terrainAtlasSlots = nullptr);
+    QString activeTerrainArchivePath() const
+    {
+        return m_activeTerrainArchivePath;
+    }
     bool buildGeneratedAiGraphCandidate(QByteArray* data,
                                         QString* error = nullptr);
     bool loadMob(QFileInfo& filePath);

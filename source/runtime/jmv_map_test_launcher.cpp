@@ -694,6 +694,29 @@ bool CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
         if(error) *error = "The runtime terrain-atlas rebase request is incomplete.";
         return false;
     }
+    CMprDocument namespaceSource;
+    CValidationReport namespaceReport;
+    if(!namespaceSource.loadBytes(sourceMpr,
+                                  QStringLiteral("runtime-atlas-source.mpr"),
+                                  &namespaceReport))
+    {
+        if(error) *error = "The run-owned MPR could not be decoded before rebasing:\n"
+            + namespaceReport.toText();
+        return false;
+    }
+    const QString sourceNamespace = namespaceSource.mapInfo().innerNamespace;
+    if(sourceNamespace.isEmpty()
+       || int(namespaceSource.mapInfo().textureCount) != expectedPages)
+    {
+        if(error) *error = QString(
+            "The run-owned MPR terrain-atlas contract differs: namespace=%1, "
+            "MPR pages=%2, expected pages=%3.")
+            .arg(sourceNamespace)
+            .arg(namespaceSource.mapInfo().textureCount)
+            .arg(expectedPages);
+        return false;
+    }
+
     QStringList archiveErrors;
     CResArchiveDocument sourceArchive;
     if(!sourceArchive.loadBytes(sourceAtlasRes,
@@ -704,24 +727,39 @@ bool CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
             + archiveErrors.join('\n');
         return false;
     }
+    // A published RES may legitimately contain unrelated atlas identities or
+    // stale higher pages left by an older, larger version of this identity.
+    // Stage only the contiguous page set named by the MPR's exact namespace
+    // and declared page count. Counting every MMP member caused Test Current
+    // to reject (or stage the wrong pages from) otherwise valid archives.
     QStringList sourceMembers;
-    for(const SResArchiveMember& member : sourceArchive.members())
-        if(member.name.endsWith(QStringLiteral(".mmp"), Qt::CaseInsensitive))
-            sourceMembers.append(member.name);
-    std::sort(sourceMembers.begin(), sourceMembers.end(),
-              [](const QString& left, const QString& right) {
-        return QString::compare(left, right, Qt::CaseInsensitive) < 0;
-    });
-    if(sourceMembers.size() != expectedPages)
+    sourceMembers.reserve(expectedPages);
+    for(int page = 0; page < expectedPages; ++page)
     {
-        if(error) *error = QString(
-            "The run-owned terrain atlas contains %1 MMP page(s), expected %2.")
-            .arg(sourceMembers.size()).arg(expectedPages);
-        return false;
+        const QString expectedName = QStringLiteral("%1%2.mmp")
+            .arg(sourceNamespace).arg(page, 3, 10, QLatin1Char('0'));
+        bool found = false;
+        for(const SResArchiveMember& member : sourceArchive.members())
+        {
+            if(member.name.compare(expectedName, Qt::CaseInsensitive) != 0)
+                continue;
+            if(found)
+            {
+                if(error) *error = "The run-owned terrain atlas contains duplicate page "
+                    + expectedName + ".";
+                return false;
+            }
+            sourceMembers.append(member.name);
+            found = true;
+        }
+        if(!found)
+        {
+            if(error) *error = "The run-owned terrain atlas is missing required page "
+                + expectedName + ".";
+            return false;
+        }
     }
 
-    CMprDocument namespaceSource;
-    CValidationReport namespaceReport;
     CMprEditTransaction namespaceTransaction(
         QStringLiteral("Rebase runtime terrain atlas namespace"));
     QByteArray runtimeMpr = sourceMpr;
