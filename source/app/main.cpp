@@ -1143,6 +1143,22 @@ int runHeadlessCommand(QApplication& app)
         landscapeTools.setClassicAutoMaterials(
             {darkGrass, freshGrass}, {}, {});
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QToolButton* classicDarkButton = nullptr;
+        QToolButton* classicFreshButton = nullptr;
+        if(classicMaterialLayerTabs)
+            for(QToolButton* button :
+                classicMaterialLayerTabs->findChildren<QToolButton*>())
+            {
+                const int id = button->property("terrainMaterialId").toInt();
+                if(id == 101) classicDarkButton = button;
+                if(id == 102) classicFreshButton = button;
+            }
+        const bool classicPaletteStartsInMultipleColumns =
+            classicDarkButton && classicFreshButton
+            && classicDarkButton->geometry().top()
+                == classicFreshButton->geometry().top()
+            && classicDarkButton->geometry().left()
+                != classicFreshButton->geometry().left();
         const int paletteBottom = materialPaletteTabs
             ? materialPaletteTabs->mapTo(
                   &landscapeTools, materialPaletteTabs->rect().bottomLeft()).y()
@@ -1153,7 +1169,29 @@ int runHeadlessCommand(QApplication& app)
             : -1;
         const bool classicPaletteFirstOpenDoesNotOverlapControls =
             materialPaletteTabs && terrainPaintRadius
-            && paletteBottom < radiusTop;
+            && paletteBottom < radiusTop
+            && classicPaletteStartsInMultipleColumns;
+        QToolButton* circlePaintShape =
+            landscapeTools.findChild<QToolButton*>("circlePaintShape");
+        QToolButton* squarePaintShape =
+            landscapeTools.findChild<QToolButton*>("squarePaintShape");
+        QToolButton* tilePaintTarget =
+            landscapeTools.findChild<QToolButton*>("tilePaintTarget");
+        QToolButton* vertexPaintTarget =
+            landscapeTools.findChild<QToolButton*>("vertexPaintTarget");
+        QCheckBox* classicAutoSafe =
+            landscapeTools.findChild<QCheckBox*>("classicAutoSafeMode");
+        QPushButton* resolveMissingBlends =
+            landscapeTools.findChild<QPushButton*>("resolveMissingBlendsButton");
+        if(tilePaintTarget) tilePaintTarget->setChecked(true);
+        if(classicAutoSafe) classicAutoSafe->setChecked(true);
+        const bool terrainPaintBetaControlsAreExplicit = circlePaintShape
+            && squarePaintShape && tilePaintTarget && vertexPaintTarget
+            && classicAutoSafe && resolveMissingBlends
+            && circlePaintShape->styleSheet().contains(
+                QStringLiteral("QToolButton:checked"))
+            && tilePaintTarget->isChecked()
+            && classicAutoSafe->isChecked();
         if(materialPaletteTabs)
             materialPaletteTabs->setCurrentIndex(0);
         QVector<QImage> manualTiles(2, QImage(16, 16,
@@ -1526,6 +1564,7 @@ int runHeadlessCommand(QApplication& app)
             && landscapeToolsAreCompactAndPaletteFillsHeight
             && threeTerrainPaintModesAvailable
             && classicPaletteFirstOpenDoesNotOverlapControls
+            && terrainPaintBetaControlsAreExplicit
             && sharedTerrainPaintFilterWorks
             && manualAtlasGridUsesTooltips
             && defaultAtlasSourceVisible
@@ -1627,6 +1666,8 @@ int runHeadlessCommand(QApplication& app)
                << threeTerrainPaintModesAvailable
                << " classicPaletteFirstOpenDoesNotOverlapControls="
                << classicPaletteFirstOpenDoesNotOverlapControls
+               << " terrainPaintBetaControlsAreExplicit="
+               << terrainPaintBetaControlsAreExplicit
                << " classicPaletteBottom=" << paletteBottom
                << " terrainPaintRadiusTop=" << radiusTop
                << " sharedTerrainPaintFilterWorks="

@@ -4239,6 +4239,9 @@ void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExac
     uniformOnly.signature = selected;
     uniformOnly.packedTile = 1;
     QVERIFY(missingBlend.addVariant(uniformOnly));
+    STerrainTransitionVariant alternateUniform = uniformOnly;
+    alternateUniform.packedTile = 2;
+    QVERIFY(missingBlend.addVariant(alternateUniform));
     CTerrainEditModel fallbackTerrain;
     QVERIFY(fallbackTerrain.load(document));
     CValidationReport fallbackReport;
@@ -4252,6 +4255,68 @@ void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExac
         QStringLiteral("terrain.semantic_stroke_hard_edge")));
     QCOMPARE(fallback.semanticAudit.solverMode,
              QStringLiteral("vertex-stroke-local-hard-edge"));
+
+    CTerrainEditModel safeTerrain;
+    QVERIFY(safeTerrain.load(document));
+    CValidationReport safeReport;
+    const STerrainTileCommand safe = safeTerrain.makeSemanticVertexStrokePaint(
+        requested, requested, ETerrainTileLayer::Land, 2, missingBlend,
+        0x53414645u, &safeReport,
+        ETerrainSemanticPaintPolicy::ExactExistingOnly);
+    QVERIFY2(!safeReport.hasErrors(), qPrintable(safeReport.toText()));
+    QVERIFY(safe.isEmpty());
+    QVERIFY(safeReport.toText().contains(
+        QStringLiteral("terrain.semantic_stroke_exact_only_skip")));
+
+    // Safe mode is partial rather than atomic: a distant unsupported edge
+    // must not discard an independent exact same-material reroll elsewhere in
+    // the same stroke. It also must never fill the unsupported edge with the
+    // selected uniform artwork.
+    CTerrainEditModel partialTerrain;
+    QVERIFY(partialTerrain.load(document));
+    STerrainTileCommand selectedIsland;
+    for(const QPoint& cell : {QPoint(7, 7), QPoint(8, 7),
+                              QPoint(7, 8), QPoint(8, 8)})
+    {
+        STerrainTileDelta delta;
+        delta.globalX = cell.x();
+        delta.globalY = cell.y();
+        delta.layer = ETerrainTileLayer::Land;
+        delta.before = partialTerrain.packedTile(
+            cell.x(), cell.y(), ETerrainTileLayer::Land);
+        delta.after = 1;
+        selectedIsland.deltas.append(delta);
+    }
+    QVERIFY(partialTerrain.apply(selectedIsland, true));
+    const QVector<QPoint> partialRequest({QPoint(8, 8), QPoint(12, 12)});
+    bool partialApplied = false;
+    for(quint32 seed = 1; seed < 128 && !partialApplied; ++seed)
+    {
+        CValidationReport partialReport;
+        const STerrainTileCommand partial =
+            partialTerrain.makeSemanticVertexStrokePaint(
+                partialRequest, partialRequest, ETerrainTileLayer::Land, 2,
+                missingBlend, seed, &partialReport,
+                ETerrainSemanticPaintPolicy::ExactExistingOnly);
+        QVERIFY2(!partialReport.hasErrors(), qPrintable(partialReport.toText()));
+        QVERIFY(partialReport.toText().contains(
+            QStringLiteral("terrain.semantic_stroke_exact_only_skip")));
+        if(partial.isEmpty())
+            continue;
+        partialApplied = true;
+        for(const STerrainTileDelta& delta : partial.deltas)
+        {
+            QVERIFY(delta.globalX >= 7 && delta.globalX <= 8);
+            QVERIFY(delta.globalY >= 7 && delta.globalY <= 8);
+            bool decoded = false;
+            const STerrainTransitionSignature actual =
+                missingBlend.gridSignatureForPacked(delta.after, &decoded);
+            QVERIFY(decoded);
+            QCOMPARE(actual, selected);
+        }
+    }
+    QVERIFY2(partialApplied,
+             "Safe Classic Auto discarded every valid part of a mixed-validity stroke");
 }
 
 void EnduranceDocumentTests::manualPaintShowsCellFootprintAndLiftedTilePreview()

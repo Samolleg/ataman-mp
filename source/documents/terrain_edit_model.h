@@ -41,6 +41,12 @@ enum class ETerrainMaterialFieldRecovery
     RecoverDeterministically
 };
 
+enum class ETerrainSemanticPaintPolicy
+{
+    AllowLocalHardEdges,
+    ExactExistingOnly
+};
+
 enum class ETerrainTileBrushShape
 {
     Circle,
@@ -455,7 +461,9 @@ public:
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        ETerrainSemanticPaintPolicy policy =
+            ETerrainSemanticPaintPolicy::AllowLocalHardEdges) const;
     STerrainTileCommand makeSemanticVertexPaint(
         int selectedCellX, int selectedCellY,
         const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
@@ -469,7 +477,9 @@ public:
         ETerrainTileLayer layer, qint32 materialId,
         const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        ETerrainSemanticPaintPolicy policy =
+            ETerrainSemanticPaintPolicy::AllowLocalHardEdges) const;
     // Modern flow: material identity is committed to an independent vertex
     // field. Drag preview is deliberately uniform; release prefers authored
     // exact tiles. The caller must realize absent tuples in the live working
@@ -480,10 +490,19 @@ public:
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed, CValidationReport* report = nullptr,
         bool randomizeUniformRotation = false);
+    STerrainTileCommand makeVirtualTileMaterialPaint(
+        const STerrainTileBrush& tileBrush, ETerrainTileLayer layer,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed, CValidationReport* report = nullptr,
+        bool randomizeUniformRotation = false);
     STerrainTileCommand makeVirtualStrokeResolution(
         const STerrainTileCommand& stroke,
         const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
         CValidationReport* report = nullptr,
+        bool randomizeUniformRotation = false) const;
+    STerrainTileCommand makeVirtualMapResolution(
+        ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed, CValidationReport* report = nullptr,
         bool randomizeUniformRotation = false) const;
     bool copyVirtualMaterialField(ETerrainTileLayer layer,
         CTerrainVirtualMaterialField* output,
@@ -494,6 +513,8 @@ public:
         ETerrainMaterialFieldRecovery recovery =
             ETerrainMaterialFieldRecovery::RequireExactTopology);
     bool virtualMaterialFieldActive(ETerrainTileLayer layer) const;
+    qint32 virtualMaterialAt(ETerrainTileLayer layer, int vertexX,
+                             int vertexY, bool* found = nullptr) const;
     bool virtualMaterialCellChanged(
         ETerrainTileLayer layer, int cellX, int cellY) const;
     STerrainTileCommand makeSemanticCornerMaterialPaint(
@@ -543,7 +564,15 @@ private:
     STerrainTileCommand makeBoundedSemanticTilePaint(
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
-        quint32 distributionSeed, CValidationReport* report) const;
+        quint32 distributionSeed, CValidationReport* report,
+        ETerrainSemanticPaintPolicy policy) const;
+    STerrainTileCommand makeVirtualMaterialPaintVertices(
+        int selectedCellX, int selectedCellY,
+        const QVector<QPoint>& requestedVertices,
+        const STerrainTileBrush& auditBrush, ETerrainTileLayer layer,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed, CValidationReport* report,
+        bool randomizeUniformRotation);
 
     int m_sectorCountX{0};
     int m_sectorCountY{0};

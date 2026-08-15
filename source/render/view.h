@@ -262,6 +262,7 @@ public:
     void addTileRotation(int step);
     void adjustTerrainPaintSize(int steps);
     void adjustTerrainPaintMaterial(int steps);
+    void selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode);
     bool manualTilePaintingEnabled() const;
     float terrainPaintStampSpacing() const;
     bool terrainBrushProjectsToLand() const;
@@ -361,6 +362,7 @@ private:
     void refreshClassicAutoPalette();
     void refreshManualAtlasPalette();
     void refreshTerrainFamilyUsage();
+    void resolveMissingTerrainBlends();
     QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
     QMap<int, quint64> workingTerrainAtlasUsage() const;
     bool terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const;

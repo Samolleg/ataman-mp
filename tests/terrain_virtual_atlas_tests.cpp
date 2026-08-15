@@ -545,6 +545,8 @@ private slots:
     void workingPreviewPackageDoesNotSerializePhysicalPagePadding();
     void workingPreviewPackageStagesSeveralGeneratedPages();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
+    void virtualTilePaintTargetsFourCellCorners();
+    void mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly();
     void classicAutoStrokeRefusesMissingBlendAndRollsBackExactly();
     void overlayVirtualPaintAllowsSparseInactiveField();
     void collapsedUniformBaselineRecoversExactRotatedBlend();
@@ -3867,6 +3869,71 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     CTerrainVirtualMaterialField undone;
     QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
     QCOMPARE(undone.material(8,8),qint32(1));
+}
+
+void TerrainVirtualAtlasTests::virtualTilePaintTargetsFourCellCorners()
+{
+    Fixture fixture;
+    QByteArray payload;
+    QDataStream sec(&payload,QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec<<quint32(0xCF4BF774)<<quint8(0);
+    payload.append(QByteArray(33*33*8,'\0'));
+    payload.append(QByteArray(16*16*2,'\0'));
+    STerrainSectorSource source;
+    source.memberName="CaveSet000000.SEC";source.sectorX=0;source.sectorY=0;
+    source.type=0;source.payload=payload;source.landTileOffset=5+33*33*8;
+    CTerrainEditModel model;CValidationReport report;
+    QVERIFY(model.loadSources(1,1,100.0f,{source},&report,1,
+                              QVector<qint32>(64,1),0));
+    STerrainTileBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=0;
+    const STerrainTileCommand command=model.makeVirtualTileMaterialPaint(
+        brush,ETerrainTileLayer::Land,2,fixture.catalog,0x54494c45u,&report);
+    QVERIFY2(!command.isEmpty(),qPrintable(report.toText()));
+    QCOMPARE(command.virtualVertices.size(),4);
+    QSet<QPair<int,int>> points;
+    for(const auto& delta:command.virtualVertices)
+        points.insert(qMakePair(delta.globalX,delta.globalY));
+    QSet<QPair<int,int>> expected;
+    expected << qMakePair(8,8) << qMakePair(9,8)
+             << qMakePair(9,9) << qMakePair(8,9);
+    QCOMPARE(points,expected);
+}
+
+void TerrainVirtualAtlasTests::mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly()
+{
+    Fixture fixture;
+    QByteArray payload;
+    QDataStream sec(&payload,QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec<<quint32(0xCF4BF774)<<quint8(0);
+    payload.append(QByteArray(33*33*8,'\0'));
+    payload.append(QByteArray(16*16*2,'\0'));
+    STerrainSectorSource source;
+    source.memberName="CaveSet000000.SEC";source.sectorX=0;source.sectorY=0;
+    source.type=0;source.payload=payload;source.landTileOffset=5+33*33*8;
+    CTerrainEditModel model;CValidationReport report;
+    QVERIFY(model.loadSources(1,1,100.0f,{source},&report,1,
+                              QVector<qint32>(64,1),0));
+    QVERIFY(model.initializeVirtualMaterialField(ETerrainTileLayer::Land,
+        fixture.catalog,&report,ETerrainMaterialFieldRecovery::RecoverDeterministically));
+    STerrainTileCommand damage;
+    STerrainTileDelta wrong;wrong.globalX=8;wrong.globalY=8;
+    wrong.layer=ETerrainTileLayer::Land;wrong.before=0;wrong.after=1;
+    damage.deltas.append(wrong);
+    QVERIFY(model.apply(damage,true,&report));
+    const STerrainTileCommand repair=model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land,fixture.catalog,0x4d415000u,&report,false);
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+    QCOMPARE(repair.deltas.size(),1);
+    QCOMPARE(repair.deltas.front().globalX,8);
+    QCOMPARE(repair.deltas.front().globalY,8);
+    QCOMPARE(repair.deltas.front().before,quint16(1));
+    QCOMPARE(repair.deltas.front().after,quint16(0));
+    QVERIFY(model.apply(repair,true,&report));
+    QCOMPARE(model.packedTile(8,8,ETerrainTileLayer::Land),quint16(0));
+    QVERIFY(model.apply(repair,false,&report));
+    QCOMPARE(model.packedTile(8,8,ETerrainTileLayer::Land),quint16(1));
 }
 
 void TerrainVirtualAtlasTests::classicAutoStrokeRefusesMissingBlendAndRollsBackExactly()

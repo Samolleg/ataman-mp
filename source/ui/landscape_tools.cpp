@@ -107,6 +107,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintRadiusValue(new QLabel(this))
     , m_circlePaintShape(new QToolButton(this))
     , m_squarePaintShape(new QToolButton(this))
+    , m_tilePaintTarget(new QToolButton(this))
+    , m_vertexPaintTarget(new QToolButton(this))
+    , m_classicAutoSafe(new QCheckBox(
+          tr("Safe: exact authored blends only"), this))
     , m_randomizeUniformRotation(new QCheckBox(
           tr("Vary uniform texture rotation across strokes"), this))
     , m_paintIssueCategory(new QComboBox(this))
@@ -188,13 +192,17 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "Left-drag sculpts. Alt+Wheel changes radius; Shift+Wheel changes strength; Wheel keeps camera zoom. Each drag is one undo step."), this);
     help->setWordWrap(true);
     form->addRow(help);
+    form->addRow(tr("Heightmap import"), m_flipVertical);
+    QPushButton* importButton = new QPushButton(
+        tr("Import grayscale heightmap..."), m_sculptControls);
+    form->addRow(importButton);
 
     QVBoxLayout* paintLayout = new QVBoxLayout(m_paintControls);
     paintLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* paintHelp = new QLabel(tr(
-        "Modern and Classic Auto brushes paint terrain vertices and resolve the surrounding atlas tiles together. Size 1 paints the nearest vertex (up to four tiles); larger circles and squares select more vertices. "
-        "Modern reuses exact authored junctions and adds a generated exact blend only when one is missing. Classic Auto never changes the atlas: it preserves authored blends first and uses the selected uniform tile only for boundary cells the current atlas cannot blend exactly. "
-        "Manual paints one selected physical atlas tile and rotation directly, without semantic blending. Right-click samples from the map. "
+        "Z / X / C switches Modern / Classic Auto / Manual. Tile targeting paints complete cells; Vertex targeting edits shared corners. "
+        "Modern reuses exact authored junctions and adds a generated exact blend only when one is missing. Classic Auto never changes the atlas: Safe mode applies every available exact connection and leaves only unsupported boundaries untouched. "
+        "Manual paints one selected physical atlas tile and rotation directly, without semantic blending. Hold right-click and move to sample the nearest material vertex, or the physical tile in Manual. "
         "Alt+Wheel changes brush size. Shift+Wheel selects the automatic material or rotates the manual tile; Wheel keeps camera zoom. "
         "Overlay surface mode adds/removes coverage. Its Terrain material selects the atlas texture; its Surface material independently controls tint, opacity, illumination, waves, and texture warp. "
         "Overlay painting only changes the atlas texture on cells that already exist."), this);
@@ -292,11 +300,19 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     classicModeLayout->setContentsMargins(0, 0, 0, 0);
     QLabel* classicHelp = new QLabel(tr(
         "Uses only tiles already present in this atlas. Exact authored blends "
-        "win; unresolved boundary cells use the selected uniform tile without "
-        "expanding the atlas."),
+        "win. Safe mode keeps every valid connection and leaves unsupported "
+        "boundary cells untouched instead of forcing a uniform tile."),
         m_classicModePage);
     classicHelp->setWordWrap(true);
     classicModeLayout->addWidget(classicHelp);
+    m_classicAutoSafe->setObjectName(QStringLiteral("classicAutoSafeMode"));
+    m_classicAutoSafe->setChecked(settings.value(
+        QStringLiteral("ui/landscape/classicAutoSafe"), true).toBool());
+    m_classicAutoSafe->setToolTip(tr(
+        "Apply every exact authored connection that is available and leave "
+        "unsupported boundary cells untouched. Disable this only when a local "
+        "uniform hard edge is preferable to an unchanged gap."));
+    classicModeLayout->addWidget(m_classicAutoSafe);
     classicModeLayout->addWidget(m_classicMaterialTabs);
     QVBoxLayout* manualModeLayout = new QVBoxLayout(m_manualModePage);
     manualModeLayout->setContentsMargins(0, 0, 0, 0);
@@ -352,10 +368,35 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_squarePaintShape->setFixedSize(38, 38);
     m_squarePaintShape->setToolTip(tr("Square brush"));
     m_squarePaintShape->setCheckable(true);
+    const QString strongChoiceStyle = QStringLiteral(
+        "QToolButton { border: 2px solid palette(mid); padding: 2px; }"
+        "QToolButton:hover { border-color: #ffd34e; }"
+        "QToolButton:checked { border: 4px solid #ffd22e; "
+        "background: #6b4c00; padding: 0px; }");
+    m_circlePaintShape->setObjectName(QStringLiteral("circlePaintShape"));
+    m_squarePaintShape->setObjectName(QStringLiteral("squarePaintShape"));
+    m_circlePaintShape->setStyleSheet(strongChoiceStyle);
+    m_squarePaintShape->setStyleSheet(strongChoiceStyle);
     QButtonGroup* shapeButtons = new QButtonGroup(this);
     shapeButtons->setExclusive(true);
     shapeButtons->addButton(m_circlePaintShape);
     shapeButtons->addButton(m_squarePaintShape);
+    m_tilePaintTarget->setText(tr("Tile"));
+    m_vertexPaintTarget->setText(tr("Vertex"));
+    m_tilePaintTarget->setObjectName(QStringLiteral("tilePaintTarget"));
+    m_vertexPaintTarget->setObjectName(QStringLiteral("vertexPaintTarget"));
+    m_tilePaintTarget->setCheckable(true);
+    m_vertexPaintTarget->setCheckable(true);
+    m_tilePaintTarget->setStyleSheet(strongChoiceStyle);
+    m_vertexPaintTarget->setStyleSheet(strongChoiceStyle);
+    QButtonGroup* targetButtons = new QButtonGroup(this);
+    targetButtons->setExclusive(true);
+    targetButtons->addButton(m_tilePaintTarget);
+    targetButtons->addButton(m_vertexPaintTarget);
+    const int savedTarget = qBound(0, settings.value(
+        QStringLiteral("ui/landscape/paintTargetMode"), 0).toInt(), 1);
+    m_tilePaintTarget->setChecked(savedTarget == 0);
+    m_vertexPaintTarget->setChecked(savedTarget == 1);
     m_overlaySurfaceOperation->addItem(tr("Add surface"));
     m_overlaySurfaceOperation->addItem(tr("Remove surface"));
     m_overlayMaterial->setToolTip(tr(
@@ -373,14 +414,27 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     shapeRow->addStretch(1);
     QWidget* shapeWidget = new QWidget(this);
     shapeWidget->setLayout(shapeRow);
-    paintForm->addRow(tr("Brush size (vertices)"), sizeWidget);
+    QHBoxLayout* targetRow = new QHBoxLayout;
+    targetRow->addWidget(m_tilePaintTarget);
+    targetRow->addWidget(m_vertexPaintTarget);
+    targetRow->addStretch(1);
+    QWidget* targetWidget = new QWidget(this);
+    targetWidget->setLayout(targetRow);
+    paintForm->addRow(tr("Brush size (tiles / vertices)"), sizeWidget);
     paintForm->addRow(tr("Brush shape"), shapeWidget);
+    paintForm->addRow(tr("Paint target"), targetWidget);
     paintForm->addRow(m_randomizeUniformRotation);
     paintForm->addRow(m_overlaySurfaceOperationLabel, m_overlaySurfaceOperation);
     paintForm->addRow(m_overlayMaterialLabel, m_overlayMaterial);
     paintLayout->addLayout(paintForm);
-    QPushButton* tilePicker = new QPushButton(tr("Inspect atlas / choose tile..."), this);
-    paintLayout->addWidget(tilePicker);
+    QPushButton* resolveMissing = new QPushButton(
+        tr("Resolve missing blends..."), this);
+    resolveMissing->setObjectName(QStringLiteral("resolveMissingBlendsButton"));
+    resolveMissing->setToolTip(tr(
+        "Scan the complete map and rebuild missing or inconsistent physical "
+        "blend tiles from its shared-corner material field. The map repair is "
+        "committed as one undo step."));
+    paintLayout->addWidget(resolveMissing);
     QPushButton* reviewAtlas = new QPushButton(tr("Material atlas..."), this);
     reviewAtlas->setObjectName("materialAtlasButton");
     reviewAtlas->setToolTip(tr(
@@ -432,17 +486,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintLayout->addWidget(exportDiagnostic);
     paintLayout->addLayout(issueRow);
     paintLayout->addWidget(saveDraft);
-    // The material palette is the primary authoring surface. Give it all
-    // remaining vertical space instead of leaving an empty stretch below the
-    // fixed heightmap controls.
+    // The material palette is the primary authoring surface.
     layout->addWidget(m_paintControls, 1);
-    layout->addSpacing(8);
-    layout->addWidget(new QLabel(tr("Heightmap import"), this));
-    layout->addWidget(m_flipVertical);
-    QPushButton* importButton = new QPushButton(tr("Import grayscale heightmap..."), this);
-    layout->addWidget(importButton);
     connect(importButton, &QPushButton::clicked, this, &CLandscapeTools::importHeightmapRequested);
-    connect(tilePicker, &QPushButton::clicked, this, &CLandscapeTools::tilePickerRequested);
+    connect(resolveMissing, &QPushButton::clicked,
+            this, &CLandscapeTools::resolveMissingBlendsRequested);
     connect(reviewAtlas, &QPushButton::clicked, this, &CLandscapeTools::atlasProfileReviewRequested);
     connect(exportDiagnostic, &QPushButton::clicked, this, &CLandscapeTools::exportPaintDiagnosticRequested);
     connect(m_markPaintIssue, &QToolButton::toggled, this, [this](bool enabled) {
@@ -522,6 +570,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         emit paintTerrainTypeChanged(selected ? material : -1);
         emit editingStateChanged();
         applyPaintFilter();
+        QTimer::singleShot(0, this, [this]() { refreshPaletteColumns(); });
     });
     m_paintModeTabs->setCurrentIndex(qBound(0,
         settings.value(QStringLiteral("ui/landscape/paintPaletteMode"), 0)
@@ -545,6 +594,22 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             [this](bool) { emit editingStateChanged(); });
     connect(m_squarePaintShape, &QToolButton::toggled, this,
             [this](bool) { emit editingStateChanged(); });
+    const auto targetChanged = [this](bool checked) {
+        if(!checked)
+            return;
+        QSettings().setValue(QStringLiteral("ui/landscape/paintTargetMode"),
+                             int(paintTargetMode()));
+        applyPaintFilter();
+        emit editingStateChanged();
+    };
+    connect(m_tilePaintTarget, &QToolButton::toggled, this, targetChanged);
+    connect(m_vertexPaintTarget, &QToolButton::toggled, this, targetChanged);
+    connect(m_classicAutoSafe, &QCheckBox::toggled, this, [this](bool enabled) {
+        QSettings().setValue(QStringLiteral("ui/landscape/classicAutoSafe"),
+                             enabled);
+        refreshPaintTerrainTypes();
+        emit editingStateChanged();
+    });
     connect(m_overlaySurfaceOperation, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int)
     {
@@ -759,6 +824,21 @@ ETerrainPaintPaletteMode CLandscapeTools::paintPaletteMode() const
     return static_cast<ETerrainPaintPaletteMode>(
         qBound(0, m_paintModeTabs ? m_paintModeTabs->currentIndex() : 0, 2));
 }
+void CLandscapeTools::setPaintPaletteMode(ETerrainPaintPaletteMode mode)
+{
+    if(!m_paintModeTabs)
+        return;
+    m_paintModeTabs->setCurrentIndex(qBound(0, int(mode), 2));
+}
+ETerrainPaintTargetMode CLandscapeTools::paintTargetMode() const
+{
+    return m_vertexPaintTarget && m_vertexPaintTarget->isChecked()
+        ? ETerrainPaintTargetMode::Vertex : ETerrainPaintTargetMode::Tile;
+}
+bool CLandscapeTools::classicAutoSafeMode() const
+{
+    return m_classicAutoSafe && m_classicAutoSafe->isChecked();
+}
 bool CLandscapeTools::randomizeUniformRotation() const
 {
     return m_randomizeUniformRotation->isChecked();
@@ -901,6 +981,8 @@ void CLandscapeTools::updatePaintIssueUi()
     if(m_paintRadius) m_paintRadius->setEnabled(!marking);
     if(m_circlePaintShape) m_circlePaintShape->setEnabled(!marking);
     if(m_squarePaintShape) m_squarePaintShape->setEnabled(!marking);
+    if(m_tilePaintTarget) m_tilePaintTarget->setEnabled(!marking);
+    if(m_vertexPaintTarget) m_vertexPaintTarget->setEnabled(!marking);
     if(m_paintModeTabs) m_paintModeTabs->setEnabled(!marking);
 }
 void CLandscapeTools::setPaintTerrainTypes(
@@ -988,6 +1070,7 @@ void CLandscapeTools::setClassicAutoMaterials(
     m_classicLandPaintTypes = uniqueIdentities(landTypes);
     m_classicUnderwaterPaintTypes = uniqueIdentities(underwaterTypes);
     m_classicOverlayPaintTypes = uniqueIdentities(overlayTypes);
+    refreshPaletteColumns(false);
     rebuildMaterialPalette();
     refreshPaintTerrainTypes();
 }
@@ -1031,20 +1114,27 @@ void CLandscapeTools::applyPaintFilter()
 {
     const QString filter = m_paintFilter
         ? m_paintFilter->text().trimmed() : QString();
-    const auto filterGroup = [&filter](QButtonGroup* group) {
+    const bool hideClassicStamps = paintPaletteMode()
+        == ETerrainPaintPaletteMode::ClassicAuto
+        && paintTargetMode() == ETerrainPaintTargetMode::Tile;
+    const auto filterGroup = [&filter, hideClassicStamps](
+        QButtonGroup* group, bool classic) {
         if(!group)
             return;
         for(QAbstractButton* button : group->buttons())
         {
             const QString searchable = button->property(
                 "terrainFilterText").toString();
-            button->setVisible(terrainFilterMatches(searchable, filter));
+            const bool stampOnly = button->property(
+                "terrainCornerOnly").toBool();
+            button->setVisible(terrainFilterMatches(searchable, filter)
+                && !(classic && hideClassicStamps && stampOnly));
         }
     };
-    filterGroup(m_groundMaterialButtons);
-    filterGroup(m_overlayMaterialButtons);
-    filterGroup(m_classicGroundMaterialButtons);
-    filterGroup(m_classicOverlayMaterialButtons);
+    filterGroup(m_groundMaterialButtons, false);
+    filterGroup(m_overlayMaterialButtons, false);
+    filterGroup(m_classicGroundMaterialButtons, true);
+    filterGroup(m_classicOverlayMaterialButtons, true);
     if(m_manualTileList)
         for(int row = 0; row < m_manualTileList->count(); ++row)
         {
@@ -1111,6 +1201,7 @@ void CLandscapeTools::rebuildMaterialPalette()
               button->setProperty("terrainMaterialId", choice.id);
               button->setProperty("terrainSupportMaterialId", choice.supportId);
               button->setProperty("terrainContextualStamp", choice.contextualStamp);
+              button->setProperty("terrainCornerOnly", choice.cornerOnly);
               button->setProperty("terrainFilterText",
                   QStringLiteral("%1 %2").arg(choice.name,
                                                choice.familyName));
@@ -1125,7 +1216,7 @@ void CLandscapeTools::rebuildMaterialPalette()
                   .arg(choice.name).arg(choice.assignedSlots)
                   .arg(used ? tr("Currently used on this map.")
                             : (classicAuto
-                                ? tr("Unused on this map; Classic Auto preserves available authored blends and uses a local uniform hard edge where a boundary blend is absent.")
+                                ? tr("Unused on this map; Classic Auto preserves available authored blends. Safe mode leaves a boundary unchanged when its exact blend is absent.")
                                 : tr("Unused on this map; Modern painting adds this material and generates exact blends as needed."))));
               if(!choice.thumbnail.isNull())
               {
@@ -1204,15 +1295,33 @@ void CLandscapeTools::resizeEvent(QResizeEvent* event)
     // event queue once the viewport has its final width.
     QTimer::singleShot(0, this, [this]() {
         m_paletteRelayoutPending = false;
-        const int viewportWidth = m_groundMaterialScroll
-            ? m_groundMaterialScroll->viewport()->width() : width();
-        const int columns = qMax(1, (viewportWidth - 12) / 70);
-        if(columns != m_paletteColumns)
-        {
-            m_paletteColumns = columns;
-            rebuildMaterialPalette();
-        }
+        refreshPaletteColumns();
     });
+}
+
+void CLandscapeTools::refreshPaletteColumns(bool rebuild)
+{
+    QScrollArea* activeScroll = nullptr;
+    const bool overlay = editMode() == ELandscapeEditMode::OverlayPaint
+        || editMode() == ELandscapeEditMode::OverlaySurface;
+    if(paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto)
+        activeScroll = overlay ? m_classicOverlayMaterialScroll
+                               : m_classicGroundMaterialScroll;
+    else if(paintPaletteMode() == ETerrainPaintPaletteMode::Modern)
+        activeScroll = overlay ? m_overlayMaterialScroll
+                               : m_groundMaterialScroll;
+    int viewportWidth = activeScroll && activeScroll->viewport()
+        ? activeScroll->viewport()->width() : 0;
+    if(viewportWidth < 70 && m_paintModeTabs)
+        viewportWidth = m_paintModeTabs->width() - 16;
+    if(viewportWidth < 70)
+        viewportWidth = width() - 24;
+    const int columns = qMax(1, (qMax(70, viewportWidth) - 12) / 70);
+    if(columns == m_paletteColumns)
+        return;
+    m_paletteColumns = columns;
+    if(rebuild)
+        rebuildMaterialPalette();
 }
 
 void CLandscapeTools::setUsedTerrainFamilies(
@@ -1263,8 +1372,11 @@ void CLandscapeTools::refreshPaintTerrainTypes()
     if(paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto)
         m_tilesetStatus->setText(materialCount == 0
             ? tr("No existing automatic material designation is available for this layer.")
-            : tr("%1 existing material designation(s). Classic Auto never changes the atlas; authored blends win and unresolved boundary cells use a local uniform hard edge.")
-                  .arg(materialCount));
+            : (classicAutoSafeMode()
+                ? tr("%1 existing material designation(s). Safe Classic Auto applies exact authored connections and skips only unsupported boundary cells.")
+                      .arg(materialCount)
+                : tr("%1 existing material designation(s). Classic Auto never changes the atlas; unresolved boundaries may use a local uniform hard edge.")
+                      .arg(materialCount)));
     else if(paintPaletteMode() == ETerrainPaintPaletteMode::Manual)
         m_tilesetStatus->setText(materialCount == 0
             ? tr("No physical atlas tiles are available.")
@@ -1296,6 +1408,22 @@ bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
             emit editingStateChanged();
             return true;
         }
+    return false;
+}
+
+bool CLandscapeTools::selectManualAtlasTile(int slot)
+{
+    if(!m_manualTileList)
+        return false;
+    for(int row = 0; row < m_manualTileList->count(); ++row)
+    {
+        QListWidgetItem* item = m_manualTileList->item(row);
+        if(item->data(Qt::UserRole).toInt() != slot)
+            continue;
+        m_manualTileList->setCurrentItem(item);
+        m_manualTileList->scrollToItem(item);
+        return true;
+    }
     return false;
 }
 bool CLandscapeTools::underwaterFamiliesVisible() const

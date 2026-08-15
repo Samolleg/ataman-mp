@@ -47,6 +47,12 @@ enum class ETerrainPaintPaletteMode
     Manual
 };
 
+enum class ETerrainPaintTargetMode
+{
+    Tile,
+    Vertex
+};
+
 enum class EOverlaySurfaceOperation
 {
     PaintExisting,
@@ -90,6 +96,9 @@ public:
     bool manualTileSelectionEnabled() const;
     bool classicAutoPaintingEnabled() const;
     ETerrainPaintPaletteMode paintPaletteMode() const;
+    void setPaintPaletteMode(ETerrainPaintPaletteMode mode);
+    ETerrainPaintTargetMode paintTargetMode() const;
+    bool classicAutoSafeMode() const;
     bool randomizeUniformRotation() const;
     bool landFamiliesAllowedInOverlay() const;
     EOverlaySurfaceOperation overlaySurfaceOperation() const;
@@ -126,6 +135,7 @@ public:
     void setUsedTerrainFamilies(const QSet<qint32>& landFamilies,
                                 const QSet<qint32>& overlayFamilies);
     bool selectPaintTerrainType(qint32 terrainType);
+    bool selectManualAtlasTile(int slot);
     bool underwaterFamiliesVisible() const;
     void setUnderwaterFamiliesVisible(bool visible);
     bool mainTerrainVisible() const;
@@ -135,7 +145,7 @@ public:
 
 signals:
     void importHeightmapRequested();
-    void tilePickerRequested();
+    void resolveMissingBlendsRequested();
     void atlasProfileReviewRequested();
     void exportPaintDiagnosticRequested();
     void saveModernDraftRequested();
@@ -186,6 +196,9 @@ private:
     QLabel* m_paintRadiusValue;
     QToolButton* m_circlePaintShape;
     QToolButton* m_squarePaintShape;
+    QToolButton* m_tilePaintTarget;
+    QToolButton* m_vertexPaintTarget;
+    QCheckBox* m_classicAutoSafe;
     QCheckBox* m_randomizeUniformRotation;
     QComboBox* m_paintIssueCategory;
     QToolButton* m_markPaintIssue;
@@ -219,6 +232,7 @@ private:
     void updatePaintIssueUi();
     void clearPaintMaterialSelection();
     void applyPaintFilter();
+    void refreshPaletteColumns(bool rebuild = true);
     QButtonGroup* activeMaterialButtons() const;
 };
 

@@ -796,8 +796,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         m_lastLandscapeEditMode = int(m_landscapeTools->editMode());
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
-        connect(m_landscapeTools, &CLandscapeTools::tilePickerRequested,
-                this, &CView::openAtlasTiles);
+        connect(m_landscapeTools, &CLandscapeTools::resolveMissingBlendsRequested,
+                this, &CView::resolveMissingTerrainBlends);
         connect(m_landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                 this, &CView::reviewTerrainAtlasProfile);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
@@ -7183,6 +7183,9 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     }
     const bool manualSelection =
         m_landscapeTools->manualTileSelectionEnabled();
+    const bool cellCentered = manualSelection
+        || m_landscapeTools->paintTargetMode()
+            == ETerrainPaintTargetMode::Tile;
     if(!terrainPaintOutlineEnabled(m_terrainPaintOutlineValid,
                                    manualSelection))
         return;
@@ -7213,9 +7216,9 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     // circle/square centered on the snapped vertex. Half a vertex interval is
     // included so size 1 remains visible around its single selected junction.
     const float centerX = terrainPaintOutlineWorldCenter(
-        m_terrainPaintOutlineX, manualSelection);
+        m_terrainPaintOutlineX, cellCentered);
     const float centerY = terrainPaintOutlineWorldCenter(
-        m_terrainPaintOutlineY, manualSelection);
+        m_terrainPaintOutlineY, cellCentered);
     const float footprintRadius = float(radius * 2 + 1);
     QVector<QVector3D> boundary;
     if(shape == ETerrainTileBrushShape::Circle)
@@ -7256,8 +7259,8 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             if(!included(x, y))
                 continue;
             QVector3D point;
-            if(projected(terrainPaintOutlineWorldCenter(x, manualSelection),
-                         terrainPaintOutlineWorldCenter(y, manualSelection),
+            if(projected(terrainPaintOutlineWorldCenter(x, cellCentered),
+                         terrainPaintOutlineWorldCenter(y, cellCentered),
                          &point))
             {
                 point.setZ(point.z() + 0.04f);
@@ -11027,6 +11030,15 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
     // when the physical index belongs to its bounded authored table.
     if(m_pTileForm->selectTile(pTile->tileIndex()))
         m_pTileForm->setTileRotation(pTile->tileRotation());
+    if(m_landscapeTools
+       && m_landscapeTools->paintPaletteMode()
+            == ETerrainPaintPaletteMode::Manual)
+    {
+        m_landscapeTools->selectManualAtlasTile(pTile->tileIndex());
+        // Selecting the list row emits the same signal as a click and resets
+        // rotation to zero. Restore the packed rotation sampled from the map.
+        m_pTileForm->setTileRotation(pTile->tileRotation());
+    }
     if(m_landscapeTools && m_terrainEditAvailable)
     {
         const int globalX = tileLoc.xSec * 16 + tileLoc.col;
@@ -11036,23 +11048,40 @@ void CView::pickTile(QVector3D posOnLand, bool bLand)
             bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay, &found);
         const ETerrainTileLayer layer = bLand
             ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
-        const CTerrainTransitionCatalog& catalog = !bLand
-            ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
-            : m_terrainAtlasAnalysis.catalog(layer);
-        const STerrainTransitionSignature signature = found
-            ? catalog.signatureForPacked(packed, &found)
-            : STerrainTransitionSignature();
-        if(found && signature.northWest == signature.northEast
-           && signature.northWest == signature.southEast
-           && signature.northWest == signature.southWest)
+        const CTerrainTransitionCatalog& catalog = m_workingTerrainAtlas
+            ? m_workingTerrainAtlas->catalog()
+            : (!bLand ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+                      : m_terrainAtlasAnalysis.catalog(layer));
+        const int vertexX = tileLoc.xSec * 16
+            + qBound(0, qRound(posOnLand.x() / 2.0f), 16);
+        const int vertexY = tileLoc.ySec * 16
+            + qBound(0, qRound(posOnLand.y() / 2.0f), 16);
+        qint32 sampledMaterial = m_terrainEdit.virtualMaterialAt(
+            layer, vertexX, vertexY, &found);
+        if(!found)
         {
-            if(m_landscapeTools->selectPaintTerrainType(signature.northWest))
-                emit updateMsg(tr("Sampled visual terrain material %1.").arg(signature.northWest));
-            else
-                emit updateMsg(tr("This atlas family is reserved for underwater or internal transitions and is not a land brush."));
+            const STerrainTransitionSignature signature =
+                catalog.gridSignatureForPacked(packed, &found);
+            if(found)
+            {
+                const int localVertexX = vertexX - tileLoc.xSec * 16;
+                const int localVertexY = vertexY - tileLoc.ySec * 16;
+                const bool east = localVertexX > tileLoc.col;
+                const bool south = localVertexY > tileLoc.row;
+                sampledMaterial = !south
+                    ? (east ? signature.northEast : signature.northWest)
+                    : (east ? signature.southEast : signature.southWest);
+            }
         }
-        else if(found)
-            emit updateMsg(tr("This is a transition tile; sample a uniform tile to choose one material."));
+        if(found && m_landscapeTools->paintPaletteMode()
+                         != ETerrainPaintPaletteMode::Manual)
+        {
+            if(m_landscapeTools->selectPaintTerrainType(sampledMaterial))
+                emit updateMsg(tr("Sampled nearest terrain vertex material %1.")
+                                   .arg(sampledMaterial));
+            else
+                emit updateMsg(tr("The nearest vertex material is contextual and has no brush in this palette."));
+        }
     }
     if(!bLand)
         m_pTileForm->setActiveMatIndex(pTile->materialIndex());
@@ -11090,10 +11119,13 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     const QPoint detailVertex(
         tileLoc.xSec * 16 + qBound(0, qRound(posOnLand.x() / 2.0f), 16),
         tileLoc.ySec * 16 + qBound(0, qRound(posOnLand.y() / 2.0f), 16));
-    const QPoint brushCenter = semanticPaint
+    const bool tileTarget = semanticPaint
+        && m_landscapeTools->paintTargetMode()
+            == ETerrainPaintTargetMode::Tile;
+    const QPoint brushCenter = semanticPaint && !tileTarget
         ? detailVertex : QPoint(qRound(brush.centerX), qRound(brush.centerY));
     const bool interpolateClassicAuto = semanticPaint
-        && m_landscapeTools->classicAutoPaintingEnabled()
+        && m_landscapeTools->classicAutoPaintingEnabled() && !tileTarget
         && m_tilePaintStrokeActive && m_lastTerrainPaintCenterValid
         && m_lastTerrainPaintLayerLand == bLand;
     const QPoint previousPaintCenter = m_lastTerrainPaintCenter;
@@ -11251,7 +11283,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             emit updateMsg(report.toText());
             return;
         }
-        if(classicAuto && m_tilePaintStrokeActive)
+        if(classicAuto && m_tilePaintStrokeActive && !tileTarget)
         {
             if(!m_classicAutoStrokePending)
             {
@@ -11304,15 +11336,29 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             m_tileStrokeActions += stampCenters.size();
             return;
         }
-        if(classicAuto)
+        const ETerrainSemanticPaintPolicy classicPolicy =
+            m_landscapeTools->classicAutoSafeMode()
+                ? ETerrainSemanticPaintPolicy::ExactExistingOnly
+                : ETerrainSemanticPaintPolicy::AllowLocalHardEdges;
+        if(classicAuto && tileTarget)
+            command = m_terrainEdit.makeSemanticTilePaint(
+                brush, layer, terrainType, semanticCatalog,
+                m_tileStrokeDistributionSeed, &report, classicPolicy);
+        else if(classicAuto)
         {
             const QVector<QPoint> points = terrainVertexBrushPoints(
                 vertexBrush, m_terrainEdit.tileCountX(),
                 m_terrainEdit.tileCountY());
             command = m_terrainEdit.makeSemanticVertexStrokePaint(
                 points, QVector<QPoint>({detailVertex}), layer, terrainType,
-                semanticCatalog, m_tileStrokeDistributionSeed, &report);
+                semanticCatalog, m_tileStrokeDistributionSeed, &report,
+                classicPolicy);
         }
+        else if(tileTarget)
+            command = m_terrainEdit.makeVirtualTileMaterialPaint(
+                brush, layer, terrainType, semanticCatalog,
+                m_tileStrokeDistributionSeed, &report,
+                m_landscapeTools->randomizeUniformRotation());
         else
             command = m_terrainEdit.makeVirtualMaterialPaint(
                 qRound(brush.centerX), qRound(brush.centerY), vertexBrush,
@@ -11320,6 +11366,31 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 m_tileStrokeDistributionSeed, &report,
                 m_landscapeTools
                     && m_landscapeTools->randomizeUniformRotation());
+
+        if(classicAuto && tileTarget && !report.hasErrors())
+        {
+            CTerrainVirtualMaterialField field;
+            if(m_terrainEdit.copyVirtualMaterialField(layer, &field, false))
+            {
+                QSet<QPoint> vertices;
+                for(const QPoint& cell : command.semanticAudit.paintedCoreCells)
+                {
+                    vertices.insert(cell);vertices.insert(cell + QPoint(1, 0));
+                    vertices.insert(cell + QPoint(1, 1));
+                    vertices.insert(cell + QPoint(0, 1));
+                }
+                for(const QPoint& vertex : vertices)
+                {
+                    const qint32 before = field.material(vertex.x(), vertex.y());
+                    if(before == terrainType)
+                        continue;
+                    STerrainTileCommand::SVirtualVertexDelta delta;
+                    delta.globalX = vertex.x();delta.globalY = vertex.y();
+                    delta.layer = layer;delta.before = before;
+                    delta.after = terrainType;command.virtualVertices.append(delta);
+                }
+            }
+        }
     }
     STerrainPaintAuditAction audit;
     audit.actionId = m_terrainPaintActionId++;
@@ -11453,7 +11524,10 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
         return;
     }
 
-    if(!manualTilePaintingEnabled())
+    const bool cellTarget = manualTilePaintingEnabled()
+        || (m_landscapeTools && m_landscapeTools->paintTargetMode()
+            == ETerrainPaintTargetMode::Tile);
+    if(!cellTarget)
     {
         // pickTile converts the point to sector-local coordinates. Match the
         // paint path by snapping that hit to the nearest global terrain vertex.
@@ -11469,7 +11543,15 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     }
     int index = -1;
     int rotNum = 0;
-    m_pTileForm->getSelectedTile(index, rotNum);
+    if(manualTilePaintingEnabled())
+        m_pTileForm->getSelectedTile(index, rotNum);
+    else if(m_landscapeTools)
+    {
+        bool selected = false;
+        const qint32 material = m_landscapeTools->paintTerrainType(&selected);
+        if(selected)
+            index = m_terrainMaterialRepresentatives.value(material, -1);
+    }
     if(index < 0)
     {
         m_terrainPaintOutlineValid = false;
@@ -11609,7 +11691,10 @@ void CView::endTileBrushGroup()
                 m_terrainEdit.makeSemanticVertexStrokePaint(
                     vertices, anchors, m_classicAutoStrokeLayer,
                     m_classicAutoStrokeMaterialId, catalog,
-                    m_tileStrokeDistributionSeed, &report);
+                    m_tileStrokeDistributionSeed, &report,
+                    m_landscapeTools && m_landscapeTools->classicAutoSafeMode()
+                        ? ETerrainSemanticPaintPolicy::ExactExistingOnly
+                        : ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
             // Classic Auto changes physical authored tiles, but a map that
             // has already used Modern also owns an independent exact vertex
             // field. Keep both representations in the same undoable command
@@ -11861,6 +11946,161 @@ void CView::endTileBrushGroup()
     m_tileStrokeClassicAuto = false;
     m_classicAutoStrokePending = false;
     ++m_tileBrushCommandId;
+}
+
+void CView::selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode)
+{
+    if(!m_landscapeTools)
+        return;
+    m_landscapeTools->setPaintPaletteMode(mode);
+    syncLandscapeToolState();
+    if(m_hasViewportMousePos)
+    {
+        const bool land = CScene::getInstance()->isLandTileEditMode();
+        bool hit = false;
+        const QVector3D position = getTerrainBrushPos(
+            m_lastViewportMousePos.x(), m_lastViewportMousePos.y(), &hit);
+        if(hit)
+            updatePreviewTile(position, land);
+    }
+}
+
+void CView::resolveMissingTerrainBlends()
+{
+    if(!m_terrainEditAvailable || !m_workingTerrainAtlas || !m_pUndoStack)
+    {
+        QMessageBox::information(this, tr("Resolve missing blends"), tr(
+            "Open an editable MPR with a modern terrain atlas before running "
+            "the map-wide resolver."));
+        return;
+    }
+    if(QMessageBox::question(this, tr("Resolve missing blends"), tr(
+        "Scan Ground and Overlay, reconstruct one deterministic shared-corner "
+        "material field, and replace every missing or inconsistent physical "
+        "blend with the exact Modern result?\n\nThe MPR changes will be one "
+        "undo step. Newly required atlas tiles remain in the working atlas."),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes)
+       != QMessageBox::Yes)
+        return;
+
+    finishSculptStroke();
+    endTileBrushGroup();
+    QProgressDialog progress(tr("Scanning terrain material connections..."),
+        QString(), 0, 5, this);
+    progress.setWindowTitle(tr("Resolve missing blends"));
+    progress.setCancelButton(nullptr);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    progress.show();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    CValidationReport report;
+    struct SMissingMapSignature
+    {
+        STerrainTransitionSignature signature;
+        int x{0};
+        int y{0};
+    };
+    QMap<QByteArray, SMissingMapSignature> missing;
+    const ETerrainTileLayer layers[] = {
+        ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
+    for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
+    {
+        const ETerrainTileLayer layer = layers[layerIndex];
+        if(!m_terrainEdit.initializeVirtualMaterialField(
+               layer, m_workingTerrainAtlas->catalog(), &report,
+               ETerrainMaterialFieldRecovery::RecoverDeterministically))
+            break;
+        CTerrainVirtualMaterialField field;
+        if(!m_terrainEdit.copyVirtualMaterialField(layer, &field, false))
+        {
+            report.add("terrain.resolve_map_field",
+                EValidationSeverity::Error,
+                "The map-wide resolver could not copy the recovered material field");
+            break;
+        }
+        for(int y = 0; y < field.tileHeight(); ++y)
+            for(int x = 0; x < field.tileWidth(); ++x)
+            {
+                bool available = false;
+                m_terrainEdit.packedTile(x, y, layer, &available);
+                if(!available)
+                    continue;
+                bool signatureFound = false;
+                const STerrainTransitionSignature signature =
+                    field.cellSignature(x, y, &signatureFound);
+                if(!signatureFound)
+                    continue;
+                bool physicalFound = false;
+                m_workingTerrainAtlas->catalog().selectForPaint(
+                    signature, x, y, m_terrainSemanticSeed, &physicalFound);
+                if(physicalFound)
+                    continue;
+                SMissingMapSignature item;
+                item.signature = signature;item.x = x;item.y = y;
+                missing.insert(globalTransitionKey(signature), item);
+            }
+        progress.setValue(layerIndex + 1);
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+
+    QMap<int, quint64> usage;
+    if(!report.hasErrors() && !missing.isEmpty())
+        usage = workingTerrainAtlasUsage();
+    int generated = 0;
+    for(auto item = missing.constBegin();
+        item != missing.constEnd() && !report.hasErrors(); ++item)
+    {
+        if(!realizeWorkingTerrainSignature(item.value().signature,
+               item.value().x, item.value().y, &usage, &report))
+            break;
+        ++generated;
+    }
+    progress.setValue(3);
+    if(!report.hasErrors() && !syncWorkingTerrainAtlas(&report))
+        report.add("terrain.resolve_map_upload", EValidationSeverity::Error,
+            "The resolved atlas tiles could not be installed in the live renderer");
+    progress.setValue(4);
+
+    STerrainTileCommand combined;
+    combined.description = tr("Resolve missing terrain blends");
+    if(!report.hasErrors())
+        for(ETerrainTileLayer layer : layers)
+        {
+            const STerrainTileCommand command =
+                m_terrainEdit.makeVirtualMapResolution(layer,
+                    m_workingTerrainAtlas->catalog(), m_terrainSemanticSeed,
+                    &report, false);
+            appendTerrainTileCommand(&combined, command);
+        }
+    if(report.hasErrors())
+    {
+        QMessageBox::critical(this, tr("Resolve missing blends refused"),
+            tr("No MPR cell was changed.\n\n%1").arg(report.toText()));
+        return;
+    }
+    if(combined.isEmpty())
+    {
+        progress.setValue(5);
+        QMessageBox::information(this, tr("Resolve missing blends"), tr(
+            "Every active terrain cell already matches the recovered exact "
+            "material field. No MPR change was needed."));
+        return;
+    }
+    if(!applyTerrainTilePreview(combined, true))
+    {
+        QMessageBox::critical(this, tr("Resolve missing blends refused"), tr(
+            "The repaired physical tile command could not be applied. No undo "
+            "entry was created."));
+        return;
+    }
+    m_pUndoStack->push(new CTerrainTilePreviewCommand(this, combined, true));
+    refreshTerrainFamilyUsage();
+    refreshClassicAutoPalette();
+    refreshManualAtlasPalette();
+    progress.setValue(5);
+    emit updateMsg(tr("Resolved %1 terrain cell(s) in one undo step; %2 exact atlas tuple(s) were added.")
+        .arg(combined.deltas.size()).arg(generated));
 }
 
 void CView::beginTileBrushGroup()

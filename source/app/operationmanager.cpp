@@ -1097,6 +1097,21 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         m_pView->setDrawLand(!m_pView->drawLand());
         break;
     }
+    case eKey_Z:
+    case eKey_X:
+    case eKey_C:
+    {
+        if(pOp->keyManager()->isPressed(eKey_Ctrl))
+        {
+            pOp->keyManager()->press(key);
+            break;
+        }
+        m_pView->selectTerrainPaintPaletteMode(key == eKey_Z
+            ? ETerrainPaintPaletteMode::Modern
+            : key == eKey_X ? ETerrainPaintPaletteMode::ClassicAuto
+                            : ETerrainPaintPaletteMode::Manual);
+        break;
+    }
     case eKey_1:
     case eKey_2:
     case eKey_3:
@@ -1251,6 +1266,22 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
         m_pView->endTerrainPreviewBatch();
         m_pView->updatePreviewTile(landPos, bLand);
 
+    }
+    else if(pEvent->buttons() & Qt::RightButton)
+    {
+        const bool bLand = CScene::getInstance()->isLandTileEditMode();
+        bool hit = false;
+        const QVector3D landPos = m_pView->getTerrainBrushPos(
+            pEvent->x(), pEvent->y(), &hit);
+        if(hit)
+        {
+            m_pView->pickTile(landPos, bLand);
+            m_pView->updatePreviewTile(landPos, bLand);
+            m_lastLandPos = landPos;
+            m_lastLandPosValid = true;
+        }
+        else
+            m_lastLandPosValid = false;
     }
     else
     {// just moving mouse. Set tile preview mode

@@ -2650,7 +2650,8 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
 STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
-    quint32 distributionSeed, CValidationReport* report) const
+    quint32 distributionSeed, CValidationReport* report,
+    ETerrainSemanticPaintPolicy policy) const
 {
     STerrainTileCommand command;
     command.description = layer == ETerrainTileLayer::Land
@@ -2988,6 +2989,11 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
         STerrainTransitionSignature selected = desired;
         if(!exactFound)
         {
+            if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly)
+            {
+                ++hardEdgeCount;
+                continue;
+            }
             // Nearest candidates remain topologically anchored to the core and
             // may use only families already present in this exact boundary tile.
             QSet<qint32> allowedMaterials;
@@ -3092,10 +3098,11 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
 STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
-    quint32 distributionSeed, CValidationReport* report) const
+    quint32 distributionSeed, CValidationReport* report,
+    ETerrainSemanticPaintPolicy policy) const
 {
     return makeBoundedSemanticTilePaint(
-        brush, layer, materialId, catalog, distributionSeed, report);
+        brush, layer, materialId, catalog, distributionSeed, report, policy);
 #if 0
     CValidationReport compactReport;
     STerrainTileCommand compact = makeSemanticTilePaintAttempt(
@@ -3582,7 +3589,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
     const QVector<QPoint>& anchorVertices,
     ETerrainTileLayer layer, qint32 materialId,
     const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
-    CValidationReport* report) const
+    CValidationReport* report, ETerrainSemanticPaintPolicy policy) const
 {
     STerrainTileCommand command;
     command.description = layer == ETerrainTileLayer::Land
@@ -3798,6 +3805,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
     bool uniformChecked = false;
     bool uniformFound = false;
     bool missingWithoutFallback = false;
+    QSet<int> exactOnlyBlockedVertices;
     const QVector<STerrainTransitionSignature> authoredSignatures =
         catalog.gridSignatures();
     for(auto entry = activeCells.constBegin();
@@ -3932,6 +3940,13 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
             resolvedSignatures.insert(entry.key(), exact);
         else
         {
+            if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly)
+            {
+                for(int key : keys)
+                    if(requested.contains(key))
+                        exactOnlyBlockedVertices.insert(key);
+                continue;
+            }
             if(!uniformChecked)
             {
                 catalog.selectForPaint(uniform, 0, 0, distributionSeed,
@@ -3952,6 +3967,35 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
                         unsupportedVertices.insert(key);
             }
         }
+    }
+
+    if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly
+       && !exactOnlyBlockedVertices.isEmpty())
+    {
+        QSet<int> remaining = requested;
+        remaining.subtract(exactOnlyBlockedVertices);
+        QVector<QPoint> retryVertices;
+        QVector<int> ordered = remaining.values().toVector();
+        std::sort(ordered.begin(), ordered.end());
+        for(int key : ordered)
+            retryVertices.append(QPoint(key % vertexWidth, key / vertexWidth));
+        CValidationReport retryReport;
+        STerrainTileCommand retry = makeSemanticVertexStrokePaint(
+            retryVertices, retryVertices, layer, materialId, catalog,
+            distributionSeed, &retryReport, policy);
+        retry.semanticAudit.solverMode = QStringLiteral(
+            "vertex-stroke-exact-existing-partial");
+        if(report)
+        {
+            report->add("terrain.semantic_stroke_exact_only_skip",
+                EValidationSeverity::Warning,
+                "Classic Auto Safe left vertices requiring absent authored blends unchanged",
+                QString::number(exactOnlyBlockedVertices.size()));
+            for(const SValidationFinding& finding : retryReport.findings())
+                report->add(finding.code, finding.severity,
+                            finding.message, finding.location);
+        }
+        return retry;
     }
 
     if(missingWithoutFallback)
@@ -4881,14 +4925,77 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
     const CTerrainTransitionCatalog& catalog,quint32 distributionSeed,
     CValidationReport* report,bool randomizeUniformRotation)
 {
+    QVector<QPoint> requested;
+    const int minX=qMax(0,int(std::ceil(brush.centerX-brush.radius)));
+    const int maxX=qMin(tileCountX(),int(std::floor(brush.centerX+brush.radius)));
+    const int minY=qMax(0,int(std::ceil(brush.centerY-brush.radius)));
+    const int maxY=qMin(tileCountY(),int(std::floor(brush.centerY+brush.radius)));
+    for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x)
+    {
+        const float dx=float(x)-brush.centerX,dy=float(y)-brush.centerY;
+        const bool inside=brush.shape==ETerrainTileBrushShape::Square
+            ?qMax(std::fabs(dx),std::fabs(dy))<=brush.radius
+            :std::sqrt(dx*dx+dy*dy)<=brush.radius;
+        if(inside)requested.append(QPoint(x,y));
+    }
+    return makeVirtualMaterialPaintVertices(selectedCellX,selectedCellY,
+        requested,brush,layer,materialId,catalog,distributionSeed,report,
+        randomizeUniformRotation);
+}
+
+STerrainTileCommand CTerrainEditModel::makeVirtualTileMaterialPaint(
+    const STerrainTileBrush& tileBrush,ETerrainTileLayer layer,
+    qint32 materialId,const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed,CValidationReport* report,
+    bool randomizeUniformRotation)
+{
+    QSet<QPair<int,int>> vertexCoordinates;
+    const int minX=qMax(0,int(std::ceil(tileBrush.centerX-tileBrush.radius)));
+    const int maxX=qMin(tileCountX()-1,
+        int(std::floor(tileBrush.centerX+tileBrush.radius)));
+    const int minY=qMax(0,int(std::ceil(tileBrush.centerY-tileBrush.radius)));
+    const int maxY=qMin(tileCountY()-1,
+        int(std::floor(tileBrush.centerY+tileBrush.radius)));
+    for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x)
+    {
+        const float dx=float(x)-tileBrush.centerX;
+        const float dy=float(y)-tileBrush.centerY;
+        const bool inside=tileBrush.shape==ETerrainTileBrushShape::Square
+            ?qMax(std::fabs(dx),std::fabs(dy))<=tileBrush.radius
+            :std::sqrt(dx*dx+dy*dy)<=tileBrush.radius;
+        if(!inside)continue;
+        vertexCoordinates.insert(qMakePair(x,y));
+        vertexCoordinates.insert(qMakePair(x+1,y));
+        vertexCoordinates.insert(qMakePair(x+1,y+1));
+        vertexCoordinates.insert(qMakePair(x,y+1));
+    }
+    QVector<QPoint> requested;
+    requested.reserve(vertexCoordinates.size());
+    for(const QPair<int,int>& coordinate:vertexCoordinates)
+        requested.append(QPoint(coordinate.first,coordinate.second));
+    std::sort(requested.begin(),requested.end(),[](const QPoint& left,
+        const QPoint& right){return left.y()!=right.y()
+            ?left.y()<right.y():left.x()<right.x();});
+    return makeVirtualMaterialPaintVertices(qRound(tileBrush.centerX),
+        qRound(tileBrush.centerY),requested,tileBrush,layer,materialId,catalog,
+        distributionSeed,report,randomizeUniformRotation);
+}
+
+STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
+    int selectedCellX,int selectedCellY,const QVector<QPoint>& requestedVertices,
+    const STerrainTileBrush& auditBrush,ETerrainTileLayer layer,
+    qint32 materialId,const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed,CValidationReport* report,
+    bool randomizeUniformRotation)
+{
     STerrainTileCommand command;
     command.description=layer==ETerrainTileLayer::Land
         ?QStringLiteral("Paint virtual terrain materials")
         :QStringLiteral("Paint virtual overlay materials");
-    command.semanticAudit.valid=true;command.semanticAudit.brush=brush;
+    command.semanticAudit.valid=true;command.semanticAudit.brush=auditBrush;
     command.semanticAudit.layer=layer;command.semanticAudit.requestedMaterialId=materialId;
     command.semanticAudit.solverMode=QStringLiteral("virtual-unblended-preview");
-    if(brush.radius<0.0f||!catalog.hasMaterial(materialId)
+    if(auditBrush.radius<0.0f||!catalog.hasMaterial(materialId)
        ||selectedCellX<0||selectedCellX>=tileCountX()
        ||selectedCellY<0||selectedCellY>=tileCountY())
     {
@@ -4906,18 +5013,11 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
         return command;
     QVector<qint32> desired=active;
     const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
-    const int minX=qMax(0,int(std::ceil(brush.centerX-brush.radius)));
-    const int maxX=qMin(tileCountX(),int(std::floor(brush.centerX+brush.radius)));
-    const int minY=qMax(0,int(std::ceil(brush.centerY-brush.radius)));
-    const int maxY=qMin(tileCountY(),int(std::floor(brush.centerY+brush.radius)));
     QSet<int> affected;
-    for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x)
+    for(const QPoint& point:requestedVertices)
     {
-        const float dx=float(x)-brush.centerX,dy=float(y)-brush.centerY;
-        const bool inside=brush.shape==ETerrainTileBrushShape::Square
-            ?qMax(std::fabs(dx),std::fabs(dy))<=brush.radius
-            :std::sqrt(dx*dx+dy*dy)<=brush.radius;
-        if(!inside)continue;
+        const int x=point.x(),y=point.y();
+        if(x<0||x>tileCountX()||y<0||y>tileCountY())continue;
         bool incidentAvailable=layer==ETerrainTileLayer::Land;
         if(layer==ETerrainTileLayer::Overlay)
             for(int cellY:{y-1,y})for(int cellX:{x-1,x})
@@ -5079,6 +5179,74 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
     return command;
 }
 
+STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
+    ETerrainTileLayer layer,const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed,CValidationReport* report,
+    bool randomizeUniformRotation) const
+{
+    STerrainTileCommand command;
+    command.description=QStringLiteral("Resolve missing terrain blends");
+    command.semanticAudit.valid=true;
+    command.semanticAudit.layer=layer;
+    command.semanticAudit.requestedMaterialId=-1;
+    command.semanticAudit.solverMode=QStringLiteral("virtual-map-exact");
+    const QVector<qint32>& values=layer==ETerrainTileLayer::Land
+        ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+    const int vertexWidth=tileCountX()+1;
+    const qint32 unset=std::numeric_limits<qint32>::min();
+    if(values.size()!=vertexWidth*(tileCountY()+1))
+    {
+        if(report)report->add("terrain.virtual_map_field",
+            EValidationSeverity::Error,
+            "The map has no complete shared-corner material field to resolve");
+        return command;
+    }
+    const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
+    int unresolved=0;
+    for(int y=0;y<tileCountY();++y)for(int x=0;x<tileCountX();++x)
+    {
+        bool available=false;
+        const quint16 before=packedTile(x,y,layer,&available);
+        if(!available)continue;
+        const int nw=y*vertexWidth+x,ne=nw+1;
+        const int sw=(y+1)*vertexWidth+x,se=sw+1;
+        if(values.at(nw)==unset||values.at(ne)==unset
+           ||values.at(se)==unset||values.at(sw)==unset)
+        {
+            ++unresolved;
+            continue;
+        }
+        STerrainTransitionSignature exact;
+        exact.northWest=values.at(nw);exact.northEast=values.at(ne);
+        exact.southEast=values.at(se);exact.southWest=values.at(sw);
+        bool decoded=false;
+        const STerrainTransitionSignature current=
+            catalog.gridSignatureForPacked(before,&decoded);
+        if(decoded&&current==exact)
+            continue;
+        bool found=false;
+        const bool uniform=exact.northWest==exact.northEast
+            &&exact.northWest==exact.southEast
+            &&exact.northWest==exact.southWest;
+        const quint16 after=uniform
+            ?selectUniformInteriorTile(catalog,exact,x,y,paintSeed,
+                randomizeUniformRotation,&found)
+            :catalog.selectForPaint(exact,x,y,paintSeed,&found);
+        if(!found){++unresolved;continue;}
+        command.semanticAudit.affectedCells.append(QPoint(x,y));
+        if(after==before)continue;
+        STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;
+        delta.layer=layer;delta.before=before;delta.after=after;
+        delta.hasSemanticRequest=true;delta.requestedMaterialId=-1;
+        delta.requestedSignature=exact;command.deltas.append(delta);
+    }
+    if(unresolved>0&&report)report->add("terrain.virtual_map_unresolved",
+        EValidationSeverity::Error,
+        QString("%1 map cell(s) could not be resolved to an exact physical blend")
+            .arg(unresolved));
+    return command;
+}
+
 bool CTerrainEditModel::virtualMaterialFieldActive(ETerrainTileLayer layer) const
 {
     const QVector<qint32>& current=layer==ETerrainTileLayer::Land
@@ -5086,6 +5254,21 @@ bool CTerrainEditModel::virtualMaterialFieldActive(ETerrainTileLayer layer) cons
     const QVector<qint32>& baseline=layer==ETerrainTileLayer::Land
         ?m_originalVirtualLandMaterials:m_originalVirtualOverlayMaterials;
     return !current.isEmpty()&&current!=baseline;
+}
+
+qint32 CTerrainEditModel::virtualMaterialAt(ETerrainTileLayer layer,
+    int vertexX,int vertexY,bool* found) const
+{
+    const QVector<qint32>& values=layer==ETerrainTileLayer::Land
+        ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+    const int width=tileCountX()+1;
+    const bool valid=vertexX>=0&&vertexX<=tileCountX()
+        &&vertexY>=0&&vertexY<=tileCountY()
+        &&values.size()==width*(tileCountY()+1)
+        &&values.at(vertexY*width+vertexX)
+            !=std::numeric_limits<qint32>::min();
+    if(found)*found=valid;
+    return valid?values.at(vertexY*width+vertexX):-1;
 }
 
 bool CTerrainEditModel::virtualMaterialCellChanged(
