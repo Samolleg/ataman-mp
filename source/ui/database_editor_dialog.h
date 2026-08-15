@@ -14,6 +14,7 @@ class DatabaseEditorDialog : public QDialog
 public: explicit DatabaseEditorDialog(const QSharedPointer<DatabaseDocument>&, QWidget* = nullptr); ~DatabaseEditorDialog() override; void refreshFromHistory(); bool selectPrototype(const QString& prototype); bool selectFinding(const QString& tableKey,const QString& rowKey);
 signals: void transactionCommitted(const QString& description, const QString& tableKey, const QString& rowKey);
     void itemSpellConstructorRequested(const QString& initialCode);
+    void resourceBrowserRequested(const QString& reference);
     void undoRequested();
     void redoRequested();
 private slots: void selectTable(); void rebuildGrid(); void editFieldDialog(const QModelIndex&); void showRowContextMenu(const QPoint&); void copySelectedRowId(); void cloneSelected(); void deleteSelected(); void review(); void apply(); void saveAs(); void exportXlsx(); void importXlsx(); void importDatabaseRes(); void importTablesLua(); void importDatabaseBundle();

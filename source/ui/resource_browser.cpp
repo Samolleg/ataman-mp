@@ -8,6 +8,7 @@
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QApplication>
+#include <QAbstractItemView>
 #include <QClipboard>
 #include <QComboBox>
 #include <QCryptographicHash>
@@ -165,6 +166,13 @@ namespace {
 constexpr int kEntryRole = Qt::UserRole + 80;
 constexpr qint64 kMaximumPreviewBytes = 32ll * 1024ll * 1024ll;
 constexpr qint64 kHexPrefixBytes = 4096;
+
+bool isDedicatedDatabaseArchive(const QString& path)
+{
+    const QString name = QFileInfo(path).fileName();
+    return name.compare(QStringLiteral("database.res"), Qt::CaseInsensitive) == 0
+        || name.compare(QStringLiteral("databaseJmv.res"), Qt::CaseInsensitive) == 0;
+}
 
 QString suffixType(const QString& name, const QString& archiveName = QString())
 {
@@ -537,6 +545,7 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     m_copyName = new QPushButton(tr("Copy Name"), preview);
     m_openLocation = new QPushButton(tr("Open Location"), preview);
     m_databaseEditor = new QPushButton(tr("Open in Database Editor"), preview);
+    m_databaseEditor->hide();
     m_replace = new QPushButton(tr("Replace..."), preview);
     m_add = new QPushButton(tr("Add..."), preview);
     m_rename = new QPushButton(tr("Rename..."), preview);
@@ -687,6 +696,63 @@ void CResourceBrowser::setActiveProfileSources(const QVector<QString>& sources,
     if(m_mode->currentIndex() == 0) beginLoad(sources, true, profileName);
 }
 
+bool CResourceBrowser::selectResourceReference(const QString& reference)
+{
+    const QString requested = reference.trimmed();
+    if(requested.isEmpty() || m_activeSources.isEmpty()) return false;
+    if(!m_activeProfileMode || m_mode->currentIndex() != 0)
+    {
+        m_pendingReference = requested;
+        m_mode->setCurrentIndex(0);
+        return true;
+    }
+    if(m_loadWatcher->isRunning())
+    {
+        m_pendingReference = requested;
+        return true;
+    }
+    return applyResourceReferenceSelection(requested);
+}
+
+bool CResourceBrowser::applyResourceReferenceSelection(const QString& reference)
+{
+    const QString requestedName = QFileInfo(reference).fileName();
+    const QString requestedStem = QFileInfo(requestedName).completeBaseName();
+    int bestIndex = -1;
+    int bestScore = -1;
+    const QVector<SResourceCatalogEntry> entries = m_catalog.entries();
+    for(int index = 0; index < entries.size(); ++index)
+    {
+        const SResourceCatalogEntry& entry = entries.at(index);
+        const QString logicalName = QFileInfo(entry.logicalName).fileName();
+        const QString logicalStem = QFileInfo(logicalName).completeBaseName();
+        int score = -1;
+        if(entry.logicalName.compare(reference, Qt::CaseInsensitive) == 0) score = 8;
+        else if(logicalName.compare(requestedName, Qt::CaseInsensitive) == 0) score = 7;
+        else if(logicalStem.compare(requestedStem, Qt::CaseInsensitive) == 0) score = 5;
+        if(score >= 0 && entry.winning) ++score;
+        if(score > bestScore) { bestScore = score; bestIndex = index; }
+    }
+    if(bestIndex < 0) return false;
+
+    const SResourceCatalogEntry target = entries.at(bestIndex);
+    m_search->clear();
+    m_typeFilter->setCurrentIndex(0);
+    m_statusFilter->setCurrentIndex(0);
+    if(m_archives->topLevelItemCount()) m_archives->setCurrentItem(m_archives->topLevelItem(0));
+    rebuildList();
+    for(int row = 0; row < m_visibleEntries.size(); ++row)
+        if(m_visibleEntries.at(row).archivePriority == target.archivePriority
+           && m_visibleEntries.at(row).memberIndex == target.memberIndex)
+        {
+            QTreeWidgetItem* item = m_resources->topLevelItem(row);
+            m_resources->setCurrentItem(item);
+            m_resources->scrollToItem(item, QAbstractItemView::PositionAtCenter);
+            return true;
+        }
+    return false;
+}
+
 void CResourceBrowser::beginLoad(const QVector<QString>& archives, bool activeProfile, const QString& label)
 {
     ++m_loadGeneration;
@@ -751,6 +817,12 @@ void CResourceBrowser::finishLoad()
     m_summary->setText(tr("%1 members from %2 archive(s)%3")
         .arg(m_catalog.entries().size()).arg(qMax(0, m_archives->topLevelItemCount() - 1))
         .arg(result.errors.isEmpty() ? QString() : tr("; %1 archive(s) rejected").arg(result.errors.size())));
+    if(!m_pendingReference.isEmpty())
+    {
+        const QString pending = m_pendingReference;
+        m_pendingReference.clear();
+        applyResourceReferenceSelection(pending);
+    }
 }
 
 void CResourceBrowser::rebuildList()
@@ -815,7 +887,7 @@ void CResourceBrowser::beginPreview(QTreeWidgetItem*)
     for(const auto& provider : chain)
         chainText += QString("\n%1 %2").arg(provider.winning ? tr("Active:") : tr("Overridden:"), provider.archivePath);
     m_previewDetails->setText(entry->logicalName + chainText);
-    m_databaseEditor->setVisible(QFileInfo(entry->archivePath).fileName().startsWith("database", Qt::CaseInsensitive));
+    m_databaseEditor->setVisible(isDedicatedDatabaseArchive(entry->archivePath));
     m_previewWatcher->setFuture(QtConcurrent::run(
         makePreview, *archive, entry->memberIndex, m_catalog, generation));
 }
@@ -989,7 +1061,7 @@ bool CResourceBrowser::publishTransaction(CResArchiveTransaction& transaction,
                                           const SResourceCatalogEntry& context,
                                           const QString& operationSummary)
 {
-    if(QFileInfo(context.archivePath).fileName().startsWith("database", Qt::CaseInsensitive))
+    if(isDedicatedDatabaseArchive(context.archivePath))
     {
         QMessageBox::information(this, tr("Protected database archive"),
             tr("database.res and databaseJmv.res cannot be changed by the generic resource transaction. "

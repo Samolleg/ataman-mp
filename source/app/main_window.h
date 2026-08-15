@@ -212,6 +212,7 @@ private:
     void updateUnitTexturePreview();
     void renderUnitTexturePreview();
     void showDatabaseEditor(const QString& prototype = QString());
+    void openDatabaseArchiveFromBrowser(const QString& archivePath);
     void showItemSpellConstructor(const QString& initialCode = QString());
 
 private slots:

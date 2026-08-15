@@ -51,6 +51,7 @@ public:
     ~CResourceBrowser() override;
     void setActiveProfileSources(const QVector<QString>& sources,
                                  const QString& profileName);
+    bool selectResourceReference(const QString& reference);
     bool uiContractSatisfied() const;
 
 signals:
@@ -63,6 +64,7 @@ private:
                    const QString& label);
     void finishLoad();
     void rebuildList();
+    bool applyResourceReferenceSelection(const QString& reference);
     void beginPreview(QTreeWidgetItem* item);
     void finishPreview();
     void selectAnimation(int index);
@@ -125,6 +127,7 @@ private:
     CResourceCatalog m_catalog;
     QVector<QString> m_activeSources;
     QString m_activeProfileName;
+    QString m_pendingReference;
     bool m_activeProfileMode{true};
     QVector<QString> m_loadedSources;
     QFileSystemWatcher* m_archiveWatcher{nullptr};

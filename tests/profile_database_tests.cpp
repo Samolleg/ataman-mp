@@ -228,6 +228,7 @@ private slots:
     void losslessMemberFixedSizePatchPreservesOriginalHeaders();
     void workbookImportRejectsReadOnlyAndUnpublishableChanges();
     void databaseEditorRowMenuAndWrappedFieldEditor();
+    void databaseEditorOpensKnownResourceReferences();
     void databaseEditorUsesLazyModelAndNavigatesReferences();
     void databaseEditorPersistsVisualColumnControls();
     void databaseEditorForwardsFocusedUndoRedo();
@@ -1622,6 +1623,43 @@ void ProfileDatabaseTests::databaseEditorRowMenuAndWrappedFieldEditor()
     QMetaObject::invokeMethod(grid, "doubleClicked", Qt::DirectConnection,
         Q_ARG(QModelIndex, cancelItem));
     QCOMPARE(document->changes().size(), changesBeforeCancel);
+}
+
+void ProfileDatabaseTests::databaseEditorOpensKnownResourceReferences()
+{
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());
+    write(QDir(temporary.path()).filePath("database.res"),resArchive(relationalMembers()));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="base";
+    request.resourceDirectories<<temporary.path();
+    auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    ei::DatabaseEditorDialog dialog(document);dialog.show();
+    QVERIFY(dialog.selectFinding("units.racemodels","Human Male"));
+    QTableView* grid=dialog.findChild<QTableView*>("databaseGrid");QVERIFY(grid);
+    int modelColumn=-1;
+    for(int column=0;column<grid->model()->columnCount();++column)
+        if(grid->model()->index(grid->currentIndex().row(),column)
+               .data(Qt::UserRole+1).toString()==QStringLiteral("fld.30.0"))
+            modelColumn=column;
+    QVERIFY(modelColumn>=0);
+    const QModelIndex model=grid->model()->index(grid->currentIndex().row(),modelColumn);
+    grid->setCurrentIndex(model);grid->scrollTo(model,QAbstractItemView::PositionAtCenter);
+    QSignalSpy requested(&dialog,&ei::DatabaseEditorDialog::resourceBrowserRequested);
+    bool triggered=false;
+    QTimer::singleShot(0,[&triggered](){
+        QMenu* menu=qobject_cast<QMenu*>(QApplication::activePopupWidget());
+        if(!menu)return;
+        for(QAction* action:menu->actions())if(action->objectName()=="databaseOpenResourceAction")
+        {action->trigger();triggered=true;return;}
+        menu->close();
+    });
+    const QRect cell=grid->visualRect(model);QVERIFY(cell.isValid());
+    QContextMenuEvent event(QContextMenuEvent::Mouse,cell.center(),
+        grid->viewport()->mapToGlobal(cell.center()));
+    QApplication::sendEvent(grid->viewport(),&event);
+    QTRY_VERIFY_WITH_TIMEOUT(triggered,1000);
+    QCOMPARE(requested.count(),1);
+    QCOMPARE(requested.takeFirst().at(0).toString(),QStringLiteral("unhuma.mod"));
 }
 
 void ProfileDatabaseTests::databaseEditorUsesLazyModelAndNavigatesReferences()

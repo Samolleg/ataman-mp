@@ -566,6 +566,15 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
                 m_undoStack, &QUndoStack::redo);
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::itemSpellConstructorRequested,
                 this, &MainWindow::showItemSpellConstructor);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::resourceBrowserRequested,
+                this, [this](const QString& reference)
+        {
+            m_resourceBrowserDock->show();
+            m_resourceBrowserDock->raise();
+            if(!m_resourceBrowser->selectResourceReference(reference))
+                QMessageBox::information(this, tr("Resource not found"),
+                    tr("No active-profile resource matches '%1'.").arg(reference));
+        });
     }
 
     m_databaseEditorDialog->show();
@@ -578,6 +587,35 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
             tr("The active profile database does not contain monster prototype '%1'.")
                 .arg(prototype));
     }
+}
+
+void MainWindow::openDatabaseArchiveFromBrowser(const QString& archivePath)
+{
+    const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+    if(!snapshot || snapshot->sourceArchivePath.trimmed().isEmpty())
+    {
+        QMessageBox::warning(this, tr("Database Editor"),
+            tr("No active profile database is available. Configure the game/mod profile first."));
+        return;
+    }
+
+    const QFileInfo requested(archivePath);
+    const QFileInfo active(snapshot->sourceArchivePath);
+    const bool primary = requested.absoluteFilePath().compare(
+        active.absoluteFilePath(), Qt::CaseInsensitive) == 0;
+    const bool jmvOverlay = requested.fileName().compare(
+        QStringLiteral("databaseJmv.res"), Qt::CaseInsensitive) == 0
+        && requested.absolutePath().compare(active.absolutePath(), Qt::CaseInsensitive) == 0;
+    if(!primary && !jmvOverlay)
+    {
+        QMessageBox::information(this, tr("External database archive"),
+            tr("The integrated Database Editor authors the active profile's database.res bundle. "
+               "This archive is not that active database.\n\n"
+               "Switch the active game/mod profile to this database, or open Database Editor and "
+               "use Import > Import database.res to bring it into the active document."));
+        return;
+    }
+    showDatabaseEditor();
 }
 
 MainWindow::MainWindow(QWidget* parent) :
@@ -1009,10 +1047,7 @@ MainWindow::MainWindow(QWidget* parent) :
     viewMenu->addAction(resourceBrowserAction);
     connect(m_resourceBrowser, &CResourceBrowser::databaseEditorRequested,
             this, [this](const QString& archivePath) {
-        QMessageBox::information(this, tr("Database Editor"),
-            tr("Database archives are protected from generic RES editing.\n\n"
-               "A dedicated Database Editor integration request was created for:\n%1")
-                .arg(archivePath));
+        openDatabaseArchiveFromBrowser(archivePath);
     });
     connect(m_resourceBrowser, &CResourceBrowser::activeResourcesPublished,
             this, [this](const QString& archivePath) {

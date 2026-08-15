@@ -91,6 +91,7 @@ enum DatabaseGridRole {
     FullTextRole,
     RawValueRole,
     ReferenceTableRole,
+    ResourceReferenceRole,
     ChoicesRole,
     FilterTextRole
 };
@@ -164,6 +165,9 @@ public:
         if(role==FullTextRole)return full;
         if(role==RawValueRole)return stored;
         if(role==ReferenceTableRole)return field->referenceTable;
+        if(role==ResourceReferenceRole)return field->resourceReference
+            ? (field->resourceExtension.isEmpty() || QFileInfo(full).suffix().compare(field->resourceExtension,Qt::CaseInsensitive)==0
+                ? full : full+QLatin1Char('.')+field->resourceExtension) : QString();
         if(role==ChoicesRole)return choicesForColumn(index.column());
         if(role==FilterTextRole){QStringList values;values<<QString("#%1").arg(rowNumber)<<QString::number(rowNumber)<<row->sourceStableKey;for(int fieldIndex:m_fields)values<<authoringText(*table,table->fields[fieldIndex],row->values.value(table->fields[fieldIndex].key));return values.join(' ').toLower();}
         if(role==Qt::ForegroundRole&&!field->referenceTable.isEmpty())return QBrush(QColor(35,110,190));
@@ -173,6 +177,7 @@ public:
             QString reason;const bool editable=field->writable&&m_document->fieldEditable(m_tableKey,row->stableKey,field->key,&reason);
             if(!editable)return reason.isEmpty()?tr("Read-only raw payload. It remains preserved byte-for-byte; editing is disabled until this field's type and serializer are verified."):reason;
             if(!field->referenceTable.isEmpty())return tr("Choose a referenced row from the list. Right-click and select Open Referenced Row to follow the link.");
+            if(field->resourceReference)return tr("This value names a game resource. Right-click and select Open in Resource Browser to locate its active provider.");
             return tr("Preview limited to %1 of %2 characters. Double-click or press Enter/F2 to edit the complete value.").arg(data(index,Qt::DisplayRole).toString().size()).arg(full.size());
         }
         return {};
@@ -484,7 +489,7 @@ void DatabaseEditorDialog::editFieldDialog(const QModelIndex& viewIndex)
 }
 void DatabaseEditorDialog::showRowContextMenu(const QPoint& position)
 {
-    const QModelIndex index=m_grid->indexAt(position);if(!index.isValid())return;m_grid->setCurrentIndex(index);m_grid->selectRow(index.row());const auto*table=m_document->table(currentTableKey());auto*menu=new QMenu(m_grid);menu->setAttribute(Qt::WA_DeleteOnClose);menu->setObjectName("databaseRowContextMenu");QAction*copy=menu->addAction(tr("Copy Row ID"));copy->setObjectName("databaseCopyRowIdAction");connect(copy,&QAction::triggered,this,&DatabaseEditorDialog::copySelectedRowId);const QModelIndex source=m_proxy->mapToSource(index);const QString referenceTable=source.data(ReferenceTableRole).toString(),referenceIdentity=source.data(Qt::EditRole).toString().trimmed();if(!referenceTable.isEmpty()&&!referenceIdentity.isEmpty()){QAction*open=menu->addAction(tr("Open Referenced Row"));open->setObjectName("databaseOpenReferenceAction");connect(open,&QAction::triggered,this,[this,referenceTable,referenceIdentity](){if(!selectTableRow(referenceTable,referenceIdentity))QMessageBox::information(this,tr("Reference not found"),tr("The referenced row '%1' is not present in %2.").arg(referenceIdentity,referenceTable));});}QAction*clone=menu->addAction(tr("Duplicate / Clone Row…"));clone->setObjectName("databaseCloneRowAction");clone->setEnabled(table&&table->structuralEditing);connect(clone,&QAction::triggered,this,&DatabaseEditorDialog::cloneSelected);menu->popup(m_grid->viewport()->mapToGlobal(position));
+    const QModelIndex index=m_grid->indexAt(position);if(!index.isValid())return;m_grid->setCurrentIndex(index);m_grid->selectRow(index.row());const auto*table=m_document->table(currentTableKey());auto*menu=new QMenu(m_grid);menu->setAttribute(Qt::WA_DeleteOnClose);menu->setObjectName("databaseRowContextMenu");QAction*copy=menu->addAction(tr("Copy Row ID"));copy->setObjectName("databaseCopyRowIdAction");connect(copy,&QAction::triggered,this,&DatabaseEditorDialog::copySelectedRowId);const QModelIndex source=m_proxy->mapToSource(index);const QString referenceTable=source.data(ReferenceTableRole).toString(),referenceIdentity=source.data(Qt::EditRole).toString().trimmed(),resourceIdentity=source.data(ResourceReferenceRole).toString().trimmed();if(!referenceTable.isEmpty()&&!referenceIdentity.isEmpty()){QAction*open=menu->addAction(tr("Open Referenced Row"));open->setObjectName("databaseOpenReferenceAction");connect(open,&QAction::triggered,this,[this,referenceTable,referenceIdentity](){if(!selectTableRow(referenceTable,referenceIdentity))QMessageBox::information(this,tr("Reference not found"),tr("The referenced row '%1' is not present in %2.").arg(referenceIdentity,referenceTable));});}if(!resourceIdentity.isEmpty()){QAction*openResource=menu->addAction(tr("Open in Resource Browser"));openResource->setObjectName("databaseOpenResourceAction");connect(openResource,&QAction::triggered,this,[this,resourceIdentity](){emit resourceBrowserRequested(resourceIdentity);});}QAction*clone=menu->addAction(tr("Duplicate / Clone Row…"));clone->setObjectName("databaseCloneRowAction");clone->setEnabled(table&&table->structuralEditing);connect(clone,&QAction::triggered,this,&DatabaseEditorDialog::cloneSelected);menu->popup(m_grid->viewport()->mapToGlobal(position));
 }
 void DatabaseEditorDialog::openCurrentReference(){const QModelIndex view=m_grid->currentIndex();if(!view.isValid())return;const QModelIndex source=m_proxy->mapToSource(view);const QString table=source.data(ReferenceTableRole).toString(),identity=source.data(Qt::EditRole).toString().trimmed();if(table.isEmpty()||identity.isEmpty())return;if(!selectTableRow(table,identity))QMessageBox::information(this,tr("Reference not found"),tr("The referenced row '%1' is not present in %2.").arg(identity,table));}
 void DatabaseEditorDialog::copySelectedRowId(){const QString key=selectedRowKey();if(key.isEmpty())return;const QString identity=m_document->displayIdentity(currentTableKey(),key);QApplication::clipboard()->setText(identity.isEmpty()?key:identity);}
