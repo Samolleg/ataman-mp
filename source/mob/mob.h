@@ -20,6 +20,7 @@ class CActivationZone;
 class CTrapCastPoint;
 class CMobEditTransaction;
 class CValidationReport;
+struct STerrainHeightInfluenceBounds;
 
 struct SMobParameterState
 {
@@ -129,6 +130,7 @@ public:
     QList<CNode*>& logicNodes();
     void logicNodesUpdate();
     void reprojectForCurrentTerrain();
+    int reprojectForCurrentTerrain(const STerrainHeightInfluenceBounds& bounds);
     void getPatrolHash(int& unitMapIdOut, int& pointIdOut, CPatrolPoint* pPoint);
     void getViewHash(int& unitMapIdOut, int& pointIdOut, int& viewIdOut, CLookPoint* pPoint);
     int getPatrolId(uint unitMapId, CPatrolPoint* pPoint);

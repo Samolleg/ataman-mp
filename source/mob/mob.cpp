@@ -34,6 +34,7 @@
 #include "staged_save_validator.h"
 #include "endurance_document.h"
 #include "ai_graph_document.h"
+#include "terrain_edit_model.h"
 
 CMob::CMob():
     m_view(nullptr)
@@ -653,6 +654,25 @@ CLookPoint *CMob::viewPointById(int unitId, int patrolId, int viewId, int logicS
 {
     CPatrolPoint* pPoint = patrolPointById(unitId, patrolId, logicSlot);
     return pPoint ? pPoint->viewByIndex(viewId) : nullptr;
+}
+
+int CMob::reprojectForCurrentTerrain(const STerrainHeightInfluenceBounds& bounds)
+{
+    if(!bounds.valid)
+        return 0;
+    int projected = 0;
+    for(CNode* node : m_aNode)
+    {
+        if(!node || !bounds.contains(node->position().x(), node->position().y()))
+            continue;
+        CLandscape::getInstance()->projectPosition(node);
+        if(CUnit* unit = dynamic_cast<CUnit*>(node))
+            unit->refreshLogicProjection();
+        ++projected;
+    }
+    ei::log(eLogInfo, QString("Reprojected %1 of %2 objects in changed terrain footprint")
+            .arg(projected).arg(m_aNode.size()));
+    return projected;
 }
 
 void CMob::getTrapZoneHash(int &unitMapIdOut, int &zoneIdOut, CActivationZone *pZone)

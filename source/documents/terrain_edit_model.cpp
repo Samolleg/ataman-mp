@@ -306,6 +306,37 @@ void appendTerrainHeightCommand(STerrainHeightCommand* stroke,
     }
 }
 
+STerrainHeightInfluenceBounds terrainHeightInfluenceBounds(
+    const STerrainHeightCommand& command, int vertexCountX, int vertexCountY)
+{
+    STerrainHeightInfluenceBounds bounds;
+    if(command.deltas.isEmpty() || vertexCountX < 2 || vertexCountY < 2)
+        return bounds;
+    int minimumX = command.deltas.front().globalX;
+    int minimumY = command.deltas.front().globalY;
+    int maximumX = minimumX;
+    int maximumY = minimumY;
+    for(const STerrainHeightDelta& delta : command.deltas)
+    {
+        minimumX = qMin(minimumX, delta.globalX);
+        minimumY = qMin(minimumY, delta.globalY);
+        maximumX = qMax(maximumX, delta.globalX);
+        maximumY = qMax(maximumY, delta.globalY);
+    }
+    // Surface sampling may walk neighbouring displaced cells before finding
+    // the owning triangle. This conservative halo keeps that search correct
+    // without reprojecting every object in every loaded MOB.
+    constexpr float projectionSearchHalo = 12.0f;
+    bounds.valid = true;
+    bounds.minimumX = float(minimumX) - projectionSearchHalo;
+    bounds.minimumY = float(minimumY) - projectionSearchHalo;
+    bounds.maximumX = float(maximumX) + projectionSearchHalo;
+    bounds.maximumY = float(maximumY) + projectionSearchHalo;
+    bounds.terrainMaximumX = float(vertexCountX - 2);
+    bounds.terrainMaximumY = float(vertexCountY - 2);
+    return bounds;
+}
+
 STerrainTransitionSignature CTerrainTransitionCatalog::rotated(
     const STerrainTransitionSignature& signature, int clockwiseQuarterTurns)
 {
@@ -2383,6 +2414,24 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
     const STerrainDiagnosticPolicy& policy,
     CValidationReport* report) const
 {
+    return diagnoseState(command, objects, policy, report, false);
+}
+
+STerrainEditDiagnostics CTerrainEditModel::diagnoseApplied(
+    const STerrainHeightCommand& command,
+    const QVector<STerrainObjectHeightProbe>& objects,
+    const STerrainDiagnosticPolicy& policy,
+    CValidationReport* report) const
+{
+    return diagnoseState(command, objects, policy, report, true);
+}
+
+STerrainEditDiagnostics CTerrainEditModel::diagnoseState(
+    const STerrainHeightCommand& command,
+    const QVector<STerrainObjectHeightProbe>& objects,
+    const STerrainDiagnosticPolicy& policy,
+    CValidationReport* report, bool commandAlreadyApplied) const
+{
     STerrainEditDiagnostics result;
     if(command.isEmpty())
     {
@@ -2390,6 +2439,7 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
         return result;
     }
 
+    QMap<int, quint16> beforeHeights;
     QMap<int, quint16> afterHeights;
     QSet<int> affectedSectors;
     bool firstDelta = true;
@@ -2412,7 +2462,9 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
                             QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
             return result;
         }
-        if(m_conflictedVertices.at(index) || m_heights.at(index) != delta.before)
+        const quint16 expectedCurrent = commandAlreadyApplied
+            ? delta.after : delta.before;
+        if(m_conflictedVertices.at(index) || m_heights.at(index) != expectedCurrent)
         {
             if(report)
                 report->add("terrain.diagnostic_provenance", EValidationSeverity::Error,
@@ -2420,6 +2472,7 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
                             QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
             return result;
         }
+        beforeHeights.insert(index, delta.before);
         afterHeights.insert(index, delta.after);
         for(const SVertexRef& ref : m_refs.at(index))
             affectedSectors.insert(ref.sectorIndex);
@@ -2451,9 +2504,13 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
     result.changedVertexCount = afterHeights.size();
     result.affectedSectorCount = affectedSectors.size();
 
-    const auto rawHeight = [this, &afterHeights](int index, bool after) {
-        return after && afterHeights.contains(index)
-            ? afterHeights.value(index) : m_heights.at(index);
+    const auto rawHeight = [this, &beforeHeights, &afterHeights,
+                            commandAlreadyApplied](int index, bool after) {
+        if(!after && commandAlreadyApplied && beforeHeights.contains(index))
+            return beforeHeights.value(index);
+        if(after && !commandAlreadyApplied && afterHeights.contains(index))
+            return afterHeights.value(index);
+        return m_heights.at(index);
     };
     const auto position = [this, &rawHeight](int index, bool after) {
         const int x = index % m_vertexCountX;

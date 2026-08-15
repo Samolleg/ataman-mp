@@ -490,6 +490,7 @@ private slots:
     void terrainVerticalScalePoliciesAreUndoableAndExplicit();
     void globalTerrainHeightOperationsRejectInvalidRanges();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
+    void appliedTerrainDiagnosticsMatchPreApplyAndKeepProjectionLocal();
     void terrainSurfaceSamplingMatchesRuntimeCellSelection();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
@@ -3659,6 +3660,45 @@ void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()
     QVERIFY(!terrain.diagnose(saturated, QVector<STerrainObjectHeightProbe>(),
                               policy, &staleReport).valid);
     QVERIFY(staleReport.hasErrors());
+}
+
+void EnduranceDocumentTests::appliedTerrainDiagnosticsMatchPreApplyAndKeepProjectionLocal()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(1, 1, 100.0f, twoSectorTerrain(1000).mid(0, 1)));
+    STerrainBrush brush;
+    brush.centerX = 10.0f;
+    brush.centerY = 12.0f;
+    brush.radius = 2.0f;
+    brush.falloff = ETerrainBrushFalloff::Constant;
+    const STerrainHeightCommand command = terrain.makeRaiseLower(brush, 5000.0f);
+    QVERIFY(!command.isEmpty());
+
+    STerrainDiagnosticPolicy policy;
+    policy.steepSlopeDegrees = 10.0f;
+    const STerrainEditDiagnostics before = terrain.diagnose(
+        command, QVector<STerrainObjectHeightProbe>(), policy);
+    QVERIFY(before.valid);
+    QVERIFY(terrain.apply(command, true));
+    const STerrainEditDiagnostics applied = terrain.diagnoseApplied(
+        command, QVector<STerrainObjectHeightProbe>(), policy);
+    QVERIFY(applied.valid);
+    QCOMPARE(applied.changedVertexCount, before.changedVertexCount);
+    QCOMPARE(applied.affectedSectorCount, before.affectedSectorCount);
+    QCOMPARE(applied.maximumSlopeBeforeDegrees, before.maximumSlopeBeforeDegrees);
+    QCOMPARE(applied.maximumSlopeAfterDegrees, before.maximumSlopeAfterDegrees);
+    QCOMPARE(applied.steepSlopeRisk, before.steepSlopeRisk);
+
+    const STerrainHeightInfluenceBounds influence =
+        terrainHeightInfluenceBounds(command, terrain.vertexCountX(),
+                                     terrain.vertexCountY());
+    QVERIFY(influence.valid);
+    QVERIFY(influence.contains(10.0f, 12.0f));
+    QVERIFY(influence.contains(-1.0f, 12.0f));
+    QVERIFY(!influence.contains(100.0f, 12.0f));
+    QVERIFY(!terrainHeightInfluenceBounds(STerrainHeightCommand(),
+                                          terrain.vertexCountX(),
+                                          terrain.vertexCountY()).valid);
 }
 
 void EnduranceDocumentTests::terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe()

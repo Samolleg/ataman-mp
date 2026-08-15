@@ -693,6 +693,7 @@ private:
     QVector<QVector3D> m_sculptOutlineVertices;
     QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;
+    bool m_sculptGestureCaptured{false};
     bool m_sculptPointerValid{false};
     STerrainHeightCommand m_sculptStrokeCommand;
     QVector3D m_lastSculptPoint;

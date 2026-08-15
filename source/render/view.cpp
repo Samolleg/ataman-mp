@@ -12921,6 +12921,9 @@ void CView::mousePressEvent(QMouseEvent* event)
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
         && m_terrainEditAvailable && event->button() == Qt::LeftButton)
     {
+        // Landscape sculpt owns the whole pointer gesture even when an
+        // overlay-only pick misses. Never leak its drag/release to Select.
+        m_sculptGestureCaptured = true;
         const bool overlaySculpt = m_landscapeTools->overlaySculptEnabled();
         if(overlaySculpt)
             m_overlayPointerTimer->stop();
@@ -13205,8 +13208,11 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
     }
     else
     {
+        const STerrainHeightInfluenceBounds influence =
+            terrainHeightInfluenceBounds(command, m_terrainEdit.vertexCountX(),
+                                         m_terrainEdit.vertexCountY());
         for(CMob* mob : m_aMob)
-            mob->reprojectForCurrentTerrain();
+            mob->reprojectForCurrentTerrain(influence);
     }
     syncMprDirtyState();
     m_overlayMaterialSlotLabelsDirty = true;
@@ -13415,6 +13421,11 @@ void CView::mouseMoveEvent(QMouseEvent* event)
                 event->accept();
                 return;
             }
+            if(m_sculptGestureCaptured && (event->buttons() & Qt::LeftButton))
+            {
+                event->accept();
+                return;
+            }
             m_pOp->mouseMoveEvent(event);
             return;
         }
@@ -13460,17 +13471,18 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
             event->accept();
         return;
     }
-    if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
+    if(m_sculptGestureCaptured && event->button() == Qt::LeftButton)
     {
         if(m_landscapeTools && m_landscapeTools->overlaySculptEnabled())
         {
             m_overlayPointerTimer->stop();
             updateOverlaySculptPointer();
         }
-        if(m_sculptPointerValid
+        if(m_sculptStrokeActive && m_sculptPointerValid
            && m_lastSculptPoint.distanceToPoint(m_lastSculptStampPoint) > 0.01f)
             sculptTerrainTowardLatestPoint();
         finishSculptStroke();
+        m_sculptGestureCaptured = false;
         event->accept();
         return;
     }
@@ -15525,12 +15537,25 @@ bool CView::applyMprParametersPreview(
 void CView::finishSculptStroke()
 {
     if(!m_sculptStrokeActive)
+    {
+        m_sculptGestureCaptured = false;
         return;
+    }
+    QElapsedTimer releaseTimer;
+    releaseTimer.start();
+    qint64 reconciliationNsecs = 0;
+    qint64 diagnosticsNsecs = 0;
+    qint64 undoNsecs = 0;
+    qint64 reprojectionNsecs = 0;
+    qint64 stateNsecs = 0;
+    int reprojectedObjects = 0;
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
     m_sculptPointerValid = false;
     if(!m_overlaySurfaceStrokeCommand.isEmpty())
     {
+        QElapsedTimer phaseTimer;
+        phaseTimer.start();
         CValidationReport report;
         const SOverlaySurfaceCommand exactCommand =
             m_terrainEdit.makeOverlaySurfaceCommand(
@@ -15545,21 +15570,19 @@ void CView::finishSculptStroke()
         }
         else
             m_overlaySurfaceStrokeCommand = exactCommand;
+        reconciliationNsecs = phaseTimer.nsecsElapsed();
     }
     const bool overlayStroke = !m_overlaySurfaceStrokeCommand.isEmpty();
     STerrainEditDiagnostics terrainDiagnostics;
     int maximumRawDelta = 0;
     if(!overlayStroke && !m_sculptStrokeCommand.isEmpty())
     {
-        CTerrainEditModel baseline = m_terrainEdit;
-        CValidationReport restoreReport;
-        if(baseline.apply(m_sculptStrokeCommand, false, &restoreReport, false))
-        {
-            STerrainDiagnosticPolicy policy;
-            policy.steepSlopeDegrees = 60.0f;
-            terrainDiagnostics = baseline.diagnose(
-                m_sculptStrokeCommand, QVector<STerrainObjectHeightProbe>(), policy);
-        }
+        QElapsedTimer phaseTimer;
+        phaseTimer.start();
+        STerrainDiagnosticPolicy policy;
+        policy.steepSlopeDegrees = 60.0f;
+        terrainDiagnostics = m_terrainEdit.diagnoseApplied(
+            m_sculptStrokeCommand, QVector<STerrainObjectHeightProbe>(), policy);
         for(const STerrainHeightDelta& delta : m_sculptStrokeCommand.deltas)
             maximumRawDelta = qMax(maximumRawDelta,
                 qAbs(int(delta.after) - int(delta.before)));
@@ -15572,21 +15595,37 @@ void CView::finishSculptStroke()
             .arg(maximumRawDelta)
             .arg(terrainDiagnostics.maximumSlopeAfterDegrees, 0, 'f', 2)
             .arg(terrainDiagnostics.steepSlopeRisk ? "yes" : "no"));
+        diagnosticsNsecs = phaseTimer.nsecsElapsed();
     }
+    QElapsedTimer undoTimer;
+    undoTimer.start();
     if(m_pUndoStack && overlayStroke)
         m_pUndoStack->push(new COverlaySurfacePreviewCommand(
             this, m_overlaySurfaceStrokeCommand, true));
     else if(m_pUndoStack && !m_sculptStrokeCommand.isEmpty())
         m_pUndoStack->push(new CTerrainHeightPreviewCommand(
             this, m_sculptStrokeCommand, true));
+    undoNsecs = undoTimer.nsecsElapsed();
     if(m_sculptStrokeChanged)
     {
         if(!overlayStroke)
+        {
+            QElapsedTimer phaseTimer;
+            phaseTimer.start();
+            const STerrainHeightInfluenceBounds influence =
+                terrainHeightInfluenceBounds(
+                    m_sculptStrokeCommand, m_terrainEdit.vertexCountX(),
+                    m_terrainEdit.vertexCountY());
             for(CMob* mob : m_aMob)
-                mob->reprojectForCurrentTerrain();
+                reprojectedObjects += mob->reprojectForCurrentTerrain(influence);
+            reprojectionNsecs = phaseTimer.nsecsElapsed();
+        }
+        QElapsedTimer stateTimer;
+        stateTimer.start();
         syncMprDirtyState();
         m_staticShadowFingerprint.clear();
         m_farStaticShadowFingerprint.clear();
+        stateNsecs = stateTimer.nsecsElapsed();
         if(overlayStroke)
         {
             emit updateMsg(tr("Overlay sculpt stroke: %1 stamp(s), %2 sector update(s); liquid navigation may need review.")
@@ -15609,6 +15648,16 @@ void CView::finishSculptStroke()
             emit updateMsg(tr("Sculpt stroke: %1 stamp(s), %2 vertex updates; MOB placement and navigation may need review.")
                 .arg(m_sculptStrokeStamps).arg(m_sculptStrokeVertices));
     }
+    ei::log(eLogInfo, QString(
+        "Sculpt release timing: totalMs=%1 reconcileMs=%2 diagnosticsMs=%3 undoMs=%4 reprojectMs=%5 stateMs=%6 reprojectedObjects=%7")
+        .arg(double(releaseTimer.nsecsElapsed()) / 1000000.0, 0, 'f', 2)
+        .arg(double(reconciliationNsecs) / 1000000.0, 0, 'f', 2)
+        .arg(double(diagnosticsNsecs) / 1000000.0, 0, 'f', 2)
+        .arg(double(undoNsecs) / 1000000.0, 0, 'f', 2)
+        .arg(double(reprojectionNsecs) / 1000000.0, 0, 'f', 2)
+        .arg(double(stateNsecs) / 1000000.0, 0, 'f', 2)
+        .arg(reprojectedObjects));
+    m_sculptGestureCaptured = false;
 }
 
 void CView::setDurty(CMob* pMob)

@@ -173,6 +173,28 @@ struct STerrainHeightCommand
     }
 };
 
+struct STerrainHeightInfluenceBounds
+{
+    bool valid{false};
+    float minimumX{0.0f};
+    float minimumY{0.0f};
+    float maximumX{0.0f};
+    float maximumY{0.0f};
+    float terrainMaximumX{0.0f};
+    float terrainMaximumY{0.0f};
+
+    bool contains(float x, float y) const
+    {
+        const float sampleX = qBound(0.0f, x, terrainMaximumX);
+        const float sampleY = qBound(0.0f, y, terrainMaximumY);
+        return valid && sampleX >= minimumX && sampleX <= maximumX
+            && sampleY >= minimumY && sampleY <= maximumY;
+    }
+};
+
+STerrainHeightInfluenceBounds terrainHeightInfluenceBounds(
+    const STerrainHeightCommand& command, int vertexCountX, int vertexCountY);
+
 struct SOverlaySectorDelta
 {
     int sectorX{-1};
@@ -443,6 +465,11 @@ public:
         const QVector<STerrainObjectHeightProbe>& objects = QVector<STerrainObjectHeightProbe>(),
         const STerrainDiagnosticPolicy& policy = STerrainDiagnosticPolicy(),
         CValidationReport* report = nullptr) const;
+    STerrainEditDiagnostics diagnoseApplied(
+        const STerrainHeightCommand& command,
+        const QVector<STerrainObjectHeightProbe>& objects = QVector<STerrainObjectHeightProbe>(),
+        const STerrainDiagnosticPolicy& policy = STerrainDiagnosticPolicy(),
+        CValidationReport* report = nullptr) const;
     bool apply(const STerrainHeightCommand& command, bool forward,
                CValidationReport* report = nullptr,
                bool allowHeightClamping = false);
@@ -487,6 +514,11 @@ private:
                                              const STerrainBrush& brush,
                                              const QVector<float>& targets,
                                              float strength) const;
+    STerrainEditDiagnostics diagnoseState(
+        const STerrainHeightCommand& command,
+        const QVector<STerrainObjectHeightProbe>& objects,
+        const STerrainDiagnosticPolicy& policy,
+        CValidationReport* report, bool commandAlreadyApplied) const;
     bool tileLocation(int globalX, int globalY, int* sectorIndex,
                       int* localTile, CValidationReport* report = nullptr) const;
     bool overlayTileIsActive(const SSector& sector, int localTile) const;

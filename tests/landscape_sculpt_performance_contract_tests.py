@@ -55,6 +55,43 @@ class LandscapeSculptPerformanceContractTests(unittest.TestCase):
             sync.index("emit updateMainWindowTitle"),
         )
 
+    def test_release_diagnostics_do_not_clone_and_rewind_the_whole_terrain(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        finish = view.split("void CView::finishSculptStroke()", 1)[1].split(
+            "void CView::setDurty", 1
+        )[0]
+
+        self.assertIn("diagnoseApplied", finish)
+        self.assertNotIn("CTerrainEditModel baseline = m_terrainEdit", finish)
+        self.assertNotIn("baseline.apply", finish)
+
+    def test_release_reprojects_only_the_changed_terrain_footprint(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        finish = view.split("void CView::finishSculptStroke()", 1)[1].split(
+            "void CView::setDurty", 1
+        )[0]
+
+        self.assertIn("terrainHeightInfluenceBounds", finish)
+        self.assertIn("reprojectForCurrentTerrain(influence)", finish)
+        self.assertNotIn("mob->reprojectForCurrentTerrain();", finish)
+
+    def test_overlay_sculpt_miss_still_owns_the_complete_left_drag(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        press = view.split("void CView::mousePressEvent", 1)[1].split(
+            "void CView::sculptTerrainAt", 1
+        )[0]
+        move = view.split("void CView::mouseMoveEvent", 1)[1].split(
+            "void CView::mouseReleaseEvent", 1
+        )[0]
+        release = view.split("void CView::mouseReleaseEvent", 1)[1].split(
+            "QPoint CView::operationAnchor", 1
+        )[0]
+
+        self.assertIn("m_sculptGestureCaptured = true", press)
+        self.assertIn("if(m_sculptGestureCaptured", move)
+        self.assertIn("if(m_sculptGestureCaptured", release)
+        self.assertIn("m_sculptGestureCaptured = false", release)
+
 
 if __name__ == "__main__":
     unittest.main()
