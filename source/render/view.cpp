@@ -11287,6 +11287,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 : tr("No authored slot template is registered for this atlas namespace."));
             return;
         }
+        m_tileStrokeMaterialId = terrainType;
+        m_tileStrokeLayer = layer;
         STerrainTileBrush vertexBrush = brush;
         vertexBrush.centerX = detailVertex.x();
         vertexBrush.centerY = detailVertex.y();
@@ -11405,6 +11407,23 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 m_tileStrokeDistributionSeed, &report,
                 m_landscapeTools
                     && m_landscapeTools->randomizeUniformRotation());
+
+        if(classicAuto && m_tileStrokeSafeMode)
+        {
+            for(const SValidationFinding& finding : report.findings())
+            {
+                bool countValid = false;
+                const int count = finding.location.toInt(&countValid);
+                if(!countValid)
+                    continue;
+                if(finding.code == QStringLiteral(
+                       "terrain.semantic_stroke_exact_only_skip"))
+                    m_tileStrokeSafeSkippedVertices += count;
+                else if(finding.code == QStringLiteral(
+                            "terrain.semantic_hard_edge"))
+                    m_tileStrokeSafeSkippedBoundaryCells += count;
+            }
+        }
 
         if(classicAuto && tileTarget && !report.hasErrors())
         {
@@ -11736,9 +11755,22 @@ void CView::endTileBrushGroup()
                     vertices, anchors, m_classicAutoStrokeLayer,
                     m_classicAutoStrokeMaterialId, catalog,
                     m_tileStrokeDistributionSeed, &report,
-                    m_landscapeTools && m_landscapeTools->classicAutoSafeMode()
+                    m_tileStrokeSafeMode
                         ? ETerrainSemanticPaintPolicy::ExactExistingOnly
                         : ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
+            if(m_tileStrokeSafeMode)
+            {
+                for(const SValidationFinding& finding : report.findings())
+                {
+                    if(finding.code != QStringLiteral(
+                           "terrain.semantic_stroke_exact_only_skip"))
+                        continue;
+                    bool countValid = false;
+                    const int count = finding.location.toInt(&countValid);
+                    if(countValid)
+                        m_tileStrokeSafeSkippedVertices += count;
+                }
+            }
             // Classic Auto changes physical authored tiles, but a map that
             // has already used Modern also owns an independent exact vertex
             // field. Keep both representations in the same undoable command
@@ -11966,18 +11998,44 @@ void CView::endTileBrushGroup()
         m_pLand->setDirty(m_terrainEdit.isDirty());
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
-        emit updateMsg(tr("Terrain stroke: %1 stamp(s), %2 changed tile(s), %3 no-op, %4 refused.%5")
+        const QString safeDetail = m_tileStrokeSafeMode
+            && (m_tileStrokeSafeSkippedVertices > 0
+                || m_tileStrokeSafeSkippedBoundaryCells > 0)
+            ? tr(" Classic Auto Safe preserved %1 unsupported vertex/vertices and %2 boundary cell(s) unchanged.")
+                .arg(m_tileStrokeSafeSkippedVertices)
+                .arg(m_tileStrokeSafeSkippedBoundaryCells)
+            : QString();
+        emit updateMsg(tr("Terrain stroke: %1 stamp(s), %2 changed tile(s), %3 no-op, %4 refused.%5%6")
             .arg(m_tileStrokeActions).arg(m_tileStrokeChangedTiles)
             .arg(m_tileStrokeNoOps).arg(m_tileStrokeRefused)
             .arg(m_tileStrokeUndoCheckpointed
                 ? tr(" Preview cache checkpointed; earlier undo history was cleared.")
-                : QString()));
+                : QString()).arg(safeDetail));
+        const QString paletteLabel = m_tileStrokePaletteMode
+                == int(ETerrainPaintPaletteMode::Modern)
+            ? QStringLiteral("modern")
+            : m_tileStrokePaletteMode == int(ETerrainPaintPaletteMode::ClassicAuto)
+                ? QStringLiteral("classic-auto")
+                : m_tileStrokePaletteMode == int(ETerrainPaintPaletteMode::Manual)
+                    ? QStringLiteral("manual") : QStringLiteral("unknown");
+        const QString targetLabel = m_tileStrokeTargetMode
+                == int(ETerrainPaintTargetMode::Tile)
+            ? QStringLiteral("tile")
+            : m_tileStrokeTargetMode == int(ETerrainPaintTargetMode::Vertex)
+                ? QStringLiteral("vertex") : QStringLiteral("unknown");
         ei::log(m_tileStrokeRefused > 0 ? eLogWarning : eLogInfo,
-            QString("Terrain paint stroke %1 summary: actions=%2 applied=%3 no-op=%4 refused=%5 changed=%6 solverNodes=%7")
-                .arg(m_tileBrushCommandId).arg(m_tileStrokeActions)
+            QString("Terrain paint stroke %1 summary: palette=%2 target=%3 safe=%4 layer=%5 material=%6 actions=%7 applied=%8 no-op=%9 refused=%10 changed=%11 solverNodes=%12 safeSkippedVertices=%13 safeSkippedBoundary=%14")
+                .arg(m_tileBrushCommandId).arg(paletteLabel).arg(targetLabel)
+                .arg(m_tileStrokeSafeMode ? QStringLiteral("true")
+                                          : QStringLiteral("false"))
+                .arg(m_tileStrokeLayer == ETerrainTileLayer::Land
+                         ? QStringLiteral("land") : QStringLiteral("overlay"))
+                .arg(m_tileStrokeMaterialId).arg(m_tileStrokeActions)
                 .arg(m_tileStrokeApplied).arg(m_tileStrokeNoOps)
                 .arg(m_tileStrokeRefused).arg(m_tileStrokeChangedTiles)
-                .arg(m_tileStrokeSolverNodes));
+                .arg(m_tileStrokeSolverNodes)
+                .arg(m_tileStrokeSafeSkippedVertices)
+                .arg(m_tileStrokeSafeSkippedBoundaryCells));
         // Resolution happens after mouse release. Present the completed atlas
         // texture and rebuilt sector VBOs immediately instead of waiting for
         // a later camera/input event to trigger another frame.
@@ -12154,6 +12212,12 @@ void CView::beginTileBrushGroup()
     m_tilePaintStrokeActive = true;
     m_tileStrokeClassicAuto = m_landscapeTools
         && m_landscapeTools->classicAutoPaintingEnabled();
+    m_tileStrokePaletteMode = m_landscapeTools
+        ? int(m_landscapeTools->paintPaletteMode()) : -1;
+    m_tileStrokeTargetMode = m_landscapeTools
+        ? int(m_landscapeTools->paintTargetMode()) : -1;
+    m_tileStrokeSafeMode = m_tileStrokeClassicAuto
+        && m_landscapeTools->classicAutoSafeMode();
     // Draw one nonce only when a new committed stroke begins. Every preview
     // recomputation within that stroke keeps this immutable seed; undo/redo
     // later replays captured packed values and never consults randomness.
@@ -12179,6 +12243,10 @@ void CView::beginTileBrushGroup()
     m_tileStrokeRefused = 0;
     m_tileStrokeChangedTiles = 0;
     m_tileStrokeSolverNodes = 0;
+    m_tileStrokeMaterialId = -1;
+    m_tileStrokeLayer = ETerrainTileLayer::Land;
+    m_tileStrokeSafeSkippedVertices = 0;
+    m_tileStrokeSafeSkippedBoundaryCells = 0;
     m_tileStrokeUndoCheckpointed = false;
 }
 
@@ -14137,6 +14205,9 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
 
 void CView::changeOperation(EButtonOp type, bool preserveLandscapeEditing)
 {
+    if(m_pOp && !landscapeOperationNeedsTransition(
+           type, m_pOp->operationMethod()))
+        return;
     cancelPendingOperation();
     const bool landscapePaintMode = m_landscapeTools
         && (m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint

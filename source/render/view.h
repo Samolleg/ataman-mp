@@ -656,6 +656,13 @@ private:
     int m_tileStrokeRefused{0};
     int m_tileStrokeChangedTiles{0};
     int m_tileStrokeSolverNodes{0};
+    int m_tileStrokePaletteMode{-1};
+    int m_tileStrokeTargetMode{-1};
+    bool m_tileStrokeSafeMode{false};
+    qint32 m_tileStrokeMaterialId{-1};
+    ETerrainTileLayer m_tileStrokeLayer{ETerrainTileLayer::Land};
+    int m_tileStrokeSafeSkippedVertices{0};
+    int m_tileStrokeSafeSkippedBoundaryCells{0};
     bool m_tileStrokeUndoCheckpointed{false};
     bool m_terrainPreviewBatchActive{false};
     QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;

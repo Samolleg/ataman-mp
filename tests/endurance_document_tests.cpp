@@ -8,6 +8,7 @@
 
 #include "endurance_document.h"
 #include "landscape_edit_policy.h"
+#include "landscape_operation_policy.h"
 #include "terrain_atlas_shape_policy.h"
 #include "terrain_save_flow_policy.h"
 #include "mmp_codec.h"
@@ -4325,6 +4326,16 @@ void EnduranceDocumentTests::manualPaintShowsCellFootprintAndLiftedTilePreview()
     QCOMPARE(terrainPaintOutlineWorldCenter(4, false), 8.0f);
     QCOMPARE(terrainPaintOutlineWorldCenter(4, true), 9.0f);
     QVERIFY(terrainTilePreviewElevation() > 0.0f);
+
+    // A palette update raised synchronously from held-RMB sampling must not
+    // replace the CTileBrush whose mouse handler is still executing.
+    QVERIFY(!landscapeOperationNeedsTransition(
+        EButtonOpTilebrush, eOperationMethodTileBrush));
+    QVERIFY(landscapeOperationNeedsTransition(
+        EButtonOpTilebrush, eOperationMethodSelect));
+    // Other same-tool requests retain their existing transition semantics.
+    QVERIFY(landscapeOperationNeedsTransition(
+        EButtonOpSelect, eOperationMethodSelect));
 
     // Tile-target semantic painting retains its Manual-style cell footprint
     // even when the selected family has no optional physical preview tile.
