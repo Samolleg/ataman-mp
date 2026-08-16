@@ -786,6 +786,21 @@ struct SReviewedCanonicalMask
 const SReviewedCanonicalMask* reviewedCanonicalMask(
     ETerrainBlendStyle style, const QString& topology)
 {
+    // R155 full effective-mask review rejected the last live mathematical
+    // stone edge variant.  Reuse the approved R44 authored stone edge profile
+    // as the reviewed source; approvedReviewedMask() mirrors/rotates it to the
+    // requested edge-v2 corner ownership instead of using procedural geometry.
+    static const SReviewedCanonicalMask r155Masks[] = {
+        {ETerrainBlendStyle::Stone, "edge-2of4-v2",
+         ":/terrain_blend_masks/terrain_blend_masks/stone-edge-2of4-v1-r44-repaired.png",
+         "3555e3e95a387d04d219e71cd0de3e8bde69d4bf369cc566f007ee66e83a7090",
+         "canonical-generated:stone-fracture:edge-2of4-v2:r155-approved-from-edge-v1"}
+    };
+    for(const SReviewedCanonicalMask& mask : r155Masks)
+        if(mask.style == style
+           && topology == QString::fromLatin1(mask.topology))
+            return &mask;
+
     // R123 explicitly reviewed Lava against the real approved-HD Red and
     // Orange uniforms. Lava has no authored transition family, so reuse only
     // the selected, already-approved ownership mattes instead of reaching the

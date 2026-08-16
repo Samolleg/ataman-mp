@@ -1337,24 +1337,43 @@ void TerrainVirtualAtlasTests::canonicalMasksAreAvailableWithoutStockTemplates()
 
 void TerrainVirtualAtlasTests::contextFreeResolutionUsesReviewedMaterialMask()
 {
-    Fixture fixture;
-    QMap<qint32, ETerrainBlendStyle> styles;
-    styles.insert(1, ETerrainBlendStyle::Soil);
-    styles.insert(2, ETerrainBlendStyle::Grass);
-    CTestTerrainVirtualAtlas atlas(
-        fixture.catalog, fixture.images, 0x52455657u, {}, styles);
-    QVERIFY(atlas.isValid());
+    struct ReviewedCase
+    {
+        STerrainTransitionSignature signature;
+        qint32 ownerMaterial;
+        ETerrainBlendStyle ownerStyle;
+        const char* expectedProvenance;
+    };
+    const ReviewedCase cases[] = {
+        {signature(2, 1, 1, 1), 1, ETerrainBlendStyle::Soil, ""},
+        {signature(2, 1, 1, 2), 2, ETerrainBlendStyle::Stone,
+         "canonical-generated:stone-fracture:edge-2of4-v2:r155-approved-from-edge-v1"}
+    };
 
-    CValidationReport report;
-    const STerrainVirtualTile resolved = atlas.resolve(
-        signature(2, 1, 1, 1), 0, 0, &report);
-    QVERIFY2(resolved.generatedIndex >= 0, qPrintable(report.toText()));
-    const QString provenance = atlas.generatedTiles().at(
-        resolved.generatedIndex).blendProvenance;
-    QVERIFY2(provenance.contains(QStringLiteral("-approved")),
-             qPrintable(QStringLiteral(
-                 "Context-free production resolution used an unreviewed mathematical mask: %1")
-                 .arg(provenance)));
+    for(const ReviewedCase& item : cases)
+    {
+        Fixture fixture;
+        QMap<qint32, ETerrainBlendStyle> styles;
+        styles.insert(item.ownerMaterial, item.ownerStyle);
+        styles.insert(item.ownerMaterial == 1 ? 2 : 1,
+                      ETerrainBlendStyle::Grass);
+        CTestTerrainVirtualAtlas atlas(
+            fixture.catalog, fixture.images, 0x52455657u, {}, styles);
+        QVERIFY(atlas.isValid());
+
+        CValidationReport report;
+        const STerrainVirtualTile resolved = atlas.resolve(
+            item.signature, 0, 0, &report, item.ownerMaterial);
+        QVERIFY2(resolved.generatedIndex >= 0, qPrintable(report.toText()));
+        const QString provenance = atlas.generatedTiles().at(
+            resolved.generatedIndex).blendProvenance;
+        if(item.expectedProvenance[0] != '\0')
+            QCOMPARE(provenance, QString::fromLatin1(item.expectedProvenance));
+        QVERIFY2(provenance.contains(QStringLiteral("-approved")),
+                 qPrintable(QStringLiteral(
+                     "Context-free production resolution used an unreviewed mathematical mask: %1")
+                     .arg(provenance)));
+    }
 }
 
 void TerrainVirtualAtlasTests::lavaUsesOnlyExplicitR123ReviewedMaskRoutes()
