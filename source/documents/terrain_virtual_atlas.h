@@ -396,6 +396,16 @@ public:
     int capacityLimit() const { return m_capacityLimit; }
     int generatedTileCount() const;
     int activeTextureCount() const;
+    // Resolve Missing Blends plans against an isolated copy.  The live cache
+    // is changed only when the caller has accepted the complete repair.
+    QSharedPointer<CTerrainWorkingAtlas> createStagingCopy() const;
+    bool canCommitStaging(const CTerrainWorkingAtlas& staged) const;
+    bool commitStaging(const CTerrainWorkingAtlas& staged);
+    int workingMappingCount() const { return m_virtualToWorking.size(); }
+    int catalogVariantCount() const { return m_workingCatalog.size(); }
+    QSet<int> changedSlots() const { return m_changedSlots; }
+    QByteArray stateFingerprint() const;
+    void acknowledgeChangedSlots(const QSet<int>& changed);
     void setDistributionSeed(quint32 seed)
     { if(m_resolver) m_resolver->setDistributionSeed(seed); }
     QSet<int> takeChangedSlots();

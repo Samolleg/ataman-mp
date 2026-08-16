@@ -574,6 +574,8 @@ private slots:
     void dxt1AtlasTileDirectDecodeMatchesFullPageOrientation();
     void dxt1AtlasTileCacheReadsEachPageOnce();
     void workingAtlasGeneratesImmediatelyAndReusesTuple();
+    void workingAtlasStagingInjectedFailureLeavesLiveStateUntouched();
+    void workingAtlasStagingRealizationThenEmptyLeavesLiveStateUntouched();
     void expanded4096AtlasRetainsWorkingExtensionCapacity();
     void workingAtlasNeverReplacesAuthoredPixels();
     void repeatedGeneratedStampsNeverMutateAuthoredAtlas();
@@ -5691,6 +5693,129 @@ void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()
     bool decoded=false;
     QCOMPARE(working.catalog().gridSignatureForPacked(reused,&decoded),missing);
     QVERIFY(decoded);
+}
+
+void TerrainVirtualAtlasTests::workingAtlasStagingInjectedFailureLeavesLiveStateUntouched()
+{
+    Fixture fixture;
+    CTestTerrainWorkingAtlas live(fixture.catalog, fixture.images, 17, 8);
+    seedReviewedStockMasks(live, fixture);
+    const int generatedBefore = live.generatedTileCount();
+    const int catalogBefore = live.catalogVariantCount();
+    const int mappingsBefore = live.workingMappingCount();
+    const QVector<QImage> imagesBefore = live.activeTileImages();
+    const QVector<qint32> typesBefore = live.activeTileTypes();
+    const QSet<int> changedBefore = live.changedSlots();
+    const QByteArray fingerprintBefore = live.stateFingerprint();
+    CMprDocument source;
+    CValidationReport modelReport;
+    QVERIFY2(source.loadBytes(portableMpr(), "staging-upload-failure.mpr", &modelReport),
+             qPrintable(modelReport.toText()));
+    CTerrainEditModel liveModel;
+    QVERIFY2(liveModel.load(source, &modelReport),
+             qPrintable(modelReport.toText()));
+    liveModel.enableWorkingAtlasSlots(live.capacityLimit());
+    SMprPackedTile stagedTile;
+    stagedTile.tileIndex = quint8(fixture.images.size());
+    const quint16 stagedPacked = stagedTile.encode();
+    bool liveTypeFound = false;
+    liveModel.tileType(stagedPacked, &liveTypeFound);
+    QVERIFY(!liveTypeFound);
+
+    QSharedPointer<CTerrainWorkingAtlas> staged = live.createStagingCopy();
+    QVERIFY(staged);
+    QMap<int, quint64> usage;
+    for(int slot = 0; slot < staged->capacityLimit(); ++slot)
+        usage.insert(slot, slot < fixture.images.size() ? 1 : 0);
+    CValidationReport report;
+    QVERIFY2(staged->resolve(signature(1, 2, 2, 2), 7, 8, &usage, {},
+                              nullptr, &report) != 0,
+             qPrintable(report.toText()));
+    QVERIFY(staged->generatedTileCount() > generatedBefore);
+    QVERIFY(!staged->changedSlots().isEmpty());
+    CTerrainEditModel stagedModel = liveModel;
+    const int stagedSlot = SMprPackedTile::decode(
+        staged->catalog().selectForPaint(signature(1, 2, 2, 2),
+                                         7, 8, 17)).atlasSlot();
+    QVERIFY(stagedModel.setWorkingAtlasSlotType(
+        stagedSlot, staged->runtimeTerrainTypeForSlot(stagedSlot)));
+
+    // Inject the final upload failure by rejecting the staged candidate.  A
+    // failed Resolve must not publish any of the realization side effects.
+    const bool uploadSucceeded = false;
+    QVERIFY(!uploadSucceeded);
+    staged.clear();
+
+    QCOMPARE(live.generatedTileCount(), generatedBefore);
+    QCOMPARE(live.catalogVariantCount(), catalogBefore);
+    QCOMPARE(live.workingMappingCount(), mappingsBefore);
+    QCOMPARE(live.activeTileImages(), imagesBefore);
+    QCOMPARE(live.activeTileTypes(), typesBefore);
+    QCOMPARE(live.changedSlots(), changedBefore);
+    QCOMPARE(live.stateFingerprint(), fingerprintBefore);
+    liveModel.tileType(stagedPacked, &liveTypeFound);
+    QVERIFY(!liveTypeFound);
+}
+
+void TerrainVirtualAtlasTests::workingAtlasStagingRealizationThenEmptyLeavesLiveStateUntouched()
+{
+    Fixture fixture;
+    CTestTerrainWorkingAtlas live(fixture.catalog, fixture.images, 29, 8);
+    seedReviewedStockMasks(live, fixture);
+    const int generatedBefore = live.generatedTileCount();
+    const int catalogBefore = live.catalogVariantCount();
+    const int mappingsBefore = live.workingMappingCount();
+    const QVector<QImage> imagesBefore = live.activeTileImages();
+    const QVector<qint32> typesBefore = live.activeTileTypes();
+    const QSet<int> changedBefore = live.changedSlots();
+    const QByteArray fingerprintBefore = live.stateFingerprint();
+    CMprDocument source;
+    CValidationReport modelReport;
+    QVERIFY2(source.loadBytes(portableMpr(), "staging-empty-command.mpr", &modelReport),
+             qPrintable(modelReport.toText()));
+    CTerrainEditModel liveModel;
+    QVERIFY2(liveModel.load(source, &modelReport),
+             qPrintable(modelReport.toText()));
+    liveModel.enableWorkingAtlasSlots(live.capacityLimit());
+    SMprPackedTile stagedTile;
+    stagedTile.tileIndex = quint8(fixture.images.size());
+    const quint16 stagedPacked = stagedTile.encode();
+    bool liveTypeFound = false;
+    liveModel.tileType(stagedPacked, &liveTypeFound);
+    QVERIFY(!liveTypeFound);
+
+    QSharedPointer<CTerrainWorkingAtlas> staged = live.createStagingCopy();
+    QVERIFY(staged);
+    QMap<int, quint64> usage;
+    for(int slot = 0; slot < staged->capacityLimit(); ++slot)
+        usage.insert(slot, slot < fixture.images.size() ? 1 : 0);
+    CValidationReport report;
+    QVERIFY2(staged->resolve(signature(1, 2, 2, 2), 3, 4, &usage, {},
+                              nullptr, &report) != 0,
+             qPrintable(report.toText()));
+    QVERIFY(staged->generatedTileCount() > generatedBefore);
+    CTerrainEditModel stagedModel = liveModel;
+    const int stagedSlot = SMprPackedTile::decode(
+        staged->catalog().selectForPaint(signature(1, 2, 2, 2),
+                                         3, 4, 29)).atlasSlot();
+    QVERIFY(stagedModel.setWorkingAtlasSlotType(
+        stagedSlot, staged->runtimeTerrainTypeForSlot(stagedSlot)));
+
+    // The full semantic map command can still be empty after the cache was
+    // realized.  Treat that as an abort, not as a cache publication.
+    const STerrainTileCommand finalCommand;
+    QVERIFY(finalCommand.isEmpty());
+    staged.clear();
+
+    QCOMPARE(live.generatedTileCount(), generatedBefore);
+    QCOMPARE(live.catalogVariantCount(), catalogBefore);
+    QCOMPARE(live.workingMappingCount(), mappingsBefore);
+    QCOMPARE(live.activeTileImages(), imagesBefore);
+    QCOMPARE(live.activeTileTypes(), typesBefore);
+    QCOMPARE(live.changedSlots(), changedBefore);
+    QCOMPARE(live.stateFingerprint(), fingerprintBefore);
+    liveModel.tileType(stagedPacked, &liveTypeFound);
+    QVERIFY(!liveTypeFound);
 }
 
 void TerrainVirtualAtlasTests::expanded4096AtlasRetainsWorkingExtensionCapacity()

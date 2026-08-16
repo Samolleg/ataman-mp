@@ -3884,6 +3884,138 @@ int CTerrainWorkingAtlas::generatedTileCount() const
     return m_resolver ? m_resolver->generatedTiles().size() : 0;
 }
 
+QSharedPointer<CTerrainWorkingAtlas>
+CTerrainWorkingAtlas::createStagingCopy() const
+{
+    // QSharedPointer itself would share the mutable resolver.  Resolve uses
+    // that resolver to append generated and imported-library entries, so a
+    // shallow copy would still leak failed/no-op planning back into the live
+    // working atlas.  All other members are value containers.
+    QSharedPointer<CTerrainWorkingAtlas> staged(
+        new CTerrainWorkingAtlas(*this));
+    if(m_resolver)
+        staged->m_resolver.reset(new CTerrainVirtualAtlas(*m_resolver));
+    return staged;
+}
+
+bool CTerrainWorkingAtlas::canCommitStaging(
+    const CTerrainWorkingAtlas& staged) const
+{
+    if(this == &staged)
+        return true;
+    // A staging copy is valid only for the atlas that created it.  Never let
+    // an unrelated atlas replace the immutable authored baseline.
+    if(m_capacityLimit != staged.m_capacityLimit
+       || m_authoredSlotCount != staged.m_authoredSlotCount
+       || m_authoredImages != staged.m_authoredImages
+       || m_workingImages.size() != staged.m_workingImages.size()
+       || m_workingTileTypes.size() != staged.m_workingTileTypes.size()
+       || bool(m_resolver) != bool(staged.m_resolver))
+        return false;
+
+    return true;
+}
+
+bool CTerrainWorkingAtlas::commitStaging(
+    const CTerrainWorkingAtlas& staged)
+{
+    if(!canCommitStaging(staged))
+        return false;
+
+    m_workingCatalog = staged.m_workingCatalog;
+    m_workingImages = staged.m_workingImages;
+    m_workingTileTypes = staged.m_workingTileTypes;
+    m_virtualToWorking = staged.m_virtualToWorking;
+    m_workingToVirtual = staged.m_workingToVirtual;
+    m_changedSlots = staged.m_changedSlots;
+    if(staged.m_resolver)
+        m_resolver.reset(new CTerrainVirtualAtlas(*staged.m_resolver));
+    else
+        m_resolver.reset();
+    return true;
+}
+
+QByteArray CTerrainWorkingAtlas::stateFingerprint() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    const auto addInt = [&hash](qint32 value) {
+        char bytes[sizeof(value)];
+        qToLittleEndian<qint32>(value, reinterpret_cast<uchar*>(bytes));
+        hash.addData(bytes, sizeof(bytes));
+    };
+    const auto addBytes = [&hash, &addInt](const QByteArray& value) {
+        addInt(value.size());
+        hash.addData(value);
+    };
+    const auto addSignature = [&addInt](
+        const STerrainTransitionSignature& signature) {
+        addInt(signature.northWest);
+        addInt(signature.northEast);
+        addInt(signature.southEast);
+        addInt(signature.southWest);
+    };
+
+    hash.addData("terrain-working-atlas-state-v1");
+    addInt(m_capacityLimit);
+    addInt(m_authoredSlotCount);
+    addInt(m_workingCatalog.size());
+    const QVector<STerrainTransitionSignature> catalogSignatures =
+        m_workingCatalog.gridSignatures();
+    addInt(catalogSignatures.size());
+    for(const STerrainTransitionSignature& signature : catalogSignatures)
+        addSignature(signature);
+    addInt(m_workingImages.size());
+    for(const QImage& image : m_workingImages)
+        addBytes(imageHash(image));
+    addInt(m_workingTileTypes.size());
+    for(qint32 type : m_workingTileTypes)
+        addInt(type);
+    addInt(m_virtualToWorking.size());
+    for(auto mapping = m_virtualToWorking.constBegin();
+        mapping != m_virtualToWorking.constEnd(); ++mapping)
+    {
+        addInt(mapping.key().first);
+        addInt(mapping.key().second);
+        addInt(mapping.value());
+    }
+    addInt(m_workingToVirtual.size());
+    for(auto mapping = m_workingToVirtual.constBegin();
+        mapping != m_workingToVirtual.constEnd(); ++mapping)
+    {
+        addInt(mapping.key());
+        addInt(mapping.value().first);
+        addInt(mapping.value().second);
+    }
+    addInt(m_changedSlots.size());
+    for(int slot : m_changedSlots)
+        addInt(slot);
+    const QVector<STerrainFinalizedTile> generated = m_resolver
+        ? m_resolver->generatedTiles() : QVector<STerrainFinalizedTile>();
+    addInt(generated.size());
+    for(const STerrainFinalizedTile& tile : generated)
+    {
+        addSignature(tile.canonicalSignature);
+        addBytes(tile.pixelSha256);
+        addInt(tile.authored ? 1 : 0);
+        addInt(tile.sourceSlot);
+        addBytes(tile.sourceNamespace.toUtf8());
+        addBytes(tile.blendProvenance.toUtf8());
+        addInt(tile.stockDerivedBlend ? 1 : 0);
+        addInt(tile.canonicalGeneratedBlend ? 1 : 0);
+        addInt(tile.runtimeTerrainType);
+        addInt(tile.sourceSlotAliases.size());
+        for(int alias : tile.sourceSlotAliases)
+            addInt(alias);
+    }
+    return hash.result();
+}
+
+void CTerrainWorkingAtlas::acknowledgeChangedSlots(const QSet<int>& changed)
+{
+    for(int slot : changed)
+        m_changedSlots.remove(slot);
+}
+
 bool CTerrainWorkingAtlas::addAuthoredLibraryTransition(
     const STerrainTransitionSignature& signature, const QImage& pixels,
     const QString& sourceLabel, CValidationReport* report,
