@@ -463,7 +463,7 @@ public:
         quint32 distributionSeed,
         CValidationReport* report = nullptr,
         ETerrainSemanticPaintPolicy policy =
-            ETerrainSemanticPaintPolicy::AllowLocalHardEdges) const;
+            ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
     STerrainTileCommand makeSemanticVertexPaint(
         int selectedCellX, int selectedCellY,
         const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
@@ -472,7 +472,7 @@ public:
         CValidationReport* report = nullptr,
         qint32 preferredSupportId = 0,
         ETerrainSemanticPaintPolicy policy =
-            ETerrainSemanticPaintPolicy::AllowLocalHardEdges) const;
+            ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
     STerrainTileCommand makeSemanticVertexStrokePaint(
         const QVector<QPoint>& requestedVertices,
         const QVector<QPoint>& anchorVertices,
@@ -481,7 +481,7 @@ public:
         quint32 distributionSeed,
         CValidationReport* report = nullptr,
         ETerrainSemanticPaintPolicy policy =
-            ETerrainSemanticPaintPolicy::AllowLocalHardEdges) const;
+            ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
     // Modern flow: material identity is committed to an independent vertex
     // field. Drag preview is deliberately uniform; release prefers authored
     // exact tiles. The caller must realize absent tuples in the live working
@@ -516,13 +516,15 @@ public:
     bool inferCellSignatureFromNeighbors(
         int cellX, int cellY, ETerrainTileLayer layer,
         const CTerrainTransitionCatalog& catalog,
-        STerrainTransitionSignature* output) const;
+        STerrainTransitionSignature* output,
+        const QMap<int, STerrainTransitionSignature>* plannedSignatures = nullptr) const;
     bool missingBlendRepairSignature(
         int cellX, int cellY, ETerrainTileLayer layer,
         const CTerrainTransitionCatalog& catalog,
         const CTerrainVirtualMaterialField* repairField,
         bool repairDecodedCells,
-        STerrainTransitionSignature* output) const;
+        STerrainTransitionSignature* output,
+        const QMap<int, STerrainTransitionSignature>* plannedSignatures = nullptr) const;
     bool copyVirtualMaterialField(ETerrainTileLayer layer,
         CTerrainVirtualMaterialField* output,
         bool requireComplete = true) const;
@@ -540,7 +542,7 @@ public:
         int selectedCellX, int selectedCellY, int vertexX, int vertexY,
         ETerrainTileLayer layer, qint32 materialId,
         const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr);
     bool apply(const STerrainTileCommand& command, bool forward,
                CValidationReport* report = nullptr);
     bool apply(const SOverlaySurfaceCommand& command, bool forward,
@@ -593,6 +595,12 @@ private:
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed, CValidationReport* report,
         bool randomizeUniformRotation);
+    bool appendSemanticVirtualVertices(
+        STerrainTileCommand* command,
+        const QVector<QPoint>& acceptedVertices,
+        ETerrainTileLayer layer, qint32 materialId,
+        const CTerrainTransitionCatalog& catalog,
+        CValidationReport* report);
 
     int m_sectorCountX{0};
     int m_sectorCountY{0};

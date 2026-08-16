@@ -7,6 +7,7 @@
 #include <QRegularExpression>
 #include <QTransform>
 #include <cmath>
+#include <limits>
 
 #include "endurance_document.h"
 #include "mmp_codec.h"
@@ -550,11 +551,15 @@ private slots:
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void virtualTilePaintTargetsFourCellCorners();
     void mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly();
+    void mapResolutionReachesFixedPointInOneCommand();
+    void mapResolutionPrefersAuthoritativeVirtualField();
     void mapResolutionDoesNotChooseAWinningSideForTiedBorders();
     void recoveredMapResolutionPreservesDecodedContextStamps();
     void recoveredMapResolutionRepairsDecodedWrongBlend();
     void recoveredMapResolutionExcludesTheCellBeingJudged();
     void classicAutoStrokeRefusesMissingBlendAndRollsBackExactly();
+    void classicSemanticCommandsEstablishVirtualField();
+    void contextualClassicVirtualFieldTracksAcceptedVertices();
     void overlayVirtualPaintAllowsSparseInactiveField();
     void collapsedUniformBaselineRecoversExactRotatedBlend();
     void overlappingVirtualPaintDoesNotReplaceUnchangedEdgeBlendWithUniformPreview();
@@ -3987,6 +3992,183 @@ void TerrainVirtualAtlasTests::mapResolutionRepairsWrongPhysicalBlendAndUndoesEx
     QCOMPARE(model.packedTile(8,8,ETerrainTileLayer::Land),quint16(1));
 }
 
+void TerrainVirtualAtlasTests::mapResolutionReachesFixedPointInOneCommand()
+{
+    Fixture fixture;
+    STerrainTransitionVariant vertical;
+    vertical.signature = signature(1, 2, 2, 1);
+    vertical.packedTile = 4;
+    QVERIFY(fixture.catalog.addVariant(vertical));
+    STerrainTransitionVariant damaged;
+    damaged.signature = signature(1, 2, 1, 2);
+    damaged.packedTile = 5;
+    QVERIFY(fixture.catalog.addVariant(damaged));
+
+    QByteArray payload;
+    QDataStream stream(&payload, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(64, 1), 0));
+
+    // A coherent vertical 1/2 boundary is present everywhere except for a
+    // long consecutive damaged chain. Each lower cell can be inferred only
+    // after its upper neighbour is considered, so one map-resolution command
+    // must settle the complete connected repair rather than requiring a
+    // second user invocation or repeated full-map scans.
+    STerrainTileCommand setup;
+    for(int y = 0; y < 16; ++y)
+        for(int x = 8; x < 16; ++x)
+        {
+            STerrainTileDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.layer = ETerrainTileLayer::Land;
+            delta.before = 0;
+            delta.after = x == 8 ? 4 : 1;
+            setup.deltas.append(delta);
+        }
+    QVERIFY(model.apply(setup, true, &report));
+    STerrainTileCommand corrupt;
+    for(int y = 3; y <= 12; ++y)
+    {
+        STerrainTileDelta delta;
+        delta.globalX = 8;
+        delta.globalY = y;
+        delta.layer = ETerrainTileLayer::Land;
+        delta.before = 4;
+        delta.after = 5;
+        corrupt.deltas.append(delta);
+    }
+    QVERIFY(model.apply(corrupt, true, &report));
+
+    CTerrainVirtualMaterialField sparseRecovery;
+    QVERIFY(sparseRecovery.resize(model.tileCountX(), model.tileCountY()));
+    for(int y = 0; y <= sparseRecovery.tileHeight(); ++y)
+        for(int x = 0; x <= sparseRecovery.tileWidth(); ++x)
+            sparseRecovery.setMaterial(
+                x, y, std::numeric_limits<qint32>::min());
+    CValidationReport repairReport;
+    const STerrainTileCommand repair = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x46495850u,
+        &repairReport, false, &sparseRecovery, true, false);
+    QVERIFY2(!repairReport.hasErrors(), qPrintable(repairReport.toText()));
+    QCOMPARE(repair.deltas.size(), 10);
+    QSet<QPair<int, int>> repaired;
+    for(const STerrainTileDelta& delta : repair.deltas)
+    {
+        QCOMPARE(delta.after, quint16(4));
+        repaired.insert(qMakePair(delta.globalX, delta.globalY));
+    }
+    QSet<QPair<int, int>> expected;
+    for(int y = 3; y <= 12; ++y)
+        expected.insert(qMakePair(8, y));
+    QCOMPARE(repaired, expected);
+    QVERIFY(model.apply(repair, true, &report));
+
+    CValidationReport settledReport;
+    const STerrainTileCommand settled = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x46495850u,
+        &settledReport, false, &sparseRecovery, true, false);
+    QVERIFY2(!settledReport.hasErrors(), qPrintable(settledReport.toText()));
+    QVERIFY2(settled.isEmpty(),
+             "Resolve Missing Blends must be idempotent after one command");
+}
+
+void TerrainVirtualAtlasTests::mapResolutionPrefersAuthoritativeVirtualField()
+{
+    Fixture fixture;
+    STerrainTransitionVariant vertical;
+    vertical.signature = signature(1, 2, 2, 1);
+    vertical.packedTile = 4;
+    QVERIFY(fixture.catalog.addVariant(vertical));
+    STerrainTransitionVariant inverse;
+    inverse.signature = signature(2, 1, 1, 2);
+    inverse.packedTile = 5;
+    QVERIFY(fixture.catalog.addVariant(inverse));
+
+    QByteArray payload;
+    QDataStream stream(&payload, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(64, 1), 0));
+
+    STerrainTileCommand setup;
+    for(int y = 0; y < 16; ++y)
+        for(int x = 8; x < 16; ++x)
+        {
+            STerrainTileDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.layer = ETerrainTileLayer::Land;
+            delta.before = 0;
+            delta.after = x == 8 ? 4 : 1;
+            setup.deltas.append(delta);
+        }
+    QVERIFY(model.apply(setup, true, &report));
+    QVERIFY2(model.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, fixture.catalog, &report),
+             qPrintable(report.toText()));
+
+    STerrainTileCommand damage;
+    STerrainTileDelta erased;
+    erased.globalX = 8;
+    erased.globalY = 8;
+    erased.layer = ETerrainTileLayer::Land;
+    erased.before = 4;
+    erased.after = 0;
+    damage.deltas.append(erased);
+    QVERIFY(model.apply(damage, true, &report));
+
+    // The conservative field and physical neighbours describe the inverse
+    // boundary. The model-owned virtual field was captured before corruption
+    // and is therefore the only authoritative semantic evidence.
+    CTerrainVirtualMaterialField recoveredButWrong;
+    QVERIFY(recoveredButWrong.resize(model.tileCountX(), model.tileCountY()));
+    for(int y = 0; y <= recoveredButWrong.tileHeight(); ++y)
+        for(int x = 0; x <= recoveredButWrong.tileWidth(); ++x)
+            recoveredButWrong.setMaterial(x, y, x <= 8 ? 2 : 1);
+    CValidationReport repairReport;
+    const STerrainTileCommand repair = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x41555448u,
+        &repairReport, false, &recoveredButWrong, true, true);
+    QVERIFY2(!repairReport.hasErrors(), qPrintable(repairReport.toText()));
+    QCOMPARE(repair.deltas.size(), 1);
+    QCOMPARE(repair.deltas.front().globalX, 8);
+    QCOMPARE(repair.deltas.front().globalY, 8);
+    QCOMPARE(repair.deltas.front().after, quint16(4));
+    QVERIFY(model.apply(repair, true, &report));
+
+    CValidationReport settledReport;
+    QVERIFY(model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x41555448u,
+        &settledReport, false, &recoveredButWrong, true, true).isEmpty());
+    QVERIFY2(!settledReport.hasErrors(), qPrintable(settledReport.toText()));
+}
+
 void TerrainVirtualAtlasTests::mapResolutionDoesNotChooseAWinningSideForTiedBorders()
 {
     Fixture fixture;
@@ -4277,6 +4459,234 @@ void TerrainVirtualAtlasTests::classicAutoStrokeRefusesMissingBlendAndRollsBackE
                               &restoredPackedAvailable), baselinePacked);
     QVERIFY(restoredPackedAvailable);
     QVERIFY(resolution.deltas.isEmpty());
+}
+
+void TerrainVirtualAtlasTests::classicSemanticCommandsEstablishVirtualField()
+{
+    const auto sourceForPacked = [](quint16 packed) {
+        QByteArray payload;
+        QDataStream stream(&payload, QIODevice::WriteOnly);
+        stream.setByteOrder(QDataStream::LittleEndian);
+        stream << quint32(0xCF4BF774) << quint8(0);
+        payload.append(QByteArray(33 * 33 * 8, '\0'));
+        QByteArray tiles(16 * 16 * 2, '\0');
+        for(int cell = 0; cell < 16 * 16; ++cell)
+            qToLittleEndian<quint16>(packed,
+                reinterpret_cast<uchar*>(tiles.data() + cell * 2));
+        payload.append(tiles);
+        STerrainSectorSource source;
+        source.memberName = QStringLiteral("CaveSet000000.SEC");
+        source.sectorX = 0;
+        source.sectorY = 0;
+        source.type = 0;
+        source.payload = payload;
+        source.landTileOffset = 5 + 33 * 33 * 8;
+        return source;
+    };
+
+    // A complete binary 1/2 catalog lets each Classic entry point resolve
+    // exact physical tiles. The independent semantic field must nevertheless
+    // be initialized and changed through the same reversible command.
+    CTerrainTransitionCatalog catalog;
+    for(int bits = 0; bits < 16; ++bits)
+    {
+        const auto material = [bits](int corner) {
+            return (bits & (1 << corner)) ? qint32(2) : qint32(1);
+        };
+        STerrainTransitionVariant variant;
+        variant.signature = signature(
+            material(0), material(1), material(2), material(3));
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(bits);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+
+    STerrainTileBrush brush;
+    brush.centerX = 8.0f;
+    brush.centerY = 8.0f;
+    brush.radius = 0.0f;
+    brush.shape = ETerrainTileBrushShape::Square;
+
+    CTerrainEditModel tileModel;
+    CValidationReport tileReport;
+    QVERIFY(tileModel.loadSources(1, 1, 100.0f, {sourceForPacked(0)},
+                                  &tileReport, 1, QVector<qint32>(64, 1), 0));
+    const STerrainTileCommand tile = tileModel.makeSemanticTilePaint(
+        brush, ETerrainTileLayer::Land, 2, catalog, 0x54494c45u, &tileReport);
+    QVERIFY2(!tileReport.hasErrors(), qPrintable(tileReport.toText()));
+    QCOMPARE(tile.virtualVertices.size(), 4);
+    // Construction establishes a deterministic pre-command baseline, but the
+    // selected identity exists only in the reversible command until Apply.
+    bool beforeApplyFound = false;
+    QCOMPARE(tileModel.virtualMaterialAt(
+                 ETerrainTileLayer::Land, 8, 8, &beforeApplyFound), qint32(1));
+    QVERIFY(beforeApplyFound);
+    QVERIFY(tileModel.apply(tile, true, &tileReport));
+    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
+                                QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = false;
+        QCOMPARE(tileModel.virtualMaterialAt(
+                     ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(2));
+        QVERIFY(found);
+    }
+    QVERIFY(tileModel.apply(tile, false, &tileReport));
+    bool afterCancelFound = false;
+    QCOMPARE(tileModel.virtualMaterialAt(
+                 ETerrainTileLayer::Land, 8, 8, &afterCancelFound), qint32(1));
+    QVERIFY(afterCancelFound);
+
+    CTerrainEditModel strokeModel;
+    CValidationReport strokeReport;
+    QVERIFY(strokeModel.loadSources(1, 1, 100.0f, {sourceForPacked(0)},
+                                    &strokeReport, 1, QVector<qint32>(64, 1), 0));
+    const STerrainTileCommand stroke = strokeModel.makeSemanticVertexStrokePaint(
+        {QPoint(8, 8)}, {QPoint(8, 8)}, ETerrainTileLayer::Land, 2,
+        catalog, 0x5354524fu, &strokeReport);
+    QVERIFY2(!strokeReport.hasErrors(), qPrintable(strokeReport.toText()));
+    QCOMPARE(stroke.virtualVertices.size(), 1);
+    QCOMPARE(stroke.virtualVertices.front().globalX, 8);
+    QCOMPARE(stroke.virtualVertices.front().globalY, 8);
+    QVERIFY(strokeModel.apply(stroke, true, &strokeReport));
+    bool strokeFound = false;
+    QCOMPARE(strokeModel.virtualMaterialAt(
+                 ETerrainTileLayer::Land, 8, 8, &strokeFound), qint32(2));
+    QVERIFY(strokeFound);
+
+    // The corner convenience entry point delegates to the vertex resolver;
+    // keep its semantic field behavior covered independently of the direct
+    // vertex call used by contextual palette cards.
+    CTerrainEditModel cornerModel;
+    CValidationReport cornerReport;
+    QVERIFY(cornerModel.loadSources(1, 1, 100.0f, {sourceForPacked(0)},
+                                    &cornerReport, 1, QVector<qint32>(64, 1), 0));
+    const STerrainTileCommand corner = cornerModel.makeSemanticCornerMaterialPaint(
+        8, 8, 8, 8, ETerrainTileLayer::Land, 2, catalog,
+        0x434f524eu, &cornerReport);
+    QVERIFY2(!cornerReport.hasErrors(), qPrintable(cornerReport.toText()));
+    QCOMPARE(corner.virtualVertices.size(), 1);
+    QVERIFY(cornerModel.apply(corner, true, &cornerReport));
+    bool cornerFound = false;
+    QCOMPARE(cornerModel.virtualMaterialAt(
+                 ETerrainTileLayer::Land, 8, 8, &cornerFound), qint32(2));
+    QVERIFY(cornerFound);
+}
+
+void TerrainVirtualAtlasTests::contextualClassicVirtualFieldTracksAcceptedVertices()
+{
+    const auto sourceForPacked = [](quint16 packed) {
+        QByteArray payload;
+        QDataStream stream(&payload, QIODevice::WriteOnly);
+        stream.setByteOrder(QDataStream::LittleEndian);
+        stream << quint32(0xCF4BF774) << quint8(0);
+        payload.append(QByteArray(33 * 33 * 8, '\0'));
+        QByteArray tiles(16 * 16 * 2, '\0');
+        for(int cell = 0; cell < 16 * 16; ++cell)
+            qToLittleEndian<quint16>(packed,
+                reinterpret_cast<uchar*>(tiles.data() + cell * 2));
+        payload.append(tiles);
+        STerrainSectorSource source;
+        source.memberName = QStringLiteral("CaveSet000000.SEC");
+        source.sectorX = 0;
+        source.sectorY = 0;
+        source.type = 0;
+        source.payload = payload;
+        source.landTileOffset = 5 + 33 * 33 * 8;
+        return source;
+    };
+
+    CTerrainTransitionCatalog catalog;
+    for(int bits = 0; bits < 16; ++bits)
+    {
+        const auto material = [bits](int corner) {
+            return (bits & (1 << corner)) ? qint32(2) : qint32(3);
+        };
+        STerrainTransitionVariant variant;
+        variant.signature = signature(
+            material(0), material(1), material(2), material(3));
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(bits);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+    STerrainTransitionVariant incompatibleBackground;
+    incompatibleBackground.signature = signature(1, 1, 1, 1);
+    SMprPackedTile incompatiblePacked;
+    incompatiblePacked.tileIndex = 20;
+    incompatibleBackground.packedTile = incompatiblePacked.encode();
+    QVERIFY(catalog.addVariant(incompatibleBackground));
+
+    STerrainTileBrush brush;
+    brush.centerX = 8.0f;
+    brush.centerY = 8.0f;
+    brush.radius = 1.0f;
+    brush.shape = ETerrainTileBrushShape::Circle;
+
+    // With safe mode off, unrelated terrain still accepts the selected
+    // contextual anchor. Missing multi-corner combinations must not smuggle
+    // the skipped radius vertices into the virtual field.
+    CTerrainEditModel incompatible;
+    CValidationReport incompatibleReport;
+    QVERIFY(incompatible.loadSources(1, 1, 100.0f,
+                                     {sourceForPacked(incompatiblePacked.encode())},
+                                     &incompatibleReport, 1,
+                                     QVector<qint32>(64, 1), 0));
+    const STerrainTileCommand anchorOnly = incompatible.makeSemanticVertexPaint(
+        8, 8, brush, ETerrainTileLayer::Land, 2, catalog, 0x414e4348u,
+        &incompatibleReport, 3, ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
+    QVERIFY2(!incompatibleReport.hasErrors(),
+             qPrintable(incompatibleReport.toText()));
+    QSet<QPair<int, int>> acceptedAnchor;
+    for(const QPoint& point : anchorOnly.semanticAudit.paintedVertices)
+        acceptedAnchor.insert(qMakePair(point.x(), point.y()));
+    QSet<QPair<int, int>> expectedAnchor;
+    expectedAnchor.insert(qMakePair(8, 8));
+    QCOMPARE(acceptedAnchor, expectedAnchor);
+    QSet<QPair<int, int>> virtualAnchor;
+    for(const auto& delta : anchorOnly.virtualVertices)
+        virtualAnchor.insert(qMakePair(delta.globalX, delta.globalY));
+    QCOMPARE(virtualAnchor, expectedAnchor);
+    QVERIFY(incompatible.apply(anchorOnly, true, &incompatibleReport));
+    bool anchorFound = false;
+    QCOMPARE(incompatible.virtualMaterialAt(
+                 ETerrainTileLayer::Land, 8, 8, &anchorFound), qint32(2));
+    QVERIFY(anchorFound);
+
+    // On the card's authored support, the same contextual brush may retain
+    // every exact connected stamp. Their accepted semantic vertices, not the
+    // raw brush footprint, are the virtual-field transaction.
+    CTerrainEditModel compatible;
+    CValidationReport compatibleReport;
+    QVERIFY(compatible.loadSources(1, 1, 100.0f, {sourceForPacked(0)},
+                                   &compatibleReport, 1,
+                                   QVector<qint32>(64, 1), 0));
+    const STerrainTileCommand connected = compatible.makeSemanticVertexPaint(
+        8, 8, brush, ETerrainTileLayer::Land, 2, catalog, 0x434f4e4eu,
+        &compatibleReport, 3, ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
+    QVERIFY2(!compatibleReport.hasErrors(), qPrintable(compatibleReport.toText()));
+    QSet<QPair<int, int>> expectedConnected;
+    expectedConnected << qMakePair(8, 8) << qMakePair(8, 7)
+                      << qMakePair(7, 8) << qMakePair(9, 8)
+                      << qMakePair(8, 9);
+    QSet<QPair<int, int>> acceptedConnected;
+    for(const QPoint& point : connected.semanticAudit.paintedVertices)
+        acceptedConnected.insert(qMakePair(point.x(), point.y()));
+    QCOMPARE(acceptedConnected, expectedConnected);
+    QSet<QPair<int, int>> virtualConnected;
+    for(const auto& delta : connected.virtualVertices)
+        virtualConnected.insert(qMakePair(delta.globalX, delta.globalY));
+    QCOMPARE(virtualConnected, expectedConnected);
+    QVERIFY(compatible.apply(connected, true, &compatibleReport));
+    for(const QPair<int, int>& point : expectedConnected)
+    {
+        bool found = false;
+        QCOMPARE(compatible.virtualMaterialAt(
+                     ETerrainTileLayer::Land, point.first, point.second, &found),
+                 qint32(2));
+        QVERIFY(found);
+    }
 }
 
 void TerrainVirtualAtlasTests::overlayVirtualPaintAllowsSparseInactiveField()

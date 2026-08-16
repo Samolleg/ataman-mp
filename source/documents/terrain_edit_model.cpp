@@ -3196,14 +3196,95 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     return command;
 }
 
+bool CTerrainEditModel::appendSemanticVirtualVertices(
+    STerrainTileCommand* command,
+    const QVector<QPoint>& acceptedVertices,
+    ETerrainTileLayer layer, qint32 materialId,
+    const CTerrainTransitionCatalog& catalog,
+    CValidationReport* report)
+{
+    if(!command)
+        return false;
+    if(acceptedVertices.isEmpty())
+        return true;
+
+    // Classic output is physical authored artwork, but it must not leave a
+    // later Modern operation to reconstruct its meaning from that artwork.
+    // Establish the field from the pre-command topology once, then carry only
+    // the vertices the Classic solver actually accepted in this undoable
+    // transaction. In particular, constrained contextual brushes must never
+    // promote their skipped footprint vertices into semantic identity.
+    if(!initializeVirtualMaterialField(
+           layer, catalog, report,
+           ETerrainMaterialFieldRecovery::RecoverDeterministically))
+    {
+        command->deltas.clear();
+        command->virtualVertices.clear();
+        return false;
+    }
+    QVector<qint32>& field = layer == ETerrainTileLayer::Land
+        ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    const int vertexWidth = tileCountX() + 1;
+    const int expectedSize = vertexWidth * (tileCountY() + 1);
+    if(field.size() != expectedSize)
+    {
+        if(report)
+            report->add("terrain.semantic_virtual_field",
+                EValidationSeverity::Error,
+                "The Classic terrain command could not establish its shared-corner material field");
+        command->deltas.clear();
+        command->virtualVertices.clear();
+        return false;
+    }
+
+    QSet<int> seen;
+    for(const QPoint& vertex : acceptedVertices)
+    {
+        if(vertex.x() < 0 || vertex.x() > tileCountX()
+           || vertex.y() < 0 || vertex.y() > tileCountY())
+            continue;
+        const int key = vertex.y() * vertexWidth + vertex.x();
+        if(seen.contains(key))
+            continue;
+        seen.insert(key);
+        const qint32 before = field.at(key);
+        if(before == materialId)
+            continue;
+        STerrainTileCommand::SVirtualVertexDelta delta;
+        delta.globalX = vertex.x();
+        delta.globalY = vertex.y();
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = materialId;
+        command->virtualVertices.append(delta);
+    }
+    return true;
+}
+
 STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed, CValidationReport* report,
-    ETerrainSemanticPaintPolicy policy) const
+    ETerrainSemanticPaintPolicy policy)
 {
-    return makeBoundedSemanticTilePaint(
-        brush, layer, materialId, catalog, distributionSeed, report, policy);
+    CValidationReport localReport;
+    CValidationReport* effectiveReport = report ? report : &localReport;
+    STerrainTileCommand command = makeBoundedSemanticTilePaint(
+        brush, layer, materialId, catalog, distributionSeed, effectiveReport,
+        policy);
+    if(effectiveReport->hasErrors())
+        return command;
+    QVector<QPoint> acceptedVertices;
+    for(const QPoint& cell : command.semanticAudit.paintedCoreCells)
+    {
+        acceptedVertices.append(cell);
+        acceptedVertices.append(cell + QPoint(1, 0));
+        acceptedVertices.append(cell + QPoint(1, 1));
+        acceptedVertices.append(cell + QPoint(0, 1));
+    }
+    appendSemanticVirtualVertices(&command, acceptedVertices, layer,
+                                  materialId, catalog, effectiveReport);
+    return command;
 #if 0
     CValidationReport compactReport;
     STerrainTileCommand compact = makeSemanticTilePaintAttempt(
@@ -3285,8 +3366,11 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
     const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed, CValidationReport* report,
-    qint32 preferredSupportId, ETerrainSemanticPaintPolicy policy) const
+    qint32 preferredSupportId, ETerrainSemanticPaintPolicy policy)
 {
+    CValidationReport localReport;
+    if(!report)
+        report = &localReport;
     STerrainTileCommand command;
     command.description = layer == ETerrainTileLayer::Land
         ? QStringLiteral("Paint terrain material vertices")
@@ -3714,6 +3798,10 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
             EValidationSeverity::Warning,
             "This detail material cannot occupy every requested vertex because the atlas lacks the required multi-corner tiles",
             QString::number(skippedVertices));
+    if(!report->hasErrors())
+        appendSemanticVirtualVertices(
+            &command, command.semanticAudit.paintedVertices, layer,
+            materialId, catalog, report);
     return command;
 }
 
@@ -3722,8 +3810,11 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
     const QVector<QPoint>& anchorVertices,
     ETerrainTileLayer layer, qint32 materialId,
     const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
-    CValidationReport* report, ETerrainSemanticPaintPolicy policy) const
+    CValidationReport* report, ETerrainSemanticPaintPolicy policy)
 {
+    CValidationReport localReport;
+    if(!report)
+        report = &localReport;
     STerrainTileCommand command;
     command.description = layer == ETerrainTileLayer::Land
         ? QStringLiteral("Paint terrain material stroke")
@@ -4253,6 +4344,10 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
             "The Material atlas is missing some boundary transitions. Exact blends were preserved and only the unresolved boundary tiles used the selected material's uniform hard-edge fallback",
             QString("%1 boundary tile(s) used hard-edge fallback")
                 .arg(hardEdgeCells.size()));
+    if(!report->hasErrors())
+        appendSemanticVirtualVertices(
+            &command, command.semanticAudit.paintedVertices, layer,
+            materialId, catalog, report);
     return command;
 }
 
@@ -4260,7 +4355,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticCornerMaterialPaint(
     int selectedCellX, int selectedCellY, int vertexX, int vertexY,
     ETerrainTileLayer layer, qint32 materialId,
     const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
-    CValidationReport* report) const
+    CValidationReport* report)
 {
     STerrainTileBrush vertexBrush;
     vertexBrush.centerX = vertexX;
@@ -5337,7 +5432,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
 bool CTerrainEditModel::inferCellSignatureFromNeighbors(
     int cellX,int cellY,ETerrainTileLayer layer,
     const CTerrainTransitionCatalog& catalog,
-    STerrainTransitionSignature* output) const
+    STerrainTransitionSignature* output,
+    const QMap<int, STerrainTransitionSignature>* plannedSignatures) const
 {
     if(!output||cellX<0||cellX>=tileCountX()
        ||cellY<0||cellY>=tileCountY())
@@ -5356,11 +5452,25 @@ bool CTerrainEditModel::inferCellSignatureFromNeighbors(
                    ||otherY<0||otherY>=tileCountY()
                    ||(otherX==cellX&&otherY==cellY))
                     continue;
-                bool available=false,decoded=false;
-                const quint16 packed=packedTile(otherX,otherY,layer,&available);
-                if(!available)continue;
-                const STerrainTransitionSignature signature=
-                    catalog.gridSignatureForPacked(packed,&decoded);
+                bool available = true;
+                bool decoded = false;
+                STerrainTransitionSignature signature;
+                const int otherKey = otherY * tileCountX() + otherX;
+                if(plannedSignatures && plannedSignatures->contains(otherKey))
+                {
+                    signature = plannedSignatures->value(otherKey);
+                    decoded = true;
+                }
+                else
+                {
+                    const quint16 packed = packedTile(
+                        otherX, otherY, layer, &available);
+                    if(available)
+                        signature = catalog.gridSignatureForPacked(
+                            packed, &decoded);
+                }
+                if(!available)
+                    continue;
                 if(!decoded)continue;
                 if(otherX==vx&&otherY==vy)
                     observed.insert(signature.northWest);
@@ -5384,55 +5494,79 @@ bool CTerrainEditModel::missingBlendRepairSignature(
     int cellX,int cellY,ETerrainTileLayer layer,
     const CTerrainTransitionCatalog& catalog,
     const CTerrainVirtualMaterialField* repairField,
-    bool repairDecodedCells,STerrainTransitionSignature* output) const
+    bool repairDecodedCells,STerrainTransitionSignature* output,
+    const QMap<int, STerrainTransitionSignature>* plannedSignatures) const
 {
     if(!output||cellX<0||cellX>=tileCountX()
        ||cellY<0||cellY>=tileCountY())
         return false;
-    bool available=false,decoded=false;
-    const quint16 packed=packedTile(cellX,cellY,layer,&available);
-    if(!available)return false;
-    const STerrainTransitionSignature current=
-        catalog.gridSignatureForPacked(packed,&decoded);
-    STerrainTransitionSignature fieldSignature;
-    bool fieldFound=false;
-    if(repairField)
-        fieldSignature=repairField->cellSignature(cellX,cellY,&fieldFound);
+    bool available = true;
+    bool decoded = false;
+    STerrainTransitionSignature current;
+    const int cellKey = cellY * tileCountX() + cellX;
+    if(plannedSignatures && plannedSignatures->contains(cellKey))
+    {
+        current = plannedSignatures->value(cellKey);
+        decoded = true;
+    }
     else
     {
-        const QVector<qint32>& values=layer==ETerrainTileLayer::Land
-            ?m_virtualLandMaterials:m_virtualOverlayMaterials;
-        const int vertexWidth=tileCountX()+1;
-        const qint32 unset=std::numeric_limits<qint32>::min();
-        if(values.size()==vertexWidth*(tileCountY()+1))
+        const quint16 packed = packedTile(cellX, cellY, layer, &available);
+        if(available)
+            current = catalog.gridSignatureForPacked(packed, &decoded);
+    }
+    if(!available)
+        return false;
+
+    // The model-owned field is an explicit history of Modern and Classic
+    // semantic edits. A supplied repair field and neighbouring packed cells
+    // are reconstruction evidence only, so neither may overwrite it.
+    STerrainTransitionSignature authoritativeSignature;
+    bool authoritativeFound = false;
+    const QVector<qint32>& authoritativeValues =
+        layer == ETerrainTileLayer::Land
+            ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    const int vertexWidth = tileCountX() + 1;
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    if(authoritativeValues.size() == vertexWidth * (tileCountY() + 1))
+    {
+        const int northWest = cellY * vertexWidth + cellX;
+        const int northEast = northWest + 1;
+        const int southWest = (cellY + 1) * vertexWidth + cellX;
+        const int southEast = southWest + 1;
+        authoritativeFound = authoritativeValues.at(northWest) != unset
+            && authoritativeValues.at(northEast) != unset
+            && authoritativeValues.at(southEast) != unset
+            && authoritativeValues.at(southWest) != unset;
+        if(authoritativeFound)
         {
-            const int nw=cellY*vertexWidth+cellX,ne=nw+1;
-            const int sw=(cellY+1)*vertexWidth+cellX,se=sw+1;
-            fieldFound=values.at(nw)!=unset&&values.at(ne)!=unset
-                &&values.at(se)!=unset&&values.at(sw)!=unset;
-            if(fieldFound)
-            {
-                fieldSignature.northWest=values.at(nw);
-                fieldSignature.northEast=values.at(ne);
-                fieldSignature.southEast=values.at(se);
-                fieldSignature.southWest=values.at(sw);
-            }
+            authoritativeSignature.northWest = authoritativeValues.at(northWest);
+            authoritativeSignature.northEast = authoritativeValues.at(northEast);
+            authoritativeSignature.southEast = authoritativeValues.at(southEast);
+            authoritativeSignature.southWest = authoritativeValues.at(southWest);
         }
     }
+    if(authoritativeFound)
+    {
+        if(decoded && current == authoritativeSignature)
+            return false;
+        *output = authoritativeSignature;
+        return true;
+    }
+
+    STerrainTransitionSignature recoveredSignature;
+    bool recoveredFound = false;
+    if(repairField)
+        recoveredSignature = repairField->cellSignature(
+            cellX, cellY, &recoveredFound);
     STerrainTransitionSignature neighborSignature;
     const bool neighborFound=inferCellSignatureFromNeighbors(
-        cellX,cellY,layer,catalog,&neighborSignature);
+        cellX,cellY,layer,catalog,&neighborSignature,plannedSignatures);
     if(!decoded)
     {
         if(neighborFound)*output=neighborSignature;
-        else if(fieldFound)*output=fieldSignature;
+        else if(recoveredFound)*output=recoveredSignature;
         else return false;
-        return true;
-    }
-    if(!repairField&&fieldFound)
-    {
-        if(current==fieldSignature)return false;
-        *output=fieldSignature;
         return true;
     }
     const auto uniform=[](const STerrainTransitionSignature& signature)
@@ -5442,10 +5576,10 @@ bool CTerrainEditModel::missingBlendRepairSignature(
             &&signature.northWest==signature.southWest;
     };
     const bool currentUniform=uniform(current);
-    if(currentUniform&&repairDecodedCells&&fieldFound
-       &&!uniform(fieldSignature)&&!(current==fieldSignature))
+    if(currentUniform&&repairDecodedCells&&recoveredFound
+       &&!uniform(recoveredSignature)&&!(current==recoveredSignature))
     {
-        *output=fieldSignature;
+        *output=recoveredSignature;
         return true;
     }
     if(!neighborFound||current==neighborSignature)
@@ -5499,31 +5633,165 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
             &&signature.northWest==signature.southEast
             &&signature.northWest==signature.southWest;
     };
-    int unresolved=0;
-    for(int y=0;y<tileCountY();++y)for(int x=0;x<tileCountX();++x)
+    const auto selectExact = [&](const STerrainTransitionSignature& exact,
+                                 int x, int y, bool* found) {
+        return uniformSignature(exact)
+            ? selectUniformInteriorTile(catalog, exact, x, y, paintSeed,
+                randomizeUniformRotation, found)
+            : catalog.selectForPaint(exact, x, y, paintSeed, found);
+    };
+
+    // Neighbour recovery used to emit a first physical batch and only learn
+    // from it on the next Resolve Missing Blends invocation. Keep the planned
+    // semantic signatures separate from sector payloads and iterate them to a
+    // fixed point before producing one reversible command. This never lets a
+    // transient packed choice replace the model-owned virtual field.
+    QMap<int, STerrainTransitionSignature> plannedSignatures;
+    QMap<int, bool> pendingCells;
+    for(int y = 0; y < tileCountY(); ++y)
+        for(int x = 0; x < tileCountX(); ++x)
+        {
+            bool available = false;
+            packedTile(x, y, layer, &available);
+            if(available)
+                pendingCells.insert(y * tileCountX() + x, true);
+        }
+    const auto signatureStateKey = [](const STerrainTransitionSignature& value) {
+        return QByteArray::number(value.northWest) + ','
+            + QByteArray::number(value.northEast) + ','
+            + QByteArray::number(value.southEast) + ','
+            + QByteArray::number(value.southWest);
+    };
+    QMap<int, QSet<QByteArray>> observedStates;
+    int stateChanges = 0;
+    const qint64 mapCellCount = qint64(tileCountX()) * tileCountY();
+    const int maximumStateChanges = int(qMax<qint64>(1, qMin<qint64>(
+        1000000, mapCellCount * 8)));
+    while(!pendingCells.isEmpty())
     {
-        bool available=false;
-        const quint16 before=packedTile(x,y,layer,&available);
-        if(!available)continue;
-        STerrainTransitionSignature exact;
-        if(!missingBlendRepairSignature(x,y,layer,catalog,repairField,
-             repairDecodedCells,&exact))
+        const int key = pendingCells.constBegin().key();
+        pendingCells.remove(key);
+        const int x = key % tileCountX();
+        const int y = key / tileCountX();
+        bool available = false;
+        packedTile(x, y, layer, &available);
+        if(!available)
             continue;
-        bool found=false;
-        const bool uniform=uniformSignature(exact);
-        const quint16 after=uniform
-            ?selectUniformInteriorTile(catalog,exact,x,y,paintSeed,
-                randomizeUniformRotation,&found)
-            :catalog.selectForPaint(exact,x,y,paintSeed,&found);
-        if(!found){++unresolved;continue;}
-        command.semanticAudit.affectedCells.append(QPoint(x,y));
-        if(after==before)continue;
-        STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;
-        delta.layer=layer;delta.before=before;delta.after=after;
-        delta.hasSemanticRequest=true;delta.requestedMaterialId=-1;
-        delta.requestedSignature=exact;command.deltas.append(delta);
+        STerrainTransitionSignature exact;
+        if(!missingBlendRepairSignature(
+               x, y, layer, catalog, repairField,
+               repairDecodedCells, &exact, &plannedSignatures))
+            continue;
+        bool found = false;
+        selectExact(exact, x, y, &found);
+        if(!found)
+            continue;
+
+        bool currentDecoded = false;
+        STerrainTransitionSignature current;
+        if(plannedSignatures.contains(key))
+        {
+            current = plannedSignatures.value(key);
+            currentDecoded = true;
+        }
+        else
+        {
+            const quint16 packed = packedTile(x, y, layer, &available);
+            if(available)
+                current = catalog.gridSignatureForPacked(
+                    packed, &currentDecoded);
+        }
+        if(currentDecoded && current == exact)
+            continue;
+
+        QSet<QByteArray>& states = observedStates[key];
+        if(states.isEmpty() && currentDecoded)
+            states.insert(signatureStateKey(current));
+        const QByteArray nextState = signatureStateKey(exact);
+        if(states.contains(nextState) || ++stateChanges > maximumStateChanges)
+        {
+            if(report)
+                report->add("terrain.virtual_map_nonconvergent",
+                    EValidationSeverity::Error,
+                    "Resolve Missing Blends detected a cyclic or excessive semantic repair frontier without mutating the map");
+            return command;
+        }
+        states.insert(nextState);
+
+        bool originalDecoded = false;
+        const quint16 originalPacked = packedTile(x, y, layer, &available);
+        STerrainTransitionSignature original;
+        if(available)
+            original = catalog.gridSignatureForPacked(
+                originalPacked, &originalDecoded);
+        if(originalDecoded && original == exact)
+            plannedSignatures.remove(key);
+        else
+            plannedSignatures.insert(key, exact);
+
+        // A changed cell can influence only the three-by-three cell block
+        // sharing one of its four vertices. Keep the frontier ordered by key
+        // so equivalent maps produce the same command independent of hash
+        // iteration order.
+        for(int neighborY = y - 1; neighborY <= y + 1; ++neighborY)
+            for(int neighborX = x - 1; neighborX <= x + 1; ++neighborX)
+                if(neighborX >= 0 && neighborX < tileCountX()
+                   && neighborY >= 0 && neighborY < tileCountY())
+                    pendingCells.insert(
+                        neighborY * tileCountX() + neighborX, true);
     }
-    if(unresolved>0&&report)report->add(
+
+    QSet<int> unresolvedCells;
+    for(int y = 0; y < tileCountY(); ++y)
+        for(int x = 0; x < tileCountX(); ++x)
+        {
+            bool available = false;
+            packedTile(x, y, layer, &available);
+            if(!available)
+                continue;
+            STerrainTransitionSignature exact;
+            if(!missingBlendRepairSignature(
+                   x, y, layer, catalog, repairField,
+                   repairDecodedCells, &exact, &plannedSignatures))
+                continue;
+            bool found = false;
+            selectExact(exact, x, y, &found);
+            if(!found)
+                unresolvedCells.insert(y * tileCountX() + x);
+        }
+
+    for(auto entry = plannedSignatures.constBegin();
+        entry != plannedSignatures.constEnd(); ++entry)
+    {
+        const int key = entry.key();
+        const int x = key % tileCountX();
+        const int y = key / tileCountX();
+        bool available = false;
+        const quint16 before = packedTile(x, y, layer, &available);
+        if(!available)
+            continue;
+        bool found = false;
+        const quint16 after = selectExact(entry.value(), x, y, &found);
+        if(!found)
+        {
+            unresolvedCells.insert(key);
+            continue;
+        }
+        command.semanticAudit.affectedCells.append(QPoint(x, y));
+        if(after == before)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = x;
+        delta.globalY = y;
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = after;
+        delta.hasSemanticRequest = true;
+        delta.requestedMaterialId = -1;
+        delta.requestedSignature = entry.value();
+        command.deltas.append(delta);
+    }
+    if(!unresolvedCells.isEmpty()&&report)report->add(
         allowPartialMaterialField
             ? "terrain.virtual_map_ambiguous_skipped"
             : "terrain.virtual_map_unresolved",
@@ -5531,9 +5799,9 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
             ? EValidationSeverity::Warning : EValidationSeverity::Error,
         allowPartialMaterialField
             ? QString("%1 ambiguous map cell(s) were preserved rather than moving a tied material boundary")
-                  .arg(unresolved)
+                  .arg(unresolvedCells.size())
             : QString("%1 map cell(s) could not be resolved to an exact physical blend")
-                  .arg(unresolved));
+                  .arg(unresolvedCells.size()));
     return command;
 }
 
