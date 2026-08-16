@@ -190,6 +190,34 @@ QByteArray runtimeTypedTransitionKey(
     return key;
 }
 
+bool selectWorkingPaintVariantWithRuntimeType(
+    const CTerrainWorkingAtlas& atlas,
+    const STerrainTransitionSignature& signature,
+    int cellX, int cellY, quint32 distributionSeed,
+    qint32 runtimeTerrainType, quint16* packedTile)
+{
+    if(runtimeTerrainType < 0 || runtimeTerrainType >= 16)
+        return false;
+    QSet<int> typedSlots;
+    for(const STerrainTransitionVariant& candidate :
+        atlas.catalog().paintVariants(signature))
+    {
+        const int slot = SMprPackedTile::decode(
+            candidate.packedTile).atlasSlot();
+        if(slot >= 0 && slot < atlas.activeTileCount()
+           && atlas.runtimeTerrainTypeForSlot(slot) == runtimeTerrainType)
+            typedSlots.insert(slot);
+    }
+    if(typedSlots.isEmpty())
+        return false;
+    bool found = false;
+    const quint16 selected = atlas.catalog().selectForPaint(
+        signature, cellX, cellY, distributionSeed, typedSlots, &found);
+    if(found && packedTile)
+        *packedTile = selected;
+    return found;
+}
+
 int terrainTransitionTopology(const STerrainTransitionSignature& signature)
 {
     QMap<qint32, int> counts;
@@ -8525,7 +8553,8 @@ bool CView::realizeWorkingTerrainSignature(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     QMap<int, quint64>* usage, CValidationReport* report, bool* generated,
     qint32 preferredPaintMaterial, qint32 preferredRuntimeType,
-    SWorkingTerrainResolveStage* staging)
+    SWorkingTerrainResolveStage* staging,
+    bool requirePreferredRuntimeType)
 {
     CTerrainWorkingAtlas* atlas = staging
         ? staging->atlas.data() : m_workingTerrainAtlas.data();
@@ -8555,8 +8584,13 @@ bool CView::realizeWorkingTerrainSignature(
     // canonical generation from reviewed uniform material anchors. Global
     // pages are decoded on demand so palette construction stays cheap.
     bool alreadyExact = false;
-    atlas->catalog().selectForPaint(
-        signature, cellX, cellY, m_terrainSemanticSeed, &alreadyExact);
+    if(requirePreferredRuntimeType)
+        alreadyExact = selectWorkingPaintVariantWithRuntimeType(
+            *atlas, signature, cellX, cellY, m_terrainSemanticSeed,
+            preferredRuntimeType, nullptr);
+    else
+        atlas->catalog().selectForPaint(
+            signature, cellX, cellY, m_terrainSemanticSeed, &alreadyExact);
     if(!alreadyExact)
     {
         QList<STerrainGlobalTransitionSource> candidates =
@@ -8607,7 +8641,7 @@ bool CView::realizeWorkingTerrainSignature(
         if(importedAny && !atlas->realizeAuthoredLibraryVariants(
                signature, usage, *protectedSlots,
                &libraryReport, preferredPaintMaterial,
-               preferredRuntimeType))
+               preferredRuntimeType, requirePreferredRuntimeType))
         {
             if(report)
                 for(const SValidationFinding& finding : libraryReport.findings())
@@ -8637,10 +8671,23 @@ bool CView::realizeWorkingTerrainSignature(
         return false;
     };
     CValidationReport attempt;
-    quint16 packed = atlas->resolve(
-        signature, cellX, cellY, usage, *protectedSlots,
-        generated, &attempt, preferredPaintMaterial, preferredRuntimeType);
-    if(attempt.hasErrors() && hasCapacityFinding(attempt) && usage)
+    quint16 packed = 0;
+    const bool selectedTypedWorkingVariant = requirePreferredRuntimeType
+        && selectWorkingPaintVariantWithRuntimeType(
+            *atlas, signature, cellX, cellY, m_terrainSemanticSeed,
+            preferredRuntimeType, &packed);
+    if(selectedTypedWorkingVariant)
+    {
+        if(generated)
+            *generated = false;
+    }
+    else
+        packed = atlas->resolve(
+            signature, cellX, cellY, usage, *protectedSlots,
+            generated, &attempt, preferredPaintMaterial,
+            preferredRuntimeType, requirePreferredRuntimeType);
+    if(!selectedTypedWorkingVariant && attempt.hasErrors()
+       && hasCapacityFinding(attempt) && usage)
     {
         bool reclaimable = false;
         for(int slot = 0; slot < atlas->capacityLimit(); ++slot)
@@ -8667,7 +8714,7 @@ bool CView::realizeWorkingTerrainSignature(
             packed = atlas->resolve(
                 signature, cellX, cellY, usage, *protectedSlots,
                 generated, &retry, preferredPaintMaterial,
-                preferredRuntimeType);
+                preferredRuntimeType, requirePreferredRuntimeType);
             if(!retry.hasErrors())
             {
                 if(!staging)
@@ -9006,7 +9053,7 @@ void CView::finalizeVirtualTerrainAtlas()
             placedCellTypes.append(typeFound?type:-1);
             placedPackedCells.append(available?packed:quint16(0));
             preservePlacedCells.append(
-                m_terrainEdit.preservePhysicalTileAtFinalization(layer,x,y));
+                !m_terrainEdit.virtualMaterialCellChanged(layer,x,y));
         }
     const CTerrainTransitionCatalog* finalizedDecodeCatalog =
         m_workingTerrainAtlas
@@ -12546,17 +12593,9 @@ void CView::resolveMissingTerrainBlends()
                             .arg(x).arg(y));
                     break;
                 }
-                bool typedPhysicalFound = false;
-                for(const STerrainTransitionVariant& candidate :
-                    m_workingTerrainAtlas->catalog().paintVariants(signature))
-                    if(m_workingTerrainAtlas->runtimeTerrainTypeForSlot(
-                           SMprPackedTile::decode(candidate.packedTile)
-                               .atlasSlot()) == runtimeType)
-                    {
-                        typedPhysicalFound = true;
-                        break;
-                    }
-                if(typedPhysicalFound)
+                if(selectWorkingPaintVariantWithRuntimeType(
+                       *m_workingTerrainAtlas, signature, x, y,
+                       m_terrainSemanticSeed, runtimeType, nullptr))
                     continue;
                 SMissingMapSignature item;
                 item.signature = signature;item.x = x;item.y = y;
@@ -12599,7 +12638,7 @@ void CView::resolveMissingTerrainBlends()
     {
         if(!realizeWorkingTerrainSignature(item.value().signature,
                item.value().x, item.value().y, &usage, &report, nullptr,
-               0, item.value().runtimeType, &staged))
+               0, item.value().runtimeType, &staged, true))
             break;
         ++generated;
     }

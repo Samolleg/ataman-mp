@@ -2834,11 +2834,12 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
 QVector<STerrainVirtualTile> CTerrainVirtualAtlas::authoredLibraryVariants(
     const STerrainTransitionSignature& signature,
     qint32 preferredPaintMaterial, qint32 preferredRuntimeType,
-    CValidationReport* report)
+    CValidationReport* report, bool requirePreferredRuntimeType)
 {
     QVector<STerrainVirtualTile> result;
     const qint32 runtimeType = resolvedRuntimeType(
-        signature, preferredPaintMaterial, preferredRuntimeType, report);
+        signature, preferredPaintMaterial, preferredRuntimeType, report,
+        requirePreferredRuntimeType);
     if(runtimeType < 0)
         return result;
     QSet<int> seen;
@@ -2868,8 +2869,17 @@ QVector<STerrainVirtualTile> CTerrainVirtualAtlas::authoredLibraryVariants(
 qint32 CTerrainVirtualAtlas::resolvedRuntimeType(
     const STerrainTransitionSignature& signature,
     qint32 preferredPaintMaterial, qint32 preferredRuntimeType,
-    CValidationReport* report) const
+    CValidationReport* report, bool requirePreferredRuntimeType) const
 {
+    if(requirePreferredRuntimeType)
+    {
+        if(preferredRuntimeType >= 0 && preferredRuntimeType < 16)
+            return preferredRuntimeType;
+        if(report) report->add("terrain.required_runtime_type_invalid",
+            EValidationSeverity::Error,
+            "An exact predecessor-preserving resolution requires a reviewed runtime terrain type.");
+        return -1;
+    }
     QMap<qint32, int> coverage;
     for(qint32 material : corners(signature))
     {
@@ -2932,7 +2942,7 @@ int CTerrainVirtualAtlas::typedTileVariant(int sourceIndex, qint32 runtimeType)
 STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     CValidationReport* report, qint32 preferredPaintMaterial,
-    qint32 preferredRuntimeType)
+    qint32 preferredRuntimeType, bool requirePreferredRuntimeType)
 {
     STerrainVirtualTile result;
     result.signature = signature;
@@ -2942,9 +2952,30 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
             EValidationSeverity::Error, m_error);
         return result;
     }
+    const qint32 requiredRuntimeType = requirePreferredRuntimeType
+        ? resolvedRuntimeType(signature, preferredPaintMaterial,
+                              preferredRuntimeType, report, true)
+        : -1;
+    if(requirePreferredRuntimeType && requiredRuntimeType < 0)
+        return result;
+
     bool authored = false;
-    const quint16 packed = m_catalog.selectForPaint(
-        signature, cellX, cellY, m_distributionSeed, &authored);
+    quint16 packed = 0;
+    if(requirePreferredRuntimeType)
+    {
+        QSet<int> allowedSlots;
+        const int sourceSlotCount = qMin(m_authoredTiles.size(),
+                                         m_sourceTileTypes.size());
+        for(int slot = 0; slot < sourceSlotCount; ++slot)
+            if(m_sourceTileTypes.at(slot) == requiredRuntimeType)
+                allowedSlots.insert(slot);
+        packed = m_catalog.selectForPaint(
+            signature, cellX, cellY, m_distributionSeed, allowedSlots,
+            &authored);
+    }
+    else
+        packed = m_catalog.selectForPaint(
+            signature, cellX, cellY, m_distributionSeed, &authored);
     if(authored)
     {
         result.authored = true;
@@ -2955,8 +2986,10 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
         return result;
     }
 
-    const qint32 runtimeType = resolvedRuntimeType(
-        signature, preferredPaintMaterial, preferredRuntimeType, report);
+    const qint32 runtimeType = requirePreferredRuntimeType
+        ? requiredRuntimeType : resolvedRuntimeType(
+            signature, preferredPaintMaterial, preferredRuntimeType, report,
+            false);
     if(runtimeType < 0)
         return result;
 
@@ -4043,13 +4076,14 @@ bool CTerrainWorkingAtlas::realizeAuthoredLibraryVariants(
     const STerrainTransitionSignature& signature,
     QMap<int, quint64>* workingUsage, const QSet<int>& protectedSlots,
     CValidationReport* report, qint32 preferredPaintMaterial,
-    qint32 preferredRuntimeType)
+    qint32 preferredRuntimeType, bool requirePreferredRuntimeType)
 {
     if(!m_resolver || !workingUsage)
         return false;
     const QVector<STerrainVirtualTile> variants =
         m_resolver->authoredLibraryVariants(
-            signature, preferredPaintMaterial, preferredRuntimeType, report);
+            signature, preferredPaintMaterial, preferredRuntimeType, report,
+            requirePreferredRuntimeType);
     if(variants.isEmpty())
         return false;
     QSet<int> reserved = protectedSlots;
@@ -4446,7 +4480,8 @@ quint16 CTerrainWorkingAtlas::resolve(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     QMap<int, quint64>* workingUsage, const QSet<int>& protectedSlots,
     bool* generated, CValidationReport* report,
-    qint32 preferredPaintMaterial, qint32 preferredRuntimeType)
+    qint32 preferredPaintMaterial, qint32 preferredRuntimeType,
+    bool requirePreferredRuntimeType)
 {
     if(generated)
         *generated = false;
@@ -4458,7 +4493,7 @@ quint16 CTerrainWorkingAtlas::resolve(
     }
     const STerrainVirtualTile tile = m_resolver->resolve(
         signature, cellX, cellY, report, preferredPaintMaterial,
-        preferredRuntimeType);
+        preferredRuntimeType, requirePreferredRuntimeType);
     const bool isGenerated = !tile.authored;
     const int sourceIndex = tile.authored
         ? SMprPackedTile::decode(tile.authoredPacked).atlasSlot()

@@ -529,6 +529,7 @@ private slots:
     void generatedTerrainTypeTieUsesPaintedMaterialAndTypedDedup();
     void unknownGeneratedTerrainTypeIsRefused();
     void workingAtlasCarriesGeneratedTerrainType();
+    void stagedResolveUsesPredecessorTypeOverAuthoredAndSemanticMajority();
     void stableHashesAndNamespaceAreDeterministic();
     void mapWideUsageAndUnusedCompaction();
     void exactAuthoredDuplicatesAreRemappedBeforeCapacity();
@@ -555,7 +556,7 @@ private slots:
     void mapResolutionReachesFixedPointInOneCommand();
     void mapResolutionPrefersAuthoritativeVirtualField();
     void mapResolutionDoesNotChooseAWinningSideForTiedBorders();
-    void recoveredMapResolutionPreservesDecodedContextStamps();
+    void recoveredMapResolutionRepairsDecodedContextStampsLikeAnyBlend();
     void recoveredMapResolutionRepairsDecodedWrongBlend();
     void recoveredMapResolutionExcludesTheCellBeingJudged();
     void classicAutoStrokeRefusesMissingBlendAndRollsBackExactly();
@@ -2924,6 +2925,114 @@ void TerrainVirtualAtlasTests::workingAtlasCarriesGeneratedTerrainType()
     QCOMPARE(working.activeTileTypes().at(slot), qint32(7));
 }
 
+void TerrainVirtualAtlasTests::stagedResolveUsesPredecessorTypeOverAuthoredAndSemanticMajority()
+{
+    // This reproduces the first Zone2 Shift+R failure without a live map or
+    // renderer: the exact authored non-uniform slot is type 0, while the
+    // physical predecessor is type 2.  Semantic material 2 owns three
+    // corners and is type 1, so an implementation must not simply fall back
+    // to its unique semantic-majority type either.
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    images << solid(qRgba(28, 28, 28, 255))
+           << solid(qRgba(214, 72, 54, 255))
+           << solid(qRgba(53, 156, 75, 255))
+           << solid(qRgba(116, 102, 175, 255));
+    const auto makeVariant = [](
+        const STerrainTransitionSignature& value, int slot) {
+        STerrainTransitionVariant variant;
+        variant.signature = value;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot);
+        variant.packedTile = packed.encode();
+        return variant;
+    };
+    const STerrainTransitionVariant predecessorVariant =
+        makeVariant(signature(1, 1, 1, 1), 1);
+    QVERIFY(catalog.addVariant(predecessorVariant));
+    const quint16 predecessorPacked = predecessorVariant.packedTile;
+    QVERIFY(catalog.addVariant(makeVariant(signature(2, 2, 2, 2), 2)));
+    const STerrainTransitionSignature requested = signature(1, 2, 2, 2);
+    const STerrainTransitionVariant authoredVariant = makeVariant(requested, 3);
+    QVERIFY(catalog.addVariant(authoredVariant));
+    const quint16 authoredPacked = authoredVariant.packedTile;
+    const QVector<qint32> sourceTypes = {0, 2, 1, 0};
+    const QMap<qint32, qint32> materialTypes = {{1, 2}, {2, 1}};
+    CTestTerrainWorkingAtlas live(catalog, images, 0x5a6f6e65u, 8,
+                                  {}, {}, sourceTypes, materialTypes);
+    seedReviewedPairMasks(live, 1, 2, images.at(1), images.at(2));
+    QVERIFY2(live.isValid(), qPrintable(live.error()));
+    QCOMPARE(live.runtimeTerrainTypeForSlot(
+                 SMprPackedTile::decode(authoredPacked).atlasSlot()),
+             qint32(0));
+
+    QByteArray payload;
+    QDataStream stream(&payload, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    QVector<qint32> modelTypes(64, 0);
+    modelTypes[1] = 2;
+    modelTypes[2] = 1;
+    modelTypes[3] = 0;
+    CTerrainEditModel model;
+    CValidationReport modelReport;
+    QVERIFY2(model.loadSources(1, 1, 100.0f, {source}, &modelReport, 1,
+                               modelTypes, 0),
+             qPrintable(modelReport.toText()));
+    STerrainTileCommand predecessor;
+    STerrainTileDelta predecessorDelta;
+    predecessorDelta.globalX = 7;
+    predecessorDelta.globalY = 8;
+    predecessorDelta.layer = ETerrainTileLayer::Land;
+    predecessorDelta.before = 0;
+    predecessorDelta.after = predecessorPacked;
+    predecessor.deltas.append(predecessorDelta);
+    QVERIFY2(model.apply(predecessor, true, &modelReport),
+             qPrintable(modelReport.toText()));
+    bool predecessorTypeFound = false;
+    const qint32 predecessorType = model.tileType(
+        model.packedTile(7, 8, ETerrainTileLayer::Land),
+        &predecessorTypeFound);
+    QVERIFY(predecessorTypeFound);
+    QCOMPARE(predecessorType, qint32(2));
+
+    bool authoredFound = false;
+    const quint16 untypedAuthored = live.catalog().selectForPaint(
+        requested, 7, 8, 0x5a6f6e65u, &authoredFound);
+    QVERIFY(authoredFound);
+    QCOMPARE(untypedAuthored, authoredPacked);
+    QCOMPARE(live.runtimeTerrainTypeForSlot(
+                 SMprPackedTile::decode(untypedAuthored).atlasSlot()),
+             qint32(0));
+
+    QSharedPointer<CTerrainWorkingAtlas> staged = live.createStagingCopy();
+    QVERIFY(staged);
+    QMap<int, quint64> usage;
+    CValidationReport resolveReport;
+    bool generated = false;
+    const quint16 resolved = staged->resolve(
+        requested, 7, 8, &usage, {}, &generated, &resolveReport,
+        0, predecessorType, true);
+    QVERIFY2(!resolveReport.hasErrors(), qPrintable(resolveReport.toText()));
+    const int resolvedSlot = SMprPackedTile::decode(resolved).atlasSlot();
+    QCOMPARE(staged->runtimeTerrainTypeForSlot(resolvedSlot), predecessorType);
+    QVERIFY(generated);
+    QVERIFY(resolvedSlot >= images.size());
+    QCOMPARE(live.generatedTileCount(), 0);
+    QCOMPARE(live.runtimeTerrainTypeForSlot(
+                 SMprPackedTile::decode(authoredPacked).atlasSlot()),
+             qint32(0));
+}
+
 void TerrainVirtualAtlasTests::stableHashesAndNamespaceAreDeterministic()
 {
     Fixture fixture;
@@ -4373,7 +4482,7 @@ void TerrainVirtualAtlasTests::mapResolutionDoesNotChooseAWinningSideForTiedBord
                      quint16(x < 8 ? 0 : 1));
 }
 
-void TerrainVirtualAtlasTests::recoveredMapResolutionPreservesDecodedContextStamps()
+void TerrainVirtualAtlasTests::recoveredMapResolutionRepairsDecodedContextStampsLikeAnyBlend()
 {
     Fixture fixture;
     STerrainTransitionVariant stamp;
@@ -4418,9 +4527,19 @@ void TerrainVirtualAtlasTests::recoveredMapResolutionPreservesDecodedContextStam
         ETerrainTileLayer::Land, fixture.catalog, 0x5354414du, &report,
         false, &recoveredLikeField, true, true);
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
-    QVERIFY2(repair.isEmpty(),
-             "Recovered map repair erased a decoded contextual stamp");
-    QCOMPARE(model.packedTile(8, 8, ETerrainTileLayer::Land), quint16(4));
+    QVERIFY2(!repair.isEmpty(),
+             "A decoded contextual stamp received special repair immunity");
+    bool repairedStamp = false;
+    for(const STerrainTileDelta& delta : repair.deltas)
+        if(delta.globalX == 8 && delta.globalY == 8)
+        {
+            repairedStamp = true;
+            QCOMPARE(delta.before, quint16(4));
+            QCOMPARE(delta.after, quint16(1));
+        }
+    QVERIFY(repairedStamp);
+    QVERIFY(model.apply(repair, true, &report));
+    QCOMPARE(model.packedTile(8, 8, ETerrainTileLayer::Land), quint16(1));
 }
 
 void TerrainVirtualAtlasTests::recoveredMapResolutionRepairsDecodedWrongBlend()

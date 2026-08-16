@@ -378,7 +378,8 @@ private:
         bool* generated = nullptr,
         qint32 preferredPaintMaterial = 0,
         qint32 preferredRuntimeType = -1,
-        SWorkingTerrainResolveStage* staging = nullptr);
+        SWorkingTerrainResolveStage* staging = nullptr,
+        bool requirePreferredRuntimeType = false);
     bool syncWorkingTerrainAtlas(CValidationReport* report,
                                  CTerrainWorkingAtlas* staging = nullptr);
     void refreshTerrainTilePreview(const STerrainTileCommand& command,

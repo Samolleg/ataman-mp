@@ -205,11 +205,15 @@ public:
     bool isValid() const { return m_valid; }
     QString error() const { return m_error; }
     void setDistributionSeed(quint32 seed) { m_distributionSeed = seed; }
+    // Map repair can carry a reviewed predecessor runtime type that must be
+    // retained exactly.  The default leaves this as the historical soft
+    // tie-break for normal paint/finalization callers.
     STerrainVirtualTile resolve(const STerrainTransitionSignature& signature,
                                 int cellX, int cellY,
                                 CValidationReport* report = nullptr,
                                 qint32 preferredPaintMaterial = 0,
-                                qint32 preferredRuntimeType = -1);
+                                qint32 preferredRuntimeType = -1,
+                                bool requirePreferredRuntimeType = false);
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
@@ -220,7 +224,8 @@ public:
         const STerrainTransitionSignature& signature,
         qint32 preferredPaintMaterial = 0,
         qint32 preferredRuntimeType = -1,
-        CValidationReport* report = nullptr);
+        CValidationReport* report = nullptr,
+        bool requirePreferredRuntimeType = false);
     bool addStockBlendMaskTemplate(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
@@ -336,7 +341,8 @@ private:
     qint32 resolvedRuntimeType(
         const STerrainTransitionSignature& signature,
         qint32 preferredPaintMaterial, qint32 preferredRuntimeType,
-        CValidationReport* report) const;
+        CValidationReport* report,
+        bool requirePreferredRuntimeType) const;
     int typedTileVariant(int sourceIndex, qint32 runtimeType);
 
     const CTerrainTransitionCatalog& m_catalog;
@@ -427,7 +433,8 @@ public:
         const QSet<int>& protectedSlots,
         CValidationReport* report = nullptr,
         qint32 preferredPaintMaterial = 0,
-        qint32 preferredRuntimeType = -1);
+        qint32 preferredRuntimeType = -1,
+        bool requirePreferredRuntimeType = false);
 
     quint16 resolve(const STerrainTransitionSignature& signature,
                     int cellX, int cellY,
@@ -436,7 +443,8 @@ public:
                     bool* generated = nullptr,
                     CValidationReport* report = nullptr,
                     qint32 preferredPaintMaterial = 0,
-                    qint32 preferredRuntimeType = -1);
+                    qint32 preferredRuntimeType = -1,
+                    bool requirePreferredRuntimeType = false);
 
 private:
     int realize(bool generated, int sourceIndex,

@@ -367,7 +367,7 @@ private slots:
     void globalTerrainHeightOperationsRejectInvalidRanges();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
-    void manualTileOwnershipSurvivesFinalizationAndUndoSequences();
+    void manualTilePaintHasNoOwnershipPrivilege();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
@@ -4331,10 +4331,10 @@ void EnduranceDocumentTests::semanticVertexPaintNeverUsesUniformForBlendFallback
     }
 }
 
-void EnduranceDocumentTests::manualTileOwnershipSurvivesFinalizationAndUndoSequences()
+void EnduranceDocumentTests::manualTilePaintHasNoOwnershipPrivilege()
 {
     CMprDocument baseline;
-    QVERIFY(baseline.loadBytes(syntheticMpr(), "manual-ownership.mpr"));
+    QVERIFY(baseline.loadBytes(syntheticMpr(), "manual-is-ordinary.mpr"));
     CTerrainEditModel terrain;
     QVERIFY(terrain.load(baseline));
 
@@ -4360,67 +4360,48 @@ void EnduranceDocumentTests::manualTileOwnershipSurvivesFinalizationAndUndoSeque
     QVERIFY(terrain.apply(semantic, true));
     QVERIFY(terrain.virtualMaterialCellChanged(
         ETerrainTileLayer::Land, 8, 8));
-    QVERIFY(!terrain.preservePhysicalTileAtFinalization(
-        ETerrainTileLayer::Land, 8, 8));
+    const quint16 semanticPacked = terrain.packedTile(
+        8, 8, ETerrainTileLayer::Land);
 
     const STerrainTileCommand manual = terrain.makeTilePaint(
         cell, ETerrainTileLayer::Land, 0, 1, 3);
     QVERIFY(!manual.isEmpty());
     QVERIFY(terrain.apply(manual, true));
-    QVERIFY(terrain.physicalTileManuallyOwned(
+    const quint16 manualPacked = manual.deltas.front().after;
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             manualPacked);
+    QVERIFY(terrain.virtualMaterialCellChanged(
         ETerrainTileLayer::Land, 8, 8));
-    QVERIFY(terrain.preservePhysicalTileAtFinalization(
-        ETerrainTileLayer::Land, 8, 8));
+    QVERIFY(terrain.makeTilePaint(
+        cell, ETerrainTileLayer::Land, 0, 1, 3).isEmpty());
 
     QVERIFY(terrain.apply(manual, false));
-    QVERIFY(!terrain.physicalTileManuallyOwned(
-        ETerrainTileLayer::Land, 8, 8));
-    QVERIFY(!terrain.preservePhysicalTileAtFinalization(
-        ETerrainTileLayer::Land, 8, 8));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             semanticPacked);
     QVERIFY(terrain.apply(manual, true));
-    QVERIFY(terrain.preservePhysicalTileAtFinalization(
-        ETerrainTileLayer::Land, 8, 8));
-
-    // Ownership is intentionally session state: saving writes the exact
-    // Manual packed tile, and reopening rebases the recovered semantic field
-    // to that physical map. The baseline-untouched half of the finalization
-    // predicate must therefore preserve it even before another Manual edit.
-    CMprEditTransaction save("persist exact Manual terrain tile");
-    QVERIFY(terrain.appendSectorEdits(&save));
-    QByteArray reopenedBytes;
-    QVERIFY(baseline.applyTransaction(save, &reopenedBytes));
-    CMprDocument reopenedDocument;
-    QVERIFY(reopenedDocument.loadBytes(reopenedBytes, "manual-reopened.mpr"));
-    CTerrainEditModel reopened;
-    QVERIFY(reopened.load(reopenedDocument));
-    QVERIFY(reopened.initializeVirtualMaterialField(
-        ETerrainTileLayer::Land, catalog, nullptr,
-        ETerrainMaterialFieldRecovery::RecoverDeterministically));
-    QCOMPARE(reopened.packedTile(8, 8, ETerrainTileLayer::Land),
-             manual.deltas.front().after);
-    QVERIFY(!reopened.physicalTileManuallyOwned(
-        ETerrainTileLayer::Land, 8, 8));
-    QVERIFY(!reopened.virtualMaterialFieldActive(ETerrainTileLayer::Land));
-    QVERIFY(reopened.preservePhysicalTileAtFinalization(
-        ETerrainTileLayer::Land, 8, 8));
-    STerrainTileBrush unrelated = cell;
-    unrelated.centerX = 2.0f;
-    unrelated.centerY = 2.0f;
-    const STerrainTileCommand unrelatedModern =
-        reopened.makeVirtualTileMaterialPaint(
-            unrelated, ETerrainTileLayer::Land, 2, catalog, 0x4d414e55u);
-    QVERIFY(!unrelatedModern.isEmpty());
-    QVERIFY(reopened.apply(unrelatedModern, true));
-    QVERIFY(reopened.virtualMaterialFieldActive(ETerrainTileLayer::Land));
-    QVERIFY(reopened.preservePhysicalTileAtFinalization(
-        ETerrainTileLayer::Land, 8, 8));
 
     const STerrainTileCommand laterSemantic = terrain.makeSemanticTilePaint(
         cell, ETerrainTileLayer::Land, 1, catalog, 0x4d414e55u);
     QVERIFY(!laterSemantic.isEmpty());
+    bool centerChanged = false;
+    quint16 laterPacked = 0;
+    for(const STerrainTileDelta& delta : laterSemantic.deltas)
+        if(delta.globalX == 8 && delta.globalY == 8)
+        {
+            centerChanged = true;
+            laterPacked = delta.after;
+            break;
+        }
+    QVERIFY(centerChanged);
     QVERIFY(terrain.apply(laterSemantic, true));
-    QVERIFY(!terrain.physicalTileManuallyOwned(
-        ETerrainTileLayer::Land, 8, 8));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             laterPacked);
+    QVERIFY(terrain.apply(laterSemantic, false));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             manualPacked);
+    QVERIFY(terrain.apply(manual, false));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             semanticPacked);
 }
 
 void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExactVariants()
