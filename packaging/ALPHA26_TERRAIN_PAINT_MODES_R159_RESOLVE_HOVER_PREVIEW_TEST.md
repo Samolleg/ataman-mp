@@ -13,6 +13,7 @@ Focused follow-up for the R158 terrain paint modes build.
 
 - `terrain_virtual_atlas_tests`: 103 passed, 0 failed.
 - `endurance_document_tests`: 107 passed, 0 failed, 6 expected fixture/export skips.
+- `--ui-widget-check`: explicit PASS with the Qt minimal headless platform.
 - Read-only `zone2resolve4.mpr` audit: 60 repairable cells found with either available Zone 2 sidecar profile (58 wrong blends and 2 missing blends); 2 contextual stamp-to-uniform cases remain protected.
 - `git diff --check`: pass.
 
