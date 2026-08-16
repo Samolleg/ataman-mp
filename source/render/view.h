@@ -86,6 +86,7 @@ class IPropertyBase;
 class CTileForm;
 class CLandscapeTools;
 class CTerrainWorkingAtlas;
+struct SWorkingTerrainResolveStage;
 class CLight;
 class QOpenGLFramebufferObject;
 class RenderQueueContext;
@@ -376,8 +377,12 @@ private:
         QMap<int, quint64>* usage, CValidationReport* report,
         bool* generated = nullptr,
         qint32 preferredPaintMaterial = 0,
-        qint32 preferredRuntimeType = -1);
-    bool syncWorkingTerrainAtlas(CValidationReport* report);
+        qint32 preferredRuntimeType = -1,
+        SWorkingTerrainResolveStage* staging = nullptr);
+    bool syncWorkingTerrainAtlas(CValidationReport* report,
+                                 CTerrainWorkingAtlas* staging = nullptr);
+    void refreshTerrainTilePreview(const STerrainTileCommand& command,
+                                   bool forward);
     void reviewTerrainAtlasProfile();
     void finalizeVirtualTerrainAtlas();
     void updateTerrainAtlasViewerAnnotations(const QString& status);

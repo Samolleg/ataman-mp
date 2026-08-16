@@ -178,6 +178,17 @@ QByteArray globalTransitionKey(const STerrainTransitionSignature& signature)
     return key;
 }
 
+QByteArray runtimeTypedTransitionKey(
+    const STerrainTransitionSignature& signature, qint32 runtimeTerrainType)
+{
+    QByteArray key = globalTransitionKey(signature);
+    char typeBytes[4];
+    qToLittleEndian<qint32>(runtimeTerrainType,
+        reinterpret_cast<uchar*>(typeBytes));
+    key.append(typeBytes, 4);
+    return key;
+}
+
 int terrainTransitionTopology(const STerrainTransitionSignature& signature)
 {
     QMap<qint32, int> counts;
@@ -710,6 +721,26 @@ QVector<SSkyVertex> decodeLegacySkyFigure(const QByteArray& bytes, QString* diag
 }
 
 }
+
+// Resolve Missing Blends owns a short-lived copy of every state object that
+// realization can otherwise mutate.  It is intentionally separate from a
+// brush stroke: the map-wide repair must be a complete no-op if command
+// validation or preview upload is refused.
+struct SWorkingTerrainResolveStage
+{
+    QSharedPointer<CTerrainWorkingAtlas> atlas;
+    CTerrainEditModel terrainEdit;
+    QSet<int> protectedSlots;
+    QMultiMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
+        importedTransitions;
+    QMap<QString, QByteArray> encodedPageCache;
+    QSet<QString> missingPages;
+    QMap<QString, QImage> decodedTileCache;
+    bool undoCheckpointRequired{false};
+};
+
+QByteArray terrainTilePixelSha256(const QImage& source);
+
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
   ,m_gpuTimer(nullptr)
   ,m_gpuTimerPending(false)
@@ -8443,9 +8474,26 @@ bool CView::terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const
 bool CView::realizeWorkingTerrainSignature(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     QMap<int, quint64>* usage, CValidationReport* report, bool* generated,
-    qint32 preferredPaintMaterial, qint32 preferredRuntimeType)
+    qint32 preferredPaintMaterial, qint32 preferredRuntimeType,
+    SWorkingTerrainResolveStage* staging)
 {
-    if(!m_workingTerrainAtlas || !m_workingTerrainAtlas->isValid())
+    CTerrainWorkingAtlas* atlas = staging
+        ? staging->atlas.data() : m_workingTerrainAtlas.data();
+    CTerrainEditModel* terrainEdit = staging
+        ? &staging->terrainEdit : &m_terrainEdit;
+    QSet<int>* protectedSlots = staging
+        ? &staging->protectedSlots : &m_workingAtlasProtectedSlots;
+    QMultiMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>*
+        importedTransitions = staging ? &staging->importedTransitions
+        : &m_importedTerrainTransitions;
+    QMap<QString, QByteArray>* encodedPageCache = staging
+        ? &staging->encodedPageCache
+        : &m_terrainGlobalTransitionEncodedPageCache;
+    QSet<QString>* missingPages = staging ? &staging->missingPages
+        : &m_terrainGlobalTransitionMissingPages;
+    QMap<QString, QImage>* decodedTileCache = staging
+        ? &staging->decodedTileCache : &m_terrainGlobalTransitionTileCache;
+    if(!atlas || !atlas->isValid())
     {
         if(report) report->add("terrain.working_atlas_unavailable",
             EValidationSeverity::Error,
@@ -8457,7 +8505,7 @@ bool CView::realizeWorkingTerrainSignature(
     // canonical generation from reviewed uniform material anchors. Global
     // pages are decoded on demand so palette construction stays cheap.
     bool alreadyExact = false;
-    m_workingTerrainAtlas->catalog().selectForPaint(
+    atlas->catalog().selectForPaint(
         signature, cellX, cellY, m_terrainSemanticSeed, &alreadyExact);
     if(!alreadyExact)
     {
@@ -8488,19 +8536,17 @@ bool CView::realizeWorkingTerrainSignature(
             importedPhysical.insert(physicalKey);
             const QImage pixels = loadGlobalTransitionTile(
                 source, requiredSize,
-                &m_terrainGlobalTransitionEncodedPageCache,
-                &m_terrainGlobalTransitionMissingPages,
-                &m_terrainGlobalTransitionTileCache);
+                encodedPageCache, missingPages, decodedTileCache);
             if(pixels.isNull())
                 continue;
             const QString label = QStringLiteral("%1 slot %2")
                 .arg(source.mprNamespace).arg(source.slot);
-            if(m_workingTerrainAtlas->addAuthoredLibraryTransition(
+            if(atlas->addAuthoredLibraryTransition(
                    source.signature, pixels, label, &libraryReport,
                    source.mprNamespace, source.slot))
             {
                 importedAny = true;
-                m_importedTerrainTransitions.insert(
+                importedTransitions->insert(
                     globalTransitionKey(source.signature),
                     qMakePair(source.signature, pixels));
                 ei::log(eLogInfo, QString(
@@ -8508,8 +8554,8 @@ bool CView::realizeWorkingTerrainSignature(
                     .arg(label));
             }
         }
-        if(importedAny && !m_workingTerrainAtlas->realizeAuthoredLibraryVariants(
-               signature, usage, m_workingAtlasProtectedSlots,
+        if(importedAny && !atlas->realizeAuthoredLibraryVariants(
+               signature, usage, *protectedSlots,
                &libraryReport, preferredPaintMaterial,
                preferredRuntimeType))
         {
@@ -8541,14 +8587,14 @@ bool CView::realizeWorkingTerrainSignature(
         return false;
     };
     CValidationReport attempt;
-    quint16 packed = m_workingTerrainAtlas->resolve(
-        signature, cellX, cellY, usage, m_workingAtlasProtectedSlots,
+    quint16 packed = atlas->resolve(
+        signature, cellX, cellY, usage, *protectedSlots,
         generated, &attempt, preferredPaintMaterial, preferredRuntimeType);
     if(attempt.hasErrors() && hasCapacityFinding(attempt) && usage)
     {
         bool reclaimable = false;
-        for(int slot = 0; slot < m_workingTerrainAtlas->capacityLimit(); ++slot)
-            if(usage->value(slot) == 0 && m_workingAtlasProtectedSlots.contains(slot))
+        for(int slot = 0; slot < atlas->capacityLimit(); ++slot)
+            if(usage->value(slot) == 0 && protectedSlots->contains(slot))
             {
                 reclaimable = true;
                 break;
@@ -8558,21 +8604,24 @@ bool CView::realizeWorkingTerrainSignature(
             // Physical packed slots are referenced by old undo commands. They
             // may only be recycled after that history is explicitly retired.
             // The virtual material field/current map remain authoritative.
-            if(m_pUndoStack)
+            if(staging)
+                staging->undoCheckpointRequired = true;
+            else if(m_pUndoStack)
                 m_pUndoStack->clear();
-            m_workingAtlasProtectedSlots.clear();
+            protectedSlots->clear();
             for(auto it = usage->cbegin(); it != usage->cend(); ++it)
                 if(it.value() != 0)
-                    m_workingAtlasProtectedSlots.insert(it.key());
+                    protectedSlots->insert(it.key());
             CValidationReport retry;
             if(generated) *generated = false;
-            packed = m_workingTerrainAtlas->resolve(
-                signature, cellX, cellY, usage, m_workingAtlasProtectedSlots,
+            packed = atlas->resolve(
+                signature, cellX, cellY, usage, *protectedSlots,
                 generated, &retry, preferredPaintMaterial,
                 preferredRuntimeType);
             if(!retry.hasErrors())
             {
-                m_tileStrokeUndoCheckpointed = true;
+                if(!staging)
+                    m_tileStrokeUndoCheckpointed = true;
                 if(report) report->add("terrain.working_atlas_undo_checkpoint",
                     EValidationSeverity::Warning,
                     "The live preview cache was full. The editor checkpointed the current terrain state and cleared prior undo history so unused physical slots could be safely recycled; no material identity was substituted.");
@@ -8597,8 +8646,16 @@ bool CView::realizeWorkingTerrainSignature(
     }
     const int resolvedSlot = SMprPackedTile::decode(packed).atlasSlot();
     const qint32 runtimeType =
-        m_workingTerrainAtlas->runtimeTerrainTypeForSlot(resolvedSlot);
-    if(!m_terrainEdit.setWorkingAtlasSlotType(resolvedSlot, runtimeType))
+        atlas->runtimeTerrainTypeForSlot(resolvedSlot);
+    if(preferredRuntimeType >= 0 && runtimeType != preferredRuntimeType)
+    {
+        if(report) report->add("terrain.working_type_mismatch",
+            EValidationSeverity::Error,
+            QString("The resolved exact transition retained runtime terrain type %1 instead of the required predecessor type %2; no differently typed slot was substituted.")
+                .arg(runtimeType).arg(preferredRuntimeType));
+        return false;
+    }
+    if(!terrainEdit->setWorkingAtlasSlotType(resolvedSlot, runtimeType))
     {
         if(report) report->add("terrain.working_type_install",
             EValidationSeverity::Error,
@@ -8624,17 +8681,24 @@ QByteArray terrainTilePixelSha256(const QImage& source)
     return hash.result().toHex();
 }
 
-bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
+bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
+                                    CTerrainWorkingAtlas* staging)
 {
-    if(!m_workingTerrainAtlas)
+    CTerrainWorkingAtlas* atlas = staging
+        ? staging : m_workingTerrainAtlas.data();
+    if(!atlas || !m_pLand || !m_pTileForm)
         return false;
-    if(m_landscapeTools)
-        m_landscapeTools->setGeneratedAtlasTileCount(
-            m_workingTerrainAtlas->generatedTileCount());
-    const QSet<int> changed = m_workingTerrainAtlas->takeChangedSlots();
+    const bool publishingLiveAtlas = atlas == m_workingTerrainAtlas.data();
+    const QSet<int> changed = atlas->changedSlots();
     if(changed.isEmpty())
+    {
+        if(publishingLiveAtlas && m_landscapeTools)
+            m_landscapeTools->setGeneratedAtlasTileCount(
+                atlas->generatedTileCount());
         return true;
-    const QVector<QImage> activeImages = m_workingTerrainAtlas->activeTileImages();
+    }
+    const QVector<QImage> activeImages = atlas->activeTileImages();
+    const QVector<qint32> activeTypes = atlas->activeTileTypes();
     const QVector<QImage> tableImages = activeImages.mid(
         0, m_authoredTerrainTileImages.size());
     if(tableImages != m_authoredTerrainTileImages)
@@ -8644,38 +8708,100 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report)
             "The working atlas attempted to change authored terrain pixels. The preview update was refused before upload.");
         return false;
     }
+    // CTileForm rejects before mutating, but validate the same shape contract
+    // before touching the GL preview so a malformed staged candidate cannot
+    // leave only one of the two preview consumers updated.
+    if(activeImages.isEmpty() || activeImages.size() % 64 != 0
+       || activeTypes.isEmpty()
+       || (activeTypes.size() + 63) / 64 != activeImages.size() / 64)
+    {
+        if(report) report->add("terrain.working_atlas_tile_picker",
+            EValidationSeverity::Error,
+            "The generated exact tiles have no valid logical tile-type table for the manual tile picker.");
+        return false;
+    }
+    const QSize tileSize = activeImages.front().size();
+    if(tileSize.width() <= 0 || tileSize.width() != tileSize.height())
+    {
+        if(report) report->add("terrain.working_atlas_tile_picker",
+            EValidationSeverity::Error,
+            "The generated exact tiles have invalid physical image dimensions.");
+        return false;
+    }
+    for(const QImage& image : activeImages)
+        if(image.isNull() || image.size() != tileSize)
+        {
+            if(report) report->add("terrain.working_atlas_tile_picker",
+                EValidationSeverity::Error,
+                "The generated exact tiles do not form complete physical atlas pages.");
+            return false;
+        }
+
+    const QVector<QImage> previousImages = m_pTileForm->tileImages();
+    QVector<qint32> previousTypes;
+    for(ETileType type : m_pTileForm->tileTypes())
+        previousTypes.append(qint32(type));
+    if(previousImages.isEmpty() || previousImages.size() % 64 != 0
+       || previousTypes.isEmpty()
+       || (previousTypes.size() + 63) / 64 != previousImages.size() / 64)
+    {
+        if(report) report->add("terrain.working_atlas_previous_preview",
+            EValidationSeverity::Error,
+            "The previous terrain atlas preview cannot be restored safely, so staged upload was refused.");
+        return false;
+    }
     QElapsedTimer uploadTimer;
     uploadTimer.start();
-    makeCurrent();
-    const bool installed = m_pLand->previewTerrainAtlas(
-        activeImages, m_workingTerrainAtlas->activeTextureCount());
-    doneCurrent();
+    // The picker validates before it mutates.  Install it first so a rejected
+    // staged candidate never reaches the renderer.  Conversely,
+    // previewTerrainAtlas() refuses before replacing its GL texture; if that
+    // second step fails, immediately restore the picker from its snapshot.
+    const bool pickerInstalled = m_pTileForm->adoptTileImages(
+        activeImages, activeTypes);
+    bool rendererInstalled = false;
+    bool pickerRestored = true;
+    if(pickerInstalled)
+    {
+        makeCurrent();
+        rendererInstalled = m_pLand->previewTerrainAtlas(
+            activeImages, atlas->activeTextureCount());
+        doneCurrent();
+        if(!rendererInstalled)
+            pickerRestored = m_pTileForm->adoptTileImages(
+                previousImages, previousTypes);
+    }
     ei::log(eLogInfo, QString(
         "Working terrain atlas sync timing: changedSlots:%1 activeSlots:%2 pages:%3 elapsedMs:%4")
         .arg(changed.size()).arg(activeImages.size())
-        .arg(m_workingTerrainAtlas->activeTextureCount())
+        .arg(atlas->activeTextureCount())
         .arg(uploadTimer.elapsed()));
-    if(!installed && report)
+    if(!pickerInstalled && report)
+    {
+        report->add("terrain.working_atlas_tile_picker",
+            EValidationSeverity::Error,
+            "The manual tile picker rejected the staged atlas before the renderer was changed.");
+    }
+    if(pickerInstalled && !rendererInstalled && report)
+    {
         report->add("terrain.working_atlas_renderer",
             EValidationSeverity::Error,
-            "The generated exact tiles could not be installed in the live terrain renderer.");
-    if(installed)
+            pickerRestored
+                ? "The staged atlas could not be installed in the live terrain renderer; the manual tile picker was restored."
+                : "The staged atlas could not be installed in the live terrain renderer and the manual tile picker could not be restored.");
+    }
+    if(!rendererInstalled || !pickerInstalled)
+        return false;
+    atlas->acknowledgeChangedSlots(changed);
+    if(publishingLiveAtlas)
     {
-        const QVector<qint32> activeTypes =
-            m_workingTerrainAtlas->activeTileTypes();
-        if(!m_pTileForm->adoptTileImages(activeImages, activeTypes))
-        {
-            if(report)
-                report->add("terrain.working_atlas_tile_picker",
-                    EValidationSeverity::Error,
-                    "The live atlas was uploaded, but its physical slots could not be adopted by the manual tile picker.");
-            return false;
-        }
+        if(m_landscapeTools)
+            m_landscapeTools->setGeneratedAtlasTileCount(
+                atlas->generatedTileCount());
         refreshClassicAutoPalette();
         refreshManualAtlasPalette();
         update();
     }
-    return installed;
+    return true;
 }
 
 void CView::finalizeVirtualTerrainAtlas()
@@ -12431,19 +12557,59 @@ void CView::resolveMissingTerrainBlends()
                        x, y, layer, m_workingTerrainAtlas->catalog(),
                        &field, completeField, &signature))
                     continue;
-                bool physicalFound = false;
-                m_workingTerrainAtlas->catalog().selectForPaint(
-                    signature, x, y, m_terrainSemanticSeed, &physicalFound);
-                if(physicalFound)
+                const qint32 runtimeType =
+                    m_workingTerrainAtlas->runtimeTerrainTypeForSlot(
+                        SMprPackedTile::decode(before).atlasSlot());
+                if(runtimeType < 0 || runtimeType >= 16)
+                {
+                    report.add("terrain.resolve_map_runtime_type",
+                        EValidationSeverity::Error,
+                        QString("Resolve Missing Blends could not determine the predecessor runtime terrain type at %1,%2; no exact tuple was substituted.")
+                            .arg(x).arg(y));
+                    break;
+                }
+                bool typedPhysicalFound = false;
+                for(const STerrainTransitionVariant& candidate :
+                    m_workingTerrainAtlas->catalog().paintVariants(signature))
+                    if(m_workingTerrainAtlas->runtimeTerrainTypeForSlot(
+                           SMprPackedTile::decode(candidate.packedTile)
+                               .atlasSlot()) == runtimeType)
+                    {
+                        typedPhysicalFound = true;
+                        break;
+                    }
+                if(typedPhysicalFound)
                     continue;
                 SMissingMapSignature item;
                 item.signature = signature;item.x = x;item.y = y;
-                item.runtimeType = m_workingTerrainAtlas->runtimeTerrainTypeForSlot(
-                    SMprPackedTile::decode(before).atlasSlot());
-                missing.insert(globalTransitionKey(signature), item);
+                item.runtimeType = runtimeType;
+                missing.insert(runtimeTypedTransitionKey(signature, runtimeType),
+                               item);
             }
         progress.setValue(layerIndex + 1);
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+
+    // Keep every realization side effect private until the complete semantic
+    // command has been built and accepted.  In particular, a failed/no-op
+    // Resolve must not leave generated slots, imported transition metadata,
+    // picker/renderer uploads, model tile types, or a retired undo history.
+    SWorkingTerrainResolveStage staged;
+    if(!report.hasErrors())
+    {
+        staged.atlas = m_workingTerrainAtlas->createStagingCopy();
+        if(!staged.atlas || !staged.atlas->isValid())
+            report.add("terrain.resolve_map_stage", EValidationSeverity::Error,
+                "Resolve Missing Blends could not create an isolated working-atlas staging copy.");
+        else
+        {
+            staged.terrainEdit = m_terrainEdit;
+            staged.protectedSlots = m_workingAtlasProtectedSlots;
+            staged.importedTransitions = m_importedTerrainTransitions;
+            staged.encodedPageCache = m_terrainGlobalTransitionEncodedPageCache;
+            staged.missingPages = m_terrainGlobalTransitionMissingPages;
+            staged.decodedTileCache = m_terrainGlobalTransitionTileCache;
+        }
     }
 
     QMap<int, quint64> usage;
@@ -12455,15 +12621,11 @@ void CView::resolveMissingTerrainBlends()
     {
         if(!realizeWorkingTerrainSignature(item.value().signature,
                item.value().x, item.value().y, &usage, &report, nullptr,
-               0, item.value().runtimeType))
+               0, item.value().runtimeType, &staged))
             break;
         ++generated;
     }
     progress.setValue(3);
-    if(!report.hasErrors() && !syncWorkingTerrainAtlas(&report))
-        report.add("terrain.resolve_map_upload", EValidationSeverity::Error,
-            "The resolved atlas tiles could not be installed in the live renderer");
-    progress.setValue(4);
 
     STerrainTileCommand combined;
     combined.description = tr("Resolve missing terrain blends");
@@ -12471,8 +12633,8 @@ void CView::resolveMissingTerrainBlends()
         for(ETerrainTileLayer layer : layers)
         {
             const STerrainTileCommand command =
-                m_terrainEdit.makeVirtualMapResolution(layer,
-                    m_workingTerrainAtlas->catalog(), m_terrainSemanticSeed,
+                staged.terrainEdit.makeVirtualMapResolution(layer,
+                    staged.atlas->catalog(), m_terrainSemanticSeed,
                     &report, false,
                     &repairFields[layer == ETerrainTileLayer::Land ? 0 : 1],
                     true,
@@ -12494,14 +12656,60 @@ void CView::resolveMissingTerrainBlends()
             "disputed shared corners were deliberately preserved."));
         return;
     }
-    if(!applyTerrainTilePreview(combined, true))
+    if(!staged.terrainEdit.apply(combined, true, &report))
     {
+        if(!report.hasErrors())
+            report.add("terrain.resolve_map_apply", EValidationSeverity::Error,
+                "The repaired physical tile command could not be validated against the staged MPR model.");
         QMessageBox::critical(this, tr("Resolve missing blends refused"), tr(
-            "The repaired physical tile command could not be applied. No undo "
-            "entry was created."));
+            "The repaired physical tile command could not be applied. No MPR, "
+            "atlas, preview, or undo state was changed.\n\n%1")
+                .arg(report.toText()));
         return;
     }
+
+    // This check is deliberately before preview upload. A stage is created
+    // from this atlas on the GUI thread, so commit must remain possible after
+    // this point; checking first means an incompatible candidate can never
+    // update GL/picker state and then be refused by the live cache.
+    if(!m_workingTerrainAtlas->canCommitStaging(*staged.atlas))
+    {
+        report.add("terrain.resolve_map_stage", EValidationSeverity::Error,
+            "The isolated working-atlas stage no longer matches the live authored cache.");
+        QMessageBox::critical(this, tr("Resolve missing blends refused"),
+            tr("No MPR, atlas, preview, or undo state was changed.\n\n%1")
+                .arg(report.toText()));
+        return;
+    }
+    if(!syncWorkingTerrainAtlas(&report, staged.atlas.data()))
+    {
+        if(!report.hasErrors())
+            report.add("terrain.resolve_map_upload", EValidationSeverity::Error,
+                "The resolved atlas tiles could not be installed in the live renderer.");
+        QMessageBox::critical(this, tr("Resolve missing blends refused"),
+            tr("No MPR, atlas, preview, or undo state was changed.\n\n%1")
+                .arg(report.toText()));
+        return;
+    }
+    progress.setValue(4);
+
+    const bool committed = m_workingTerrainAtlas->commitStaging(*staged.atlas);
+    Q_ASSERT(committed);
+    if(!committed)
+        return;
+    m_terrainEdit = staged.terrainEdit;
+    m_workingAtlasProtectedSlots = staged.protectedSlots;
+    m_importedTerrainTransitions = staged.importedTransitions;
+    m_terrainGlobalTransitionEncodedPageCache = staged.encodedPageCache;
+    m_terrainGlobalTransitionMissingPages = staged.missingPages;
+    m_terrainGlobalTransitionTileCache = staged.decodedTileCache;
+    if(staged.undoCheckpointRequired)
+        m_pUndoStack->clear();
+    refreshTerrainTilePreview(combined, true);
     m_pUndoStack->push(new CTerrainTilePreviewCommand(this, combined, true));
+    if(m_landscapeTools)
+        m_landscapeTools->setGeneratedAtlasTileCount(
+            m_workingTerrainAtlas->generatedTileCount());
     refreshTerrainFamilyUsage();
     refreshClassicAutoPalette();
     refreshManualAtlasPalette();
@@ -12572,6 +12780,13 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
         ei::log(eLogWarning, "Semantic terrain preview command refused:\n" + report.toText());
         return false;
     }
+    refreshTerrainTilePreview(command, forward);
+    return true;
+}
+
+void CView::refreshTerrainTilePreview(const STerrainTileCommand& command,
+                                      bool forward)
+{
     for(const STerrainTileDelta& delta:command.deltas)
     {
         m_workingAtlasProtectedSlots.insert(
@@ -12615,7 +12830,6 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
                   .arg(command.deltas.size()));
     }
     update();
-    return true;
 }
 
 bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
