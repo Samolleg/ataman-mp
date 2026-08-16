@@ -5072,7 +5072,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
         if(inside)requested.append(QPoint(x,y));
     }
     return makeVirtualMaterialPaintVertices(selectedCellX,selectedCellY,
-        requested,brush,layer,materialId,catalog,distributionSeed,report,
+        requested,QSet<int>(),brush,layer,materialId,catalog,distributionSeed,report,
         randomizeUniformRotation);
 }
 
@@ -5083,6 +5083,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualTileMaterialPaint(
     bool randomizeUniformRotation)
 {
     QSet<QPair<int,int>> vertexCoordinates;
+    QSet<int> previewCoreCells;
     const int minX=qMax(0,int(std::ceil(tileBrush.centerX-tileBrush.radius)));
     const int maxX=qMin(tileCountX()-1,
         int(std::floor(tileBrush.centerX+tileBrush.radius)));
@@ -5097,6 +5098,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualTileMaterialPaint(
             ?qMax(std::fabs(dx),std::fabs(dy))<=tileBrush.radius
             :std::sqrt(dx*dx+dy*dy)<=tileBrush.radius;
         if(!inside)continue;
+        previewCoreCells.insert(y*tileCountX()+x);
         vertexCoordinates.insert(qMakePair(x,y));
         vertexCoordinates.insert(qMakePair(x+1,y));
         vertexCoordinates.insert(qMakePair(x+1,y+1));
@@ -5109,14 +5111,22 @@ STerrainTileCommand CTerrainEditModel::makeVirtualTileMaterialPaint(
     std::sort(requested.begin(),requested.end(),[](const QPoint& left,
         const QPoint& right){return left.y()!=right.y()
             ?left.y()<right.y():left.x()<right.x();});
-    return makeVirtualMaterialPaintVertices(qRound(tileBrush.centerX),
-        qRound(tileBrush.centerY),requested,tileBrush,layer,materialId,catalog,
+    STerrainTileCommand command=makeVirtualMaterialPaintVertices(
+        qRound(tileBrush.centerX),qRound(tileBrush.centerY),requested,
+        previewCoreCells,tileBrush,layer,materialId,catalog,
         distributionSeed,report,randomizeUniformRotation);
+    QVector<int> sortedCore=previewCoreCells.values().toVector();
+    std::sort(sortedCore.begin(),sortedCore.end());
+    for(int cell:sortedCore)
+        command.semanticAudit.paintedCoreCells.append(
+            QPoint(cell%tileCountX(),cell/tileCountX()));
+    return command;
 }
 
 STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
     int selectedCellX,int selectedCellY,const QVector<QPoint>& requestedVertices,
-    const STerrainTileBrush& auditBrush,ETerrainTileLayer layer,
+    const QSet<int>& previewCoreCells,const STerrainTileBrush& auditBrush,
+    ETerrainTileLayer layer,
     qint32 materialId,const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed,CValidationReport* report,
     bool randomizeUniformRotation)
@@ -5219,6 +5229,18 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
             command.semanticAudit.affectedCells.append(QPoint(x,y));
             continue;
         }
+        // Tile targeting owns complete cells, but changing their four corner
+        // vertices also makes the surrounding blend ring semantically affected.
+        // Keep that ring at its exact current artwork during the drag preview;
+        // release resolution will replace it with exact blends. Painting the
+        // uniform preview into every incident cell made the visible footprint
+        // one cell larger than the tile outline and the committed core.
+        if(!command.virtualVertices.isEmpty()&&!previewCoreCells.isEmpty()
+           &&!previewCoreCells.contains(cell))
+        {
+            command.semanticAudit.affectedCells.append(QPoint(x,y));
+            continue;
+        }
         const quint16 after = command.virtualVertices.isEmpty()
             ? (exactUniform
                 ? selectUniformInteriorTile(catalog, exact, x, y, paintSeed,
@@ -5312,6 +5334,132 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
     return command;
 }
 
+bool CTerrainEditModel::inferCellSignatureFromNeighbors(
+    int cellX,int cellY,ETerrainTileLayer layer,
+    const CTerrainTransitionCatalog& catalog,
+    STerrainTransitionSignature* output) const
+{
+    if(!output||cellX<0||cellX>=tileCountX()
+       ||cellY<0||cellY>=tileCountY())
+        return false;
+    qint32 inferred[4]={0,0,0,0};
+    const int vertexX[4]={cellX,cellX+1,cellX+1,cellX};
+    const int vertexY[4]={cellY,cellY,cellY+1,cellY+1};
+    for(int targetCorner=0;targetCorner<4;++targetCorner)
+    {
+        QSet<qint32> observed;
+        const int vx=vertexX[targetCorner],vy=vertexY[targetCorner];
+        for(int otherY=vy-1;otherY<=vy;++otherY)
+            for(int otherX=vx-1;otherX<=vx;++otherX)
+            {
+                if(otherX<0||otherX>=tileCountX()
+                   ||otherY<0||otherY>=tileCountY()
+                   ||(otherX==cellX&&otherY==cellY))
+                    continue;
+                bool available=false,decoded=false;
+                const quint16 packed=packedTile(otherX,otherY,layer,&available);
+                if(!available)continue;
+                const STerrainTransitionSignature signature=
+                    catalog.gridSignatureForPacked(packed,&decoded);
+                if(!decoded)continue;
+                if(otherX==vx&&otherY==vy)
+                    observed.insert(signature.northWest);
+                else if(otherX==vx-1&&otherY==vy)
+                    observed.insert(signature.northEast);
+                else if(otherX==vx-1&&otherY==vy-1)
+                    observed.insert(signature.southEast);
+                else if(otherX==vx&&otherY==vy-1)
+                    observed.insert(signature.southWest);
+            }
+        if(observed.size()!=1)
+            return false;
+        inferred[targetCorner]=*observed.constBegin();
+    }
+    output->northWest=inferred[0];output->northEast=inferred[1];
+    output->southEast=inferred[2];output->southWest=inferred[3];
+    return true;
+}
+
+bool CTerrainEditModel::missingBlendRepairSignature(
+    int cellX,int cellY,ETerrainTileLayer layer,
+    const CTerrainTransitionCatalog& catalog,
+    const CTerrainVirtualMaterialField* repairField,
+    bool repairDecodedCells,STerrainTransitionSignature* output) const
+{
+    if(!output||cellX<0||cellX>=tileCountX()
+       ||cellY<0||cellY>=tileCountY())
+        return false;
+    bool available=false,decoded=false;
+    const quint16 packed=packedTile(cellX,cellY,layer,&available);
+    if(!available)return false;
+    const STerrainTransitionSignature current=
+        catalog.gridSignatureForPacked(packed,&decoded);
+    STerrainTransitionSignature fieldSignature;
+    bool fieldFound=false;
+    if(repairField)
+        fieldSignature=repairField->cellSignature(cellX,cellY,&fieldFound);
+    else
+    {
+        const QVector<qint32>& values=layer==ETerrainTileLayer::Land
+            ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+        const int vertexWidth=tileCountX()+1;
+        const qint32 unset=std::numeric_limits<qint32>::min();
+        if(values.size()==vertexWidth*(tileCountY()+1))
+        {
+            const int nw=cellY*vertexWidth+cellX,ne=nw+1;
+            const int sw=(cellY+1)*vertexWidth+cellX,se=sw+1;
+            fieldFound=values.at(nw)!=unset&&values.at(ne)!=unset
+                &&values.at(se)!=unset&&values.at(sw)!=unset;
+            if(fieldFound)
+            {
+                fieldSignature.northWest=values.at(nw);
+                fieldSignature.northEast=values.at(ne);
+                fieldSignature.southEast=values.at(se);
+                fieldSignature.southWest=values.at(sw);
+            }
+        }
+    }
+    STerrainTransitionSignature neighborSignature;
+    const bool neighborFound=inferCellSignatureFromNeighbors(
+        cellX,cellY,layer,catalog,&neighborSignature);
+    if(!decoded)
+    {
+        if(neighborFound)*output=neighborSignature;
+        else if(fieldFound)*output=fieldSignature;
+        else return false;
+        return true;
+    }
+    if(!repairField&&fieldFound)
+    {
+        if(current==fieldSignature)return false;
+        *output=fieldSignature;
+        return true;
+    }
+    const auto uniform=[](const STerrainTransitionSignature& signature)
+    {
+        return signature.northWest==signature.northEast
+            &&signature.northWest==signature.southEast
+            &&signature.northWest==signature.southWest;
+    };
+    const bool currentUniform=uniform(current);
+    if(currentUniform&&repairDecodedCells&&fieldFound
+       &&!uniform(fieldSignature)&&!(current==fieldSignature))
+    {
+        *output=fieldSignature;
+        return true;
+    }
+    if(!neighborFound||current==neighborSignature)
+        return false;
+    // This operation repairs missing or incorrect blends. It never replaces a
+    // decoded contextual stamp with a uniform merely because the surrounding
+    // field cannot represent that stamp, and it never relabels one uniform
+    // interior as another material.
+    if(uniform(neighborSignature))
+        return false;
+    *output=neighborSignature;
+    return true;
+}
+
 STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
     ETerrainTileLayer layer,const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed,CValidationReport* report,
@@ -5328,8 +5476,6 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
     command.semanticAudit.solverMode=QStringLiteral("virtual-map-exact");
     const QVector<qint32>& values=layer==ETerrainTileLayer::Land
         ?m_virtualLandMaterials:m_virtualOverlayMaterials;
-    const int vertexWidth=tileCountX()+1;
-    const qint32 unset=std::numeric_limits<qint32>::min();
     if(repairField
        && (repairField->tileWidth()!=tileCountX()
            ||repairField->tileHeight()!=tileCountY()))
@@ -5339,7 +5485,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
             "The conservative repair field dimensions do not match this map");
         return command;
     }
-    if(!repairField&&values.size()!=vertexWidth*(tileCountY()+1))
+    if(!repairField&&values.size()!=(tileCountX()+1)*(tileCountY()+1))
     {
         if(report)report->add("terrain.virtual_map_field",
             EValidationSeverity::Error,
@@ -5347,12 +5493,12 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         return command;
     }
     const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
-    const auto uniformSignature =
-        [](const STerrainTransitionSignature& signature) {
-            return signature.northWest == signature.northEast
-                && signature.northWest == signature.southEast
-                && signature.northWest == signature.southWest;
-        };
+    const auto uniformSignature=[](const STerrainTransitionSignature& signature)
+    {
+        return signature.northWest==signature.northEast
+            &&signature.northWest==signature.southEast
+            &&signature.northWest==signature.southWest;
+    };
     int unresolved=0;
     for(int y=0;y<tileCountY();++y)for(int x=0;x<tileCountX();++x)
     {
@@ -5360,34 +5506,9 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         const quint16 before=packedTile(x,y,layer,&available);
         if(!available)continue;
         STerrainTransitionSignature exact;
-        if(repairField)
-        {
-            bool signatureFound=false;
-            exact=repairField->cellSignature(x,y,&signatureFound);
-            if(!signatureFound){++unresolved;continue;}
-        }
-        else
-        {
-            const int nw=y*vertexWidth+x,ne=nw+1;
-            const int sw=(y+1)*vertexWidth+x,se=sw+1;
-            if(values.at(nw)==unset||values.at(ne)==unset
-               ||values.at(se)==unset||values.at(sw)==unset)
-            {++unresolved;continue;}
-            exact.northWest=values.at(nw);exact.northEast=values.at(ne);
-            exact.southEast=values.at(se);exact.southWest=values.at(sw);
-        }
-        bool decoded=false;
-        const STerrainTransitionSignature current=
-            catalog.gridSignatureForPacked(before,&decoded);
-        if(decoded&&current==exact)
+        if(!missingBlendRepairSignature(x,y,layer,catalog,repairField,
+             repairDecodedCells,&exact))
             continue;
-        if(repairField&&decoded)
-        {
-            const bool currentUniform=uniformSignature(current);
-            const bool exactUniform=uniformSignature(exact);
-            if(!repairDecodedCells||!currentUniform||exactUniform)
-                continue;
-        }
         bool found=false;
         const bool uniform=uniformSignature(exact);
         const quint16 after=uniform

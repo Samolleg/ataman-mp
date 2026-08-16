@@ -12253,12 +12253,6 @@ void CView::resolveMissingTerrainBlends()
     QMap<QByteArray, SMissingMapSignature> missing;
     CTerrainVirtualMaterialField repairFields[2];
     bool completeRepairFields[2] = {false, false};
-    const auto uniformSignature =
-        [](const STerrainTransitionSignature& signature) {
-            return signature.northWest == signature.northEast
-                && signature.northWest == signature.southEast
-                && signature.northWest == signature.southWest;
-        };
     const ETerrainTileLayer layers[] = {
         ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
     for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
@@ -12285,23 +12279,11 @@ void CView::resolveMissingTerrainBlends()
                     x, y, layer, &available);
                 if(!available)
                     continue;
-                bool signatureFound = false;
-                const STerrainTransitionSignature signature =
-                    field.cellSignature(x, y, &signatureFound);
-                if(!signatureFound)
+                STerrainTransitionSignature signature;
+                if(!m_terrainEdit.missingBlendRepairSignature(
+                       x, y, layer, m_workingTerrainAtlas->catalog(),
+                       &field, completeField, &signature))
                     continue;
-                bool decoded = false;
-                const STerrainTransitionSignature current =
-                    m_workingTerrainAtlas->catalog().gridSignatureForPacked(
-                    before, &decoded);
-                if(decoded)
-                {
-                    if(current == signature)
-                        continue;
-                    if(!uniformSignature(current)
-                       || uniformSignature(signature))
-                        continue;
-                }
                 bool physicalFound = false;
                 m_workingTerrainAtlas->catalog().selectForPaint(
                     signature, x, y, m_terrainSemanticSeed, &physicalFound);

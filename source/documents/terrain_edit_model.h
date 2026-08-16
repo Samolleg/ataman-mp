@@ -513,6 +513,16 @@ public:
         ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
         CTerrainVirtualMaterialField* output,
         CValidationReport* report = nullptr) const;
+    bool inferCellSignatureFromNeighbors(
+        int cellX, int cellY, ETerrainTileLayer layer,
+        const CTerrainTransitionCatalog& catalog,
+        STerrainTransitionSignature* output) const;
+    bool missingBlendRepairSignature(
+        int cellX, int cellY, ETerrainTileLayer layer,
+        const CTerrainTransitionCatalog& catalog,
+        const CTerrainVirtualMaterialField* repairField,
+        bool repairDecodedCells,
+        STerrainTransitionSignature* output) const;
     bool copyVirtualMaterialField(ETerrainTileLayer layer,
         CTerrainVirtualMaterialField* output,
         bool requireComplete = true) const;
@@ -578,6 +588,7 @@ private:
     STerrainTileCommand makeVirtualMaterialPaintVertices(
         int selectedCellX, int selectedCellY,
         const QVector<QPoint>& requestedVertices,
+        const QSet<int>& previewCoreCells,
         const STerrainTileBrush& auditBrush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed, CValidationReport* report,

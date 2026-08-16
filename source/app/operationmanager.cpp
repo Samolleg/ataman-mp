@@ -1295,9 +1295,14 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
         bool hit = false;
         const QVector3D landPos = m_pView->getTerrainBrushPos(
             pEvent->x(), pEvent->y(), &hit);
-        if(hit && (!m_lastLandPosValid
-                   || landPos.distanceToPoint(m_lastLandPos) > 1.0f))
+        if(hit)
         {
+            // A terrain cell is two world units wide, but its projected screen
+            // boundary can be crossed after a much smaller world-space move.
+            // The old one-unit throttle therefore left the outline on one cell
+            // while mouse press freshly picked and painted its neighbour.
+            // Re-pick every hover event; updatePreviewTile already performs the
+            // authoritative cell/vertex snap used by the paint path.
             m_pView->updatePreviewTile(landPos, bLand);
             m_lastLandPos = landPos;
             m_lastLandPosValid = true;

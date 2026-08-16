@@ -553,6 +553,7 @@ private slots:
     void mapResolutionDoesNotChooseAWinningSideForTiedBorders();
     void recoveredMapResolutionPreservesDecodedContextStamps();
     void recoveredMapResolutionRepairsDecodedWrongBlend();
+    void recoveredMapResolutionExcludesTheCellBeingJudged();
     void classicAutoStrokeRefusesMissingBlendAndRollsBackExactly();
     void overlayVirtualPaintAllowsSparseInactiveField();
     void collapsedUniformBaselineRecoversExactRotatedBlend();
@@ -3945,6 +3946,9 @@ void TerrainVirtualAtlasTests::virtualTilePaintTargetsFourCellCorners()
     expected << qMakePair(8,8) << qMakePair(9,8)
              << qMakePair(9,9) << qMakePair(8,9);
     QCOMPARE(points,expected);
+    QCOMPARE(command.deltas.size(), 1);
+    QCOMPARE(command.deltas.front().globalX, 8);
+    QCOMPARE(command.deltas.front().globalY, 8);
 }
 
 void TerrainVirtualAtlasTests::mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly()
@@ -4130,6 +4134,85 @@ void TerrainVirtualAtlasTests::recoveredMapResolutionRepairsDecodedWrongBlend()
         if(delta.globalX == 8 && delta.after == 4)
             repairedCell = true;
     QVERIFY(repairedCell);
+}
+
+void TerrainVirtualAtlasTests::recoveredMapResolutionExcludesTheCellBeingJudged()
+{
+    Fixture fixture;
+    STerrainTransitionVariant expectedBoundary;
+    expectedBoundary.signature = signature(1, 2, 2, 1);
+    expectedBoundary.packedTile = 4;
+    QVERIFY(fixture.catalog.addVariant(expectedBoundary));
+    STerrainTransitionVariant wrongBoundary;
+    wrongBoundary.signature = signature(1, 1, 2, 2);
+    wrongBoundary.packedTile = 5;
+    QVERIFY(fixture.catalog.addVariant(wrongBoundary));
+
+    QByteArray payload;
+    QDataStream sec(&payload, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(64, 1), 0));
+
+    STerrainTileCommand boundary;
+    for(int y = 0; y < 16; ++y)
+        for(int x = 8; x < 16; ++x)
+        {
+            STerrainTileDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.layer = ETerrainTileLayer::Land;
+            delta.before = 0;
+            delta.after = x == 8 ? 4 : 1;
+            boundary.deltas.append(delta);
+        }
+    QVERIFY(model.apply(boundary, true, &report));
+
+    STerrainTileCommand damage;
+    STerrainTileDelta wrong;
+    wrong.globalX = 8;
+    wrong.globalY = 8;
+    wrong.layer = ETerrainTileLayer::Land;
+    wrong.before = 4;
+    wrong.after = 5;
+    damage.deltas.append(wrong);
+    QVERIFY(model.apply(damage, true, &report));
+
+    CTerrainVirtualMaterialField recovered;
+    QVERIFY(model.recoverUnambiguousVirtualMaterialField(
+        ETerrainTileLayer::Land, fixture.catalog, &recovered, &report));
+    bool contaminatedConsensusFound = true;
+    recovered.cellSignature(8, 8, &contaminatedConsensusFound);
+    QVERIFY2(!contaminatedConsensusFound,
+             "The damaged cell should poison the old all-cell consensus fixture");
+
+    STerrainTransitionSignature inferred;
+    QVERIFY(model.inferCellSignatureFromNeighbors(
+        8, 8, ETerrainTileLayer::Land, fixture.catalog, &inferred));
+    QCOMPARE(inferred, expectedBoundary.signature);
+
+    CValidationReport repairReport;
+    const STerrainTileCommand repair = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x4c4f4f55u,
+        &repairReport, false, &recovered, true, false);
+    QVERIFY2(!repairReport.hasErrors(), qPrintable(repairReport.toText()));
+    QCOMPARE(repair.deltas.size(), 1);
+    QCOMPARE(repair.deltas.front().globalX, 8);
+    QCOMPARE(repair.deltas.front().globalY, 8);
+    QCOMPARE(repair.deltas.front().before, quint16(5));
+    QCOMPARE(repair.deltas.front().after, quint16(4));
 }
 
 void TerrainVirtualAtlasTests::classicAutoStrokeRefusesMissingBlendAndRollsBackExactly()
