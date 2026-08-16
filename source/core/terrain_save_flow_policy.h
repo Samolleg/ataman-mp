@@ -45,6 +45,14 @@ inline bool terrainMprSaveActionEnabled(bool hasMpr, bool mprDirty,
     return hasMpr && (mprDirty || identityPublicationPending);
 }
 
+inline bool terrainChangedSaveNeedsWorkingAtlasPackage(
+    bool editableModernDraftRequested, bool workingAtlasAvailable,
+    bool landUsesWorkingExtension, bool overlayUsesWorkingExtension)
+{
+    return (editableModernDraftRequested && workingAtlasAvailable)
+        || landUsesWorkingExtension || overlayUsesWorkingExtension;
+}
+
 enum class ETerrainPublicationPrimaryLayer
 {
     None,

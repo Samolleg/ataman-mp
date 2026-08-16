@@ -6103,9 +6103,15 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         return false;
     }
 
+    const bool landWorkingExtension =
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land);
+    const bool overlayWorkingExtension =
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay);
     const bool workingExtension =
-        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
-        || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay);
+        terrainChangedSaveNeedsWorkingAtlasPackage(
+            allowModernDraft,
+            m_workingTerrainAtlas && m_workingTerrainAtlas->isValid(),
+            landWorkingExtension, overlayWorkingExtension);
     QProgressDialog progress(tr("Preparing canonical terrain patches..."), QString(),
                              0, workingExtension ? 8 : 4, this);
     progress.setWindowTitle(tr("Saving MPR"));
@@ -7199,6 +7205,8 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     const ETerrainTileBrushShape shape = m_landscapeTools->paintShape();
     const auto included = [this, radius, shape](int x, int y)
     {
+        if(!m_terrainPaintOutlineCells.isEmpty())
+            return m_terrainPaintOutlineCells.contains(QPoint(x, y));
         const int dx = qAbs(x - m_terrainPaintOutlineX);
         const int dy = qAbs(y - m_terrainPaintOutlineY);
         return shape == ETerrainTileBrushShape::Square
@@ -7233,11 +7241,20 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
         glDepthFunc(GL_ALWAYS);
         glLineWidth(2.5f);
         program->setUniformValue("customColor", outlineColor);
-        for(int y = m_terrainPaintOutlineY - radius;
-            y <= m_terrainPaintOutlineY + radius; ++y)
+        int minX = m_terrainPaintOutlineX - radius;
+        int maxX = m_terrainPaintOutlineX + radius;
+        int minY = m_terrainPaintOutlineY - radius;
+        int maxY = m_terrainPaintOutlineY + radius;
+        for(const QPoint& point : m_terrainPaintOutlineCells)
         {
-            for(int x = m_terrainPaintOutlineX - radius;
-                x <= m_terrainPaintOutlineX + radius; ++x)
+            minX = qMin(minX, point.x());
+            maxX = qMax(maxX, point.x());
+            minY = qMin(minY, point.y());
+            maxY = qMax(maxY, point.y());
+        }
+        for(int y = minY; y <= maxY; ++y)
+        {
+            for(int x = minX; x <= maxX; ++x)
             {
                 if(!included(x, y))
                     continue;
@@ -11683,6 +11700,7 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 {
     if(!m_pLand->isMprLoad())
         return;
+    m_terrainPaintOutlineCells.clear();
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
@@ -11730,6 +11748,46 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     m_terrainPaintOutlineY = tileLoc.ySec * 16 + tileLoc.row;
     m_terrainPaintOutlineValid = terrainPaintCellOutlineVisible(
         brushSelectionAvailable, index >= 0);
+    if(m_terrainPaintOutlineValid && !manualTilePaintingEnabled()
+       && m_landscapeTools && m_terrainEditAvailable)
+    {
+        bool materialSelected = false;
+        const qint32 material = m_landscapeTools->paintTerrainType(
+            &materialSelected);
+        if(materialSelected)
+        {
+            STerrainTileBrush outlineBrush;
+            outlineBrush.centerX = m_terrainPaintOutlineX;
+            outlineBrush.centerY = m_terrainPaintOutlineY;
+            outlineBrush.radius = m_landscapeTools->paintRadius();
+            outlineBrush.shape = m_landscapeTools->paintShape();
+            const ETerrainTileLayer layer = bLand
+                ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+            const CTerrainTransitionCatalog& catalog = m_workingTerrainAtlas
+                ? m_workingTerrainAtlas->catalog()
+                : (!bLand
+                    ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
+                    : m_terrainAtlasAnalysis.catalog(layer));
+            CValidationReport outlineReport;
+            const ETerrainSemanticPaintPolicy policy =
+                m_landscapeTools->classicAutoSafeMode()
+                    ? ETerrainSemanticPaintPolicy::ExactExistingOnly
+                    : ETerrainSemanticPaintPolicy::AllowLocalHardEdges;
+            const STerrainTileCommand outlineCommand =
+                m_landscapeTools->classicAutoPaintingEnabled()
+                    ? m_terrainEdit.makeSemanticTilePaint(
+                          outlineBrush, layer, material, catalog,
+                          m_tileStrokeDistributionSeed, &outlineReport,
+                          policy)
+                    : m_terrainEdit.makeVirtualTileMaterialPaint(
+                          outlineBrush, layer, material, catalog,
+                          m_tileStrokeDistributionSeed, &outlineReport,
+                          m_landscapeTools->randomizeUniformRotation());
+            for(const QPoint& cell :
+                outlineCommand.semanticAudit.affectedCells)
+                m_terrainPaintOutlineCells.insert(cell);
+        }
+    }
     if(index < 0)
     {
         setPreviewTile(false);
@@ -12267,8 +12325,6 @@ void CView::resolveMissingTerrainBlends()
                 bool decoded = false;
                 m_workingTerrainAtlas->catalog().gridSignatureForPacked(
                     before, &decoded);
-                if(!completeField && decoded)
-                    continue;
                 bool physicalFound = false;
                 m_workingTerrainAtlas->catalog().selectForPaint(
                     signature, x, y, m_terrainSemanticSeed, &physicalFound);

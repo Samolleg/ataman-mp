@@ -565,6 +565,16 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         QSettings().setValue(QStringLiteral("ui/landscape/paintPaletteMode"),
                              index);
         setPaintIssueMarkingEnabled(false);
+        if(paintPaletteMode() == ETerrainPaintPaletteMode::Manual
+           && m_tilePaintTarget && !m_tilePaintTarget->isChecked())
+        {
+            const QSignalBlocker tileBlocker(m_tilePaintTarget);
+            const QSignalBlocker vertexBlocker(m_vertexPaintTarget);
+            m_tilePaintTarget->setChecked(true);
+            if(m_vertexPaintTarget)
+                m_vertexPaintTarget->setChecked(false);
+        }
+        updatePaintIssueUi();
         bool selected = false;
         const qint32 material = paintTerrainType(&selected);
         emit paintTerrainTypeChanged(selected ? material : -1);
@@ -834,6 +844,8 @@ void CLandscapeTools::setPaintPaletteMode(ETerrainPaintPaletteMode mode)
 }
 ETerrainPaintTargetMode CLandscapeTools::paintTargetMode() const
 {
+    if(manualTileSelectionEnabled())
+        return ETerrainPaintTargetMode::Tile;
     return m_vertexPaintTarget && m_vertexPaintTarget->isChecked()
         ? ETerrainPaintTargetMode::Vertex : ETerrainPaintTargetMode::Tile;
 }
@@ -979,6 +991,7 @@ QButtonGroup* CLandscapeTools::activeMaterialButtons() const
 void CLandscapeTools::updatePaintIssueUi()
 {
     const bool marking = paintIssueMarkingEnabled();
+    const bool manual = manualTileSelectionEnabled();
     const QString category = m_paintIssueCategory
         ? m_paintIssueCategory->currentText() : tr("No / wrong blend");
     if(m_markPaintIssue)
@@ -986,8 +999,8 @@ void CLandscapeTools::updatePaintIssueUi()
             ? tr("MARKING: %1").arg(category.toUpper())
             : tr("Mark bad tiles on map"));
     if(m_paintRadius) m_paintRadius->setEnabled(!marking);
-    if(m_tilePaintTarget) m_tilePaintTarget->setEnabled(!marking);
-    if(m_vertexPaintTarget) m_vertexPaintTarget->setEnabled(!marking);
+    if(m_tilePaintTarget) m_tilePaintTarget->setEnabled(!marking && !manual);
+    if(m_vertexPaintTarget) m_vertexPaintTarget->setEnabled(!marking && !manual);
     if(m_paintModeTabs) m_paintModeTabs->setEnabled(!marking);
     updatePaintShapeUi();
 }

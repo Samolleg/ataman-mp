@@ -552,6 +552,7 @@ private slots:
     void mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly();
     void mapResolutionDoesNotChooseAWinningSideForTiedBorders();
     void recoveredMapResolutionPreservesDecodedContextStamps();
+    void recoveredMapResolutionRepairsDecodedWrongBlend();
     void classicAutoStrokeRefusesMissingBlendAndRollsBackExactly();
     void overlayVirtualPaintAllowsSparseInactiveField();
     void collapsedUniformBaselineRecoversExactRotatedBlend();
@@ -4084,6 +4085,51 @@ void TerrainVirtualAtlasTests::recoveredMapResolutionPreservesDecodedContextStam
     QVERIFY2(repair.isEmpty(),
              "Recovered map repair erased a decoded contextual stamp");
     QCOMPARE(model.packedTile(8, 8, ETerrainTileLayer::Land), quint16(4));
+}
+
+void TerrainVirtualAtlasTests::recoveredMapResolutionRepairsDecodedWrongBlend()
+{
+    Fixture fixture;
+    STerrainTransitionVariant vertical;
+    vertical.signature = signature(1, 2, 2, 1);
+    vertical.packedTile = 4;
+    QVERIFY(fixture.catalog.addVariant(vertical));
+
+    QByteArray payload;
+    QDataStream sec(&payload, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(64, 1), 0));
+
+    CTerrainVirtualMaterialField recoveredField;
+    QVERIFY(recoveredField.resize(model.tileCountX(), model.tileCountY()));
+    for(int y = 0; y <= recoveredField.tileHeight(); ++y)
+        for(int x = 0; x <= recoveredField.tileWidth(); ++x)
+            recoveredField.setMaterial(x, y, x <= 8 ? 1 : 2);
+
+    const STerrainTileCommand repair = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x52455052u, &report,
+        false, &recoveredField, true, true);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY2(!repair.isEmpty(),
+             "Recovered map repair skipped a decoded uniform where a blend was required");
+    bool repairedCell = false;
+    for(const STerrainTileDelta& delta : repair.deltas)
+        if(delta.globalX == 8 && delta.after == 4)
+            repairedCell = true;
+    QVERIFY(repairedCell);
 }
 
 void TerrainVirtualAtlasTests::classicAutoStrokeRefusesMissingBlendAndRollsBackExactly()

@@ -543,6 +543,16 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QVERIFY(terrainMprSaveActionEnabled(true, false, true));
     QVERIFY(!terrainMprSaveActionEnabled(true, false, false));
     QVERIFY(!terrainMprSaveActionEnabled(false, true, true));
+    QVERIFY(terrainChangedSaveNeedsWorkingAtlasPackage(
+        true, true, false, false));
+    QVERIFY(!terrainChangedSaveNeedsWorkingAtlasPackage(
+        true, false, false, false));
+    QVERIFY(terrainChangedSaveNeedsWorkingAtlasPackage(
+        false, false, true, false));
+    QVERIFY(terrainChangedSaveNeedsWorkingAtlasPackage(
+        false, false, false, true));
+    QVERIFY(!terrainChangedSaveNeedsWorkingAtlasPackage(
+        false, true, false, false));
 
     const STerrainPublicationLayerPlan landOnly =
         terrainPublicationLayerPlan(true, false);
@@ -3807,7 +3817,31 @@ void EnduranceDocumentTests::cornerOnlyMaterialPaintUsesAuthoredContextAndStaysL
         QCOMPARE(corners.count(3), 3);
     }
     QVERIFY(fallbackTerrain.apply(explicitSupport, true));
+    CTerrainEditModel safeWrongSupportTerrain;
+    QVERIFY(safeWrongSupportTerrain.load(document));
+    for(const QPoint& cell : expectedCells)
+    {
+        STerrainTileBrush setup;
+        setup.centerX = cell.x();
+        setup.centerY = cell.y();
+        setup.radius = 0.0f;
+        QVERIFY(safeWrongSupportTerrain.apply(
+            safeWrongSupportTerrain.makeTilePaint(
+                setup, ETerrainTileLayer::Land, 0, 0, 1), true));
+    }
+    CValidationReport safeWrongSupportReport;
+    const STerrainTileCommand safeWrongSupport =
+        safeWrongSupportTerrain.makeSemanticVertexPaint(
+            8, 8, contextualBrush, ETerrainTileLayer::Land, 2, catalog,
+            0x53414645u, &safeWrongSupportReport, 3,
+            ETerrainSemanticPaintPolicy::ExactExistingOnly);
+    QVERIFY2(safeWrongSupport.isEmpty(),
+             qPrintable(safeWrongSupportReport.toText()));
+    QVERIFY2(safeWrongSupportReport.hasErrors(),
+             qPrintable(safeWrongSupportReport.toText()));
+
     contextualBrush.centerX = 9.0f;
+    contextualBrush.centerY = 8.0f;
     CValidationReport overlapReport;
     const STerrainTileCommand overlap = fallbackTerrain.makeSemanticVertexPaint(
         9, 8, contextualBrush, ETerrainTileLayer::Land, 2, catalog,
@@ -3837,6 +3871,63 @@ void EnduranceDocumentTests::cornerOnlyMaterialPaintUsesAuthoredContextAndStaysL
                                       signature.southWest});
         QCOMPARE(corners.at(corner), qint32(2));
     }
+
+    STerrainTransitionSignature detailEdgeOnGround;
+    detailEdgeOnGround.northWest = 2;
+    detailEdgeOnGround.northEast = 2;
+    detailEdgeOnGround.southEast = 3;
+    detailEdgeOnGround.southWest = 3;
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        const STerrainTransitionSignature edgeOnGround =
+            CTerrainTransitionCatalog::rotated(detailEdgeOnGround, rotation);
+        QVERIFY(add(edgeOnGround.northWest, edgeOnGround.northEast,
+                    edgeOnGround.southEast, edgeOnGround.southWest,
+                    quint16(7 | (rotation << 14))));
+    }
+
+    // Safe contextual stamps must still connect to another compatible stamp
+    // vertically. The guard above should reject only unrelated support
+    // materials, not the material/support pair already authored by the card.
+    CTerrainEditModel safeVerticalTerrain;
+    QVERIFY(safeVerticalTerrain.load(document));
+    for(const QPoint& cell : QVector<QPoint>({QPoint(7, 7), QPoint(8, 7),
+                                               QPoint(7, 8), QPoint(8, 8),
+                                               QPoint(7, 9), QPoint(8, 9)}))
+    {
+        STerrainTileBrush setup;
+        setup.centerX = cell.x();
+        setup.centerY = cell.y();
+        setup.radius = 0.0f;
+        QVERIFY(safeVerticalTerrain.apply(
+            safeVerticalTerrain.makeTilePaint(
+                setup, ETerrainTileLayer::Land, 0, 1, 0), true));
+    }
+    contextualBrush.centerX = 8.0f;
+    contextualBrush.centerY = 8.0f;
+    CValidationReport safeFirstStampReport;
+    const STerrainTileCommand safeFirstStamp =
+        safeVerticalTerrain.makeSemanticVertexPaint(
+            8, 8, contextualBrush, ETerrainTileLayer::Land, 2, catalog,
+            0x53414645u, &safeFirstStampReport, 3,
+            ETerrainSemanticPaintPolicy::ExactExistingOnly);
+    QVERIFY2(!safeFirstStamp.isEmpty(),
+             qPrintable(safeFirstStampReport.toText()));
+    QVERIFY2(!safeFirstStampReport.hasErrors(),
+             qPrintable(safeFirstStampReport.toText()));
+    QVERIFY(safeVerticalTerrain.apply(safeFirstStamp, true));
+    contextualBrush.centerY = 9.0f;
+    CValidationReport safeVerticalReport;
+    const STerrainTileCommand safeVertical =
+        safeVerticalTerrain.makeSemanticVertexPaint(
+            8, 9, contextualBrush, ETerrainTileLayer::Land, 2, catalog,
+            0x53414645u, &safeVerticalReport, 3,
+            ETerrainSemanticPaintPolicy::ExactExistingOnly);
+    QVERIFY2(!safeVertical.isEmpty(), qPrintable(safeVerticalReport.toText()));
+    QVERIFY2(!safeVerticalReport.hasErrors(),
+             qPrintable(safeVerticalReport.toText()));
+    QCOMPARE(safeVertical.semanticAudit.solverMode,
+             QStringLiteral("vertex-context-stamp"));
 
     // The inverse 1-on-3 relationship is also a complete vertex motif. A
     // material that has ordinary pure tiles (family 4) must still be able to

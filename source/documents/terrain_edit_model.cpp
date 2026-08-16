@@ -3444,6 +3444,26 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
         command.semanticAudit.backgroundMaterialId = preferredSupportId;
         command.semanticAudit.materialPath = {materialId, preferredSupportId};
     }
+    const auto supportCompatibleWithContextualStamp =
+        [&](const STerrainTransitionSignature& signature, int cellX,
+            int cellY, int pointX, int pointY) {
+            if(!contextualStamp
+               || policy != ETerrainSemanticPaintPolicy::ExactExistingOnly)
+                return true;
+            const QVector<int> keys = cellCornerKeys(cellX, cellY);
+            const QVector<qint32> values = valuesOf(signature);
+            const int ownerCorner =
+                cornerForVertex(cellX, cellY, pointX, pointY);
+            for(int corner = 0; corner < values.size(); ++corner)
+            {
+                if(corner == ownerCorner)
+                    continue;
+                const qint32 value = values.at(corner);
+                if(value != preferredSupportId && value != materialId)
+                    return false;
+            }
+            return keys.size() == 4;
+        };
     const QVector<STerrainTransitionSignature> authored = catalog.gridSignatures();
     QSet<int> acceptedVertices;
     int skippedVertices = 0;
@@ -3551,6 +3571,13 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
                 const int index = y * width + x;
                 if(!originalTiles.contains(index))
                     continue;
+                if(contextualCenter && scratch.contains(index)
+                   && !supportCompatibleWithContextualStamp(
+                       scratch.value(index), x, y, vertex.x, vertex.y))
+                {
+                    vertexPossible = false;
+                    break;
+                }
                 QVector<qint32> desired = contextualCenter
                     ? QVector<qint32>({preferredSupportId, preferredSupportId,
                                       preferredSupportId, preferredSupportId})
