@@ -4080,7 +4080,7 @@ void TerrainVirtualAtlasTests::recoveredMapResolutionPreservesDecodedContextStam
             recoveredLikeField.setMaterial(x, y, 2);
     const STerrainTileCommand repair = model.makeVirtualMapResolution(
         ETerrainTileLayer::Land, fixture.catalog, 0x5354414du, &report,
-        false, &recoveredLikeField, true, false);
+        false, &recoveredLikeField, true, true);
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QVERIFY2(repair.isEmpty(),
              "Recovered map repair erased a decoded contextual stamp");

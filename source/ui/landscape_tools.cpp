@@ -599,6 +599,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(m_paintRadius, &QSlider::valueChanged, this, [this](int value) {
         m_paintRadiusValue->setText(QString::number(value));
         QSettings().setValue("ui/landscape/paintSize", value);
+        emit editingStateChanged();
     });
     connect(m_circlePaintShape, &QToolButton::toggled, this,
             [this](bool) { emit editingStateChanged(); });

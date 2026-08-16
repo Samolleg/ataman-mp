@@ -637,7 +637,6 @@ private:
     bool m_terrainPaintProjectionLand{true};
     int m_terrainPaintOutlineX{0};
     int m_terrainPaintOutlineY{0};
-    QSet<QPoint> m_terrainPaintOutlineCells;
     bool m_terrainSampleGestureActive{false};
     bool m_terrainSampleKeyValid{false};
     QPoint m_lastTerrainSamplePoint;

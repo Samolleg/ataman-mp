@@ -810,7 +810,19 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         connect(m_landscapeTools, &CLandscapeTools::saveModernDraftRequested,
                 this, &CView::saveModernDraftAs);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
-                this, &CView::syncLandscapeToolState);
+                this, [this]()
+        {
+            syncLandscapeToolState();
+            if(!m_hasViewportMousePos || !m_landscapeTools
+               || !m_landscapeTools->editingEnabled())
+                return;
+            const bool land = CScene::getInstance()->isLandTileEditMode();
+            bool hit = false;
+            const QVector3D position = getTerrainBrushPos(
+                m_lastViewportMousePos.x(), m_lastViewportMousePos.y(), &hit);
+            if(hit)
+                updatePreviewTile(position, land);
+        });
         connect(m_landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
                 this, [this](qint32 terrainType)
         {
@@ -7205,8 +7217,6 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     const ETerrainTileBrushShape shape = m_landscapeTools->paintShape();
     const auto included = [this, radius, shape](int x, int y)
     {
-        if(!m_terrainPaintOutlineCells.isEmpty())
-            return m_terrainPaintOutlineCells.contains(QPoint(x, y));
         const int dx = qAbs(x - m_terrainPaintOutlineX);
         const int dy = qAbs(y - m_terrainPaintOutlineY);
         return shape == ETerrainTileBrushShape::Square
@@ -7245,13 +7255,6 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
         int maxX = m_terrainPaintOutlineX + radius;
         int minY = m_terrainPaintOutlineY - radius;
         int maxY = m_terrainPaintOutlineY + radius;
-        for(const QPoint& point : m_terrainPaintOutlineCells)
-        {
-            minX = qMin(minX, point.x());
-            maxX = qMax(maxX, point.x());
-            minY = qMin(minY, point.y());
-            maxY = qMax(maxY, point.y());
-        }
         for(int y = minY; y <= maxY; ++y)
         {
             for(int x = minX; x <= maxX; ++x)
@@ -11700,7 +11703,6 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 {
     if(!m_pLand->isMprLoad())
         return;
-    m_terrainPaintOutlineCells.clear();
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
@@ -11748,46 +11750,6 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     m_terrainPaintOutlineY = tileLoc.ySec * 16 + tileLoc.row;
     m_terrainPaintOutlineValid = terrainPaintCellOutlineVisible(
         brushSelectionAvailable, index >= 0);
-    if(m_terrainPaintOutlineValid && !manualTilePaintingEnabled()
-       && m_landscapeTools && m_terrainEditAvailable)
-    {
-        bool materialSelected = false;
-        const qint32 material = m_landscapeTools->paintTerrainType(
-            &materialSelected);
-        if(materialSelected)
-        {
-            STerrainTileBrush outlineBrush;
-            outlineBrush.centerX = m_terrainPaintOutlineX;
-            outlineBrush.centerY = m_terrainPaintOutlineY;
-            outlineBrush.radius = m_landscapeTools->paintRadius();
-            outlineBrush.shape = m_landscapeTools->paintShape();
-            const ETerrainTileLayer layer = bLand
-                ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
-            const CTerrainTransitionCatalog& catalog = m_workingTerrainAtlas
-                ? m_workingTerrainAtlas->catalog()
-                : (!bLand
-                    ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
-                    : m_terrainAtlasAnalysis.catalog(layer));
-            CValidationReport outlineReport;
-            const ETerrainSemanticPaintPolicy policy =
-                m_landscapeTools->classicAutoSafeMode()
-                    ? ETerrainSemanticPaintPolicy::ExactExistingOnly
-                    : ETerrainSemanticPaintPolicy::AllowLocalHardEdges;
-            const STerrainTileCommand outlineCommand =
-                m_landscapeTools->classicAutoPaintingEnabled()
-                    ? m_terrainEdit.makeSemanticTilePaint(
-                          outlineBrush, layer, material, catalog,
-                          m_tileStrokeDistributionSeed, &outlineReport,
-                          policy)
-                    : m_terrainEdit.makeVirtualTileMaterialPaint(
-                          outlineBrush, layer, material, catalog,
-                          m_tileStrokeDistributionSeed, &outlineReport,
-                          m_landscapeTools->randomizeUniformRotation());
-            for(const QPoint& cell :
-                outlineCommand.semanticAudit.affectedCells)
-                m_terrainPaintOutlineCells.insert(cell);
-        }
-    }
     if(index < 0)
     {
         setPreviewTile(false);
@@ -12291,6 +12253,12 @@ void CView::resolveMissingTerrainBlends()
     QMap<QByteArray, SMissingMapSignature> missing;
     CTerrainVirtualMaterialField repairFields[2];
     bool completeRepairFields[2] = {false, false};
+    const auto uniformSignature =
+        [](const STerrainTransitionSignature& signature) {
+            return signature.northWest == signature.northEast
+                && signature.northWest == signature.southEast
+                && signature.northWest == signature.southWest;
+        };
     const ETerrainTileLayer layers[] = {
         ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
     for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
@@ -12323,8 +12291,17 @@ void CView::resolveMissingTerrainBlends()
                 if(!signatureFound)
                     continue;
                 bool decoded = false;
-                m_workingTerrainAtlas->catalog().gridSignatureForPacked(
+                const STerrainTransitionSignature current =
+                    m_workingTerrainAtlas->catalog().gridSignatureForPacked(
                     before, &decoded);
+                if(decoded)
+                {
+                    if(current == signature)
+                        continue;
+                    if(!uniformSignature(current)
+                       || uniformSignature(signature))
+                        continue;
+                }
                 bool physicalFound = false;
                 m_workingTerrainAtlas->catalog().selectForPaint(
                     signature, x, y, m_terrainSemanticSeed, &physicalFound);

@@ -9,7 +9,7 @@ $removed = [System.Collections.Generic.List[string]]::new()
 
 function Remove-PackageFile([System.IO.FileInfo]$File) {
     $relative = $File.FullName.Substring($root.Length + 1)
-    Remove-Item -LiteralPath $File.FullName -Force
+    [System.IO.File]::Delete($File.FullName)
     $removed.Add($relative)
 }
 
@@ -63,7 +63,7 @@ if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
 
 $checksums = Join-Path $root 'SHA256SUMS.txt'
 if (Test-Path -LiteralPath $checksums) {
-    Remove-Item -LiteralPath $checksums -Force
+    [System.IO.File]::Delete($checksums)
 }
 Get-ChildItem -LiteralPath $root -Recurse -File |
     Sort-Object FullName |

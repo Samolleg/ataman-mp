@@ -5347,6 +5347,12 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         return command;
     }
     const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
+    const auto uniformSignature =
+        [](const STerrainTransitionSignature& signature) {
+            return signature.northWest == signature.northEast
+                && signature.northWest == signature.southEast
+                && signature.northWest == signature.southWest;
+        };
     int unresolved=0;
     for(int y=0;y<tileCountY();++y)for(int x=0;x<tileCountX();++x)
     {
@@ -5373,14 +5379,17 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         bool decoded=false;
         const STerrainTransitionSignature current=
             catalog.gridSignatureForPacked(before,&decoded);
-        if(repairField && !repairDecodedCells && decoded)
-            continue;
         if(decoded&&current==exact)
             continue;
+        if(repairField&&decoded)
+        {
+            const bool currentUniform=uniformSignature(current);
+            const bool exactUniform=uniformSignature(exact);
+            if(!repairDecodedCells||!currentUniform||exactUniform)
+                continue;
+        }
         bool found=false;
-        const bool uniform=exact.northWest==exact.northEast
-            &&exact.northWest==exact.southEast
-            &&exact.northWest==exact.southWest;
+        const bool uniform=uniformSignature(exact);
         const quint16 after=uniform
             ?selectUniformInteriorTile(catalog,exact,x,y,paintSeed,
                 randomizeUniformRotation,&found)
