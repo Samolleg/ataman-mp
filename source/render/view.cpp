@@ -755,6 +755,13 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     //qDebug() << isSharing();
     QApplication* application = static_cast<QApplication *>(QApplication::instance());
     application->inputMethod()->reset();
+    connect(application, &QApplication::applicationStateChanged, this,
+            [this](Qt::ApplicationState state)
+    {
+        if(state == Qt::ApplicationInactive
+           || state == Qt::ApplicationSuspended)
+            cancelTileBrushGroup();
+    });
     QLocale a = application->inputMethod()->locale();
     QString lang = a.languageToString(a.language());
     a.setDefault(QLocale::English);
@@ -812,6 +819,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
                 this, [this]()
         {
+            cancelTileBrushGroup();
             syncLandscapeToolState();
             if(!m_hasViewportMousePos || !m_landscapeTools
                || !m_landscapeTools->editingEnabled())
@@ -827,6 +835,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, [this](qint32 terrainType)
         {
             Q_UNUSED(terrainType);
+            cancelTileBrushGroup();
             if(!manualTilePaintingEnabled())
             {
                 setPreviewTile(false);
@@ -842,6 +851,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         connect(m_landscapeTools, &CLandscapeTools::manualAtlasTileRequested,
                 this, [this](int slot)
         {
+            cancelTileBrushGroup();
             if(!m_pTileForm || !m_pTileForm->selectTile(slot))
                 return;
             m_pTileForm->setTileRotation(0);
@@ -923,7 +933,7 @@ void CView::setLandscapeInteractionSuspended(bool suspended)
         return;
     m_landscapeInteractionSuspended = suspended;
     finishSculptStroke();
-    endTileBrushGroup();
+    cancelTileBrushGroup();
     m_sculptRepeatTimer->stop();
     m_sculptOutlineValid = false;
     m_terrainPaintOutlineValid = false;
@@ -947,6 +957,7 @@ void CView::closeLandscapeTools()
 
 void CView::syncLandscapeToolState()
 {
+    cancelTileBrushGroup();
     finishSculptStroke();
     const bool markingPaintIssue = m_landscapeTools
         && m_landscapeTools->paintIssueMarkingEnabled();
@@ -11272,6 +11283,27 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                         == EOverlaySurfaceOperation::PaintExisting);
     if(semanticPaint)
         preselectedTerrainType = m_landscapeTools->paintTerrainType(&preselectedMaterial);
+    if(m_tilePaintStrokeActive)
+    {
+        const int livePalette = int(m_landscapeTools->paintPaletteMode());
+        const int liveTarget = int(m_landscapeTools->paintTargetMode());
+        const bool liveSafe = m_landscapeTools->classicAutoPaintingEnabled()
+            && m_landscapeTools->classicAutoSafeMode();
+        const ETerrainTileLayer liveLayer = bLand
+            ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+        const bool materialChanged = m_tileStrokeMaterialId >= 0
+            && semanticPaint && preselectedMaterial
+            && preselectedTerrainType != m_tileStrokeMaterialId;
+        if(livePalette != m_tileStrokePaletteMode
+           || liveTarget != m_tileStrokeTargetMode
+           || liveSafe != m_tileStrokeSafeMode
+           || (m_tileStrokeMaterialId >= 0 && liveLayer != m_tileStrokeLayer)
+           || materialChanged)
+        {
+            cancelTileBrushGroup();
+            return;
+        }
+    }
     const QPoint detailVertex(
         tileLoc.xSec * 16 + qBound(0, qRound(posOnLand.x() / 2.0f), 16),
         tileLoc.ySec * 16 + qBound(0, qRound(posOnLand.y() / 2.0f), 16));
@@ -11418,7 +11450,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         const bool contextualClassic = classicAuto && terrainSupport > 0
             && terrainSupport != terrainType;
         bool pureAvailable = false;
-        const quint16 purePacked = semanticCatalog.selectForPaint(
+        semanticCatalog.selectForPaint(
             pure, qRound(vertexBrush.centerX), qRound(vertexBrush.centerY),
             m_tileStrokeDistributionSeed, &pureAvailable);
         if(classicAuto && !pureAvailable && !contextualClassic)
@@ -11466,8 +11498,6 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 : QVector<QPoint>({detailVertex});
             if(interpolateClassicAuto && stampCenters.size() > 1)
                 stampCenters.removeFirst();
-            const SMprPackedTile previewTile =
-                SMprPackedTile::decode(purePacked);
             for(const QPoint& stampCenter : stampCenters)
             {
                 STerrainTileBrush stampBrush = vertexBrush;
@@ -11481,21 +11511,58 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                         qMakePair(point.x(), point.y()));
                 m_classicAutoStrokeAnchors.insert(
                     qMakePair(stampCenter.x(), stampCenter.y()));
-
-                STerrainTileCommand preview = m_terrainEdit.makeTilePaint(
-                    stampBrush, layer, previewTile.atlasIndex,
-                    previewTile.tileIndex, previewTile.rotation);
-                preview.description = tr("Preview Classic Auto terrain stroke");
-                preview.semanticAudit.valid = true;
-                preview.semanticAudit.layer = layer;
-                preview.semanticAudit.requestedMaterialId = terrainType;
-                preview.semanticAudit.solverMode =
-                    QStringLiteral("classic-auto-unblended-preview");
-                if(!preview.isEmpty()
-                   && applyTerrainTilePreview(preview, true))
-                    appendTerrainTileCommand(
-                        &m_classicAutoStrokePreviewCommand, preview);
             }
+            // Recompute the whole accumulated gesture from its pre-stroke
+            // state. The same authored resolver, seed, and packed command are
+            // retained through release, so live pixels cannot jump from a
+            // uniform stand-in to blended tiles when the button is released.
+            if(!m_classicAutoStrokePreviewCommand.isEmpty())
+                applyTerrainTilePreview(
+                    m_classicAutoStrokePreviewCommand, false);
+            QVector<QPoint> vertices;
+            QVector<QPoint> anchors;
+            for(const QPair<int, int>& point : m_classicAutoStrokeVertices)
+                vertices.append(QPoint(point.first, point.second));
+            for(const QPair<int, int>& point : m_classicAutoStrokeAnchors)
+                anchors.append(QPoint(point.first, point.second));
+            std::sort(vertices.begin(), vertices.end(),
+                [](const QPoint& left, const QPoint& right) {
+                    return left.y() != right.y()
+                        ? left.y() < right.y() : left.x() < right.x();
+                });
+            std::sort(anchors.begin(), anchors.end(),
+                [](const QPoint& left, const QPoint& right) {
+                    return left.y() != right.y()
+                        ? left.y() < right.y() : left.x() < right.x();
+                });
+            CValidationReport previewReport;
+            STerrainTileCommand preview =
+                m_terrainEdit.makeSemanticVertexStrokePaint(
+                    vertices, anchors, layer, terrainType, semanticCatalog,
+                    m_tileStrokeDistributionSeed, &previewReport,
+                    m_tileStrokeSafeMode
+                        ? ETerrainSemanticPaintPolicy::ExactExistingOnly
+                        : ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
+            m_classicAutoStrokeValidation = previewReport.toText();
+            m_classicAutoStrokePreviewRefused = previewReport.hasErrors();
+            m_tileStrokeSafeSkippedVertices = 0;
+            if(m_tileStrokeSafeMode)
+                for(const SValidationFinding& finding : previewReport.findings())
+                {
+                    if(finding.code != QStringLiteral(
+                           "terrain.semantic_stroke_exact_only_skip"))
+                        continue;
+                    bool countValid = false;
+                    const int count = finding.location.toInt(&countValid);
+                    if(countValid)
+                        m_tileStrokeSafeSkippedVertices += count;
+                }
+            m_classicAutoStrokePreviewCommand = STerrainTileCommand();
+            if(!previewReport.hasErrors() && !preview.isEmpty()
+               && applyTerrainTilePreview(preview, true))
+                m_classicAutoStrokePreviewCommand = preview;
+            else if(previewReport.hasErrors())
+                emit updateMsg(previewReport.toText());
             m_tileStrokeActions += stampCenters.size();
             return;
         }
@@ -11772,6 +11839,7 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 
 void CView::addTileRotation(int step)
 {
+    cancelTileBrushGroup();
     int curRot = (m_pTileForm->tileRotation() + step)%4;
     if(curRot < 0)
         curRot = 3;
@@ -11782,6 +11850,7 @@ void CView::adjustTerrainPaintSize(int steps)
 {
     if(!m_landscapeTools)
         return;
+    cancelTileBrushGroup();
     m_landscapeTools->adjustPaintSize(steps);
     update();
 }
@@ -11790,6 +11859,7 @@ void CView::adjustTerrainPaintMaterial(int steps)
 {
     if(!m_landscapeTools || manualTilePaintingEnabled())
         return;
+    cancelTileBrushGroup();
     m_landscapeTools->adjustPaintTerrainType(steps);
     update();
 }
@@ -11857,6 +11927,7 @@ void CView::pickQuickAccessTile(int index)
     if(!m_pLand->isMprLoad())
         return;
 
+    cancelTileBrushGroup();
     m_pTileForm->selectQuickAccessTile(index);
 }
 
@@ -11864,50 +11935,21 @@ void CView::endTileBrushGroup()
 {
     if(m_tilePaintStrokeActive)
     {
+        m_tileStrokeFinishing = true;
         if(m_classicAutoStrokePending)
         {
-            if(!m_classicAutoStrokePreviewCommand.isEmpty())
-                applyTerrainTilePreview(
-                    m_classicAutoStrokePreviewCommand, false);
-            const CTerrainTransitionCatalog& catalog = m_workingTerrainAtlas
-                ? m_workingTerrainAtlas->catalog()
-                : (m_classicAutoStrokeLayer == ETerrainTileLayer::Land
-                    ? m_terrainAtlasAnalysis.catalog(ETerrainTileLayer::Land)
-                    : m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies());
             QVector<QPoint> vertices;
-            QVector<QPoint> anchors;
             for(const QPair<int, int>& point : m_classicAutoStrokeVertices)
                 vertices.append(QPoint(point.first, point.second));
-            for(const QPair<int, int>& point : m_classicAutoStrokeAnchors)
-                anchors.append(QPoint(point.first, point.second));
-            CValidationReport report;
             STerrainTileCommand resolved =
-                m_terrainEdit.makeSemanticVertexStrokePaint(
-                    vertices, anchors, m_classicAutoStrokeLayer,
-                    m_classicAutoStrokeMaterialId, catalog,
-                    m_tileStrokeDistributionSeed, &report,
-                    m_tileStrokeSafeMode
-                        ? ETerrainSemanticPaintPolicy::ExactExistingOnly
-                        : ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
-            if(m_tileStrokeSafeMode)
-            {
-                for(const SValidationFinding& finding : report.findings())
-                {
-                    if(finding.code != QStringLiteral(
-                           "terrain.semantic_stroke_exact_only_skip"))
-                        continue;
-                    bool countValid = false;
-                    const int count = finding.location.toInt(&countValid);
-                    if(countValid)
-                        m_tileStrokeSafeSkippedVertices += count;
-                }
-            }
+                m_classicAutoStrokePreviewCommand;
             // Classic Auto changes physical authored tiles, but a map that
             // has already used Modern also owns an independent exact vertex
             // field. Keep both representations in the same undoable command
             // so switching modes never resurrects stale pre-Classic meaning.
             CTerrainVirtualMaterialField field;
-            if(!report.hasErrors()
+            STerrainTileCommand virtualUpdate;
+            if(!m_classicAutoStrokePreviewRefused
                && m_terrainEdit.copyVirtualMaterialField(
                     m_classicAutoStrokeLayer, &field, false))
             {
@@ -11923,23 +11965,41 @@ void CView::endTileBrushGroup()
                     delta.layer = m_classicAutoStrokeLayer;
                     delta.before = before;
                     delta.after = m_classicAutoStrokeMaterialId;
-                    resolved.virtualVertices.append(delta);
+                    virtualUpdate.virtualVertices.append(delta);
                 }
             }
-            m_tileStrokeCommand.semanticAudit = resolved.semanticAudit;
             for(STerrainTileDelta& delta : resolved.deltas)
                 delta.diagnosticStrokeId = m_tileBrushCommandId;
-            bool resolvedApplied = false;
-            if(!resolved.isEmpty() && applyTerrainTilePreview(resolved, true))
+            bool resolvedApplied = !resolved.isEmpty();
+            if(!virtualUpdate.isEmpty())
             {
-                resolvedApplied = true;
+                if(applyTerrainTilePreview(virtualUpdate, true))
+                {
+                    resolved.virtualVertices += virtualUpdate.virtualVertices;
+                    resolvedApplied = true;
+                }
+                else
+                {
+                    if(!m_classicAutoStrokePreviewCommand.isEmpty())
+                        applyTerrainTilePreview(
+                            m_classicAutoStrokePreviewCommand, false);
+                    resolved = STerrainTileCommand();
+                    resolvedApplied = false;
+                    m_classicAutoStrokePreviewRefused = true;
+                    m_classicAutoStrokeValidation += QStringLiteral(
+                        "ERROR terrain.classic_auto_virtual_preview: "
+                        "The exact virtual vertex update was refused.\n");
+                }
+            }
+            if(!resolved.isEmpty())
+            {
                 m_tileStrokeCommand = resolved;
                 m_tileStrokeApplied = 1;
                 m_tileStrokeChangedTiles = resolved.deltas.size();
                 m_tileStrokeSolverNodes = resolved.semanticAudit.solverNodes;
                 m_terrainPaintAudit += resolved.deltas;
             }
-            else if(report.hasErrors())
+            else if(m_classicAutoStrokePreviewRefused)
                 ++m_tileStrokeRefused;
             else
                 ++m_tileStrokeNoOps;
@@ -11949,14 +12009,14 @@ void CView::endTileBrushGroup()
             audit.strokeId = m_tileBrushCommandId;
             audit.outcome = resolvedApplied
                 ? QStringLiteral("applied")
-                : report.hasErrors() ? QStringLiteral("refused")
-                                     : QStringLiteral("no-op");
-            audit.validation = report.toText();
+                : m_classicAutoStrokePreviewRefused
+                    ? QStringLiteral("refused") : QStringLiteral("no-op");
+            audit.validation = m_classicAutoStrokeValidation;
             audit.semantic = resolved.semanticAudit;
             audit.deltas = resolved.deltas;
             m_terrainPaintActions.append(audit);
-            if(!report.findings().isEmpty())
-                emit updateMsg(report.toText());
+            if(!m_classicAutoStrokeValidation.isEmpty())
+                emit updateMsg(m_classicAutoStrokeValidation);
         }
         if(!m_tileStrokeClassicAuto
            && !m_tileStrokeCommand.virtualVertices.isEmpty())
@@ -12114,6 +12174,7 @@ void CView::endTileBrushGroup()
                     "Virtual terrain release resolution:\n"+releaseReport.toText());
         }
         m_tilePaintStrokeActive = false;
+        m_tileStrokeFinishing = false;
         refreshTerrainFamilyUsage();
         if(m_pUndoStack && !m_overlaySurfaceStrokeCommand.isEmpty())
             m_pUndoStack->push(new COverlaySurfacePreviewCommand(
@@ -12181,10 +12242,59 @@ void CView::endTileBrushGroup()
     ++m_tileBrushCommandId;
 }
 
+void CView::cancelTileBrushGroup()
+{
+    if(!m_tilePaintStrokeActive || m_tileStrokeFinishing)
+        return;
+
+    // A lost button release is an abandoned preview transaction. Roll back
+    // the exact command currently visible before clearing any gesture state;
+    // no undo entry is created for a transaction the user did not finish.
+    m_terrainPreviewBatchActive = false;
+    m_pendingTerrainPreviewSectors.clear();
+    if(!m_overlaySurfaceStrokeCommand.isEmpty())
+        applyOverlaySurfacePreview(m_overlaySurfaceStrokeCommand, false);
+    else if(m_classicAutoStrokePending
+            && !m_classicAutoStrokePreviewCommand.isEmpty())
+        applyTerrainTilePreview(m_classicAutoStrokePreviewCommand, false);
+    else if(!m_tileStrokeCommand.isEmpty())
+        applyTerrainTilePreview(m_tileStrokeCommand, false);
+
+    for(int index = m_terrainPaintActions.size() - 1; index >= 0; --index)
+        if(m_terrainPaintActions.at(index).strokeId == m_tileBrushCommandId)
+            m_terrainPaintActions.removeAt(index);
+    for(int index = m_terrainPaintAudit.size() - 1; index >= 0; --index)
+        if(m_terrainPaintAudit.at(index).diagnosticStrokeId
+           == m_tileBrushCommandId)
+            m_terrainPaintAudit.removeAt(index);
+
+    m_tilePaintStrokeActive = false;
+    m_tileStrokeCommand = STerrainTileCommand();
+    m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
+    m_classicAutoStrokePreviewCommand = STerrainTileCommand();
+    m_classicAutoStrokeVertices.clear();
+    m_classicAutoStrokeAnchors.clear();
+    m_classicAutoStrokePending = false;
+    m_classicAutoStrokeMaterialId = -1;
+    m_classicAutoStrokeValidation.clear();
+    m_classicAutoStrokePreviewRefused = false;
+    m_lastTerrainPaintCenterValid = false;
+    m_tileStrokeClassicAuto = false;
+    ++m_tileBrushCommandId;
+
+    refreshTerrainFamilyUsage();
+    m_pLand->setDirty(m_terrainEdit.isDirty());
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
+                              m_terrainEdit.isDirty() ? "*" : "");
+    emit updateMsg(tr("Cancelled unfinished terrain stroke."));
+    update();
+}
+
 void CView::selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode)
 {
     if(!m_landscapeTools)
         return;
+    cancelTileBrushGroup();
     m_landscapeTools->setPaintPaletteMode(mode);
     syncLandscapeToolState();
     if(m_hasViewportMousePos)
@@ -12365,7 +12475,12 @@ void CView::resolveMissingTerrainBlends()
 
 void CView::beginTileBrushGroup()
 {
-    if(m_tilePaintStrokeActive || !m_pUndoStack)
+    // A fresh press is also the final safety net for a platform/tool that
+    // swallowed both deactivation and release. Never append that click to a
+    // stale transaction.
+    if(m_tilePaintStrokeActive)
+        cancelTileBrushGroup();
+    if(!m_pUndoStack)
         return;
     m_tilePaintStrokeActive = true;
     m_tileStrokeClassicAuto = m_landscapeTools
@@ -12394,6 +12509,8 @@ void CView::beginTileBrushGroup()
     m_classicAutoStrokeAnchors.clear();
     m_classicAutoStrokePending = false;
     m_classicAutoStrokeMaterialId = -1;
+    m_classicAutoStrokeValidation.clear();
+    m_classicAutoStrokePreviewRefused = false;
     m_lastTerrainPaintCenterValid = false;
     m_tileStrokeActions = 0;
     m_tileStrokeApplied = 0;
@@ -14259,6 +14376,7 @@ void CView::wheelEvent(QWheelEvent* event)
 void CView::focusOutEvent(QFocusEvent *event)
 {
     Q_UNUSED(event);
+    cancelTileBrushGroup();
     finishSculptStroke();
     endTerrainPaintSampling();
     auto keySet = m_pOp->keyManager()->keys();

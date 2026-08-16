@@ -384,6 +384,8 @@ private slots:
     void vertexMaterialBrushPaintsCircleAndConstrainsCornerOnlyFamilies();
     void semanticVertexPaintNeverUsesUniformForBlendFallback();
     void classicAutoStrokeUsesAuthoredResolverAndRerollsExactVariants();
+    void classicAutoLivePreviewUsesCommittedPackedOutcome();
+    void abandonedTerrainPreviewRollsBackBeforeNextStroke();
     void classicAutoSafeTileSkipsUnsupportedCoreInsteadOfHardSeam();
     void manualPaintShowsCellFootprintAndLiftedTilePreview();
     void zone1NamespaceTemplateMatchesPrivateFixture();
@@ -4410,6 +4412,135 @@ void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExac
     }
     QVERIFY2(partialApplied,
              "Safe Classic Auto discarded every valid part of a mixed-validity stroke");
+}
+
+void EnduranceDocumentTests::classicAutoLivePreviewUsesCommittedPackedOutcome()
+{
+    CTerrainTransitionCatalog catalog;
+    const auto add = [&catalog](const STerrainTransitionSignature& signature,
+                                quint16 packed) {
+        STerrainTransitionVariant variant;
+        variant.signature = signature;
+        variant.packedTile = packed;
+        return catalog.addVariant(variant);
+    };
+    STerrainTransitionSignature background;
+    background.northWest = background.northEast = 1;
+    background.southEast = background.southWest = 1;
+    STerrainTransitionSignature selected;
+    selected.northWest = selected.northEast = 2;
+    selected.southEast = selected.southWest = 2;
+    STerrainTransitionSignature blend;
+    blend.northWest = 2;
+    blend.northEast = blend.southEast = blend.southWest = 1;
+    QVERIFY(add(background, 0));
+    QVERIFY(add(selected, 1));
+    for(int rotation = 0; rotation < 4; ++rotation)
+        QVERIFY(add(CTerrainTransitionCatalog::rotated(blend, rotation),
+                    quint16(2 | (rotation << 14))));
+
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(16)),
+        "classic-auto-live-preview-parity.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+    const QVector<QPoint> vertices({QPoint(8, 8)});
+    CValidationReport report;
+    const STerrainTileCommand preview = terrain.makeSemanticVertexStrokePaint(
+        vertices, vertices, ETerrainTileLayer::Land, 2, catalog,
+        0x50525657u, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(!preview.isEmpty());
+
+    // The live transaction must retain this exact packed command for release;
+    // rebuilding the preview as uniform physical tiles is visibly different.
+    for(const STerrainTileDelta& delta : preview.deltas)
+    {
+        bool decoded = false;
+        const STerrainTransitionSignature signature =
+            catalog.gridSignatureForPacked(delta.after, &decoded);
+        QVERIFY(decoded);
+        QVERIFY(!(signature == selected));
+    }
+    QVERIFY(terrain.apply(preview, true));
+    for(const STerrainTileDelta& delta : preview.deltas)
+        QCOMPARE(terrain.packedTile(delta.globalX, delta.globalY, delta.layer),
+                 delta.after);
+
+    // Release promotes the already-visible command; undo and redo replay its
+    // captured packed values without resolving or rerolling candidates.
+    QVERIFY(terrain.apply(preview, false));
+    for(const STerrainTileDelta& delta : preview.deltas)
+        QCOMPARE(terrain.packedTile(delta.globalX, delta.globalY, delta.layer),
+                 delta.before);
+    QVERIFY(terrain.apply(preview, true));
+    for(const STerrainTileDelta& delta : preview.deltas)
+        QCOMPARE(terrain.packedTile(delta.globalX, delta.globalY, delta.layer),
+                 delta.after);
+}
+
+void EnduranceDocumentTests::abandonedTerrainPreviewRollsBackBeforeNextStroke()
+{
+    CTerrainTransitionCatalog catalog;
+    STerrainTransitionSignature background;
+    background.northWest = background.northEast = 1;
+    background.southEast = background.southWest = 1;
+    STerrainTransitionVariant backgroundVariant;
+    backgroundVariant.signature = background;
+    backgroundVariant.packedTile = 0;
+    QVERIFY(catalog.addVariant(backgroundVariant));
+    STerrainTransitionSignature selected;
+    selected.northWest = selected.northEast = 2;
+    selected.southEast = selected.southWest = 2;
+    STerrainTransitionVariant selectedVariant;
+    selectedVariant.signature = selected;
+    selectedVariant.packedTile = 1;
+    QVERIFY(catalog.addVariant(selectedVariant));
+
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(16)),
+        "abandoned-terrain-preview-rollback.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+    const QVector<QPoint> abandonedVertices({QPoint(8, 8)});
+    CValidationReport abandonedReport;
+    const STerrainTileCommand abandoned =
+        terrain.makeSemanticVertexStrokePaint(
+            abandonedVertices, abandonedVertices, ETerrainTileLayer::Land,
+            2, catalog, 0x4142414Eu, &abandonedReport);
+    QVERIFY2(!abandonedReport.hasErrors(),
+             qPrintable(abandonedReport.toText()));
+    QVERIFY(!abandoned.isEmpty());
+    QVERIFY(terrain.apply(abandoned, true));
+
+    // Application/window deactivation cancels instead of committing. The next
+    // press starts from the exact pre-preview state and owns only its changes.
+    QVERIFY(terrain.apply(abandoned, false));
+    const QVector<QPoint> nextVertices({QPoint(12, 12)});
+    CValidationReport nextReport;
+    const STerrainTileCommand next = terrain.makeSemanticVertexStrokePaint(
+        nextVertices, nextVertices, ETerrainTileLayer::Land, 2, catalog,
+        0x4E455854u, &nextReport);
+    QVERIFY2(!nextReport.hasErrors(), qPrintable(nextReport.toText()));
+    QVERIFY(!next.isEmpty());
+    QVERIFY(terrain.apply(next, true));
+    for(const STerrainTileDelta& delta : abandoned.deltas)
+    {
+        if(qAbs(delta.globalX - 12) <= 1 && qAbs(delta.globalY - 12) <= 1)
+            continue;
+        QCOMPARE(terrain.packedTile(delta.globalX, delta.globalY, delta.layer),
+                 delta.before);
+    }
+    QVERIFY(terrain.apply(next, false));
+    for(const STerrainTileDelta& delta : next.deltas)
+        QCOMPARE(terrain.packedTile(delta.globalX, delta.globalY, delta.layer),
+                 delta.before);
+    QVERIFY(terrain.apply(next, true));
+    for(const STerrainTileDelta& delta : next.deltas)
+        QCOMPARE(terrain.packedTile(delta.globalX, delta.globalY, delta.layer),
+                 delta.after);
 }
 
 void EnduranceDocumentTests::classicAutoSafeTileSkipsUnsupportedCoreInsteadOfHardSeam()

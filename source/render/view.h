@@ -278,6 +278,7 @@ public:
     void pickQuickAccessTile(int index);
     void beginTileBrushGroup();
     void endTileBrushGroup();
+    void cancelTileBrushGroup();
     void beginTerrainPreviewBatch();
     void endTerrainPreviewBatch();
     bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
@@ -632,6 +633,7 @@ private:
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
     bool m_tilePaintStrokeActive{false};
+    bool m_tileStrokeFinishing{false};
     bool m_tileStrokeClassicAuto{false};
     bool m_terrainPaintOutlineValid{false};
     bool m_terrainPaintProjectionLand{true};
@@ -665,6 +667,8 @@ private:
     int m_tileStrokeSafeSkippedVertices{0};
     int m_tileStrokeSafeSkippedBoundaryCells{0};
     bool m_tileStrokeUndoCheckpointed{false};
+    QString m_classicAutoStrokeValidation;
+    bool m_classicAutoStrokePreviewRefused{false};
     bool m_terrainPreviewBatchActive{false};
     QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
     bool m_sculptOutlineValid{false};
