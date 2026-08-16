@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: Shift+R predecessor runtime types and ordinary Manual/contextual tile repair
+Executable source/changelist commit: 0bd92232719b9ebc7bd152e953b6f47f029b0bac
+Semantic catalog source commit: 052082a201f43933d69240798e0f7ad11f1d7bcc
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: virtual atlas 111 pass / 0 fail; document 112 pass / 0 fail / 6 expected skips; RES 16 pass / 0 fail; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: carried forward from the clean R160 terrain-paint test scope; executable, runtime components, changelist, and build identity updated for R161
