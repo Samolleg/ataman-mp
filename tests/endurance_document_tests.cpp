@@ -4635,6 +4635,30 @@ void EnduranceDocumentTests::manualPaintShowsCellFootprintAndLiftedTilePreview()
     QVERIFY(terrainPaintCellOutlineVisible(true, false));
     QVERIFY(!terrainPaintCellOutlineVisible(false, true));
 
+    // Hover, lifted preview, and commit retain one immutable logical snapshot.
+    // Changing the next brush size must not retroactively resize or re-anchor
+    // the footprint already resolved for the current pointer event.
+    const QPoint cellAnchor(4, 7);
+    const QPoint vertexAnchor(5, 8);
+    const STerrainPaintFootprintSnapshot manual =
+        terrainPaintFootprintSnapshot(
+            cellAnchor, vertexAnchor, true, 1.0f, true);
+    QCOMPARE(manual.anchor, cellAnchor);
+    QCOMPARE(manual.cells().size(), 9);
+    QVERIFY(manual.contains(QPoint(5, 8)));
+
+    const STerrainPaintFootprintSnapshot modernVertex =
+        terrainPaintFootprintSnapshot(
+            cellAnchor, vertexAnchor, false, 1.0f, false);
+    QCOMPARE(modernVertex.anchor, vertexAnchor);
+    QCOMPARE(modernVertex.cells().size(), 5);
+
+    const STerrainPaintFootprintSnapshot resized =
+        terrainPaintFootprintSnapshot(
+            cellAnchor, vertexAnchor, true, 2.0f, true);
+    QCOMPARE(resized.cells().size(), 25);
+    QCOMPARE(manual.cells().size(), 9);
+
     // Held-RMB sampling is keyed to the logical terrain vicinity rather than
     // raw mouse events. Layer and palette changes intentionally invalidate it.
     const QPoint sample(12, 17);

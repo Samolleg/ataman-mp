@@ -33,6 +33,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
 #include "terrain_tile_information_policy.h"
+#include "landscape_edit_policy.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_profile.h"
 #include "landscape_tools.h"
@@ -53,6 +54,7 @@ class CKeyManager;
 class CMob;
 class CCamera;
 class CNode;
+class CTile;
 class CUnit;
 class CKeyManager;
 class CSettings;
@@ -414,6 +416,10 @@ private:
     void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
                              bool receiveStatic = true,
                              bool receiveDynamic = true);
+    bool resolveTerrainPaintFootprint(QVector3D position, bool land,
+                                      CTile** tile, STileLocation* location,
+                                      STerrainTileBrush* brush,
+                                      QPoint* detailVertex);
 
 
 public slots:
@@ -637,8 +643,7 @@ private:
     bool m_tileStrokeClassicAuto{false};
     bool m_terrainPaintOutlineValid{false};
     bool m_terrainPaintProjectionLand{true};
-    int m_terrainPaintOutlineX{0};
-    int m_terrainPaintOutlineY{0};
+    STerrainPaintFootprintSnapshot m_terrainPaintFootprint;
     bool m_terrainSampleGestureActive{false};
     bool m_terrainSampleKeyValid{false};
     QPoint m_lastTerrainSamplePoint;

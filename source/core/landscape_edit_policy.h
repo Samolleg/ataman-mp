@@ -2,6 +2,7 @@
 #define LANDSCAPE_EDIT_POLICY_H
 
 #include <QPoint>
+#include <QVector>
 
 enum class ELandscapeEditMode
 {
@@ -89,6 +90,47 @@ inline float terrainPaintOutlineWorldCenter(int coordinate,
     // Semantic brushes are vertex-centered. Manual brushes are cell-centered
     // and therefore sit one world unit farther along the two-unit tile grid.
     return float(coordinate * 2 + (manualTileSelection ? 1 : 0));
+}
+
+struct STerrainPaintFootprintSnapshot
+{
+    QPoint anchor;
+    int radius{0};
+    bool square{false};
+    bool cellCentered{false};
+
+    bool contains(const QPoint& point) const
+    {
+        const int dx = qAbs(point.x() - anchor.x());
+        const int dy = qAbs(point.y() - anchor.y());
+        return square ? qMax(dx, dy) <= radius
+                      : dx * dx + dy * dy <= radius * radius;
+    }
+
+    QVector<QPoint> cells() const
+    {
+        QVector<QPoint> result;
+        for(int y = anchor.y() - radius; y <= anchor.y() + radius; ++y)
+            for(int x = anchor.x() - radius; x <= anchor.x() + radius; ++x)
+            {
+                const QPoint point(x, y);
+                if(contains(point))
+                    result.append(point);
+            }
+        return result;
+    }
+};
+
+inline STerrainPaintFootprintSnapshot terrainPaintFootprintSnapshot(
+    const QPoint& cellAnchor, const QPoint& vertexAnchor, bool cellCentered,
+    float radius, bool square)
+{
+    STerrainPaintFootprintSnapshot snapshot;
+    snapshot.anchor = cellCentered ? cellAnchor : vertexAnchor;
+    snapshot.radius = qMax(0, qRound(radius));
+    snapshot.square = square;
+    snapshot.cellCentered = cellCentered;
+    return snapshot;
 }
 
 #endif // LANDSCAPE_EDIT_POLICY_H

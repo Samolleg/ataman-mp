@@ -7222,22 +7222,17 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     }
     const bool manualSelection =
         m_landscapeTools->manualTileSelectionEnabled();
-    const bool cellCentered = manualSelection
-        || m_landscapeTools->paintTargetMode()
-            == ETerrainPaintTargetMode::Tile;
+    const bool cellCentered = m_terrainPaintFootprint.cellCentered;
     if(!terrainPaintOutlineEnabled(m_terrainPaintOutlineValid,
                                    manualSelection))
         return;
     const bool landLayer = m_terrainPaintProjectionLand;
-    const int radius = qMax(0, int(qRound(m_landscapeTools->paintRadius())));
-    const ETerrainTileBrushShape shape = m_landscapeTools->paintShape();
-    const auto included = [this, radius, shape](int x, int y)
+    const int radius = m_terrainPaintFootprint.radius;
+    const ETerrainTileBrushShape shape = m_terrainPaintFootprint.square
+        ? ETerrainTileBrushShape::Square : ETerrainTileBrushShape::Circle;
+    const auto included = [this](int x, int y)
     {
-        const int dx = qAbs(x - m_terrainPaintOutlineX);
-        const int dy = qAbs(y - m_terrainPaintOutlineY);
-        return shape == ETerrainTileBrushShape::Square
-            ? qMax(dx, dy) <= radius
-            : dx * dx + dy * dy <= radius * radius;
+        return m_terrainPaintFootprint.contains(QPoint(x, y));
     };
     const auto projected = [this, landLayer](float x, float y,
                                              QVector3D* result)
@@ -7255,9 +7250,9 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     // circle/square centered on the snapped vertex. Half a vertex interval is
     // included so size 1 remains visible around its single selected junction.
     const float centerX = terrainPaintOutlineWorldCenter(
-        m_terrainPaintOutlineX, cellCentered);
+        m_terrainPaintFootprint.anchor.x(), cellCentered);
     const float centerY = terrainPaintOutlineWorldCenter(
-        m_terrainPaintOutlineY, cellCentered);
+        m_terrainPaintFootprint.anchor.y(), cellCentered);
     const float footprintRadius = float(radius * 2 + 1);
     const QVector4D outlineColor = landLayer
         ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
@@ -7267,10 +7262,10 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
         glDepthFunc(GL_ALWAYS);
         glLineWidth(2.5f);
         program->setUniformValue("customColor", outlineColor);
-        int minX = m_terrainPaintOutlineX - radius;
-        int maxX = m_terrainPaintOutlineX + radius;
-        int minY = m_terrainPaintOutlineY - radius;
-        int maxY = m_terrainPaintOutlineY + radius;
+        int minX = m_terrainPaintFootprint.anchor.x() - radius;
+        int maxX = m_terrainPaintFootprint.anchor.x() + radius;
+        int minY = m_terrainPaintFootprint.anchor.y() - radius;
+        int maxY = m_terrainPaintFootprint.anchor.y() + radius;
         for(int y = minY; y <= maxY; ++y)
         {
             for(int x = minX; x <= maxX; ++x)
@@ -7332,11 +7327,11 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     }
 
     QVector<QVector3D> vertices;
-    for(int y = m_terrainPaintOutlineY - radius;
-        y <= m_terrainPaintOutlineY + radius; ++y)
+    for(int y = m_terrainPaintFootprint.anchor.y() - radius;
+        y <= m_terrainPaintFootprint.anchor.y() + radius; ++y)
     {
-        for(int x = m_terrainPaintOutlineX - radius;
-            x <= m_terrainPaintOutlineX + radius; ++x)
+        for(int x = m_terrainPaintFootprint.anchor.x() - radius;
+            x <= m_terrainPaintFootprint.anchor.x() + radius; ++x)
         {
             if(!included(x, y))
                 continue;
@@ -11261,6 +11256,42 @@ void CView::endTerrainPaintSampling()
     m_terrainSampleKeyValid = false;
 }
 
+bool CView::resolveTerrainPaintFootprint(
+    QVector3D position, bool land, CTile** tile,
+    STileLocation* location, STerrainTileBrush* brush, QPoint* detailVertex)
+{
+    if(!m_pLand || !m_pLand->isMprLoad() || !m_landscapeTools
+       || !tile || !location || !brush || !detailVertex)
+        return false;
+
+    const bool activatingOverlay = !land
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate;
+    const bool pickLand = land || (!land
+        && (m_terrainPaintProjectionLand || activatingOverlay));
+    if(!m_pLand->pickTile(position, *tile, *location, pickLand))
+        return false;
+
+    const QPoint cellAnchor(location->xSec * 16 + location->col,
+                            location->ySec * 16 + location->row);
+    *detailVertex = QPoint(
+        location->xSec * 16 + qBound(0, qRound(position.x() / 2.0f), 16),
+        location->ySec * 16 + qBound(0, qRound(position.y() / 2.0f), 16));
+    const bool cellCentered = manualTilePaintingEnabled()
+        || m_landscapeTools->paintTargetMode() == ETerrainPaintTargetMode::Tile;
+    m_terrainPaintFootprint = terrainPaintFootprintSnapshot(
+        cellAnchor, *detailVertex, cellCentered,
+        m_landscapeTools->paintRadius(),
+        m_landscapeTools->paintShape() == ETerrainTileBrushShape::Square);
+
+    brush->centerX = cellAnchor.x();
+    brush->centerY = cellAnchor.y();
+    brush->radius = m_terrainPaintFootprint.radius;
+    brush->shape = m_terrainPaintFootprint.square
+        ? ETerrainTileBrushShape::Square : ETerrainTileBrushShape::Circle;
+    return true;
+}
+
 void CView::setTile(QVector3D posOnLand, bool bLand)
 {
     if(!m_pLand->isMprLoad() || !m_terrainEditAvailable || !m_landscapeTools)
@@ -11268,19 +11299,11 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    // Coverage activation always resolves the logical cell from canonical
-    // land. The hover/outline may sit on an existing overlay, but choosing the
-    // cell through that thin/disconnected surface would make interpolated add
-    // strokes skip land gaps.
-    const bool pickLand = bLand || (!bLand
-        && m_landscapeTools->overlaySurfaceOperation()
-            == EOverlaySurfaceOperation::Activate);
-    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
-        return;
-
     STerrainTileBrush brush;
-    brush.centerX = tileLoc.xSec * 16 + tileLoc.col;
-    brush.centerY = tileLoc.ySec * 16 + tileLoc.row;
+    QPoint detailVertex;
+    if(!resolveTerrainPaintFootprint(posOnLand, bLand, &pTile, &tileLoc,
+                                     &brush, &detailVertex))
+        return;
     bool preselectedMaterial = false;
     qint32 preselectedTerrainType = -1;
     const bool semanticPaint = !m_landscapeTools->manualTileSelectionEnabled()
@@ -11309,12 +11332,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             return;
         }
     }
-    const QPoint detailVertex(
-        tileLoc.xSec * 16 + qBound(0, qRound(posOnLand.x() / 2.0f), 16),
-        tileLoc.ySec * 16 + qBound(0, qRound(posOnLand.y() / 2.0f), 16));
     const bool tileTarget = semanticPaint
-        && m_landscapeTools->paintTargetMode()
-            == ETerrainPaintTargetMode::Tile;
+        && m_terrainPaintFootprint.cellCentered;
     const QPoint brushCenter = semanticPaint && !tileTarget
         ? detailVertex : QPoint(qRound(brush.centerX), qRound(brush.centerY));
     const bool interpolateClassicAuto = semanticPaint
@@ -11329,8 +11348,6 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     m_lastTerrainPaintCenter = brushCenter;
     m_lastTerrainPaintCenterValid = true;
     m_lastTerrainPaintLayerLand = bLand;
-    brush.radius = m_landscapeTools->paintRadius();
-    brush.shape = m_landscapeTools->paintShape();
     CValidationReport report;
     if(!bLand && m_landscapeTools->overlaySurfaceOperation()
                      != EOverlaySurfaceOperation::PaintExisting)
@@ -11778,24 +11795,18 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
-    const bool pickLand = bLand || (!bLand && m_terrainPaintProjectionLand);
-    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
+    STerrainTileBrush brush;
+    QPoint detailVertex;
+    if(!resolveTerrainPaintFootprint(posOnLand, bLand, &pTile, &tileLoc,
+                                     &brush, &detailVertex))
     {
         m_terrainPaintOutlineValid = false;
         return;
     }
 
-    const bool cellTarget = manualTilePaintingEnabled()
-        || (m_landscapeTools && m_landscapeTools->paintTargetMode()
-            == ETerrainPaintTargetMode::Tile);
+    const bool cellTarget = m_terrainPaintFootprint.cellCentered;
     if(!cellTarget)
     {
-        // pickTile converts the point to sector-local coordinates. Match the
-        // paint path by snapping that hit to the nearest global terrain vertex.
-        m_terrainPaintOutlineX = tileLoc.xSec * 16
-            + qBound(0, qRound(posOnLand.x() / 2.0f), 16);
-        m_terrainPaintOutlineY = tileLoc.ySec * 16
-            + qBound(0, qRound(posOnLand.y() / 2.0f), 16);
         m_terrainPaintOutlineValid = true;
         setPreviewTile(false);
         unsetCursor();
@@ -11818,8 +11829,6 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
             index = m_terrainMaterialRepresentatives.value(material, -1);
     }
 
-    m_terrainPaintOutlineX = tileLoc.xSec * 16 + tileLoc.col;
-    m_terrainPaintOutlineY = tileLoc.ySec * 16 + tileLoc.row;
     m_terrainPaintOutlineValid = terrainPaintCellOutlineVisible(
         brushSelectionAvailable, index >= 0);
     if(index < 0)
