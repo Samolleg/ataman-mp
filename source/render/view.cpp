@@ -1123,6 +1123,8 @@ CView::~CView()
     ei::setCrashContext("shutdown/view-opengl-resources");
     if(isValid())
         makeCurrent();
+    if(!m_pPreviewTile.isNull())
+        m_pPreviewTile->releaseGpuResources();
     if(m_pLand)
         m_pLand->clearPreviewTerrainAtlas();
     ei::setCrashContext("shutdown/view-gpu-timer");
@@ -5842,6 +5844,9 @@ void CView::unloadLand(bool promptForSave)
     m_mprDocument = CMprDocument();
     if(isValid())
         makeCurrent();
+    if(!m_pPreviewTile.isNull())
+        m_pPreviewTile->releaseGpuResources();
+    m_pPreviewTile.clear();
     m_pLand->unloadMpr();
     CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
     m_activeTerrainArchivePath.clear();
@@ -5856,7 +5861,6 @@ void CView::unloadLand(bool promptForSave)
     m_spatialIndexDirty = true;
     m_sceneFingerprintDirty = true;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, "");
-    m_pPreviewTile.clear();
     emit selectionStateChanged(nSelectedNodes() > 0);
     ei::log(eLogInfo, "Landscape unloaded");
     m_landscapeVisible = true;
@@ -7118,6 +7122,7 @@ void CView::drawTilePreview(QOpenGLShaderProgram* program)
 
     m_pLand->glTexture()->bind(0); // todo: update preview tile texture after mpr loaded
     program->setUniformValue("qt_Texture0", 0);
+    m_pPreviewTile->uploadPendingGeometry();
     m_pPreviewTile->draw(program);
 }
 
