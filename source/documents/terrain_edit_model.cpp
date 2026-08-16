@@ -5290,7 +5290,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
     quint32 distributionSeed,CValidationReport* report,
     bool randomizeUniformRotation,
     const CTerrainVirtualMaterialField* repairField,
-    bool allowPartialMaterialField) const
+    bool allowPartialMaterialField,
+    bool repairDecodedCells) const
 {
     STerrainTileCommand command;
     command.description=QStringLiteral("Resolve missing terrain blends");
@@ -5345,6 +5346,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         bool decoded=false;
         const STerrainTransitionSignature current=
             catalog.gridSignatureForPacked(before,&decoded);
+        if(repairField && !repairDecodedCells && decoded)
+            continue;
         if(decoded&&current==exact)
             continue;
         bool found=false;

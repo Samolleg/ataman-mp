@@ -507,7 +507,8 @@ public:
         quint32 distributionSeed, CValidationReport* report = nullptr,
         bool randomizeUniformRotation = false,
         const CTerrainVirtualMaterialField* repairField = nullptr,
-        bool allowPartialMaterialField = false) const;
+        bool allowPartialMaterialField = false,
+        bool repairDecodedCells = true) const;
     bool recoverUnambiguousVirtualMaterialField(
         ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
         CTerrainVirtualMaterialField* output,

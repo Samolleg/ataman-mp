@@ -219,6 +219,7 @@ public:
     QVector<STerrainVirtualTile> authoredLibraryVariants(
         const STerrainTransitionSignature& signature,
         qint32 preferredPaintMaterial = 0,
+        qint32 preferredRuntimeType = -1,
         CValidationReport* report = nullptr);
     bool addStockBlendMaskTemplate(
         const STerrainTransitionSignature& signature, const QImage& pixels,
@@ -415,7 +416,8 @@ public:
         QMap<int, quint64>* workingUsage,
         const QSet<int>& protectedSlots,
         CValidationReport* report = nullptr,
-        qint32 preferredPaintMaterial = 0);
+        qint32 preferredPaintMaterial = 0,
+        qint32 preferredRuntimeType = -1);
 
     quint16 resolve(const STerrainTransitionSignature& signature,
                     int cellX, int cellY,
@@ -423,7 +425,8 @@ public:
                     const QSet<int>& protectedSlots,
                     bool* generated = nullptr,
                     CValidationReport* report = nullptr,
-                    qint32 preferredPaintMaterial = 0);
+                    qint32 preferredPaintMaterial = 0,
+                    qint32 preferredRuntimeType = -1);
 
 private:
     int realize(bool generated, int sourceIndex,

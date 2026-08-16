@@ -2818,11 +2818,12 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
 
 QVector<STerrainVirtualTile> CTerrainVirtualAtlas::authoredLibraryVariants(
     const STerrainTransitionSignature& signature,
-    qint32 preferredPaintMaterial, CValidationReport* report)
+    qint32 preferredPaintMaterial, qint32 preferredRuntimeType,
+    CValidationReport* report)
 {
     QVector<STerrainVirtualTile> result;
     const qint32 runtimeType = resolvedRuntimeType(
-        signature, preferredPaintMaterial, -1, report);
+        signature, preferredPaintMaterial, preferredRuntimeType, report);
     if(runtimeType < 0)
         return result;
     QSet<int> seen;
@@ -3894,13 +3895,14 @@ int CTerrainWorkingAtlas::stockBlendMaskCountFor(
 bool CTerrainWorkingAtlas::realizeAuthoredLibraryVariants(
     const STerrainTransitionSignature& signature,
     QMap<int, quint64>* workingUsage, const QSet<int>& protectedSlots,
-    CValidationReport* report, qint32 preferredPaintMaterial)
+    CValidationReport* report, qint32 preferredPaintMaterial,
+    qint32 preferredRuntimeType)
 {
     if(!m_resolver || !workingUsage)
         return false;
     const QVector<STerrainVirtualTile> variants =
         m_resolver->authoredLibraryVariants(
-            signature, preferredPaintMaterial, report);
+            signature, preferredPaintMaterial, preferredRuntimeType, report);
     if(variants.isEmpty())
         return false;
     QSet<int> reserved = protectedSlots;
@@ -4297,7 +4299,7 @@ quint16 CTerrainWorkingAtlas::resolve(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     QMap<int, quint64>* workingUsage, const QSet<int>& protectedSlots,
     bool* generated, CValidationReport* report,
-    qint32 preferredPaintMaterial)
+    qint32 preferredPaintMaterial, qint32 preferredRuntimeType)
 {
     if(generated)
         *generated = false;
@@ -4308,7 +4310,8 @@ quint16 CTerrainWorkingAtlas::resolve(
         return 0;
     }
     const STerrainVirtualTile tile = m_resolver->resolve(
-        signature, cellX, cellY, report, preferredPaintMaterial);
+        signature, cellX, cellY, report, preferredPaintMaterial,
+        preferredRuntimeType);
     const bool isGenerated = !tile.authored;
     const int sourceIndex = tile.authored
         ? SMprPackedTile::decode(tile.authoredPacked).atlasSlot()

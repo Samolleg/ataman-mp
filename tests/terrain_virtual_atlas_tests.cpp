@@ -200,13 +200,15 @@ public:
                     const QSet<int>& protectedSlots,
                     bool* generated = nullptr,
                     CValidationReport* report = nullptr,
-                    qint32 preferredPaintMaterial = 0)
+                    qint32 preferredPaintMaterial = 0,
+                    qint32 preferredRuntimeType = -1)
     {
         return CTerrainWorkingAtlas::resolve(
             requested, cellX, cellY, workingUsage, protectedSlots,
             generated, report,
             preferredPaintMaterial != 0
-                ? preferredPaintMaterial : requested.northWest);
+                ? preferredPaintMaterial : requested.northWest,
+            preferredRuntimeType);
     }
 };
 
@@ -549,6 +551,7 @@ private slots:
     void virtualTilePaintTargetsFourCellCorners();
     void mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly();
     void mapResolutionDoesNotChooseAWinningSideForTiedBorders();
+    void recoveredMapResolutionPreservesDecodedContextStamps();
     void classicAutoStrokeRefusesMissingBlendAndRollsBackExactly();
     void overlayVirtualPaintAllowsSparseInactiveField();
     void collapsedUniformBaselineRecoversExactRotatedBlend();
@@ -4012,6 +4015,56 @@ void TerrainVirtualAtlasTests::mapResolutionDoesNotChooseAWinningSideForTiedBord
         for(int x = 0; x < 16; ++x)
             QCOMPARE(model.packedTile(x, y, ETerrainTileLayer::Land),
                      quint16(x < 8 ? 0 : 1));
+}
+
+void TerrainVirtualAtlasTests::recoveredMapResolutionPreservesDecodedContextStamps()
+{
+    Fixture fixture;
+    STerrainTransitionVariant stamp;
+    stamp.signature = signature(1, 2, 2, 2);
+    stamp.packedTile = 4;
+    QVERIFY(fixture.catalog.addVariant(stamp));
+
+    QByteArray payload;
+    QDataStream sec(&payload, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(64, 1), 0));
+
+    STerrainTileCommand stampCommand;
+    STerrainTileDelta stampDelta;
+    stampDelta.globalX = 8;
+    stampDelta.globalY = 8;
+    stampDelta.layer = ETerrainTileLayer::Land;
+    stampDelta.before = 0;
+    stampDelta.after = 4;
+    stampCommand.deltas.append(stampDelta);
+    QVERIFY(model.apply(stampCommand, true, &report));
+
+    CTerrainVirtualMaterialField recoveredLikeField;
+    QVERIFY(recoveredLikeField.resize(model.tileCountX(), model.tileCountY()));
+    for(int y = 0; y <= recoveredLikeField.tileHeight(); ++y)
+        for(int x = 0; x <= recoveredLikeField.tileWidth(); ++x)
+            recoveredLikeField.setMaterial(x, y, 2);
+    const STerrainTileCommand repair = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x5354414du, &report,
+        false, &recoveredLikeField, true, false);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY2(repair.isEmpty(),
+             "Recovered map repair erased a decoded contextual stamp");
+    QCOMPARE(model.packedTile(8, 8, ETerrainTileLayer::Land), quint16(4));
 }
 
 void TerrainVirtualAtlasTests::classicAutoStrokeRefusesMissingBlendAndRollsBackExactly()

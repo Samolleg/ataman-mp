@@ -433,7 +433,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     resolveMissing->setToolTip(tr(
         "Scan the complete map and rebuild missing or inconsistent physical "
         "blend tiles from its shared-corner material field. The map repair is "
-        "committed as one undo step."));
+        "committed as one undo step. Shortcut: Shift+R."));
     paintLayout->addWidget(resolveMissing);
     QPushButton* reviewAtlas = new QPushButton(tr("Material atlas..."), this);
     reviewAtlas->setObjectName("materialAtlasButton");
@@ -808,8 +808,7 @@ void CLandscapeTools::refreshAtlasCapacity(int activeSlots)
 }
 ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {
-    return paintTargetMode() == ETerrainPaintTargetMode::Tile
-        || m_squarePaintShape->isChecked()
+    return m_squarePaintShape->isChecked()
         ? ETerrainTileBrushShape::Square : ETerrainTileBrushShape::Circle;
 }
 bool CLandscapeTools::manualTileSelectionEnabled() const
@@ -996,21 +995,19 @@ void CLandscapeTools::updatePaintIssueUi()
 void CLandscapeTools::updatePaintShapeUi()
 {
     const bool tileTarget = paintTargetMode() == ETerrainPaintTargetMode::Tile;
-    const bool enabled = !paintIssueMarkingEnabled() && !tileTarget;
-    if(tileTarget && m_squarePaintShape)
-        m_squarePaintShape->setChecked(true);
+    const bool enabled = !paintIssueMarkingEnabled();
     if(m_circlePaintShape)
     {
         m_circlePaintShape->setEnabled(enabled);
         m_circlePaintShape->setToolTip(tileTarget
-            ? tr("Tile target always uses a square cell footprint")
+            ? tr("Circular tile brush; the viewport outlines affected tiles")
             : tr("Circular brush"));
     }
     if(m_squarePaintShape)
     {
         m_squarePaintShape->setEnabled(enabled);
         m_squarePaintShape->setToolTip(tileTarget
-            ? tr("Tile target uses this square cell footprint")
+            ? tr("Square tile brush; the viewport outlines affected tiles")
             : tr("Square brush"));
     }
 }

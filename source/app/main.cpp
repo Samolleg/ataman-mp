@@ -1213,10 +1213,9 @@ int runHeadlessCommand(QApplication& app)
         const bool contextualStampHiddenForTile = contextualStampButton
             && !contextualStampButton->isVisible() && !tileStampSelected;
         if(classicAutoSafe) classicAutoSafe->setChecked(true);
-        const bool tilePaintTargetForcesSquare = squarePaintShape
-            && circlePaintShape && squarePaintShape->isChecked()
-            && !squarePaintShape->isEnabled()
-            && !circlePaintShape->isEnabled();
+        const bool tilePaintTargetKeepsShapeChoice = squarePaintShape
+            && circlePaintShape && squarePaintShape->isEnabled()
+            && circlePaintShape->isEnabled();
         const bool terrainPaintBetaControlsAreExplicit = circlePaintShape
             && squarePaintShape && tilePaintTarget && vertexPaintTarget
             && classicAutoSafe && resolveMissingBlends
@@ -1224,7 +1223,7 @@ int runHeadlessCommand(QApplication& app)
                 QStringLiteral("QToolButton:checked"))
             && tilePaintTarget->isChecked()
             && classicAutoSafe->isChecked()
-            && tilePaintTargetForcesSquare;
+            && tilePaintTargetKeepsShapeChoice;
         landscapeTools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         if(materialPaletteTabs)
             materialPaletteTabs->setCurrentIndex(0);

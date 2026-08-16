@@ -798,6 +798,11 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::resolveMissingBlendsRequested,
                 this, &CView::resolveMissingTerrainBlends);
+        QShortcut* resolveMissingShortcut = new QShortcut(
+            QKeySequence(Qt::SHIFT + Qt::Key_R), this);
+        resolveMissingShortcut->setContext(Qt::ApplicationShortcut);
+        connect(resolveMissingShortcut, &QShortcut::activated,
+                this, &CView::resolveMissingTerrainBlends);
         connect(m_landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                 this, &CView::reviewTerrainAtlasProfile);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
@@ -7220,6 +7225,47 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     const float centerY = terrainPaintOutlineWorldCenter(
         m_terrainPaintOutlineY, cellCentered);
     const float footprintRadius = float(radius * 2 + 1);
+    const QVector4D outlineColor = landLayer
+        ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
+        : QVector4D(0.10f, 0.82f, 1.0f, 0.95f);
+    if(cellCentered)
+    {
+        glDepthFunc(GL_ALWAYS);
+        glLineWidth(2.5f);
+        program->setUniformValue("customColor", outlineColor);
+        for(int y = m_terrainPaintOutlineY - radius;
+            y <= m_terrainPaintOutlineY + radius; ++y)
+        {
+            for(int x = m_terrainPaintOutlineX - radius;
+                x <= m_terrainPaintOutlineX + radius; ++x)
+            {
+                if(!included(x, y))
+                    continue;
+                QVector<QVector3D> cell;
+                const QPointF corners[] = {
+                    {float(x) * 2.0f, float(y) * 2.0f},
+                    {float(x + 1) * 2.0f, float(y) * 2.0f},
+                    {float(x + 1) * 2.0f, float(y + 1) * 2.0f},
+                    {float(x) * 2.0f, float(y + 1) * 2.0f}
+                };
+                for(const QPointF& corner : corners)
+                {
+                    QVector3D point;
+                    if(projected(float(corner.x()), float(corner.y()),
+                                 &point))
+                        cell.append(point);
+                }
+                if(cell.size() == 4)
+                {
+                    program->setAttributeArray(position, cell.constData());
+                    glDrawArrays(GL_LINE_LOOP, 0, cell.size());
+                }
+            }
+        }
+        glLineWidth(1.0f);
+        glDepthFunc(GL_LESS);
+        return;
+    }
     QVector<QVector3D> boundary;
     if(shape == ETerrainTileBrushShape::Circle)
     {
@@ -7270,9 +7316,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     }
     if(boundary.isEmpty() && vertices.isEmpty())
         return;
-    program->setUniformValue("customColor", landLayer
-        ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
-        : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
+    program->setUniformValue("customColor", outlineColor);
     glDepthFunc(GL_ALWAYS);
     if(boundary.size() >= 3)
     {
@@ -8368,7 +8412,7 @@ bool CView::terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const
 bool CView::realizeWorkingTerrainSignature(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     QMap<int, quint64>* usage, CValidationReport* report, bool* generated,
-    qint32 preferredPaintMaterial)
+    qint32 preferredPaintMaterial, qint32 preferredRuntimeType)
 {
     if(!m_workingTerrainAtlas || !m_workingTerrainAtlas->isValid())
     {
@@ -8435,7 +8479,8 @@ bool CView::realizeWorkingTerrainSignature(
         }
         if(importedAny && !m_workingTerrainAtlas->realizeAuthoredLibraryVariants(
                signature, usage, m_workingAtlasProtectedSlots,
-               &libraryReport, preferredPaintMaterial))
+               &libraryReport, preferredPaintMaterial,
+               preferredRuntimeType))
         {
             if(report)
                 for(const SValidationFinding& finding : libraryReport.findings())
@@ -8467,7 +8512,7 @@ bool CView::realizeWorkingTerrainSignature(
     CValidationReport attempt;
     quint16 packed = m_workingTerrainAtlas->resolve(
         signature, cellX, cellY, usage, m_workingAtlasProtectedSlots,
-        generated, &attempt, preferredPaintMaterial);
+        generated, &attempt, preferredPaintMaterial, preferredRuntimeType);
     if(attempt.hasErrors() && hasCapacityFinding(attempt) && usage)
     {
         bool reclaimable = false;
@@ -8492,7 +8537,8 @@ bool CView::realizeWorkingTerrainSignature(
             if(generated) *generated = false;
             packed = m_workingTerrainAtlas->resolve(
                 signature, cellX, cellY, usage, m_workingAtlasProtectedSlots,
-                generated, &retry, preferredPaintMaterial);
+                generated, &retry, preferredPaintMaterial,
+                preferredRuntimeType);
             if(!retry.hasErrors())
             {
                 m_tileStrokeUndoCheckpointed = true;
@@ -12141,16 +12187,29 @@ void CView::resolveMissingTerrainBlends()
             "the map-wide resolver."));
         return;
     }
-    if(QMessageBox::question(this, tr("Resolve missing blends"), tr(
-        "Scan Ground and Overlay and replace every unambiguous missing or "
-        "inconsistent physical blend with the exact Modern result?\n\n"
-        "Disputed shared corners are preserved exactly; this repair will not "
-        "choose a side or move an existing material border. The MPR changes "
-        "will be one undo step. Newly required atlas tiles remain in the "
-        "working atlas."),
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes)
-       != QMessageBox::Yes)
-        return;
+    QSettings settings;
+    if(!settings.value(QStringLiteral(
+           "ui/landscape/resolveMissingBlendsSkipConfirm"), false).toBool())
+    {
+        QMessageBox confirm(QMessageBox::Question,
+            tr("Resolve missing blends"),
+            tr("Scan Ground and Overlay and replace every unambiguous missing "
+               "or inconsistent physical blend with the exact Modern result?\n\n"
+               "Disputed shared corners are preserved exactly; this repair "
+               "will not choose a side or move an existing material border. "
+               "The MPR changes will be one undo step. Newly required atlas "
+               "tiles remain in the working atlas."),
+            QMessageBox::Yes | QMessageBox::No, this);
+        confirm.setDefaultButton(QMessageBox::Yes);
+        QCheckBox* skipConfirm = new QCheckBox(
+            tr("Don't show this confirmation again"), &confirm);
+        confirm.setCheckBox(skipConfirm);
+        if(confirm.exec() != QMessageBox::Yes)
+            return;
+        if(skipConfirm->isChecked())
+            settings.setValue(QStringLiteral(
+                "ui/landscape/resolveMissingBlendsSkipConfirm"), true);
+    }
 
     finishSculptStroke();
     endTileBrushGroup();
@@ -12169,16 +12228,21 @@ void CView::resolveMissingTerrainBlends()
         STerrainTransitionSignature signature;
         int x{0};
         int y{0};
+        qint32 runtimeType{-1};
     };
     QMap<QByteArray, SMissingMapSignature> missing;
     CTerrainVirtualMaterialField repairFields[2];
+    bool completeRepairFields[2] = {false, false};
     const ETerrainTileLayer layers[] = {
         ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
     for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
     {
         const ETerrainTileLayer layer = layers[layerIndex];
         CTerrainVirtualMaterialField& field = repairFields[layerIndex];
-        if(!m_terrainEdit.copyVirtualMaterialField(layer, &field, false)
+        const bool completeField =
+            m_terrainEdit.copyVirtualMaterialField(layer, &field, true);
+        completeRepairFields[layerIndex] = completeField;
+        if(!completeField
            && !m_terrainEdit.recoverUnambiguousVirtualMaterialField(
                layer, m_workingTerrainAtlas->catalog(), &field, &report))
         {
@@ -12191,13 +12255,19 @@ void CView::resolveMissingTerrainBlends()
             for(int x = 0; x < field.tileWidth(); ++x)
             {
                 bool available = false;
-                m_terrainEdit.packedTile(x, y, layer, &available);
+                const quint16 before = m_terrainEdit.packedTile(
+                    x, y, layer, &available);
                 if(!available)
                     continue;
                 bool signatureFound = false;
                 const STerrainTransitionSignature signature =
                     field.cellSignature(x, y, &signatureFound);
                 if(!signatureFound)
+                    continue;
+                bool decoded = false;
+                m_workingTerrainAtlas->catalog().gridSignatureForPacked(
+                    before, &decoded);
+                if(!completeField && decoded)
                     continue;
                 bool physicalFound = false;
                 m_workingTerrainAtlas->catalog().selectForPaint(
@@ -12206,6 +12276,8 @@ void CView::resolveMissingTerrainBlends()
                     continue;
                 SMissingMapSignature item;
                 item.signature = signature;item.x = x;item.y = y;
+                item.runtimeType = m_workingTerrainAtlas->runtimeTerrainTypeForSlot(
+                    SMprPackedTile::decode(before).atlasSlot());
                 missing.insert(globalTransitionKey(signature), item);
             }
         progress.setValue(layerIndex + 1);
@@ -12220,7 +12292,8 @@ void CView::resolveMissingTerrainBlends()
         item != missing.constEnd() && !report.hasErrors(); ++item)
     {
         if(!realizeWorkingTerrainSignature(item.value().signature,
-               item.value().x, item.value().y, &usage, &report))
+               item.value().x, item.value().y, &usage, &report, nullptr,
+               0, item.value().runtimeType))
             break;
         ++generated;
     }
@@ -12240,7 +12313,9 @@ void CView::resolveMissingTerrainBlends()
                     m_workingTerrainAtlas->catalog(), m_terrainSemanticSeed,
                     &report, false,
                     &repairFields[layer == ETerrainTileLayer::Land ? 0 : 1],
-                    true);
+                    true,
+                    completeRepairFields[
+                        layer == ETerrainTileLayer::Land ? 0 : 1]);
             appendTerrainTileCommand(&combined, command);
         }
     if(report.hasErrors())
