@@ -304,6 +304,31 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
             if(existing.before==existing.after)stroke->virtualVertices.remove(existingIndex);
         }
     }
+    for(const STerrainTileCommand::SPhysicalOwnershipDelta& delta :
+        stamp.physicalOwnership)
+    {
+        int existingIndex = -1;
+        for(int index = 0; index < stroke->physicalOwnership.size(); ++index)
+        {
+            const auto& existing = stroke->physicalOwnership.at(index);
+            if(existing.globalX == delta.globalX
+               && existing.globalY == delta.globalY
+               && existing.layer == delta.layer)
+            {
+                existingIndex = index;
+                break;
+            }
+        }
+        if(existingIndex < 0)
+            stroke->physicalOwnership.append(delta);
+        else
+        {
+            auto& existing = stroke->physicalOwnership[existingIndex];
+            existing.after = delta.after;
+            if(existing.before == existing.after)
+                stroke->physicalOwnership.remove(existingIndex);
+        }
+    }
 }
 
 void appendTerrainHeightCommand(STerrainHeightCommand* stroke,
@@ -802,6 +827,8 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     m_virtualOverlayMaterials.clear();
     m_originalVirtualLandMaterials.clear();
     m_originalVirtualOverlayMaterials.clear();
+    m_manualLandTileOwnership.clear();
+    m_manualOverlayTileOwnership.clear();
     if(sectorCountX <= 0 || sectorCountY <= 0 || !std::isfinite(maxZ) || maxZ <= 0.0f)
     {
         if(report)
@@ -882,6 +909,9 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     m_yOffsets.fill(0, globalCount);
     m_refs.resize(globalCount);
     m_conflictedVertices.fill(false, globalCount);
+    const int tileCount = sectorCountX * 16 * sectorCountY * 16;
+    m_manualLandTileOwnership.fill(false, tileCount);
+    m_manualOverlayTileOwnership.fill(false, tileCount);
     QVector<bool> initialized(globalCount, false);
 
     for(int sectorY = 0; sectorY < sectorCountY; ++sectorY)
@@ -2617,6 +2647,35 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
     return true;
 }
 
+void CTerrainEditModel::appendPhysicalOwnershipDeltas(
+    STerrainTileCommand* command, ETerrainTileLayer layer,
+    const QVector<QPoint>& cells, bool owned) const
+{
+    if(!command)
+        return;
+    const QVector<bool>& current = layer == ETerrainTileLayer::Land
+        ? m_manualLandTileOwnership : m_manualOverlayTileOwnership;
+    QSet<int> seen;
+    for(const QPoint& cell : cells)
+    {
+        if(cell.x() < 0 || cell.x() >= tileCountX()
+           || cell.y() < 0 || cell.y() >= tileCountY())
+            continue;
+        const int key = cell.y() * tileCountX() + cell.x();
+        if(seen.contains(key) || key >= current.size()
+           || current.at(key) == owned)
+            continue;
+        seen.insert(key);
+        STerrainTileCommand::SPhysicalOwnershipDelta delta;
+        delta.globalX = cell.x();
+        delta.globalY = cell.y();
+        delta.layer = layer;
+        delta.before = current.at(key);
+        delta.after = owned;
+        command->physicalOwnership.append(delta);
+    }
+}
+
 STerrainTileCommand CTerrainEditModel::makeTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     quint8 atlasIndex, quint8 tileIndex, quint8 rotation) const
@@ -2640,6 +2699,7 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
     const int maximumY = qMin(tileCountY() - 1,
                               int(std::floor(brush.centerY + brush.radius)));
+    QVector<QPoint> ownedCells;
     for(int y = minimumY; y <= maximumY; ++y)
     {
         for(int x = minimumX; x <= maximumX; ++x)
@@ -2653,7 +2713,10 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
                 continue;
             bool available = false;
             const quint16 before = packedTile(x, y, layer, &available);
-            if(!available || before == after)
+            if(!available)
+                continue;
+            ownedCells.append(QPoint(x, y));
+            if(before == after)
                 continue;
             STerrainTileDelta delta;
             delta.globalX = x;
@@ -2664,6 +2727,7 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
             command.deltas.append(delta);
         }
     }
+    appendPhysicalOwnershipDeltas(&command, layer, ownedCells, true);
     return command;
 }
 
@@ -3277,6 +3341,14 @@ bool CTerrainEditModel::appendSemanticVirtualVertices(
         delta.after = materialId;
         command->virtualVertices.append(delta);
     }
+    QVector<QPoint> affectedCells = command->semanticAudit.affectedCells;
+    for(const STerrainTileDelta& delta : command->deltas)
+        affectedCells.append(QPoint(delta.globalX, delta.globalY));
+    for(const QPoint& vertex : acceptedVertices)
+        for(int y : {vertex.y() - 1, vertex.y()})
+            for(int x : {vertex.x() - 1, vertex.x()})
+                affectedCells.append(QPoint(x, y));
+    appendPhysicalOwnershipDeltas(command, layer, affectedCells, false);
     return true;
 }
 
@@ -5379,6 +5451,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
     if(report)report->add("terrain.virtual_paint_resolve_pending",
         EValidationSeverity::Info,
         "Touched vertices are mandatory; authored exact transition resolution is deferred until stroke release");
+    appendPhysicalOwnershipDeltas(
+        &command, layer, command.semanticAudit.affectedCells, false);
     return command;
 }
 
@@ -5445,6 +5519,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
     if(unresolved>0&&report)report->add("terrain.virtual_release_unresolved",
         EValidationSeverity::Error,
         QString("%1 exact transition tuple(s) were not realized in the live working atlas before release; the stroke must be refused without substituting identities").arg(unresolved));
+    appendPhysicalOwnershipDeltas(
+        &command, layer, command.semanticAudit.affectedCells, false);
     return command;
 }
 
@@ -5888,6 +5964,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
                   .arg(unresolvedCells.size())
             : QString("%1 map cell(s) could not be resolved to an exact physical blend")
                   .arg(unresolvedCells.size()));
+    appendPhysicalOwnershipDeltas(
+        &command, layer, command.semanticAudit.affectedCells, false);
     return command;
 }
 
@@ -5939,9 +6017,52 @@ bool CTerrainEditModel::virtualMaterialCellChanged(
         || current.at(southWest) != baseline.at(southWest);
 }
 
+bool CTerrainEditModel::physicalTileManuallyOwned(
+    ETerrainTileLayer layer, int cellX, int cellY) const
+{
+    if(cellX < 0 || cellX >= tileCountX()
+       || cellY < 0 || cellY >= tileCountY())
+        return false;
+    const QVector<bool>& ownership = layer == ETerrainTileLayer::Land
+        ? m_manualLandTileOwnership : m_manualOverlayTileOwnership;
+    const int key = cellY * tileCountX() + cellX;
+    return key < ownership.size() && ownership.at(key);
+}
+
+bool CTerrainEditModel::preservePhysicalTileAtFinalization(
+    ETerrainTileLayer layer, int cellX, int cellY) const
+{
+    return physicalTileManuallyOwned(layer, cellX, cellY)
+        || !virtualMaterialCellChanged(layer, cellX, cellY);
+}
+
 bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
                               CValidationReport* report)
 {
+    QSet<int> commandOwnership;
+    for(const auto& delta : command.physicalOwnership)
+    {
+        if(delta.globalX < 0 || delta.globalX >= tileCountX()
+           || delta.globalY < 0 || delta.globalY >= tileCountY())
+            return false;
+        QVector<bool>& ownership = delta.layer == ETerrainTileLayer::Land
+            ? m_manualLandTileOwnership : m_manualOverlayTileOwnership;
+        const int key = delta.globalY * tileCountX() + delta.globalX;
+        const int layerKey = (delta.layer == ETerrainTileLayer::Overlay ? 1 : 0)
+            * tileCountX() * tileCountY() + key;
+        const bool expected = forward ? delta.before : delta.after;
+        if(commandOwnership.contains(layerKey) || key >= ownership.size()
+           || ownership.at(key) != expected)
+        {
+            if(report)
+                report->add("terrain.physical_ownership_provenance",
+                    EValidationSeverity::Error,
+                    "The tile command no longer matches its Manual ownership state",
+                    QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return false;
+        }
+        commandOwnership.insert(layerKey);
+    }
     QSet<int> commandVertices;
     for(const STerrainTileCommand::SVirtualVertexDelta& delta:command.virtualVertices)
     {
@@ -6044,6 +6165,13 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
             ?m_virtualLandMaterials:m_virtualOverlayMaterials;
         values[delta.globalY*(tileCountX()+1)+delta.globalX]
             =forward?delta.after:delta.before;
+    }
+    for(const auto& delta : command.physicalOwnership)
+    {
+        QVector<bool>& ownership = delta.layer == ETerrainTileLayer::Land
+            ? m_manualLandTileOwnership : m_manualOverlayTileOwnership;
+        ownership[delta.globalY * tileCountX() + delta.globalX]
+            = forward ? delta.after : delta.before;
     }
     return true;
 }

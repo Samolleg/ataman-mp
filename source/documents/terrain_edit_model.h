@@ -126,7 +126,20 @@ struct STerrainTileCommand
         qint32 after{0};
     };
     QVector<SVirtualVertexDelta> virtualVertices;
-    bool isEmpty() const { return deltas.isEmpty() && virtualVertices.isEmpty(); }
+    struct SPhysicalOwnershipDelta
+    {
+        int globalX{0};
+        int globalY{0};
+        ETerrainTileLayer layer{ETerrainTileLayer::Land};
+        bool before{false};
+        bool after{false};
+    };
+    QVector<SPhysicalOwnershipDelta> physicalOwnership;
+    bool isEmpty() const
+    {
+        return deltas.isEmpty() && virtualVertices.isEmpty()
+            && physicalOwnership.isEmpty();
+    }
 };
 
 // Compose sequential live-preview commands into one reversible before/after
@@ -547,6 +560,10 @@ public:
                              int vertexY, bool* found = nullptr) const;
     bool virtualMaterialCellChanged(
         ETerrainTileLayer layer, int cellX, int cellY) const;
+    bool physicalTileManuallyOwned(
+        ETerrainTileLayer layer, int cellX, int cellY) const;
+    bool preservePhysicalTileAtFinalization(
+        ETerrainTileLayer layer, int cellX, int cellY) const;
     STerrainTileCommand makeSemanticCornerMaterialPaint(
         int selectedCellX, int selectedCellY, int vertexX, int vertexY,
         ETerrainTileLayer layer, qint32 materialId,
@@ -610,6 +627,9 @@ private:
         ETerrainTileLayer layer, qint32 materialId,
         const CTerrainTransitionCatalog& catalog,
         CValidationReport* report);
+    void appendPhysicalOwnershipDeltas(
+        STerrainTileCommand* command, ETerrainTileLayer layer,
+        const QVector<QPoint>& cells, bool owned) const;
 
     int m_sectorCountX{0};
     int m_sectorCountY{0};
@@ -632,6 +652,8 @@ private:
     QVector<qint32> m_virtualOverlayMaterials;
     QVector<qint32> m_originalVirtualLandMaterials;
     QVector<qint32> m_originalVirtualOverlayMaterials;
+    QVector<bool> m_manualLandTileOwnership;
+    QVector<bool> m_manualOverlayTileOwnership;
 };
 
 class CTerrainTileEditHistory

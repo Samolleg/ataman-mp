@@ -8956,7 +8956,7 @@ void CView::finalizeVirtualTerrainAtlas()
             placedCellTypes.append(typeFound?type:-1);
             placedPackedCells.append(available?packed:quint16(0));
             preservePlacedCells.append(
-                !m_terrainEdit.virtualMaterialCellChanged(layer,x,y));
+                m_terrainEdit.preservePhysicalTileAtFinalization(layer,x,y));
         }
     const CTerrainTransitionCatalog* finalizedDecodeCatalog =
         m_workingTerrainAtlas
