@@ -133,4 +133,15 @@ inline STerrainPaintFootprintSnapshot terrainPaintFootprintSnapshot(
     return snapshot;
 }
 
+inline bool terrainPaintCommitMatchesDisplayedFootprint(
+    bool displayedValid, const STerrainPaintFootprintSnapshot& displayed,
+    const STerrainPaintFootprintSnapshot& fresh)
+{
+    return displayedValid
+        && displayed.anchor == fresh.anchor
+        && displayed.radius == fresh.radius
+        && displayed.square == fresh.square
+        && displayed.cellCentered == fresh.cellCentered;
+}
+
 #endif // LANDSCAPE_EDIT_POLICY_H

@@ -11258,10 +11258,11 @@ void CView::endTerrainPaintSampling()
 
 bool CView::resolveTerrainPaintFootprint(
     QVector3D position, bool land, CTile** tile,
-    STileLocation* location, STerrainTileBrush* brush, QPoint* detailVertex)
+    STileLocation* location, STerrainTileBrush* brush, QPoint* detailVertex,
+    STerrainPaintFootprintSnapshot* footprint)
 {
     if(!m_pLand || !m_pLand->isMprLoad() || !m_landscapeTools
-       || !tile || !location || !brush || !detailVertex)
+       || !tile || !location || !brush || !detailVertex || !footprint)
         return false;
 
     const bool activatingOverlay = !land
@@ -11279,15 +11280,15 @@ bool CView::resolveTerrainPaintFootprint(
         location->ySec * 16 + qBound(0, qRound(position.y() / 2.0f), 16));
     const bool cellCentered = manualTilePaintingEnabled()
         || m_landscapeTools->paintTargetMode() == ETerrainPaintTargetMode::Tile;
-    m_terrainPaintFootprint = terrainPaintFootprintSnapshot(
+    *footprint = terrainPaintFootprintSnapshot(
         cellAnchor, *detailVertex, cellCentered,
         m_landscapeTools->paintRadius(),
         m_landscapeTools->paintShape() == ETerrainTileBrushShape::Square);
 
     brush->centerX = cellAnchor.x();
     brush->centerY = cellAnchor.y();
-    brush->radius = m_terrainPaintFootprint.radius;
-    brush->shape = m_terrainPaintFootprint.square
+    brush->radius = footprint->radius;
+    brush->shape = footprint->square
         ? ETerrainTileBrushShape::Square : ETerrainTileBrushShape::Circle;
     return true;
 }
@@ -11301,9 +11302,27 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     STileLocation tileLoc;
     STerrainTileBrush brush;
     QPoint detailVertex;
+    STerrainPaintFootprintSnapshot freshFootprint;
     if(!resolveTerrainPaintFootprint(posOnLand, bLand, &pTile, &tileLoc,
-                                     &brush, &detailVertex))
+                                     &brush, &detailVertex, &freshFootprint))
         return;
+    const bool firstStrokeStamp = m_tilePaintStrokeActive
+        && !m_lastTerrainPaintCenterValid;
+    if(firstStrokeStamp
+       && !terrainPaintCommitMatchesDisplayedFootprint(
+              m_terrainPaintFootprintValid, m_terrainPaintFootprint,
+              freshFootprint))
+    {
+        // A press can arrive at a newer pointer coordinate than the last hover
+        // event. Refresh the displayed snapshot and defer this first stamp;
+        // release/drag may commit only after the user-visible footprint agrees.
+        m_terrainPaintFootprint = freshFootprint;
+        m_terrainPaintFootprintValid = true;
+        updatePreviewTile(posOnLand, bLand);
+        return;
+    }
+    m_terrainPaintFootprint = freshFootprint;
+    m_terrainPaintFootprintValid = true;
     bool preselectedMaterial = false;
     qint32 preselectedTerrainType = -1;
     const bool semanticPaint = !m_landscapeTools->manualTileSelectionEnabled()
@@ -11797,12 +11816,16 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     STileLocation tileLoc;
     STerrainTileBrush brush;
     QPoint detailVertex;
+    STerrainPaintFootprintSnapshot freshFootprint;
     if(!resolveTerrainPaintFootprint(posOnLand, bLand, &pTile, &tileLoc,
-                                     &brush, &detailVertex))
+                                     &brush, &detailVertex, &freshFootprint))
     {
+        m_terrainPaintFootprintValid = false;
         m_terrainPaintOutlineValid = false;
         return;
     }
+    m_terrainPaintFootprint = freshFootprint;
+    m_terrainPaintFootprintValid = true;
 
     const bool cellTarget = m_terrainPaintFootprint.cellCentered;
     if(!cellTarget)

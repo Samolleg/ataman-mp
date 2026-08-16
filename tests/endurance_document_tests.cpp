@@ -4658,6 +4658,17 @@ void EnduranceDocumentTests::manualPaintShowsCellFootprintAndLiftedTilePreview()
             cellAnchor, vertexAnchor, true, 2.0f, true);
     QCOMPARE(resized.cells().size(), 25);
     QCOMPARE(manual.cells().size(), 9);
+    QVERIFY(terrainPaintCommitMatchesDisplayedFootprint(
+        true, manual, manual));
+    QVERIFY(!terrainPaintCommitMatchesDisplayedFootprint(
+        true, manual, resized));
+    const STerrainPaintFootprintSnapshot nextTile =
+        terrainPaintFootprintSnapshot(
+            QPoint(5, 7), QPoint(6, 8), true, 1.0f, true);
+    QVERIFY(!terrainPaintCommitMatchesDisplayedFootprint(
+        true, manual, nextTile));
+    QVERIFY(!terrainPaintCommitMatchesDisplayedFootprint(
+        false, manual, manual));
 
     // Held-RMB sampling is keyed to the logical terrain vicinity rather than
     // raw mouse events. Layer and palette changes intentionally invalidate it.

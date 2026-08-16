@@ -419,7 +419,8 @@ private:
     bool resolveTerrainPaintFootprint(QVector3D position, bool land,
                                       CTile** tile, STileLocation* location,
                                       STerrainTileBrush* brush,
-                                      QPoint* detailVertex);
+                                      QPoint* detailVertex,
+                                      STerrainPaintFootprintSnapshot* footprint);
 
 
 public slots:
@@ -644,6 +645,7 @@ private:
     bool m_terrainPaintOutlineValid{false};
     bool m_terrainPaintProjectionLand{true};
     STerrainPaintFootprintSnapshot m_terrainPaintFootprint;
+    bool m_terrainPaintFootprintValid{false};
     bool m_terrainSampleGestureActive{false};
     bool m_terrainSampleKeyValid{false};
     QPoint m_lastTerrainSamplePoint;
