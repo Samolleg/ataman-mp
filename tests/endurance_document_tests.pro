@@ -21,6 +21,7 @@ SOURCES += \
     ../source/render/terrain_atlas_analyzer.cpp \
     ../source/render/terrain_atlas_archive_binding.cpp \
     ../source/render/terrain_atlas_profile.cpp \
+    ../source/render/terrain_paint_diagnostic.cpp \
     ../source/render/terrain_atlas_presets.cpp \
     ../source/documents/staged_save_validator.cpp \
     ../source/documents/backup_manager.cpp \
@@ -44,6 +45,7 @@ HEADERS += \
     ../source/render/terrain_atlas_analyzer.h \
     ../source/render/terrain_atlas_archive_binding.h \
     ../source/render/terrain_atlas_profile.h \
+    ../source/render/terrain_paint_diagnostic.h \
     ../source/documents/staged_save_validator.h \
     ../source/documents/backup_manager.h \
     ../source/documents/terrain_atlas_recovery_store.h \

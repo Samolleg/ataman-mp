@@ -18,6 +18,7 @@
 #include "operation_history_policy.h"
 #include "portable_diagnostic_writer.h"
 #include "res_archive_document.h"
+#include "terrain_paint_diagnostic.h"
 #include "terrain_edit_model.h"
 #include "terrain_tile_information_policy.h"
 #include "terrain_atlas_analyzer.h"
@@ -304,6 +305,7 @@ private slots:
     void terrainTileInformationPersistsWithoutBlinking();
     void persistentPaintOperationSurvivesHistoryNavigation();
     void portableDiagnosticCanReplaceExistingReportInPlace();
+    void terrainDiagnosticIdentityIsAuthoritativeAndShared();
     void persistentPaintOperationSurvivesDocumentTransition();
     void landscapeLayerChangesResetBrushSelection();
     void landscapeWheelDirectionUsesAvailableDelta();
@@ -449,11 +451,81 @@ void EnduranceDocumentTests::portableDiagnosticCanReplaceExistingReportInPlace()
     QString error;
     QVERIFY2(ei::writePortableDiagnostic(path, QByteArray("first"), &error),
              qPrintable(error));
+    const QDateTime firstModified = QFileInfo(path).lastModified();
+    QTest::qWait(20);
     QVERIFY2(ei::writePortableDiagnostic(path, QByteArray("second-report"), &error),
              qPrintable(error));
     QFile report(path);
     QVERIFY(report.open(QIODevice::ReadOnly));
     QCOMPARE(report.readAll(), QByteArray("second-report"));
+    QVERIFY2(QFileInfo(path).lastModified() > firstModified,
+             "Replacing changed diagnostic content did not update its timestamp");
+}
+
+void EnduranceDocumentTests::terrainDiagnosticIdentityIsAuthoritativeAndShared()
+{
+    STerrainWorkingTileIdentity physical;
+    physical.origin = ETerrainWorkingTileOrigin::ImportedAuthored;
+    physical.workingSlot = 47;
+    physical.sourceSlot = 3;
+    physical.sourceSlotAliases = {3, 9};
+    physical.sourceNamespace = QStringLiteral("global-source");
+    physical.physicalPixelSha256 = QByteArray("physical-hash");
+    physical.runtimeTerrainType = 6;
+    physical.canonicalSignature.northWest = 11;
+    physical.canonicalSignature.northEast = 12;
+    physical.canonicalSignature.southEast = 13;
+    physical.canonicalSignature.southWest = 14;
+
+    const QJsonObject exported = terrainWorkingPhysicalIdentityJson(
+        physical, QStringLiteral("current-map"), {}, {}, {});
+    const QJsonObject issueReport = terrainWorkingPhysicalIdentityJson(
+        physical, QStringLiteral("current-map"), {}, {}, {});
+    QCOMPARE(exported, issueReport);
+    QCOMPARE(exported.value(QStringLiteral("origin")).toString(),
+             QStringLiteral("authored-global"));
+    QCOMPARE(exported.value(QStringLiteral("workingSlot")).toInt(), 47);
+    QCOMPARE(exported.value(QStringLiteral("sourceNamespace")).toString(),
+             QStringLiteral("global-source"));
+    QCOMPARE(exported.value(QStringLiteral("sourceSlot")).toInt(), 3);
+    const QJsonArray aliases =
+        exported.value(QStringLiteral("sourceAliases")).toArray();
+    QCOMPARE(aliases.size(), 2);
+    QCOMPARE(aliases.at(1).toObject()
+                 .value(QStringLiteral("sourceSlot")).toInt(), 9);
+    QVERIFY2(exported.value(QStringLiteral("sourceSlot")).toInt()
+                 != exported.value(QStringLiteral("workingSlot")).toInt(),
+             "Source identity was inferred from the recyclable working slot");
+    QCOMPARE(exported.value(QStringLiteral("runtimeTerrainType")).toInt(), 6);
+    QCOMPARE(exported.value(QStringLiteral("canonicalGridCorners")).toObject()
+                 .value(QStringLiteral("x0y1")).toInt(), 14);
+
+    STerrainWorkingTileIdentity generated = physical;
+    generated.origin = ETerrainWorkingTileOrigin::CanonicalGenerated;
+    generated.sourceSlot = -1;
+    generated.sourceSlotAliases.clear();
+    generated.sourceNamespace.clear();
+    generated.canonicalGeneratedBlend = true;
+    STerrainGlobalMaterialFamily family;
+    family.id = 11;
+    family.name = QStringLiteral("Grass / Dark");
+    STerrainGlobalMaterialSource source;
+    source.mprNamespace = QStringLiteral("zone-source");
+    source.uniformSlot = 18;
+    source.atlasIdentity = QByteArray::fromHex("aabb");
+    const QJsonObject generatedJson = terrainWorkingPhysicalIdentityJson(
+        generated, QStringLiteral("current-map"), {family}, {{11, source}},
+        {{11, QByteArray("uniform-pixel-hash")}});
+    QCOMPARE(generatedJson.value(QStringLiteral("origin")).toString(),
+             QStringLiteral("canonical-generated"));
+    const QJsonArray inputs = generatedJson
+        .value(QStringLiteral("inputUniformSources")).toArray();
+    QCOMPARE(inputs.size(), 1);
+    QCOMPARE(inputs.at(0).toObject()
+                 .value(QStringLiteral("sourceSlot")).toInt(), 18);
+    QCOMPARE(inputs.at(0).toObject()
+                 .value(QStringLiteral("physicalPixelSha256")).toString(),
+             QStringLiteral("uniform-pixel-hash"));
 }
 
 void EnduranceDocumentTests::persistentPaintOperationSurvivesHistoryNavigation()

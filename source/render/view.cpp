@@ -90,6 +90,7 @@
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
 #include "portable_diagnostic_writer.h"
+#include "terrain_paint_diagnostic.h"
 #include "terrain_atlas_recovery_store.h"
 
 class CLogic;
@@ -8128,7 +8129,7 @@ void CView::exportTerrainPaintDiagnostic()
         return;
     QJsonObject root;
     root.insert("schema", "ei-mapper-endurance-paint-diagnostic");
-    root.insert("version", 5);
+    root.insert("version", 6);
     root.insert("mprFileName", m_pLand->filePath().fileName());
     root.insert("mprNamespace", m_mprDocument.mapInfo().innerNamespace);
     root.insert("sourceMprSha256", QString::fromLatin1(QCryptographicHash::hash(
@@ -8329,6 +8330,11 @@ void CView::exportTerrainPaintDiagnostic()
         }
     }
     QJsonArray currentTiles;
+    QMap<qint32, QByteArray> materialPixelSha256;
+    for(auto material = m_terrainGlobalMaterialSources.constBegin();
+        material != m_terrainGlobalMaterialSources.constEnd(); ++material)
+        materialPixelSha256.insert(
+            material.key(), terrainTilePixelSha256(material.value()));
     for(const STerrainTileDelta& cell : snapshotCells)
     {
         bool available = false;
@@ -8341,6 +8347,49 @@ void CView::exportTerrainPaintDiagnostic()
         current.insert("y", cell.globalY);
         current.insert("layer", cell.layer == ETerrainTileLayer::Land ? "land" : "overlay");
         current.insert("packed", packedTerrainTileJson(packed));
+        const int physicalSlot = SMprPackedTile::decode(packed).atlasSlot();
+        STerrainWorkingTileIdentity workingIdentity;
+        const bool hasWorkingIdentity =
+            cell.layer == ETerrainTileLayer::Land && m_workingTerrainAtlas
+            && m_workingTerrainAtlas->tileIdentityForSlot(
+                physicalSlot, &workingIdentity);
+        if(hasWorkingIdentity)
+        {
+            current.insert(QStringLiteral("physicalPixelSha256"),
+                QString::fromLatin1(workingIdentity.physicalPixelSha256));
+            current.insert(QStringLiteral("physicalIdentity"),
+                terrainWorkingPhysicalIdentityJson(
+                    workingIdentity, m_mprDocument.mapInfo().innerNamespace,
+                    m_terrainGlobalFamilies,
+                    m_terrainGlobalMaterialSourceIdentities,
+                    materialPixelSha256));
+        }
+        else if(m_pTileForm && physicalSlot >= 0
+                && physicalSlot < m_pTileForm->tileImages().size())
+        {
+            const QByteArray physicalPixelSha256 = terrainTilePixelSha256(
+                m_pTileForm->tileImages().at(physicalSlot));
+            current.insert(QStringLiteral("physicalPixelSha256"),
+                           QString::fromLatin1(physicalPixelSha256));
+            const STerrainAtlasProfileSlot* profileSlot = nullptr;
+            for(const STerrainAtlasProfileSlot& candidate :
+                m_terrainAtlasProfile.slotDefinitions)
+                if(candidate.slot == physicalSlot)
+                {
+                    profileSlot = &candidate;
+                    break;
+                }
+            qint32 runtimeTerrainType = -1;
+            if(cell.layer == ETerrainTileLayer::Land && m_pLand
+               && physicalSlot < m_pLand->tileTypes().size())
+                runtimeTerrainType =
+                    qint32(m_pLand->tileTypes().at(physicalSlot));
+            current.insert(QStringLiteral("physicalIdentity"),
+                terrainAuthoredPhysicalIdentityJson(
+                    physicalSlot, physicalPixelSha256,
+                    m_mprDocument.mapInfo().innerNamespace,
+                    runtimeTerrainType, profileSlot));
+        }
         const CTerrainTransitionCatalog& catalog = m_workingTerrainAtlas
             ? m_workingTerrainAtlas->catalog()
             : m_terrainAtlasAnalysis.catalog(cell.layer);
@@ -8358,15 +8407,16 @@ void CView::exportTerrainPaintDiagnostic()
         currentTiles.append(current);
     }
     root.insert("currentTileSnapshot", currentTiles);
-    QFile output(path);
-    if(!output.open(QIODevice::WriteOnly | QIODevice::Truncate)
-       || output.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0)
+    QString writeError;
+    if(!ei::writePortableDiagnostic(
+           path, QJsonDocument(root).toJson(QJsonDocument::Indented),
+           &writeError))
     {
         QMessageBox::warning(this, tr("Paint diagnostic"),
-                             tr("Could not write %1: %2").arg(path, output.errorString()));
+                             tr("Could not write %1: %2")
+                                 .arg(path, writeError));
         return;
     }
-    output.close();
     emit updateMsg(tr("Paint diagnostic exported without writing an MPR: %1").arg(path));
 }
 
@@ -13556,6 +13606,11 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
     }
     mark.insert(QStringLiteral("selectedCells"), selectedCells);
     QJsonArray tiles;
+    QMap<qint32, QByteArray> materialPixelSha256;
+    for(auto material = m_terrainGlobalMaterialSources.constBegin();
+        material != m_terrainGlobalMaterialSources.constEnd(); ++material)
+        materialPixelSha256.insert(
+            material.key(), terrainTilePixelSha256(material.value()));
     QSet<QString> capturedLayerNames;
     const QRect snapshot = markedBounds.adjusted(-1, -1, 1, 1).intersected(
         QRect(0, 0, m_terrainEdit.tileCountX(), m_terrainEdit.tileCountY()));
@@ -13593,133 +13648,12 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
             {
                 tile.insert(QStringLiteral("physicalPixelSha256"),
                     QString::fromLatin1(workingIdentity.physicalPixelSha256));
-                QJsonObject identity;
-                QString origin = QStringLiteral("unknown");
-                if(workingIdentity.origin ==
-                   ETerrainWorkingTileOrigin::AuthoredMap)
-                    origin = QStringLiteral("authored-current-map");
-                else if(workingIdentity.origin ==
-                        ETerrainWorkingTileOrigin::ImportedAuthored)
-                    origin = QStringLiteral("authored-global");
-                else if(workingIdentity.origin ==
-                        ETerrainWorkingTileOrigin::CanonicalGenerated)
-                    origin = QStringLiteral("canonical-generated");
-                identity.insert(QStringLiteral("origin"), origin);
-                identity.insert(QStringLiteral("workingSlot"),
-                                workingIdentity.workingSlot);
-                QString identitySourceNamespace =
-                    workingIdentity.origin ==
-                            ETerrainWorkingTileOrigin::AuthoredMap
-                        ? namespaceName : workingIdentity.sourceNamespace;
-                int identitySourceSlot = workingIdentity.sourceSlot;
-                const STerrainAtlasProfileSlot* profileSlot = nullptr;
-                if(workingIdentity.origin ==
-                   ETerrainWorkingTileOrigin::AuthoredMap)
-                    for(const STerrainAtlasProfileSlot& candidate :
-                        m_terrainAtlasProfile.slotDefinitions)
-                        if(candidate.slot == physicalSlot)
-                        {
-                            profileSlot = &candidate;
-                            break;
-                        }
-                if(profileSlot && !profileSlot->sourceSlotAliases.isEmpty())
-                {
-                    identitySourceNamespace = profileSlot->sourceNamespace;
-                    identitySourceSlot = profileSlot->sourceSlotAliases.front();
-                    QJsonArray aliases;
-                    for(int sourceSlot : profileSlot->sourceSlotAliases)
-                    {
-                        QJsonObject alias;
-                        alias.insert(QStringLiteral("sourceNamespace"),
-                                     profileSlot->sourceNamespace);
-                        alias.insert(QStringLiteral("sourceSlot"), sourceSlot);
-                        alias.insert(QStringLiteral("sourcePixelSha256"),
-                            QString::fromLatin1(
-                                profileSlot->sourcePixelSha256));
-                        aliases.append(alias);
-                    }
-                    identity.insert(QStringLiteral("sourceAliases"), aliases);
-                }
-                else if(!workingIdentity.sourceSlotAliases.isEmpty())
-                {
-                    QJsonArray aliases;
-                    for(int sourceSlot : workingIdentity.sourceSlotAliases)
-                    {
-                        QJsonObject alias;
-                        alias.insert(QStringLiteral("sourceNamespace"),
-                                     identitySourceNamespace);
-                        alias.insert(QStringLiteral("sourceSlot"), sourceSlot);
-                        alias.insert(QStringLiteral("sourcePixelSha256"),
-                            QString::fromLatin1(
-                                workingIdentity.physicalPixelSha256));
-                        aliases.append(alias);
-                    }
-                    identity.insert(QStringLiteral("sourceAliases"), aliases);
-                }
-                identity.insert(QStringLiteral("sourceNamespace"),
-                                identitySourceNamespace);
-                identity.insert(QStringLiteral("sourceSlot"),
-                                identitySourceSlot);
-                identity.insert(QStringLiteral("blendProvenance"),
-                                workingIdentity.blendProvenance);
-                identity.insert(QStringLiteral("stockDerivedBlend"),
-                                workingIdentity.stockDerivedBlend);
-                identity.insert(QStringLiteral("canonicalGeneratedBlend"),
-                                workingIdentity.canonicalGeneratedBlend);
-                identity.insert(QStringLiteral("runtimeTerrainType"),
-                                workingIdentity.runtimeTerrainType);
-                identity.insert(QStringLiteral("canonicalGridCorners"),
-                    terrainGridSignatureJson(
-                        workingIdentity.canonicalSignature));
-                if(workingIdentity.origin ==
-                   ETerrainWorkingTileOrigin::CanonicalGenerated)
-                {
-                    QSet<qint32> addedMaterials;
-                    QJsonArray inputs;
-                    for(qint32 materialId : {
-                            workingIdentity.canonicalSignature.northWest,
-                            workingIdentity.canonicalSignature.northEast,
-                            workingIdentity.canonicalSignature.southEast,
-                            workingIdentity.canonicalSignature.southWest})
-                    {
-                        if(addedMaterials.contains(materialId))
-                            continue;
-                        addedMaterials.insert(materialId);
-                        const auto source =
-                            m_terrainGlobalMaterialSourceIdentities.constFind(
-                                materialId);
-                        if(source ==
-                           m_terrainGlobalMaterialSourceIdentities.constEnd())
-                            continue;
-                        QString materialName;
-                        for(const STerrainGlobalMaterialFamily& family :
-                                m_terrainGlobalFamilies)
-                            if(family.id == materialId)
-                            {
-                                materialName = family.name;
-                                break;
-                            }
-                        QJsonObject input;
-                        input.insert(QStringLiteral("materialId"), materialId);
-                        input.insert(QStringLiteral("material"), materialName);
-                        input.insert(QStringLiteral("sourceNamespace"),
-                                     source->mprNamespace);
-                        input.insert(QStringLiteral("sourceSlot"),
-                                     source->uniformSlot);
-                        input.insert(QStringLiteral("atlasIdentity"),
-                            QString::fromLatin1(source->atlasIdentity.toHex()));
-                        const auto pixels =
-                            m_terrainGlobalMaterialSources.constFind(materialId);
-                        if(pixels != m_terrainGlobalMaterialSources.constEnd())
-                            input.insert(QStringLiteral("physicalPixelSha256"),
-                                QString::fromLatin1(
-                                    terrainTilePixelSha256(pixels.value())));
-                        inputs.append(input);
-                    }
-                    identity.insert(QStringLiteral("inputUniformSources"),
-                                    inputs);
-                }
-                tile.insert(QStringLiteral("physicalIdentity"), identity);
+                tile.insert(QStringLiteral("physicalIdentity"),
+                    terrainWorkingPhysicalIdentityJson(
+                        workingIdentity, namespaceName,
+                        m_terrainGlobalFamilies,
+                        m_terrainGlobalMaterialSourceIdentities,
+                        materialPixelSha256));
             }
             else if(m_pTileForm && physicalSlot >= 0
                     && physicalSlot < m_pTileForm->tileImages().size())
@@ -13732,13 +13666,6 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
                 // overlays) are still exact authored current-map slots. Record
                 // their source identity instead of leaving a pixel hash that
                 // later review cannot connect back to semantic authority.
-                QJsonObject identity;
-                identity.insert(QStringLiteral("origin"),
-                                QStringLiteral("authored-current-map"));
-                identity.insert(QStringLiteral("workingSlot"), physicalSlot);
-                QString sourceNamespace = namespaceName;
-                int sourceSlot = physicalSlot;
-                QByteArray sourcePixelSha256 = currentPixelSha256;
                 const STerrainAtlasProfileSlot* profileSlot = nullptr;
                 for(const STerrainAtlasProfileSlot& candidate :
                     m_terrainAtlasProfile.slotDefinitions)
@@ -13747,40 +13674,14 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
                         profileSlot = &candidate;
                         break;
                     }
-                if(profileSlot && !profileSlot->sourceSlotAliases.isEmpty())
-                {
-                    if(!profileSlot->sourceNamespace.isEmpty())
-                        sourceNamespace = profileSlot->sourceNamespace;
-                    sourceSlot = profileSlot->sourceSlotAliases.front();
-                    if(!profileSlot->sourcePixelSha256.isEmpty())
-                        sourcePixelSha256 = profileSlot->sourcePixelSha256;
-                    QJsonArray aliases;
-                    for(int aliasSlot : profileSlot->sourceSlotAliases)
-                    {
-                        QJsonObject alias;
-                        alias.insert(QStringLiteral("sourceNamespace"),
-                                     sourceNamespace);
-                        alias.insert(QStringLiteral("sourceSlot"), aliasSlot);
-                        alias.insert(QStringLiteral("sourcePixelSha256"),
-                            QString::fromLatin1(sourcePixelSha256));
-                        aliases.append(alias);
-                    }
-                    identity.insert(QStringLiteral("sourceAliases"), aliases);
-                }
-                identity.insert(QStringLiteral("sourceNamespace"), sourceNamespace);
-                identity.insert(QStringLiteral("sourceSlot"), sourceSlot);
-                identity.insert(QStringLiteral("sourcePixelSha256"),
-                                QString::fromLatin1(sourcePixelSha256));
-                identity.insert(QStringLiteral("blendProvenance"),
-                                QStringLiteral("original map atlas"));
-                identity.insert(QStringLiteral("stockDerivedBlend"), false);
-                identity.insert(QStringLiteral("canonicalGeneratedBlend"), false);
                 qint32 runtimeType = -1;
                 if(!snapshotOverlay && m_pLand
                    && physicalSlot < m_pLand->tileTypes().size())
                     runtimeType = qint32(m_pLand->tileTypes().at(physicalSlot));
-                identity.insert(QStringLiteral("runtimeTerrainType"), runtimeType);
-                tile.insert(QStringLiteral("physicalIdentity"), identity);
+                tile.insert(QStringLiteral("physicalIdentity"),
+                    terrainAuthoredPhysicalIdentityJson(
+                        physicalSlot, currentPixelSha256, namespaceName,
+                        runtimeType, profileSlot));
             }
             tile.insert(QStringLiteral("catalogRecognized"), recognized);
             if(recognized)
