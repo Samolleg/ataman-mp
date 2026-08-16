@@ -210,6 +210,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintHelp->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     paintLayout->addWidget(paintHelp);
     m_tilesetStatus->setWordWrap(true);
+    m_tilesetStatus->setObjectName(
+        QStringLiteral("terrainPaintTilesetStatus"));
     m_tilesetStatus->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     paintLayout->addWidget(m_tilesetStatus);
 
@@ -1123,9 +1125,19 @@ void CLandscapeTools::setManualAtlasTiles(
     const int previousSlot = m_manualTileList->currentItem()
         ? m_manualTileList->currentItem()->data(Qt::UserRole).toInt() : -1;
     const QSignalBlocker blocker(m_manualTileList);
+    m_manualTileList->setProperty("physicalAtlasSlotCount", tiles.size());
     m_manualTileList->clear();
     for(int slot = 0; slot < tiles.size(); ++slot)
     {
+        // Working atlases preserve page-aligned physical indices. A partial
+        // authored page can therefore leave null, unaddressable holes before
+        // later generated tiles. Adding those holes to an icon-mode view gives
+        // each one a 62 px grid cell even though it paints no thumbnail; a run
+        // of page padding then looks like a large blank region in the palette.
+        // Keep the real slot in UserRole, but do not allocate a selectable
+        // palette cell for an image that cannot be painted.
+        if(tiles.at(slot).isNull())
+            continue;
         const QString description = slot < descriptions.size()
             ? descriptions.at(slot).trimmed() : QString();
         const QString label = description.isEmpty()
@@ -1148,6 +1160,7 @@ void CLandscapeTools::setManualAtlasTiles(
             m_manualTileList->setCurrentItem(item);
     }
     applyPaintFilter();
+    refreshPaintTerrainTypes();
 }
 
 void CLandscapeTools::applyPaintFilter()
@@ -1399,7 +1412,9 @@ void CLandscapeTools::refreshPaintTerrainTypes()
         || editMode() == ELandscapeEditMode::OverlaySurface;
     int materialCount = 0;
     if(paintPaletteMode() == ETerrainPaintPaletteMode::Manual)
-        materialCount = m_manualTileList ? m_manualTileList->count() : 0;
+        materialCount = m_manualTileList
+            ? m_manualTileList->property("physicalAtlasSlotCount").toInt()
+            : 0;
     else if(paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto)
         materialCount = overlay ? m_classicOverlayPaintTypes.size()
             : m_classicLandPaintTypes.size()

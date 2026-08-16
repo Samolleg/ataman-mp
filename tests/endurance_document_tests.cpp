@@ -136,6 +136,21 @@ QByteArray mainWindowSource()
     return QByteArray();
 }
 
+QByteArray viewSource()
+{
+    const QString relativePath = QStringLiteral("source/render/view.cpp");
+    QDir directory(QDir::currentPath());
+    for(int depth = 0; depth < 8; ++depth)
+    {
+        QFile source(directory.filePath(relativePath));
+        if(source.open(QIODevice::ReadOnly))
+            return source.readAll();
+        if(!directory.cdUp())
+            break;
+    }
+    return QByteArray();
+}
+
 QByteArray emptyMpr()
 {
     QByteArray bytes;
@@ -367,8 +382,10 @@ private slots:
     void globalTerrainHeightOperationsRejectInvalidRanges();
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
-    void manualTilePaintHasNoOwnershipPrivilege();
+    void manualTilePaintRebasesDecodedSemanticsAndInvalidatesDisputes();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
+    void interruptedTerrainStrokeRejectsUnownedStamp();
+    void resolveMissingBlendsStagesDeterministicLoadBaseline();
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
     void semanticAtlasProposalIsDeterministicAndApprovalGated();
@@ -4331,14 +4348,20 @@ void EnduranceDocumentTests::semanticVertexPaintNeverUsesUniformForBlendFallback
     }
 }
 
-void EnduranceDocumentTests::manualTilePaintHasNoOwnershipPrivilege()
+void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidatesDisputes()
 {
     CMprDocument baseline;
-    QVERIFY(baseline.loadBytes(syntheticMpr(), "manual-is-ordinary.mpr"));
+    QVERIFY(baseline.loadBytes(syntheticMpr(), "manual-semantic-rebase.mpr"));
     CTerrainEditModel terrain;
     QVERIFY(terrain.load(baseline));
 
     CTerrainTransitionCatalog catalog;
+    const auto packed = [](quint8 tileIndex, quint8 rotation) {
+        SMprPackedTile tile;
+        tile.tileIndex = tileIndex;
+        tile.rotation = rotation;
+        return tile.encode();
+    };
     STerrainTransitionVariant base;
     base.signature.northWest = base.signature.northEast =
         base.signature.southEast = base.signature.southWest = 1;
@@ -4349,6 +4372,15 @@ void EnduranceDocumentTests::manualTilePaintHasNoOwnershipPrivilege()
         modern.signature.southEast = modern.signature.southWest = 2;
     modern.packedTile = quint16(1 << 14);
     QVERIFY(catalog.addVariant(modern));
+    STerrainTransitionVariant manualUniform = base;
+    manualUniform.packedTile = packed(1, 3);
+    QVERIFY(catalog.addVariant(manualUniform));
+    STerrainTransitionVariant manualTransition = base;
+    manualTransition.signature.northWest = 2;
+    manualTransition.signature.northEast = 1;
+    manualTransition.signature.southEast = 1;
+    manualTransition.signature.southWest = 1;
+    manualTransition.packedTile = packed(2, 0);
 
     STerrainTileBrush cell;
     cell.centerX = 8.0f;
@@ -4363,45 +4395,223 @@ void EnduranceDocumentTests::manualTilePaintHasNoOwnershipPrivilege()
     const quint16 semanticPacked = terrain.packedTile(
         8, 8, ETerrainTileLayer::Land);
 
+    // This reproduces the bug: Manual changes a physical cell but leaves the
+    // previously authored Modern field at material 2, so a later resolver
+    // treats the stale field as authoritative and puts the old tile back.
+    CValidationReport manualReport;
     const STerrainTileCommand manual = terrain.makeTilePaint(
-        cell, ETerrainTileLayer::Land, 0, 1, 3);
+        cell, ETerrainTileLayer::Land, 0, 1, 3, catalog, &manualReport);
+    QVERIFY2(!manualReport.hasErrors(), qPrintable(manualReport.toText()));
     QVERIFY(!manual.isEmpty());
     QVERIFY(terrain.apply(manual, true));
     const quint16 manualPacked = manual.deltas.front().after;
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              manualPacked);
-    QVERIFY(terrain.virtualMaterialCellChanged(
-        ETerrainTileLayer::Land, 8, 8));
-    QVERIFY(terrain.makeTilePaint(
-        cell, ETerrainTileLayer::Land, 0, 1, 3).isEmpty());
-
+    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
+                                 QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(1));
+        QVERIFY(found);
+    }
     QVERIFY(terrain.apply(manual, false));
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              semanticPacked);
+    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
+                                 QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(2));
+        QVERIFY(found);
+    }
     QVERIFY(terrain.apply(manual, true));
-
-    const STerrainTileCommand laterSemantic = terrain.makeSemanticTilePaint(
-        cell, ETerrainTileLayer::Land, 1, catalog, 0x4d414e55u);
-    QVERIFY(!laterSemantic.isEmpty());
-    bool centerChanged = false;
-    quint16 laterPacked = 0;
-    for(const STerrainTileDelta& delta : laterSemantic.deltas)
-        if(delta.globalX == 8 && delta.globalY == 8)
-        {
-            centerChanged = true;
-            laterPacked = delta.after;
-            break;
-        }
-    QVERIFY(centerChanged);
-    QVERIFY(terrain.apply(laterSemantic, true));
-    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
-             laterPacked);
-    QVERIFY(terrain.apply(laterSemantic, false));
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              manualPacked);
-    QVERIFY(terrain.apply(manual, false));
+    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
+                                 QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(1));
+        QVERIFY(found);
+    }
+    STerrainTransitionSignature replacement;
+    QVERIFY(!terrain.missingBlendRepairSignature(
+        8, 8, ETerrainTileLayer::Land, catalog, nullptr, true,
+        &replacement));
+    QVERIFY(!terrain.virtualMaterialCellChanged(
+        ETerrainTileLayer::Land, 8, 8));
+
+    // The Manual palette intentionally includes every physical slot. An
+    // unassigned rotation must still paint, but it has no semantic vote, so
+    // each incident field vertex becomes explicitly unknown rather than
+    // retaining the previous field's material.
+    CValidationReport unassignedReport;
+    const STerrainTileCommand unassigned = terrain.makeTilePaint(
+        cell, ETerrainTileLayer::Land, 0, 2, 1, catalog, &unassignedReport);
+    QVERIFY2(!unassigned.isEmpty(), qPrintable(unassignedReport.toText()));
+    QVERIFY(!unassignedReport.hasErrors());
+    QVERIFY(terrain.apply(unassigned, true));
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
-             semanticPacked);
+             packed(2, 1));
+    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
+                                 QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = true;
+        terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found);
+        QVERIFY(!found);
+    }
+    // Direct Manual paint invalidates the semantic field, but it does not
+    // grant the undecodable physical slot a preservation privilege. A later
+    // Resolve Missing Blends operation remains free to use its ordinary
+    // neighbour/recovered inference for every undecodable cell.
+    QVERIFY(terrain.missingBlendRepairSignature(
+        8, 8, ETerrainTileLayer::Land, catalog, nullptr, true,
+        &replacement));
+    QVERIFY(replacement == base.signature);
+    CValidationReport resolveReport;
+    const STerrainTileCommand resolved = terrain.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, catalog, 0x52455041u, &resolveReport);
+    QVERIFY2(!resolveReport.hasErrors(), qPrintable(resolveReport.toText()));
+    const STerrainTileDelta* resolvedCenter = nullptr;
+    for(const STerrainTileDelta& delta : resolved.deltas)
+        if(delta.layer == ETerrainTileLayer::Land
+           && delta.globalX == 8 && delta.globalY == 8)
+        {
+            resolvedCenter = &delta;
+            break;
+        }
+    QVERIFY(resolvedCenter);
+    bool resolvedFound = false;
+    const STerrainTransitionSignature resolvedSignature =
+        catalog.gridSignatureForPacked(resolvedCenter->after, &resolvedFound);
+    QVERIFY(resolvedFound);
+    QVERIFY(resolvedSignature == base.signature);
+    QVERIFY(terrain.apply(resolved, true));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             resolvedCenter->after);
+    QVERIFY(terrain.apply(resolved, false));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             packed(2, 1));
+    QVERIFY(terrain.apply(unassigned, false));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             manualPacked);
+    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
+                                 QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(1));
+        QVERIFY(found);
+    }
+    QVERIFY(terrain.apply(unassigned, true));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             packed(2, 1));
+    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
+                                 QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = true;
+        terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found);
+        QVERIFY(!found);
+    }
+    QVERIFY(terrain.apply(unassigned, false));
+
+    // A decoded non-uniform stamp can disagree with its physical neighbours
+    // at one shared vertex. The model must invalidate that vertex rather than
+    // silently retaining the old Modern value or assigning the Manual tile
+    // an ownership privilege.
+    QVERIFY(catalog.addVariant(manualTransition));
+    CValidationReport mixedReport;
+    const STerrainTileCommand mixed = terrain.makeTilePaint(
+        cell, ETerrainTileLayer::Land, 0, 2, 0, catalog, &mixedReport);
+    QVERIFY2(!mixedReport.hasErrors(), qPrintable(mixedReport.toText()));
+    QVERIFY(!mixed.isEmpty());
+    QVERIFY(terrain.apply(mixed, true));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             manualTransition.packedTile);
+    bool northWestFound = true;
+    terrain.virtualMaterialAt(
+        ETerrainTileLayer::Land, 8, 8, &northWestFound);
+    QVERIFY(!northWestFound);
+    for(const QPoint& vertex : {QPoint(9, 8), QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(1));
+        QVERIFY(found);
+    }
+    QVERIFY(!terrain.missingBlendRepairSignature(
+        8, 8, ETerrainTileLayer::Land, catalog, nullptr, true,
+        &replacement));
+    QVERIFY(terrain.apply(mixed, false));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             manualPacked);
+    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
+                                 QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(1));
+        QVERIFY(found);
+    }
+    QVERIFY(terrain.apply(mixed, true));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
+             manualTransition.packedTile);
+    northWestFound = true;
+    terrain.virtualMaterialAt(
+        ETerrainTileLayer::Land, 8, 8, &northWestFound);
+    QVERIFY(!northWestFound);
+    for(const QPoint& vertex : {QPoint(9, 8), QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(1));
+        QVERIFY(found);
+    }
+
+    // Keep the view integration in the regression contract. Manual must use
+    // the catalog-aware command above, but it must not run Modern's automatic
+    // end-of-stroke exact-blend pass; a later explicit Shift+R remains free to
+    // resolve the resulting physical/semantic state without origin privilege.
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+    const int setTileStart = source.indexOf(
+        "void CView::setTile(QVector3D posOnLand, bool bLand)");
+    const int setTileEnd = source.indexOf(
+        "void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)",
+        setTileStart);
+    QVERIFY2(setTileStart >= 0 && setTileEnd > setTileStart,
+             "Manual terrain paint entry point was not found");
+    const QByteArray setTile = source.mid(setTileStart,
+                                          setTileEnd - setTileStart);
+    QVERIFY2(setTile.contains(
+        "selected.rotation, semanticCatalog, &report"),
+        "Manual paint bypasses the catalog-aware semantic rebase command");
+    const int releaseStart = source.indexOf("void CView::endTileBrushGroup()");
+    const int releaseEnd = source.indexOf("void CView::cancelTileBrushGroup()",
+                                          releaseStart);
+    QVERIFY2(releaseStart >= 0 && releaseEnd > releaseStart,
+             "Terrain stroke release implementation was not found");
+    const QByteArray release = source.mid(releaseStart,
+                                          releaseEnd - releaseStart);
+    const int manualGuard = release.indexOf(
+        "!= int(ETerrainPaintPaletteMode::Manual)");
+    const int virtualRelease = release.indexOf(
+        "makeVirtualStrokeResolution(");
+    QVERIFY2(manualGuard >= 0 && virtualRelease > manualGuard,
+             "Manual paint is incorrectly passed through Modern stroke release");
 }
 
 void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExactVariants()
@@ -4706,6 +4916,250 @@ void EnduranceDocumentTests::abandonedTerrainPreviewRollsBackBeforeNextStroke()
     for(const STerrainTileDelta& delta : next.deltas)
         QCOMPARE(terrain.packedTile(delta.globalX, delta.globalY, delta.layer),
                  delta.after);
+}
+
+void EnduranceDocumentTests::interruptedTerrainStrokeRejectsUnownedStamp()
+{
+    // A desktop capture/modal interruption can cancel the active preview while
+    // Qt still delivers one old mouse move or release. That input is not a new
+    // gesture and therefore cannot be permitted to mutate the terrain model.
+    const auto ownsTileStamp = [](bool strokeActive, bool strokeFinishing) {
+        return strokeActive && !strokeFinishing;
+    };
+    QVERIFY(ownsTileStamp(true, false));
+    QVERIFY(!ownsTileStamp(false, false));
+    QVERIFY(!ownsTileStamp(true, true));
+
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+    const int methodStart = source.indexOf(
+        "void CView::setTile(QVector3D posOnLand, bool bLand)");
+    const int methodEnd = source.indexOf(
+        "void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)",
+        methodStart);
+    QVERIFY2(methodStart >= 0 && methodEnd > methodStart,
+             "Terrain paint entry point was not found");
+    const QByteArray method = source.mid(methodStart, methodEnd - methodStart);
+    const int ownershipGate = method.indexOf(
+        "if(!m_tilePaintStrokeActive || m_tileStrokeFinishing)");
+    const int ownershipReturn = method.indexOf("return;", ownershipGate);
+    const int footprintResolution = method.indexOf(
+        "resolveTerrainPaintFootprint");
+    const int previewMutation = method.indexOf(
+        "applyTerrainTilePreview(command, true)");
+    QVERIFY2(ownershipGate >= 0 && ownershipReturn > ownershipGate,
+             "A stale terrain paint event can enter setTile without owning an active stroke");
+    QVERIFY2(ownershipGate < footprintResolution
+             && ownershipGate < previewMutation,
+             "Terrain paint ownership is checked after preview/model work has begun");
+}
+
+void EnduranceDocumentTests::resolveMissingBlendsStagesDeterministicLoadBaseline()
+{
+    // Zone 2 regression shape: an initially decoded hard border has no
+    // model-owned virtual material field after load.  Conservative recovery
+    // cannot decide its disputed vertices, while the deterministic field
+    // seeded by the first semantic paint resolves the same cells.
+    CTerrainTransitionCatalog catalog;
+    int nextSlot = 2;
+    for(int mask = 0; mask < 16; ++mask)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = (mask & 1) ? 2 : 1;
+        variant.signature.northEast = (mask & 2) ? 2 : 1;
+        variant.signature.southEast = (mask & 4) ? 2 : 1;
+        variant.signature.southWest = (mask & 8) ? 2 : 1;
+        if(mask == 0)
+            variant.packedTile = 0;
+        else if(mask == 15)
+            variant.packedTile = 1;
+        else if(mask == 6)
+            variant.packedTile = 4; // 1/2/2/1 vertical transition
+        else
+        {
+            while(nextSlot == 4)
+                ++nextSlot;
+            variant.packedTile = quint16(nextSlot++);
+        }
+        QVERIFY(catalog.addVariant(variant));
+    }
+
+    QVector<STerrainSectorSource> sources;
+    for(int sectorY = 0; sectorY < 2; ++sectorY)
+        for(int sectorX = 0; sectorX < 2; ++sectorX)
+        {
+            STerrainSectorSource source;
+            source.memberName = QStringLiteral("load-baseline-%1-%2.sec")
+                .arg(sectorX).arg(sectorY);
+            source.sectorX = sectorX;
+            source.sectorY = sectorY;
+            source.type = 0;
+            source.payload = syntheticLandSector(1200);
+            source.landTileOffset = 5 + 33 * 33 * 8;
+            source.expectedPayloadSha256 = QCryptographicHash::hash(
+                source.payload, QCryptographicHash::Sha256).toHex();
+            sources.append(source);
+        }
+
+    CValidationReport setupReport;
+    CTerrainEditModel loaded;
+    QVERIFY2(loaded.loadSources(2, 2, 100.0f, sources, &setupReport, 1,
+                                QVector<qint32>(64, 1), 0),
+             qPrintable(setupReport.toText()));
+    QCOMPARE(loaded.tileCountX(), 32);
+    QCOMPARE(loaded.tileCountY(), 32);
+
+    // Physical slot 0 is uniform material 1.  Build a material-2 side at
+    // x=28, then corrupt the reported second cell back to material 1.
+    STerrainTileCommand border;
+    for(int y = 0; y < loaded.tileCountY(); ++y)
+        for(int x = 28; x < loaded.tileCountX(); ++x)
+        {
+            STerrainTileDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.layer = ETerrainTileLayer::Land;
+            delta.before = 0;
+            delta.after = 1;
+            border.deltas.append(delta);
+        }
+    QVERIFY2(loaded.apply(border, true, &setupReport),
+             qPrintable(setupReport.toText()));
+    STerrainTileCommand corruption;
+    STerrainTileDelta corrupt;
+    corrupt.globalX = 29;
+    corrupt.globalY = 17;
+    corrupt.layer = ETerrainTileLayer::Land;
+    corrupt.before = 1;
+    corrupt.after = 0;
+    corruption.deltas.append(corrupt);
+    QVERIFY2(loaded.apply(corruption, true, &setupReport),
+             qPrintable(setupReport.toText()));
+
+    const auto targetAfter = [](const STerrainTileCommand& command,
+                                int x, int y, quint16* after) {
+        for(const STerrainTileDelta& delta : command.deltas)
+            if(delta.layer == ETerrainTileLayer::Land
+               && delta.globalX == x && delta.globalY == y)
+            {
+                if(after)
+                    *after = delta.after;
+                return true;
+            }
+        return false;
+    };
+
+    // This is the pre-fix first-Shift+R path: no loaded virtual field means
+    // only the partial unambiguous recovery is available.
+    CTerrainVirtualMaterialField conservativeField;
+    QVERIFY(!loaded.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &conservativeField, true));
+    CValidationReport conservativeReport;
+    QVERIFY2(loaded.recoverUnambiguousVirtualMaterialField(
+                 ETerrainTileLayer::Land, catalog, &conservativeField,
+                 &conservativeReport),
+             qPrintable(conservativeReport.toText()));
+    const STerrainTileCommand conservative = loaded.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, catalog, 0x53484946u, &conservativeReport,
+        false, &conservativeField, true, false);
+    QVERIFY2(!conservativeReport.hasErrors(),
+             qPrintable(conservativeReport.toText()));
+    quint16 ignored = 0;
+    QVERIFY2(!targetAfter(conservative, 28, 17, &ignored)
+             && !targetAfter(conservative, 29, 17, &ignored),
+             "The fixture no longer distinguishes a fresh load from a first semantic paint");
+
+    // The fixed first-Shift+R path seeds only its staged copy.  It must plan
+    // the same exact target cells as a map whose first Modern paint has
+    // already initialized the field.
+    CTerrainEditModel staged = loaded;
+    CValidationReport stagedReport;
+    QVERIFY2(staged.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, catalog, &stagedReport,
+                 ETerrainMaterialFieldRecovery::RecoverDeterministically),
+             qPrintable(stagedReport.toText()));
+    CTerrainVirtualMaterialField stagedField;
+    QVERIFY(staged.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &stagedField, true));
+    const STerrainTileCommand firstShiftR = staged.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, catalog, 0x53484946u, &stagedReport, false,
+        &stagedField, true, true);
+    QVERIFY2(!stagedReport.hasErrors(), qPrintable(stagedReport.toText()));
+    quint16 first28 = 0;
+    quint16 first29 = 0;
+    QVERIFY(targetAfter(firstShiftR, 28, 17, &first28));
+    QVERIFY(targetAfter(firstShiftR, 29, 17, &first29));
+    QCOMPARE(first28, quint16(4));
+    QCOMPARE(first29, quint16(1));
+
+    CTerrainEditModel afterPaint = loaded;
+    STerrainTileBrush firstPaintBrush;
+    firstPaintBrush.centerX = 0.0f;
+    firstPaintBrush.centerY = 0.0f;
+    firstPaintBrush.radius = 0.0f;
+    firstPaintBrush.shape = ETerrainTileBrushShape::Square;
+    CValidationReport paintReport;
+    const STerrainTileCommand firstPaint = afterPaint.makeVirtualMaterialPaint(
+        0, 0, firstPaintBrush, ETerrainTileLayer::Land, 2, catalog,
+        0x53484946u, &paintReport);
+    QVERIFY2(!paintReport.hasErrors(), qPrintable(paintReport.toText()));
+    QVERIFY(!firstPaint.isEmpty());
+    QVERIFY2(afterPaint.apply(firstPaint, true, &paintReport),
+             qPrintable(paintReport.toText()));
+    CTerrainVirtualMaterialField afterPaintField;
+    QVERIFY(afterPaint.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &afterPaintField, true));
+    const STerrainTileCommand postPaintShiftR =
+        afterPaint.makeVirtualMapResolution(
+            ETerrainTileLayer::Land, catalog, 0x53484946u, &paintReport,
+            false, &afterPaintField, true, true);
+    QVERIFY2(!paintReport.hasErrors(), qPrintable(paintReport.toText()));
+    quint16 painted28 = 0;
+    quint16 painted29 = 0;
+    QVERIFY(targetAfter(postPaintShiftR, 28, 17, &painted28));
+    QVERIFY(targetAfter(postPaintShiftR, 29, 17, &painted29));
+    QCOMPARE(painted28, first28);
+    QCOMPARE(painted29, first29);
+
+    // Abandoning the staged work must leave the freshly loaded model exactly
+    // as it was: no virtual field and no physical repair are leaked.
+    CTerrainVirtualMaterialField liveField;
+    QVERIFY(!loaded.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &liveField, false));
+    QCOMPARE(loaded.packedTile(28, 17, ETerrainTileLayer::Land), quint16(1));
+    QCOMPARE(loaded.packedTile(29, 17, ETerrainTileLayer::Land), quint16(0));
+
+    // This target does not link CView, so make the production ordering part
+    // of the regression contract: the staged deterministic seed must exist
+    // before Shift+R copies/scans the repair field, and live state must not be
+    // assigned until after the plan is complete.
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+    const int methodStart = source.indexOf(
+        "void CView::resolveMissingTerrainBlends()");
+    const int methodEnd = source.indexOf(
+        "void CView::beginTileBrushGroup()", methodStart);
+    QVERIFY2(methodStart >= 0 && methodEnd > methodStart,
+             "Resolve Missing Blends implementation was not found");
+    const QByteArray method = source.mid(methodStart, methodEnd - methodStart);
+    const int stageConstruction = method.indexOf("SWorkingTerrainResolveStage staged;");
+    const int stageCopy = method.indexOf("staged.terrainEdit = m_terrainEdit;");
+    const int deterministicSeed = method.indexOf(
+        "staged.terrainEdit.initializeVirtualMaterialField(");
+    const int repairFieldCopy = method.indexOf(
+        "staged.terrainEdit.copyVirtualMaterialField(");
+    const int resolution = method.indexOf(
+        "staged.terrainEdit.makeVirtualMapResolution(");
+    const int liveCommit = method.indexOf("m_terrainEdit = staged.terrainEdit;");
+    QVERIFY2(stageConstruction >= 0 && stageCopy > stageConstruction
+             && deterministicSeed > stageCopy
+             && repairFieldCopy > deterministicSeed
+             && resolution > repairFieldCopy && liveCommit > resolution,
+             "First Shift+R does not seed its staged deterministic field before planning and committing");
+    QVERIFY2(!method.contains("m_terrainEdit.initializeVirtualMaterialField("),
+             "Resolve Missing Blends initialized the live model before its staged command committed");
 }
 
 void EnduranceDocumentTests::classicAutoSafeTileSkipsUnsupportedCoreInsteadOfHardSeam()

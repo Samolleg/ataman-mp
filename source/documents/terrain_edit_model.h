@@ -466,6 +466,18 @@ public:
                                      ETerrainTileLayer layer,
                                      quint8 atlasIndex, quint8 tileIndex,
                                      quint8 rotation) const;
+    // Manual painting remains a direct physical operation, but a caller with
+    // the active catalog can also keep the model-owned semantic field honest.
+    // Each affected vertex is recomputed from its post-command incident
+    // physical cells: one unanimous decoded value is retained; a disagreement
+    // or unassigned packed cell is represented as an unset vertex instead of
+    // privileging either the old field or the Manual stamp.
+    STerrainTileCommand makeTilePaint(const STerrainTileBrush& brush,
+                                     ETerrainTileLayer layer,
+                                     quint8 atlasIndex, quint8 tileIndex,
+                                     quint8 rotation,
+                                     const CTerrainTransitionCatalog& catalog,
+                                     CValidationReport* report = nullptr);
     STerrainTileCommand makeSemanticTilePaint(
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,

@@ -2667,6 +2667,172 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     return command;
 }
 
+STerrainTileCommand CTerrainEditModel::makeTilePaint(
+    const STerrainTileBrush& brush, ETerrainTileLayer layer,
+    quint8 atlasIndex, quint8 tileIndex, quint8 rotation,
+    const CTerrainTransitionCatalog& catalog, CValidationReport* report)
+{
+    STerrainTileCommand command = makeTilePaint(
+        brush, layer, atlasIndex, tileIndex, rotation);
+    if(brush.radius < 0.0f || tileIndex >= 64 || rotation >= 4
+       || atlasIndex >= m_textureCount)
+        return command;
+
+    SMprPackedTile selected;
+    selected.atlasIndex = atlasIndex;
+    selected.tileIndex = tileIndex;
+    selected.rotation = rotation;
+    if(selected.atlasSlot() >= m_tileTypes.size())
+        return command;
+
+    const int width = tileCountX();
+    const int height = tileCountY();
+    const quint16 after = selected.encode();
+    QMap<int, quint16> postCommandPacked;
+    const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
+    const int maximumX = qMin(width - 1,
+                              int(std::floor(brush.centerX + brush.radius)));
+    const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
+    const int maximumY = qMin(height - 1,
+                              int(std::floor(brush.centerY + brush.radius)));
+    for(int y = minimumY; y <= maximumY; ++y)
+    {
+        for(int x = minimumX; x <= maximumX; ++x)
+        {
+            const float dx = std::fabs(float(x) - brush.centerX);
+            const float dy = std::fabs(float(y) - brush.centerY);
+            const bool inside = brush.shape == ETerrainTileBrushShape::Square
+                ? qMax(dx, dy) <= brush.radius
+                : std::sqrt(dx * dx + dy * dy) <= brush.radius;
+            if(!inside)
+                continue;
+            bool available = false;
+            packedTile(x, y, layer, &available);
+            if(available)
+                postCommandPacked.insert(y * width + x, after);
+        }
+    }
+    if(postCommandPacked.isEmpty())
+        return command;
+
+    command.semanticAudit.valid = true;
+    command.semanticAudit.brush = brush;
+    command.semanticAudit.layer = layer;
+    command.semanticAudit.requestedMaterialId = -1;
+    command.semanticAudit.solverMode = QStringLiteral(
+        "manual-physical-consensus");
+    for(auto cell = postCommandPacked.constBegin();
+        cell != postCommandPacked.constEnd(); ++cell)
+    {
+        const QPoint point(cell.key() % width, cell.key() / width);
+        command.semanticAudit.paintedCoreCells.append(point);
+        command.semanticAudit.affectedCells.append(point);
+    }
+
+    QVector<qint32>& field = layer == ETerrainTileLayer::Land
+        ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    QVector<qint32>& baseline = layer == ETerrainTileLayer::Land
+        ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+    const int vertexWidth = width + 1;
+    const int expectedFieldSize = vertexWidth * (height + 1);
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    if(field.isEmpty()
+       && !initializeVirtualMaterialField(
+           layer, catalog, nullptr,
+           ETerrainMaterialFieldRecovery::RecoverDeterministically))
+    {
+        // Manual remains a direct physical operation even when a damaged map
+        // cannot supply a semantic baseline. Install an explicitly unknown
+        // baseline instead of allowing a later recovery pass to manufacture
+        // an old semantic owner for this paint.
+        field.fill(unset, expectedFieldSize);
+        baseline = field;
+        if(report)
+            report->add("terrain.manual_semantic_baseline",
+                        EValidationSeverity::Warning,
+                        "Manual physical paint could not recover a material-field baseline; affected semantic vertices were invalidated");
+    }
+    if(field.size() != expectedFieldSize)
+    {
+        field.fill(unset, expectedFieldSize);
+        baseline = field;
+        if(report)
+            report->add("terrain.manual_semantic_baseline",
+                        EValidationSeverity::Warning,
+                        "Manual physical paint found an invalid material field; affected semantic vertices were invalidated");
+    }
+
+    QSet<int> affectedVertices;
+    for(auto cell = postCommandPacked.constBegin();
+        cell != postCommandPacked.constEnd(); ++cell)
+    {
+        const int x = cell.key() % width;
+        const int y = cell.key() / width;
+        affectedVertices.insert(y * vertexWidth + x);
+        affectedVertices.insert(y * vertexWidth + x + 1);
+        affectedVertices.insert((y + 1) * vertexWidth + x + 1);
+        affectedVertices.insert((y + 1) * vertexWidth + x);
+    }
+    QVector<int> orderedVertices = affectedVertices.values().toVector();
+    std::sort(orderedVertices.begin(), orderedVertices.end());
+    for(int key : orderedVertices)
+    {
+        const int vertexX = key % vertexWidth;
+        const int vertexY = key / vertexWidth;
+        QSet<qint32> values;
+        bool undecodable = false;
+        for(int cellY = vertexY - 1; cellY <= vertexY; ++cellY)
+        {
+            for(int cellX = vertexX - 1; cellX <= vertexX; ++cellX)
+            {
+                if(cellX < 0 || cellX >= width
+                   || cellY < 0 || cellY >= height)
+                    continue;
+                const int cellKey = cellY * width + cellX;
+                bool available = false;
+                quint16 packed = 0;
+                if(postCommandPacked.contains(cellKey))
+                {
+                    packed = postCommandPacked.value(cellKey);
+                    available = true;
+                }
+                else
+                    packed = packedTile(cellX, cellY, layer, &available);
+                if(!available)
+                    continue;
+                bool decoded = false;
+                const STerrainTransitionSignature signature =
+                    catalog.gridSignatureForPacked(packed, &decoded);
+                if(!decoded)
+                {
+                    undecodable = true;
+                    continue;
+                }
+                if(cellX == vertexX && cellY == vertexY)
+                    values.insert(signature.northWest);
+                else if(cellX == vertexX - 1 && cellY == vertexY)
+                    values.insert(signature.northEast);
+                else if(cellX == vertexX - 1 && cellY == vertexY - 1)
+                    values.insert(signature.southEast);
+                else
+                    values.insert(signature.southWest);
+            }
+        }
+        const qint32 consensus = !undecodable && values.size() == 1
+            ? *values.constBegin() : unset;
+        if(field.at(key) == consensus)
+            continue;
+        STerrainTileCommand::SVirtualVertexDelta delta;
+        delta.globalX = vertexX;
+        delta.globalY = vertexY;
+        delta.layer = layer;
+        delta.before = field.at(key);
+        delta.after = consensus;
+        command.virtualVertices.append(delta);
+    }
+    return command;
+}
+
 STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,

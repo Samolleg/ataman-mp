@@ -11521,6 +11521,12 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!m_pLand->isMprLoad() || !m_terrainEditAvailable || !m_landscapeTools)
         return;
 
+    // A focus or modal interruption can cancel the preview while Qt still
+    // delivers a delayed move or release from the abandoned mouse gesture.
+    // Only a live brush transaction is allowed to mutate the terrain model.
+    if(!m_tilePaintStrokeActive || m_tileStrokeFinishing)
+        return;
+
     CTile* pTile = nullptr;
     STileLocation tileLoc;
     STerrainTileBrush brush;
@@ -11675,19 +11681,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         selected.rotation = quint8(selectedRotation & 3);
         command = m_terrainEdit.makeTilePaint(
             brush, layer, selected.atlasIndex, selected.tileIndex,
-            selected.rotation);
+            selected.rotation, semanticCatalog, &report);
         command.description = tr("Paint manual atlas tiles");
-        command.semanticAudit.valid = true;
-        command.semanticAudit.brush = brush;
-        command.semanticAudit.layer = layer;
-        command.semanticAudit.requestedMaterialId = -1;
-        command.semanticAudit.solverMode = QStringLiteral("manual-atlas");
-        for(const STerrainTileDelta& delta : command.deltas)
-        {
-            const QPoint point(delta.globalX, delta.globalY);
-            command.semanticAudit.paintedCoreCells.append(point);
-            command.semanticAudit.affectedCells.append(point);
-        }
     }
     else
     {
@@ -12207,6 +12202,8 @@ void CView::endTileBrushGroup()
                 emit updateMsg(m_classicAutoStrokeValidation);
         }
         if(!m_tileStrokeClassicAuto
+           && m_tileStrokePaletteMode
+                  != int(ETerrainPaintPaletteMode::Manual)
            && !m_tileStrokeCommand.virtualVertices.isEmpty())
         {
             const ETerrainTileLayer layer=m_tileStrokeCommand.virtualVertices.front().layer;
@@ -12541,6 +12538,26 @@ void CView::resolveMissingTerrainBlends()
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     CValidationReport report;
+    // Build the entire repair transaction before recovering the virtual
+    // material field.  A freshly loaded map deliberately has no persisted
+    // semantic field; seed only this copy with the same deterministic
+    // baseline that the first Modern paint establishes.  That makes a first
+    // Shift+R plan equivalent to a post-paint plan without changing a map
+    // when validation, upload, or the no-op path refuses the transaction.
+    SWorkingTerrainResolveStage staged;
+    staged.atlas = m_workingTerrainAtlas->createStagingCopy();
+    if(!staged.atlas || !staged.atlas->isValid())
+        report.add("terrain.resolve_map_stage", EValidationSeverity::Error,
+            "Resolve Missing Blends could not create an isolated working-atlas staging copy.");
+    else
+    {
+        staged.terrainEdit = m_terrainEdit;
+        staged.protectedSlots = m_workingAtlasProtectedSlots;
+        staged.importedTransitions = m_importedTerrainTransitions;
+        staged.encodedPageCache = m_terrainGlobalTransitionEncodedPageCache;
+        staged.missingPages = m_terrainGlobalTransitionMissingPages;
+        staged.decodedTileCache = m_terrainGlobalTransitionTileCache;
+    }
     struct SMissingMapSignature
     {
         STerrainTransitionSignature signature;
@@ -12553,79 +12570,70 @@ void CView::resolveMissingTerrainBlends()
     bool completeRepairFields[2] = {false, false};
     const ETerrainTileLayer layers[] = {
         ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
-    for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
-    {
-        const ETerrainTileLayer layer = layers[layerIndex];
-        CTerrainVirtualMaterialField& field = repairFields[layerIndex];
-        const bool completeField =
-            m_terrainEdit.copyVirtualMaterialField(layer, &field, true);
-        completeRepairFields[layerIndex] = completeField;
-        if(!completeField
-           && !m_terrainEdit.recoverUnambiguousVirtualMaterialField(
-               layer, m_workingTerrainAtlas->catalog(), &field, &report))
-        {
-            report.add("terrain.resolve_map_field",
-                EValidationSeverity::Error,
-                "The map-wide resolver could not copy the recovered material field");
-            break;
-        }
-        for(int y = 0; y < field.tileHeight(); ++y)
-            for(int x = 0; x < field.tileWidth(); ++x)
-            {
-                bool available = false;
-                const quint16 before = m_terrainEdit.packedTile(
-                    x, y, layer, &available);
-                if(!available)
-                    continue;
-                STerrainTransitionSignature signature;
-                if(!m_terrainEdit.missingBlendRepairSignature(
-                       x, y, layer, m_workingTerrainAtlas->catalog(),
-                       &field, completeField, &signature))
-                    continue;
-                const qint32 runtimeType =
-                    m_workingTerrainAtlas->runtimeTerrainTypeForSlot(
-                        SMprPackedTile::decode(before).atlasSlot());
-                if(runtimeType < 0 || runtimeType >= 16)
-                {
-                    report.add("terrain.resolve_map_runtime_type",
-                        EValidationSeverity::Error,
-                        QString("Resolve Missing Blends could not determine the predecessor runtime terrain type at %1,%2; no exact tuple was substituted.")
-                            .arg(x).arg(y));
-                    break;
-                }
-                if(selectWorkingPaintVariantWithRuntimeType(
-                       *m_workingTerrainAtlas, signature, x, y,
-                       m_terrainSemanticSeed, runtimeType, nullptr))
-                    continue;
-                SMissingMapSignature item;
-                item.signature = signature;item.x = x;item.y = y;
-                item.runtimeType = runtimeType;
-                missing.insert(runtimeTypedTransitionKey(signature, runtimeType),
-                               item);
-            }
-        progress.setValue(layerIndex + 1);
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    }
-
-    // Keep every realization side effect private until the complete semantic
-    // command has been built and accepted.  In particular, a failed/no-op
-    // Resolve must not leave generated slots, imported transition metadata,
-    // picker/renderer uploads, model tile types, or a retired undo history.
-    SWorkingTerrainResolveStage staged;
     if(!report.hasErrors())
     {
-        staged.atlas = m_workingTerrainAtlas->createStagingCopy();
-        if(!staged.atlas || !staged.atlas->isValid())
-            report.add("terrain.resolve_map_stage", EValidationSeverity::Error,
-                "Resolve Missing Blends could not create an isolated working-atlas staging copy.");
-        else
+        for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
         {
-            staged.terrainEdit = m_terrainEdit;
-            staged.protectedSlots = m_workingAtlasProtectedSlots;
-            staged.importedTransitions = m_importedTerrainTransitions;
-            staged.encodedPageCache = m_terrainGlobalTransitionEncodedPageCache;
-            staged.missingPages = m_terrainGlobalTransitionMissingPages;
-            staged.decodedTileCache = m_terrainGlobalTransitionTileCache;
+            const ETerrainTileLayer layer = layers[layerIndex];
+            CTerrainVirtualMaterialField& field = repairFields[layerIndex];
+            if(!staged.terrainEdit.initializeVirtualMaterialField(
+                   layer, staged.atlas->catalog(), &report,
+                   ETerrainMaterialFieldRecovery::RecoverDeterministically))
+            {
+                if(!report.hasErrors())
+                    report.add("terrain.resolve_map_field",
+                        EValidationSeverity::Error,
+                        "The map-wide resolver could not establish a deterministic material field");
+                break;
+            }
+            const bool completeField =
+                staged.terrainEdit.copyVirtualMaterialField(layer, &field, true);
+            completeRepairFields[layerIndex] = completeField;
+            if(!completeField && !staged.terrainEdit
+                   .recoverUnambiguousVirtualMaterialField(
+                       layer, staged.atlas->catalog(), &field, &report))
+            {
+                report.add("terrain.resolve_map_field",
+                    EValidationSeverity::Error,
+                    "The map-wide resolver could not copy the recovered material field");
+                break;
+            }
+            for(int y = 0; y < field.tileHeight(); ++y)
+                for(int x = 0; x < field.tileWidth(); ++x)
+                {
+                    bool available = false;
+                    const quint16 before = staged.terrainEdit.packedTile(
+                        x, y, layer, &available);
+                    if(!available)
+                        continue;
+                    STerrainTransitionSignature signature;
+                    if(!staged.terrainEdit.missingBlendRepairSignature(
+                           x, y, layer, staged.atlas->catalog(),
+                           &field, completeField, &signature))
+                        continue;
+                    const qint32 runtimeType =
+                        staged.atlas->runtimeTerrainTypeForSlot(
+                            SMprPackedTile::decode(before).atlasSlot());
+                    if(runtimeType < 0 || runtimeType >= 16)
+                    {
+                        report.add("terrain.resolve_map_runtime_type",
+                            EValidationSeverity::Error,
+                            QString("Resolve Missing Blends could not determine the predecessor runtime terrain type at %1,%2; no exact tuple was substituted.")
+                                .arg(x).arg(y));
+                        break;
+                    }
+                    if(selectWorkingPaintVariantWithRuntimeType(
+                           *staged.atlas, signature, x, y,
+                           m_terrainSemanticSeed, runtimeType, nullptr))
+                        continue;
+                    SMissingMapSignature item;
+                    item.signature = signature;item.x = x;item.y = y;
+                    item.runtimeType = runtimeType;
+                    missing.insert(runtimeTypedTransitionKey(signature, runtimeType),
+                                   item);
+                }
+            progress.setValue(layerIndex + 1);
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         }
     }
 
