@@ -11840,30 +11840,6 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             }
         }
 
-        if(classicAuto && tileTarget && !report.hasErrors())
-        {
-            CTerrainVirtualMaterialField field;
-            if(m_terrainEdit.copyVirtualMaterialField(layer, &field, false))
-            {
-                QSet<QPoint> vertices;
-                for(const QPoint& cell : command.semanticAudit.paintedCoreCells)
-                {
-                    vertices.insert(cell);vertices.insert(cell + QPoint(1, 0));
-                    vertices.insert(cell + QPoint(1, 1));
-                    vertices.insert(cell + QPoint(0, 1));
-                }
-                for(const QPoint& vertex : vertices)
-                {
-                    const qint32 before = field.material(vertex.x(), vertex.y());
-                    if(before == terrainType)
-                        continue;
-                    STerrainTileCommand::SVirtualVertexDelta delta;
-                    delta.globalX = vertex.x();delta.globalY = vertex.y();
-                    delta.layer = layer;delta.before = before;
-                    delta.after = terrainType;command.virtualVertices.append(delta);
-                }
-            }
-        }
     }
     STerrainPaintAuditAction audit;
     audit.actionId = m_terrainPaintActionId++;
@@ -12151,59 +12127,11 @@ void CView::endTileBrushGroup()
         m_tileStrokeFinishing = true;
         if(m_classicAutoStrokePending)
         {
-            QVector<QPoint> vertices;
-            for(const QPair<int, int>& point : m_classicAutoStrokeVertices)
-                vertices.append(QPoint(point.first, point.second));
             STerrainTileCommand resolved =
                 m_classicAutoStrokePreviewCommand;
-            // Classic Auto changes physical authored tiles, but a map that
-            // has already used Modern also owns an independent exact vertex
-            // field. Keep both representations in the same undoable command
-            // so switching modes never resurrects stale pre-Classic meaning.
-            CTerrainVirtualMaterialField field;
-            STerrainTileCommand virtualUpdate;
-            if(!m_classicAutoStrokePreviewRefused
-               && m_terrainEdit.copyVirtualMaterialField(
-                    m_classicAutoStrokeLayer, &field, false))
-            {
-                for(const QPoint& vertex : vertices)
-                {
-                    const qint32 before = field.material(
-                        vertex.x(), vertex.y());
-                    if(before == m_classicAutoStrokeMaterialId)
-                        continue;
-                    STerrainTileCommand::SVirtualVertexDelta delta;
-                    delta.globalX = vertex.x();
-                    delta.globalY = vertex.y();
-                    delta.layer = m_classicAutoStrokeLayer;
-                    delta.before = before;
-                    delta.after = m_classicAutoStrokeMaterialId;
-                    virtualUpdate.virtualVertices.append(delta);
-                }
-            }
             for(STerrainTileDelta& delta : resolved.deltas)
                 delta.diagnosticStrokeId = m_tileBrushCommandId;
             bool resolvedApplied = !resolved.isEmpty();
-            if(!virtualUpdate.isEmpty())
-            {
-                if(applyTerrainTilePreview(virtualUpdate, true))
-                {
-                    resolved.virtualVertices += virtualUpdate.virtualVertices;
-                    resolvedApplied = true;
-                }
-                else
-                {
-                    if(!m_classicAutoStrokePreviewCommand.isEmpty())
-                        applyTerrainTilePreview(
-                            m_classicAutoStrokePreviewCommand, false);
-                    resolved = STerrainTileCommand();
-                    resolvedApplied = false;
-                    m_classicAutoStrokePreviewRefused = true;
-                    m_classicAutoStrokeValidation += QStringLiteral(
-                        "ERROR terrain.classic_auto_virtual_preview: "
-                        "The exact virtual vertex update was refused.\n");
-                }
-            }
             if(!resolved.isEmpty())
             {
                 m_tileStrokeCommand = resolved;
