@@ -39,11 +39,15 @@ quint16 selectUniformInteriorTile(
     const CTerrainTransitionCatalog& catalog,
     const STerrainTransitionSignature& uniformSignature,
     int cellX, int cellY, quint32 distributionSeed,
-    bool randomizeRotation, bool* found)
+    bool randomizeRotation, bool* found,
+    const QSet<int>* allowedPhysicalSlots = nullptr)
 {
     bool selected = false;
-    const quint16 value = catalog.selectForPaint(
-        uniformSignature, cellX, cellY, distributionSeed, &selected);
+    const quint16 value = allowedPhysicalSlots
+        ? catalog.selectForPaint(uniformSignature, cellX, cellY,
+            distributionSeed, *allowedPhysicalSlots, &selected)
+        : catalog.selectForPaint(uniformSignature, cellX, cellY,
+            distributionSeed, &selected);
     if(found)
         *found = selected;
     if(!selected)
@@ -427,12 +431,13 @@ quint16 CTerrainTransitionCatalog::select(
     quint32 distributionSeed, bool* found) const
 {
     return selectCandidates(signature, globalX, globalY, distributionSeed,
-                            false, found);
+                            false, nullptr, found);
 }
 
 quint16 CTerrainTransitionCatalog::selectCandidates(
     const STerrainTransitionSignature& signature, int globalX, int globalY,
-    quint32 distributionSeed, bool paintOnly, bool* found) const
+    quint32 distributionSeed, bool paintOnly,
+    const QSet<int>* allowedPhysicalSlots, bool* found) const
 {
     const QVector<int> indexed = m_signatureLookup.value(signatureKey(signature));
     QMap<int, QVector<int>> byPhysicalSlot;
@@ -441,8 +446,11 @@ quint16 CTerrainTransitionCatalog::selectCandidates(
         const STerrainTransitionVariant& variant = m_variants.at(index);
         if(paintOnly && !variant.paintSelectable)
             continue;
-        byPhysicalSlot[SMprPackedTile::decode(
-            variant.packedTile).atlasSlot()].append(index);
+        const int physicalSlot = SMprPackedTile::decode(
+            variant.packedTile).atlasSlot();
+        if(allowedPhysicalSlots && !allowedPhysicalSlots->contains(physicalSlot))
+            continue;
+        byPhysicalSlot[physicalSlot].append(index);
     }
     quint64 totalWeight = 0;
     for(auto group = byPhysicalSlot.constBegin();
@@ -512,7 +520,18 @@ quint16 CTerrainTransitionCatalog::selectForPaint(
     const STerrainTransitionSignature lookup = m_mirrorPaintGridY
         ? mirroredGridY(signature) : signature;
     return selectCandidates(lookup, globalX, globalY, distributionSeed,
-                            true, found);
+                             true, nullptr, found);
+}
+
+quint16 CTerrainTransitionCatalog::selectForPaint(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, const QSet<int>& allowedPhysicalSlots,
+    bool* found) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    return selectCandidates(lookup, globalX, globalY, distributionSeed,
+                             true, &allowedPhysicalSlots, found);
 }
 
 quint16 CTerrainTransitionCatalog::lowestPaintRotationForSlot(
@@ -5634,11 +5653,47 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
             &&signature.northWest==signature.southWest;
     };
     const auto selectExact = [&](const STerrainTransitionSignature& exact,
-                                 int x, int y, bool* found) {
-        return uniformSignature(exact)
-            ? selectUniformInteriorTile(catalog, exact, x, y, paintSeed,
-                randomizeUniformRotation, found)
+                                  int x, int y,
+                                  qint32 requiredRuntimeType,
+                                  bool* found) {
+        QSet<int> allowedPhysicalSlots;
+        const QSet<int>* allowedSlots = nullptr;
+        if(requiredRuntimeType >= 0 && requiredRuntimeType < 16)
+        {
+            for(const STerrainTransitionVariant& variant :
+                catalog.paintVariants(exact))
+            {
+                bool typeFound = false;
+                const qint32 candidateType = tileType(
+                    variant.packedTile, &typeFound);
+                if(!typeFound || candidateType != requiredRuntimeType)
+                    continue;
+                allowedPhysicalSlots.insert(SMprPackedTile::decode(
+                    variant.packedTile).atlasSlot());
+            }
+            allowedSlots = &allowedPhysicalSlots;
+        }
+        // Uniform-only rotation normalization is deliberately confined to a
+        // uniform tuple. A non-uniform exact repair must never fall back to a
+        // pure interior tile merely because its required runtime type is absent.
+        if(uniformSignature(exact))
+            return selectUniformInteriorTile(catalog, exact, x, y, paintSeed,
+                randomizeUniformRotation, found, allowedSlots);
+        return allowedSlots
+            ? catalog.selectForPaint(exact, x, y, paintSeed, *allowedSlots,
+                found)
             : catalog.selectForPaint(exact, x, y, paintSeed, found);
+    };
+    const auto refuseRuntimeTypeSubstitution = [report](
+        int x, int y, const STerrainTransitionSignature& exact,
+        qint32 requiredRuntimeType) {
+        if(report)
+            report->add("terrain.virtual_map_runtime_type",
+                EValidationSeverity::Error,
+                QString("Resolve Missing Blends could not select the exact %1/%2/%3/%4 tuple at %5,%6 with the predecessor runtime terrain type %7; no differently typed slot was substituted.")
+                    .arg(exact.northWest).arg(exact.northEast)
+                    .arg(exact.southEast).arg(exact.southWest)
+                    .arg(x).arg(y).arg(requiredRuntimeType));
     };
 
     // Neighbour recovery used to emit a first physical batch and only learn
@@ -5674,7 +5729,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         const int x = key % tileCountX();
         const int y = key / tileCountX();
         bool available = false;
-        packedTile(x, y, layer, &available);
+        const quint16 before = packedTile(x, y, layer, &available);
         if(!available)
             continue;
         STerrainTransitionSignature exact;
@@ -5682,10 +5737,20 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
                x, y, layer, catalog, repairField,
                repairDecodedCells, &exact, &plannedSignatures))
             continue;
+        bool predecessorTypeFound = false;
+        const qint32 predecessorType = tileType(before, &predecessorTypeFound);
         bool found = false;
-        selectExact(exact, x, y, &found);
+        selectExact(exact, x, y,
+                    predecessorTypeFound ? predecessorType : -1, &found);
         if(!found)
+        {
+            if(predecessorTypeFound)
+            {
+                refuseRuntimeTypeSubstitution(x, y, exact, predecessorType);
+                return STerrainTileCommand();
+            }
             continue;
+        }
 
         bool currentDecoded = false;
         STerrainTransitionSignature current;
@@ -5746,7 +5811,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         for(int x = 0; x < tileCountX(); ++x)
         {
             bool available = false;
-            packedTile(x, y, layer, &available);
+            const quint16 before = packedTile(x, y, layer, &available);
             if(!available)
                 continue;
             STerrainTransitionSignature exact;
@@ -5754,10 +5819,22 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
                    x, y, layer, catalog, repairField,
                    repairDecodedCells, &exact, &plannedSignatures))
                 continue;
+            bool predecessorTypeFound = false;
+            const qint32 predecessorType = tileType(
+                before, &predecessorTypeFound);
             bool found = false;
-            selectExact(exact, x, y, &found);
+            selectExact(exact, x, y,
+                        predecessorTypeFound ? predecessorType : -1, &found);
             if(!found)
+            {
+                if(predecessorTypeFound)
+                {
+                    refuseRuntimeTypeSubstitution(x, y, exact,
+                                                  predecessorType);
+                    return STerrainTileCommand();
+                }
                 unresolvedCells.insert(y * tileCountX() + x);
+            }
         }
 
     for(auto entry = plannedSignatures.constBegin();
@@ -5770,10 +5847,19 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         const quint16 before = packedTile(x, y, layer, &available);
         if(!available)
             continue;
+        bool predecessorTypeFound = false;
+        const qint32 predecessorType = tileType(before, &predecessorTypeFound);
         bool found = false;
-        const quint16 after = selectExact(entry.value(), x, y, &found);
+        const quint16 after = selectExact(entry.value(), x, y,
+            predecessorTypeFound ? predecessorType : -1, &found);
         if(!found)
         {
+            if(predecessorTypeFound)
+            {
+                refuseRuntimeTypeSubstitution(x, y, entry.value(),
+                                              predecessorType);
+                return STerrainTileCommand();
+            }
             unresolvedCells.insert(key);
             continue;
         }

@@ -551,6 +551,7 @@ private slots:
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
     void virtualTilePaintTargetsFourCellCorners();
     void mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly();
+    void mapResolutionPreservesRuntimeTypeForTiedGeneratedBlends();
     void mapResolutionReachesFixedPointInOneCommand();
     void mapResolutionPrefersAuthoritativeVirtualField();
     void mapResolutionDoesNotChooseAWinningSideForTiedBorders();
@@ -3990,6 +3991,153 @@ void TerrainVirtualAtlasTests::mapResolutionRepairsWrongPhysicalBlendAndUndoesEx
     QCOMPARE(model.packedTile(8,8,ETerrainTileLayer::Land),quint16(0));
     QVERIFY(model.apply(repair,false,&report));
     QCOMPARE(model.packedTile(8,8,ETerrainTileLayer::Land),quint16(1));
+}
+
+void TerrainVirtualAtlasTests::mapResolutionPreservesRuntimeTypeForTiedGeneratedBlends()
+{
+    Fixture fixture;
+    const QVector<qint32> authoredTypes = {5, 6, 5, 6};
+    const QMap<qint32, qint32> materialTypes = {
+        {1, 5}, {2, 6}, {3, 5}, {4, 6}};
+    CTerrainWorkingAtlas working(
+        fixture.catalog, fixture.images, 0x54595045u, 16, {}, {},
+        authoredTypes, materialTypes);
+    seedReviewedPairMasks(working, 1, 2, fixture.images.at(0),
+                          fixture.images.at(1));
+
+    // A 2/2 tuple has no majority runtime terrain type. Resolve Missing Blends
+    // must therefore retain the current physical slot's reviewed type rather
+    // than collapsing both cells onto the first generated signature match.
+    const STerrainTransitionSignature tied = signature(1, 1, 2, 2);
+    QMap<int, quint64> usage;
+    CValidationReport prepareReport;
+    bool generatedFive = false;
+    const quint16 packedFive = working.resolve(
+        tied, 3, 3, &usage, {}, &generatedFive, &prepareReport, 1, 5);
+    // The map resolver keeps every newly realized slot reserved while it
+    // prepares a batch. Mirror that here so realizing the type-6 tuple cannot
+    // reuse the just-prepared type-5 physical slot.
+    usage.insert(SMprPackedTile::decode(packedFive).atlasSlot(), 1);
+    bool generatedSix = false;
+    const quint16 packedSix = working.resolve(
+        tied, 12, 12, &usage, {}, &generatedSix, &prepareReport, 2, 6);
+    QVERIFY2(!prepareReport.hasErrors(), qPrintable(prepareReport.toText()));
+    QVERIFY(generatedFive);
+    QVERIFY(generatedSix);
+    const int slotFive = SMprPackedTile::decode(packedFive).atlasSlot();
+    const int slotSix = SMprPackedTile::decode(packedSix).atlasSlot();
+    QVERIFY(slotFive != slotSix);
+    QCOMPARE(working.runtimeTerrainTypeForSlot(slotFive), qint32(5));
+    QCOMPARE(working.runtimeTerrainTypeForSlot(slotSix), qint32(6));
+    QSet<qint32> preparedTypes;
+    for(const STerrainTransitionVariant& variant :
+        working.catalog().paintVariants(tied))
+    {
+        const qint32 type = working.runtimeTerrainTypeForSlot(
+            SMprPackedTile::decode(variant.packedTile).atlasSlot());
+        if(type >= 0)
+            preparedTypes.insert(type);
+    }
+    QSet<qint32> expectedPreparedTypes;
+    expectedPreparedTypes << 5 << 6;
+    QCOMPARE(preparedTypes, expectedPreparedTypes);
+    bool untypedFound = false;
+    const quint16 oldUntypedChoice = working.catalog().selectForPaint(
+        tied, 12, 12, 0x54595045u ^ 0x6c616e64u, &untypedFound);
+    QVERIFY(untypedFound);
+    QCOMPARE(working.runtimeTerrainTypeForSlot(
+                 SMprPackedTile::decode(oldUntypedChoice).atlasSlot()),
+             qint32(5));
+    // The former signature-only map resolver made precisely this type-5 choice
+    // for the type-6 predecessor below. The exact resolver must instead filter
+    // candidates to the predecessor's runtime type.
+
+    QByteArray payload;
+    QDataStream stream(&payload, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    QVector<qint32> modelTypes(64, 5);
+    modelTypes[1] = 6;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              modelTypes, 0));
+    model.enableWorkingAtlasSlots(working.capacityLimit());
+    QVERIFY(model.setWorkingAtlasSlotType(slotFive, 5));
+    QVERIFY(model.setWorkingAtlasSlotType(slotSix, 6));
+
+    // Preserve different reviewed predecessor types at the two damaged cells.
+    STerrainTileCommand damage;
+    STerrainTileDelta typeSixBefore;
+    typeSixBefore.globalX = 12;
+    typeSixBefore.globalY = 12;
+    typeSixBefore.layer = ETerrainTileLayer::Land;
+    typeSixBefore.before = 0;
+    typeSixBefore.after = 1;
+    damage.deltas.append(typeSixBefore);
+    QVERIFY(model.apply(damage, true, &report));
+
+    CTerrainVirtualMaterialField repairField;
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    QVERIFY(repairField.resize(model.tileCountX(), model.tileCountY(), unset));
+    const auto setTiedCell = [&repairField](int x, int y) {
+        QVERIFY(repairField.setMaterial(x, y, 1));
+        QVERIFY(repairField.setMaterial(x + 1, y, 1));
+        QVERIFY(repairField.setMaterial(x + 1, y + 1, 2));
+        QVERIFY(repairField.setMaterial(x, y + 1, 2));
+    };
+    setTiedCell(3, 3);
+    setTiedCell(12, 12);
+
+    CValidationReport repairReport;
+    const STerrainTileCommand repair = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, working.catalog(), 0x54595045u,
+        &repairReport, false, &repairField, true, true);
+    QVERIFY2(!repairReport.hasErrors(), qPrintable(repairReport.toText()));
+    QCOMPARE(repair.deltas.size(), 2);
+    QMap<QPair<int, int>, qint32> expectedTypes;
+    expectedTypes.insert(qMakePair(3, 3), 5);
+    expectedTypes.insert(qMakePair(12, 12), 6);
+    QMap<QPair<int, int>, quint16> repairedPacked;
+    for(const STerrainTileDelta& delta : repair.deltas)
+    {
+        const QPair<int, int> point = qMakePair(delta.globalX, delta.globalY);
+        QVERIFY(expectedTypes.contains(point));
+        repairedPacked.insert(point, delta.after);
+        bool typeFound = false;
+        QCOMPARE(model.tileType(delta.after, &typeFound),
+                 expectedTypes.value(point));
+        QVERIFY(typeFound);
+    }
+
+    QVERIFY(model.apply(repair, true, &report));
+    QCOMPARE(model.packedTile(3, 3, ETerrainTileLayer::Land),
+             repairedPacked.value(qMakePair(3, 3)));
+    QCOMPARE(model.packedTile(12, 12, ETerrainTileLayer::Land),
+             repairedPacked.value(qMakePair(12, 12)));
+    QCOMPARE(model.tileType(model.packedTile(3, 3, ETerrainTileLayer::Land)),
+             qint32(5));
+    QCOMPARE(model.tileType(model.packedTile(12, 12, ETerrainTileLayer::Land)),
+             qint32(6));
+
+    CValidationReport settledReport;
+    QVERIFY(model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, working.catalog(), 0x54595045u,
+        &settledReport, false, &repairField, true, true).isEmpty());
+    QVERIFY2(!settledReport.hasErrors(), qPrintable(settledReport.toText()));
+
+    QVERIFY(model.apply(repair, false, &report));
+    QCOMPARE(model.packedTile(3, 3, ETerrainTileLayer::Land), quint16(0));
+    QCOMPARE(model.packedTile(12, 12, ETerrainTileLayer::Land), quint16(1));
 }
 
 void TerrainVirtualAtlasTests::mapResolutionReachesFixedPointInOneCommand()

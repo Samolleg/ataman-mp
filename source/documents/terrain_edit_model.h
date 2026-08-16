@@ -161,6 +161,14 @@ public:
     quint16 selectForPaint(const STerrainTransitionSignature& signature,
                            int globalX, int globalY, quint32 distributionSeed,
                            bool* found = nullptr) const;
+    // Exact map repair sometimes has a reviewed runtime type inherited from
+    // the physical predecessor. Restrict the deterministic paint selection to
+    // physical slots carrying that type instead of substituting another equal
+    // semantic signature.
+    quint16 selectForPaint(const STerrainTransitionSignature& signature,
+                           int globalX, int globalY, quint32 distributionSeed,
+                           const QSet<int>& allowedPhysicalSlots,
+                           bool* found = nullptr) const;
     quint16 lowestPaintRotationForSlot(
         const STerrainTransitionSignature& signature, quint16 selectedPacked,
         bool* found = nullptr) const;
@@ -187,9 +195,10 @@ public:
 private:
     static QByteArray signatureKey(const STerrainTransitionSignature& signature);
     quint16 selectCandidates(const STerrainTransitionSignature& signature,
-                             int globalX, int globalY,
-                             quint32 distributionSeed, bool paintOnly,
-                             bool* found) const;
+                              int globalX, int globalY,
+                              quint32 distributionSeed, bool paintOnly,
+                              const QSet<int>* allowedPhysicalSlots,
+                              bool* found) const;
     QVector<STerrainTransitionVariant> m_variants;
     QHash<quint16, int> m_packedLookup;
     QHash<QByteArray, QVector<int>> m_signatureLookup;
