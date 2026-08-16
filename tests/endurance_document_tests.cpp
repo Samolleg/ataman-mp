@@ -1,5 +1,8 @@
 #include <QtTest>
 #include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QPointer>
 #include <QSet>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
@@ -115,6 +118,21 @@ QByteArray encryptedScript(const QByteArray& script, quint32 key = 0x12345678)
         encrypted.append(char(character ^ char(temporaryKey)));
     }
     return section(0xACCEECCB, encrypted);
+}
+
+QByteArray mainWindowSource()
+{
+    const QString relativePath = QStringLiteral("source/app/main_window.cpp");
+    QDir directory(QDir::currentPath());
+    for(int depth = 0; depth < 8; ++depth)
+    {
+        QFile source(directory.filePath(relativePath));
+        if(source.open(QIODevice::ReadOnly))
+            return source.readAll();
+        if(!directory.cdUp())
+            break;
+    }
+    return QByteArray();
 }
 
 QByteArray emptyMpr()
@@ -394,6 +412,7 @@ private slots:
     void overlaySculptChangesOnlyActiveOverlayGeometry();
     void overlaySculptSynchronizesSectorSeam();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
+    void deferredLandscapeVisibilityStopsBeforeViewTeardown();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
 };
@@ -8374,6 +8393,85 @@ void EnduranceDocumentTests::conflictingTerrainSeamIsPreservedAndNotEditable()
     CValidationReport serializationReport;
     QVERIFY(terrain.appendSectorEdits(&transaction, &serializationReport));
     QVERIFY(transaction.isEmpty());
+}
+
+void EnduranceDocumentTests::deferredLandscapeVisibilityStopsBeforeViewTeardown()
+{
+    const QByteArray source = mainWindowSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/app/main_window.cpp from the test worktree");
+
+    const int applyStart = source.indexOf("const auto applyLandscapeVisibility =");
+    const int dockConnection = source.indexOf("connect(m_landscapeToolsDock",
+                                               applyStart);
+    QVERIFY2(applyStart >= 0 && dockConnection > applyStart,
+             "Landscape Tools visibility callback was not found");
+    const QByteArray apply = source.mid(applyStart, dockConnection - applyStart);
+
+    // The callback must operate through a QObject lifetime tracker rather than
+    // reaching through MainWindow's raw view pointer after shutdown has started.
+    QVERIFY2(apply.contains("if(!view)") && apply.contains("return;"),
+             "Landscape visibility application has no live-view guard");
+    QVERIFY2(!apply.contains("m_pView->"),
+             "Landscape visibility application still dereferences m_pView directly");
+    QVERIFY(apply.contains("view->setDrawLand(true);"));
+    QVERIFY(apply.contains("view->setDrawWater(true);"));
+    QVERIFY(apply.contains("view->setLandscapeEditingEnabled(visible);"));
+
+    const int deferredTimer = source.indexOf("QTimer::singleShot(0, this",
+                                              dockConnection);
+    QVERIFY2(deferredTimer > dockConnection,
+             "Landscape hidden transition is no longer deferred");
+    const int viewCapture = source.indexOf("QPointer<CView> view(m_pView)",
+                                            dockConnection);
+    QVERIFY2(viewCapture >= dockConnection && viewCapture < deferredTimer,
+             "Deferred Landscape Tools transition does not capture CView lifetime");
+    const int deferredEnd = source.indexOf("});", deferredTimer);
+    QVERIFY(deferredEnd > deferredTimer);
+    const QByteArray deferred = source.mid(deferredTimer, deferredEnd - deferredTimer);
+    QVERIFY2(deferred.contains("!view"),
+             "Deferred Landscape Tools callback can still run after CView deletion");
+    QVERIFY(deferred.contains("visibilityGeneration != m_landscapeVisibilityGeneration"));
+
+    const int closeEvent = source.indexOf("void MainWindow::closeEvent");
+    const int deleteView = source.indexOf("delete m_pView;", closeEvent);
+    const int invalidation = source.indexOf("++m_landscapeVisibilityGeneration;",
+                                            closeEvent);
+    QVERIFY2(closeEvent >= 0 && deleteView > closeEvent,
+             "MainWindow shutdown view deletion was not found");
+    QVERIFY2(invalidation >= closeEvent && invalidation < deleteView,
+             "Shutdown does not invalidate a queued Landscape Tools transition before CView deletion");
+
+    // The production callback uses these two independent gates: a still-live
+    // QObject and the generation that was current when the hidden transition
+    // was queued. The document target does not link the full OpenGL MainWindow,
+    // but it can still prove that QPointer clears on teardown and either gate
+    // denies the pending transition.
+    const auto queuedTransitionMayApply = [](quint64 expectedGeneration,
+                                             quint64 activeGeneration,
+                                             const QPointer<QObject>& view)
+    {
+        return expectedGeneration == activeGeneration && view;
+    };
+    quint64 currentGeneration = 1;
+    QPointer<QObject> liveView(new QObject);
+    const quint64 liveGeneration = currentGeneration;
+    QVERIFY(queuedTransitionMayApply(liveGeneration, currentGeneration, liveView));
+
+    QPointer<QObject> destroyedView(new QObject);
+    const quint64 destroyedViewGeneration = currentGeneration;
+    delete destroyedView.data();
+    QVERIFY(destroyedView.isNull());
+    QVERIFY(!queuedTransitionMayApply(destroyedViewGeneration,
+                                      currentGeneration, destroyedView));
+
+    QPointer<QObject> invalidatedView(new QObject);
+    const quint64 invalidatedGeneration = currentGeneration;
+    ++currentGeneration;
+    QVERIFY(!queuedTransitionMayApply(invalidatedGeneration,
+                                      currentGeneration, invalidatedView));
+    delete liveView.data();
+    delete invalidatedView.data();
 }
 
 void EnduranceDocumentTests::malformedMprTableIsRejected()

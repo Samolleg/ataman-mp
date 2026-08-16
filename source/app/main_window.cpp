@@ -17,6 +17,7 @@
 #include <QApplication>
 #include <QStatusBar>
 #include <QProgressDialog>
+#include <QPointer>
 #include <QMouseEvent>
 #include <QDockWidget>
 #include <QToolBar>
@@ -93,6 +94,7 @@
 #include "map_table_editor_dialog.h"
 #include "script_reference_analyzer.h"
 #include "unit.h"
+#include "view.h"
 
 namespace
 {
@@ -1181,8 +1183,12 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::hideLandscapeToolsSignal,
             this, &MainWindow::hideLandscapeTools);
-    const auto applyLandscapeVisibility = [this](bool visible)
+    const auto applyLandscapeVisibility = [this](bool visible,
+                                                 const QPointer<CView>& view,
+                                                 const QPointer<QDockWidget>& dock)
     {
+        if(!view)
+            return;
         if(m_landscapeToolsAction)
         {
             const QSignalBlocker blocker(m_landscapeToolsAction);
@@ -1202,22 +1208,24 @@ MainWindow::MainWindow(QWidget* parent) :
         {
             // Layer isolation belongs to Landscape Tools. Closing it restores
             // the ordinary viewport instead of leaving terrain hidden.
-            m_pView->setDrawLand(true);
-            m_pView->setDrawWater(true);
+            view->setDrawLand(true);
+            view->setDrawWater(true);
         }
-        m_pView->setLandscapeEditingEnabled(visible);
-        if(visible)
-            m_landscapeToolsDock->raise();
+        view->setLandscapeEditingEnabled(visible);
+        if(visible && dock)
+            dock->raise();
         // Like Maps and Collections, hiding Landscape Tools changes only
         // visibility. Qt retains its dock area, split, tab, and floating state.
     };
     connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this,
             [this, applyLandscapeVisibility](bool visible)
     {
+        const QPointer<CView> view(m_pView);
+        const QPointer<QDockWidget> dock(m_landscapeToolsDock);
         const quint64 visibilityGeneration = ++m_landscapeVisibilityGeneration;
         if(visible)
         {
-            applyLandscapeVisibility(true);
+            applyLandscapeVisibility(true, view, dock);
             return;
         }
         // QDockWidget emits a transient hidden state while changing between
@@ -1225,12 +1233,12 @@ MainWindow::MainWindow(QWidget* parent) :
         // transition avoids both cancelling the active brush and re-entering
         // Qt's dock layout engine during that native-window move.
         QTimer::singleShot(0, this, [this, visibilityGeneration,
-                                    applyLandscapeVisibility]()
+                                    view, dock, applyLandscapeVisibility]()
         {
             if(visibilityGeneration != m_landscapeVisibilityGeneration
-               || !m_landscapeToolsDock || m_landscapeToolsDock->isVisible())
+               || !view || !dock || dock->isVisible())
                 return;
-            applyLandscapeVisibility(false);
+            applyLandscapeVisibility(false, view, dock);
         });
     });
     connect(m_pView, &CView::selectionChanged,
@@ -5644,6 +5652,11 @@ void MainWindow::closeEvent(QCloseEvent *e)
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();
     ei::log(eLogInfo, "Shutdown live view deletion started");
+    // Qt can still deliver the zero-delay hidden transition queued while
+    // closing docks. It captured this generation and a QPointer<CView>, so
+    // invalidate it before CView teardown instead of allowing a stale callback
+    // to observe the raw member after its owner has been deleted.
+    ++m_landscapeVisibilityGeneration;
     delete m_pView;
     m_pView = nullptr;
     ei::log(eLogInfo, QString("Shutdown live view deletion complete elapsedMs:%1")
