@@ -11,6 +11,19 @@
 #include <QTemporaryDir>
 #include <QtEndian>
 
+#include "res_file.h"
+
+// The focused target links the runtime reader without the unrelated core
+// utility implementation. Keep its stream format identical to util::formatStream
+// so the regression exercises the production parser's byte order.
+namespace util {
+void formatStream(QDataStream& stream)
+{
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+}
+}
+
 namespace {
 QByteArray syntheticRes()
 {
@@ -99,6 +112,7 @@ class ResArchiveDocumentTests : public QObject
     Q_OBJECT
 private slots:
     void noOpIsByteIdentical();
+    void legacyResReaderUsesExactNameLengthAndRejectsInvalidRanges();
     void replacementPreservesUntouchedMembersAndMetadata();
     void staleMemberHashRefusesOutput();
     void malformedArchiveIsRejected();
@@ -330,6 +344,47 @@ void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
         QCOMPARE(zone.maps.objectivesTexture, QString("customatlas007"));
     }
     QCOMPARE(customMatches, 1);
+}
+
+void ResArchiveDocumentTests::legacyResReaderUsesExactNameLengthAndRejectsInvalidRanges()
+{
+    const QByteArray bytes = syntheticRes();
+
+    // syntheticRes deliberately concatenates its names without a trailing NUL.
+    // CResFile must decode exactly NamesLenght bytes rather than scanning beyond
+    // the filename table.
+    CResFile valid(bytes);
+    QCOMPARE(valid.bufferOfFiles().size(), 3);
+    QCOMPARE(valid.bufferOfFiles().value(QStringLiteral("opaque.bin")),
+             QByteArray::fromHex("001122334455"));
+    QCOMPARE(valid.bufferOfFiles().value(QStringLiteral("mixed.CaSe")),
+             QByteArray("untouched authored payload"));
+
+    // A short names table used to be accepted after readRawData() returned a
+    // partial read. The incomplete buffer was then passed to the NUL-terminated
+    // QTextCodec overload.
+    const QByteArray truncatedNames = bytes.left(bytes.size() - 1);
+    CResFile truncated(truncatedNames);
+    QVERIFY(truncated.bufferOfFiles().isEmpty());
+
+    const quint32 tableOffset = qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(bytes.constData() + 8));
+
+    QByteArray outOfRangeName = bytes;
+    qToLittleEndian<quint16>(quint16(2),
+        reinterpret_cast<uchar*>(outOfRangeName.data() + tableOffset + 16));
+    qToLittleEndian<quint32>(quint32(0xFFFFFFFF),
+        reinterpret_cast<uchar*>(outOfRangeName.data() + tableOffset + 18));
+    CResFile invalidNameRange(outOfRangeName);
+    QVERIFY(invalidNameRange.bufferOfFiles().isEmpty());
+
+    QByteArray overflowingPayloadRange = bytes;
+    qToLittleEndian<quint32>(quint32(1),
+        reinterpret_cast<uchar*>(overflowingPayloadRange.data() + tableOffset + 4));
+    qToLittleEndian<quint32>(quint32(0xFFFFFFFF),
+        reinterpret_cast<uchar*>(overflowingPayloadRange.data() + tableOffset + 8));
+    CResFile invalidPayloadRange(overflowingPayloadRange);
+    QVERIFY(invalidPayloadRange.bufferOfFiles().isEmpty());
 }
 
 void ResArchiveDocumentTests::publishedMembersCommitInPlaceWithOptionalBackup()
