@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: reuse the exact decoded terrain atlas during MPR activation
+Executable source/changelist commit: ab7302d2ec4d048db3d5d7dc8c16ff63e6129c28
+Semantic catalog source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: document 124 pass / 0 fail / 6 expected skips; virtual atlas 113 pass / 0 fail; landscape widget 7 pass / 0 fail; decoded-atlas reuse/fallback regressions PASS; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: omitted from this focused MPR-load revision; test against the user's installed Zone2 map and compare the R170/R171 timing logs
