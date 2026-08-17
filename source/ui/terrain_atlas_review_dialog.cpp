@@ -253,7 +253,8 @@ private:
 
 CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     const STerrainAtlasProfile& profile, const QVector<QImage>& tileImages,
-    const STerrainAtlasProfileSource& source, QWidget* parent)
+    const STerrainAtlasProfileSource& source, QWidget* parent,
+    int initialSlot)
     : QDialog(parent), m_profile(profile), m_source(source), m_tileImages(tileImages),
       m_materials(new CAtlasMaterialTree(this)),
       m_unassigned(new CAtlasTilePool(this)), m_preview(new QLabel(this)),
@@ -415,7 +416,7 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
         QSettings settings;
         settings.setValue(QStringLiteral("terrainAtlasReview/geometry"), saveGeometry());
     });
-    rebuildVisuals();
+    rebuildVisuals(-1, initialSlot);
 }
 
 STerrainAtlasProfileFamily* CTerrainAtlasReviewDialog::family(qint32 id)

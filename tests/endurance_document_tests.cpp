@@ -383,6 +383,8 @@ private slots:
     void terrainDiagnosticsArePreApplyAndPolicyExplicit();
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void manualTilePaintRebasesDecodedSemanticsAndInvalidatesDisputes();
+    void manualTilePaintOnLegacyMapStaysPhysicalUntilModernStarts();
+    void mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlasCapacity();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void interruptedTerrainStrokeRejectsUnownedStamp();
     void resolveMissingBlendsStagesDeterministicLoadBaseline();
@@ -4447,10 +4449,10 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
     QVERIFY(!terrain.virtualMaterialCellChanged(
         ETerrainTileLayer::Land, 8, 8));
 
-    // The Manual palette intentionally includes every physical slot. An
-    // unassigned rotation must still paint, but it has no semantic vote, so
-    // each incident field vertex becomes explicitly unknown rather than
-    // retaining the previous field's material.
+    // The Manual palette intentionally includes every physical slot. Once the
+    // preceding Manual edit returns the material field to its baseline, an
+    // unassigned physical tile remains a plain Manual edit: it neither creates
+    // a semantic field nor receives hidden ownership/preservation metadata.
     CValidationReport unassignedReport;
     const STerrainTileCommand unassigned = terrain.makeTilePaint(
         cell, ETerrainTileLayer::Land, 0, 2, 1, catalog, &unassignedReport);
@@ -4459,70 +4461,36 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
     QVERIFY(terrain.apply(unassigned, true));
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              packed(2, 1));
-    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
-                                 QPoint(9, 9), QPoint(8, 9)})
-    {
-        bool found = true;
-        terrain.virtualMaterialAt(
-            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found);
-        QVERIFY(!found);
-    }
-    // Direct Manual paint invalidates the semantic field, but it does not
-    // grant the undecodable physical slot a preservation privilege. A later
-    // Resolve Missing Blends operation remains free to use its ordinary
-    // neighbour/recovered inference for every undecodable cell.
-    QVERIFY(terrain.missingBlendRepairSignature(
-        8, 8, ETerrainTileLayer::Land, catalog, nullptr, true,
-        &replacement));
-    QVERIFY(replacement == base.signature);
-    CValidationReport resolveReport;
-    const STerrainTileCommand resolved = terrain.makeVirtualMapResolution(
-        ETerrainTileLayer::Land, catalog, 0x52455041u, &resolveReport);
-    QVERIFY2(!resolveReport.hasErrors(), qPrintable(resolveReport.toText()));
-    const STerrainTileDelta* resolvedCenter = nullptr;
-    for(const STerrainTileDelta& delta : resolved.deltas)
-        if(delta.layer == ETerrainTileLayer::Land
-           && delta.globalX == 8 && delta.globalY == 8)
-        {
-            resolvedCenter = &delta;
-            break;
-        }
-    QVERIFY(resolvedCenter);
-    bool resolvedFound = false;
-    const STerrainTransitionSignature resolvedSignature =
-        catalog.gridSignatureForPacked(resolvedCenter->after, &resolvedFound);
-    QVERIFY(resolvedFound);
-    QVERIFY(resolvedSignature == base.signature);
-    QVERIFY(terrain.apply(resolved, true));
-    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
-             resolvedCenter->after);
-    QVERIFY(terrain.apply(resolved, false));
-    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
-             packed(2, 1));
+    CTerrainVirtualMaterialField noManualField;
+    QVERIFY(!terrain.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &noManualField, false));
+    const QMap<int, QPoint> unresolved =
+        terrain.referencedUnassignedAtlasSlots(
+            ETerrainTileLayer::Land, catalog);
+    QCOMPARE(unresolved.size(), 1);
+    QCOMPARE(unresolved.value(2), QPoint(8, 8));
+
+    // Undo/redo is still entirely physical and exact.
     QVERIFY(terrain.apply(unassigned, false));
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              manualPacked);
-    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
-                                 QPoint(9, 9), QPoint(8, 9)})
-    {
-        bool found = false;
-        QCOMPARE(terrain.virtualMaterialAt(
-            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
-                 qint32(1));
-        QVERIFY(found);
-    }
     QVERIFY(terrain.apply(unassigned, true));
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              packed(2, 1));
-    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
-                                 QPoint(9, 9), QPoint(8, 9)})
-    {
-        bool found = true;
-        terrain.virtualMaterialAt(
-            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found);
-        QVERIFY(!found);
-    }
     QVERIFY(terrain.apply(unassigned, false));
+
+    // Re-enter Modern away from the Manual cell. This reconstructs semantics
+    // from the post-Manual packed map and leaves a genuinely active field, so
+    // a subsequent decoded Manual blend can be rebased without stale state.
+    STerrainTileBrush farCell;
+    farCell.centerX = 0.0f;
+    farCell.centerY = 0.0f;
+    farCell.radius = 0.0f;
+    const STerrainTileCommand farModern = terrain.makeSemanticTilePaint(
+        farCell, ETerrainTileLayer::Land, 2, catalog, 0x4641524du);
+    QVERIFY(!farModern.isEmpty());
+    QVERIFY(terrain.apply(farModern, true));
+    QVERIFY(terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land));
 
     // A decoded non-uniform stamp can disagree with its physical neighbours
     // at one shared vertex. The model must invalidate that vertex rather than
@@ -4582,8 +4550,8 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
 
     // Keep the view integration in the regression contract. Manual must use
     // the catalog-aware command above, but it must not run Modern's automatic
-    // end-of-stroke exact-blend pass; a later explicit Shift+R remains free to
-    // resolve the resulting physical/semantic state without origin privilege.
+    // end-of-stroke exact-blend pass. Later Modern operations treat its
+    // physical/semantic state generically, without any Manual-origin privilege.
     const QByteArray source = viewSource();
     QVERIFY2(!source.isEmpty(),
              "Could not locate source/render/view.cpp from the test worktree");
@@ -4612,6 +4580,151 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
         "makeVirtualStrokeResolution(");
     QVERIFY2(manualGuard >= 0 && virtualRelease > manualGuard,
              "Manual paint is incorrectly passed through Modern stroke release");
+}
+
+void EnduranceDocumentTests::manualTilePaintOnLegacyMapStaysPhysicalUntilModernStarts()
+{
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(32)),
+        "manual-legacy-physical-only.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+
+    CTerrainTransitionCatalog catalog;
+    for(int mask = 0; mask < 16; ++mask)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = (mask & 1) ? 2 : 1;
+        variant.signature.northEast = (mask & 2) ? 2 : 1;
+        variant.signature.southEast = (mask & 4) ? 2 : 1;
+        variant.signature.southWest = (mask & 8) ? 2 : 1;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(mask);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+
+    QVERIFY(!terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land));
+    CValidationReport baselineReport;
+    QVERIFY(terrain.initializeVirtualMaterialField(
+        ETerrainTileLayer::Land, catalog, &baselineReport,
+        ETerrainMaterialFieldRecovery::RecoverDeterministically));
+    QVERIFY2(!baselineReport.hasErrors(),
+             qPrintable(baselineReport.toText()));
+    CTerrainVirtualMaterialField inactiveCache;
+    QVERIFY(terrain.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &inactiveCache, true));
+    QVERIFY(!terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land));
+
+    STerrainTileBrush wholeMap;
+    wholeMap.centerX = 8.0f;
+    wholeMap.centerY = 8.0f;
+    wholeMap.radius = 32.0f;
+    wholeMap.shape = ETerrainTileBrushShape::Square;
+    CValidationReport manualReport;
+    const STerrainTileCommand manual = terrain.makeTilePaint(
+        wholeMap, ETerrainTileLayer::Land, 0, 15, 0,
+        catalog, &manualReport);
+    QVERIFY2(!manualReport.hasErrors(), qPrintable(manualReport.toText()));
+    QVERIFY(!manual.isEmpty());
+    QVERIFY2(manual.virtualVertices.isEmpty(),
+             "Manual paint on a legacy map activated the Modern semantic field");
+    QVERIFY(terrain.apply(manual, true));
+    QVERIFY(!terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land));
+    CTerrainVirtualMaterialField absent;
+    QVERIFY(!terrain.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &absent, false));
+    QCOMPARE(terrainMprSaveRoute(
+        false,
+        terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land),
+        terrain.virtualMaterialFieldActive(ETerrainTileLayer::Overlay),
+        false, false), ETerrainMprSaveRoute::PlainMpr);
+
+    STerrainTileBrush oneCell;
+    oneCell.centerX = 8.0f;
+    oneCell.centerY = 8.0f;
+    oneCell.radius = 0.0f;
+    CValidationReport modernReport;
+    const STerrainTileCommand modern = terrain.makeVirtualTileMaterialPaint(
+        oneCell, ETerrainTileLayer::Land, 1, catalog,
+        0x4d4f4445u, &modernReport);
+    QVERIFY2(!modernReport.hasErrors(), qPrintable(modernReport.toText()));
+    QVERIFY2(!modern.isEmpty(),
+             "Modern paint could not continue after physical-only Manual paint");
+    CTerrainVirtualMaterialField recovered;
+    QVERIFY(terrain.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &recovered, true));
+    QCOMPARE(recovered.material(0, 0), qint32(2));
+}
+
+void EnduranceDocumentTests::mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlasCapacity()
+{
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(16)),
+        "map-referenced-unassigned-slot.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+
+    CTerrainTransitionCatalog catalog;
+    STerrainTransitionVariant assigned;
+    assigned.signature.northWest = assigned.signature.northEast =
+        assigned.signature.southEast = assigned.signature.southWest = 1;
+    assigned.packedTile = 0;
+    QVERIFY(catalog.addVariant(assigned));
+
+    // Fifteen other physical slots exist in the synthetic atlas but are not
+    // referenced by the map. They must not be reported merely because the
+    // profile does not assign every atlas position.
+    QVERIFY(terrain.referencedUnassignedAtlasSlots(
+        ETerrainTileLayer::Land, catalog).isEmpty());
+
+    STerrainTileBrush cell;
+    cell.centerX = 8.0f;
+    cell.centerY = 8.0f;
+    cell.radius = 0.0f;
+    const STerrainTileCommand manual = terrain.makeTilePaint(
+        cell, ETerrainTileLayer::Land, 0, 2, 1);
+    QVERIFY(!manual.isEmpty());
+    QVERIFY(terrain.apply(manual, true));
+    const QMap<int, QPoint> unresolved =
+        terrain.referencedUnassignedAtlasSlots(
+            ETerrainTileLayer::Land, catalog);
+    QCOMPARE(unresolved.size(), 1);
+    QCOMPARE(unresolved.value(2), QPoint(8, 8));
+
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+    const int setTileStart = source.indexOf(
+        "void CView::setTile(QVector3D posOnLand, bool bLand)");
+    const int setTileEnd = source.indexOf(
+        "void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)",
+        setTileStart);
+    QVERIFY(setTileStart >= 0 && setTileEnd > setTileStart);
+    const QByteArray setTile = source.mid(setTileStart,
+                                          setTileEnd - setTileStart);
+    const int assignmentGate = setTile.indexOf(
+        "ensureModernTerrainArtworkAssigned(layer, semanticCatalog)");
+    const int modernPaint = setTile.indexOf(
+        "makeVirtualTileMaterialPaint(");
+    QVERIFY2(assignmentGate >= 0 && modernPaint > assignmentGate,
+             "Modern paint can initialize semantics before checking live unassigned artwork");
+    QVERIFY2(source.contains("reviewTerrainAtlasProfileAtSlot"),
+             "Live unassigned artwork is not routed to the Material atlas assignment UI");
+    QVERIFY2(source.contains("tileImages.at(slot).isNull()"),
+             "The Modern assignment gate does not distinguish real artwork from null atlas padding");
+    const int resolveStart = source.indexOf(
+        "void CView::resolveMissingTerrainBlends()");
+    const int resolveEnd = source.indexOf(
+        "void CView::beginTileBrushGroup()",
+        resolveStart);
+    QVERIFY(resolveStart >= 0 && resolveEnd > resolveStart);
+    const QByteArray resolve = source.mid(resolveStart,
+                                           resolveEnd - resolveStart);
+    QVERIFY2(resolve.contains("ensureModernTerrainArtworkAssigned("),
+             "Resolve Missing Blends can silently process map-referenced unassigned artwork");
 }
 
 void EnduranceDocumentTests::classicAutoStrokeUsesAuthoredResolverAndRerollsExactVariants()

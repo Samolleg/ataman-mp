@@ -8043,6 +8043,11 @@ QVector<STerrainAtlasSlotUsage> CView::terrainAtlasUsage() const
 
 void CView::reviewTerrainAtlasProfile()
 {
+    reviewTerrainAtlasProfileAtSlot(-1);
+}
+
+void CView::reviewTerrainAtlasProfileAtSlot(int initialSlot)
+{
     if(!m_terrainEditAvailable || !m_pTileForm || m_pTileForm->tileImages().isEmpty())
     {
         emit updateMsg(tr("Load an MPR and its complete terrain atlas before reviewing semantic conversion."));
@@ -8078,7 +8083,8 @@ void CView::reviewTerrainAtlasProfile()
             source.kind = ETerrainAtlasProfileSource::GeneratedDraft;
         }
     }
-    CTerrainAtlasReviewDialog dialog(profile, m_pTileForm->tileImages(), source, this);
+    CTerrainAtlasReviewDialog dialog(
+        profile, m_pTileForm->tileImages(), source, this, initialSlot);
     if(dialog.exec() != QDialog::Accepted) return;
     if(dialog.shouldResetToDefault())
     {
@@ -8114,6 +8120,109 @@ void CView::reviewTerrainAtlasProfile()
               .arg(QDir::toNativeSeparators(savedPath))
         : tr("Material atlas applied and saved to %1. Unassigned or unconfirmed items remain excluded from painting.")
               .arg(QDir::toNativeSeparators(savedPath)));
+}
+
+bool CView::ensureModernTerrainArtworkAssigned(
+    ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog)
+{
+    if(m_terrainAssignmentPromptPending)
+        return false;
+    const QMap<int, QPoint> unresolved =
+        m_terrainEdit.referencedUnassignedAtlasSlots(layer, catalog);
+    if(unresolved.isEmpty())
+        return true;
+
+    const QVector<QImage>& tileImages = m_pTileForm->tileImages();
+    int firstArtworkSlot = -1;
+    QPoint firstArtworkCell;
+    int firstMissingSlot = -1;
+    QPoint firstMissingCell;
+    int artworkCount = 0;
+    for(auto it = unresolved.constBegin(); it != unresolved.constEnd(); ++it)
+    {
+        const int slot = it.key();
+        if(slot < 0 || slot >= tileImages.size()
+           || tileImages.at(slot).isNull())
+        {
+            if(firstMissingSlot < 0)
+            {
+                firstMissingSlot = slot;
+                firstMissingCell = it.value();
+            }
+            continue;
+        }
+        ++artworkCount;
+        if(firstArtworkSlot < 0)
+        {
+            firstArtworkSlot = slot;
+            firstArtworkCell = it.value();
+        }
+    }
+
+    // Unwind the mouse gesture before opening a modal window. No physical or
+    // semantic paint command has been applied at this point.
+    cancelTileBrushGroup();
+    m_terrainAssignmentPromptPending = true;
+    const QString layerName = layer == ETerrainTileLayer::Land
+        ? tr("ground") : tr("overlay");
+    if(firstMissingSlot >= 0)
+    {
+        QTimer::singleShot(0, this,
+            [this, layerName, firstMissingSlot, firstMissingCell]() {
+                QMessageBox::warning(this,
+                    tr("Terrain atlas artwork is missing"),
+                    tr("Modern paint was not started. The %1 map cell %2,%3 "
+                       "references physical atlas slot %4, but the loaded atlas "
+                       "has no image for that slot. Restore the matching RES "
+                       "atlas before painting; Material Atlas cannot assign "
+                       "artwork that is not loaded.")
+                        .arg(layerName)
+                        .arg(firstMissingCell.x())
+                        .arg(firstMissingCell.y())
+                        .arg(firstMissingSlot));
+                m_terrainAssignmentPromptPending = false;
+            });
+        return false;
+    }
+
+    const bool profileLocked =
+        m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
+        || m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay)
+        || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
+        || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay);
+    QTimer::singleShot(0, this,
+        [this, layerName, firstArtworkSlot, firstArtworkCell,
+         artworkCount, profileLocked]() {
+            if(profileLocked)
+            {
+                QMessageBox::warning(this,
+                    tr("Terrain tile needs a material assignment"),
+                    tr("Modern paint was not started. The %1 map uses %2 "
+                       "physical artwork slot(s) without semantic assignments; "
+                       "the first is slot %3 at cell %4,%5. Undo the unassigned "
+                       "Manual paint or finish the active Modern atlas session, "
+                       "then assign the slot in Material Atlas.")
+                        .arg(layerName).arg(artworkCount)
+                        .arg(firstArtworkSlot)
+                        .arg(firstArtworkCell.x())
+                        .arg(firstArtworkCell.y()));
+                m_terrainAssignmentPromptPending = false;
+                return;
+            }
+            QMessageBox::warning(this,
+                tr("Terrain tile needs a material assignment"),
+                tr("Modern paint was not started. The %1 map uses %2 physical "
+                   "artwork slot(s) without semantic assignments; the first is "
+                   "slot %3 at cell %4,%5. Material Atlas will open on that "
+                   "slot so its material or four corners can be assigned.")
+                    .arg(layerName).arg(artworkCount)
+                    .arg(firstArtworkSlot)
+                    .arg(firstArtworkCell.x())
+                    .arg(firstArtworkCell.y()));
+            reviewTerrainAtlasProfileAtSlot(firstArtworkSlot);
+            m_terrainAssignmentPromptPending = false;
+        });
+    return false;
 }
 
 void CView::updateTerrainAtlasViewerAnnotations(const QString& status)
@@ -11708,6 +11817,9 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             ? m_landscapeTools->paintTerrainSupport() : 0;
         const bool contextualClassic = classicAuto && terrainSupport > 0
             && terrainSupport != terrainType;
+        if(!classicAuto
+           && !ensureModernTerrainArtworkAssigned(layer, semanticCatalog))
+            return;
         bool pureAvailable = false;
         semanticCatalog.selectForPaint(
             pure, qRound(vertexBrush.centerX), qRound(vertexBrush.centerY),
@@ -12502,6 +12614,13 @@ void CView::resolveMissingTerrainBlends()
             "the map-wide resolver."));
         return;
     }
+    const CTerrainTransitionCatalog& activeCatalog =
+        m_workingTerrainAtlas->catalog();
+    if(!ensureModernTerrainArtworkAssigned(
+           ETerrainTileLayer::Land, activeCatalog)
+       || !ensureModernTerrainArtworkAssigned(
+           ETerrainTileLayer::Overlay, activeCatalog))
+        return;
     QSettings settings;
     if(!settings.value(QStringLiteral(
            "ui/landscape/resolveMissingBlendsSkipConfirm"), false).toBool())
@@ -12849,7 +12968,8 @@ void CView::refreshTerrainTilePreview(const STerrainTileCommand& command,
         refreshTerrainFamilyUsage();
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
-        emit updateMsg(command.semanticAudit.solverMode == QStringLiteral("manual-atlas")
+        emit updateMsg(command.semanticAudit.solverMode == QStringLiteral(
+                           "manual-physical-consensus")
             ? tr("Painted %1 atlas tile(s) manually.").arg(command.deltas.size())
             : tr("Painted %1 atlas tile(s), including bounded seam updates.")
                   .arg(command.deltas.size()));

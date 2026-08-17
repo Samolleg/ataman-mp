@@ -21,7 +21,8 @@ public:
     CTerrainAtlasReviewDialog(const STerrainAtlasProfile& profile,
                               const QVector<QImage>& tileImages,
                               const STerrainAtlasProfileSource& source = STerrainAtlasProfileSource(),
-                              QWidget* parent = nullptr);
+                              QWidget* parent = nullptr,
+                              int initialSlot = -1);
 
     const STerrainAtlasProfile& reviewedProfile() const { return m_profile; }
     bool shouldPersistOverride() const { return m_persistOverride; }

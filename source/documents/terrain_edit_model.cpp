@@ -2733,25 +2733,20 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
         ? m_virtualLandMaterials : m_virtualOverlayMaterials;
     QVector<qint32>& baseline = layer == ETerrainTileLayer::Land
         ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+    if(!virtualMaterialFieldActive(layer))
+    {
+        // An inactive field is only a recoverable cache. Keeping it after a
+        // direct physical Manual edit would make the next Modern stroke trust
+        // stale pre-Manual semantics. Drop both copies without turning Manual
+        // into a semantic edit; Modern will reconstruct from the post-Manual
+        // packed cells when it is actually invoked.
+        field.clear();
+        baseline.clear();
+        return command;
+    }
     const int vertexWidth = width + 1;
     const int expectedFieldSize = vertexWidth * (height + 1);
     const qint32 unset = std::numeric_limits<qint32>::min();
-    if(field.isEmpty()
-       && !initializeVirtualMaterialField(
-           layer, catalog, nullptr,
-           ETerrainMaterialFieldRecovery::RecoverDeterministically))
-    {
-        // Manual remains a direct physical operation even when a damaged map
-        // cannot supply a semantic baseline. Install an explicitly unknown
-        // baseline instead of allowing a later recovery pass to manufacture
-        // an old semantic owner for this paint.
-        field.fill(unset, expectedFieldSize);
-        baseline = field;
-        if(report)
-            report->add("terrain.manual_semantic_baseline",
-                        EValidationSeverity::Warning,
-                        "Manual physical paint could not recover a material-field baseline; affected semantic vertices were invalidated");
-    }
     if(field.size() != expectedFieldSize)
     {
         field.fill(unset, expectedFieldSize);
@@ -6066,6 +6061,28 @@ bool CTerrainEditModel::virtualMaterialFieldActive(ETerrainTileLayer layer) cons
     const QVector<qint32>& baseline=layer==ETerrainTileLayer::Land
         ?m_originalVirtualLandMaterials:m_originalVirtualOverlayMaterials;
     return !current.isEmpty()&&current!=baseline;
+}
+
+QMap<int, QPoint> CTerrainEditModel::referencedUnassignedAtlasSlots(
+    ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog) const
+{
+    QMap<int, QPoint> result;
+    for(int y = 0; y < tileCountY(); ++y)
+        for(int x = 0; x < tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 packed = packedTile(x, y, layer, &available);
+            if(!available)
+                continue;
+            bool decoded = false;
+            catalog.gridSignatureForPacked(packed, &decoded);
+            if(decoded)
+                continue;
+            const int slot = SMprPackedTile::decode(packed).atlasSlot();
+            if(!result.contains(slot))
+                result.insert(slot, QPoint(x, y));
+        }
+    return result;
 }
 
 qint32 CTerrainEditModel::virtualMaterialAt(ETerrainTileLayer layer,

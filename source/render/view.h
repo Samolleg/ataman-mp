@@ -382,9 +382,13 @@ private:
         bool requirePreferredRuntimeType = false);
     bool syncWorkingTerrainAtlas(CValidationReport* report,
                                  CTerrainWorkingAtlas* staging = nullptr);
+    bool ensureModernTerrainArtworkAssigned(
+        ETerrainTileLayer layer,
+        const CTerrainTransitionCatalog& catalog);
     void refreshTerrainTilePreview(const STerrainTileCommand& command,
                                    bool forward);
     void reviewTerrainAtlasProfile();
+    void reviewTerrainAtlasProfileAtSlot(int initialSlot);
     void finalizeVirtualTerrainAtlas();
     void updateTerrainAtlasViewerAnnotations(const QString& status);
     void rebuildSpatialIndices();
@@ -645,6 +649,7 @@ private:
     bool m_legacyTerrainProfileCollision{false};
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
+    bool m_terrainAssignmentPromptPending{false};
     bool m_tilePaintStrokeActive{false};
     bool m_tileStrokeFinishing{false};
     bool m_tileStrokeClassicAuto{false};

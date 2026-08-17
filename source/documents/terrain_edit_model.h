@@ -466,12 +466,11 @@ public:
                                      ETerrainTileLayer layer,
                                      quint8 atlasIndex, quint8 tileIndex,
                                      quint8 rotation) const;
-    // Manual painting remains a direct physical operation, but a caller with
-    // the active catalog can also keep the model-owned semantic field honest.
-    // Each affected vertex is recomputed from its post-command incident
-    // physical cells: one unanimous decoded value is retained; a disagreement
-    // or unassigned packed cell is represented as an unset vertex instead of
-    // privileging either the old field or the Manual stamp.
+    // Manual painting remains a direct physical operation. If Modern already
+    // owns an active semantic field, the catalog-aware overload also keeps
+    // that field honest: each affected vertex is recomputed from its
+    // post-command incident physical cells. On a legacy/plain map no semantic
+    // field is created, so ordinary Manual saves remain ordinary MPR saves.
     STerrainTileCommand makeTilePaint(const STerrainTileBrush& brush,
                                      ETerrainTileLayer layer,
                                      quint8 atlasIndex, quint8 tileIndex,
@@ -555,6 +554,9 @@ public:
         ETerrainMaterialFieldRecovery recovery =
             ETerrainMaterialFieldRecovery::RequireExactTopology);
     bool virtualMaterialFieldActive(ETerrainTileLayer layer) const;
+    QMap<int, QPoint> referencedUnassignedAtlasSlots(
+        ETerrainTileLayer layer,
+        const CTerrainTransitionCatalog& catalog) const;
     qint32 virtualMaterialAt(ETerrainTileLayer layer, int vertexX,
                              int vertexY, bool* found = nullptr) const;
     bool virtualMaterialCellChanged(
