@@ -630,6 +630,7 @@ private:
     bool m_deferManualAtlasPalette{false};
     STerrainAtlasEmbeddedBindingResult
         m_prevalidatedTerrainEmbeddedBinding;
+    bool m_prevalidatedTerrainTilesAdopted{false};
     QSet<int> m_workingAtlasProtectedSlots;
     QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;

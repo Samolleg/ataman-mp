@@ -236,6 +236,44 @@ bool STerrainAtlasEmbeddedBindingResult::matchesLoadedAtlas(
         && valid;
 }
 
+bool STerrainAtlasEmbeddedBindingResult::canReuseDecodedAtlasTiles(
+    const QString& activeArchivePath,
+    const QString& currentNamespace,
+    int currentAtlasSlotCount,
+    CValidationReport* report) const
+{
+    bool valid = currentAtlasSlotCount > 0
+        && decodedAtlasTiles.size() == currentAtlasSlotCount
+        && archiveSize >= 0 && archiveLastModifiedMs >= 0;
+    const QFileInfo active(activeArchivePath);
+    if(!active.isFile() || active.size() != archiveSize
+       || active.lastModified().toMSecsSinceEpoch()
+            != archiveLastModifiedMs)
+    {
+        valid = false;
+        if(report) report->add(
+            "terrain.embedded_binding_archive_changed",
+            EValidationSeverity::Error,
+            "The terrain RES changed after its exact atlas was decoded");
+    }
+    if(valid)
+    {
+        const QSize tileSize = decodedAtlasTiles.front().size();
+        valid = tileSize.width() > 0 && tileSize.width() == tileSize.height();
+        for(const QImage& tile : decodedAtlasTiles)
+            if(tile.isNull() || tile.size() != tileSize)
+            {
+                valid = false;
+                break;
+            }
+    }
+    if(!valid)
+        return false;
+    return matchesLoadedAtlas(
+        activeArchivePath, currentNamespace, decodedAtlasPixelSha256,
+        currentAtlasSlotCount, report);
+}
+
 STerrainAtlasEmbeddedBindingResult
 CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
     const QStringList& candidateArchives,
@@ -289,10 +327,12 @@ CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
                 .arg(QDir::toNativeSeparators(archive.absoluteFilePath())));
             continue;
         }
+        QVector<QImage> decodedTiles;
         const STerrainAtlasArchiveBindingResult exact = findExactArchive(
             {archive.absoluteFilePath()}, profile.mprNamespace,
             profile.textureCount, profile.atlasSlotCount,
-            profile.atlasPixelSha256, archive.absoluteFilePath());
+            profile.atlasPixelSha256, archive.absoluteFilePath(),
+            &decodedTiles);
         if(!exact.success())
         {
             rejected.append(QStringLiteral("%1: %2")
@@ -304,6 +344,9 @@ CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
         result.profileMemberName = memberName;
         result.profile = profile;
         result.decodedAtlasPixelSha256 = exact.decodedAtlasPixelSha256;
+        result.decodedAtlasTiles = decodedTiles;
+        result.archiveSize = exact.archiveSize;
+        result.archiveLastModifiedMs = exact.archiveLastModifiedMs;
         return result;
     }
     result.error = QStringLiteral(
@@ -321,9 +364,12 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
     int textureCount,
     int atlasSlotCount,
     const QByteArray& expectedAtlasPixelSha256,
-    const QString& preferredArchive)
+    const QString& preferredArchive,
+    QVector<QImage>* decodedTiles)
 {
     STerrainAtlasArchiveBindingResult result;
+    if(decodedTiles)
+        decodedTiles->clear();
     if(mprNamespace.trimmed().isEmpty() || textureCount <= 0
        || atlasSlotCount <= 0 || atlasSlotCount > textureCount * 64
        || expectedAtlasPixelSha256.size() != 64)
@@ -345,6 +391,9 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
         if(seen.contains(key))
             continue;
         seen.insert(key);
+        const qint64 archiveSize = archive.size();
+        const qint64 archiveLastModifiedMs =
+            archive.lastModified().toMSecsSinceEpoch();
         QMap<QString, SArchiveMemberLocation> members;
         if(!archiveIndex(archive.absoluteFilePath(), &members))
             continue;
@@ -393,12 +442,23 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
             continue;
         const QByteArray actual =
             CTerrainAtlasProfileInference::pixelSha256(tiles);
+        QFileInfo archiveAfterRead(archive.absoluteFilePath());
+        archiveAfterRead.refresh();
+        if(!archiveAfterRead.isFile()
+           || archiveAfterRead.size() != archiveSize
+           || archiveAfterRead.lastModified().toMSecsSinceEpoch()
+                != archiveLastModifiedMs)
+            continue;
         result.completeArchivePixelSha256.insert(
             archive.absoluteFilePath(), actual);
         if(actual.toLower() != expectedAtlasPixelSha256.toLower())
             continue;
         result.archivePath = archive.absoluteFilePath();
         result.decodedAtlasPixelSha256 = actual;
+        result.archiveSize = archiveSize;
+        result.archiveLastModifiedMs = archiveLastModifiedMs;
+        if(decodedTiles)
+            *decodedTiles = tiles;
         return result;
     }
     result.error = QStringLiteral(

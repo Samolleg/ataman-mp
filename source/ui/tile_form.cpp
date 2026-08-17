@@ -489,6 +489,13 @@ bool CTileForm::adoptTileImages(const QVector<QImage>& images,
     ui->tableTile->clearContents();
     ui->tableTile->setRowCount(m_nTextureAtlas * m_nTilePerRow);
     ui->tableTile->setColumnCount(m_nTilePerRow);
+    for(int column = 0; column < m_nTilePerRow; ++column)
+    {
+        ui->tableTile->setItemDelegateForColumn(
+            column, new IconDelegate(ui->tableTile));
+        ui->tableQuick->setItemDelegateForColumn(
+            column, new IconDelegate(ui->tableQuick));
+    }
     for(int& slot : m_arrQuickTile)
         if(slot < 0 || slot >= images.size())
             slot = 0;

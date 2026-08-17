@@ -8835,6 +8835,11 @@ void EnduranceDocumentTests::embeddedTerrainAtlasProfileRoundTripsInsidePublishe
     QCOMPARE(binding.profile.textureCount, 1);
     QCOMPARE(binding.profile.atlasPixelSha256, profile.atlasPixelSha256);
     QCOMPARE(binding.profile.slotDefinitions.size(), 64);
+    QCOMPARE(binding.decodedAtlasTiles.size(), 64);
+    for(int slot = 0; slot < decoded.size(); ++slot)
+        QCOMPARE(binding.decodedAtlasTiles.at(slot), decoded.at(slot));
+    QVERIFY(binding.canReuseDecodedAtlasTiles(
+        archivePath, profile.mprNamespace, 64));
     CResArchiveDocument reopened;
     QVERIFY(reopened.loadBytes(resultBytes, archivePath, &errors));
     QCOMPARE(reopened.memberPayload(QStringLiteral("unrelated.bin")),
@@ -8889,10 +8894,17 @@ void EnduranceDocumentTests::prevalidatedEmbeddedAtlasBindingMatchesOnlyExactLoa
     binding.profile.mprNamespace = QStringLiteral("zone2");
     binding.profile.atlasPixelSha256 = binding.decodedAtlasPixelSha256;
     binding.profile.atlasSlotCount = 576;
+    binding.decodedAtlasTiles.fill(
+        QImage(4, 4, QImage::Format_RGBA8888), 576);
+    binding.archiveSize = QFileInfo(archivePath).size();
+    binding.archiveLastModifiedMs = QFileInfo(archivePath)
+        .lastModified().toMSecsSinceEpoch();
 
     QVERIFY(binding.matchesLoadedAtlas(
         archivePath, QStringLiteral("Zone2"),
         binding.decodedAtlasPixelSha256, 576));
+    QVERIFY(binding.canReuseDecodedAtlasTiles(
+        archivePath, QStringLiteral("Zone2"), 576));
     QVERIFY(!binding.matchesLoadedAtlas(
         root.filePath(QStringLiteral("other.res")),
         QStringLiteral("zone2"), binding.decodedAtlasPixelSha256, 576));
@@ -8907,6 +8919,14 @@ void EnduranceDocumentTests::prevalidatedEmbeddedAtlasBindingMatchesOnlyExactLoa
     QVERIFY(!binding.matchesLoadedAtlas(
         archivePath, QStringLiteral("zone2"),
         binding.profile.atlasPixelSha256, 576));
+
+    binding.decodedAtlasPixelSha256 = binding.profile.atlasPixelSha256;
+    QFile changedArchive(archivePath);
+    QVERIFY(changedArchive.open(QIODevice::Append));
+    QCOMPARE(changedArchive.write("changed"), qint64(7));
+    changedArchive.close();
+    QVERIFY(!binding.canReuseDecodedAtlasTiles(
+        archivePath, QStringLiteral("zone2"), 576));
 }
 
 void EnduranceDocumentTests::indexedTerrainArchiveMemberReadSkipsUnrelatedPayloads()
