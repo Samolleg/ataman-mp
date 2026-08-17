@@ -5542,10 +5542,40 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
         ?m_virtualLandMaterials:m_virtualOverlayMaterials;
     const qint32 unset=std::numeric_limits<qint32>::min();
     const int vertexWidth=tileCountX()+1;
-    if(active.isEmpty() && !initializeVirtualMaterialField(
-           layer, catalog, report,
-           ETerrainMaterialFieldRecovery::RecoverDeterministically))
-        return command;
+    if(active.isEmpty())
+    {
+        // Planning must never establish hidden live state.  Build the first
+        // Modern stamp on a copy, then replace its sparse vertex edits with
+        // one complete before/after field delta.  The resulting command owns
+        // recovery, visible preview, undo, and redo atomically; refusal or a
+        // no-op leaves the live model exactly fieldless.
+        CTerrainEditModel staged=*this;
+        if(!staged.initializeVirtualMaterialField(
+               layer, catalog, report,
+               ETerrainMaterialFieldRecovery::RecoverDeterministically))
+            return command;
+        STerrainTileCommand stagedCommand=
+            staged.makeVirtualMaterialPaintVertices(
+                selectedCellX,selectedCellY,requestedVertices,
+                previewCoreCells,auditBrush,layer,materialId,catalog,
+                distributionSeed,report,randomizeUniformRotation);
+        if(stagedCommand.isEmpty())
+            return stagedCommand;
+        if(!staged.apply(stagedCommand,true,report))
+            return STerrainTileCommand();
+
+        STerrainTileCommand::SVirtualFieldDelta fieldDelta;
+        fieldDelta.layer=layer;
+        fieldDelta.vertexWidth=tileCountX()+1;
+        fieldDelta.vertexHeight=tileCountY()+1;
+        copyVirtualMaterialFieldState(
+            layer,&fieldDelta.beforeCurrent,&fieldDelta.beforeBaseline);
+        staged.copyVirtualMaterialFieldState(
+            layer,&fieldDelta.afterCurrent,&fieldDelta.afterBaseline);
+        stagedCommand.virtualVertices.clear();
+        stagedCommand.virtualFields.append(fieldDelta);
+        return stagedCommand;
+    }
     QVector<qint32> desired=active;
     const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
     QSet<int> affected;
@@ -5672,8 +5702,14 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
     command.semanticAudit.brush=stroke.semanticAudit.brush;
     command.semanticAudit.layer=stroke.semanticAudit.layer;
     command.semanticAudit.solverMode=QStringLiteral("virtual-release-exact");
-    if(stroke.virtualVertices.isEmpty())return command;
-    const ETerrainTileLayer layer=stroke.virtualVertices.front().layer;
+    QVector<QPoint> changedVertices=stroke.semanticAudit.paintedVertices;
+    for(const auto& vertex:stroke.virtualVertices)
+        changedVertices.append(QPoint(vertex.globalX,vertex.globalY));
+    if(changedVertices.isEmpty())return command;
+    const ETerrainTileLayer layer=!stroke.virtualVertices.isEmpty()
+        ?stroke.virtualVertices.front().layer
+        :!stroke.virtualFields.isEmpty()
+            ?stroke.virtualFields.front().layer:stroke.semanticAudit.layer;
     const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
     const QVector<qint32>& values=layer==ETerrainTileLayer::Land
         ?m_virtualLandMaterials:m_virtualOverlayMaterials;
@@ -5688,11 +5724,12 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
                 "A virtual material stroke cannot mix land and overlay vertices");
             return STerrainTileCommand();
         }
-        for(int y:{vertex.globalY-1,vertex.globalY})
-            for(int x:{vertex.globalX-1,vertex.globalX})
+    }
+    for(const QPoint& vertex:changedVertices)
+        for(int y:{vertex.y()-1,vertex.y()})
+            for(int x:{vertex.x()-1,vertex.x()})
                 if(x>=0&&x<tileCountX()&&y>=0&&y<tileCountY())
                     affected.insert(y*tileCountX()+x);
-    }
     QVector<int> cells=affected.values().toVector();std::sort(cells.begin(),cells.end());
     int unresolved=0;
     for(int cell:cells)

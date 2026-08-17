@@ -13093,9 +13093,13 @@ void CView::endTileBrushGroup()
         if(!m_tileStrokeClassicAuto
            && m_tileStrokePaletteMode
                   != int(ETerrainPaintPaletteMode::Manual)
-           && !m_tileStrokeCommand.virtualVertices.isEmpty())
+           && (!m_tileStrokeCommand.virtualVertices.isEmpty()
+               || !m_tileStrokeCommand.virtualFields.isEmpty()))
         {
-            const ETerrainTileLayer layer=m_tileStrokeCommand.virtualVertices.front().layer;
+            const ETerrainTileLayer layer=
+                !m_tileStrokeCommand.virtualVertices.isEmpty()
+                ?m_tileStrokeCommand.virtualVertices.front().layer
+                :m_tileStrokeCommand.virtualFields.front().layer;
             CValidationReport releaseReport;
             CTerrainVirtualMaterialField field;
             QSet<int> affected;
@@ -13109,9 +13113,14 @@ void CView::endTileBrushGroup()
                     "The completed stroke has no complete vertex-material field.");
             else
             {
+                QVector<QPoint> changedVertices=
+                    m_tileStrokeCommand.semanticAudit.paintedVertices;
                 for(const auto& vertex:m_tileStrokeCommand.virtualVertices)
-                    for(int y:{vertex.globalY-1,vertex.globalY})
-                        for(int x:{vertex.globalX-1,vertex.globalX})
+                    changedVertices.append(
+                        QPoint(vertex.globalX,vertex.globalY));
+                for(const QPoint& vertex:changedVertices)
+                    for(int y:{vertex.y()-1,vertex.y()})
+                        for(int x:{vertex.x()-1,vertex.x()})
                             if(x>=0&&x<field.tileWidth()&&y>=0&&y<field.tileHeight())
                                 affected.insert(y*field.tileWidth()+x);
                 QVector<int> cells=affected.values().toVector();

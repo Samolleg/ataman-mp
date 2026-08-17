@@ -387,6 +387,8 @@ private slots:
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void manualTilePaintRebasesDecodedSemanticsAndInvalidatesDisputes();
     void manualTilePaintOnLegacyMapStaysPhysicalUntilModernStarts();
+    void firstModernStrokeOwnsFieldInitializationAndManualUndo();
+    void refusedFirstModernStrokeLeavesFieldlessStateUntouched();
     void firstResolvePreservesFreshManualTileSemanticCorners();
     void laterManualTileWinsSharedCornersAndUndoRestoresPriorValues();
     void manualTileStrokeStoresOnlyTouchedSemanticVertices();
@@ -4696,6 +4698,174 @@ void EnduranceDocumentTests::manualTilePaintOnLegacyMapStaysPhysicalUntilModernS
     QVERIFY(terrain.copyVirtualMaterialField(
         ETerrainTileLayer::Land, &recovered, true));
     QCOMPARE(recovered.material(0, 0), qint32(2));
+}
+
+void EnduranceDocumentTests::firstModernStrokeOwnsFieldInitializationAndManualUndo()
+{
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(32)),
+        "first-modern-field-transaction.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+
+    CTerrainTransitionCatalog catalog;
+    for(int mask = 0; mask < 16; ++mask)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = (mask & 1) ? 2 : 1;
+        variant.signature.northEast = (mask & 2) ? 2 : 1;
+        variant.signature.southEast = (mask & 4) ? 2 : 1;
+        variant.signature.southWest = (mask & 8) ? 2 : 1;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(mask);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+
+    STerrainTileBrush manualCell;
+    manualCell.centerX = 8.0f;
+    manualCell.centerY = 8.0f;
+    manualCell.radius = 0.0f;
+    manualCell.shape = ETerrainTileBrushShape::Square;
+    const STerrainTileCommand manual = terrain.makeTilePaint(
+        manualCell, ETerrainTileLayer::Land, 0, 15, 0, catalog);
+    QVERIFY(!manual.isEmpty());
+    QCOMPARE(manual.pendingVirtualVertices.size(), 4);
+    QVERIFY(terrain.apply(manual, true));
+
+    QVector<qint32> fieldlessCurrent;
+    QVector<qint32> fieldlessBaseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &fieldlessCurrent, &fieldlessBaseline));
+    QVERIFY(fieldlessCurrent.isEmpty());
+    QVERIFY(fieldlessBaseline.isEmpty());
+
+    STerrainTileBrush modernCell = manualCell;
+    modernCell.centerX = 10.0f;
+    CValidationReport modernReport;
+    STerrainTileCommand modern = terrain.makeVirtualTileMaterialPaint(
+        modernCell, ETerrainTileLayer::Land, 2, catalog,
+        0x46495253u, &modernReport);
+    QVERIFY2(!modernReport.hasErrors(), qPrintable(modernReport.toText()));
+    QVERIFY(!modern.isEmpty());
+
+    // Merely planning the first Modern stamp must not create hidden live
+    // state. The complete recovery belongs to the same undo transaction as
+    // the visible stamp, including when a preceding Manual command is still
+    // represented by sparse fieldless corners.
+    QVector<qint32> plannedCurrent;
+    QVector<qint32> plannedBaseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &plannedCurrent, &plannedBaseline));
+    QCOMPARE(plannedCurrent, fieldlessCurrent);
+    QCOMPARE(plannedBaseline, fieldlessBaseline);
+    QCOMPARE(modern.virtualFields.size(), 1);
+    QVERIFY(modern.virtualVertices.isEmpty());
+    QCOMPARE(modern.virtualFields.front().beforeCurrent, fieldlessCurrent);
+    QCOMPARE(modern.virtualFields.front().beforeBaseline, fieldlessBaseline);
+
+    QVERIFY(terrain.apply(modern, true));
+    STerrainTileBrush secondModernCell = modernCell;
+    secondModernCell.centerX = 11.0f;
+    const STerrainTileCommand secondModern =
+        terrain.makeVirtualTileMaterialPaint(
+            secondModernCell, ETerrainTileLayer::Land, 2, catalog,
+            0x46495253u, &modernReport);
+    QVERIFY2(!modernReport.hasErrors(), qPrintable(modernReport.toText()));
+    QVERIFY(!secondModern.isEmpty());
+    QVERIFY(!secondModern.virtualVertices.isEmpty());
+    QVERIFY(secondModern.virtualFields.isEmpty());
+    QVERIFY(terrain.apply(secondModern, true));
+    appendTerrainTileCommand(&modern, secondModern);
+    QCOMPARE(modern.virtualFields.size(), 1);
+    QVERIFY(modern.virtualVertices.isEmpty());
+    CValidationReport releaseReport;
+    const STerrainTileCommand release = terrain.makeVirtualStrokeResolution(
+        modern, catalog, 0x46495253u, &releaseReport);
+    QVERIFY2(!releaseReport.hasErrors(), qPrintable(releaseReport.toText()));
+    QVERIFY2(!release.isEmpty(),
+             "The first transactional Modern stamp lost its release ring");
+    QVERIFY(terrain.apply(release, true));
+    appendTerrainTileCommand(&modern, release);
+
+    QVector<qint32> paintedCurrent;
+    QVector<qint32> paintedBaseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &paintedCurrent, &paintedBaseline));
+    const quint16 paintedManual = terrain.packedTile(
+        8, 8, ETerrainTileLayer::Land);
+    const quint16 paintedModern = terrain.packedTile(
+        10, 8, ETerrainTileLayer::Land);
+
+    QVERIFY2(terrain.apply(modern, false),
+             "Undo of the first Modern transaction was refused");
+    QVector<qint32> undoneCurrent;
+    QVector<qint32> undoneBaseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &undoneCurrent, &undoneBaseline));
+    QCOMPARE(undoneCurrent, fieldlessCurrent);
+    QCOMPARE(undoneBaseline, fieldlessBaseline);
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land), quint16(15));
+
+    QVERIFY2(terrain.apply(manual, false),
+             "The preceding fieldless Manual command could not be undone");
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land), quint16(0));
+    QVERIFY(terrain.apply(manual, true));
+    QVERIFY(terrain.apply(modern, true));
+    QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land), paintedManual);
+    QCOMPARE(terrain.packedTile(10, 8, ETerrainTileLayer::Land), paintedModern);
+    QVector<qint32> redoneCurrent;
+    QVector<qint32> redoneBaseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &redoneCurrent, &redoneBaseline));
+    QCOMPARE(redoneCurrent, paintedCurrent);
+    QCOMPARE(redoneBaseline, paintedBaseline);
+}
+
+void EnduranceDocumentTests::refusedFirstModernStrokeLeavesFieldlessStateUntouched()
+{
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(32)),
+        "refused-first-modern-fieldless.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+
+    CTerrainTransitionCatalog catalog;
+    for(int mask = 0; mask < 16; ++mask)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = (mask & 1) ? 2 : 1;
+        variant.signature.northEast = (mask & 2) ? 2 : 1;
+        variant.signature.southEast = (mask & 4) ? 2 : 1;
+        variant.signature.southWest = (mask & 8) ? 2 : 1;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(mask);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+    // The semantic name is known, but no honest uniform artwork exists for
+    // it. Planning therefore reaches the post-recovery resolver and refuses.
+    catalog.declareMaterial(3);
+
+    STerrainTileBrush cell;
+    cell.centerX = 8.0f;
+    cell.centerY = 8.0f;
+    cell.radius = 0.0f;
+    cell.shape = ETerrainTileBrushShape::Square;
+    CValidationReport report;
+    const STerrainTileCommand refused = terrain.makeVirtualTileMaterialPaint(
+        cell, ETerrainTileLayer::Land, 3, catalog, 0x52454655u, &report);
+    QVERIFY(refused.isEmpty());
+    QVERIFY(report.hasErrors());
+
+    QVector<qint32> current;
+    QVector<qint32> baseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &current, &baseline));
+    QVERIFY2(current.isEmpty() && baseline.isEmpty(),
+             "A refused first Modern stamp left an unowned semantic field");
 }
 
 void EnduranceDocumentTests::firstResolvePreservesFreshManualTileSemanticCorners()

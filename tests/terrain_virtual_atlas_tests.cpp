@@ -4159,7 +4159,9 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     const STerrainTileCommand command=model.makeVirtualMaterialPaint(
         8,8,brush,ETerrainTileLayer::Land,2,fixture.catalog,99,&report);
     QVERIFY2(!command.isEmpty(),qPrintable(report.toText()));
-    QCOMPARE(command.virtualVertices.size(),5);
+    QVERIFY(command.virtualVertices.isEmpty());
+    QCOMPARE(command.virtualFields.size(),1);
+    QCOMPARE(command.semanticAudit.paintedVertices.size(),5);
     QCOMPARE(command.semanticAudit.solverMode,QString("virtual-unblended-preview"));
     QVERIFY(!command.deltas.isEmpty());
     SMprPackedTile pureSelected;pureSelected.tileIndex=1;
@@ -4168,8 +4170,8 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     QVERIFY(model.apply(command,true,&report));
     CTerrainVirtualMaterialField painted;
     QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&painted));
-    for(const auto& touched:command.virtualVertices)
-        QCOMPARE(painted.material(touched.globalX,touched.globalY),qint32(2));
+    for(const QPoint& touched:command.semanticAudit.paintedVertices)
+        QCOMPARE(painted.material(touched.x(),touched.y()),qint32(2));
     QCOMPARE(painted.material(6,8),qint32(1));
     QVector<QImage> workingImages = fixture.images;
     while(workingImages.size() < 64) workingImages.append(fixture.images.front());
@@ -4180,9 +4182,9 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     for(int slot = 0; slot < 128; ++slot) usage.insert(slot, 0);
     QSet<int> protectedSlots({0,1,2,3,10});
     QSet<int> affected;
-    for(const auto& vertex : command.virtualVertices)
-        for(int y : {vertex.globalY-1, vertex.globalY})
-            for(int x : {vertex.globalX-1, vertex.globalX})
+    for(const QPoint& vertex : command.semanticAudit.paintedVertices)
+        for(int y : {vertex.y()-1, vertex.y()})
+            for(int x : {vertex.x()-1, vertex.x()})
                 if(x >= 0 && x < painted.tileWidth() && y >= 0 && y < painted.tileHeight())
                     affected.insert(y * painted.tileWidth() + x);
     CValidationReport releaseReport;
@@ -4206,13 +4208,16 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
     QVERIFY(model.apply(resolved,true,&report));
     CTerrainVirtualMaterialField afterResolution;
     QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&afterResolution));
-    for(const auto& touched:command.virtualVertices)
-        QCOMPARE(afterResolution.material(touched.globalX,touched.globalY),qint32(2));
+    for(const QPoint& touched:command.semanticAudit.paintedVertices)
+        QCOMPARE(afterResolution.material(touched.x(),touched.y()),qint32(2));
     QVERIFY(model.apply(resolved,false,&report));
     QVERIFY(model.apply(command,false,&report));
-    CTerrainVirtualMaterialField undone;
-    QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
-    QCOMPARE(undone.material(8,8),qint32(1));
+    QVector<qint32> undoneCurrent;
+    QVector<qint32> undoneBaseline;
+    QVERIFY(model.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land,&undoneCurrent,&undoneBaseline));
+    QVERIFY(undoneCurrent.isEmpty());
+    QVERIFY(undoneBaseline.isEmpty());
 }
 
 void TerrainVirtualAtlasTests::virtualTilePaintTargetsFourCellCorners()
@@ -4234,10 +4239,12 @@ void TerrainVirtualAtlasTests::virtualTilePaintTargetsFourCellCorners()
     const STerrainTileCommand command=model.makeVirtualTileMaterialPaint(
         brush,ETerrainTileLayer::Land,2,fixture.catalog,0x54494c45u,&report);
     QVERIFY2(!command.isEmpty(),qPrintable(report.toText()));
-    QCOMPARE(command.virtualVertices.size(),4);
+    QVERIFY(command.virtualVertices.isEmpty());
+    QCOMPARE(command.virtualFields.size(),1);
+    QCOMPARE(command.semanticAudit.paintedVertices.size(),4);
     QSet<QPair<int,int>> points;
-    for(const auto& delta:command.virtualVertices)
-        points.insert(qMakePair(delta.globalX,delta.globalY));
+    for(const QPoint& point:command.semanticAudit.paintedVertices)
+        points.insert(qMakePair(point.x(),point.y()));
     QSet<QPair<int,int>> expected;
     expected << qMakePair(8,8) << qMakePair(9,8)
              << qMakePair(9,9) << qMakePair(8,9);
