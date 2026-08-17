@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QString>
 #include <QImage>
+#include <QIODevice>
 #include <QMap>
 #include <QSet>
 #include <QVector>
@@ -29,6 +30,13 @@ bool decodeDxtImage(const QByteArray& compressed, int width, int height,
 // This avoids expanding a 1024/2048-pixel page merely to build one material
 // palette thumbnail. logicalSlot uses the MPR 0..63 tile ordering.
 bool decodeMmpDxt1AtlasTile(const QByteArray& mmp, int logicalSlot,
+                            QImage* image, QString* diagnostic = nullptr);
+
+// Decode one logical terrain tile without reading the rest of a large RES
+// member. payloadOffset/payloadSize identify the MMP member inside the device;
+// only its header and the DXT block-row band containing logicalSlot are read.
+bool decodeMmpDxt1AtlasTile(QIODevice* device, qint64 payloadOffset,
+                            qint64 payloadSize, int logicalSlot,
                             QImage* image, QString* diagnostic = nullptr);
 
 // Resolve one page payload at most once while a caller requests several

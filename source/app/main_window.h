@@ -130,7 +130,7 @@ private:
     void launchCurrentMapTest();
     void createViewportToolbars();
     void refreshMapTestContext(bool preserveWorkspaceState = false,
-                               bool reloadCatalog = true);
+                               bool reloadCatalog = false);
     void populateEntranceCombo();
     void chooseBorrowedMapIdentity();
     void setCustomSpawnPicking(bool enabled);

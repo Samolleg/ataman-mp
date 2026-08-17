@@ -153,6 +153,14 @@ public:
     bool catalogTerrainMmpPayload(const QString& textureName,
                                   QByteArray* payload,
                                   QString* sourcePath = nullptr) const;
+    // Resolve the winning terrain page archive without reading the page body.
+    bool terrainMmpSourceArchive(const QString& textureName,
+                                 QString* sourcePath) const;
+    // Read and decode only one DXT1 tile band from the winning configured RES
+    // member. The exact archive/member identity keys the persistent cache.
+    bool catalogTerrainMmpTile(const QString& textureName, int logicalSlot,
+                               QImage* tile,
+                               QString* sourceIdentity = nullptr) const;
     bool terrainMmpTile(const QString& textureName, int logicalSlot,
                         QImage* tile, QString* sourcePath = nullptr) const;
     // A finalized isolated MPR may carry a sibling <mpr>-atlas.res. This
@@ -181,6 +189,7 @@ private:
     CSettings* m_pSettings;
     QList<QString> m_arrCellComboBox; //optimization for cell widget
     QString m_mapLocalTerrainArchive;
+    mutable QMap<QString, QImage> m_catalogTerrainTileCache;
 };
 
 

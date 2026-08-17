@@ -530,6 +530,86 @@ bool decodeMmpDxt1AtlasTile(const QByteArray& mmp, int logicalSlot,
                           DxtFormat::Dxt1, image, diagnostic);
 }
 
+bool decodeMmpDxt1AtlasTile(QIODevice* device, qint64 payloadOffset,
+                            qint64 payloadSize, int logicalSlot,
+                            QImage* image, QString* diagnostic)
+{
+    constexpr qint64 headerSize = 76;
+    constexpr quint32 signature = 0x00504d4d;
+    constexpr quint32 dxt1 = 0x31545844;
+    if(diagnostic)
+        diagnostic->clear();
+    if(!device || !device->isReadable() || !image
+       || logicalSlot < 0 || logicalSlot >= 64
+       || payloadOffset < 0 || payloadSize < headerSize
+       || payloadOffset > std::numeric_limits<qint64>::max() - payloadSize
+       || !device->seek(payloadOffset))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The direct DXT1 terrain tile request is invalid.");
+        return false;
+    }
+    const QByteArray header = device->read(headerSize);
+    if(header.size() != headerSize || readDword(header, 0) != signature
+       || readDword(header, 16) != dxt1)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The terrain atlas member has no complete DXT1 header.");
+        return false;
+    }
+    const quint32 widthValue = readDword(header, 4);
+    const quint32 heightValue = readDword(header, 8);
+    if(widthValue == 0 || widthValue != heightValue || widthValue % 32 != 0
+       || widthValue > quint32(std::numeric_limits<int>::max()))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page dimensions cannot be divided into 8x8 tiles.");
+        return false;
+    }
+    const int width = int(widthValue);
+    const int tileSize = width / 8;
+    const int pageBlocks = width / 4;
+    const int tileBlocks = tileSize / 4;
+    const qint64 pageRowBytes = qint64(pageBlocks) * 8;
+    const qint64 baseBytes = qint64(pageBlocks) * pageBlocks * 8;
+    if(baseBytes > payloadSize - headerSize)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page base mip is truncated.");
+        return false;
+    }
+    const int tileColumn = logicalSlot % 8;
+    const int rawTileRow = 7 - logicalSlot / 8;
+    const qint64 firstBlock = qint64(rawTileRow * tileBlocks) * pageBlocks
+        + tileColumn * tileBlocks;
+    const qint64 bandOffset = headerSize + firstBlock * 8;
+    const qint64 bandSize = qint64(tileBlocks - 1) * pageRowBytes
+        + qint64(tileBlocks) * 8;
+    if(bandOffset < headerSize || bandSize <= 0
+       || bandOffset > payloadSize - bandSize
+       || !device->seek(payloadOffset + bandOffset))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The requested terrain tile band falls outside the MMP member.");
+        return false;
+    }
+    const QByteArray band = device->read(bandSize);
+    if(band.size() != bandSize)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The requested terrain tile band is truncated.");
+        return false;
+    }
+    QByteArray compressed;
+    compressed.reserve(tileBlocks * tileBlocks * 8);
+    const int rowBytes = tileBlocks * 8;
+    for(int blockRow = 0; blockRow < tileBlocks; ++blockRow)
+        compressed.append(band.constData() + blockRow * pageRowBytes,
+                          rowBytes);
+    return decodeDxtImage(compressed, tileSize, tileSize,
+                          DxtFormat::Dxt1, image, diagnostic);
+}
+
 bool decodeMmpDxt1AtlasTileCached(
     const QString& pageName, int logicalSlot,
     QMap<QString, QByteArray>* payloadCache,

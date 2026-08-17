@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QBuffer>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -407,6 +408,7 @@ private slots:
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
     void globalMaterialBrushSourceIsPayloadCoherentAndPrefersLocalUniform();
+    void directTerrainTileDecoderReadsOnlyRequestedTileBand();
     void stockInputsCannotOverrideCanonicalOneCornerMask();
     void workingAtlasRealizesExactTransitionsBeyond512Slots();
     void globalAuthoredTransitionLibraryIndexesRealStockBlends();
@@ -7948,6 +7950,42 @@ void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefer
     QCOMPARE(paintedBase, expectedPreferred.convertToFormat(
         QImage::Format_RGBA8888));
 
+    // The map-load path must not hydrate complete 2048x2048 pages merely to
+    // obtain palette/source tiles. Prove the direct indexed-tile callback is
+    // authoritative when supplied and the full-page fallback remains unused.
+    int fullPageLoads = 0;
+    int directTileLoads = 0;
+    encodedPages.clear();
+    missingPages.clear();
+    const QImage directBase =
+        CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
+            family, QStringLiteral("preferred"), QSize(8, 8),
+            &encodedPages, &missingPages, &decodedTiles,
+            [&](const QString&, QByteArray*) {
+                ++fullPageLoads;
+                return false;
+            }, false, &paintedSource,
+            [&](const QString& name, int logicalSlot, QImage* tile,
+                QString* sourceIdentity) {
+                ++directTileLoads;
+                const QByteArray* payload = nullptr;
+                if(name == QStringLiteral("preferred000.mmp"))
+                    payload = &preferredPage;
+                else if(name == QStringLiteral("foreign000.mmp"))
+                    payload = &foreignPage;
+                if(!payload)
+                    return false;
+                if(sourceIdentity)
+                    *sourceIdentity = name + QStringLiteral("|test-resource");
+                return ei::decodeMmpDxt1AtlasTile(
+                    *payload, logicalSlot, tile, &diagnostic);
+            });
+    QVERIFY(!directBase.isNull());
+    QCOMPARE(directBase, expectedPreferred.convertToFormat(
+        QImage::Format_RGBA8888));
+    QCOMPARE(fullPageLoads, 0);
+    QVERIFY(directTileLoads > 0);
+
     // Reusing one decoded cache across two maps used to return the first map's
     // tile solely because the RES member name and slot matched. The current
     // encoded payload is now part of the key, so the second map cannot inherit
@@ -8011,6 +8049,54 @@ void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefer
     QVERIFY(firstTransition != secondTransition);
     QCOMPARE(secondTransition, expectedSecond.convertToFormat(
         QImage::Format_RGBA8888));
+}
+
+void EnduranceDocumentTests::directTerrainTileDecoderReadsOnlyRequestedTileBand()
+{
+    QVector<QImage> tiles;
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        QImage tile(32, 32, QImage::Format_RGBA8888);
+        tile.fill(QColor::fromHsv((slot * 37) % 360, 180, 80 + slot * 2));
+        tiles.append(tile);
+    }
+    QString diagnostic;
+    const QByteArray page = ei::encodeMmpDxt1(
+        CTerrainVirtualAtlas::composePage(tiles, 0, 32), true,
+        &diagnostic);
+    QVERIFY2(!page.isEmpty(), qPrintable(diagnostic));
+
+    class CountingBuffer final : public QBuffer
+    {
+    public:
+        explicit CountingBuffer(QByteArray* data) : QBuffer(data) {}
+        qint64 bytesRead{0};
+
+    protected:
+        qint64 readData(char* data, qint64 maxSize) override
+        {
+            const qint64 count = QBuffer::readData(data, maxSize);
+            if(count > 0)
+                bytesRead += count;
+            return count;
+        }
+    };
+
+    QByteArray wrapped = QByteArrayLiteral("prefix") + page
+        + QByteArrayLiteral("suffix");
+    CountingBuffer device(&wrapped);
+    QVERIFY(device.open(QIODevice::ReadOnly));
+    QImage direct;
+    QVERIFY2(ei::decodeMmpDxt1AtlasTile(
+        &device, 6, page.size(), 37, &direct, &diagnostic),
+        qPrintable(diagnostic));
+    QImage expected;
+    QVERIFY2(ei::decodeMmpDxt1AtlasTile(
+        page, 37, &expected, &diagnostic), qPrintable(diagnostic));
+    QCOMPARE(direct, expected);
+    QVERIFY2(device.bytesRead < page.size() / 4,
+        qPrintable(QStringLiteral("Direct tile decode read %1 of %2 bytes")
+            .arg(device.bytesRead).arg(page.size())));
 }
 
 void EnduranceDocumentTests::stockInputsCannotOverrideCanonicalOneCornerMask()

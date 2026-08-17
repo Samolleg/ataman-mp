@@ -4495,7 +4495,10 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     // validation and hot reload cannot retain the previous map's primary MOB,
     // entrances, or custom-spawn context.
     mapLoadPhase.restart();
-    refreshMapTestContext();
+    // The Maps browser already owns the current resource/map catalog. Opening
+    // one entry must only bind that snapshot, not rescan every configured RES
+    // and map root on the UI thread.
+    refreshMapTestContext(false, false);
     const qint64 mapContextMs = mapLoadPhase.elapsed();
     ei::log(eLogInfo, QString(
         "Map workspace load phases zone:%1 landscapeMs:%2 mobMs:%3 "

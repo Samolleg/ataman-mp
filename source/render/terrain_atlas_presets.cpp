@@ -267,10 +267,12 @@ QImage CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
     QMap<QString, QImage>* decodedTileCache,
     const std::function<bool(const QString&, QByteArray*)>& pageLoader,
     bool thumbnail,
-    STerrainGlobalMaterialSource* selectedSource)
+    STerrainGlobalMaterialSource* selectedSource,
+    const std::function<bool(const QString&, int, QImage*, QString*)>&
+        tileLoader)
 {
     if(!encodedPageCache || !missingPageCache || !decodedTileCache
-       || !pageLoader)
+       || (!pageLoader && !tileLoader))
         return QImage();
 
     QVector<STerrainGlobalMaterialSource> sources;
@@ -315,6 +317,27 @@ QImage CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
         if(pageIndex < 0 || pageIndex >= names.size())
             continue;
         const QString pageName = names.at(pageIndex).toCaseFolded();
+        if(tileLoader)
+        {
+            QImage tile;
+            QString sourceIdentity;
+            if(!tileLoader(pageName, source.uniformSlot % 64,
+                           &tile, &sourceIdentity)
+               || tile.isNull())
+                continue;
+            tile = tile.convertToFormat(QImage::Format_RGBA8888);
+            if(requiredSize.isEmpty() || tile.size() == requiredSize)
+            {
+                if(selectedSource) *selectedSource = source;
+                return tile;
+            }
+            if(fallback.isNull())
+            {
+                fallback = tile;
+                fallbackSource = source;
+            }
+            continue;
+        }
         if(missingPageCache->contains(pageName))
             continue;
         auto encoded = encodedPageCache->find(pageName);
@@ -493,11 +516,13 @@ CTerrainAtlasPresetCatalog::globalAuthoredTransitions(CValidationReport* report)
 
 CTerrainTransitionCatalog CTerrainAtlasPresetCatalog::globalizedCatalog(
     const STerrainAtlasProfile& profile,
-    const CTerrainTransitionCatalog& source)
+    const CTerrainTransitionCatalog& source,
+    const QVector<STerrainGlobalMaterialFamily>* globalFamilies)
 {
     const QJsonObject preset = matchingPreset(profile);
     const QByteArray atlasIdentity = presetAtlasIdentity(preset);
     QMap<qint32, qint32> globalByLocal;
+    QVector<STerrainGlobalMaterialFamily> resolvedGlobalFamilies;
     for(const STerrainAtlasProfileFamily& family : profile.families)
     {
         STerrainTransitionSignature pure;
@@ -511,9 +536,12 @@ CTerrainTransitionCatalog CTerrainAtlasPresetCatalog::globalizedCatalog(
             // A transition-only local identity may borrow only one explicit
             // full-tile variant with the same reviewed name. Never merge all
             // same-named uniform sources into one brush identity.
+            if(!globalFamilies && resolvedGlobalFamilies.isEmpty())
+                resolvedGlobalFamilies = globalUniformFamilies(nullptr);
+            const QVector<STerrainGlobalMaterialFamily>& candidates =
+                globalFamilies ? *globalFamilies : resolvedGlobalFamilies;
             QByteArray bestIdentity;
-            for(const STerrainGlobalMaterialFamily& candidate :
-                    globalUniformFamilies(nullptr))
+            for(const STerrainGlobalMaterialFamily& candidate : candidates)
                 if(candidate.layer == family.layer
                    && !candidate.sources.isEmpty()
                    && candidate.sources.front().variantName.compare(

@@ -110,10 +110,12 @@ QString paintIssueCategoryLabel(const QString& category)
 CTerrainTransitionCatalog globalMaterialCatalog(
     const STerrainAtlasProfile& profile,
     const CTerrainTransitionCatalog& source,
-    ETerrainAtlasLayer layer)
+    ETerrainAtlasLayer layer,
+    const QVector<STerrainGlobalMaterialFamily>* globalFamilies = nullptr)
 {
     Q_UNUSED(layer);
-    return CTerrainAtlasPresetCatalog::globalizedCatalog(profile, source);
+    return CTerrainAtlasPresetCatalog::globalizedCatalog(
+        profile, source, globalFamilies);
 }
 
 QMap<qint32, ETerrainBlendStyle> globalMaterialBlendStyles(
@@ -5804,6 +5806,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
         ei::log(eLogInfo, QString("Canonical terrain preview ready: %1 x %2 vertices")
             .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
     }
+    phaseTimer.restart();
     if(m_activeTerrainArchivePath.isEmpty() && m_terrainEditAvailable)
     {
         // A published MPR can live in Maps while textures.res lives in the
@@ -5816,10 +5819,9 @@ void CView::loadLandscape(const QFileInfo& filePath)
             int(m_mprDocument.mapInfo().textureCount));
         for(const QString& pageName : pageNames)
         {
-            QByteArray payload;
             QString sourcePath;
-            if(CTextureList::getInstance()->terrainMmpPayload(
-                   pageName, &payload, &sourcePath)
+            if(CTextureList::getInstance()->terrainMmpSourceArchive(
+                   pageName, &sourcePath)
                && !sourcePath.isEmpty())
                 atlasSources.insert(QFileInfo(sourcePath).absoluteFilePath());
         }
@@ -5839,6 +5841,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
             ei::log(eLogWarning, QStringLiteral(
                 "Published terrain pages resolve from multiple archives; Save will request one explicit RES destination."));
     }
+    const qint64 archiveBindingMs = phaseTimer.elapsed();
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
     m_landscapeVisible = true;
@@ -5872,10 +5875,13 @@ void CView::loadLandscape(const QFileInfo& filePath)
     emit mprSaveStateChanged();
     const qint64 saveStateRefreshMs = phaseTimer.elapsed();
     ei::log(eLogInfo, QString(
-        "MPR editor load phases file:%1 rendererAtlasAndSectorsMs:%2 canonicalMs:%3 tileTableMs:%4 materialCatalogMs:%5 semanticFieldRestoreMs:%6 saveStateRefreshMs:%7 totalMs:%8")
+        "MPR editor load phases file:%1 rendererAtlasAndSectorsMs:%2 canonicalMs:%3 "
+        "archiveBindingMs:%4 tileTableMs:%5 materialCatalogMs:%6 "
+        "semanticFieldRestoreMs:%7 saveStateRefreshMs:%8 totalMs:%9")
         .arg(filePath.fileName()).arg(rendererLoadMs).arg(canonicalLoadMs)
-        .arg(tileTableMs).arg(materialCatalogMs).arg(semanticFieldRestoreMs)
-        .arg(saveStateRefreshMs).arg(totalLoadTimer.elapsed()));
+        .arg(archiveBindingMs).arg(tileTableMs).arg(materialCatalogMs)
+        .arg(semanticFieldRestoreMs).arg(saveStateRefreshMs)
+        .arg(totalLoadTimer.elapsed()));
     refreshAiGraphPreviewSource();
     refreshMprSettingsDock();
     emit selectionStateChanged(nSelectedNodes() > 0);
@@ -7800,17 +7806,17 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainGlobalMaterialSourceIdentities.clear();
     if(m_terrainAtlasAnalysis.usable)
     {
-        m_terrainAtlasAnalysis.landCatalog = globalMaterialCatalog(
-            m_terrainAtlasProfile, m_terrainAtlasAnalysis.landCatalog,
-            ETerrainAtlasLayer::Land);
-        m_terrainAtlasAnalysis.overlayCatalog = globalMaterialCatalog(
-            m_terrainAtlasProfile, m_terrainAtlasAnalysis.overlayCatalog,
-            ETerrainAtlasLayer::Overlay);
-        m_terrainAtlasAnalysis.overlayCompatibleCatalog = globalMaterialCatalog(
-            m_terrainAtlasProfile, m_terrainAtlasAnalysis.overlayCompatibleCatalog,
-            ETerrainAtlasLayer::Overlay);
         m_terrainGlobalFamilies =
             CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+        m_terrainAtlasAnalysis.landCatalog = globalMaterialCatalog(
+            m_terrainAtlasProfile, m_terrainAtlasAnalysis.landCatalog,
+            ETerrainAtlasLayer::Land, &m_terrainGlobalFamilies);
+        m_terrainAtlasAnalysis.overlayCatalog = globalMaterialCatalog(
+            m_terrainAtlasProfile, m_terrainAtlasAnalysis.overlayCatalog,
+            ETerrainAtlasLayer::Overlay, &m_terrainGlobalFamilies);
+        m_terrainAtlasAnalysis.overlayCompatibleCatalog = globalMaterialCatalog(
+            m_terrainAtlasProfile, m_terrainAtlasAnalysis.overlayCompatibleCatalog,
+            ETerrainAtlasLayer::Overlay, &m_terrainGlobalFamilies);
         for(const STerrainGlobalTransitionSource& source :
                 CTerrainAtlasPresetCatalog::globalAuthoredTransitions(&report))
             for(int rotation = 0; rotation < 4; ++rotation)
@@ -7819,12 +7825,27 @@ void CView::rebuildTerrainAutoCatalog()
                         source.signature, rotation)), source);
         const QSize requiredSize = m_pTileForm->tileImages().isEmpty()
             ? QSize() : m_pTileForm->tileImages().front().size();
-        // A reviewed atlas page commonly supplies anchors for many material
-        // families. Decode each physical MMP only once per catalog rebuild;
-        // the previous per-family decode made map opening spend tens of
-        // seconds repeatedly expanding the same 2048x2048 DXT page.
+        // Palette construction only needs individual 256x256 authored tiles.
+        // Read those DXT block bands directly from the indexed RES members;
+        // loading every complete 2048x2048 page here made map opening perform
+        // more than 100 MB of synchronous I/O before painting was even used.
         QMap<QString, QByteArray> encodedGlobalPages;
         QSet<QString> missingGlobalPages;
+        QSet<QString> directGlobalPages;
+        QElapsedTimer sourceHydrationTimer;
+        sourceHydrationTimer.start();
+        const auto loadCatalogTile = [&directGlobalPages](
+            const QString& name, int logicalSlot, QImage* tile,
+            QString* sourceIdentity) {
+            QString identity;
+            const bool loaded = CTextureList::getInstance()
+                ->catalogTerrainMmpTile(name, logicalSlot, tile, &identity);
+            if(loaded && !identity.isEmpty())
+                directGlobalPages.insert(identity);
+            if(sourceIdentity)
+                *sourceIdentity = identity;
+            return loaded;
+        };
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             STerrainGlobalMaterialSource selectedSource;
@@ -7835,7 +7856,7 @@ void CView::rebuildTerrainAutoCatalog()
                 [](const QString& name, QByteArray* payload) {
                     return CTextureList::getInstance()->catalogTerrainMmpPayload(
                         name, payload);
-                }, false, &selectedSource);
+                }, false, &selectedSource, loadCatalogTile);
             if(source.isNull())
             {
                 report.add("terrain.global_family_source",
@@ -7858,7 +7879,7 @@ void CView::rebuildTerrainAutoCatalog()
                 [](const QString& name, QByteArray* payload) {
                     return CTextureList::getInstance()->catalogTerrainMmpPayload(
                         name, payload);
-                }, true);
+                }, true, nullptr, loadCatalogTile);
             choice.thumbnail = thumbnail.isNull() ? source : thumbnail;
             choice.assignedSlots = family.sources.size();
             if(family.layer == ETerrainAtlasLayer::Land)
@@ -7875,9 +7896,12 @@ void CView::rebuildTerrainAutoCatalog()
             }
         }
         ei::log(eLogInfo, QString(
-            "Game-wide material palette source pages loaded:%1 unavailable:%2 materialTiles:%3")
-            .arg(encodedGlobalPages.size()).arg(missingGlobalPages.size())
-            .arg(m_terrainGlobalMaterialSources.size()));
+            "Game-wide material palette source pages accessed:%1 fullPagesRead:%2 "
+            "unavailable:%3 materialTiles:%4 elapsedMs:%5")
+            .arg(directGlobalPages.size()).arg(encodedGlobalPages.size())
+            .arg(missingGlobalPages.size())
+            .arg(m_terrainGlobalMaterialSources.size())
+            .arg(sourceHydrationTimer.elapsed()));
     }
     QString status = m_terrainAtlasAnalysis.usable
         ? tr("%1 loaded: %2 land and %3 overlay materials.")

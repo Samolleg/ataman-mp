@@ -152,7 +152,9 @@ const SCachedArchiveIndex& archiveIndex(const QString& path)
     return cached;
 }
 
-bool readIndexedResource(const QVector<QString>& sources, const QString& requestedName, QByteArray& output, QString* sourcePath = nullptr)
+bool findIndexedResource(const QVector<QString>& sources,
+                         const QString& requestedName,
+                         QString* sourcePath, SResFileEntry* resourceEntry)
 {
     const QString normalized = requestedName.toLower();
     for(const QString& path : sources)
@@ -161,17 +163,32 @@ bool readIndexedResource(const QVector<QString>& sources, const QString& request
         auto found = index.entries.constFind(normalized);
         if(found == index.entries.constEnd())
             continue;
-        QFile file(path);
-        if(!file.open(QIODevice::ReadOnly) || !file.seek(found->Position))
-            continue;
-        output = file.read(found->Size);
-        if(output.size() != found->Size)
-            continue;
         if(sourcePath)
             *sourcePath = path;
+        if(resourceEntry)
+            *resourceEntry = found.value();
         return true;
     }
     return false;
+}
+
+bool readIndexedResource(const QVector<QString>& sources,
+                         const QString& requestedName, QByteArray& output,
+                         QString* sourcePath = nullptr)
+{
+    QString resolvedPath;
+    SResFileEntry entry;
+    if(!findIndexedResource(sources, requestedName, &resolvedPath, &entry))
+        return false;
+    QFile file(resolvedPath);
+    if(!file.open(QIODevice::ReadOnly) || !file.seek(entry.Position))
+        return false;
+    output = file.read(entry.Size);
+    if(output.size() != entry.Size)
+        return false;
+    if(sourcePath)
+        *sourcePath = resolvedPath;
+    return true;
 }
 
 QStringList indexedNames(const QVector<QString>& sources, const QString& suffix)
@@ -1352,6 +1369,71 @@ bool CTextureList::catalogTerrainMmpPayload(const QString& textureName,
                                textureName.toLower(), *payload, sourcePath);
 }
 
+bool CTextureList::terrainMmpSourceArchive(const QString& textureName,
+                                           QString* sourcePath) const
+{
+    if(sourcePath)
+        sourcePath->clear();
+    QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!m_mapLocalTerrainArchive.isEmpty())
+        sources.prepend(m_mapLocalTerrainArchive);
+    return findIndexedResource(sources, textureName.toLower(),
+                               sourcePath, nullptr);
+}
+
+bool CTextureList::catalogTerrainMmpTile(const QString& textureName,
+                                         int logicalSlot, QImage* tile,
+                                         QString* sourceIdentity) const
+{
+    if(tile)
+        *tile = QImage();
+    if(sourceIdentity)
+        sourceIdentity->clear();
+    if(!tile || logicalSlot < 0 || logicalSlot >= 64)
+        return false;
+
+    QString resolvedPath;
+    SResFileEntry entry;
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!findIndexedResource(sources, textureName.toLower(),
+                            &resolvedPath, &entry))
+        return false;
+    const QFileInfo info(resolvedPath);
+    const QString pageIdentity = QStringLiteral("%1|%2|%3|%4|%5|%6")
+        .arg(info.absoluteFilePath().toCaseFolded())
+        .arg(info.size())
+        .arg(info.lastModified().toMSecsSinceEpoch())
+        .arg(entry.Position).arg(entry.Size)
+        .arg(entry.LastWriteTime.toMSecsSinceEpoch());
+    const QString cacheKey = pageIdentity + QStringLiteral("|")
+        + QString::number(logicalSlot);
+    const auto cached = m_catalogTerrainTileCache.constFind(cacheKey);
+    if(cached != m_catalogTerrainTileCache.constEnd())
+    {
+        *tile = cached.value();
+        if(sourceIdentity)
+            *sourceIdentity = pageIdentity;
+        return true;
+    }
+    QFile file(resolvedPath);
+    if(!file.open(QIODevice::ReadOnly))
+        return false;
+    QString diagnostic;
+    if(!ei::decodeMmpDxt1AtlasTile(
+           &file, entry.Position, entry.Size, logicalSlot,
+           tile, &diagnostic))
+    {
+        ei::log(eLogWarning, QString(
+            "Cannot decode indexed terrain atlas tile: %1 slot:%2 archive:%3 diagnostic:%4")
+            .arg(textureName).arg(logicalSlot).arg(resolvedPath, diagnostic));
+        return false;
+    }
+    m_catalogTerrainTileCache.insert(cacheKey, *tile);
+    if(sourceIdentity)
+        *sourceIdentity = pageIdentity;
+    return true;
+}
+
 bool CTextureList::terrainMmpTile(const QString& textureName, int logicalSlot,
                                   QImage* tile, QString* sourcePath) const
 {
@@ -1680,6 +1762,7 @@ void CTextureList::refreshConfiguredSources()
 {
     m_missingTextureNames.clear();
     m_aTextureImages.clear();
+    m_catalogTerrainTileCache.clear();
     for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
     {
         if(it.key().startsWith("layers|"))

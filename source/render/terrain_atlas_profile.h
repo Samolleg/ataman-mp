@@ -287,7 +287,9 @@ public:
         QMap<QString, QImage>* decodedTileCache,
         const std::function<bool(const QString&, QByteArray*)>& pageLoader,
         bool thumbnail = false,
-        STerrainGlobalMaterialSource* selectedSource = nullptr);
+        STerrainGlobalMaterialSource* selectedSource = nullptr,
+        const std::function<bool(const QString&, int, QImage*, QString*)>&
+            tileLoader = {});
     // Resolve one authored transition against the current resource payload.
     // Unlike a page-name-only cache, this remains correct when another
     // configured RES supplies different bytes for the same MMP member.
@@ -302,7 +304,8 @@ public:
         CValidationReport* report = nullptr);
     static CTerrainTransitionCatalog globalizedCatalog(
         const STerrainAtlasProfile& profile,
-        const CTerrainTransitionCatalog& source);
+        const CTerrainTransitionCatalog& source,
+        const QVector<STerrainGlobalMaterialFamily>* globalFamilies = nullptr);
 };
 
 QImage terrainVertexJunctionThumbnail(
