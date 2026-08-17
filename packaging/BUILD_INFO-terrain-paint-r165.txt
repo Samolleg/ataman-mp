@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: responsive sparse Manual paint and undo transactions
+Executable source/changelist commit: eb5bbf8297eaaae0365d45508e89d85987553fd0
+Semantic catalog source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: virtual atlas 113 pass / 0 fail; document 120 pass / 0 fail / 6 expected skips; Landscape Tools widget 5 pass / 0 fail; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: omitted from this focused performance revision; test against the user's existing Zone2 repro map and resource profile
