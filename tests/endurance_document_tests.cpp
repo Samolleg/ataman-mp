@@ -20,6 +20,7 @@
 #include "res_archive_document.h"
 #include "terrain_paint_diagnostic.h"
 #include "terrain_edit_model.h"
+#include "terrain_semantic_field_store.h"
 #include "terrain_tile_information_policy.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_archive_binding.h"
@@ -384,6 +385,9 @@ private slots:
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void manualTilePaintRebasesDecodedSemanticsAndInvalidatesDisputes();
     void manualTilePaintOnLegacyMapStaysPhysicalUntilModernStarts();
+    void laterManualTileWinsSharedCornersAndUndoRestoresPriorValues();
+    void terrainSemanticFieldRoundTripsWithoutPlacementHistory();
+    void terrainSemanticFieldRejectsWrongMprOrAtlasBinding();
     void mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlasCapacity();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void interruptedTerrainStrokeRejectsUnownedStamp();
@@ -4492,10 +4496,11 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
     QVERIFY(terrain.apply(farModern, true));
     QVERIFY(terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land));
 
-    // A decoded non-uniform stamp can disagree with its physical neighbours
-    // at one shared vertex. The model must invalidate that vertex rather than
-    // silently retaining the old Modern value or assigning the Manual tile
-    // an ownership privilege.
+    // A decoded non-uniform Manual tile is an explicit physical/corner edit.
+    // Its exact selected corner tuple wins at the four touched vertices; the
+    // surrounding incident cells must not outvote it or turn it into an
+    // unset/disputed value. This stores only the final semantic values, not
+    // Manual ownership or placement order.
     QVERIFY(catalog.addVariant(manualTransition));
     CValidationReport mixedReport;
     const STerrainTileCommand mixed = terrain.makeTilePaint(
@@ -4505,10 +4510,10 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
     QVERIFY(terrain.apply(mixed, true));
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              manualTransition.packedTile);
-    bool northWestFound = true;
-    terrain.virtualMaterialAt(
-        ETerrainTileLayer::Land, 8, 8, &northWestFound);
-    QVERIFY(!northWestFound);
+    bool northWestFound = false;
+    QCOMPARE(terrain.virtualMaterialAt(
+        ETerrainTileLayer::Land, 8, 8, &northWestFound), qint32(2));
+    QVERIFY(northWestFound);
     for(const QPoint& vertex : {QPoint(9, 8), QPoint(9, 9), QPoint(8, 9)})
     {
         bool found = false;
@@ -4535,10 +4540,10 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
     QVERIFY(terrain.apply(mixed, true));
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              manualTransition.packedTile);
-    northWestFound = true;
-    terrain.virtualMaterialAt(
-        ETerrainTileLayer::Land, 8, 8, &northWestFound);
-    QVERIFY(!northWestFound);
+    northWestFound = false;
+    QCOMPARE(terrain.virtualMaterialAt(
+        ETerrainTileLayer::Land, 8, 8, &northWestFound), qint32(2));
+    QVERIFY(northWestFound);
     for(const QPoint& vertex : {QPoint(9, 8), QPoint(9, 9), QPoint(8, 9)})
     {
         bool found = false;
@@ -4628,13 +4633,18 @@ void EnduranceDocumentTests::manualTilePaintOnLegacyMapStaysPhysicalUntilModernS
         catalog, &manualReport);
     QVERIFY2(!manualReport.hasErrors(), qPrintable(manualReport.toText()));
     QVERIFY(!manual.isEmpty());
-    QVERIFY2(manual.virtualVertices.isEmpty(),
-             "Manual paint on a legacy map activated the Modern semantic field");
+    QVERIFY2(!manual.virtualFields.isEmpty(),
+             "Manual paint did not record its exact semantic corner values");
     QVERIFY(terrain.apply(manual, true));
     QVERIFY(!terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land));
-    CTerrainVirtualMaterialField absent;
-    QVERIFY(!terrain.copyVirtualMaterialField(
-        ETerrainTileLayer::Land, &absent, false));
+    CTerrainVirtualMaterialField manualField;
+    QVERIFY(terrain.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &manualField, true));
+    for(int y = 0; y <= terrain.tileCountY(); ++y)
+        for(int x = 0; x <= terrain.tileCountX(); ++x)
+            QCOMPARE(manualField.material(x, y), qint32(2));
+    QVERIFY(!terrain.virtualMaterialCellChanged(
+        ETerrainTileLayer::Land, 8, 8));
     QCOMPARE(terrainMprSaveRoute(
         false,
         terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land),
@@ -4656,6 +4666,79 @@ void EnduranceDocumentTests::manualTilePaintOnLegacyMapStaysPhysicalUntilModernS
     QVERIFY(terrain.copyVirtualMaterialField(
         ETerrainTileLayer::Land, &recovered, true));
     QCOMPARE(recovered.material(0, 0), qint32(2));
+}
+
+void EnduranceDocumentTests::laterManualTileWinsSharedCornersAndUndoRestoresPriorValues()
+{
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(),
+                               "manual-shared-corner-order.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+
+    CTerrainTransitionCatalog catalog;
+    for(qint32 material = 1; material <= 3; ++material)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = variant.signature.northEast =
+            variant.signature.southEast = variant.signature.southWest =
+                material;
+        variant.packedTile = quint16(material - 1);
+        QVERIFY(catalog.addVariant(variant));
+    }
+    CValidationReport baselineReport;
+    QVERIFY(terrain.initializeVirtualMaterialField(
+        ETerrainTileLayer::Land, catalog, &baselineReport,
+        ETerrainMaterialFieldRecovery::RecoverDeterministically));
+    QVERIFY2(!baselineReport.hasErrors(),
+             qPrintable(baselineReport.toText()));
+
+    STerrainTileBrush firstCell;
+    firstCell.centerX = 8.0f;
+    firstCell.centerY = 8.0f;
+    firstCell.radius = 0.0f;
+    const STerrainTileCommand first = terrain.makeTilePaint(
+        firstCell, ETerrainTileLayer::Land, 0, 1, 0, catalog);
+    QVERIFY(!first.isEmpty());
+    QVERIFY(terrain.apply(first, true));
+
+    STerrainTileBrush secondCell = firstCell;
+    secondCell.centerX = 9.0f;
+    const STerrainTileCommand second = terrain.makeTilePaint(
+        secondCell, ETerrainTileLayer::Land, 0, 2, 0, catalog);
+    QVERIFY(!second.isEmpty());
+    QVERIFY(terrain.apply(second, true));
+
+    // The later explicit cell supplies both vertices on the shared edge.
+    // This is only the final semantic field: there is no timestamp, owner, or
+    // placement sequence to persist.
+    for(const QPoint& vertex : {QPoint(9, 8), QPoint(9, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(3));
+        QVERIFY(found);
+    }
+
+    QVERIFY(terrain.apply(second, false));
+    for(const QPoint& vertex : {QPoint(9, 8), QPoint(9, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(2));
+        QVERIFY(found);
+    }
+    QVERIFY(terrain.apply(second, true));
+    for(const QPoint& vertex : {QPoint(9, 8), QPoint(9, 9)})
+    {
+        bool found = false;
+        QCOMPARE(terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found),
+                 qint32(3));
+        QVERIFY(found);
+    }
 }
 
 void EnduranceDocumentTests::mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlasCapacity()
@@ -8603,6 +8686,11 @@ void EnduranceDocumentTests::terrainAtlasRecoveryStoreDeduplicatesExactPayloads(
     pageOne.name = QStringLiteral("zone2_deadbeef001.mmp");
     pageOne.payload = QByteArray("exact-page-one");
     snapshot.pages.append(pageOne);
+    STerrainAtlasRecoveryPage semanticMember;
+    semanticMember.name = QStringLiteral(
+        "ei_terrain_semantics_zone2_deadbeef.json");
+    semanticMember.payload = QByteArray("{\"field\":\"exact\"}");
+    snapshot.metadataMembers.append(semanticMember);
 
     CTerrainAtlasRecoveryStore store(root.path());
     const STerrainAtlasRecoveryResult first = store.saveSnapshot(snapshot);
@@ -8614,9 +8702,9 @@ void EnduranceDocumentTests::terrainAtlasRecoveryStoreDeduplicatesExactPayloads(
     QCOMPARE(second.manifestPath, first.manifestPath);
 
     const QDir objectDirectory(store.objectDirectory());
-    // One profile payload and two distinct page payloads. The second snapshot
-    // must reuse all three content-addressed objects.
-    QCOMPARE(objectDirectory.entryList(QDir::Files).size(), 3);
+    // One profile, two pages, and one editor semantic-field payload. The
+    // second snapshot must reuse all four content-addressed objects.
+    QCOMPARE(objectDirectory.entryList(QDir::Files).size(), 4);
     STerrainAtlasRecoverySnapshot recovered;
     QString error;
     QVERIFY2(store.findExact(snapshot.resourceIdentity,
@@ -8631,6 +8719,10 @@ void EnduranceDocumentTests::terrainAtlasRecoveryStoreDeduplicatesExactPayloads(
         QCOMPARE(recovered.pages.at(index).payload,
                  snapshot.pages.at(index).payload);
     }
+    QCOMPARE(recovered.metadataMembers.size(), 1);
+    QCOMPARE(recovered.metadataMembers.front().name, semanticMember.name);
+    QCOMPARE(recovered.metadataMembers.front().payload,
+             semanticMember.payload);
     STerrainAtlasRecoverySnapshot recoveredFromMpr;
     QVERIFY2(store.findForMpr(snapshot.resourceIdentity,
                               snapshot.mprSha256,
@@ -9237,6 +9329,97 @@ void EnduranceDocumentTests::malformedMprTableIsRejected()
     CValidationReport report;
     QVERIFY(!document.load(QFileInfo(file.fileName()), &report));
     QVERIFY(report.hasErrors());
+}
+
+void EnduranceDocumentTests::terrainSemanticFieldRoundTripsWithoutPlacementHistory()
+{
+    STerrainSemanticFieldDocument source;
+    source.mprNamespace = QStringLiteral("zone2");
+    source.mprSha256 = QCryptographicHash::hash(
+        QByteArrayLiteral("mpr-candidate"), QCryptographicHash::Sha256);
+    source.atlasPixelSha256 = QCryptographicHash::hash(
+        QByteArrayLiteral("atlas-pixels"), QCryptographicHash::Sha256);
+    source.profileSha256 = QCryptographicHash::hash(
+        QByteArrayLiteral("semantic-profile"), QCryptographicHash::Sha256);
+    source.vertexWidth = 3;
+    source.vertexHeight = 2;
+    source.land = {0x40000101, 0x40000101, -1,
+                   0x40000102, 0x40000103, 0x40000103};
+    // An absent layer remains absent. Reload must not manufacture a complete
+    // all-unset field that would suppress deterministic initialization later.
+    source.overlay.clear();
+
+    CValidationReport writeReport;
+    const QByteArray bytes = source.toBytes(&writeReport);
+    QVERIFY2(!bytes.isEmpty(), qPrintable(writeReport.toText()));
+    QVERIFY(!bytes.contains("placement"));
+    QVERIFY(!bytes.contains("owner"));
+    QVERIFY(!bytes.contains("timestamp"));
+
+    STerrainSemanticFieldDocument reopened;
+    CValidationReport readReport;
+    QVERIFY2(STerrainSemanticFieldDocument::fromBytes(
+        bytes, &reopened, &readReport, QStringLiteral("test.res:field")),
+        qPrintable(readReport.toText()));
+    QCOMPARE(reopened.mprNamespace, source.mprNamespace);
+    QCOMPARE(reopened.mprSha256, source.mprSha256);
+    QCOMPARE(reopened.atlasPixelSha256, source.atlasPixelSha256);
+    QCOMPARE(reopened.profileSha256, source.profileSha256);
+    QCOMPARE(reopened.vertexWidth, source.vertexWidth);
+    QCOMPARE(reopened.vertexHeight, source.vertexHeight);
+    QCOMPARE(reopened.land, source.land);
+    QCOMPARE(reopened.overlay, source.overlay);
+    QVERIFY(reopened.validateBinding(
+        source.mprNamespace, source.mprSha256, source.atlasPixelSha256,
+        source.profileSha256,
+        source.vertexWidth, source.vertexHeight, &readReport));
+
+    const QString first = STerrainSemanticFieldDocument::memberName(
+        source.mprNamespace, QFileInfo(QStringLiteral("C:/Maps/zone2 edit.mpr")));
+    const QString second = STerrainSemanticFieldDocument::memberName(
+        source.mprNamespace, QFileInfo(QStringLiteral("D:/Elsewhere/zone2 edit.mpr")));
+    QCOMPARE(first, second);
+    QVERIFY(first.startsWith(QStringLiteral("ei_terrain_semantics_zone2_")));
+    QVERIFY(first.endsWith(QStringLiteral(".json")));
+}
+
+void EnduranceDocumentTests::terrainSemanticFieldRejectsWrongMprOrAtlasBinding()
+{
+    STerrainSemanticFieldDocument source;
+    source.mprNamespace = QStringLiteral("zone2");
+    source.mprSha256 = QCryptographicHash::hash(
+        QByteArrayLiteral("mpr-a"), QCryptographicHash::Sha256);
+    source.atlasPixelSha256 = QCryptographicHash::hash(
+        QByteArrayLiteral("atlas-a"), QCryptographicHash::Sha256);
+    source.profileSha256 = QCryptographicHash::hash(
+        QByteArrayLiteral("profile-a"), QCryptographicHash::Sha256);
+    source.vertexWidth = 2;
+    source.vertexHeight = 2;
+    source.land = {1, 2, 3, 4};
+    source.overlay = {-1, -1, -1, -1};
+
+    CValidationReport report;
+    QVERIFY(!source.validateBinding(
+        source.mprNamespace,
+        QCryptographicHash::hash(QByteArrayLiteral("mpr-b"),
+                                 QCryptographicHash::Sha256),
+        source.atlasPixelSha256, source.profileSha256, 2, 2, &report));
+    QVERIFY(report.hasErrors());
+
+    QByteArray bytes = source.toBytes();
+    QVERIFY(!bytes.isEmpty());
+    QJsonObject corruptedRoot = QJsonDocument::fromJson(bytes).object();
+    QJsonObject corruptedLand = corruptedRoot.value(
+        QStringLiteral("land")).toObject();
+    corruptedLand.insert(QStringLiteral("sha256"),
+                         QString(64, QLatin1Char('0')));
+    corruptedRoot.insert(QStringLiteral("land"), corruptedLand);
+    bytes = QJsonDocument(corruptedRoot).toJson(QJsonDocument::Compact);
+    STerrainSemanticFieldDocument corrupt;
+    CValidationReport corruptReport;
+    QVERIFY(!STerrainSemanticFieldDocument::fromBytes(
+        bytes, &corrupt, &corruptReport, QStringLiteral("corrupt")));
+    QVERIFY(corruptReport.hasErrors());
 }
 
 void EnduranceDocumentTests::stagedMobIsReopenedWithoutCreatingDestination()

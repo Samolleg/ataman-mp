@@ -14,6 +14,7 @@ SOURCES += \
     ../source/documents/mpr_document.cpp \
     ../source/documents/mpr_namespace.cpp \
     ../source/documents/terrain_edit_model.cpp \
+    ../source/documents/terrain_semantic_field_store.cpp \
     ../source/documents/terrain_virtual_atlas.cpp \
     ../source/documents/res_archive_document.cpp \
     ../source/resources/mmp_codec.cpp \
@@ -38,6 +39,7 @@ HEADERS += \
     ../source/documents/endurance_document.h \
     ../source/documents/mpr_document.h \
     ../source/documents/terrain_edit_model.h \
+    ../source/documents/terrain_semantic_field_store.h \
     ../source/documents/terrain_virtual_atlas.h \
     ../source/documents/res_archive_document.h \
     ../source/resources/mmp_codec.h \

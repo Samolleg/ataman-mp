@@ -1669,6 +1669,42 @@ bool CTerrainEditModel::copyVirtualMaterialField(
     return true;
 }
 
+bool CTerrainEditModel::copyVirtualMaterialFieldState(
+    ETerrainTileLayer layer, QVector<qint32>* current,
+    QVector<qint32>* baseline) const
+{
+    if(!current || !baseline)
+        return false;
+    *current = layer == ETerrainTileLayer::Land
+        ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    *baseline = layer == ETerrainTileLayer::Land
+        ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+    return true;
+}
+
+bool CTerrainEditModel::restoreVirtualMaterialFieldState(
+    ETerrainTileLayer layer, const QVector<qint32>& current,
+    const QVector<qint32>& baseline, CValidationReport* report)
+{
+    const int expected = (tileCountX() + 1) * (tileCountY() + 1);
+    const bool empty = current.isEmpty() && baseline.isEmpty();
+    if(!empty && (current.size() != expected || baseline.size() != expected))
+    {
+        if(report)
+            report->add("terrain.virtual_field_dimensions",
+                EValidationSeverity::Error,
+                "The stored virtual material field dimensions do not match the MPR terrain grid");
+        return false;
+    }
+    QVector<qint32>& destinationCurrent = layer == ETerrainTileLayer::Land
+        ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    QVector<qint32>& destinationBaseline = layer == ETerrainTileLayer::Land
+        ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+    destinationCurrent = current;
+    destinationBaseline = baseline;
+    return true;
+}
+
 bool CTerrainEditModel::initializeVirtualMaterialField(
     ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
     CValidationReport* report, ETerrainMaterialFieldRecovery recovery)
@@ -4138,6 +4174,27 @@ QVector<qint32> CTerrainWorkingAtlas::activeTileTypes() const
     return result;
 }
 
+QVector<QByteArray> CTerrainWorkingAtlas::manualAtlasPhysicalIdentities() const
+{
+    QVector<QByteArray> result(activeTextureCount() * 64);
+    for(int slot = 0; slot < result.size(); ++slot)
+    {
+        STerrainWorkingTileIdentity identity;
+        if(!tileIdentityForSlot(slot, &identity)
+           || identity.physicalPixelSha256.isEmpty()
+           || identity.runtimeTerrainType < 0
+           || identity.runtimeTerrainType >= 16)
+            continue;
+        QByteArray selectionIdentity = identity.physicalPixelSha256;
+        char typeBytes[sizeof(identity.runtimeTerrainType)];
+        qToLittleEndian<qint32>(identity.runtimeTerrainType,
+                                reinterpret_cast<uchar*>(typeBytes));
+        selectionIdentity.append(typeBytes, sizeof(typeBytes));
+        result[slot] = selectionIdentity;
+    }
+    return result;
+}
+
 qint32 CTerrainWorkingAtlas::runtimeTerrainTypeForSlot(int slot) const
 {
     return slot >= 0 && slot < m_workingTileTypes.size()
@@ -4375,11 +4432,12 @@ int CTerrainWorkingAtlas::realize(
         return -1;
 
     int workingSlot = -1;
-    // Authored imagery is immutable for the entire editing session. Generated
-    // transitions live only in the extension namespace; an apparently unused
-    // stock slot may still be referenced by preserved layers, undo history, or
-    // renderer state and must never be recycled under it.
-    for(int slot = m_authoredImages.size(); slot < m_capacityLimit; ++slot)
+    // Logical authored slots are immutable for the editing session. The unused
+    // tail of an authored physical page has no logical identity, so it is a
+    // safe extension slot exactly when no layer references it and undo history
+    // does not protect it. Do not skip that reusable tail merely because the
+    // MMP page itself is physically complete.
+    for(int slot = m_authoredSlotCount; slot < m_capacityLimit; ++slot)
     {
         if(workingUsage->value(slot) == 0 && !protectedSlots.contains(slot))
         {
@@ -4391,9 +4449,9 @@ int CTerrainWorkingAtlas::realize(
     {
         if(report) report->add("terrain.working_atlas_capacity",
             EValidationSeverity::Error,
-            QString("The stroke needs another exact transition, but all %1 validated working slots are used or protected by undo history (authored:%2 extension:%3). No identity was substituted.")
-                .arg(m_capacityLimit).arg(m_authoredImages.size())
-                .arg(qMax(0, m_capacityLimit - m_authoredImages.size())));
+            QString("The stroke needs another exact transition, but all %1 validated working slots are used or protected by undo history (authored logical:%2 reusable extension:%3). No identity was substituted.")
+                .arg(m_capacityLimit).arg(m_authoredSlotCount)
+                .arg(qMax(0, m_capacityLimit - m_authoredSlotCount)));
         return -1;
     }
 

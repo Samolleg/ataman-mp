@@ -3,7 +3,9 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QListWidget>
+#include <QTreeWidget>
 
+#include "loaded_map_panel_policy.h"
 #include "landscape_tools.h"
 
 class LandscapeToolsWidgetTests : public QObject
@@ -12,7 +14,49 @@ class LandscapeToolsWidgetTests : public QObject
 
 private slots:
     void manualPaletteDoesNotAllocateRowsForEmptyAtlasHoles();
+    void manualPaletteFiltersNonNullPaddingAndRestoresPhysicalIdentity();
+    void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
+
+void LandscapeToolsWidgetTests::loadedMapRefreshWaitsForTreeItemMutationToReturn()
+{
+    QTreeWidget tree;
+    tree.setColumnCount(2);
+    QTreeWidgetItem* original = new QTreeWidgetItem(&tree);
+    original->setFlags(original->flags() | Qt::ItemIsUserCheckable);
+    original->setCheckState(1, Qt::Checked);
+
+    bool refreshPending = false;
+    int rebuildCount = 0;
+    QObject::connect(&tree, &QTreeWidget::itemChanged, &tree,
+        [&](QTreeWidgetItem* item, int column) {
+        if(item != original || column != 1)
+            return;
+        QVERIFY(scheduleLoadedMapPanelRefresh(&tree, &refreshPending, [&]() {
+            ++rebuildCount;
+            tree.clear();
+            QTreeWidgetItem* replacement = new QTreeWidgetItem(&tree);
+            replacement->setText(0, QStringLiteral("rebuilt"));
+        }));
+        QVERIFY(!scheduleLoadedMapPanelRefresh(&tree, &refreshPending, [&]() {
+            ++rebuildCount;
+        }));
+        // The originating QTreeWidgetItem::setData call is still on the stack.
+        // A synchronous clear here was the observed use-after-free.
+        QCOMPARE(tree.topLevelItem(0), original);
+    });
+
+    original->setCheckState(1, Qt::Unchecked);
+    QCOMPARE(rebuildCount, 0);
+    QCOMPARE(tree.topLevelItem(0), original);
+    QVERIFY(refreshPending);
+
+    QCoreApplication::processEvents();
+    QCOMPARE(rebuildCount, 1);
+    QCOMPARE(tree.topLevelItemCount(), 1);
+    QCOMPARE(tree.topLevelItem(0)->text(0), QStringLiteral("rebuilt"));
+    QVERIFY(!refreshPending);
+}
 
 void LandscapeToolsWidgetTests::manualPaletteDoesNotAllocateRowsForEmptyAtlasHoles()
 {
@@ -48,7 +92,7 @@ void LandscapeToolsWidgetTests::manualPaletteDoesNotAllocateRowsForEmptyAtlasHol
     QLabel* status = tools.findChild<QLabel*>(
         QStringLiteral("terrainPaintTilesetStatus"));
     QVERIFY(status);
-    QVERIFY2(status->text().contains(QStringLiteral("619 physical")),
+    QVERIFY2(status->text().contains(QStringLiteral("567 physical")),
              qPrintable(status->text()));
 
     const QRect lastBeforeHole = list->visualItemRect(list->item(11));
@@ -72,6 +116,55 @@ void LandscapeToolsWidgetTests::manualPaletteDoesNotAllocateRowsForEmptyAtlasHol
         visibleItems += !list->item(row)->isHidden();
     QCOMPARE(visibleItems, 1);
     QCOMPARE(list->item(12)->data(Qt::UserRole).toInt(), 64);
+}
+
+void LandscapeToolsWidgetTests::manualPaletteFiltersNonNullPaddingAndRestoresPhysicalIdentity()
+{
+    CLandscapeTools tools;
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Manual);
+
+    QVector<QImage> tiles;
+    QVector<qint32> runtimeTypes;
+    QVector<QByteArray> identities;
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        QImage image(16, 16, QImage::Format_RGBA8888);
+        image.fill(QColor::fromHsv(slot * 5, 255, 180));
+        tiles.append(image);
+        runtimeTypes.append(1);
+        if(slot < 61)
+            identities.append(QByteArray("physical-pixels-")
+                              + QByteArray::number(slot) + QByteArray("/type-1"));
+        else
+            identities.append(QByteArray());
+    }
+
+    tools.setManualAtlasTiles(tiles, runtimeTypes, {}, identities);
+    QListWidget* list = tools.findChild<QListWidget*>(
+        QStringLiteral("manualAtlasTileList"));
+    QVERIFY(list);
+    QCOMPARE(list->count(), 61);
+    QVERIFY(!tools.selectManualAtlasTile(61));
+    QVERIFY(tools.selectManualAtlasTile(13));
+
+    QVector<QByteArray> duplicateIdentities = identities;
+    duplicateIdentities[5] = identities.at(13);
+    tools.setManualAtlasTiles(tiles, runtimeTypes, {}, duplicateIdentities);
+    QVERIFY(list->currentItem());
+    QCOMPARE(list->currentItem()->data(Qt::UserRole).toInt(), 13);
+
+    QVector<QByteArray> refreshedIdentities = identities;
+    refreshedIdentities[13] = QByteArray("replacement-pixels/type-1");
+    refreshedIdentities[21] = identities.at(13);
+    tools.setManualAtlasTiles(tiles, runtimeTypes, {}, refreshedIdentities);
+
+    QVERIFY(list->currentItem());
+    QCOMPARE(list->currentItem()->data(Qt::UserRole).toInt(), 21);
+    QLabel* status = tools.findChild<QLabel*>(
+        QStringLiteral("terrainPaintTilesetStatus"));
+    QVERIFY(status);
+    QVERIFY2(status->text().contains(QStringLiteral("61 physical")),
+             qPrintable(status->text()));
 }
 
 QTEST_MAIN(LandscapeToolsWidgetTests)

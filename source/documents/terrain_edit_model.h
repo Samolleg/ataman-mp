@@ -126,7 +126,26 @@ struct STerrainTileCommand
         qint32 after{0};
     };
     QVector<SVirtualVertexDelta> virtualVertices;
-    bool isEmpty() const { return deltas.isEmpty() && virtualVertices.isEmpty(); }
+    // Commands that establish, replace, or remove a complete semantic field
+    // must own both its current and saved-baseline state.  Keeping this state
+    // outside the command made Undo restore packed cells while leaving hidden
+    // material provenance behind.
+    struct SVirtualFieldDelta
+    {
+        ETerrainTileLayer layer{ETerrainTileLayer::Land};
+        int vertexWidth{0};
+        int vertexHeight{0};
+        QVector<qint32> beforeCurrent;
+        QVector<qint32> afterCurrent;
+        QVector<qint32> beforeBaseline;
+        QVector<qint32> afterBaseline;
+    };
+    QVector<SVirtualFieldDelta> virtualFields;
+    bool isEmpty() const
+    {
+        return deltas.isEmpty() && virtualVertices.isEmpty()
+            && virtualFields.isEmpty();
+    }
 };
 
 // Compose sequential live-preview commands into one reversible before/after
@@ -548,6 +567,13 @@ public:
     bool copyVirtualMaterialField(ETerrainTileLayer layer,
         CTerrainVirtualMaterialField* output,
         bool requireComplete = true) const;
+    bool copyVirtualMaterialFieldState(
+        ETerrainTileLayer layer, QVector<qint32>* current,
+        QVector<qint32>* baseline) const;
+    bool restoreVirtualMaterialFieldState(
+        ETerrainTileLayer layer, const QVector<qint32>& current,
+        const QVector<qint32>& baseline,
+        CValidationReport* report = nullptr);
     bool initializeVirtualMaterialField(
         ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
         CValidationReport* report = nullptr,

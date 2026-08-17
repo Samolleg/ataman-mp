@@ -21,6 +21,10 @@ struct STerrainAtlasRecoverySnapshot
     QByteArray mprSha256;
     QVector<qint32> runtimeTerrainTypes;
     QVector<STerrainAtlasRecoveryPage> pages;
+    // Small editor-only RES members (for example the exact shared-corner
+    // semantic field). They are content-addressed like pages and restored
+    // verbatim, but are never interpreted as game texture pages.
+    QVector<STerrainAtlasRecoveryPage> metadataMembers;
 };
 
 struct STerrainAtlasRecoveryResult

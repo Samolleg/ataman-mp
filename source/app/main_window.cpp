@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "loaded_map_panel_policy.h"
 #include "ui_main_window.h"
 
 #include <QWidget>
@@ -4548,6 +4549,12 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
 }
 
 void MainWindow::updateLoadedMapPanel()
+{
+    scheduleLoadedMapPanelRefresh(this, &m_loadedMapPanelRefreshPending,
+        [this]() { rebuildLoadedMapPanel(); });
+}
+
+void MainWindow::rebuildLoadedMapPanel()
 {
     if(!m_loadedMapTree || !m_pView)
         return;

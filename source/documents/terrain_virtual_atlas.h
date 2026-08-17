@@ -389,6 +389,10 @@ public:
     int activeTileCount() const;
     QVector<QImage> activeTileImages() const;
     QVector<qint32> activeTileTypes() const;
+    // Complete physical pages are required by the renderer, but only a slot
+    // with a live identity can be painted manually.  Empty entries mark
+    // physical page padding or an otherwise unaddressable slot.
+    QVector<QByteArray> manualAtlasPhysicalIdentities() const;
     qint32 runtimeTerrainTypeForSlot(int slot) const;
     bool tileIdentityForSlot(int slot,
                              STerrainWorkingTileIdentity* identity) const;
@@ -400,6 +404,7 @@ public:
         const QVector<quint16>& pinnedPackedTiles = {},
         CValidationReport* report = nullptr) const;
     int capacityLimit() const { return m_capacityLimit; }
+    int authoredSlotCount() const { return m_authoredSlotCount; }
     int generatedTileCount() const;
     int activeTextureCount() const;
     // Resolve Missing Blends plans against an isolated copy.  The live cache

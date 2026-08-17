@@ -32,6 +32,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "select_window.h"
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
+#include "terrain_resolve_audit.h"
 #include "terrain_tile_information_policy.h"
 #include "landscape_edit_policy.h"
 #include "terrain_atlas_analyzer.h"
@@ -67,6 +68,7 @@ class CTableManager;
 class COperation;
 struct SColor;
 struct SMprSaveCommitResult;
+struct SResArchiveNewMember;
 
 struct STerrainPaintAuditAction
 {
@@ -329,6 +331,17 @@ private:
         const QFileInfo& destination, const QString& expectedSha256,
         const QVector<QImage>& physicalTiles,
         const QString& terrainArchivePath);
+    bool buildTerrainSemanticFieldMember(
+        const QByteArray& candidateMprBytes,
+        const QFileInfo& destinationMpr,
+        const QString& mprNamespace,
+        const QByteArray& atlasPixelSha256,
+        const QByteArray& profileBytes,
+        SResArchiveNewMember* member,
+        CValidationReport* report = nullptr) const;
+    bool restoreTerrainSemanticFieldFromArchive(
+        const QFileInfo& mprFile, const QString& terrainArchivePath,
+        bool requireMember = false);
     void refreshMobDirtyStates();
     void initShaders();
     void draw();
@@ -368,6 +381,8 @@ private:
     void refreshClassicAutoPalette();
     void refreshManualAtlasPalette();
     void refreshTerrainFamilyUsage();
+    bool terrainResolveUiActive() const;
+    void requestResolveMissingTerrainBlends(ETerrainResolveAuditTrigger trigger);
     void resolveMissingTerrainBlends();
     QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
     QMap<int, quint64> workingTerrainAtlasUsage() const;
@@ -639,6 +654,9 @@ private:
     qint32 m_classicAutoStrokeMaterialId{-1};
     QVector<STerrainPaintAuditAction> m_terrainPaintActions;
     int m_terrainPaintActionId{0};
+    ETerrainResolveAuditTrigger m_pendingTerrainResolveAuditTrigger{
+        ETerrainResolveAuditTrigger::Programmatic};
+    quint64 m_terrainResolveAuditActionId{0};
     quint32 m_terrainSemanticSeed{0};
     quint32 m_tileStrokeDistributionSeed{0};
     QString m_requestedTerrainResourceIdentity;

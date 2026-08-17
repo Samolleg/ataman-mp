@@ -2,6 +2,7 @@
 #define LANDSCAPE_TOOLS_H
 
 #include <QWidget>
+#include <QByteArray>
 #include <QImage>
 #include <QSet>
 #include <QStringList>
@@ -129,13 +130,19 @@ public:
         const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
         const QVector<STerrainPaintMaterialChoice>& overlayTypes);
     void setManualAtlasTiles(const QVector<QImage>& tiles,
-                             const QVector<qint32>& runtimeTypes,
-                             const QStringList& descriptions = QStringList());
+                              const QVector<qint32>& runtimeTypes,
+                              const QStringList& descriptions = QStringList(),
+                              // When supplied, each non-empty entry is the
+                              // stable physical-pixel SHA-256 + runtime-type
+                              // identity for the corresponding slot. Empty
+                              // entries are unaddressable physical padding.
+                              const QVector<QByteArray>& physicalIdentities = {});
     void setGeneratedAtlasTileCount(int count);
     void setUsedTerrainFamilies(const QSet<qint32>& landFamilies,
                                 const QSet<qint32>& overlayFamilies);
     bool selectPaintTerrainType(qint32 terrainType);
     bool selectManualAtlasTile(int slot);
+    int currentManualAtlasTile() const;
     bool underwaterFamiliesVisible() const;
     void setUnderwaterFamiliesVisible(bool visible);
     bool mainTerrainVisible() const;

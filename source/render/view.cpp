@@ -91,7 +91,9 @@
 #include "ai_graph_preview_builder.h"
 #include "portable_diagnostic_writer.h"
 #include "terrain_paint_diagnostic.h"
+#include "terrain_resolve_audit.h"
 #include "terrain_atlas_recovery_store.h"
+#include "terrain_semantic_field_store.h"
 
 class CLogic;
 
@@ -157,13 +159,16 @@ STerrainAtlasRecoveryResult saveTerrainAtlasRecoverySnapshot(
     snapshot.runtimeTerrainTypes = runtimeTerrainTypes;
     for(const SResArchiveNewMember& member : members)
     {
-        if(!member.name.endsWith(QStringLiteral(".mmp"),
-                                 Qt::CaseInsensitive))
-            continue;
         STerrainAtlasRecoveryPage page;
         page.name = member.name;
         page.payload = member.payload;
-        snapshot.pages.append(page);
+        if(member.name.endsWith(QStringLiteral(".mmp"),
+                                Qt::CaseInsensitive))
+            snapshot.pages.append(page);
+        else if(member.name.compare(
+                    CTerrainAtlasProfileStore::embeddedMemberName(
+                        profile.mprNamespace), Qt::CaseInsensitive) != 0)
+            snapshot.metadataMembers.append(page);
     }
     return CTerrainAtlasRecoveryStore().saveSnapshot(snapshot);
 }
@@ -864,12 +869,20 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::resolveMissingBlendsRequested,
-                this, &CView::resolveMissingTerrainBlends);
+                this, [this]()
+        {
+            requestResolveMissingTerrainBlends(
+                ETerrainResolveAuditTrigger::Button);
+        });
         QShortcut* resolveMissingShortcut = new QShortcut(
             QKeySequence(Qt::SHIFT + Qt::Key_R), this);
         resolveMissingShortcut->setContext(Qt::ApplicationShortcut);
         connect(resolveMissingShortcut, &QShortcut::activated,
-                this, &CView::resolveMissingTerrainBlends);
+                this, [this]()
+        {
+            requestResolveMissingTerrainBlends(
+                ETerrainResolveAuditTrigger::ShortcutShiftR);
+        });
         connect(m_landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                 this, &CView::reviewTerrainAtlasProfile);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
@@ -5850,6 +5863,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
     const qint64 tileTableMs = phaseTimer.elapsed();
     phaseTimer.restart();
     rebuildTerrainAutoCatalog();
+    restoreTerrainSemanticFieldFromArchive(
+        filePath, m_activeTerrainArchivePath, false);
     emit mprSaveStateChanged();
     const qint64 materialCatalogMs = phaseTimer.elapsed();
     ei::log(eLogInfo, QString(
@@ -6358,9 +6373,26 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             CTerrainAtlasProfileStore::embeddedMemberName(
                 draftProfile.mprNamespace);
         embeddedProfileMember.payload = draftProfile.toBytes();
+        SResArchiveNewMember semanticFieldMember;
+        if(!buildTerrainSemanticFieldMember(
+               draft.mprBytes, destination, draftProfile.mprNamespace,
+               draftProfile.atlasPixelSha256,
+               embeddedProfileMember.payload,
+               &semanticFieldMember, &draftReport))
+        {
+            QMessageBox::critical(this, tr("Modern draft save refused"),
+                tr("The exact shared-corner material field could not be "
+                   "bound to the draft MPR. No destination was changed.\n\n%1")
+                    .arg(draftReport.toText().trimmed()));
+            return false;
+        }
+        QVector<SResArchiveNewMember> embeddedDraftMembers = {
+            embeddedProfileMember};
+        if(!semanticFieldMember.name.isEmpty())
+            embeddedDraftMembers.append(semanticFieldMember);
         QByteArray selfDescribingDraftBytes;
         if(!draftArchive.buildWithPublishedMembers(
-               {embeddedProfileMember}, false,
+               embeddedDraftMembers, false,
                &selfDescribingDraftBytes, &draftArchiveErrors))
         {
             QMessageBox::critical(this, tr("Modern draft save refused"),
@@ -6379,6 +6411,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             recoveryMembers.append(pageMember);
         }
         recoveryMembers.append(embeddedProfileMember);
+        if(!semanticFieldMember.name.isEmpty())
+            recoveryMembers.append(semanticFieldMember);
         CMprDocument recoveryDocument;
         CValidationReport recoveryDocumentReport;
         if(!recoveryDocument.loadBytes(
@@ -6471,6 +6505,106 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             .arg(QDir::toNativeSeparators(destination.absoluteFilePath())));
         return true;
     }
+
+    QByteArray semanticResOriginalBytes;
+    QString semanticResPath;
+    QString semanticResCandidateSha256;
+    bool semanticResChanged = false;
+    const auto restoreSemanticRes = [&]() {
+        if(!semanticResChanged || semanticResPath.isEmpty())
+            return true;
+        QFile currentFile(semanticResPath);
+        if(!currentFile.open(QIODevice::ReadOnly))
+            return false;
+        const QByteArray currentBytes = currentFile.readAll();
+        currentFile.close();
+        const QString currentHash = QString::fromLatin1(
+            QCryptographicHash::hash(currentBytes,
+                QCryptographicHash::Sha256).toHex());
+        if(currentHash.compare(semanticResCandidateSha256,
+                               Qt::CaseInsensitive) != 0)
+            return false;
+        QSaveFile restore(semanticResPath);
+        return restore.open(QIODevice::WriteOnly)
+            && restore.write(semanticResOriginalBytes)
+                == semanticResOriginalBytes.size()
+            && restore.commit();
+    };
+
+    SResArchiveNewMember semanticFieldMember;
+    CValidationReport semanticFieldReport;
+    if(!buildTerrainSemanticFieldMember(
+           preview.candidateBytes, destination,
+           m_mprDocument.mapInfo().innerNamespace,
+           m_terrainAtlasProfile.atlasPixelSha256,
+           m_terrainAtlasProfile.toBytes(),
+           &semanticFieldMember, &semanticFieldReport))
+    {
+        QMessageBox::critical(this, tr("MPR save refused"),
+            tr("The exact shared-corner material state could not be prepared. "
+               "No destination was changed.\n\n%1")
+                .arg(semanticFieldReport.toText().trimmed()));
+        return false;
+    }
+    if(!semanticFieldMember.name.isEmpty())
+    {
+        semanticResPath = QFileInfo(
+            m_activeTerrainArchivePath).absoluteFilePath();
+        if(semanticResPath.isEmpty() || !QFileInfo::exists(semanticResPath))
+        {
+            ei::log(eLogWarning, QStringLiteral(
+                "No active RES is available for the map-bound terrain semantic field; the physical MPR save remains valid but a later session must reconstruct shared-corner semantics."));
+            semanticResPath.clear();
+        }
+        else
+        {
+            QFile sourceRes(semanticResPath);
+            if(!sourceRes.open(QIODevice::ReadOnly))
+            {
+                QMessageBox::critical(this, tr("MPR save refused"),
+                    tr("The active terrain RES could not be read before "
+                       "storing the map's shared-corner material state. "
+                       "No destination was changed.\n\n%1")
+                        .arg(sourceRes.errorString()));
+                return false;
+            }
+            semanticResOriginalBytes = sourceRes.readAll();
+            CResArchiveDocument semanticArchive;
+            QStringList semanticArchiveErrors;
+            if(!semanticArchive.loadBytes(
+                   semanticResOriginalBytes, semanticResPath,
+                   &semanticArchiveErrors))
+            {
+                QMessageBox::critical(this, tr("MPR save refused"),
+                    tr("The active terrain RES could not be validated before "
+                       "storing the map's shared-corner material state. "
+                       "No destination was changed.\n\n%1")
+                        .arg(semanticArchiveErrors.join(
+                            QStringLiteral("\n"))));
+                return false;
+            }
+            SResPublishedMembersSaveRequest semanticRequest;
+            semanticRequest.source = QFileInfo(semanticResPath);
+            semanticRequest.destination = QFileInfo(semanticResPath);
+            semanticRequest.published = {semanticFieldMember};
+            semanticRequest.allowReplaceExisting = true;
+            semanticRequest.createBackup = true;
+            const SResPublishedMembersSaveResult semanticResult =
+                commitStagedResPublishedMembers(
+                    semanticArchive, semanticRequest);
+            if(!semanticResult.success)
+            {
+                QMessageBox::critical(this, tr("MPR save refused"),
+                    tr("The map's shared-corner material state could not be "
+                       "stored in the active terrain RES. The MPR was not "
+                       "changed.\n\nPhase: %1\n%2")
+                        .arg(semanticResult.phase, semanticResult.error));
+                return false;
+            }
+            semanticResChanged = !semanticResult.noOp;
+            semanticResCandidateSha256 = semanticResult.candidateSha256;
+        }
+    }
     updateProgress(tr("Creating backup and committing atomically..."), 2);
 
     SMprSaveCommitRequest request;
@@ -6480,15 +6614,17 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         commitStagedMprTransaction(m_mprDocument, transaction, request);
     if(!result.success)
     {
+        const bool semanticRestored = restoreSemanticRes();
         ei::log(eLogFatal, QString("Changed MPR save failed phase:%1 path:%2 error:%3 backup:%4")
             .arg(result.phase, destinationPath, result.error,
                  result.backupPath.isEmpty() ? QStringLiteral("not-created")
                                              : result.backupPath));
         QMessageBox::critical(this, tr("Changed MPR save failed"),
-            tr("The changed MPR save did not complete.\n\nPhase: %1\n%2\n\nBackup: %3")
+            tr("The changed MPR save did not complete.\n\nPhase: %1\n%2\n\nBackup: %3\nSemantic RES rollback: %4")
                 .arg(result.phase, result.error,
                      result.backupPath.isEmpty() ? tr("not created")
-                                                 : result.backupPath));
+                                                 : result.backupPath,
+                     semanticRestored ? tr("complete") : tr("failed")));
         return false;
     }
 
@@ -6559,6 +6695,8 @@ bool CView::adoptCommittedLandscapeBaseline(const QFileInfo& destination,
     m_terrainEditAvailable = true;
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
     rebuildTerrainAutoCatalog();
+    restoreTerrainSemanticFieldFromArchive(
+        destination, m_activeTerrainArchivePath, false);
     m_pLand->setDirty(false);
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
                               destination.baseName());
@@ -7906,13 +8044,20 @@ void CView::refreshManualAtlasPalette()
 {
     if(!m_landscapeTools || !m_pTileForm)
         return;
+    int previouslySelectedSlot = -1;
+    int previouslySelectedRotation = 0;
+    m_pTileForm->getSelectedTile(previouslySelectedSlot,
+                                 previouslySelectedRotation);
     QVector<QImage> images;
     QVector<qint32> runtimeTypes;
+    QVector<QByteArray> physicalIdentities;
     const CTerrainTransitionCatalog* catalog = nullptr;
     if(m_workingTerrainAtlas)
     {
         images = m_workingTerrainAtlas->activeTileImages();
         runtimeTypes = m_workingTerrainAtlas->activeTileTypes();
+        physicalIdentities =
+            m_workingTerrainAtlas->manualAtlasPhysicalIdentities();
         catalog = &m_workingTerrainAtlas->catalog();
     }
     else
@@ -7962,7 +8107,19 @@ void CView::refreshManualAtlasPalette()
         descriptions.append(description);
     }
     m_landscapeTools->setManualAtlasTiles(
-        images, runtimeTypes, descriptions);
+        images, runtimeTypes, descriptions, physicalIdentities);
+
+    // Palette rebuilding blocks selection signals. Re-bind the legacy tile
+    // cursor explicitly to the same physical artwork identity, even when
+    // hole reuse or compaction moved that artwork to another physical slot.
+    // Rotation is a user selection and remains independent of slot identity.
+    const int restoredSlot = m_landscapeTools->currentManualAtlasTile();
+    if(restoredSlot >= 0 && m_pTileForm->selectTile(restoredSlot))
+    {
+        m_pTileForm->setTileRotation(previouslySelectedRotation);
+        if(m_landscapeTools->manualTileSelectionEnabled())
+            onChangeCursorTile(m_pTileForm->tileWithRot(restoredSlot));
+    }
 }
 
 void CView::refreshTerrainFamilyUsage()
@@ -8633,6 +8790,9 @@ bool CView::adoptCompleteTerrainBaseline(
     if(m_pUndoStack)
         m_pUndoStack->clear();
     rebuildTerrainAutoCatalog();
+    if(!restoreTerrainSemanticFieldFromArchive(
+           destination, terrainArchivePath, true))
+        return false;
     m_pLand->setDirty(false);
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
                                destination.baseName());
@@ -8640,10 +8800,121 @@ bool CView::adoptCompleteTerrainBaseline(
     return true;
 }
 
+bool CView::buildTerrainSemanticFieldMember(
+    const QByteArray& candidateMprBytes, const QFileInfo& destinationMpr,
+    const QString& mprNamespace, const QByteArray& atlasPixelSha256,
+    const QByteArray& profileBytes,
+    SResArchiveNewMember* member, CValidationReport* report) const
+{
+    if(!member) return false;
+    *member = SResArchiveNewMember();
+    QByteArray rawAtlasHash = atlasPixelSha256;
+    if(rawAtlasHash.size() == 64)
+        rawAtlasHash = QByteArray::fromHex(rawAtlasHash);
+    if(candidateMprBytes.isEmpty() || rawAtlasHash.size() != 32
+       || profileBytes.isEmpty()
+       || !m_terrainEditAvailable || m_terrainEdit.vertexCountX() <= 0
+       || m_terrainEdit.vertexCountY() <= 0)
+        return true;
+
+    STerrainSemanticFieldDocument document;
+    document.mprNamespace = mprNamespace;
+    document.mprSha256 = QCryptographicHash::hash(
+        candidateMprBytes, QCryptographicHash::Sha256);
+    document.atlasPixelSha256 = rawAtlasHash;
+    document.profileSha256 = QCryptographicHash::hash(
+        profileBytes, QCryptographicHash::Sha256);
+    document.vertexWidth = m_terrainEdit.vertexCountX();
+    document.vertexHeight = m_terrainEdit.vertexCountY();
+    const int count = document.vertexWidth * document.vertexHeight;
+    QVector<qint32> ignored;
+    m_terrainEdit.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &document.land, &ignored);
+    if(document.land.size() != count)
+        document.land.clear();
+    m_terrainEdit.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Overlay, &document.overlay, &ignored);
+    if(document.overlay.size() != count)
+        document.overlay.clear();
+    if(document.land.isEmpty() && document.overlay.isEmpty())
+        return true;
+    member->name = STerrainSemanticFieldDocument::memberName(
+        document.mprNamespace, destinationMpr);
+    member->payload = document.toBytes(report);
+    if(member->payload.isEmpty())
+    {
+        member->name.clear();
+        return false;
+    }
+    return true;
+}
+
+bool CView::restoreTerrainSemanticFieldFromArchive(
+    const QFileInfo& mprFile, const QString& terrainArchivePath,
+    bool requireMember)
+{
+    if(!m_terrainEditAvailable || terrainArchivePath.trimmed().isEmpty()
+       || !QFileInfo::exists(terrainArchivePath))
+        return !requireMember;
+    QFile archiveFile(terrainArchivePath);
+    if(!archiveFile.open(QIODevice::ReadOnly))
+        return !requireMember;
+    CResArchiveDocument archive;
+    QStringList archiveErrors;
+    if(!archive.loadBytes(archiveFile.readAll(), terrainArchivePath,
+                          &archiveErrors))
+    {
+        ei::log(eLogWarning, QStringLiteral(
+            "Could not inspect terrain semantic-field RES %1: %2")
+            .arg(terrainArchivePath,
+                 archiveErrors.join(QStringLiteral("; "))));
+        return !requireMember;
+    }
+    const QString memberName = STerrainSemanticFieldDocument::memberName(
+        m_mprDocument.mapInfo().innerNamespace, mprFile);
+    const QByteArray payload = archive.memberPayload(memberName);
+    if(payload.isEmpty())
+        return !requireMember;
+    STerrainSemanticFieldDocument document;
+    CValidationReport report;
+    const QByteArray rawMprHash = QCryptographicHash::hash(
+        m_mprDocument.originalBytes(), QCryptographicHash::Sha256);
+    QByteArray rawAtlasHash = QByteArray::fromHex(
+        m_terrainAtlasProfile.atlasPixelSha256);
+    QByteArray profileBytes = archive.memberPayload(
+        CTerrainAtlasProfileStore::embeddedMemberName(
+            m_mprDocument.mapInfo().innerNamespace));
+    if(profileBytes.isEmpty())
+        profileBytes = m_terrainAtlasProfile.toBytes();
+    const QByteArray rawProfileHash = QCryptographicHash::hash(
+        profileBytes, QCryptographicHash::Sha256);
+    if(!STerrainSemanticFieldDocument::fromBytes(
+           payload, &document, &report,
+           terrainArchivePath + QLatin1Char(':') + memberName)
+       || !document.validateBinding(
+           m_mprDocument.mapInfo().innerNamespace, rawMprHash, rawAtlasHash,
+           rawProfileHash,
+           m_terrainEdit.vertexCountX(), m_terrainEdit.vertexCountY(), &report)
+       || !m_terrainEdit.restoreVirtualMaterialFieldState(
+           ETerrainTileLayer::Land, document.land, document.land, &report)
+       || !m_terrainEdit.restoreVirtualMaterialFieldState(
+           ETerrainTileLayer::Overlay, document.overlay, document.overlay,
+           &report))
+    {
+        ei::log(eLogWarning, QStringLiteral(
+            "Ignored invalid terrain semantic-field member %1: %2")
+            .arg(memberName, report.toText().trimmed()));
+        return false;
+    }
+    ei::log(eLogInfo, QStringLiteral(
+        "Restored exact shared-corner terrain semantics from %1:%2")
+        .arg(terrainArchivePath, memberName));
+    return true;
+}
+
 bool CView::terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const
 {
-    const int authoredSlots = m_authoredTerrainTileImages.size();
-    if(!m_workingTerrainAtlas || authoredSlots <= 0)
+    if(!m_workingTerrainAtlas || m_workingTerrainAtlas->authoredSlotCount() <= 0)
         return false;
     for(int y = 0; y < m_terrainEdit.tileCountY(); ++y)
         for(int x = 0; x < m_terrainEdit.tileCountX(); ++x)
@@ -8651,8 +8922,12 @@ bool CView::terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const
             bool available = false;
             const quint16 value = m_terrainEdit.packedTile(
                 x, y, layer, &available);
-            if(available && SMprPackedTile::decode(value).atlasSlot()
-                    >= authoredSlots)
+            if(!available)
+                continue;
+            STerrainWorkingTileIdentity identity;
+            if(!m_workingTerrainAtlas->tileIdentityForSlot(
+                   SMprPackedTile::decode(value).atlasSlot(), &identity)
+               || identity.origin != ETerrainWorkingTileOrigin::AuthoredMap)
                 return true;
         }
     return false;
@@ -8905,9 +9180,12 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
     }
     const QVector<QImage> activeImages = atlas->activeTileImages();
     const QVector<qint32> activeTypes = atlas->activeTileTypes();
-    const QVector<QImage> tableImages = activeImages.mid(
-        0, m_authoredTerrainTileImages.size());
-    if(tableImages != m_authoredTerrainTileImages)
+    const int authoredSlotCount = atlas->authoredSlotCount();
+    if(authoredSlotCount <= 0
+       || authoredSlotCount > activeImages.size()
+       || authoredSlotCount > m_authoredTerrainTileImages.size()
+       || activeImages.mid(0, authoredSlotCount)
+            != m_authoredTerrainTileImages.mid(0, authoredSlotCount))
     {
         if(report) report->add("terrain.working_atlas_authored_mutation",
             EValidationSeverity::Error,
@@ -9603,6 +9881,21 @@ void CView::finalizeVirtualTerrainAtlas()
             portableProfile.mprNamespace);
     embeddedProfileMember.payload = portableProfile.toBytes();
     pages.append(embeddedProfileMember);
+    SResArchiveNewMember semanticFieldMember;
+    if(!buildTerrainSemanticFieldMember(
+           package.mprBytes, mprDestination, portableProfile.mprNamespace,
+           portableProfile.atlasPixelSha256, embeddedProfileMember.payload,
+           &semanticFieldMember,
+           &portableProfileReport))
+    {
+        QMessageBox::critical(this, tr("Atlas package not written"),
+            tr("The exact shared-corner material field could not be bound to "
+               "the published MPR. No RES or MPR was changed.\n\n%1")
+                .arg(portableProfileReport.toText().trimmed()));
+        return;
+    }
+    if(!semanticFieldMember.name.isEmpty())
+        pages.append(semanticFieldMember);
     const bool mprDestinationExisted = mprDestination.exists();
     QByteArray previousMprBytes;
     if(mprDestinationExisted)
@@ -12605,13 +12898,136 @@ void CView::selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode)
     }
 }
 
+bool CView::terrainResolveUiActive() const
+{
+    return m_landscapeTools && m_landscapeTools->isVisible()
+        && m_landscapeTools->isEnabled()
+        && (m_landscapeTools->tilePaintEnabled()
+            || m_landscapeTools->overlayPaintEnabled());
+}
+
+void CView::requestResolveMissingTerrainBlends(
+    ETerrainResolveAuditTrigger trigger)
+{
+    if(!terrainResolveUiActive())
+    {
+        ei::log(eLogInfo, QString(
+            "Terrain resolve ignored: trigger:%1 terrain paint UI is not active.")
+            .arg(terrainResolveAuditTriggerName(trigger)));
+        return;
+    }
+    m_pendingTerrainResolveAuditTrigger = trigger;
+    resolveMissingTerrainBlends();
+}
+
 void CView::resolveMissingTerrainBlends()
 {
+    const ETerrainResolveAuditTrigger trigger =
+        m_pendingTerrainResolveAuditTrigger;
+    m_pendingTerrainResolveAuditTrigger =
+        ETerrainResolveAuditTrigger::Programmatic;
+    if(!terrainResolveUiActive())
+    {
+        ei::log(eLogInfo, QString(
+            "Terrain resolve ignored: trigger:%1 terrain paint UI is not active.")
+            .arg(terrainResolveAuditTriggerName(trigger)));
+        return;
+    }
+
+    CValidationReport report;
+    const auto fieldAudit = [](const CTerrainEditModel& terrainEdit,
+                               ETerrainTileLayer layer) {
+        STerrainResolveSemanticFieldAudit result;
+        CTerrainVirtualMaterialField field;
+        result.complete = terrainEdit.copyVirtualMaterialField(
+            layer, &field, true);
+        result.present = result.complete || terrainEdit.copyVirtualMaterialField(
+            layer, &field, false);
+        result.active = terrainEdit.virtualMaterialFieldActive(layer);
+        if(result.present)
+            result.sha256 = field.stableSha256();
+        return result;
+    };
+    STerrainResolveAuditSession audit;
+    audit.actionId = ++m_terrainResolveAuditActionId;
+    audit.trigger = trigger;
+    audit.startedUtc = QDateTime::currentDateTimeUtc();
+    audit.mprNamespace = m_mprDocument.mapInfo().innerNamespace;
+    audit.sourceMprSha256 = QCryptographicHash::hash(
+        m_mprDocument.originalBytes(), QCryptographicHash::Sha256).toHex();
+    audit.atlasPixelSha256 = m_pTileForm
+        ? terrainAtlasPixelSha256(m_pTileForm->tileImages()) : QByteArray();
+    audit.landFieldBefore = fieldAudit(m_terrainEdit,
+                                       ETerrainTileLayer::Land);
+    audit.overlayFieldBefore = fieldAudit(m_terrainEdit,
+                                          ETerrainTileLayer::Overlay);
+    audit.undoStackIndexBefore = m_pUndoStack ? m_pUndoStack->index() : -1;
+    audit.undoStackCountBefore = m_pUndoStack ? m_pUndoStack->count() : -1;
+    const auto finishAudit = [this, &audit, &report, &fieldAudit](
+                                 const QString& outcome) {
+        audit.outcome = outcome;
+        audit.endedUtc = QDateTime::currentDateTimeUtc();
+        audit.landFieldAfter = fieldAudit(m_terrainEdit,
+                                          ETerrainTileLayer::Land);
+        audit.overlayFieldAfter = fieldAudit(m_terrainEdit,
+                                             ETerrainTileLayer::Overlay);
+        audit.undoStackIndexAfter = m_pUndoStack ? m_pUndoStack->index() : -1;
+        audit.undoStackCountAfter = m_pUndoStack ? m_pUndoStack->count() : -1;
+        audit.validationFindings.clear();
+        audit.skippedCellCount = 0;
+        audit.skippedReasons.clear();
+        QRegExp leadingCount(QStringLiteral("^(\\d+)"));
+        for(const SValidationFinding& finding : report.findings())
+        {
+            audit.validationFindings.append(finding.location.isEmpty()
+                ? finding.code : finding.code + QStringLiteral(" @ ")
+                    + finding.location);
+            if(finding.code != QStringLiteral(
+                   "terrain.virtual_map_ambiguous_skipped"))
+                continue;
+            const int count = leadingCount.indexIn(finding.message) >= 0
+                ? leadingCount.cap(1).toInt() : 0;
+            audit.skippedCellCount += count;
+            STerrainResolveSkippedReason skipped;
+            skipped.reason = QStringLiteral("ambiguous-shared-corner-preserved");
+            skipped.count = count;
+            audit.skippedReasons.append(skipped);
+        }
+        const QString diagnosticRoot = QDir(
+            QCoreApplication::applicationDirPath()).filePath(
+                QStringLiteral("diagnostics/terrain-resolve"));
+        const QString journalPath = terrainResolveAuditJournalPath(
+            diagnosticRoot, audit.mprNamespace);
+        QString journalError;
+        const bool journalWritten = appendTerrainResolveAuditSession(
+            journalPath, audit, 32, 256, 32, &journalError);
+        ei::log(outcome == QStringLiteral("committed") ? eLogInfo : eLogWarning,
+            QString("Terrain resolve audit end action:%1 trigger:%2 outcome:%3 stagedTuples:%4 stagedCells:%5 changedCells:%6 generatedTuples:%7 skippedCells:%8 deltaSha256:%9 journal:%10")
+                .arg(audit.actionId)
+                .arg(terrainResolveAuditTriggerName(audit.trigger))
+                .arg(audit.outcome).arg(audit.stagedTupleCount)
+                .arg(audit.stagedCellCount).arg(audit.packedDeltas.size())
+                .arg(audit.generatedTupleCount).arg(audit.skippedCellCount)
+                .arg(QString::fromLatin1(
+                    terrainResolvePackedDeltaSha256(audit.packedDeltas)))
+                .arg(journalPath));
+        if(!journalWritten)
+            ei::log(eLogWarning, QString(
+                "Terrain resolve audit journal write failed action:%1 path:%2 error:%3")
+                .arg(audit.actionId).arg(journalPath).arg(journalError));
+    };
+    ei::log(eLogInfo, QString(
+        "Terrain resolve audit begin action:%1 trigger:%2 sourceMprSha256:%3 atlasPixelSha256:%4")
+        .arg(audit.actionId).arg(terrainResolveAuditTriggerName(trigger))
+        .arg(QString::fromLatin1(audit.sourceMprSha256))
+        .arg(QString::fromLatin1(audit.atlasPixelSha256)));
+
     if(!m_terrainEditAvailable || !m_workingTerrainAtlas || !m_pUndoStack)
     {
         QMessageBox::information(this, tr("Resolve missing blends"), tr(
             "Open an editable MPR with a modern terrain atlas before running "
             "the map-wide resolver."));
+        finishAudit(QStringLiteral("precondition-refused"));
         return;
     }
     const CTerrainTransitionCatalog& activeCatalog =
@@ -12620,7 +13036,10 @@ void CView::resolveMissingTerrainBlends()
            ETerrainTileLayer::Land, activeCatalog)
        || !ensureModernTerrainArtworkAssigned(
            ETerrainTileLayer::Overlay, activeCatalog))
+    {
+        finishAudit(QStringLiteral("artwork-assignment-refused"));
         return;
+    }
     QSettings settings;
     if(!settings.value(QStringLiteral(
            "ui/landscape/resolveMissingBlendsSkipConfirm"), false).toBool())
@@ -12639,7 +13058,10 @@ void CView::resolveMissingTerrainBlends()
             tr("Don't show this confirmation again"), &confirm);
         confirm.setCheckBox(skipConfirm);
         if(confirm.exec() != QMessageBox::Yes)
+        {
+            finishAudit(QStringLiteral("cancelled"));
             return;
+        }
         if(skipConfirm->isChecked())
             settings.setValue(QStringLiteral(
                 "ui/landscape/resolveMissingBlendsSkipConfirm"), true);
@@ -12647,6 +13069,20 @@ void CView::resolveMissingTerrainBlends()
 
     finishSculptStroke();
     endTileBrushGroup();
+    audit.landFieldBefore = fieldAudit(m_terrainEdit,
+                                       ETerrainTileLayer::Land);
+    audit.overlayFieldBefore = fieldAudit(m_terrainEdit,
+                                          ETerrainTileLayer::Overlay);
+    audit.undoStackIndexBefore = m_pUndoStack->index();
+    audit.undoStackCountBefore = m_pUndoStack->count();
+    QVector<qint32> liveCurrentFields[2];
+    QVector<qint32> liveBaselineFields[2];
+    m_terrainEdit.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &liveCurrentFields[0],
+        &liveBaselineFields[0]);
+    m_terrainEdit.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Overlay, &liveCurrentFields[1],
+        &liveBaselineFields[1]);
     QProgressDialog progress(tr("Scanning terrain material connections..."),
         QString(), 0, 5, this);
     progress.setWindowTitle(tr("Resolve missing blends"));
@@ -12656,7 +13092,6 @@ void CView::resolveMissingTerrainBlends()
     progress.show();
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    CValidationReport report;
     // Build the entire repair transaction before recovering the virtual
     // material field.  A freshly loaded map deliberately has no persisted
     // semantic field; seed only this copy with the same deterministic
@@ -12769,6 +13204,8 @@ void CView::resolveMissingTerrainBlends()
             break;
         ++generated;
     }
+    audit.stagedTupleCount = missing.size();
+    audit.generatedTupleCount = generated;
     progress.setValue(3);
 
     STerrainTileCommand combined;
@@ -12786,10 +13223,69 @@ void CView::resolveMissingTerrainBlends()
                         layer == ETerrainTileLayer::Land ? 0 : 1]);
             appendTerrainTileCommand(&combined, command);
         }
+    audit.stagedCellCount = combined.deltas.size();
+    if(staged.atlas)
+    {
+        QMap<QString, int> runtimeDecisionIndexes;
+        for(const STerrainTileDelta& delta : combined.deltas)
+        {
+            const int beforeSlot = SMprPackedTile::decode(delta.before).atlasSlot();
+            const int afterSlot = SMprPackedTile::decode(delta.after).atlasSlot();
+            STerrainResolveRuntimeDecision decision;
+            decision.signature = delta.requestedSignature;
+            decision.predecessorRuntimeType =
+                staged.atlas->runtimeTerrainTypeForSlot(beforeSlot);
+            decision.selectedRuntimeType =
+                staged.atlas->runtimeTerrainTypeForSlot(afterSlot);
+            decision.selectedWorkingSlot = afterSlot;
+            STerrainWorkingTileIdentity identity;
+            if(staged.atlas->tileIdentityForSlot(afterSlot, &identity))
+            {
+                switch(identity.origin)
+                {
+                case ETerrainWorkingTileOrigin::AuthoredMap:
+                    decision.origin = QStringLiteral("authored-current-map");
+                    break;
+                case ETerrainWorkingTileOrigin::ImportedAuthored:
+                    decision.origin = QStringLiteral("authored-global");
+                    break;
+                case ETerrainWorkingTileOrigin::CanonicalGenerated:
+                    decision.origin = QStringLiteral("canonical-generated");
+                    break;
+                default:
+                    decision.origin = QStringLiteral("unknown");
+                    break;
+                }
+                decision.blendProvenance = identity.blendProvenance;
+            }
+            else
+                decision.origin = QStringLiteral("unknown");
+            const QString key = QStringLiteral("%1,%2,%3,%4|%5|%6|%7|%8|%9")
+                .arg(decision.signature.northWest)
+                .arg(decision.signature.northEast)
+                .arg(decision.signature.southEast)
+                .arg(decision.signature.southWest)
+                .arg(decision.predecessorRuntimeType)
+                .arg(decision.selectedRuntimeType)
+                .arg(decision.selectedWorkingSlot)
+                .arg(decision.origin)
+                .arg(decision.blendProvenance);
+            const auto existing = runtimeDecisionIndexes.constFind(key);
+            if(existing == runtimeDecisionIndexes.constEnd())
+            {
+                decision.cellCount = 1;
+                runtimeDecisionIndexes.insert(key, audit.runtimeDecisions.size());
+                audit.runtimeDecisions.append(decision);
+            }
+            else
+                ++audit.runtimeDecisions[existing.value()].cellCount;
+        }
+    }
     if(report.hasErrors())
     {
         QMessageBox::critical(this, tr("Resolve missing blends refused"),
             tr("No MPR cell was changed.\n\n%1").arg(report.toText()));
+        finishAudit(QStringLiteral("validation-refused"));
         return;
     }
     if(combined.isEmpty())
@@ -12798,6 +13294,7 @@ void CView::resolveMissingTerrainBlends()
         QMessageBox::information(this, tr("Resolve missing blends"), tr(
             "No unambiguous terrain cell needed repair. Existing cells at "
             "disputed shared corners were deliberately preserved."));
+        finishAudit(QStringLiteral("no-op"));
         return;
     }
     if(!staged.terrainEdit.apply(combined, true, &report))
@@ -12809,7 +13306,32 @@ void CView::resolveMissingTerrainBlends()
             "The repaired physical tile command could not be applied. No MPR, "
             "atlas, preview, or undo state was changed.\n\n%1")
                 .arg(report.toText()));
+        finishAudit(QStringLiteral("apply-refused"));
         return;
+    }
+
+    // Resolve may establish a deterministic field on first use. The complete
+    // current+baseline transition belongs to the same undo command as the
+    // packed cells; otherwise Undo restores visible tiles while leaving a
+    // hidden post-Resolve interpretation behind.
+    for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
+    {
+        QVector<qint32> stagedCurrent;
+        QVector<qint32> stagedBaseline;
+        staged.terrainEdit.copyVirtualMaterialFieldState(
+            layers[layerIndex], &stagedCurrent, &stagedBaseline);
+        if(liveCurrentFields[layerIndex] == stagedCurrent
+           && liveBaselineFields[layerIndex] == stagedBaseline)
+            continue;
+        STerrainTileCommand::SVirtualFieldDelta fieldDelta;
+        fieldDelta.layer = layers[layerIndex];
+        fieldDelta.vertexWidth = staged.terrainEdit.tileCountX() + 1;
+        fieldDelta.vertexHeight = staged.terrainEdit.tileCountY() + 1;
+        fieldDelta.beforeCurrent = liveCurrentFields[layerIndex];
+        fieldDelta.beforeBaseline = liveBaselineFields[layerIndex];
+        fieldDelta.afterCurrent = stagedCurrent;
+        fieldDelta.afterBaseline = stagedBaseline;
+        combined.virtualFields.append(fieldDelta);
     }
 
     // This check is deliberately before preview upload. A stage is created
@@ -12823,6 +13345,7 @@ void CView::resolveMissingTerrainBlends()
         QMessageBox::critical(this, tr("Resolve missing blends refused"),
             tr("No MPR, atlas, preview, or undo state was changed.\n\n%1")
                 .arg(report.toText()));
+        finishAudit(QStringLiteral("staging-commit-refused"));
         return;
     }
     if(!syncWorkingTerrainAtlas(&report, staged.atlas.data()))
@@ -12833,6 +13356,7 @@ void CView::resolveMissingTerrainBlends()
         QMessageBox::critical(this, tr("Resolve missing blends refused"),
             tr("No MPR, atlas, preview, or undo state was changed.\n\n%1")
                 .arg(report.toText()));
+        finishAudit(QStringLiteral("upload-refused"));
         return;
     }
     progress.setValue(4);
@@ -12840,7 +13364,12 @@ void CView::resolveMissingTerrainBlends()
     const bool committed = m_workingTerrainAtlas->commitStaging(*staged.atlas);
     Q_ASSERT(committed);
     if(!committed)
+    {
+        report.add("terrain.resolve_map_stage", EValidationSeverity::Error,
+            "The isolated working-atlas stage could not be committed.");
+        finishAudit(QStringLiteral("commit-refused"));
         return;
+    }
     m_terrainEdit = staged.terrainEdit;
     m_workingAtlasProtectedSlots = staged.protectedSlots;
     m_importedTerrainTransitions = staged.importedTransitions;
@@ -12848,9 +13377,16 @@ void CView::resolveMissingTerrainBlends()
     m_terrainGlobalTransitionMissingPages = staged.missingPages;
     m_terrainGlobalTransitionTileCache = staged.decodedTileCache;
     if(staged.undoCheckpointRequired)
+    {
         m_pUndoStack->clear();
+        audit.undoHistoryCleared = true;
+    }
     refreshTerrainTilePreview(combined, true);
     m_pUndoStack->push(new CTerrainTilePreviewCommand(this, combined, true));
+    audit.packedDeltas = combined.deltas;
+    audit.undoCommandId = QStringLiteral("terrain-resolve-%1")
+        .arg(audit.actionId);
+    audit.undoCommandDescription = combined.description;
     if(m_landscapeTools)
         m_landscapeTools->setGeneratedAtlasTileCount(
             m_workingTerrainAtlas->generatedTileCount());
@@ -12860,6 +13396,7 @@ void CView::resolveMissingTerrainBlends()
     progress.setValue(5);
     emit updateMsg(tr("Resolved %1 terrain cell(s) in one undo step; %2 exact atlas tuple(s) were added.")
         .arg(combined.deltas.size()).arg(generated));
+    finishAudit(QStringLiteral("committed"));
 }
 
 void CView::beginTileBrushGroup()

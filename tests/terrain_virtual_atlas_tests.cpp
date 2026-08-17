@@ -579,8 +579,10 @@ private slots:
     void workingAtlasStagingRealizationThenEmptyLeavesLiveStateUntouched();
     void expanded4096AtlasRetainsWorkingExtensionCapacity();
     void workingAtlasNeverReplacesAuthoredPixels();
+    void workingAtlasReusesSafeLogicalTailPaddingBeforeExtendingPages();
     void repeatedGeneratedStampsNeverMutateAuthoredAtlas();
     void workingAtlasProtectsUndoSlotsAndRefusesCapacity();
+    void manualTilePaintRejectsUntypedWorkingSlot();
     void externalUniformFamilyPaintsAndBlendsWithoutAuthoredSlot();
     void selfPaintPreservesExactPackedTileAndRotation();
     void parallelStripesAndBaseCrossResolveExactly();
@@ -5986,6 +5988,44 @@ void TerrainVirtualAtlasTests::workingAtlasNeverReplacesAuthoredPixels()
         QCOMPARE(active.at(slot), original.at(slot));
 }
 
+void TerrainVirtualAtlasTests::workingAtlasReusesSafeLogicalTailPaddingBeforeExtendingPages()
+{
+    Fixture fixture;
+    QVector<QImage> physicalPage;
+    physicalPage.reserve(64);
+    for(int slot = 0; slot < 64; ++slot)
+        physicalPage.append(fixture.images.at(slot % fixture.images.size()));
+    QVector<qint32> logicalTypes;
+    logicalTypes.reserve(61);
+    for(int slot = 0; slot < 61; ++slot)
+        logicalTypes.append(slot % 4);
+
+    CTestTerrainWorkingAtlas working(
+        fixture.catalog, physicalPage, 47, 128, {}, {}, logicalTypes);
+    seedReviewedStockMasks(working, fixture);
+    QMap<int, quint64> usage;
+    CValidationReport report;
+    bool generated = false;
+    const quint16 packed = working.resolve(signature(1, 2, 3, 4), 3, 7,
+                                            &usage, {}, &generated, &report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(generated);
+
+    // Slots 61..63 are the unused tail of the authored physical MMP page.
+    // They have no authored logical identity and are reusable when they are
+    // unreferenced and not protected by undo history.
+    QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(), 61);
+    QCOMPARE(working.activeTextureCount(), 1);
+    STerrainWorkingTileIdentity identity;
+    QVERIFY(working.tileIdentityForSlot(61, &identity));
+    QCOMPARE(identity.runtimeTerrainType, working.activeTileTypes().at(61));
+    const QVector<QByteArray> manualIdentities =
+        working.manualAtlasPhysicalIdentities();
+    QCOMPARE(manualIdentities.size(), 64);
+    QVERIFY(!manualIdentities.at(61).isEmpty());
+    QVERIFY(manualIdentities.at(62).isEmpty());
+}
+
 void TerrainVirtualAtlasTests::repeatedGeneratedStampsNeverMutateAuthoredAtlas()
 {
     Fixture fixture;
@@ -6047,6 +6087,41 @@ void TerrainVirtualAtlasTests::workingAtlasProtectsUndoSlotsAndRefusesCapacity()
     QVERIFY(report.hasErrors());
     QVERIFY(report.toText().contains("undo history"));
     QVERIFY(report.toText().contains("No identity was substituted"));
+}
+
+void TerrainVirtualAtlasTests::manualTilePaintRejectsUntypedWorkingSlot()
+{
+    QByteArray payload;
+    QDataStream stream(&payload, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 2,
+                              QVector<qint32>(64, 1), 0));
+    model.enableWorkingAtlasSlots(128);
+    STerrainTileBrush brush;
+    brush.centerX = 8.0f;
+    brush.centerY = 8.0f;
+    brush.radius = 0.0f;
+
+    QVERIFY(!model.makeTilePaint(
+        brush, ETerrainTileLayer::Land, 0, 1, 0).isEmpty());
+    QVERIFY(model.makeTilePaint(
+        brush, ETerrainTileLayer::Land, 1, 0, 0).isEmpty());
+    CTerrainTransitionCatalog catalog;
+    QVERIFY(model.makeTilePaint(
+        brush, ETerrainTileLayer::Land, 1, 0, 0, catalog, &report).isEmpty());
 }
 
 void TerrainVirtualAtlasTests::selfPaintPreservesExactPackedTileAndRotation()

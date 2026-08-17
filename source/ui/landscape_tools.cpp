@@ -4,6 +4,7 @@
 #include <QCheckBox>
 #include <QButtonGroup>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QDoubleSpinBox>
 #include <QDir>
 #include <QFormLayout>
@@ -27,6 +28,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QtEndian>
 
 namespace {
 QIcon brushShapeIcon(bool circle)
@@ -65,6 +67,33 @@ bool terrainFilterMatches(const QString& searchable, const QString& query)
         if(!normalizedSearchable.contains(token))
             return false;
     return true;
+}
+
+bool reviewedRuntimeTerrainType(qint32 runtimeType)
+{
+    return runtimeType >= 0 && runtimeType < 16;
+}
+
+QByteArray manualAtlasPhysicalIdentity(const QImage& image,
+                                       qint32 runtimeType)
+{
+    if(image.isNull() || !reviewedRuntimeTerrainType(runtimeType))
+        return {};
+    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    const qint32 width = rgba.width();
+    const qint32 height = rgba.height();
+    hash.addData(reinterpret_cast<const char*>(&width), sizeof(width));
+    hash.addData(reinterpret_cast<const char*>(&height), sizeof(height));
+    for(int y = 0; y < rgba.height(); ++y)
+        hash.addData(reinterpret_cast<const char*>(rgba.constScanLine(y)),
+                     rgba.bytesPerLine());
+    QByteArray identity = hash.result().toHex();
+    char typeBytes[sizeof(runtimeType)];
+    qToLittleEndian<qint32>(runtimeType,
+                            reinterpret_cast<uchar*>(typeBytes));
+    identity.append(typeBytes, sizeof(typeBytes));
+    return identity;
 }
 }
 
@@ -1120,45 +1149,66 @@ void CLandscapeTools::setClassicAutoMaterials(
 void CLandscapeTools::setManualAtlasTiles(
     const QVector<QImage>& tiles,
     const QVector<qint32>& runtimeTypes,
-    const QStringList& descriptions)
+    const QStringList& descriptions,
+    const QVector<QByteArray>& physicalIdentities)
 {
     const int previousSlot = m_manualTileList->currentItem()
         ? m_manualTileList->currentItem()->data(Qt::UserRole).toInt() : -1;
+    const QByteArray previousIdentity = m_manualTileList->currentItem()
+        ? m_manualTileList->currentItem()->data(Qt::UserRole + 2).toByteArray()
+        : QByteArray();
+    const bool identityVectorMatches = physicalIdentities.size() == tiles.size();
     const QSignalBlocker blocker(m_manualTileList);
-    m_manualTileList->setProperty("physicalAtlasSlotCount", tiles.size());
     m_manualTileList->clear();
+    int selectableCount = 0;
+    QListWidgetItem* sameSlot = nullptr;
+    QListWidgetItem* sameIdentity = nullptr;
     for(int slot = 0; slot < tiles.size(); ++slot)
     {
-        // Working atlases preserve page-aligned physical indices. A partial
-        // authored page can therefore leave null, unaddressable holes before
-        // later generated tiles. Adding those holes to an icon-mode view gives
-        // each one a 62 px grid cell even though it paints no thumbnail; a run
-        // of page padding then looks like a large blank region in the palette.
-        // Keep the real slot in UserRole, but do not allocate a selectable
-        // palette cell for an image that cannot be painted.
-        if(tiles.at(slot).isNull())
+        const qint32 runtimeType = slot < runtimeTypes.size()
+            ? runtimeTypes.at(slot) : -1;
+        const QByteArray identity = identityVectorMatches
+            ? physicalIdentities.at(slot)
+            : manualAtlasPhysicalIdentity(tiles.at(slot), runtimeType);
+        // A complete physical MMP page includes non-null padding pixels.  The
+        // working atlas supplies an empty identity for those positions, so the
+        // identity rather than thumbnail transparency is authoritative here.
+        // Untyped and null tiles are equally non-addressable by Manual paint.
+        if(tiles.at(slot).isNull() || !reviewedRuntimeTerrainType(runtimeType)
+           || identity.isEmpty())
             continue;
         const QString description = slot < descriptions.size()
             ? descriptions.at(slot).trimmed() : QString();
         const QString label = description.isEmpty()
             ? tr("Slot %1 - runtime type %2")
-                  .arg(slot).arg(slot < runtimeTypes.size()
-                      ? runtimeTypes.at(slot) : -1)
+                  .arg(slot).arg(runtimeType)
             : tr("Slot %1 - %2 - runtime type %3")
                   .arg(slot).arg(description)
-                  .arg(slot < runtimeTypes.size()
-                      ? runtimeTypes.at(slot) : -1);
+                  .arg(runtimeType);
         QListWidgetItem* item = new QListWidgetItem(
             QIcon(QPixmap::fromImage(tiles.at(slot))), QString(),
             m_manualTileList);
         item->setData(Qt::UserRole, slot);
         item->setData(Qt::UserRole + 1,
                       QStringLiteral("%1 %2").arg(slot).arg(description));
+        item->setData(Qt::UserRole + 2, identity);
         item->setToolTip(label);
         item->setData(Qt::AccessibleTextRole, label);
-        if(slot == previousSlot)
-            m_manualTileList->setCurrentItem(item);
+        ++selectableCount;
+        // Prefer the exact physical slot while it still carries the selected
+        // artwork. Exact-pixel duplicates can have different reviewed corner
+        // semantics, so an identity-only restore must not silently switch to
+        // a different duplicate. Fall back to identity only when compaction
+        // or safe hole reuse really moved the selected artwork.
+        if(slot == previousSlot && identity == previousIdentity)
+            sameSlot = item;
+        else if(!sameIdentity && !previousIdentity.isEmpty()
+                && identity == previousIdentity)
+            sameIdentity = item;
     }
+    if(sameSlot || sameIdentity)
+        m_manualTileList->setCurrentItem(sameSlot ? sameSlot : sameIdentity);
+    m_manualTileList->setProperty("physicalAtlasSlotCount", selectableCount);
     applyPaintFilter();
     refreshPaintTerrainTypes();
 }
@@ -1486,6 +1536,12 @@ bool CLandscapeTools::selectManualAtlasTile(int slot)
         return true;
     }
     return false;
+}
+
+int CLandscapeTools::currentManualAtlasTile() const
+{
+    return m_manualTileList && m_manualTileList->currentItem()
+        ? m_manualTileList->currentItem()->data(Qt::UserRole).toInt() : -1;
 }
 bool CLandscapeTools::underwaterFamiliesVisible() const
 {

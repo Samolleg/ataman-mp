@@ -174,6 +174,24 @@ STerrainAtlasRecoveryResult CTerrainAtlasRecoveryStore::saveSnapshot(
                       QString::fromLatin1(pageHash));
         pageArray.append(object);
     }
+    QJsonArray metadataArray;
+    for(const STerrainAtlasRecoveryPage& member : snapshot.metadataMembers)
+    {
+        if(member.name.trimmed().isEmpty() || member.payload.isEmpty())
+        {
+            result.error = QStringLiteral(
+                "A recovery metadata member is incomplete.");
+            return result;
+        }
+        QByteArray memberHash;
+        if(!writeObject(member.payload, &memberHash, &result.error))
+            return result;
+        QJsonObject object;
+        object.insert(QStringLiteral("name"), member.name);
+        object.insert(QStringLiteral("sha256"),
+                      QString::fromLatin1(memberHash));
+        metadataArray.append(object);
+    }
     QJsonArray runtimeTypes;
     for(qint32 type : snapshot.runtimeTerrainTypes)
         runtimeTypes.append(type);
@@ -193,6 +211,7 @@ STerrainAtlasRecoveryResult CTerrainAtlasRecoveryStore::saveSnapshot(
                     QString::fromLatin1(snapshot.mprSha256.toLower()));
     manifest.insert(QStringLiteral("runtimeTerrainTypes"), runtimeTypes);
     manifest.insert(QStringLiteral("pages"), pageArray);
+    manifest.insert(QStringLiteral("metadataMembers"), metadataArray);
 
     const QString directory = identityDirectory(snapshot.resourceIdentity);
     if(!QDir().mkpath(directory))
@@ -335,6 +354,22 @@ bool CTerrainAtlasRecoveryStore::buildStandaloneArchive(
         profile.mprNamespace);
     profileMember.payload = snapshot.profileBytes;
     members.append(profileMember);
+    for(const STerrainAtlasRecoveryPage& metadata : snapshot.metadataMembers)
+    {
+        const QString normalized = metadata.name.trimmed().toLower();
+        if(normalized.isEmpty() || metadata.payload.isEmpty()
+           || names.contains(normalized))
+        {
+            if(error) *error = QStringLiteral(
+                "The recovery snapshot contains invalid or duplicate editor metadata.");
+            return false;
+        }
+        names.insert(normalized);
+        SResArchiveNewMember member;
+        member.name = metadata.name;
+        member.payload = metadata.payload;
+        members.append(member);
+    }
 
     QByteArray emptyArchive(16, '\0');
     qToLittleEndian<quint32>(0x019CE23C,
@@ -419,6 +454,19 @@ bool CTerrainAtlasRecoveryStore::loadManifest(
                           &page.payload, error))
             return false;
         candidate.pages.append(page);
+    }
+    for(const QJsonValue& value : manifest.value(
+             QStringLiteral("metadataMembers")).toArray())
+    {
+        const QJsonObject memberObject = value.toObject();
+        STerrainAtlasRecoveryPage member;
+        member.name = memberObject.value(QStringLiteral("name")).toString();
+        if(member.name.isEmpty()
+           || !readObject(memberObject.value(QStringLiteral("sha256"))
+                              .toString().toLatin1(),
+                          &member.payload, error))
+            return false;
+        candidate.metadataMembers.append(member);
     }
     if(candidate.pages.isEmpty())
     {

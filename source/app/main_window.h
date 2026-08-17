@@ -143,6 +143,7 @@ private:
     bool beginWorkspaceLoad(const QString& description);
     void endWorkspaceLoad();
     void updateLoadedMapPanel();
+    void rebuildLoadedMapPanel();
     void updateOutlinerSelectionPath();
     void previewLoadedMapVisibility(QTreeWidgetItem* item);
     void commitLoadedMapVisibilityDrag();
@@ -254,6 +255,7 @@ private:
     QDockWidget* m_propertiesDock;
     QDockWidget* m_loadedMapDock;
     QTreeWidget* m_loadedMapTree;
+    bool m_loadedMapPanelRefreshPending{false};
     QTreeWidget* m_validationTree;
     QLabel* m_validationSummary;
     QTimer* m_validationTimer;
