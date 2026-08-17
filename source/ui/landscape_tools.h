@@ -129,6 +129,8 @@ public:
         const QVector<STerrainPaintMaterialChoice>& landTypes,
         const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
         const QVector<STerrainPaintMaterialChoice>& overlayTypes);
+    void beginTerrainPaletteUpdate();
+    void endTerrainPaletteUpdate();
     void setManualAtlasTiles(const QVector<QImage>& tiles,
                               const QVector<qint32>& runtimeTypes,
                               const QStringList& descriptions = QStringList(),
@@ -158,6 +160,9 @@ signals:
     void saveModernDraftRequested();
     void editingStateChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
+    // The physical Manual palette is comparatively expensive to materialize.
+    // Request it only when the user actually opens that paint mode.
+    void manualAtlasPaletteRequested();
     void manualAtlasTileRequested(int slot);
     void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
 
@@ -232,9 +237,14 @@ private:
     int m_paletteColumns{1};
     int m_authoredAtlasSlots{0};
     bool m_paletteRelayoutPending{false};
+    int m_terrainPaletteUpdateDepth{0};
+    bool m_terrainPaletteRebuildPending{false};
+    bool m_terrainPaletteRefreshPending{false};
     void updateModeVisibility();
     void refreshPaintTerrainTypes();
     void rebuildMaterialPalette();
+    void requestMaterialPaletteRebuild();
+    void requestPaintTerrainTypesRefresh();
     void refreshAtlasCapacity(int activeSlots);
     void updatePaintIssueUi();
     void updatePaintShapeUi();

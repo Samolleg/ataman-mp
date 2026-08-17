@@ -605,6 +605,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             if(m_vertexPaintTarget)
                 m_vertexPaintTarget->setChecked(false);
         }
+        if(paintPaletteMode() == ETerrainPaintPaletteMode::Manual)
+            emit manualAtlasPaletteRequested();
         updatePaintIssueUi();
         bool selected = false;
         const qint32 material = paintTerrainType(&selected);
@@ -1114,8 +1116,8 @@ void CLandscapeTools::setPaintMaterials(
     m_atlasCoverage->setToolTip(atlasSourcePath.isEmpty()
         ? atlasSource : tr("Local override:\n%1").arg(
               QDir::toNativeSeparators(atlasSourcePath)));
-    rebuildMaterialPalette();
-    refreshPaintTerrainTypes();
+    requestMaterialPaletteRebuild();
+    requestPaintTerrainTypesRefresh();
 }
 
 void CLandscapeTools::setClassicAutoMaterials(
@@ -1142,8 +1144,30 @@ void CLandscapeTools::setClassicAutoMaterials(
     m_classicUnderwaterPaintTypes = uniqueIdentities(underwaterTypes);
     m_classicOverlayPaintTypes = uniqueIdentities(overlayTypes);
     refreshPaletteColumns(false);
-    rebuildMaterialPalette();
-    refreshPaintTerrainTypes();
+    requestMaterialPaletteRebuild();
+    requestPaintTerrainTypesRefresh();
+}
+
+void CLandscapeTools::beginTerrainPaletteUpdate()
+{
+    ++m_terrainPaletteUpdateDepth;
+}
+
+void CLandscapeTools::endTerrainPaletteUpdate()
+{
+    if(m_terrainPaletteUpdateDepth <= 0)
+        return;
+    --m_terrainPaletteUpdateDepth;
+    if(m_terrainPaletteUpdateDepth == 0 && m_terrainPaletteRebuildPending)
+    {
+        m_terrainPaletteRebuildPending = false;
+        rebuildMaterialPalette();
+    }
+    if(m_terrainPaletteUpdateDepth == 0 && m_terrainPaletteRefreshPending)
+    {
+        m_terrainPaletteRefreshPending = false;
+        refreshPaintTerrainTypes();
+    }
 }
 
 void CLandscapeTools::setManualAtlasTiles(
@@ -1210,7 +1234,7 @@ void CLandscapeTools::setManualAtlasTiles(
         m_manualTileList->setCurrentItem(sameSlot ? sameSlot : sameIdentity);
     m_manualTileList->setProperty("physicalAtlasSlotCount", selectableCount);
     applyPaintFilter();
-    refreshPaintTerrainTypes();
+    requestPaintTerrainTypesRefresh();
 }
 
 void CLandscapeTools::applyPaintFilter()
@@ -1393,6 +1417,26 @@ void CLandscapeTools::rebuildMaterialPalette()
     applyPaintFilter();
 }
 
+void CLandscapeTools::requestMaterialPaletteRebuild()
+{
+    if(m_terrainPaletteUpdateDepth > 0)
+    {
+        m_terrainPaletteRebuildPending = true;
+        return;
+    }
+    rebuildMaterialPalette();
+}
+
+void CLandscapeTools::requestPaintTerrainTypesRefresh()
+{
+    if(m_terrainPaletteUpdateDepth > 0)
+    {
+        m_terrainPaletteRefreshPending = true;
+        return;
+    }
+    refreshPaintTerrainTypes();
+}
+
 void CLandscapeTools::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
@@ -1430,7 +1474,7 @@ void CLandscapeTools::refreshPaletteColumns(bool rebuild)
         return;
     m_paletteColumns = columns;
     if(rebuild)
-        rebuildMaterialPalette();
+        requestMaterialPaletteRebuild();
 }
 
 void CLandscapeTools::setUsedTerrainFamilies(
@@ -1453,7 +1497,7 @@ void CLandscapeTools::setUsedTerrainFamilies(
     update(&m_classicUnderwaterPaintTypes, landFamilies);
     update(&m_classicOverlayPaintTypes, overlayFamilies);
     if(changed)
-        rebuildMaterialPalette();
+        requestMaterialPaletteRebuild();
 }
 
 void CLandscapeTools::refreshPaintTerrainTypes()

@@ -379,7 +379,7 @@ private:
     void ensureManualTileSelection();
     void rebuildTerrainAutoCatalog();
     void refreshClassicAutoPalette();
-    void refreshManualAtlasPalette();
+    void refreshManualAtlasPalette(bool invalidate = true);
     void refreshTerrainFamilyUsage();
     bool terrainResolveUiActive() const;
     void requestResolveMissingTerrainBlends(ETerrainResolveAuditTrigger trigger);
@@ -625,6 +625,7 @@ private:
     STerrainAtlasProfileSource m_terrainAtlasProfileSource;
     QVector<QImage> m_authoredTerrainTileImages;
     QSharedPointer<CTerrainWorkingAtlas> m_workingTerrainAtlas;
+    bool m_manualAtlasPaletteDirty{true};
     QSet<int> m_workingAtlasProtectedSlots;
     QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;

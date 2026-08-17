@@ -3,6 +3,9 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QListWidget>
+#include <QPointer>
+#include <QSignalSpy>
+#include <QToolButton>
 #include <QTreeWidget>
 
 #include "loaded_map_panel_policy.h"
@@ -15,6 +18,8 @@ class LandscapeToolsWidgetTests : public QObject
 private slots:
     void manualPaletteDoesNotAllocateRowsForEmptyAtlasHoles();
     void manualPaletteFiltersNonNullPaddingAndRestoresPhysicalIdentity();
+    void terrainPaletteBatchDefersIntermediateWidgetRebuilds();
+    void manualPaletteIsRequestedOnlyWhenItsTabIsOpened();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
 
@@ -165,6 +170,61 @@ void LandscapeToolsWidgetTests::manualPaletteFiltersNonNullPaddingAndRestoresPhy
     QVERIFY(status);
     QVERIFY2(status->text().contains(QStringLiteral("61 physical")),
              qPrintable(status->text()));
+}
+
+void LandscapeToolsWidgetTests::terrainPaletteBatchDefersIntermediateWidgetRebuilds()
+{
+    CLandscapeTools tools;
+    const auto choice = [](qint32 id, const QString& name) {
+        STerrainPaintMaterialChoice result;
+        result.id = id;
+        result.name = name;
+        result.familyName = QStringLiteral("Ground");
+        result.thumbnail = QImage(8, 8, QImage::Format_RGBA8888);
+        result.thumbnail.fill(QColor::fromHsv((id * 23) % 360, 255, 180));
+        return result;
+    };
+    const auto buttonFor = [&tools](qint32 id) {
+        for(QToolButton* button : tools.findChildren<QToolButton*>())
+            if(button->property("terrainMaterialId").toInt() == id)
+                return button;
+        return static_cast<QToolButton*>(nullptr);
+    };
+
+    tools.setPaintMaterials({choice(101, QStringLiteral("Ground / Initial"))},
+                            {}, {}, 1, 1);
+    QPointer<QToolButton> initialButton = buttonFor(101);
+    QVERIFY(initialButton);
+
+    tools.beginTerrainPaletteUpdate();
+    tools.setPaintMaterials({choice(102, QStringLiteral("Ground / Modern"))},
+                            {}, {}, 1, 1);
+    tools.setClassicAutoMaterials(
+        {choice(103, QStringLiteral("Ground / Classic"))}, {}, {});
+    tools.setUsedTerrainFamilies({102, 103}, {});
+
+    QVERIFY2(initialButton,
+             "A batched catalog update rebuilt the palette before commit");
+    QVERIFY(!buttonFor(102));
+    QVERIFY(!buttonFor(103));
+
+    tools.endTerrainPaletteUpdate();
+    QVERIFY(initialButton.isNull());
+    QVERIFY(buttonFor(102));
+    QVERIFY(buttonFor(103));
+}
+
+void LandscapeToolsWidgetTests::manualPaletteIsRequestedOnlyWhenItsTabIsOpened()
+{
+    CLandscapeTools tools;
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+    QSignalSpy requested(&tools,
+                         &CLandscapeTools::manualAtlasPaletteRequested);
+
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::ClassicAuto);
+    QCOMPARE(requested.count(), 0);
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Manual);
+    QCOMPARE(requested.count(), 1);
 }
 
 QTEST_MAIN(LandscapeToolsWidgetTests)

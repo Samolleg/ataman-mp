@@ -906,6 +906,9 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
             if(hit)
                 updatePreviewTile(position, land);
         });
+        connect(m_landscapeTools,
+                &CLandscapeTools::manualAtlasPaletteRequested,
+                this, [this]() { refreshManualAtlasPalette(false); });
         connect(m_landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
                 this, [this](qint32 terrainType)
         {
@@ -7593,6 +7596,13 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 
 void CView::rebuildTerrainAutoCatalog()
 {
+    // Modern, Classic Auto, and used-family data are derived in separate
+    // passes below. They describe one atomic palette state: rebuilding all
+    // six widget grids after every pass made MPR open synchronously create and
+    // destroy hundreds of thumbnail buttons before presenting the final set.
+    const bool batchTerrainPalette = m_landscapeTools != nullptr;
+    if(batchTerrainPalette)
+        m_landscapeTools->beginTerrainPaletteUpdate();
     m_workingTerrainAtlas.clear();
     m_workingAtlasProtectedSlots.clear();
     m_terrainAtlasAnalysis = STerrainAtlasAnalysis();
@@ -7613,11 +7623,14 @@ void CView::rebuildTerrainAutoCatalog()
     m_modernLandPaintChoices.clear();
     m_modernUnderwaterPaintChoices.clear();
     m_modernOverlayPaintChoices.clear();
+    m_manualAtlasPaletteDirty = true;
     if(m_landscapeTools)
     {
         m_landscapeTools->setPaintTerrainTypes({}, {}, {});
         m_landscapeTools->setClassicAutoMaterials({}, {}, {});
-        m_landscapeTools->setManualAtlasTiles({}, {});
+        if(m_landscapeTools->paintPaletteMode()
+           == ETerrainPaintPaletteMode::Manual)
+            m_landscapeTools->setManualAtlasTiles({}, {});
     }
     QByteArray seedText = m_mprDocument.mapInfo().innerNamespace.toUtf8();
     quint32 seed = 2166136261u;
@@ -7628,7 +7641,11 @@ void CView::rebuildTerrainAutoCatalog()
     }
     m_terrainSemanticSeed = seed;
     if(!m_terrainEditAvailable || !m_pTileForm)
+    {
+        if(batchTerrainPalette)
+            m_landscapeTools->endTerrainPaletteUpdate();
         return;
+    }
     CValidationReport report;
     const QString mprNamespace = m_mprDocument.mapInfo().innerNamespace;
     const int slotCount = m_pTileForm->tileImages().size();
@@ -7804,10 +7821,23 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainGlobalFamilies.clear();
     m_terrainGlobalMaterialSources.clear();
     m_terrainGlobalMaterialSourceIdentities.clear();
+    qint64 globalFamiliesMs = 0;
+    qint64 globalizeCatalogsMs = 0;
+    qint64 authoredTransitionsMs = 0;
+    qint64 sourceHydrationMs = 0;
+    qint64 modernPaletteDataMs = 0;
+    qint64 workingAtlasMs = 0;
+    qint64 classicPaletteDataMs = 0;
+    qint64 manualPaletteMs = 0;
+    qint64 familyUsageMs = 0;
+    qint64 paletteCommitMs = 0;
+    QElapsedTimer catalogDetailTimer;
     if(m_terrainAtlasAnalysis.usable)
     {
+        catalogDetailTimer.start();
         m_terrainGlobalFamilies =
             CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+        globalFamiliesMs = catalogDetailTimer.restart();
         m_terrainAtlasAnalysis.landCatalog = globalMaterialCatalog(
             m_terrainAtlasProfile, m_terrainAtlasAnalysis.landCatalog,
             ETerrainAtlasLayer::Land, &m_terrainGlobalFamilies);
@@ -7817,12 +7847,14 @@ void CView::rebuildTerrainAutoCatalog()
         m_terrainAtlasAnalysis.overlayCompatibleCatalog = globalMaterialCatalog(
             m_terrainAtlasProfile, m_terrainAtlasAnalysis.overlayCompatibleCatalog,
             ETerrainAtlasLayer::Overlay, &m_terrainGlobalFamilies);
+        globalizeCatalogsMs = catalogDetailTimer.restart();
         for(const STerrainGlobalTransitionSource& source :
                 CTerrainAtlasPresetCatalog::globalAuthoredTransitions(&report))
             for(int rotation = 0; rotation < 4; ++rotation)
                 m_terrainGlobalTransitionSources.insert(
                     globalTransitionKey(CTerrainTransitionCatalog::rotated(
                         source.signature, rotation)), source);
+        authoredTransitionsMs = catalogDetailTimer.restart();
         const QSize requiredSize = m_pTileForm->tileImages().isEmpty()
             ? QSize() : m_pTileForm->tileImages().front().size();
         // Palette construction only needs individual 256x256 authored tiles.
@@ -7895,13 +7927,15 @@ void CView::rebuildTerrainAutoCatalog()
                 overlayChoices.append(choice);
             }
         }
+        sourceHydrationMs = sourceHydrationTimer.elapsed();
         ei::log(eLogInfo, QString(
             "Game-wide material palette source pages accessed:%1 fullPagesRead:%2 "
             "unavailable:%3 materialTiles:%4 elapsedMs:%5")
             .arg(directGlobalPages.size()).arg(encodedGlobalPages.size())
             .arg(missingGlobalPages.size())
             .arg(m_terrainGlobalMaterialSources.size())
-            .arg(sourceHydrationTimer.elapsed()));
+            .arg(sourceHydrationMs));
+        catalogDetailTimer.restart();
     }
     QString status = m_terrainAtlasAnalysis.usable
         ? tr("%1 loaded: %2 land and %3 overlay materials.")
@@ -7945,6 +7979,8 @@ void CView::rebuildTerrainAutoCatalog()
         m_terrainAtlasProfile.assignedSlotCount(),
         m_terrainAtlasProfile.atlasSlotCount, status, sourceLabel,
         m_terrainAtlasProfileSource.path);
+    modernPaletteDataMs = catalogDetailTimer.isValid()
+        ? catalogDetailTimer.restart() : 0;
     m_modernLandPaintChoices = landChoices;
     m_modernUnderwaterPaintChoices = underwaterChoices;
     m_modernOverlayPaintChoices = overlayChoices;
@@ -7972,6 +8008,7 @@ void CView::rebuildTerrainAutoCatalog()
             m_mprDocument.mapInfo().tileTypes,
             materialRuntimeTypes(m_terrainAtlasProfile,
                                  m_terrainGlobalFamilies)));
+        workingAtlasMs = catalogDetailTimer.restart();
         m_terrainEdit.enableWorkingAtlasSlots(
             m_workingTerrainAtlas->capacityLimit());
         if(m_landscapeTools)
@@ -7990,11 +8027,35 @@ void CView::rebuildTerrainAutoCatalog()
                  - m_authoredTerrainTileImages.size())
             .arg(m_workingAtlasProtectedSlots.size()));
         refreshClassicAutoPalette();
+        classicPaletteDataMs = catalogDetailTimer.restart();
         refreshManualAtlasPalette();
+        manualPaletteMs = catalogDetailTimer.restart();
         refreshTerrainFamilyUsage();
+        familyUsageMs = catalogDetailTimer.restart();
     }
     else
+    {
         refreshManualAtlasPalette();
+        if(catalogDetailTimer.isValid())
+            manualPaletteMs = catalogDetailTimer.restart();
+    }
+    if(batchTerrainPalette)
+    {
+        if(!catalogDetailTimer.isValid())
+            catalogDetailTimer.start();
+        m_landscapeTools->endTerrainPaletteUpdate();
+        paletteCommitMs = catalogDetailTimer.elapsed();
+    }
+    ei::log(eLogInfo, QString(
+        "Terrain material catalog phases globalFamiliesMs:%1 globalizeCatalogsMs:%2 "
+        "authoredTransitionsMs:%3 sourceHydrationMs:%4 modernPaletteDataMs:%5 "
+        "workingAtlasMs:%6 classicPaletteDataMs:%7 manualPaletteMs:%8 "
+        "familyUsageMs:%9 paletteCommitMs:%10")
+        .arg(globalFamiliesMs).arg(globalizeCatalogsMs)
+        .arg(authoredTransitionsMs).arg(sourceHydrationMs)
+        .arg(modernPaletteDataMs).arg(workingAtlasMs)
+        .arg(classicPaletteDataMs).arg(manualPaletteMs)
+        .arg(familyUsageMs).arg(paletteCommitMs));
 }
 
 void CView::refreshClassicAutoPalette()
@@ -8085,9 +8146,15 @@ void CView::refreshClassicAutoPalette()
                   m_terrainAtlasAnalysis.overlayCatalog));
 }
 
-void CView::refreshManualAtlasPalette()
+void CView::refreshManualAtlasPalette(bool invalidate)
 {
     if(!m_landscapeTools || !m_pTileForm)
+        return;
+    if(invalidate)
+        m_manualAtlasPaletteDirty = true;
+    if(!m_manualAtlasPaletteDirty
+       || m_landscapeTools->paintPaletteMode()
+            != ETerrainPaintPaletteMode::Manual)
         return;
     int previouslySelectedSlot = -1;
     int previouslySelectedRotation = 0;
@@ -8153,6 +8220,7 @@ void CView::refreshManualAtlasPalette()
     }
     m_landscapeTools->setManualAtlasTiles(
         images, runtimeTypes, descriptions, physicalIdentities);
+    m_manualAtlasPaletteDirty = false;
 
     // Palette rebuilding blocks selection signals. Re-bind the legacy tile
     // cursor explicitly to the same physical artwork identity, even when
