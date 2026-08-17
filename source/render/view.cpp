@@ -5535,6 +5535,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
     }
 
     m_legacyTerrainProfileCollision = false;
+    m_prevalidatedTerrainEmbeddedBinding =
+        STerrainAtlasEmbeddedBindingResult();
     QString mapLocalAtlas = filePath.dir().filePath(
         filePath.completeBaseName() + QStringLiteral("-atlas.res"));
     if(!QFileInfo::exists(mapLocalAtlas))
@@ -5567,6 +5569,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
         bool embeddedBound = embedded.success();
         if(embeddedBound)
         {
+            m_prevalidatedTerrainEmbeddedBinding = embedded;
             mapLocalAtlas = embedded.archivePath;
             ei::log(eLogInfo, QStringLiteral(
                 "Bound self-describing terrain atlas RES: %1 member:%2 hash:%3")
@@ -5672,6 +5675,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
             }
             embedded = recovered;
             embeddedBound = true;
+            m_prevalidatedTerrainEmbeddedBinding = recovered;
             mapLocalAtlas = target.absoluteFilePath();
             ei::log(eLogInfo, QStringLiteral(
                 "Restored exact terrain atlas recovery RES: %1 hash:%2")
@@ -5789,6 +5793,8 @@ void CView::loadLandscape(const QFileInfo& filePath)
     {
         CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
         m_activeTerrainArchivePath.clear();
+        m_prevalidatedTerrainEmbeddedBinding =
+            STerrainAtlasEmbeddedBindingResult();
         ei::log(eLogWarning, "Landscape failed to load: " + filePath.absoluteFilePath());
         return;
     }
@@ -5868,8 +5874,15 @@ void CView::loadLandscape(const QFileInfo& filePath)
     updateTileForm(true);
     const qint64 tileTableMs = phaseTimer.elapsed();
     phaseTimer.restart();
+    m_deferManualAtlasPalette = true;
     rebuildTerrainAutoCatalog();
+    m_deferManualAtlasPalette = false;
     const qint64 materialCatalogMs = phaseTimer.elapsed();
+    if(m_manualAtlasPaletteDirty)
+        QTimer::singleShot(0, this, [this]() {
+            if(m_pLand && m_pLand->isMprLoad())
+                refreshManualAtlasPalette(false);
+        });
     phaseTimer.restart();
     restoreTerrainSemanticFieldFromArchive(
         filePath, m_activeTerrainArchivePath, false);
@@ -5923,6 +5936,9 @@ void CView::unloadLand(bool promptForSave)
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_workingTerrainAtlas.reset();
+    m_prevalidatedTerrainEmbeddedBinding =
+        STerrainAtlasEmbeddedBindingResult();
+    m_deferManualAtlasPalette = false;
     if(m_landscapeTools)
         m_landscapeTools->setGeneratedAtlasTileCount(0);
     m_authoredTerrainTileImages.clear();
@@ -6707,6 +6723,8 @@ bool CView::adoptCommittedLandscapeBaseline(const QFileInfo& destination,
     m_mprDocument = reopenedDocument;
     m_terrainEdit = reopenedTerrain;
     m_terrainEditAvailable = true;
+    m_prevalidatedTerrainEmbeddedBinding =
+        STerrainAtlasEmbeddedBindingResult();
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
     rebuildTerrainAutoCatalog();
     restoreTerrainSemanticFieldFromArchive(
@@ -7649,8 +7667,11 @@ void CView::rebuildTerrainAutoCatalog()
     CValidationReport report;
     const QString mprNamespace = m_mprDocument.mapInfo().innerNamespace;
     const int slotCount = m_pTileForm->tileImages().size();
+    QElapsedTimer atlasHashTimer;
+    atlasHashTimer.start();
     const QByteArray atlasHash = CTerrainAtlasProfileInference::pixelSha256(
         m_pTileForm->tileImages());
+    const qint64 atlasHashMs = atlasHashTimer.elapsed();
     // Stable map/profile identity participates in every deterministic
     // per-cell choice. Namespace alone is insufficient when different atlas
     // pixels are bound under the same resource name.
@@ -7674,10 +7695,21 @@ void CView::rebuildTerrainAutoCatalog()
     CValidationReport storedReport;
     bool legacyAdjacentProfile = false;
     bool embeddedPortableProfile = false;
+    bool prevalidatedBindingReused = false;
+    QElapsedTimer embeddedProfileLookupTimer;
+    embeddedProfileLookupTimer.start();
     if(QFileInfo(m_activeTerrainArchivePath).isFile())
     {
-        const STerrainAtlasEmbeddedBindingResult embedded =
-            CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+        STerrainAtlasEmbeddedBindingResult embedded;
+        if(m_prevalidatedTerrainEmbeddedBinding.matchesLoadedAtlas(
+               m_activeTerrainArchivePath, mprNamespace,
+               atlasHash, slotCount))
+        {
+            embedded = m_prevalidatedTerrainEmbeddedBinding;
+            prevalidatedBindingReused = true;
+        }
+        else
+            embedded = CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
                 {m_activeTerrainArchivePath}, mprNamespace,
                 m_activeTerrainArchivePath);
         if(embedded.success()
@@ -7690,6 +7722,13 @@ void CView::rebuildTerrainAutoCatalog()
             embeddedPortableProfile = true;
         }
     }
+    const qint64 embeddedProfileLookupMs =
+        embeddedProfileLookupTimer.elapsed();
+    // The approval is deliberately one-shot. A later profile-only edit may
+    // keep identical artwork pixels, so subsequent rebuilds must read the
+    // current embedded member instead of reusing load-time semantic metadata.
+    m_prevalidatedTerrainEmbeddedBinding =
+        STerrainAtlasEmbeddedBindingResult();
     const bool adjacentPortableProfile = !embeddedPortableProfile && m_pLand
         && CTerrainAtlasProfileStore::loadExplicitOverrideForMpr(
             mprNamespace, atlasHash, slotCount, m_pLand->filePath(),
@@ -8047,10 +8086,14 @@ void CView::rebuildTerrainAutoCatalog()
         paletteCommitMs = catalogDetailTimer.elapsed();
     }
     ei::log(eLogInfo, QString(
-        "Terrain material catalog phases globalFamiliesMs:%1 globalizeCatalogsMs:%2 "
-        "authoredTransitionsMs:%3 sourceHydrationMs:%4 modernPaletteDataMs:%5 "
-        "workingAtlasMs:%6 classicPaletteDataMs:%7 manualPaletteMs:%8 "
-        "familyUsageMs:%9 paletteCommitMs:%10")
+        "Terrain material catalog phases atlasHashMs:%1 embeddedProfileLookupMs:%2 "
+        "prevalidatedBindingReused:%3 globalFamiliesMs:%4 globalizeCatalogsMs:%5 "
+        "authoredTransitionsMs:%6 sourceHydrationMs:%7 modernPaletteDataMs:%8 "
+        "workingAtlasMs:%9 classicPaletteDataMs:%10 manualPaletteMs:%11 "
+        "familyUsageMs:%12 paletteCommitMs:%13")
+        .arg(atlasHashMs).arg(embeddedProfileLookupMs)
+        .arg(prevalidatedBindingReused ? QStringLiteral("true")
+                                       : QStringLiteral("false"))
         .arg(globalFamiliesMs).arg(globalizeCatalogsMs)
         .arg(authoredTransitionsMs).arg(sourceHydrationMs)
         .arg(modernPaletteDataMs).arg(workingAtlasMs)
@@ -8152,6 +8195,8 @@ void CView::refreshManualAtlasPalette(bool invalidate)
         return;
     if(invalidate)
         m_manualAtlasPaletteDirty = true;
+    if(m_deferManualAtlasPalette)
+        return;
     if(!m_manualAtlasPaletteDirty
        || m_landscapeTools->paintPaletteMode()
             != ETerrainPaintPaletteMode::Manual)
@@ -8894,6 +8939,8 @@ bool CView::adoptCompleteTerrainBaseline(
     m_pTileForm->setAnimTile(m_pLand->animTiles());
     CTextureList::getInstance()->setMapLocalTerrainArchive(terrainArchivePath);
     m_activeTerrainArchivePath = terrainArchivePath;
+    m_prevalidatedTerrainEmbeddedBinding =
+        STerrainAtlasEmbeddedBindingResult();
     m_mprDocument = reopenedDocument;
     m_terrainEdit = reopenedTerrain;
     m_terrainEditAvailable = true;

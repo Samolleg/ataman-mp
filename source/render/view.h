@@ -36,6 +36,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "terrain_tile_information_policy.h"
 #include "landscape_edit_policy.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_archive_binding.h"
 #include "terrain_atlas_profile.h"
 #include "landscape_tools.h"
 #include "spatial_grid.h"
@@ -626,6 +627,9 @@ private:
     QVector<QImage> m_authoredTerrainTileImages;
     QSharedPointer<CTerrainWorkingAtlas> m_workingTerrainAtlas;
     bool m_manualAtlasPaletteDirty{true};
+    bool m_deferManualAtlasPalette{false};
+    STerrainAtlasEmbeddedBindingResult
+        m_prevalidatedTerrainEmbeddedBinding;
     QSet<int> m_workingAtlasProtectedSlots;
     QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;

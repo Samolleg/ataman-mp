@@ -9,6 +9,7 @@
 #include <QTextCodec>
 
 #include "mmp_codec.h"
+#include "endurance_document.h"
 #include "res_file.h"
 #include "terrain_atlas_profile.h"
 
@@ -194,6 +195,45 @@ bool STerrainAtlasArchiveBindingResult::hasCompleteArchive(
         if(normalizedPath(complete) == wanted)
             return true;
     return false;
+}
+
+bool STerrainAtlasEmbeddedBindingResult::matchesLoadedAtlas(
+    const QString& activeArchivePath,
+    const QString& currentNamespace,
+    const QByteArray& currentAtlasPixelSha256,
+    int currentAtlasSlotCount,
+    CValidationReport* report) const
+{
+    bool valid = success() && !profileMemberName.isEmpty();
+    if(!valid)
+    {
+        if(report) report->add(
+            "terrain.embedded_binding_incomplete",
+            EValidationSeverity::Error,
+            "The prevalidated embedded terrain-atlas binding is incomplete");
+        return false;
+    }
+    if(normalizedPath(archivePath) != normalizedPath(activeArchivePath))
+    {
+        valid = false;
+        if(report) report->add(
+            "terrain.embedded_binding_archive_mismatch",
+            EValidationSeverity::Error,
+            "The prevalidated embedded terrain-atlas binding belongs to another RES archive");
+    }
+    if(decodedAtlasPixelSha256.toLower()
+       != currentAtlasPixelSha256.toLower())
+    {
+        valid = false;
+        if(report) report->add(
+            "terrain.embedded_binding_pixel_mismatch",
+            EValidationSeverity::Error,
+            "The loaded terrain-atlas pixels no longer match the prevalidated RES archive");
+    }
+    return profile.validateBinding(
+               currentNamespace, currentAtlasPixelSha256,
+               currentAtlasSlotCount, report)
+        && valid;
 }
 
 STerrainAtlasEmbeddedBindingResult

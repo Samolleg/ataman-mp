@@ -29,6 +29,11 @@ struct STerrainAtlasEmbeddedBindingResult
     QString error;
 
     bool success() const { return !archivePath.isEmpty(); }
+    bool matchesLoadedAtlas(const QString& activeArchivePath,
+                            const QString& currentNamespace,
+                            const QByteArray& currentAtlasPixelSha256,
+                            int currentAtlasSlotCount,
+                            CValidationReport* report = nullptr) const;
 };
 
 class CTerrainAtlasArchiveBindingResolver

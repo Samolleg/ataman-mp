@@ -420,6 +420,7 @@ private slots:
     void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void workingAtlasProfileBindsExtensionSignaturesForDraftReopen();
     void embeddedTerrainAtlasProfileRoundTripsInsidePublishedRes();
+    void prevalidatedEmbeddedAtlasBindingMatchesOnlyExactLoadedAtlas();
     void indexedTerrainArchiveMemberReadSkipsUnrelatedPayloads();
     void terrainAtlasRecoveryStoreDeduplicatesExactPayloads();
     void publishedAtlasArchiveBindingSelectsCoherentProfileSource();
@@ -8870,6 +8871,42 @@ void EnduranceDocumentTests::embeddedTerrainAtlasProfileRoundTripsInsidePublishe
     QVERIFY2(recoveredBinding.success(), qPrintable(recoveredBinding.error));
     QCOMPARE(recoveredBinding.profile.atlasPixelSha256,
              profile.atlasPixelSha256);
+}
+
+void EnduranceDocumentTests::prevalidatedEmbeddedAtlasBindingMatchesOnlyExactLoadedAtlas()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString archivePath = root.filePath(QStringLiteral("textures.res"));
+    QFile archive(archivePath);
+    QVERIFY(archive.open(QIODevice::WriteOnly));
+    archive.close();
+
+    STerrainAtlasEmbeddedBindingResult binding;
+    binding.archivePath = archivePath;
+    binding.profileMemberName = QStringLiteral("ei_terrain_atlas_zone2.json");
+    binding.decodedAtlasPixelSha256 = QByteArray(64, 'a');
+    binding.profile.mprNamespace = QStringLiteral("zone2");
+    binding.profile.atlasPixelSha256 = binding.decodedAtlasPixelSha256;
+    binding.profile.atlasSlotCount = 576;
+
+    QVERIFY(binding.matchesLoadedAtlas(
+        archivePath, QStringLiteral("Zone2"),
+        binding.decodedAtlasPixelSha256, 576));
+    QVERIFY(!binding.matchesLoadedAtlas(
+        root.filePath(QStringLiteral("other.res")),
+        QStringLiteral("zone2"), binding.decodedAtlasPixelSha256, 576));
+    QVERIFY(!binding.matchesLoadedAtlas(
+        archivePath, QStringLiteral("zone1"),
+        binding.decodedAtlasPixelSha256, 576));
+    QVERIFY(!binding.matchesLoadedAtlas(
+        archivePath, QStringLiteral("zone2"),
+        binding.decodedAtlasPixelSha256, 512));
+
+    binding.decodedAtlasPixelSha256 = QByteArray(64, 'b');
+    QVERIFY(!binding.matchesLoadedAtlas(
+        archivePath, QStringLiteral("zone2"),
+        binding.profile.atlasPixelSha256, 576));
 }
 
 void EnduranceDocumentTests::indexedTerrainArchiveMemberReadSkipsUnrelatedPayloads()
