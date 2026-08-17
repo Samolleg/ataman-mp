@@ -302,7 +302,13 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
             const int key = delta.globalY * field.vertexWidth + delta.globalX;
             if(key >= 0 && key < field.afterCurrent.size()
                && field.afterCurrent.at(key) == delta.before)
+            {
                 field.afterCurrent[key] = delta.after;
+                if(delta.updatesBaseline
+                   && key < field.afterBaseline.size()
+                   && field.afterBaseline.at(key) == delta.beforeBaseline)
+                    field.afterBaseline[key] = delta.afterBaseline;
+            }
             continue;
         }
         int existingIndex=-1;
@@ -317,7 +323,17 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
         {
             auto& existing=stroke->virtualVertices[existingIndex];
             existing.after=delta.after;
-            if(existing.before==existing.after)stroke->virtualVertices.remove(existingIndex);
+            if(delta.updatesBaseline)
+            {
+                if(!existing.updatesBaseline)
+                    existing.beforeBaseline = delta.beforeBaseline;
+                existing.updatesBaseline = true;
+                existing.afterBaseline = delta.afterBaseline;
+            }
+            if(existing.before==existing.after
+               && (!existing.updatesBaseline
+                   || existing.beforeBaseline==existing.afterBaseline))
+                stroke->virtualVertices.remove(existingIndex);
         }
     }
     for(const STerrainTileCommand::SVirtualFieldDelta& delta : stamp.virtualFields)
@@ -345,6 +361,9 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
                     + vertex.globalX;
                 if(key >= 0 && key < composed.beforeCurrent.size())
                     composed.beforeCurrent[key] = vertex.before;
+                if(vertex.updatesBaseline && key >= 0
+                   && key < composed.beforeBaseline.size())
+                    composed.beforeBaseline[key] = vertex.beforeBaseline;
                 stroke->virtualVertices.remove(index);
             }
             stroke->virtualFields.append(composed);
@@ -2729,6 +2748,7 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     quint8 atlasIndex, quint8 tileIndex, quint8 rotation,
     const CTerrainTransitionCatalog& catalog, CValidationReport* report)
 {
+    Q_UNUSED(report);
     STerrainTileCommand command = makeTilePaint(
         brush, layer, atlasIndex, tileIndex, rotation);
     if(brush.radius < 0.0f || tileIndex >= 64 || rotation >= 4
@@ -2793,50 +2813,19 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     QVector<qint32> beforeCurrent;
     QVector<qint32> beforeBaseline;
     copyVirtualMaterialFieldState(layer, &beforeCurrent, &beforeBaseline);
-    if(beforeCurrent.size() != expectedFieldSize
-       || beforeBaseline.size() != expectedFieldSize)
-    {
-        // Legacy maps do not yet have a durable field. Recover into a local
-        // copy so command construction has no hidden side effects.
-        CTerrainEditModel staged = *this;
-        CValidationReport recoveryReport;
-        if(staged.initializeVirtualMaterialField(
-               layer, catalog, &recoveryReport,
-               ETerrainMaterialFieldRecovery::RecoverDeterministically))
-            staged.copyVirtualMaterialFieldState(
-                layer, &beforeCurrent, &beforeBaseline);
-        if(report)
-            for(const SValidationFinding& finding : recoveryReport.findings())
-                report->add(finding.code, finding.severity, finding.message,
-                            finding.location);
-    }
 
     bool selectedDecoded = false;
     const STerrainTransitionSignature signature =
         catalog.gridSignatureForPacked(after, &selectedDecoded);
-    STerrainTileCommand::SVirtualFieldDelta fieldDelta;
-    fieldDelta.layer = layer;
-    fieldDelta.vertexWidth = vertexWidth;
-    fieldDelta.vertexHeight = height + 1;
-    fieldDelta.beforeCurrent = beforeCurrent;
-    fieldDelta.beforeBaseline = beforeBaseline;
-    fieldDelta.afterCurrent = beforeCurrent;
-    fieldDelta.afterBaseline = beforeBaseline;
-    if(!selectedDecoded || beforeCurrent.size() != expectedFieldSize
-       || beforeBaseline.size() != expectedFieldSize)
-    {
-        // Real artwork without an assignment remains physically paintable,
-        // but no stale semantic interpretation may survive it. The next
-        // Modern/Resolve action will route the referenced slot to assignment.
-        fieldDelta.afterCurrent.clear();
-        fieldDelta.afterBaseline.clear();
-    }
-    else
+    if(beforeCurrent.size() == expectedFieldSize
+       && beforeBaseline.size() == expectedFieldSize)
     {
         // QMap iteration is cell-key order (y, then x). When several Manual
         // cells touch a vertex, the later explicit cell in that deterministic
         // order wins. Only the final values are stored; no origin or time data
         // is retained.
+        const qint32 unset = std::numeric_limits<qint32>::min();
+        QMap<int, qint32> finalValues;
         for(auto cell = postCommandPacked.constBegin();
             cell != postCommandPacked.constEnd(); ++cell)
         {
@@ -2846,19 +2835,38 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
             const int northEast = northWest + 1;
             const int southWest = (y + 1) * vertexWidth + x;
             const int southEast = southWest + 1;
-            fieldDelta.afterCurrent[northWest] = signature.northWest;
-            fieldDelta.afterCurrent[northEast] = signature.northEast;
-            fieldDelta.afterCurrent[southEast] = signature.southEast;
-            fieldDelta.afterCurrent[southWest] = signature.southWest;
-            fieldDelta.afterBaseline[northWest] = signature.northWest;
-            fieldDelta.afterBaseline[northEast] = signature.northEast;
-            fieldDelta.afterBaseline[southEast] = signature.southEast;
-            fieldDelta.afterBaseline[southWest] = signature.southWest;
+            finalValues[northWest] = selectedDecoded
+                ? signature.northWest : unset;
+            finalValues[northEast] = selectedDecoded
+                ? signature.northEast : unset;
+            finalValues[southEast] = selectedDecoded
+                ? signature.southEast : unset;
+            finalValues[southWest] = selectedDecoded
+                ? signature.southWest : unset;
+        }
+        for(auto value = finalValues.constBegin();
+            value != finalValues.constEnd(); ++value)
+        {
+            const int key = value.key();
+            if(beforeCurrent.at(key) == value.value()
+               && beforeBaseline.at(key) == value.value())
+                continue;
+            STerrainTileCommand::SVirtualVertexDelta delta;
+            delta.globalX = key % vertexWidth;
+            delta.globalY = key / vertexWidth;
+            delta.layer = layer;
+            delta.before = beforeCurrent.at(key);
+            delta.after = value.value();
+            delta.updatesBaseline = true;
+            delta.beforeBaseline = beforeBaseline.at(key);
+            delta.afterBaseline = value.value();
+            command.virtualVertices.append(delta);
         }
     }
-    if(fieldDelta.beforeCurrent != fieldDelta.afterCurrent
-       || fieldDelta.beforeBaseline != fieldDelta.afterBaseline)
-        command.virtualFields.append(fieldDelta);
+    // A plain/legacy MPR has no durable semantic field yet. Manual remains a
+    // direct physical edit in that state; it must not synchronously solve the
+    // complete map for every clicked tile. The first later Modern/Resolve
+    // operation initializes once from the post-Manual packed cells.
     return command;
 }
 
@@ -6205,13 +6213,21 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
             return false;
         QVector<qint32>& values=delta.layer==ETerrainTileLayer::Land
             ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+        QVector<qint32>& baseline=delta.layer==ETerrainTileLayer::Land
+            ?m_originalVirtualLandMaterials:m_originalVirtualOverlayMaterials;
         const int key=delta.globalY*(tileCountX()+1)+delta.globalX;
         const int layerKey=(delta.layer==ETerrainTileLayer::Overlay?1:0)
             *(tileCountX()+1)*(tileCountY()+1)+key;
         const qint32 expected=forward?delta.before:delta.after;
+        const qint32 expectedBaseline=forward
+            ?delta.beforeBaseline:delta.afterBaseline;
         const int fieldLayerKey = delta.layer == ETerrainTileLayer::Overlay ? 1 : 0;
         if(commandFields.contains(fieldLayerKey)
-           || commandVertices.contains(layerKey)||key>=values.size()||values.at(key)!=expected)
+           || commandVertices.contains(layerKey)||key>=values.size()
+           ||values.at(key)!=expected
+           ||(delta.updatesBaseline
+              &&(key>=baseline.size()
+                 ||baseline.at(key)!=expectedBaseline)))
         {
             if(report)report->add("terrain.virtual_paint_provenance",
                 EValidationSeverity::Error,
@@ -6299,8 +6315,12 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
     {
         QVector<qint32>& values=delta.layer==ETerrainTileLayer::Land
             ?m_virtualLandMaterials:m_virtualOverlayMaterials;
-        values[delta.globalY*(tileCountX()+1)+delta.globalX]
-            =forward?delta.after:delta.before;
+        QVector<qint32>& baseline=delta.layer==ETerrainTileLayer::Land
+            ?m_originalVirtualLandMaterials:m_originalVirtualOverlayMaterials;
+        const int key=delta.globalY*(tileCountX()+1)+delta.globalX;
+        values[key]=forward?delta.after:delta.before;
+        if(delta.updatesBaseline)
+            baseline[key]=forward?delta.afterBaseline:delta.beforeBaseline;
     }
     for(const STerrainTileCommand::SVirtualFieldDelta& delta
         : command.virtualFields)

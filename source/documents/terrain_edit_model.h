@@ -124,6 +124,14 @@ struct STerrainTileCommand
         ETerrainTileLayer layer{ETerrainTileLayer::Land};
         qint32 before{0};
         qint32 after{0};
+        // Most semantic paint commands edit only the current field. Manual
+        // physical paint updates the saved baseline at the same vertices too,
+        // so it remains an ordinary MPR edit rather than creating pending
+        // Modern state. Keep that second value sparse as well: one Manual cell
+        // must never carry four complete map-sized field snapshots.
+        bool updatesBaseline{false};
+        qint32 beforeBaseline{0};
+        qint32 afterBaseline{0};
     };
     QVector<SVirtualVertexDelta> virtualVertices;
     // Commands that establish, replace, or remove a complete semantic field

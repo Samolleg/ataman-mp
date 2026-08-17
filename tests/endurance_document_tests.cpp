@@ -386,6 +386,7 @@ private slots:
     void manualTilePaintRebasesDecodedSemanticsAndInvalidatesDisputes();
     void manualTilePaintOnLegacyMapStaysPhysicalUntilModernStarts();
     void laterManualTileWinsSharedCornersAndUndoRestoresPriorValues();
+    void manualTileStrokeStoresOnlyTouchedSemanticVertices();
     void terrainSemanticFieldRoundTripsWithoutPlacementHistory();
     void terrainSemanticFieldRejectsWrongMprOrAtlasBinding();
     void mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlasCapacity();
@@ -4465,9 +4466,25 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
     QVERIFY(terrain.apply(unassigned, true));
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              packed(2, 1));
-    CTerrainVirtualMaterialField noManualField;
-    QVERIFY(!terrain.copyVirtualMaterialField(
-        ETerrainTileLayer::Land, &noManualField, false));
+    // Keep the rest of the map's field intact. Only this unassigned artwork's
+    // four touched vertices become unknown, so later Modern/Resolve can route
+    // the real referenced slot to assignment without rebuilding unrelated
+    // terrain or carrying a complete field snapshot in this command.
+    CTerrainVirtualMaterialField partialManualField;
+    QVERIFY(terrain.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &partialManualField, false));
+    for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
+                                 QPoint(9, 9), QPoint(8, 9)})
+    {
+        bool found = true;
+        terrain.virtualMaterialAt(
+            ETerrainTileLayer::Land, vertex.x(), vertex.y(), &found);
+        QVERIFY(!found);
+    }
+    bool unaffectedFound = false;
+    terrain.virtualMaterialAt(
+        ETerrainTileLayer::Land, 0, 0, &unaffectedFound);
+    QVERIFY(unaffectedFound);
     const QMap<int, QPoint> unresolved =
         terrain.referencedUnassignedAtlasSlots(
             ETerrainTileLayer::Land, catalog);
@@ -4633,7 +4650,9 @@ void EnduranceDocumentTests::manualTilePaintOnLegacyMapStaysPhysicalUntilModernS
         catalog, &manualReport);
     QVERIFY2(!manualReport.hasErrors(), qPrintable(manualReport.toText()));
     QVERIFY(!manual.isEmpty());
-    QVERIFY2(!manual.virtualFields.isEmpty(),
+    QVERIFY2(manual.virtualFields.isEmpty(),
+             "Manual paint stored a complete map-sized field snapshot");
+    QVERIFY2(!manual.virtualVertices.isEmpty(),
              "Manual paint did not record its exact semantic corner values");
     QVERIFY(terrain.apply(manual, true));
     QVERIFY(!terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land));
@@ -4686,6 +4705,25 @@ void EnduranceDocumentTests::laterManualTileWinsSharedCornersAndUndoRestoresPrio
         variant.packedTile = quint16(material - 1);
         QVERIFY(catalog.addVariant(variant));
     }
+
+    // A legacy map with no persisted field must stay a physical-only Manual
+    // edit. Reconstructing the complete map here was the multi-second click
+    // stall and also produced a command whose expected field never existed in
+    // the live model.
+    CTerrainEditModel legacyTerrain;
+    QVERIFY(legacyTerrain.load(document));
+    STerrainTileBrush legacyCell;
+    legacyCell.centerX = 8.0f;
+    legacyCell.centerY = 8.0f;
+    legacyCell.radius = 0.0f;
+    const STerrainTileCommand legacyManual = legacyTerrain.makeTilePaint(
+        legacyCell, ETerrainTileLayer::Land, 0, 1, 0, catalog);
+    QVERIFY(!legacyManual.isEmpty());
+    QVERIFY(legacyManual.virtualFields.isEmpty());
+    QVERIFY(legacyManual.virtualVertices.isEmpty());
+    QVERIFY(legacyTerrain.apply(legacyManual, true));
+    QVERIFY(legacyTerrain.apply(legacyManual, false));
+
     CValidationReport baselineReport;
     QVERIFY(terrain.initializeVirtualMaterialField(
         ETerrainTileLayer::Land, catalog, &baselineReport,
@@ -4739,6 +4777,86 @@ void EnduranceDocumentTests::laterManualTileWinsSharedCornersAndUndoRestoresPrio
                  qint32(3));
         QVERIFY(found);
     }
+}
+
+void EnduranceDocumentTests::manualTileStrokeStoresOnlyTouchedSemanticVertices()
+{
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(),
+                               "manual-sparse-semantic-stroke.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+
+    CTerrainTransitionCatalog catalog;
+    for(qint32 material = 1; material <= 3; ++material)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = variant.signature.northEast =
+            variant.signature.southEast = variant.signature.southWest =
+                material;
+        variant.packedTile = quint16(material - 1);
+        QVERIFY(catalog.addVariant(variant));
+    }
+    CValidationReport baselineReport;
+    QVERIFY(terrain.initializeVirtualMaterialField(
+        ETerrainTileLayer::Land, catalog, &baselineReport,
+        ETerrainMaterialFieldRecovery::RecoverDeterministically));
+    QVERIFY2(!baselineReport.hasErrors(),
+             qPrintable(baselineReport.toText()));
+
+    QVector<qint32> originalCurrent;
+    QVector<qint32> originalBaseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &originalCurrent, &originalBaseline));
+
+    STerrainTileCommand stroke;
+    STerrainTileBrush cell;
+    cell.centerX = 8.0f;
+    cell.centerY = 8.0f;
+    cell.radius = 0.0f;
+    const STerrainTileCommand first = terrain.makeTilePaint(
+        cell, ETerrainTileLayer::Land, 0, 1, 0, catalog);
+    QVERIFY(!first.isEmpty());
+    QVERIFY2(first.virtualFields.isEmpty(),
+             "A one-cell Manual stamp stored a complete map-sized field");
+    QCOMPARE(first.virtualVertices.size(), 4);
+    QVERIFY(terrain.apply(first, true));
+    appendTerrainTileCommand(&stroke, first);
+
+    cell.centerX = 9.0f;
+    const STerrainTileCommand second = terrain.makeTilePaint(
+        cell, ETerrainTileLayer::Land, 0, 2, 0, catalog);
+    QVERIFY(!second.isEmpty());
+    QVERIFY2(second.virtualFields.isEmpty(),
+             "A later Manual stamp stored a complete map-sized field");
+    QCOMPARE(second.virtualVertices.size(), 4);
+    QVERIFY(terrain.apply(second, true));
+    appendTerrainTileCommand(&stroke, second);
+
+    // Adjacent cells touch six unique vertices. The composed undo command
+    // must stay proportional to that footprint, not to the complete map.
+    QVERIFY(stroke.virtualFields.isEmpty());
+    QCOMPARE(stroke.virtualVertices.size(), 6);
+    QVector<qint32> paintedCurrent;
+    QVector<qint32> paintedBaseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &paintedCurrent, &paintedBaseline));
+
+    QVERIFY(terrain.apply(stroke, false));
+    QVector<qint32> undoneCurrent;
+    QVector<qint32> undoneBaseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &undoneCurrent, &undoneBaseline));
+    QCOMPARE(undoneCurrent, originalCurrent);
+    QCOMPARE(undoneBaseline, originalBaseline);
+
+    QVERIFY(terrain.apply(stroke, true));
+    QVector<qint32> redoneCurrent;
+    QVector<qint32> redoneBaseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &redoneCurrent, &redoneBaseline));
+    QCOMPARE(redoneCurrent, paintedCurrent);
+    QCOMPARE(redoneBaseline, paintedBaseline);
 }
 
 void EnduranceDocumentTests::mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlasCapacity()
