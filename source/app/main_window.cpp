@@ -4473,19 +4473,35 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     progress.setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     setWorkspaceIdentity("map", zoneId, zoneId, zoneId);
+    QElapsedTimer mapLoadTimer;
+    QElapsedTimer mapLoadPhase;
+    mapLoadTimer.start();
+    mapLoadPhase.start();
     m_pView->loadLandscape(QFileInfo(mprPath));
+    const qint64 landscapeMs = mapLoadPhase.elapsed();
     progress.setLabelText(tr("Loading %1...").arg(QFileInfo(mobPath).fileName()));
     progress.setValue(2);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QFileInfo mobFile(mobPath);
+    mapLoadPhase.restart();
     m_pView->loadMob(mobFile);
+    const qint64 mobMs = mapLoadPhase.elapsed();
+    mapLoadPhase.restart();
     rememberRecentFile(QFileInfo(mprPath));
     rememberRecentFile(QFileInfo(mobPath));
+    const qint64 recentFilesMs = mapLoadPhase.elapsed();
     // The landscape title update can run before the matching MOB has finished
     // loading. Re-resolve the map identity from the completed pair so family
     // validation and hot reload cannot retain the previous map's primary MOB,
     // entrances, or custom-spawn context.
+    mapLoadPhase.restart();
     refreshMapTestContext();
+    const qint64 mapContextMs = mapLoadPhase.elapsed();
+    ei::log(eLogInfo, QString(
+        "Map workspace load phases zone:%1 landscapeMs:%2 mobMs:%3 "
+        "recentFilesMs:%4 mapContextMs:%5 totalMs:%6")
+        .arg(zoneId).arg(landscapeMs).arg(mobMs).arg(recentFilesMs)
+        .arg(mapContextMs).arg(mapLoadTimer.elapsed()));
     ei::log(eLogInfo, QString("Opened profile map zone:%1 mpr:%2 mob:%3")
         .arg(zoneId, mprPath, mobPath));
     progress.setValue(3);

@@ -417,6 +417,7 @@ private slots:
     void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void workingAtlasProfileBindsExtensionSignaturesForDraftReopen();
     void embeddedTerrainAtlasProfileRoundTripsInsidePublishedRes();
+    void indexedTerrainArchiveMemberReadSkipsUnrelatedPayloads();
     void terrainAtlasRecoveryStoreDeduplicatesExactPayloads();
     void publishedAtlasArchiveBindingSelectsCoherentProfileSource();
     void externalPublishedAtlasArchiveBindingProbe();
@@ -8782,6 +8783,55 @@ void EnduranceDocumentTests::embeddedTerrainAtlasProfileRoundTripsInsidePublishe
     QVERIFY2(recoveredBinding.success(), qPrintable(recoveredBinding.error));
     QCOMPARE(recoveredBinding.profile.atlasPixelSha256,
              profile.atlasPixelSha256);
+}
+
+void EnduranceDocumentTests::indexedTerrainArchiveMemberReadSkipsUnrelatedPayloads()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+
+    CResArchiveDocument empty;
+    QStringList errors;
+    QVERIFY(empty.loadBytes(emptyMpr(), QStringLiteral("empty.res"), &errors));
+
+    const QByteArray semanticPayload("{\"semantic\":\"exact\"}");
+    const QByteArray profilePayload("{\"profile\":\"exact\"}");
+    SResArchiveNewMember decoy;
+    decoy.name = QStringLiteral("large-unrelated-atlas-page.mmp");
+    decoy.payload = QByteArray(8 * 1024 * 1024, char(0x5a));
+    SResArchiveNewMember semantics;
+    semantics.name = QStringLiteral("ei_terrain_semantics_zone2.json");
+    semantics.payload = semanticPayload;
+    SResArchiveNewMember profile;
+    profile.name = QStringLiteral("ei_terrain_atlas_zone2.json");
+    profile.payload = profilePayload;
+
+    QByteArray archiveBytes;
+    QVERIFY2(empty.buildWithAppendedMembers(
+                 {decoy, semantics, profile}, &archiveBytes, &errors),
+             qPrintable(errors.join(QStringLiteral("\n"))));
+    const QString archivePath = root.filePath(QStringLiteral("terrain.res"));
+    QFile archiveFile(archivePath);
+    QVERIFY(archiveFile.open(QIODevice::WriteOnly));
+    QCOMPARE(archiveFile.write(archiveBytes), qint64(archiveBytes.size()));
+    archiveFile.close();
+
+    QMap<QString, QByteArray> payloads;
+    qint64 bytesRead = 0;
+    QString error;
+    QVERIFY2(CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
+                 archivePath,
+                 {semantics.name, profile.name},
+                 &payloads, &bytesRead, &error),
+             qPrintable(error));
+    QCOMPARE(payloads.value(semantics.name), semanticPayload);
+    QCOMPARE(payloads.value(profile.name), profilePayload);
+    QVERIFY(!payloads.contains(decoy.name));
+    QVERIFY(bytesRead > 0);
+    QVERIFY2(bytesRead < archiveBytes.size() / 100,
+             qPrintable(QStringLiteral(
+                 "Indexed read consumed %1 of %2 archive bytes")
+                 .arg(bytesRead).arg(archiveBytes.size())));
 }
 
 void EnduranceDocumentTests::terrainAtlasRecoveryStoreDeduplicatesExactPayloads()

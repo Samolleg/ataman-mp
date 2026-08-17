@@ -34,6 +34,12 @@ struct STerrainAtlasEmbeddedBindingResult
 class CTerrainAtlasArchiveBindingResolver
 {
 public:
+    // Reads only the RES header, hash table, filename buffer, and requested
+    // payloads. Large unrelated atlas pages are never copied or hashed.
+    static bool readArchiveMembers(
+        const QString& archivePath, const QStringList& memberNames,
+        QMap<QString, QByteArray>* payloads, qint64* bytesRead = nullptr,
+        QString* error = nullptr);
     static STerrainAtlasEmbeddedBindingResult findEmbeddedArchive(
         const QStringList& candidateArchives,
         const QString& mprNamespace,

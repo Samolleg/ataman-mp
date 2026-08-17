@@ -5863,14 +5863,17 @@ void CView::loadLandscape(const QFileInfo& filePath)
     const qint64 tileTableMs = phaseTimer.elapsed();
     phaseTimer.restart();
     rebuildTerrainAutoCatalog();
+    const qint64 materialCatalogMs = phaseTimer.elapsed();
+    phaseTimer.restart();
     restoreTerrainSemanticFieldFromArchive(
         filePath, m_activeTerrainArchivePath, false);
+    const qint64 semanticFieldRestoreMs = phaseTimer.elapsed();
     emit mprSaveStateChanged();
-    const qint64 materialCatalogMs = phaseTimer.elapsed();
     ei::log(eLogInfo, QString(
-        "MPR editor load phases file:%1 rendererAtlasAndSectorsMs:%2 canonicalMs:%3 tileTableMs:%4 materialCatalogMs:%5 totalMs:%6")
+        "MPR editor load phases file:%1 rendererAtlasAndSectorsMs:%2 canonicalMs:%3 tileTableMs:%4 materialCatalogMs:%5 semanticFieldRestoreMs:%6 totalMs:%7")
         .arg(filePath.fileName()).arg(rendererLoadMs).arg(canonicalLoadMs)
-        .arg(tileTableMs).arg(materialCatalogMs).arg(totalLoadTimer.elapsed()));
+        .arg(tileTableMs).arg(materialCatalogMs).arg(semanticFieldRestoreMs)
+        .arg(totalLoadTimer.elapsed()));
     refreshAiGraphPreviewSource();
     refreshMprSettingsDock();
     emit selectionStateChanged(nSelectedNodes() > 0);
@@ -8856,23 +8859,24 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
     if(!m_terrainEditAvailable || terrainArchivePath.trimmed().isEmpty()
        || !QFileInfo::exists(terrainArchivePath))
         return !requireMember;
-    QFile archiveFile(terrainArchivePath);
-    if(!archiveFile.open(QIODevice::ReadOnly))
-        return !requireMember;
-    CResArchiveDocument archive;
-    QStringList archiveErrors;
-    if(!archive.loadBytes(archiveFile.readAll(), terrainArchivePath,
-                          &archiveErrors))
+    const QString memberName = STerrainSemanticFieldDocument::memberName(
+        m_mprDocument.mapInfo().innerNamespace, mprFile);
+    const QString profileMemberName =
+        CTerrainAtlasProfileStore::embeddedMemberName(
+            m_mprDocument.mapInfo().innerNamespace);
+    QMap<QString, QByteArray> members;
+    qint64 archiveBytesRead = 0;
+    QString archiveError;
+    if(!CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
+           terrainArchivePath, {memberName, profileMemberName}, &members,
+           &archiveBytesRead, &archiveError))
     {
         ei::log(eLogWarning, QStringLiteral(
             "Could not inspect terrain semantic-field RES %1: %2")
-            .arg(terrainArchivePath,
-                 archiveErrors.join(QStringLiteral("; "))));
+            .arg(terrainArchivePath, archiveError));
         return !requireMember;
     }
-    const QString memberName = STerrainSemanticFieldDocument::memberName(
-        m_mprDocument.mapInfo().innerNamespace, mprFile);
-    const QByteArray payload = archive.memberPayload(memberName);
+    const QByteArray payload = members.value(memberName);
     if(payload.isEmpty())
         return !requireMember;
     STerrainSemanticFieldDocument document;
@@ -8881,9 +8885,7 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
         m_mprDocument.originalBytes(), QCryptographicHash::Sha256);
     QByteArray rawAtlasHash = QByteArray::fromHex(
         m_terrainAtlasProfile.atlasPixelSha256);
-    QByteArray profileBytes = archive.memberPayload(
-        CTerrainAtlasProfileStore::embeddedMemberName(
-            m_mprDocument.mapInfo().innerNamespace));
+    QByteArray profileBytes = members.value(profileMemberName);
     if(profileBytes.isEmpty())
         profileBytes = m_terrainAtlasProfile.toBytes();
     const QByteArray rawProfileHash = QCryptographicHash::hash(
@@ -8907,8 +8909,11 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
         return false;
     }
     ei::log(eLogInfo, QStringLiteral(
-        "Restored exact shared-corner terrain semantics from %1:%2")
-        .arg(terrainArchivePath, memberName));
+        "Restored exact shared-corner terrain semantics by indexed RES read "
+        "from %1:%2 bytes:%3 archiveBytes:%4")
+        .arg(terrainArchivePath, memberName)
+        .arg(archiveBytesRead)
+        .arg(QFileInfo(terrainArchivePath).size()));
     return true;
 }
 
@@ -10467,10 +10472,25 @@ bool CView::loadMob(QFileInfo &filePath)
         m_environmentMob = pMob;
     m_spatialIndexDirty = true;
     m_sceneFingerprintDirty = true;
+    QElapsedTimer postPreloadTimer;
+    QElapsedTimer postPreloadPhase;
+    postPreloadTimer.start();
+    postPreloadPhase.start();
     m_scriptWorkspaces->registerMob(pMob);
+    const qint64 scriptRegistrationMs = postPreloadPhase.elapsed();
+    postPreloadPhase.restart();
     changeCurrentMob(pMob);
+    const qint64 activationMs = postPreloadPhase.elapsed();
+    postPreloadPhase.restart();
     refreshAiGraphPreviewSource();
+    const qint64 aiGraphMs = postPreloadPhase.elapsed();
+    postPreloadPhase.restart();
     emit mobStateChanged();
+    const qint64 stateSignalMs = postPreloadPhase.elapsed();
+    ei::log(eLogInfo, QString(
+        "MOB post-preload phases file:%1 scriptRegistrationMs:%2 activationMs:%3 aiGraphMs:%4 stateSignalMs:%5 totalMs:%6")
+        .arg(filePath.fileName()).arg(scriptRegistrationMs).arg(activationMs)
+        .arg(aiGraphMs).arg(stateSignalMs).arg(postPreloadTimer.elapsed()));
     return true;
 }
 

@@ -20,14 +20,27 @@ struct SArchiveMemberLocation
 };
 
 bool archiveIndex(const QString& path,
-                  QMap<QString, SArchiveMemberLocation>* members)
+                  QMap<QString, SArchiveMemberLocation>* members,
+                  qint64* bytesRead = nullptr,
+                  QSet<QString>* duplicateNames = nullptr,
+                  QString* error = nullptr)
 {
+    if(bytesRead)
+        *bytesRead = 0;
+    if(duplicateNames)
+        duplicateNames->clear();
+    if(error)
+        error->clear();
     if(!members)
         return false;
     members->clear();
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly))
+    {
+        if(error)
+            *error = QStringLiteral("The RES archive could not be opened.");
         return false;
+    }
     QDataStream stream(&file);
     stream.setByteOrder(QDataStream::LittleEndian);
     stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
@@ -35,15 +48,39 @@ bool archiveIndex(const QString& path,
     stream >> header;
     if(header.Signature != 0x019CE23C || header.TableSize > 10000000
        || quint64(header.TableOffset) > quint64(file.size()))
+    {
+        if(error)
+            *error = QStringLiteral("The RES archive header is invalid.");
         return false;
+    }
+    if(bytesRead)
+        *bytesRead += 16;
     if(!file.seek(header.TableOffset))
+    {
+        if(error)
+            *error = QStringLiteral("The RES archive table could not be reached.");
         return false;
+    }
     QVector<SResHashTable> table(int(header.TableSize));
     for(SResHashTable& entry : table)
         stream >> entry;
+    if(stream.status() != QDataStream::Ok)
+    {
+        if(error)
+            *error = QStringLiteral("The RES archive table is truncated.");
+        return false;
+    }
+    if(bytesRead)
+        *bytesRead += qint64(header.TableSize) * 22;
     const QByteArray names = file.read(header.NamesLenght);
     if(names.size() != int(header.NamesLenght))
+    {
+        if(error)
+            *error = QStringLiteral("The RES filename buffer is truncated.");
         return false;
+    }
+    if(bytesRead)
+        *bytesRead += names.size();
     QTextCodec* codec = QTextCodec::codecForName("CP1251");
     for(const SResHashTable& raw : table)
     {
@@ -55,7 +92,10 @@ bool archiveIndex(const QString& path,
         SArchiveMemberLocation location;
         location.offset = raw.DataOffset;
         location.size = raw.DataSize;
-        members->insert(name, location);
+        if(members->contains(name) && duplicateNames)
+            duplicateNames->insert(name);
+        else
+            members->insert(name, location);
     }
     return true;
 }
@@ -73,6 +113,77 @@ QString normalizedPath(const QString& path)
 {
     return QDir::cleanPath(QFileInfo(path).absoluteFilePath()).toLower();
 }
+}
+
+bool CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
+    const QString& archivePath, const QStringList& memberNames,
+    QMap<QString, QByteArray>* payloads, qint64* bytesRead, QString* error)
+{
+    if(payloads)
+        payloads->clear();
+    if(bytesRead)
+        *bytesRead = 0;
+    if(error)
+        error->clear();
+    if(!payloads)
+    {
+        if(error)
+            *error = QStringLiteral("No output map was supplied.");
+        return false;
+    }
+
+    QMap<QString, SArchiveMemberLocation> members;
+    QSet<QString> duplicateNames;
+    qint64 indexedBytes = 0;
+    if(!archiveIndex(archivePath, &members, &indexedBytes, &duplicateNames,
+                     error))
+        return false;
+    if(bytesRead)
+        *bytesRead = indexedBytes;
+
+    QFile file(archivePath);
+    if(!file.open(QIODevice::ReadOnly))
+    {
+        if(error)
+            *error = QStringLiteral("The RES archive could not be reopened.");
+        return false;
+    }
+    for(const QString& requested : memberNames)
+    {
+        const QString normalized = requested.toLower();
+        if(duplicateNames.contains(normalized))
+        {
+            if(error)
+                *error = QStringLiteral("RES member %1 is ambiguous.")
+                    .arg(requested);
+            payloads->clear();
+            return false;
+        }
+        const auto found = members.constFind(normalized);
+        if(found == members.constEnd())
+            continue;
+        if(!file.seek(found->offset))
+        {
+            if(error)
+                *error = QStringLiteral("RES member %1 could not be reached.")
+                    .arg(requested);
+            payloads->clear();
+            return false;
+        }
+        const QByteArray payload = file.read(found->size);
+        if(payload.size() != int(found->size))
+        {
+            if(error)
+                *error = QStringLiteral("RES member %1 is truncated.")
+                    .arg(requested);
+            payloads->clear();
+            return false;
+        }
+        payloads->insert(requested, payload);
+        if(bytesRead)
+            *bytesRead += payload.size();
+    }
+    return true;
 }
 
 bool STerrainAtlasArchiveBindingResult::hasCompleteArchive(
