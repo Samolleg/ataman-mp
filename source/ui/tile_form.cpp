@@ -94,6 +94,7 @@ CTileForm::CTileForm(QWidget *parent) :
     ui->formLayout_2->setWidget(2, QFormLayout::FieldRole, m_pPhaseNumText.get());
     connect(m_pPhaseNumText.get(), SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onPhaseNumSet(QSharedPointer<IPropertyBase>)));
     m_arrQuickTile.resize(8);
+    ensureQuickTableItems();
 
     QTabWidget* pTab = ui->tabWidget;
     QShortcut *nextTabShortcut = new QShortcut(QKeySequence("Ctrl+Tab"), this);
@@ -125,6 +126,7 @@ void CTileForm::fitTable()
     ensureVisibleTileIcons();
 
     //quick panel
+    ensureQuickTableItems();
     int quickColWidth = ui->tableQuick->width()/8;
     ui->tableQuick->setRowHeight(0, quickColWidth);
     for(int i(0); i<8; ++i)
@@ -167,6 +169,20 @@ QTableWidgetItem* CTileForm::ensureTileItem(int row, int column)
         item->setToolTip(m_semanticAnnotations.at(slot));
     ui->tableTile->setItem(row, column, item);
     return item;
+}
+
+void CTileForm::ensureQuickTableItems()
+{
+    for(int column = 0; column < ui->tableQuick->columnCount(); ++column)
+    {
+        if(ui->tableQuick->item(0, column))
+            continue;
+        QTableWidgetItem* item = new QTableWidgetItem;
+        item->setText(QString());
+        item->setTextAlignment(Qt::AlignCenter);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        ui->tableQuick->setItem(0, column, item);
+    }
 }
 
 void CTileForm::ensureVisibleTileIcons()
@@ -235,6 +251,7 @@ bool CTileForm::isGetMaterial(SMaterial& mat)
 void CTileForm::updateQuickTable()
 {
     //quick panel
+    ensureQuickTableItems();
     int quickColWidth = ui->tableQuick->width()/8;
     for(int i(0); i<8; ++i)
     {

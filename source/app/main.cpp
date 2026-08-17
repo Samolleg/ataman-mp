@@ -1544,7 +1544,27 @@ int runHeadlessCommand(QApplication& app)
         sessionManager->reset();
 
         CTileForm tileForm;
-        tileForm.setTileTypes(QVector<ETileType>(2, ETileType::eGrass));
+        QVector<QImage> verifiedAtlasTiles;
+        QVector<qint32> verifiedAtlasTypes;
+        verifiedAtlasTiles.reserve(64);
+        verifiedAtlasTypes.reserve(64);
+        for(int slot = 0; slot < 64; ++slot)
+        {
+            QImage tile(32, 32, QImage::Format_RGBA8888);
+            tile.fill(QColor::fromHsv((slot * 37) % 360, 180, 180));
+            verifiedAtlasTiles.append(tile);
+            verifiedAtlasTypes.append(qint32(ETileType::eGrass));
+        }
+        const bool freshTileFormAdoptsVerifiedAtlas =
+            tileForm.adoptTileImages(verifiedAtlasTiles, verifiedAtlasTypes);
+        QTableWidget* quickTileTable =
+            tileForm.findChild<QTableWidget*>(QStringLiteral("tableQuick"));
+        bool freshTileFormQuickItemsReady = freshTileFormAdoptsVerifiedAtlas
+                && quickTileTable && quickTileTable->rowCount() == 1
+                && quickTileTable->columnCount() == 8;
+        for(int column = 0; freshTileFormQuickItemsReady && column < 8; ++column)
+            freshTileFormQuickItemsReady = quickTileTable->item(0, column) != nullptr;
+        const bool adoptedPhysicalTileSelectionWorks = tileForm.selectTile(17);
         const bool expandedWorkingTileSelectionRejected =
             !tileForm.selectTile(1393);
 
@@ -1613,6 +1633,9 @@ int runHeadlessCommand(QApplication& app)
             && paintIssueMarkerActivates
             && paintIssueMarkerMutuallyExclusive
             && paintIssueTemporarySelectPreservesEditing
+            && freshTileFormAdoptsVerifiedAtlas
+            && freshTileFormQuickItemsReady
+            && adoptedPhysicalTileSelectionWorks
             && expandedWorkingTileSelectionRejected
             && logicPointUndoAtomic && logicPointRedoAtomic;
         QTextStream output(stdout);
@@ -1737,6 +1760,12 @@ int runHeadlessCommand(QApplication& app)
                << paintIssueMarkerMutuallyExclusive
                << " paintIssueTemporarySelectPreservesEditing="
                << paintIssueTemporarySelectPreservesEditing
+               << " freshTileFormAdoptsVerifiedAtlas="
+               << freshTileFormAdoptsVerifiedAtlas
+               << " freshTileFormQuickItemsReady="
+               << freshTileFormQuickItemsReady
+               << " adoptedPhysicalTileSelectionWorks="
+               << adoptedPhysicalTileSelectionWorks
                << " expandedWorkingTileSelectionRejected="
                << expandedWorkingTileSelectionRejected
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
