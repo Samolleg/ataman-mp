@@ -32,6 +32,7 @@
 #include "view.h"
 #include "landscape_operation_policy.h"
 #include "terrain_save_flow_policy.h"
+#include "terrain_catalog_load_policy.h"
 #include "gl_dispatch.h"
 #include "render_scheduling.h"
 #include "camera.h"
@@ -982,6 +983,7 @@ void CView::prepareLandscapeTilePainting(bool showTools)
 {
     if(!m_landscapeTools)
         return;
+    ensureTerrainAutoCatalogReady();
     if(m_landscapeTools->editMode() != ELandscapeEditMode::TilePaint)
         clearLandscapeBrushSelection();
     m_landscapeTools->activateMode(ELandscapeEditMode::TilePaint, false);
@@ -1139,6 +1141,15 @@ void CView::ensureManualTileSelection()
     if(!m_landscapeTools || !m_pTileForm
        || !m_landscapeTools->manualTileSelectionEnabled())
         return;
+    // A retained selection from the previous map is still a paint-only UI
+    // concern. Do not let it request a cursor preview and synchronously pull
+    // catalog hydration ahead of the new map's first visible frame.
+    if(m_terrainAutoCatalogPending)
+    {
+        setPreviewTile(false);
+        unsetCursor();
+        return;
+    }
     int selectedIndex = -1;
     int selectedRotation = 0;
     m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
@@ -3176,6 +3187,10 @@ void CView::paintGL()
             .arg(m_openGlDiagnosticFrame));
         --m_openGlDiagnosticFramesRemaining;
     }
+    // QGLWidget presents the frame after paintGL returns. Queue paint-only
+    // terrain initialization here so exact atlas validation and the landscape
+    // renderer finish first, while palettes/catalogs cannot delay this frame.
+    queueDeferredTerrainAutoCatalogBuild();
     //doneCurrent();
 }
 
@@ -5534,6 +5549,9 @@ void CView::loadLandscape(const QFileInfo& filePath)
         return;
     }
 
+    m_terrainAutoCatalogLoadTimer.start();
+    m_terrainAutoCatalogFirstFrameMs = -1;
+
     m_legacyTerrainProfileCollision = false;
     m_prevalidatedTerrainEmbeddedBinding =
         STerrainAtlasEmbeddedBindingResult();
@@ -5780,12 +5798,11 @@ void CView::loadLandscape(const QFileInfo& filePath)
                 return;
         }
     }
+    const qint64 bindingPreflightMs = m_terrainAutoCatalogLoadTimer.elapsed();
     CTextureList::getInstance()->setMapLocalTerrainArchive(mapLocalAtlas);
     m_activeTerrainArchivePath = QFileInfo::exists(mapLocalAtlas)
         ? QFileInfo(mapLocalAtlas).absoluteFilePath() : QString();
-    QElapsedTimer totalLoadTimer;
     QElapsedTimer phaseTimer;
-    totalLoadTimer.start();
     phaseTimer.start();
     ei::setCrashContext("mpr/open/dispatch:" + filePath.fileName());
     m_pLand->readMap(filePath);
@@ -5800,7 +5817,81 @@ void CView::loadLandscape(const QFileInfo& filePath)
         ei::log(eLogWarning, "Landscape failed to load: " + filePath.absoluteFilePath());
         return;
     }
-    phaseTimer.restart();
+    m_landscapeVisible = true;
+    m_overlayAnimationTimer.restart();
+    armOpenGlDiagnostics(QStringLiteral("landscape loaded: %1")
+        .arg(filePath.fileName()), 6);
+    m_spatialIndexDirty = true;
+    m_sceneFingerprintDirty = true;
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, filePath.baseName());
+    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, m_pLand->isDirty() ? "*" : "");
+    m_lastModifiedLand = filePath.lastModified();
+    deferTerrainAutoCatalogBuild(filePath);
+    ei::log(eLogInfo, QString(
+        "MPR visible-load phase file:%1 bindingPreflightMs:%2 "
+        "rendererAtlasAndSectorsMs:%3 returnReadyMs:%4 "
+        "editorInitializationDeferred:true")
+        .arg(filePath.fileName()).arg(bindingPreflightMs)
+        .arg(rendererLoadMs).arg(m_terrainAutoCatalogLoadTimer.elapsed()));
+    emit loadedMapStateChanged();
+    update();
+}
+
+void CView::deferTerrainAutoCatalogBuild(const QFileInfo& mprFile)
+{
+    m_terrainAutoCatalogPending = true;
+    m_terrainAutoCatalogBuildQueued = false;
+    m_terrainAutoCatalogBuilding = false;
+    m_pendingTerrainAutoCatalogMprPath = mprFile.absoluteFilePath();
+    m_deferManualAtlasPalette = true;
+    m_manualAtlasPaletteDirty = true;
+}
+
+void CView::queueDeferredTerrainAutoCatalogBuild()
+{
+    if(terrainCatalogLoadAction(
+           m_terrainAutoCatalogPending,
+           m_terrainAutoCatalogBuildQueued,
+           m_terrainAutoCatalogBuilding,
+           true, false)
+       != ETerrainCatalogLoadAction::QueueAfterVisibleFrame)
+        return;
+
+    m_terrainAutoCatalogBuildQueued = true;
+    m_terrainAutoCatalogFirstFrameMs =
+        m_terrainAutoCatalogLoadTimer.isValid()
+        ? m_terrainAutoCatalogLoadTimer.elapsed() : -1;
+    ei::log(eLogInfo, QString(
+        "MPR first landscape frame file:%1 startToPaintCompleteMs:%2")
+        .arg(m_pendingTerrainAutoCatalogMprPath.fileName())
+        .arg(m_terrainAutoCatalogFirstFrameMs));
+    QTimer::singleShot(0, this, [this]() {
+        m_terrainAutoCatalogBuildQueued = false;
+        ensureTerrainAutoCatalogReady();
+    });
+}
+
+bool CView::ensureTerrainAutoCatalogReady()
+{
+    if(!m_terrainAutoCatalogPending)
+        return !m_terrainAutoCatalogBuilding;
+    if(terrainCatalogLoadAction(
+           m_terrainAutoCatalogPending,
+           m_terrainAutoCatalogBuildQueued,
+           m_terrainAutoCatalogBuilding,
+           m_terrainAutoCatalogFirstFrameMs >= 0, true)
+       != ETerrainCatalogLoadAction::BuildSynchronously)
+        return false;
+
+    const QFileInfo filePath = m_pendingTerrainAutoCatalogMprPath;
+    m_terrainAutoCatalogPending = false;
+    m_terrainAutoCatalogBuildQueued = false;
+    m_terrainAutoCatalogBuilding = true;
+    QElapsedTimer deferredTimer;
+    QElapsedTimer phaseTimer;
+    deferredTimer.start();
+    phaseTimer.start();
+
     CValidationReport canonicalReport;
     m_terrainEditAvailable = m_mprDocument.load(filePath, &canonicalReport)
         && !canonicalReport.hasErrors()
@@ -5817,13 +5908,10 @@ void CView::loadLandscape(const QFileInfo& filePath)
         ei::log(eLogInfo, QString("Canonical terrain preview ready: %1 x %2 vertices")
             .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY()));
     }
+
     phaseTimer.restart();
     if(m_activeTerrainArchivePath.isEmpty() && m_terrainEditAvailable)
     {
-        // A published MPR can live in Maps while textures.res lives in the
-        // configured mod resource folder. Resolve every current page back to
-        // its archive once so subsequent Save updates the archive already in
-        // use instead of making the user select it again.
         QSet<QString> atlasSources;
         const QStringList pageNames = ei::terrainTextureResourceNames(
             m_mprDocument.mapInfo().innerNamespace,
@@ -5853,25 +5941,19 @@ void CView::loadLandscape(const QFileInfo& filePath)
                 "Published terrain pages resolve from multiple archives; Save will request one explicit RES destination."));
     }
     const qint64 archiveBindingMs = phaseTimer.elapsed();
+
     for(CMob* mob : m_aMob)
         mob->reprojectForCurrentTerrain();
-    m_landscapeVisible = true;
-    m_overlayAnimationTimer.restart();
-    armOpenGlDiagnostics(QStringLiteral("landscape loaded: %1")
-        .arg(filePath.fileName()), 6);
-    m_spatialIndexDirty = true;
-    m_sceneFingerprintDirty = true;
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr, filePath.baseName());
-    emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, m_pLand->isDirty() ? "*" : "");
-    m_lastModifiedLand = filePath.lastModified();
-    connect(m_pTileForm, SIGNAL(applyChangesSignal()), this, SLOT(onMapMaterialUpdate()));
+    connect(m_pTileForm, SIGNAL(applyChangesSignal()),
+            this, SLOT(onMapMaterialUpdate()), Qt::UniqueConnection);
     COptInt* pOpt = dynamic_cast<COptInt*>(settings()->opt("landCheckTime"));
-    if (pOpt && pOpt->value() != 0)
+    if(pOpt && pOpt->value() != 0)
     {
         m_mprModifyTimer->setInterval(pOpt->value());
         m_mprModifyTimer->start();
     }
     m_pPreviewTile.reset(new CPreviewTile());
+
     phaseTimer.restart();
     bool prevalidatedTilesAdopted = false;
     if(m_prevalidatedTerrainEmbeddedBinding.canReuseDecodedAtlasTiles(
@@ -5892,16 +5974,17 @@ void CView::loadLandscape(const QFileInfo& filePath)
     m_prevalidatedTerrainTilesAdopted = prevalidatedTilesAdopted;
     updateTileForm(false);
     const qint64 tileTableMs = phaseTimer.elapsed();
+
     phaseTimer.restart();
-    m_deferManualAtlasPalette = true;
     rebuildTerrainAutoCatalog();
-    m_deferManualAtlasPalette = false;
     const qint64 materialCatalogMs = phaseTimer.elapsed();
+    m_deferManualAtlasPalette = false;
     if(m_manualAtlasPaletteDirty)
         QTimer::singleShot(0, this, [this]() {
             if(m_pLand && m_pLand->isMprLoad())
                 refreshManualAtlasPalette(false);
         });
+
     phaseTimer.restart();
     restoreTerrainSemanticFieldFromArchive(
         filePath, m_activeTerrainArchivePath, false);
@@ -5909,24 +5992,31 @@ void CView::loadLandscape(const QFileInfo& filePath)
     phaseTimer.restart();
     emit mprSaveStateChanged();
     const qint64 saveStateRefreshMs = phaseTimer.elapsed();
+
+    refreshAiGraphPreviewSource();
+    refreshMprSettingsDock();
+    emit selectionStateChanged(nSelectedNodes() > 0);
+    m_terrainAutoCatalogBuilding = false;
+    m_pendingTerrainAutoCatalogMprPath = QFileInfo();
+    if(m_landscapeTools && m_landscapeTools->editingEnabled())
+        syncLandscapeToolState();
+    emit loadedMapStateChanged();
+
+    const qint64 totalMs = m_terrainAutoCatalogLoadTimer.isValid()
+        ? m_terrainAutoCatalogLoadTimer.elapsed() : -1;
     ei::log(eLogInfo, QString(
-        "MPR editor load phases file:%1 rendererAtlasAndSectorsMs:%2 canonicalMs:%3 "
-        "archiveBindingMs:%4 prevalidatedTilesAdopted:%5 tileTableMs:%6 "
-        "materialCatalogMs:%7 semanticFieldRestoreMs:%8 "
-        "saveStateRefreshMs:%9 totalMs:%10")
-        .arg(filePath.fileName()).arg(rendererLoadMs).arg(canonicalLoadMs)
-        .arg(archiveBindingMs)
+        "MPR deferred editor load phases file:%1 canonicalMs:%2 "
+        "archiveBindingMs:%3 prevalidatedTilesAdopted:%4 tileTableMs:%5 "
+        "materialCatalogMs:%6 semanticFieldRestoreMs:%7 "
+        "saveStateRefreshMs:%8 deferredWorkMs:%9 firstFrameMs:%10 totalMs:%11")
+        .arg(filePath.fileName()).arg(canonicalLoadMs).arg(archiveBindingMs)
         .arg(prevalidatedTilesAdopted ? QStringLiteral("true")
                                      : QStringLiteral("false"))
         .arg(tileTableMs).arg(materialCatalogMs)
         .arg(semanticFieldRestoreMs).arg(saveStateRefreshMs)
-        .arg(totalLoadTimer.elapsed()));
-    refreshAiGraphPreviewSource();
-    refreshMprSettingsDock();
-    emit selectionStateChanged(nSelectedNodes() > 0);
-    if(m_landscapeTools && m_landscapeTools->editingEnabled())
-        syncLandscapeToolState();
-    emit loadedMapStateChanged();
+        .arg(deferredTimer.elapsed()).arg(m_terrainAutoCatalogFirstFrameMs)
+        .arg(totalMs));
+    return true;
 }
 
 void CView::unloadLand(bool promptForSave)
@@ -5956,6 +6046,11 @@ void CView::unloadLand(bool promptForSave)
 
     m_mprModifyTimer->stop();
     m_overlayAnimationTimer.invalidate();
+    m_terrainAutoCatalogPending = false;
+    m_terrainAutoCatalogBuildQueued = false;
+    m_terrainAutoCatalogBuilding = false;
+    m_pendingTerrainAutoCatalogMprPath = QFileInfo();
+    m_terrainAutoCatalogFirstFrameMs = -1;
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_workingTerrainAtlas.reset();
@@ -6000,6 +6095,8 @@ void CView::saveLand()
 {
     if(m_pLand->isMprLoad())
     {
+        if(!ensureTerrainAutoCatalogReady())
+            return;
         if(modernTerrainPublicationRequired())
         {
             m_requestedTerrainMprDestination = m_pLand->filePath();
@@ -6014,6 +6111,8 @@ void CView::saveLand()
 void CView::saveLandAs()
 {
     if(!m_pLand->isMprLoad())
+        return;
+    if(!ensureTerrainAutoCatalogReady())
         return;
 
     const QFileInfo fileName = QFileDialog::getSaveFileName(
@@ -6049,6 +6148,8 @@ void CView::saveLandAs()
 void CView::saveModernDraftAs()
 {
     if(!m_pLand->isMprLoad())
+        return;
+    if(!ensureTerrainAutoCatalogReady())
         return;
     const QFileInfo destination = QFileDialog::getSaveFileName(
         this, tr("Save editable modern MPR draft as..."),
@@ -6087,6 +6188,8 @@ bool CView::persistedModernDraftRequiresPublication() const
 
 bool CView::saveLandscapeDocument(const QFileInfo& destination)
 {
+    if(!ensureTerrainAutoCatalogReady())
+        return false;
     if(m_pLand->isDirty())
     {
         const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
@@ -6121,6 +6224,8 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
                                               int* terrainAtlasPages,
                                               int* terrainAtlasSlots)
 {
+    if(!ensureTerrainAutoCatalogReady())
+        return false;
     if(data)
         data->clear();
     if(terrainAtlasResource)
@@ -6252,6 +6357,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                                          bool adoptAsOpenBaseline,
                                          bool allowModernDraft)
 {
+    if(!ensureTerrainAutoCatalogReady())
+        return false;
     if(!m_terrainEditAvailable)
     {
         QMessageBox::critical(this, tr("Lossless MPR save unavailable"),
@@ -8398,6 +8505,8 @@ void CView::reviewTerrainAtlasProfile()
 
 void CView::reviewTerrainAtlasProfileAtSlot(int initialSlot)
 {
+    if(!ensureTerrainAutoCatalogReady())
+        return;
     if(!m_terrainEditAvailable || !m_pTileForm || m_pTileForm->tileImages().isEmpty())
     {
         emit updateMsg(tr("Load an MPR and its complete terrain atlas before reviewing semantic conversion."));
@@ -8608,6 +8717,8 @@ void CView::exportTerrainPaintDiagnostic()
         emit updateMsg(tr("Load an MPR before exporting a paint diagnostic."));
         return;
     }
+    if(!ensureTerrainAutoCatalogReady())
+        return;
     const QString suggested = m_pLand->filePath().absolutePath() + QDir::separator()
         + m_pLand->filePath().completeBaseName() + "-paint-diagnostic.json";
     const QString path = QFileDialog::getSaveFileName(
@@ -9487,6 +9598,8 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
 
 void CView::finalizeVirtualTerrainAtlas()
 {
+    if(!ensureTerrainAutoCatalogReady())
+        return;
     const QString requestedIdentity = m_requestedTerrainResourceIdentity;
     const bool requestedReplacement = m_requestedTerrainIdentityReplacement;
     const bool identityOnlyRequest = m_requestedTerrainIdentityFinalization;
@@ -11967,6 +12080,8 @@ void CView::openAtlasTiles()
 {
     if(!m_pLand->isMprLoad())
         return;
+    if(!ensureTerrainAutoCatalogReady())
+        return;
 
     if(m_pTileForm->isVisible())
     {
@@ -11981,6 +12096,8 @@ void CView::openAtlasTiles()
 bool CView::pickTile(QVector3D posOnLand, bool bLand)
 {
     if(!m_pLand->isMprLoad())
+        return false;
+    if(!ensureTerrainAutoCatalogReady())
         return false;
 
     CTile* pTile = nullptr;
@@ -12132,7 +12249,11 @@ bool CView::resolveTerrainPaintFootprint(
 
 void CView::setTile(QVector3D posOnLand, bool bLand)
 {
-    if(!m_pLand->isMprLoad() || !m_terrainEditAvailable || !m_landscapeTools)
+    if(!m_pLand->isMprLoad() || !m_landscapeTools)
+        return;
+    if(!ensureTerrainAutoCatalogReady())
+        return;
+    if(!m_terrainEditAvailable)
         return;
 
     // A focus or modal interruption can cancel the preview while Qt still
@@ -12622,6 +12743,18 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 {
     if(!m_pLand->isMprLoad())
         return;
+    // Hover traffic can already be queued while an MPR is opening. A hover is
+    // not an explicit paint request and must not pull paint-only initialization
+    // ahead of the first landscape frame.
+    if(m_terrainAutoCatalogPending)
+    {
+        m_terrainPaintFootprintValid = false;
+        m_terrainPaintOutlineValid = false;
+        setPreviewTile(false);
+        return;
+    }
+    if(!ensureTerrainAutoCatalogReady())
+        return;
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
@@ -13096,6 +13229,8 @@ void CView::selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode)
 {
     if(!m_landscapeTools)
         return;
+    if(!ensureTerrainAutoCatalogReady())
+        return;
     cancelTileBrushGroup();
     m_landscapeTools->setPaintPaletteMode(mode);
     syncLandscapeToolState();
@@ -13145,6 +13280,8 @@ void CView::resolveMissingTerrainBlends()
             .arg(terrainResolveAuditTriggerName(trigger)));
         return;
     }
+    if(!ensureTerrainAutoCatalogReady())
+        return;
 
     CValidationReport report;
     const auto fieldAudit = [](const CTerrainEditModel& terrainEdit,

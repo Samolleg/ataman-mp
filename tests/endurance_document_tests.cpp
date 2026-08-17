@@ -15,6 +15,7 @@
 #include "landscape_operation_policy.h"
 #include "terrain_atlas_shape_policy.h"
 #include "terrain_save_flow_policy.h"
+#include "terrain_catalog_load_policy.h"
 #include "mmp_codec.h"
 #include "operation_history_policy.h"
 #include "portable_diagnostic_writer.h"
@@ -445,6 +446,7 @@ private slots:
     void overlaySculptSynchronizesSectorSeam();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void deferredLandscapeVisibilityStopsBeforeViewTeardown();
+    void terrainCatalogWaitsForVisibleLandscapeFrame();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
 };
@@ -9624,6 +9626,88 @@ void EnduranceDocumentTests::deferredLandscapeVisibilityStopsBeforeViewTeardown(
                                       currentGeneration, invalidatedView));
     delete liveView.data();
     delete invalidatedView.data();
+}
+
+void EnduranceDocumentTests::terrainCatalogWaitsForVisibleLandscapeFrame()
+{
+    QCOMPARE(terrainCatalogLoadAction(
+                 true, false, false, false, false),
+             ETerrainCatalogLoadAction::None);
+    QCOMPARE(terrainCatalogLoadAction(
+                 true, false, false, true, false),
+             ETerrainCatalogLoadAction::QueueAfterVisibleFrame);
+    QCOMPARE(terrainCatalogLoadAction(
+                 true, true, false, true, false),
+             ETerrainCatalogLoadAction::None);
+    QCOMPARE(terrainCatalogLoadAction(
+                 true, false, false, false, true),
+             ETerrainCatalogLoadAction::BuildSynchronously);
+    QCOMPARE(terrainCatalogLoadAction(
+                 false, false, false, true, true),
+             ETerrainCatalogLoadAction::None);
+    QCOMPARE(terrainCatalogLoadAction(
+                 true, false, true, true, true),
+             ETerrainCatalogLoadAction::None);
+
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+    const int loadStart = source.indexOf("void CView::loadLandscape");
+    const int deferStart = source.indexOf(
+        "void CView::deferTerrainAutoCatalogBuild", loadStart);
+    QVERIFY(loadStart >= 0 && deferStart > loadStart);
+    const QByteArray load = source.mid(loadStart, deferStart - loadStart);
+    QVERIFY2(load.contains("deferTerrainAutoCatalogBuild(filePath)"),
+             "MPR loading no longer marks paint-only catalog work as deferred");
+    QVERIFY2(!load.contains("rebuildTerrainAutoCatalog()"),
+             "MPR loading again blocks the first landscape frame on paint catalog construction");
+    QVERIFY2(!load.contains("restoreTerrainSemanticFieldFromArchive("),
+             "MPR loading again restores paint-only semantic state before the first landscape frame");
+    QVERIFY2(!load.contains("m_terrainEdit.load("),
+             "MPR loading again constructs canonical paint state before the first landscape frame");
+    QVERIFY2(!load.contains("m_pTileForm->adoptTileImages("),
+             "MPR loading again populates the tile picker before the first landscape frame");
+    QVERIFY2(!load.contains("m_pTileForm->fillTable("),
+             "MPR loading again decodes the tile picker before the first landscape frame");
+
+    const int paintStart = source.indexOf("void CView::paintGL");
+    const int shutdownStart = source.indexOf(
+        "bool CView::prepareForApplicationShutdown", paintStart);
+    QVERIFY(paintStart >= 0 && shutdownStart > paintStart);
+    const QByteArray paint = source.mid(paintStart, shutdownStart - paintStart);
+    const int draw = paint.indexOf("draw();");
+    const int overlays = paint.indexOf("drawTestOverlaysOpenGl();", draw);
+    const int queue = paint.indexOf("queueDeferredTerrainAutoCatalogBuild();",
+                                    overlays);
+    QVERIFY2(draw >= 0 && overlays > draw && queue > overlays,
+             "Paint catalog work is not queued after the complete visible landscape frame");
+
+    const int manualSelectionStart = source.indexOf(
+        "void CView::ensureManualTileSelection");
+    const int readStateStart = source.indexOf(
+        "void CView::updateReadState", manualSelectionStart);
+    QVERIFY(manualSelectionStart >= 0 && readStateStart > manualSelectionStart);
+    const QByteArray manualSelection = source.mid(
+        manualSelectionStart, readStateStart - manualSelectionStart);
+    const int pendingGate = manualSelection.indexOf(
+        "if(m_terrainAutoCatalogPending)");
+    const int retainedSelection = manualSelection.indexOf(
+        "m_pTileForm->getSelectedTile");
+    QVERIFY2(pendingGate >= 0 && retainedSelection > pendingGate,
+             "A retained Manual selection can force paint catalog hydration before the first landscape frame");
+
+    const int previewStart = source.indexOf("void CView::updatePreviewTile");
+    const int nextMethod = source.indexOf(
+        "void CView::addTileRotation", previewStart);
+    QVERIFY(previewStart >= 0 && nextMethod > previewStart);
+    const QByteArray preview = source.mid(previewStart,
+                                          nextMethod - previewStart);
+    const int previewPendingGate = preview.indexOf(
+        "if(m_terrainAutoCatalogPending)");
+    const int previewEnsure = preview.indexOf(
+        "ensureTerrainAutoCatalogReady()", previewPendingGate);
+    QVERIFY2(previewPendingGate >= 0 && previewEnsure > previewPendingGate,
+             "Queued hover traffic can force paint catalog hydration before the first landscape frame");
 }
 
 void EnduranceDocumentTests::malformedMprTableIsRejected()

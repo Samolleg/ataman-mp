@@ -34,6 +34,7 @@ HEADERS += \
     ../source/core/landscape_edit_policy.h \
     ../source/core/terrain_atlas_shape_policy.h \
     ../source/core/terrain_save_flow_policy.h \
+    ../source/core/terrain_catalog_load_policy.h \
     ../source/core/terrain_tile_information_policy.h \
     ../source/core/operation_history_policy.h \
     ../source/documents/endurance_document.h \

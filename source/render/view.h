@@ -378,6 +378,9 @@ private:
     void syncLandscapeToolState();
     void clearLandscapeBrushSelection();
     void ensureManualTileSelection();
+    void deferTerrainAutoCatalogBuild(const QFileInfo& mprFile);
+    void queueDeferredTerrainAutoCatalogBuild();
+    bool ensureTerrainAutoCatalogReady();
     void rebuildTerrainAutoCatalog();
     void refreshClassicAutoPalette();
     void refreshManualAtlasPalette(bool invalidate = true);
@@ -626,6 +629,12 @@ private:
     STerrainAtlasProfileSource m_terrainAtlasProfileSource;
     QVector<QImage> m_authoredTerrainTileImages;
     QSharedPointer<CTerrainWorkingAtlas> m_workingTerrainAtlas;
+    bool m_terrainAutoCatalogPending{false};
+    bool m_terrainAutoCatalogBuildQueued{false};
+    bool m_terrainAutoCatalogBuilding{false};
+    QFileInfo m_pendingTerrainAutoCatalogMprPath;
+    QElapsedTimer m_terrainAutoCatalogLoadTimer;
+    qint64 m_terrainAutoCatalogFirstFrameMs{-1};
     bool m_manualAtlasPaletteDirty{true};
     bool m_deferManualAtlasPalette{false};
     STerrainAtlasEmbeddedBindingResult
