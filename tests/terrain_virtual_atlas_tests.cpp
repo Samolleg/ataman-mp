@@ -584,6 +584,7 @@ private slots:
     void repeatedGeneratedStampsNeverMutateAuthoredAtlas();
     void workingAtlasProtectsUndoSlotsAndRefusesCapacity();
     void manualTilePaintRejectsUntypedWorkingSlot();
+    void completeWorkingTypeTableMakesEveryManualVariantPaintable();
     void externalUniformFamilyPaintsAndBlendsWithoutAuthoredSlot();
     void selfPaintPreservesExactPackedTileAndRotation();
     void parallelStripesAndBaseCrossResolveExactly();
@@ -6298,6 +6299,53 @@ void TerrainVirtualAtlasTests::manualTilePaintRejectsUntypedWorkingSlot()
     CTerrainTransitionCatalog catalog;
     QVERIFY(model.makeTilePaint(
         brush, ETerrainTileLayer::Land, 1, 0, 0, catalog, &report).isEmpty());
+}
+
+void TerrainVirtualAtlasTests::completeWorkingTypeTableMakesEveryManualVariantPaintable()
+{
+    QByteArray payload;
+    QDataStream stream(&payload, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 2,
+                              QVector<qint32>(64, 1), 0));
+    model.enableWorkingAtlasSlots(128);
+    STerrainTileBrush brush;
+    brush.centerX = 8.0f;
+    brush.centerY = 8.0f;
+    brush.radius = 0.0f;
+
+    // A family import may realize several Manual-visible variants even when
+    // the Modern stroke selects only one of them.
+    QVERIFY(model.makeTilePaint(
+        brush, ETerrainTileLayer::Land, 1, 1, 0).isEmpty());
+    QVector<qint32> activeTypes(67, 1);
+    activeTypes[64] = 4;
+    activeTypes[65] = 5;
+    activeTypes[66] = 6;
+    QVERIFY(model.canInstallWorkingAtlasSlotTypes(activeTypes));
+    QVERIFY(model.installWorkingAtlasSlotTypes(activeTypes));
+    QVERIFY(!model.makeTilePaint(
+        brush, ETerrainTileLayer::Land, 1, 1, 0).isEmpty());
+    QVERIFY(!model.makeTilePaint(
+        brush, ETerrainTileLayer::Land, 1, 2, 0).isEmpty());
+
+    QVector<qint32> invalid = activeTypes;
+    invalid[65] = -1;
+    QVERIFY(!model.canInstallWorkingAtlasSlotTypes(invalid));
+    QVERIFY(!model.installWorkingAtlasSlotTypes(invalid));
 }
 
 void TerrainVirtualAtlasTests::selfPaintPreservesExactPackedTileAndRotation()

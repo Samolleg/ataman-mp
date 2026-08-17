@@ -1044,6 +1044,32 @@ void CTerrainEditModel::enableWorkingAtlasSlots(int slotCount)
     m_textureCount = qMax(m_textureCount, (bounded + 63) / 64);
 }
 
+bool CTerrainEditModel::canInstallWorkingAtlasSlotTypes(
+    const QVector<qint32>& runtimeTerrainTypes) const
+{
+    if(runtimeTerrainTypes.isEmpty()
+       || runtimeTerrainTypes.size() > m_tileTypes.size())
+        return false;
+    for(qint32 runtimeTerrainType : runtimeTerrainTypes)
+        if(runtimeTerrainType < 0 || runtimeTerrainType >= 16)
+            return false;
+    return true;
+}
+
+bool CTerrainEditModel::installWorkingAtlasSlotTypes(
+    const QVector<qint32>& runtimeTerrainTypes)
+{
+    // Validate the complete table before changing any entry. A generated
+    // family can realize several physical variants at once; publishing only
+    // the selected slot leaves its siblings visible in Manual mode but
+    // unpaintable until a save/reopen rebuilds MP metadata.
+    if(!canInstallWorkingAtlasSlotTypes(runtimeTerrainTypes))
+        return false;
+    for(int slot = 0; slot < runtimeTerrainTypes.size(); ++slot)
+        m_tileTypes[slot] = runtimeTerrainTypes.at(slot);
+    return true;
+}
+
 bool CTerrainEditModel::setWorkingAtlasSlotType(
     int slot, qint32 runtimeTerrainType)
 {

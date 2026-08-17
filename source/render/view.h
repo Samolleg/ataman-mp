@@ -392,6 +392,7 @@ private:
     void rebuildTerrainAutoCatalog();
     void refreshClassicAutoPalette();
     void refreshManualAtlasPalette(bool invalidate = true);
+    void refreshWorkingTerrainPalettes();
     void refreshTerrainFamilyUsage();
     bool terrainResolveUiActive() const;
     void requestResolveMissingTerrainBlends(ETerrainResolveAuditTrigger trigger);
@@ -645,6 +646,7 @@ private:
     qint64 m_terrainAutoCatalogFirstFrameMs{-1};
     bool m_manualAtlasPaletteDirty{true};
     bool m_deferManualAtlasPalette{false};
+    bool m_workingAtlasPaletteRefreshPending{false};
     STerrainAtlasEmbeddedBindingResult
         m_prevalidatedTerrainEmbeddedBinding;
     bool m_prevalidatedTerrainTilesAdopted{false};

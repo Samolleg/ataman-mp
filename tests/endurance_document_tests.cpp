@@ -396,6 +396,7 @@ private slots:
     void terrainSaveRouteDoesNotHashArtworkPerMapCell();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void interruptedTerrainStrokeRejectsUnownedStamp();
+    void workingAtlasPublicationPreservesActiveStrokeTransaction();
     void resolveMissingBlendsStagesDeterministicLoadBaseline();
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
@@ -5449,6 +5450,55 @@ void EnduranceDocumentTests::interruptedTerrainStrokeRejectsUnownedStamp()
     QVERIFY2(ownershipGate < footprintResolution
              && ownershipGate < previewMutation,
              "Terrain paint ownership is checked after preview/model work has begun");
+}
+
+void EnduranceDocumentTests::workingAtlasPublicationPreservesActiveStrokeTransaction()
+{
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+    const int refreshStart = source.indexOf(
+        "void CView::refreshWorkingTerrainPalettes()");
+    const int refreshEnd = source.indexOf(
+        "void CView::refreshTerrainFamilyUsage()", refreshStart);
+    QVERIFY(refreshStart >= 0 && refreshEnd > refreshStart);
+    const QByteArray refresh = source.mid(refreshStart,
+                                           refreshEnd - refreshStart);
+    const int activeGate = refresh.indexOf(
+        "if(m_tilePaintStrokeActive || m_tileStrokeFinishing)");
+    const int pending = refresh.indexOf(
+        "m_workingAtlasPaletteRefreshPending = true", activeGate);
+    const int paletteMutation = refresh.indexOf(
+        "refreshClassicAutoPalette()", activeGate);
+    QVERIFY2(activeGate >= 0 && pending > activeGate
+                 && paletteMutation > pending,
+             "Working-atlas palette mutation can still cancel its active stroke");
+
+    const int syncStart = source.indexOf(
+        "bool CView::syncWorkingTerrainAtlas(");
+    const int syncEnd = source.indexOf(
+        "void CView::finalizeVirtualTerrainAtlas()", syncStart);
+    QVERIFY(syncStart >= 0 && syncEnd > syncStart);
+    const QByteArray sync = source.mid(syncStart, syncEnd - syncStart);
+    QVERIFY2(sync.contains("installWorkingAtlasSlotTypes(activeTypes)"),
+             "Working-atlas publication exposes variants before the MPR model receives their runtime types");
+    QVERIFY2(sync.contains("refreshWorkingTerrainPalettes();"),
+             "Working-atlas publication bypasses the transaction-aware palette gate");
+    QVERIFY2(!sync.contains("refreshClassicAutoPalette();"),
+             "Working-atlas sync still mutates the Classic palette directly");
+
+    const int releaseStart = source.indexOf("void CView::endTileBrushGroup()");
+    const int releaseEnd = source.indexOf("void CView::cancelTileBrushGroup()",
+                                          releaseStart);
+    QVERIFY(releaseStart >= 0 && releaseEnd > releaseStart);
+    const QByteArray release = source.mid(releaseStart,
+                                           releaseEnd - releaseStart);
+    const int released = release.indexOf("m_tilePaintStrokeActive = false;");
+    const int undoOwned = release.indexOf("m_pUndoStack->push(", released);
+    const int flushed = release.indexOf("refreshWorkingTerrainPalettes();",
+                                        released);
+    QVERIFY2(released >= 0 && undoOwned > released && flushed > undoOwned,
+             "Deferred palette refresh can run before the completed stroke owns its undo entry");
 }
 
 void EnduranceDocumentTests::resolveMissingBlendsStagesDeterministicLoadBaseline()

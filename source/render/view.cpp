@@ -8423,6 +8423,24 @@ void CView::refreshManualAtlasPalette(bool invalidate)
     }
 }
 
+void CView::refreshWorkingTerrainPalettes()
+{
+    m_manualAtlasPaletteDirty = true;
+    // Palette rebuilds legitimately change the selected material/tile and
+    // emit editing-state signals. Never let those UI signals cancel the
+    // stroke whose atlas import triggered this refresh. The committed or
+    // rolled-back transaction flushes the palettes after it releases
+    // ownership of the gesture.
+    if(m_tilePaintStrokeActive || m_tileStrokeFinishing)
+    {
+        m_workingAtlasPaletteRefreshPending = true;
+        return;
+    }
+    m_workingAtlasPaletteRefreshPending = false;
+    refreshClassicAutoPalette();
+    refreshManualAtlasPalette(false);
+}
+
 void CView::refreshTerrainFamilyUsage()
 {
     if(!m_landscapeTools || !m_terrainEditAvailable)
@@ -9576,15 +9594,31 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
         return false;
     const bool publishingLiveAtlas = atlas == m_workingTerrainAtlas.data();
     const QSet<int> changed = atlas->changedSlots();
+    const QVector<qint32> activeTypes = atlas->activeTileTypes();
+    if(publishingLiveAtlas
+       && !m_terrainEdit.canInstallWorkingAtlasSlotTypes(activeTypes))
+    {
+        if(report) report->add("terrain.working_atlas_model_types",
+            EValidationSeverity::Error,
+            "The complete working-atlas runtime terrain-type table cannot be installed in the live MPR model.");
+        return false;
+    }
     if(changed.isEmpty())
     {
+        if(publishingLiveAtlas)
+        {
+            const bool typesInstalled =
+                m_terrainEdit.installWorkingAtlasSlotTypes(activeTypes);
+            Q_ASSERT(typesInstalled);
+            if(!typesInstalled)
+                return false;
+        }
         if(publishingLiveAtlas && m_landscapeTools)
             m_landscapeTools->setGeneratedAtlasTileCount(
                 atlas->generatedTileCount());
         return true;
     }
     const QVector<QImage> activeImages = atlas->activeTileImages();
-    const QVector<qint32> activeTypes = atlas->activeTileTypes();
     const int authoredSlotCount = atlas->authoredSlotCount();
     if(authoredSlotCount <= 0
        || authoredSlotCount > activeImages.size()
@@ -9680,14 +9714,21 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
     }
     if(!rendererInstalled || !pickerInstalled)
         return false;
+    if(publishingLiveAtlas)
+    {
+        const bool typesInstalled =
+            m_terrainEdit.installWorkingAtlasSlotTypes(activeTypes);
+        Q_ASSERT(typesInstalled);
+        if(!typesInstalled)
+            return false;
+    }
     atlas->acknowledgeChangedSlots(changed);
     if(publishingLiveAtlas)
     {
         if(m_landscapeTools)
             m_landscapeTools->setGeneratedAtlasTileCount(
                 atlas->generatedTileCount());
-        refreshClassicAutoPalette();
-        refreshManualAtlasPalette();
+        refreshWorkingTerrainPalettes();
         update();
     }
     return true;
@@ -13220,6 +13261,11 @@ void CView::endTileBrushGroup()
             // only an already-generated preview is invalidated/rebuilt.
             scheduleAiGraphPreviewRegeneration();
         }
+        // The completed command must own its undo entry before palette
+        // selection signals are allowed to run.  Those signals are UI state,
+        // not part of the terrain transaction that produced the new slots.
+        if(m_workingAtlasPaletteRefreshPending)
+            refreshWorkingTerrainPalettes();
         m_pLand->setDirty(m_terrainEdit.isDirty());
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                   m_terrainEdit.isDirty() ? "*" : "");
@@ -13315,6 +13361,8 @@ void CView::cancelTileBrushGroup()
     m_tileStrokeClassicAuto = false;
     ++m_tileBrushCommandId;
 
+    if(m_workingAtlasPaletteRefreshPending)
+        refreshWorkingTerrainPalettes();
     refreshTerrainFamilyUsage();
     m_pLand->setDirty(m_terrainEdit.isDirty());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
@@ -13654,6 +13702,13 @@ void CView::resolveMissingTerrainBlends()
     audit.stagedTupleCount = missing.size();
     audit.generatedTupleCount = generated;
     progress.setValue(3);
+
+    if(!report.hasErrors()
+       && !staged.terrainEdit.installWorkingAtlasSlotTypes(
+              staged.atlas->activeTileTypes()))
+        report.add("terrain.resolve_map_model_types",
+            EValidationSeverity::Error,
+            "Resolve Missing Blends could not install the complete staged runtime terrain-type table.");
 
     STerrainTileCommand combined;
     combined.description = tr("Resolve missing terrain blends");
