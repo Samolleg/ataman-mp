@@ -18,6 +18,7 @@
 #include "resource_profile.h"
 #include "profile_database.h"
 #include "persistent_visual_cache.h"
+#include "settings_persistence.h"
 
 CSettings::CSettings(QWidget *parent) :
     QWidget(parent, Qt::Window)
@@ -740,14 +741,11 @@ void CSettings::saveOptions()
     optToObj("KeyBinding", eOptSetKeyBinding);
     aOpt.insert("Version", QString::number(m_version));
 
-    QJsonDocument doc(aOpt);
-    if (!m_fileOpt.open(QIODevice::WriteOnly)) {
-        Q_ASSERT("Couldn't open option file." && false);
-        //todo: suggest choosing a folder to save
-        return;
-    }
-    m_fileOpt.write(doc.toJson());
-    m_fileOpt.close();
+    const QJsonDocument doc(aOpt);
+    QString diagnostic;
+    if(!ei::writeSettingsFileAtomically(m_fileOpt.fileName(), doc.toJson(), &diagnostic))
+        ei::log(eLogWarning, QString("Could not save editor options atomically: %1")
+                    .arg(diagnostic));
 }
 
 void CSettings::on_buttonApply_clicked()

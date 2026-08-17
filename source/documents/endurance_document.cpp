@@ -306,6 +306,37 @@ SMobObjectSnapshot snapshotObject(const SMobSection& section)
             decodeStringArray(*armor, &object.armor);
         if(const SMobSection* weapons = findSection(*unit, 0xBBBB0008))
             decodeStringArray(*weapons, &object.weapons);
+        int logicSlot = 0;
+        for(const SMobSection& child : unit->children)
+        {
+            if(child.type != 0xBBBC0000)
+                continue;
+            SMobLogicSnapshot logic;
+            logic.sectionPath = child.path;
+            logic.slot = logicSlot++;
+            if(const SMobSection* behavior = findSection(child, 0xBBBC0003))
+            {
+                const QByteArray data = payload(*behavior);
+                if(data.size() == 4)
+                {
+                    logic.hasBehavior = true;
+                    logic.behavior = readU32(data, 0);
+                }
+            }
+            if(const SMobSection* enabled = findSection(child, 0xBBBC0007))
+            {
+                const QByteArray data = payload(*enabled);
+                if(data.size() == 1)
+                {
+                    logic.hasEnabled = true;
+                    logic.enabled = data.at(0) != 0;
+                }
+            }
+            for(const SMobSection& logicChild : child.children)
+                if(logicChild.type == 0xBBBD0000)
+                    ++logic.patrolPointCount;
+            object.logicSlots.append(logic);
+        }
     }
     const SMobSection* prototype = findSection(section, 0xBBBB0002);
     if(!prototype)
@@ -1291,6 +1322,23 @@ QJsonObject SMobObjectSnapshot::toJson() const
         position.append(positionY);
         position.append(positionZ);
         result.insert("position", position);
+    }
+    if(!logicSlots.isEmpty())
+    {
+        QJsonArray values;
+        for(const SMobLogicSnapshot& logic : logicSlots)
+        {
+            QJsonObject value;
+            value.insert("path", logic.sectionPath);
+            value.insert("slot", logic.slot);
+            if(logic.hasBehavior)
+                value.insert("behavior", double(logic.behavior));
+            if(logic.hasEnabled)
+                value.insert("enabled", logic.enabled);
+            value.insert("patrolPoints", logic.patrolPointCount);
+            values.append(value);
+        }
+        result.insert("logic", values);
     }
     result.insert("sha256", QString::fromLatin1(subtreeSha256.toHex()));
     return result;

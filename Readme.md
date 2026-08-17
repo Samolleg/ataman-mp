@@ -4,7 +4,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current development version: `0.2.1-alpha.32`.
+Current development version: `0.3.0-alpha.26`.
 
 Project status and upcoming work are tracked in the living
 [Endurance roadmap](ROADMAP.md).
@@ -20,47 +20,29 @@ commit `1cebe83d` tagged as `upstream-1cebe83d`.
 
 ## Alpha scope
 
-- MOB loading no longer repairs duplicate IDs automatically; duplicates are
-  reported without dirtying the document.
-- Unchanged MOB and MPR Save As operations preserve the original bytes.
-- Changed MOB output patches provenance-checked existing raw leaves directly.
-  Ordinary property and transform fields can be mixed in one save; structural
-  same-MOB copy/paste, object deletion, and known patrol/look-point edits use
-  exact raw subtrees. New objects require a selected same-type source template.
-- MPR writes retain extra archive members and the original internal map name.
-- Resource lookup uses case-normalized RES table indexes and lazy payload reads.
-- Terrain and tile-panel atlases use the same indexed, case-insensitive source
-  priority, require the complete atlas set declared by the MPR, and report provenance.
-- Tile Parameters uses the embedded `.MP` namespace when it differs from the
-  outer `.mpr` filename, incorporating the map-name concept from upstream PR #19.
-- Model-qualified `_xN` unit skins resolve to their physical archive names, with
-  a logged viewer-only nearest-family fallback when a referenced variation is absent.
-- MPR and MOB files can be opened independently, including MOB-only rendering.
-- The outliner is resizable and its layout is persisted.
-- Embedded scripts have a separate internal editor and a document-owned external
-  workspace. External changes are detected while the MOB remains loaded and
-  explicitly imported as normal undo-history entries.
-- Headless `--validate` and `--roundtrip-check` commands are available.
-- First-run setup accepts the game installation folder and automatically
-  configures built-in or external mod resource profiles.
-- Cached CPU frustum culling avoids submitting off-screen MOB objects in normal
-  object view. It can be disabled under **Settings > Render** for A/B testing;
-  selected objects remain conservative. Logic helpers are rendered separately,
-  allowing their owning off-screen object geometry to remain culled.
-- Experimental Base/JMV map testing stages the exact current map pair, initializes
-  the selected `map.txt` zone through the validated New Game path, skips intro
-  movies without renaming them, and redirects save/load operations into the
-  retained per-run AppData folder. Both profiles use the same editor-owned
-  injection transport, gated by exact `game.exe` fingerprints and guarded hook
-  bytes. See [Test Current Map dependencies](docs/TEST_CURRENT_MAP_DEPENDENCIES.md)
-  for the precise separation between Endurance requirements and JMV gameplay
-  components.
+- Lossless MOB/MPR transactions preserve unchanged bytes, patch verified source
+  leaves for supported edits, create pre-save backups, and refuse unproven
+  structural rewrites.
+- Object, unit, behavior, patrol/look-point, trap, diplomacy, script, collection,
+  and multi-MOB authoring share undo/redo and family-aware validation.
+- Landscape tools cover terrain and overlay sculpting, tile painting, canvas
+  resizing, material/animation editing, minimap generation, and navigation-graph
+  inspection and regeneration.
+- Profile-driven Base and Jamais Vu resource resolution powers character,
+  equipment, environment, lighting, particle, water, shadow, and sky previews.
+- Integrated Database and Resource Browser tools provide typed database editing,
+  safe RES transactions, previews, cross-navigation, validation, and rollback.
+- Test Current Map stages isolated Base/JMV runs with guarded runtime components,
+  redirected saves, selected entrances, Play from Here, hot reload, and cleanup.
+- Headless validation, round-trip, profile, widget, and corpus checks support
+  repeatable verification without launching an interactive editing session.
+- First-run setup, persistent multi-monitor docks, scalable UI, filtered logs,
+  backups, autosaves, and crash diagnostics support long modding sessions.
 
-The alpha is not yet a production replacement for the original editor. Existing
-MOB fields can be edited and saved through the provenance-checked raw transaction
-path without a preview or field-specific approval. Edits that change the MOB
-section tree itself (such as some create/delete operations) remain under active
-hardening and are blocked rather than falling back to the rebuilding serializer.
+The alpha remains preservation-first: unsupported or unproven mutations are
+blocked instead of being serialized approximately. The roadmap identifies the
+remaining release gates and distinguishes integrated work from isolated feature
+branches still under review.
 
 See [BUILDING_ENDURANCE.md](docs/BUILDING_ENDURANCE.md) for build and test commands,
 and [NOTICE.md](NOTICE.md) for attribution and licensing information.
