@@ -390,6 +390,7 @@ private slots:
     void terrainSemanticFieldRoundTripsWithoutPlacementHistory();
     void terrainSemanticFieldRejectsWrongMprOrAtlasBinding();
     void mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlasCapacity();
+    void terrainSaveRouteDoesNotHashArtworkPerMapCell();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void interruptedTerrainStrokeRejectsUnownedStamp();
     void resolveMissingBlendsStagesDeterministicLoadBaseline();
@@ -9549,6 +9550,23 @@ void EnduranceDocumentTests::terrainSemanticFieldRoundTripsWithoutPlacementHisto
     QCOMPARE(first, second);
     QVERIFY(first.startsWith(QStringLiteral("ei_terrain_semantics_zone2_")));
     QVERIFY(first.endsWith(QStringLiteral(".json")));
+}
+
+void EnduranceDocumentTests::terrainSaveRouteDoesNotHashArtworkPerMapCell()
+{
+    const QByteArray source = viewSource();
+    QVERIFY(!source.isEmpty());
+    const int methodStart = source.indexOf(
+        "bool CView::terrainLayerUsesWorkingExtension(");
+    const int methodEnd = source.indexOf(
+        "bool CView::realizeWorkingTerrainSignature(", methodStart);
+    QVERIFY(methodStart >= 0);
+    QVERIFY(methodEnd > methodStart);
+    const QByteArray method = source.mid(methodStart, methodEnd - methodStart);
+    QVERIFY2(method.contains("tileOriginForSlot("),
+             "The save-route cell scan no longer uses the constant-time origin lookup");
+    QVERIFY2(!method.contains("tileIdentityForSlot("),
+             "The save-route cell scan hashes full tile artwork for each MPR cell");
 }
 
 void EnduranceDocumentTests::terrainSemanticFieldRejectsWrongMprOrAtlasBinding()

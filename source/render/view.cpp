@@ -5868,12 +5868,14 @@ void CView::loadLandscape(const QFileInfo& filePath)
     restoreTerrainSemanticFieldFromArchive(
         filePath, m_activeTerrainArchivePath, false);
     const qint64 semanticFieldRestoreMs = phaseTimer.elapsed();
+    phaseTimer.restart();
     emit mprSaveStateChanged();
+    const qint64 saveStateRefreshMs = phaseTimer.elapsed();
     ei::log(eLogInfo, QString(
-        "MPR editor load phases file:%1 rendererAtlasAndSectorsMs:%2 canonicalMs:%3 tileTableMs:%4 materialCatalogMs:%5 semanticFieldRestoreMs:%6 totalMs:%7")
+        "MPR editor load phases file:%1 rendererAtlasAndSectorsMs:%2 canonicalMs:%3 tileTableMs:%4 materialCatalogMs:%5 semanticFieldRestoreMs:%6 saveStateRefreshMs:%7 totalMs:%8")
         .arg(filePath.fileName()).arg(rendererLoadMs).arg(canonicalLoadMs)
         .arg(tileTableMs).arg(materialCatalogMs).arg(semanticFieldRestoreMs)
-        .arg(totalLoadTimer.elapsed()));
+        .arg(saveStateRefreshMs).arg(totalLoadTimer.elapsed()));
     refreshAiGraphPreviewSource();
     refreshMprSettingsDock();
     emit selectionStateChanged(nSelectedNodes() > 0);
@@ -6943,16 +6945,32 @@ void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
 
 void CView::changeCurrentMob(CMob *pMob)
 {
+    QElapsedTimer activationTimer;
+    QElapsedTimer phaseTimer;
+    activationTimer.start();
     if(pMob != m_activeMob && m_pOp
        && operationRequiresCancellationForDocumentTransition(
            m_pOp->operationMethod()))
         cancelPendingOperation();
     m_activeMob = pMob;
+    phaseTimer.start();
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataActiveMob, nullptr == pMob ? "" : pMob->mobName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, (nullptr == pMob || !pMob->isDirty()) ? "" : "*");
+    const qint64 titleMs = phaseTimer.elapsed();
+    phaseTimer.restart();
     collectObjectTreeData();
+    const qint64 outlinerMs = phaseTimer.elapsed();
+    phaseTimer.restart();
     viewParameters();
+    const qint64 propertiesMs = phaseTimer.elapsed();
+    phaseTimer.restart();
     emit loadedMapStateChanged();
+    const qint64 stateSignalMs = phaseTimer.elapsed();
+    ei::log(eLogInfo, QString(
+        "MOB activation phases mob:%1 titleMs:%2 outlinerMs:%3 propertiesMs:%4 stateSignalMs:%5 totalMs:%6")
+        .arg(pMob ? pMob->mobName() : QStringLiteral("<none>"))
+        .arg(titleMs).arg(outlinerMs).arg(propertiesMs).arg(stateSignalMs)
+        .arg(activationTimer.elapsed()));
 }
 
 void CView::changeCurrentMob(QString mobName)
@@ -8929,10 +8947,9 @@ bool CView::terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const
                 x, y, layer, &available);
             if(!available)
                 continue;
-            STerrainWorkingTileIdentity identity;
-            if(!m_workingTerrainAtlas->tileIdentityForSlot(
-                   SMprPackedTile::decode(value).atlasSlot(), &identity)
-               || identity.origin != ETerrainWorkingTileOrigin::AuthoredMap)
+            if(m_workingTerrainAtlas->tileOriginForSlot(
+                   SMprPackedTile::decode(value).atlasSlot())
+               != ETerrainWorkingTileOrigin::AuthoredMap)
                 return true;
         }
     return false;

@@ -394,6 +394,9 @@ public:
     // physical page padding or an otherwise unaddressable slot.
     QVector<QByteArray> manualAtlasPhysicalIdentities() const;
     qint32 runtimeTerrainTypeForSlot(int slot) const;
+    // Cheap slot classification for hot paint/save-state scans. Unlike
+    // tileIdentityForSlot(), this never hashes the 256x256 artwork.
+    ETerrainWorkingTileOrigin tileOriginForSlot(int slot) const;
     bool tileIdentityForSlot(int slot,
                              STerrainWorkingTileIdentity* identity) const;
     bool restoreFinalizedProvenance(

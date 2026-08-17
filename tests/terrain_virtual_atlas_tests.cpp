@@ -1146,6 +1146,10 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     CTestTerrainWorkingAtlas working(
         fixture.catalog, fixture.images, 47u, 32);
     QVERIFY(working.isValid());
+    QCOMPARE(working.tileOriginForSlot(0),
+             ETerrainWorkingTileOrigin::AuthoredMap);
+    QCOMPARE(working.tileOriginForSlot(31),
+             ETerrainWorkingTileOrigin::Unknown);
 
     QMap<int, quint64> usage;
     for(int slot = 0; slot < fixture.images.size(); ++slot)
@@ -1183,6 +1187,8 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     QVERIFY(importedIdentity.stockDerivedBlend);
     QVERIFY(!importedIdentity.canonicalGeneratedBlend);
     const int importedSlot = SMprPackedTile::decode(importedPacked).atlasSlot();
+    QCOMPARE(working.tileOriginForSlot(importedSlot),
+             ETerrainWorkingTileOrigin::ImportedAuthored);
     ++usage[importedSlot];
 
     seedReviewedStockMasks(working, fixture);
@@ -1213,6 +1219,8 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     for(STerrainFinalizedTile& tile : flattened.tiles)
         tile.authored = true;
     const int generatedSlot = SMprPackedTile::decode(generatedPacked).atlasSlot();
+    QCOMPARE(working.tileOriginForSlot(generatedSlot),
+             ETerrainWorkingTileOrigin::CanonicalGenerated);
     flattened.authoredSlotRemap.insert(0, 0);
     flattened.authoredSlotRemap.insert(importedSlot, 1);
     flattened.authoredSlotRemap.insert(generatedSlot, 2);

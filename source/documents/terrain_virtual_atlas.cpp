@@ -4201,6 +4201,23 @@ qint32 CTerrainWorkingAtlas::runtimeTerrainTypeForSlot(int slot) const
         ? m_workingTileTypes.at(slot) : -1;
 }
 
+ETerrainWorkingTileOrigin CTerrainWorkingAtlas::tileOriginForSlot(
+    int slot) const
+{
+    const auto mapped = m_workingToVirtual.constFind(slot);
+    if(mapped == m_workingToVirtual.constEnd())
+        return ETerrainWorkingTileOrigin::Unknown;
+    if(mapped.value().first == 0)
+        return ETerrainWorkingTileOrigin::AuthoredMap;
+    const int sourceIndex = mapped.value().second;
+    if(!m_resolver || sourceIndex < 0
+       || sourceIndex >= m_resolver->generatedTiles().size())
+        return ETerrainWorkingTileOrigin::Unknown;
+    return m_resolver->generatedTiles().at(sourceIndex).authored
+        ? ETerrainWorkingTileOrigin::ImportedAuthored
+        : ETerrainWorkingTileOrigin::CanonicalGenerated;
+}
+
 bool CTerrainWorkingAtlas::tileIdentityForSlot(
     int slot, STerrainWorkingTileIdentity* identity) const
 {
@@ -4217,7 +4234,9 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
     identity->workingSlot = slot;
     identity->physicalPixelSha256 = imageHash(m_workingImages.at(slot));
     identity->runtimeTerrainType = runtimeTerrainTypeForSlot(slot);
-    const bool extensionIdentity = mapped.value().first != 0;
+    const ETerrainWorkingTileOrigin origin = tileOriginForSlot(slot);
+    const bool extensionIdentity = origin
+        != ETerrainWorkingTileOrigin::AuthoredMap;
     const int sourceIndex = mapped.value().second;
     if(!extensionIdentity)
     {
@@ -4241,9 +4260,7 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
         return false;
     const STerrainFinalizedTile& source =
         m_resolver->generatedTiles().at(sourceIndex);
-    identity->origin = source.authored
-        ? ETerrainWorkingTileOrigin::ImportedAuthored
-        : ETerrainWorkingTileOrigin::CanonicalGenerated;
+    identity->origin = origin;
     identity->sourceSlot = source.sourceSlot;
     identity->sourceSlotAliases = source.sourceSlotAliases;
     if(identity->sourceSlotAliases.isEmpty() && source.sourceSlot >= 0)
