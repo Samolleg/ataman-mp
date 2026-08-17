@@ -134,6 +134,21 @@ struct STerrainTileCommand
         qint32 afterBaseline{0};
     };
     QVector<SVirtualVertexDelta> virtualVertices;
+    // A freshly loaded plain MPR has no complete shared-corner field yet.
+    // Manual painting must still retain the selected decoded corners until
+    // that field is first recovered; otherwise neighbouring legacy cells can
+    // outvote the Manual tile during the first Resolve. These sparse deltas
+    // are consumed by neither save nor publication and remain reversible with
+    // their physical Manual command.
+    struct SPendingVirtualVertexDelta
+    {
+        int globalX{0};
+        int globalY{0};
+        ETerrainTileLayer layer{ETerrainTileLayer::Land};
+        qint32 before{0};
+        qint32 after{0};
+    };
+    QVector<SPendingVirtualVertexDelta> pendingVirtualVertices;
     // Commands that establish, replace, or remove a complete semantic field
     // must own both its current and saved-baseline state.  Keeping this state
     // outside the command made Undo restore packed cells while leaving hidden
@@ -152,7 +167,7 @@ struct STerrainTileCommand
     bool isEmpty() const
     {
         return deltas.isEmpty() && virtualVertices.isEmpty()
-            && virtualFields.isEmpty();
+            && pendingVirtualVertices.isEmpty() && virtualFields.isEmpty();
     }
 };
 
@@ -496,8 +511,10 @@ public:
     // Manual painting remains a direct physical operation. If Modern already
     // owns an active semantic field, the catalog-aware overload also keeps
     // that field honest: each affected vertex is recomputed from its
-    // post-command incident physical cells. On a legacy/plain map no semantic
-    // field is created, so ordinary Manual saves remain ordinary MPR saves.
+    // post-command incident physical cells. On a legacy/plain map no complete
+    // semantic field is created; only the decoded Manual corners are retained
+    // sparsely for the first later Modern/Resolve recovery, so ordinary Manual
+    // saves remain ordinary MPR saves.
     STerrainTileCommand makeTilePaint(const STerrainTileBrush& brush,
                                      ETerrainTileLayer layer,
                                      quint8 atlasIndex, quint8 tileIndex,
@@ -680,6 +697,11 @@ private:
     QVector<qint32> m_virtualOverlayMaterials;
     QVector<qint32> m_originalVirtualLandMaterials;
     QVector<qint32> m_originalVirtualOverlayMaterials;
+    // Sparse explicit Manual corners made before a complete semantic field
+    // exists. They seed the first deterministic recovery and are retained so
+    // undoing that recovery restores the exact pre-field Manual state.
+    QMap<int, qint32> m_pendingVirtualLandMaterials;
+    QMap<int, qint32> m_pendingVirtualOverlayMaterials;
 };
 
 class CTerrainTileEditHistory

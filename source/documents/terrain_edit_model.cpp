@@ -336,6 +336,31 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
                 stroke->virtualVertices.remove(existingIndex);
         }
     }
+    for(const STerrainTileCommand::SPendingVirtualVertexDelta& delta
+        : stamp.pendingVirtualVertices)
+    {
+        int existingIndex = -1;
+        for(int index = 0; index < stroke->pendingVirtualVertices.size(); ++index)
+        {
+            const auto& existing = stroke->pendingVirtualVertices.at(index);
+            if(existing.globalX == delta.globalX
+               && existing.globalY == delta.globalY
+               && existing.layer == delta.layer)
+            {
+                existingIndex = index;
+                break;
+            }
+        }
+        if(existingIndex < 0)
+            stroke->pendingVirtualVertices.append(delta);
+        else
+        {
+            auto& existing = stroke->pendingVirtualVertices[existingIndex];
+            existing.after = delta.after;
+            if(existing.before == existing.after)
+                stroke->pendingVirtualVertices.remove(existingIndex);
+        }
+    }
     for(const STerrainTileCommand::SVirtualFieldDelta& delta : stamp.virtualFields)
     {
         int existingIndex = -1;
@@ -876,6 +901,8 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     m_virtualOverlayMaterials.clear();
     m_originalVirtualLandMaterials.clear();
     m_originalVirtualOverlayMaterials.clear();
+    m_pendingVirtualLandMaterials.clear();
+    m_pendingVirtualOverlayMaterials.clear();
     if(sectorCountX <= 0 || sectorCountY <= 0 || !std::isfinite(maxZ) || maxZ <= 0.0f)
     {
         if(report)
@@ -2817,6 +2844,26 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     bool selectedDecoded = false;
     const STerrainTransitionSignature signature =
         catalog.gridSignatureForPacked(after, &selectedDecoded);
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    QMap<int, qint32> finalValues;
+    for(auto cell = postCommandPacked.constBegin();
+        cell != postCommandPacked.constEnd(); ++cell)
+    {
+        const int x = cell.key() % width;
+        const int y = cell.key() / width;
+        const int northWest = y * vertexWidth + x;
+        const int northEast = northWest + 1;
+        const int southWest = (y + 1) * vertexWidth + x;
+        const int southEast = southWest + 1;
+        finalValues[northWest] = selectedDecoded
+            ? signature.northWest : unset;
+        finalValues[northEast] = selectedDecoded
+            ? signature.northEast : unset;
+        finalValues[southEast] = selectedDecoded
+            ? signature.southEast : unset;
+        finalValues[southWest] = selectedDecoded
+            ? signature.southWest : unset;
+    }
     if(beforeCurrent.size() == expectedFieldSize
        && beforeBaseline.size() == expectedFieldSize)
     {
@@ -2824,26 +2871,6 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
         // cells touch a vertex, the later explicit cell in that deterministic
         // order wins. Only the final values are stored; no origin or time data
         // is retained.
-        const qint32 unset = std::numeric_limits<qint32>::min();
-        QMap<int, qint32> finalValues;
-        for(auto cell = postCommandPacked.constBegin();
-            cell != postCommandPacked.constEnd(); ++cell)
-        {
-            const int x = cell.key() % width;
-            const int y = cell.key() / width;
-            const int northWest = y * vertexWidth + x;
-            const int northEast = northWest + 1;
-            const int southWest = (y + 1) * vertexWidth + x;
-            const int southEast = southWest + 1;
-            finalValues[northWest] = selectedDecoded
-                ? signature.northWest : unset;
-            finalValues[northEast] = selectedDecoded
-                ? signature.northEast : unset;
-            finalValues[southEast] = selectedDecoded
-                ? signature.southEast : unset;
-            finalValues[southWest] = selectedDecoded
-                ? signature.southWest : unset;
-        }
         for(auto value = finalValues.constBegin();
             value != finalValues.constEnd(); ++value)
         {
@@ -2861,6 +2888,28 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
             delta.beforeBaseline = beforeBaseline.at(key);
             delta.afterBaseline = value.value();
             command.virtualVertices.append(delta);
+        }
+    }
+    else if(beforeCurrent.isEmpty() && beforeBaseline.isEmpty())
+    {
+        // Stay proportional to the Manual footprint on a legacy/plain map,
+        // but retain the decoded tuple for the first deterministic material
+        // recovery. The model still has no complete semantic field here.
+        QMap<int, qint32>& pending = layer == ETerrainTileLayer::Land
+            ? m_pendingVirtualLandMaterials : m_pendingVirtualOverlayMaterials;
+        for(auto value = finalValues.constBegin();
+            value != finalValues.constEnd(); ++value)
+        {
+            const qint32 before = pending.value(value.key(), unset);
+            if(before == value.value())
+                continue;
+            STerrainTileCommand::SPendingVirtualVertexDelta delta;
+            delta.globalX = value.key() % vertexWidth;
+            delta.globalY = value.key() / vertexWidth;
+            delta.layer = layer;
+            delta.before = before;
+            delta.after = value.value();
+            command.pendingVirtualVertices.append(delta);
         }
     }
     // A plain/legacy MPR has no durable semantic field yet. Manual remains a
@@ -6205,6 +6254,37 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
         }
         commandFields.insert(layerKey);
     }
+    QSet<int> commandPendingVertices;
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    for(const STerrainTileCommand::SPendingVirtualVertexDelta& delta
+        : command.pendingVirtualVertices)
+    {
+        if(delta.globalX < 0 || delta.globalX > tileCountX()
+           || delta.globalY < 0 || delta.globalY > tileCountY())
+            return false;
+        const int key = delta.globalY * (tileCountX() + 1) + delta.globalX;
+        const int layerKey = (delta.layer == ETerrainTileLayer::Overlay ? 1 : 0)
+            * (tileCountX() + 1) * (tileCountY() + 1) + key;
+        const QVector<qint32>& values = delta.layer == ETerrainTileLayer::Land
+            ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+        const QVector<qint32>& baseline = delta.layer == ETerrainTileLayer::Land
+            ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+        const QMap<int, qint32>& pending = delta.layer == ETerrainTileLayer::Land
+            ? m_pendingVirtualLandMaterials : m_pendingVirtualOverlayMaterials;
+        const qint32 expected = forward ? delta.before : delta.after;
+        if(commandPendingVertices.contains(layerKey)
+           || !values.isEmpty() || !baseline.isEmpty()
+           || pending.value(key, unset) != expected)
+        {
+            if(report)
+                report->add("terrain.pending_virtual_paint_provenance",
+                    EValidationSeverity::Error,
+                    "The fieldless Manual corner command no longer matches its pending semantic state",
+                    QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return false;
+        }
+        commandPendingVertices.insert(layerKey);
+    }
     QSet<int> commandVertices;
     for(const STerrainTileCommand::SVirtualVertexDelta& delta:command.virtualVertices)
     {
@@ -6331,6 +6411,18 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
             ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
         current = forward ? delta.afterCurrent : delta.beforeCurrent;
         baseline = forward ? delta.afterBaseline : delta.beforeBaseline;
+    }
+    for(const STerrainTileCommand::SPendingVirtualVertexDelta& delta
+        : command.pendingVirtualVertices)
+    {
+        QMap<int, qint32>& pending = delta.layer == ETerrainTileLayer::Land
+            ? m_pendingVirtualLandMaterials : m_pendingVirtualOverlayMaterials;
+        const int key = delta.globalY * (tileCountX() + 1) + delta.globalX;
+        const qint32 value = forward ? delta.after : delta.before;
+        if(value == unset)
+            pending.remove(key);
+        else
+            pending.insert(key, value);
     }
     return true;
 }

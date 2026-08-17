@@ -547,6 +547,7 @@ private slots:
     void portablePackageRemapsNamespaceAndReopens();
     void portablePackageStagesLiveSculptBeforeAtlasFinalization();
     void workingPreviewPackagePreservesAuthoredPagesAndAppendsExtensions();
+    void workingPreviewPackagePublishesReusedAuthoredTailPixels();
     void workingPreviewPackageDoesNotSerializePhysicalPagePadding();
     void workingPreviewPackageStagesSeveralGeneratedPages();
     void virtualPaintPreviewAndUndoPreserveDesiredIdentity();
@@ -3552,6 +3553,173 @@ void TerrainVirtualAtlasTests::workingPreviewPackagePreservesAuthoredPagesAndApp
     const ei::SMmpInspection appended = ei::inspectMmp(
         resources.memberPayload(package.resourceMembers.last()));
     QVERIFY2(appended.valid, qPrintable(appended.diagnostic));
+}
+
+void TerrainVirtualAtlasTests::workingPreviewPackagePublishesReusedAuthoredTailPixels()
+{
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.loadBytes(portableMpr(), "partial-tail-base.mpr",
+                                &report), qPrintable(report.toText()));
+    const SMprMapInfo map = baseline.mapInfo();
+    QVERIFY(map.textureCount > 0);
+    QVERIFY(map.tileCount >= 4);
+
+    const QByteArray originalMp = baseline.memberPayload(map.memberName);
+    const int tileTypeOffset = 38 + int(map.materialCount) * 44;
+    const int oldTailOffset = tileTypeOffset + int(map.tileCount) * 4;
+    constexpr int authoredTextureCount = 9;
+    constexpr int partialTileCount = 520;
+    constexpr int reusedSlot = 534; // page 8, local 22: R173 regression.
+    QByteArray partialMp = originalMp.left(tileTypeOffset);
+    for(int slot = 0; slot < partialTileCount; ++slot)
+    {
+        char bytes[4];
+        qToLittleEndian<qint32>(2, reinterpret_cast<uchar*>(bytes));
+        partialMp.append(bytes, 4);
+    }
+    partialMp.append(originalMp.mid(oldTailOffset));
+    qToLittleEndian<quint32>(quint32(authoredTextureCount),
+        reinterpret_cast<uchar*>(partialMp.data() + 16));
+    qToLittleEndian<quint32>(quint32(partialTileCount),
+        reinterpret_cast<uchar*>(partialMp.data() + 24));
+    CMprEditTransaction transaction(QStringLiteral(
+        "Create partial final authored page"));
+    QByteArray originalSha;
+    for(const SMprArchiveMember& member : baseline.members())
+        if(member.name.compare(map.memberName, Qt::CaseInsensitive) == 0)
+            originalSha = member.sha256;
+    transaction.replaceMemberPayload(map.memberName, originalSha, partialMp);
+    QByteArray partialBytes;
+    QVERIFY2(baseline.applyTransaction(transaction, &partialBytes, &report),
+             qPrintable(report.toText()));
+    CMprDocument partial;
+    QVERIFY2(partial.loadBytes(partialBytes, "partial-tail.mpr", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(partial.mapInfo().tileCount, quint32(partialTileCount));
+
+    QVector<QByteArray> authoredPages;
+    QVector<QImage> activeTiles;
+    for(int page = 0; page < authoredTextureCount; ++page)
+    {
+        const QImage sourcePage = CTestTerrainVirtualAtlas::composePage(
+            QVector<QImage>(64, solid(qRgba(20 + page, 40, 60, 255))),
+            0, 8);
+        QString diagnostic;
+        const QByteArray payload = ei::encodeMmpDxt1(
+            sourcePage, true, &diagnostic);
+        QVERIFY2(!payload.isEmpty(), qPrintable(diagnostic));
+        authoredPages.append(payload);
+        for(int localSlot = 0; localSlot < 64; ++localSlot)
+        {
+            QImage tile;
+            QVERIFY2(ei::decodeMmpDxt1AtlasTile(
+                         payload, localSlot, &tile, &diagnostic),
+                     qPrintable(diagnostic));
+            activeTiles.append(tile.convertToFormat(QImage::Format_RGBA8888));
+        }
+    }
+    activeTiles[reusedSlot].fill(QColor(220, 30, 170, 255));
+    QVector<qint32> types(reusedSlot + 1, 2);
+    QString expectedDiagnostic;
+    const QByteArray expectedStagedPage = ei::encodeMmpDxt1(
+        CTestTerrainVirtualAtlas::composePage(
+            activeTiles, (reusedSlot / 64) * 64, 8),
+        true, &expectedDiagnostic);
+    QVERIFY2(!expectedStagedPage.isEmpty(), qPrintable(expectedDiagnostic));
+    QImage expectedPhysicalSlot;
+    QVERIFY2(ei::decodeMmpDxt1AtlasTile(
+                 expectedStagedPage, reusedSlot % 64, &expectedPhysicalSlot,
+                 &expectedDiagnostic), qPrintable(expectedDiagnostic));
+    const STerrainPortableAtlasPackage package =
+        CTestTerrainVirtualAtlas::buildWorkingPreviewPackage(
+            partial, activeTiles, types, authoredPages, &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + QStringLiteral("\n")
+                        + report.toText()));
+    QCOMPARE(package.resourceMembers.size(), authoredTextureCount);
+    CMprDocument reopenedMpr;
+    QVERIFY2(reopenedMpr.loadBytes(package.mprBytes,
+                                   "slot534-reopened.mpr", &report),
+             qPrintable(report.toText()));
+    QCOMPARE(reopenedMpr.mapInfo().textureCount,
+             quint32(authoredTextureCount));
+    QCOMPARE(reopenedMpr.mapInfo().tileCount, quint32(reusedSlot + 1));
+
+    CResArchiveDocument resources;
+    QStringList errors;
+    QVERIFY2(resources.loadBytes(package.resourceArchiveBytes,
+                                 "partial-tail.res", &errors),
+             qPrintable(errors.join('\n')));
+    const int partialPage = reusedSlot / 64;
+    QVERIFY(resources.memberPayload(package.resourceMembers.at(partialPage))
+            != authoredPages.at(partialPage));
+    QImage reopened;
+    QString diagnostic;
+    QVERIFY2(ei::decodeMmpDxt1AtlasTile(
+                 resources.memberPayload(package.resourceMembers.at(partialPage)),
+                 reusedSlot % 64, &reopened, &diagnostic),
+             qPrintable(diagnostic));
+    const QColor center = reopened.pixelColor(
+        reopened.width() / 2, reopened.height() / 2);
+    QVERIFY(center.red() > 150);
+    QVERIFY(center.blue() > 100);
+    QVERIFY(center.alpha() > 0);
+    QCOMPARE(reopened.convertToFormat(QImage::Format_RGBA8888),
+             expectedPhysicalSlot.convertToFormat(QImage::Format_RGBA8888));
+
+    // The smallest mip is one shared DXT block for the complete page. It must
+    // come from the rebuilt page as well; otherwise the generated tail slot is
+    // correct close up but fades back to authored transparent padding at
+    // distance.
+    const QByteArray reopenedPartialPage = resources.memberPayload(
+        package.resourceMembers.at(partialPage));
+    QCOMPARE(reopenedPartialPage.right(8), expectedStagedPage.right(8));
+    QVERIFY(reopenedPartialPage.right(8)
+            != authoredPages.at(partialPage).right(8));
+
+    // Slots 512..519 are authored neighbours on the same partial page. Their
+    // compressed blocks and therefore decoded RGBA must remain exact.
+    for(int slot = partialPage * 64; slot < partialTileCount; ++slot)
+    {
+        QImage before;
+        QImage after;
+        QVERIFY(ei::decodeMmpDxt1AtlasTile(
+            authoredPages.at(partialPage), slot % 64, &before, &diagnostic));
+        QVERIFY(ei::decodeMmpDxt1AtlasTile(
+            resources.memberPayload(package.resourceMembers.at(partialPage)),
+            slot % 64, &after, &diagnostic));
+        QCOMPARE(after.convertToFormat(QImage::Format_RGBA8888),
+                 before.convertToFormat(QImage::Format_RGBA8888));
+    }
+
+    QVector<QByteArray> reopenedPages;
+    QVector<QImage> reopenedTiles;
+    for(int page = 0; page < authoredTextureCount; ++page)
+    {
+        const QByteArray pageBytes = resources.memberPayload(
+            package.resourceMembers.at(page));
+        reopenedPages.append(pageBytes);
+        for(int localSlot = 0; localSlot < 64; ++localSlot)
+        {
+            QImage tile;
+            QVERIFY(ei::decodeMmpDxt1AtlasTile(
+                pageBytes, localSlot, &tile, &diagnostic));
+            reopenedTiles.append(tile.convertToFormat(QImage::Format_RGBA8888));
+        }
+    }
+    const STerrainPortableAtlasPackage resaved =
+        CTestTerrainVirtualAtlas::buildWorkingPreviewPackage(
+            reopenedMpr, reopenedTiles, types, reopenedPages, &report);
+    QVERIFY2(resaved.success,
+             qPrintable(resaved.error + QStringLiteral("\n")
+                        + report.toText()));
+    CResArchiveDocument resavedArchive;
+    QVERIFY(resavedArchive.loadBytes(resaved.resourceArchiveBytes,
+                                     "slot534-resaved.res", &errors));
+    for(int page = 0; page < authoredTextureCount; ++page)
+        QCOMPARE(resavedArchive.memberPayload(resaved.resourceMembers.at(page)),
+                 reopenedPages.at(page));
 }
 
 void TerrainVirtualAtlasTests::workingPreviewPackageDoesNotSerializePhysicalPagePadding()

@@ -690,4 +690,93 @@ QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps,
     return result;
 }
 
+QByteArray patchMmpDxt1AtlasTiles(
+    const QByteArray& authoredMmp, const QByteArray& replacementMmp,
+    const QSet<int>& logicalSlots, QString* diagnostic)
+{
+    constexpr int headerSize = 76;
+    constexpr quint32 signature = 0x00504d4d;
+    constexpr quint32 dxt1 = 0x31545844;
+    if(diagnostic) diagnostic->clear();
+    if(authoredMmp.size() < headerSize
+       || replacementMmp.size() < headerSize
+       || readDword(authoredMmp, 0) != signature
+       || readDword(replacementMmp, 0) != signature
+       || readDword(authoredMmp, 16) != dxt1
+       || readDword(replacementMmp, 16) != dxt1
+       || authoredMmp.left(headerSize) != replacementMmp.left(headerSize))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "DXT1 atlas tile patch requires matching complete MMP headers.");
+        return {};
+    }
+    const int width = int(readDword(authoredMmp, 4));
+    const int height = int(readDword(authoredMmp, 8));
+    const int mipCount = int(readDword(authoredMmp, 12));
+    if(width <= 0 || width != height || width % 32 != 0 || mipCount <= 0)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "DXT1 atlas tile patch received invalid dimensions or mip count.");
+        return {};
+    }
+    for(int slot : logicalSlots)
+        if(slot < 0 || slot >= 64)
+        {
+            if(diagnostic) *diagnostic = QStringLiteral(
+                "DXT1 atlas tile patch slot is outside 0..63.");
+            return {};
+        }
+
+    QByteArray result = authoredMmp;
+    qint64 levelOffset = headerSize;
+    for(int level = 0; level < mipCount; ++level)
+    {
+        const int levelWidth = qMax(1, width >> level);
+        const int levelHeight = qMax(1, height >> level);
+        const int blocksWide = (levelWidth + 3) / 4;
+        const int blocksHigh = (levelHeight + 3) / 4;
+        const qint64 levelBytes = qint64(blocksWide) * blocksHigh * 8;
+        if(levelOffset > authoredMmp.size() - levelBytes
+           || levelOffset > replacementMmp.size() - levelBytes)
+        {
+            if(diagnostic) *diagnostic = QStringLiteral(
+                "DXT1 atlas tile patch encountered a truncated mip chain.");
+            return {};
+        }
+        for(int slot : logicalSlots)
+        {
+            const int tileColumn = slot % 8;
+            const int rawTileRow = 7 - slot / 8;
+            const int x0 = tileColumn * levelWidth / 8;
+            const int x1 = qMin(levelWidth,
+                qMax(x0 + 1, ((tileColumn + 1) * levelWidth + 7) / 8));
+            const int y0 = rawTileRow * levelHeight / 8;
+            const int y1 = qMin(levelHeight,
+                qMax(y0 + 1, ((rawTileRow + 1) * levelHeight + 7) / 8));
+            // At the larger mips each tile owns whole DXT blocks, so authored
+            // neighbours remain byte-identical. At the final shared mips a
+            // block covers several logical tiles; copy the complete rebuilt
+            // block whenever the new tile contributes to it. Leaving those
+            // blocks authored would make the new artwork fade back to the old
+            // transparent padding at distance.
+            const int firstBlockX = x0 / 4;
+            const int lastBlockX = (x1 - 1) / 4;
+            const int firstBlockY = y0 / 4;
+            const int lastBlockY = (y1 - 1) / 4;
+            const int rowBytes = (lastBlockX - firstBlockX + 1) * 8;
+            for(int blockY = firstBlockY; blockY <= lastBlockY; ++blockY)
+            {
+                const qint64 block = qint64(blockY)
+                    * blocksWide + firstBlockX;
+                const qint64 offset = levelOffset + block * 8;
+                memcpy(result.data() + offset,
+                       replacementMmp.constData() + offset,
+                       size_t(rowBytes));
+            }
+        }
+        levelOffset += levelBytes;
+    }
+    return result;
+}
+
 }

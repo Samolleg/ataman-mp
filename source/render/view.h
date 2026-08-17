@@ -331,7 +331,9 @@ private:
     bool adoptCompleteTerrainBaseline(
         const QFileInfo& destination, const QString& expectedSha256,
         const QVector<QImage>& physicalTiles,
-        const QString& terrainArchivePath);
+        const QString& terrainArchivePath,
+        const STerrainAtlasProfile& expectedProfile,
+        bool requireSemanticMember);
     bool buildTerrainSemanticFieldMember(
         const QByteArray& candidateMprBytes,
         const QFileInfo& destinationMpr,
@@ -343,6 +345,12 @@ private:
     bool restoreTerrainSemanticFieldFromArchive(
         const QFileInfo& mprFile, const QString& terrainArchivePath,
         bool requireMember = false);
+    bool restoreTerrainSemanticFieldFromArchive(
+        const CMprDocument& document,
+        const STerrainAtlasProfile& profile,
+        CTerrainEditModel* terrain,
+        const QFileInfo& mprFile, const QString& terrainArchivePath,
+        bool requireMember) const;
     void refreshMobDirtyStates();
     void initShaders();
     void draw();

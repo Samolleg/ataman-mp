@@ -1838,6 +1838,17 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
                 QStringLiteral("Recovered %1 material-field vertex hole(s) adjacent to unavailable legacy cells")
                     .arg(recoveredUnsetVertices));
     }
+    // Before the first Modern/Resolve operation, Manual has only its physical
+    // MPR edit plus these sparse explicit corners. Recovery votes reconstruct
+    // the rest of the legacy map, but must not allow the incident legacy cells
+    // to erase a newly selected Manual tile. Keep the sparse state intact: a
+    // Resolve undo removes the complete field and therefore needs the exact
+    // pre-field Manual intent still available to its preceding undo command.
+    const QMap<int, qint32>& pending = layer == ETerrainTileLayer::Land
+        ? m_pendingVirtualLandMaterials : m_pendingVirtualOverlayMaterials;
+    for(auto value = pending.constBegin(); value != pending.constEnd(); ++value)
+        if(value.key() >= 0 && value.key() < active.size())
+            active[value.key()] = value.value();
     int recoveredConflicts = 0;
     QString firstRecoveredConflict;
     for(int y = 0; y < tileCountY(); ++y)
@@ -3820,6 +3831,48 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
 
     QVector<QByteArray> pagePayloads = authoredPagePayloads;
     pagePayloads.reserve(textureCount);
+    // The working atlas deliberately reuses the physically present but
+    // logically unowned tail of the last authored MMP page. Preserve complete
+    // authored pages byte-for-byte, but rebuild that one partial page when MP
+    // metadata has grown into its tail. Otherwise the staged MPR references
+    // the new slot while the RES still contains the old transparent padding.
+    if(activeTileTypes.size() > int(map.tileCount)
+       && int(map.tileCount) % 64 != 0)
+    {
+        const int partialPage = int(map.tileCount) / 64;
+        if(partialPage < authoredPagePayloads.size())
+        {
+            QString diagnostic;
+            const QImage pixels = composePage(
+                activeTiles, partialPage * 64, tileSize.width());
+            const QByteArray payload = ei::encodeMmpDxt1(
+                pixels, true, &diagnostic);
+            if(payload.isEmpty())
+            {
+                result.error = QStringLiteral(
+                    "Could not encode reused authored-tail page %1: %2")
+                    .arg(partialPage).arg(diagnostic);
+                return result;
+            }
+            QSet<int> reusedLocalSlots;
+            const int pageFirstSlot = partialPage * 64;
+            for(int slot = int(map.tileCount);
+                slot < activeTileTypes.size()
+                    && slot < pageFirstSlot + 64; ++slot)
+                reusedLocalSlots.insert(slot - pageFirstSlot);
+            const QByteArray patched = ei::patchMmpDxt1AtlasTiles(
+                authoredPagePayloads.at(partialPage), payload,
+                reusedLocalSlots, &diagnostic);
+            if(patched.isEmpty())
+            {
+                result.error = QStringLiteral(
+                    "Could not patch reused authored-tail page %1: %2")
+                    .arg(partialPage).arg(diagnostic);
+                return result;
+            }
+            pagePayloads[partialPage] = patched;
+        }
+    }
     for(int page = authoredPagePayloads.size(); page < textureCount; ++page)
     {
         QString diagnostic;

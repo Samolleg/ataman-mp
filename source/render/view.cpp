@@ -6651,7 +6651,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         if(adoptAsOpenBaseline
            && !adoptCompleteTerrainBaseline(
                destination, mprResult.candidateSha256,
-               physicalDraftTiles, atlasPath))
+               physicalDraftTiles, atlasPath, draftProfile,
+               !semanticFieldMember.name.isEmpty()))
         {
             QMessageBox::critical(this, tr("Modern draft saved; reopen required"),
                 tr("The paired MPR and map-local atlas were saved, but the "
@@ -9042,19 +9043,83 @@ QMap<int, quint64> CView::workingTerrainAtlasUsage() const
 bool CView::adoptCompleteTerrainBaseline(
     const QFileInfo& destination, const QString& expectedSha256,
     const QVector<QImage>& physicalTiles,
-    const QString& terrainArchivePath)
+    const QString& terrainArchivePath,
+    const STerrainAtlasProfile& expectedProfile,
+    bool requireSemanticMember)
 {
+    const auto adoptionFailure = [](const QString& phase,
+                                    const QString& detail)
+    {
+        ei::log(eLogWarning, QStringLiteral(
+            "Terrain baseline adoption failed phase:%1 detail:%2")
+            .arg(phase, detail));
+        return false;
+    };
     CMprDocument reopenedDocument;
     CValidationReport report;
     if(!reopenedDocument.load(destination, &report) || report.hasErrors())
-        return false;
+        return adoptionFailure(QStringLiteral("mpr-reopen"),
+                               report.toText().trimmed());
     const QString reopenedSha256 = QString::fromLatin1(QCryptographicHash::hash(
         reopenedDocument.originalBytes(), QCryptographicHash::Sha256).toHex());
     if(reopenedSha256.compare(expectedSha256, Qt::CaseInsensitive) != 0)
-        return false;
+        return adoptionFailure(QStringLiteral("mpr-identity"),
+            QStringLiteral("expected:%1 actual:%2")
+                .arg(expectedSha256, reopenedSha256));
     CTerrainEditModel reopenedTerrain;
     if(!reopenedTerrain.load(reopenedDocument, &report) || report.hasErrors())
-        return false;
+        return adoptionFailure(QStringLiteral("terrain-stage"),
+                               report.toText().trimmed());
+    const SMprMapInfo& map = reopenedDocument.mapInfo();
+    const QByteArray physicalHash =
+        CTerrainAtlasProfileInference::pixelSha256(physicalTiles);
+    if(physicalTiles.size() != int(map.textureCount) * 64
+       || !expectedProfile.validateBinding(
+           map.innerNamespace, physicalHash, physicalTiles.size(), &report))
+        return adoptionFailure(QStringLiteral("staged-atlas-binding"),
+                               report.toText().trimmed());
+    const STerrainAtlasEmbeddedBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+            {terrainArchivePath}, map.innerNamespace, terrainArchivePath);
+    if(!binding.success()
+       || !binding.canReuseDecodedAtlasTiles(
+           terrainArchivePath, map.innerNamespace, physicalTiles.size(),
+           &report)
+       || binding.decodedAtlasPixelSha256.toLower() != physicalHash.toLower()
+       || binding.profile.toBytes() != expectedProfile.toBytes())
+        return adoptionFailure(QStringLiteral("committed-atlas-reopen"),
+            binding.error.isEmpty() ? report.toText().trimmed()
+                                    : binding.error);
+    // Semantic state is staged into the reopened model before any live
+    // renderer, picker, document, or archive binding is changed. A draft made
+    // before semantic painting legitimately has no member; only require one
+    // when the save path actually published it.
+    if(!restoreTerrainSemanticFieldFromArchive(
+           reopenedDocument, expectedProfile, &reopenedTerrain, destination,
+           terrainArchivePath, requireSemanticMember))
+        return adoptionFailure(QStringLiteral("semantic-stage"),
+            requireSemanticMember
+                ? QStringLiteral("required member was absent or invalid")
+                : QStringLiteral("optional member was invalid"));
+    const QVector<QImage> previousRendererTiles =
+        m_workingTerrainAtlas && m_workingTerrainAtlas->isValid()
+            ? m_workingTerrainAtlas->activeTileImages()
+            : m_authoredTerrainTileImages;
+    const auto restoreLivePreview = [&](bool restoreAtlas)
+    {
+        bool restored = true;
+        for(const SMprSectorInfo& sector : m_mprDocument.sectors())
+            restored = m_pLand->previewCanonicalSector(
+                sector.sectorX, sector.sectorY,
+                m_terrainEdit.sectorPayload(
+                    sector.sectorX, sector.sectorY)) && restored;
+        if(restoreAtlas && !previousRendererTiles.isEmpty()
+           && previousRendererTiles.size() % 64 == 0)
+            restored = m_pLand->previewTerrainAtlas(
+                previousRendererTiles,
+                previousRendererTiles.size() / 64) && restored;
+        return restored;
+    };
     for(const SMprSectorInfo& sector : reopenedDocument.sectors())
     {
         const QByteArray payload = reopenedTerrain.sectorPayload(
@@ -9064,24 +9129,44 @@ bool CView::adoptCompleteTerrainBaseline(
         // may rebuild water buffers twice during in-session adoption.
         if(!m_pLand->previewCanonicalSector(
                sector.sectorX, sector.sectorY, payload))
-            return false;
+        {
+            const bool restored = restoreLivePreview(false);
+            return adoptionFailure(QStringLiteral("renderer-sector-commit"),
+                QStringLiteral("sector:%1,%2 rollback:%3")
+                    .arg(sector.sectorX).arg(sector.sectorY)
+                    .arg(restored ? QStringLiteral("complete")
+                                  : QStringLiteral("failed")));
+        }
     }
     const bool acquireContext = isValid()
         && QGLContext::currentContext() != context();
     if(acquireContext)
         makeCurrent();
-    const SMprMapInfo& map = reopenedDocument.mapInfo();
-    const bool rendererAdopted =
-        m_pLand->previewTerrainAtlas(physicalTiles, int(map.textureCount))
+    const bool atlasAdopted = m_pLand->previewTerrainAtlas(
+        physicalTiles, int(map.textureCount));
+    const bool canonicalAdopted = atlasAdopted
         && m_pLand->adoptCanonicalTerrainSave(
-            destination, reopenedDocument.originalBytes(), map.innerNamespace,
-            map.textureCount, map.textureSize, map.tileCount, map.tileSize,
-            map.maxZ, map.tileTypes, map.animatedTiles)
+               destination, reopenedDocument.originalBytes(),
+               map.innerNamespace, map.textureCount, map.textureSize,
+               map.tileCount, map.tileSize, map.maxZ, map.tileTypes,
+               map.animatedTiles);
+    const bool pickerAdopted = canonicalAdopted
         && m_pTileForm->adoptTileImages(physicalTiles, map.tileTypes);
     if(acquireContext)
         doneCurrent();
-    if(!rendererAdopted)
-        return false;
+    if(!pickerAdopted)
+    {
+        if(acquireContext)
+            makeCurrent();
+        const bool restored = restoreLivePreview(atlasAdopted);
+        if(acquireContext)
+            doneCurrent();
+        return adoptionFailure(QStringLiteral("live-commit"),
+            QStringLiteral("atlas:%1 canonical:%2 picker:%3 rollback:%4")
+                .arg(atlasAdopted).arg(canonicalAdopted).arg(pickerAdopted)
+                .arg(restored ? QStringLiteral("complete")
+                              : QStringLiteral("failed")));
+    }
     m_pTileForm->setAnimTile(m_pLand->animTiles());
     CTextureList::getInstance()->setMapLocalTerrainArchive(terrainArchivePath);
     m_activeTerrainArchivePath = terrainArchivePath;
@@ -9092,14 +9177,12 @@ bool CView::adoptCompleteTerrainBaseline(
     m_terrainEdit = reopenedTerrain;
     m_terrainEditAvailable = true;
     m_legacyTerrainProfileCollision = false;
+    m_terrainAtlasProfile = expectedProfile;
     m_authoredTerrainTileImages = physicalTiles;
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
     if(m_pUndoStack)
         m_pUndoStack->clear();
     rebuildTerrainAutoCatalog();
-    if(!restoreTerrainSemanticFieldFromArchive(
-           destination, terrainArchivePath, true))
-        return false;
     m_pLand->setDirty(false);
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
                                destination.baseName());
@@ -9160,14 +9243,28 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
     const QFileInfo& mprFile, const QString& terrainArchivePath,
     bool requireMember)
 {
-    if(!m_terrainEditAvailable || terrainArchivePath.trimmed().isEmpty()
+    if(!m_terrainEditAvailable)
+        return !requireMember;
+    return restoreTerrainSemanticFieldFromArchive(
+        m_mprDocument, m_terrainAtlasProfile, &m_terrainEdit, mprFile,
+        terrainArchivePath, requireMember);
+}
+
+bool CView::restoreTerrainSemanticFieldFromArchive(
+    const CMprDocument& mprDocument,
+    const STerrainAtlasProfile& terrainProfile,
+    CTerrainEditModel* terrain,
+    const QFileInfo& mprFile, const QString& terrainArchivePath,
+    bool requireMember) const
+{
+    if(!terrain || terrainArchivePath.trimmed().isEmpty()
        || !QFileInfo::exists(terrainArchivePath))
         return !requireMember;
     const QString memberName = STerrainSemanticFieldDocument::memberName(
-        m_mprDocument.mapInfo().innerNamespace, mprFile);
+        mprDocument.mapInfo().innerNamespace, mprFile);
     const QString profileMemberName =
         CTerrainAtlasProfileStore::embeddedMemberName(
-            m_mprDocument.mapInfo().innerNamespace);
+            mprDocument.mapInfo().innerNamespace);
     QMap<QString, QByteArray> members;
     qint64 archiveBytesRead = 0;
     QString archiveError;
@@ -9186,24 +9283,24 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
     STerrainSemanticFieldDocument document;
     CValidationReport report;
     const QByteArray rawMprHash = QCryptographicHash::hash(
-        m_mprDocument.originalBytes(), QCryptographicHash::Sha256);
+        mprDocument.originalBytes(), QCryptographicHash::Sha256);
     QByteArray rawAtlasHash = QByteArray::fromHex(
-        m_terrainAtlasProfile.atlasPixelSha256);
+        terrainProfile.atlasPixelSha256);
     QByteArray profileBytes = members.value(profileMemberName);
     if(profileBytes.isEmpty())
-        profileBytes = m_terrainAtlasProfile.toBytes();
+        profileBytes = terrainProfile.toBytes();
     const QByteArray rawProfileHash = QCryptographicHash::hash(
         profileBytes, QCryptographicHash::Sha256);
     if(!STerrainSemanticFieldDocument::fromBytes(
            payload, &document, &report,
            terrainArchivePath + QLatin1Char(':') + memberName)
        || !document.validateBinding(
-           m_mprDocument.mapInfo().innerNamespace, rawMprHash, rawAtlasHash,
+           mprDocument.mapInfo().innerNamespace, rawMprHash, rawAtlasHash,
            rawProfileHash,
-           m_terrainEdit.vertexCountX(), m_terrainEdit.vertexCountY(), &report)
-       || !m_terrainEdit.restoreVirtualMaterialFieldState(
+           terrain->vertexCountX(), terrain->vertexCountY(), &report)
+       || !terrain->restoreVirtualMaterialFieldState(
            ETerrainTileLayer::Land, document.land, document.land, &report)
-       || !m_terrainEdit.restoreVirtualMaterialFieldState(
+       || !terrain->restoreVirtualMaterialFieldState(
            ETerrainTileLayer::Overlay, document.overlay, document.overlay,
            &report))
     {
@@ -10412,7 +10509,8 @@ void CView::finalizeVirtualTerrainAtlas()
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     if(!adoptCompleteTerrainBaseline(
            mprDestination, mprResult.candidateSha256,
-           physicalTiles, texturesPath))
+           physicalTiles, texturesPath, portableProfile,
+           !semanticFieldMember.name.isEmpty()))
     {
         publishProgress.close();
         QMessageBox::critical(this, tr("Modern MPR saved; reopen required"),

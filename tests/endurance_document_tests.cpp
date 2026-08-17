@@ -387,6 +387,7 @@ private slots:
     void terrainTilePaintingIsUndoableLocalizedAndNamespaceSafe();
     void manualTilePaintRebasesDecodedSemanticsAndInvalidatesDisputes();
     void manualTilePaintOnLegacyMapStaysPhysicalUntilModernStarts();
+    void firstResolvePreservesFreshManualTileSemanticCorners();
     void laterManualTileWinsSharedCornersAndUndoRestoresPriorValues();
     void manualTileStrokeStoresOnlyTouchedSemanticVertices();
     void terrainSemanticFieldRoundTripsWithoutPlacementHistory();
@@ -428,6 +429,8 @@ private slots:
     void externalPublishedAtlasArchiveBindingProbe();
     void externalLegacyAdjacentAtlasProfileCollisionProbe();
     void externalReopenedDraftTopologyProbe();
+    void externalModernDraftAdoptionPairProbe();
+    void modernDraftAdoptionStagesPairBeforeLiveMutation();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
     void semanticAtlasPartialCatalogRejectsCrossLayerCornersInline();
@@ -4692,6 +4695,178 @@ void EnduranceDocumentTests::manualTilePaintOnLegacyMapStaysPhysicalUntilModernS
     QVERIFY(terrain.copyVirtualMaterialField(
         ETerrainTileLayer::Land, &recovered, true));
     QCOMPARE(recovered.material(0, 0), qint32(2));
+}
+
+void EnduranceDocumentTests::firstResolvePreservesFreshManualTileSemanticCorners()
+{
+    // Zone 2 regression: slot 68 is stamped at 38,13 before any Modern
+    // operation has created a shared-corner field.  The first Shift+R must
+    // retain that explicit Manual tuple and resolve the neighbouring cells
+    // outwards.  Previously, deterministic recovery counted the Manual cell
+    // as just one vote, so its pre-existing neighbours overwrote all four
+    // corners; a second Manual stamp then behaved differently only because
+    // the first Resolve had created the field.
+    CTerrainTransitionCatalog catalog;
+    for(int mask = 0; mask < 16; ++mask)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = (mask & 1) ? 2 : 1;
+        variant.signature.northEast = (mask & 2) ? 2 : 1;
+        variant.signature.southEast = (mask & 4) ? 2 : 1;
+        variant.signature.southWest = (mask & 8) ? 2 : 1;
+        SMprPackedTile packed;
+        packed.atlasIndex = mask == 15 ? 1 : 0;
+        packed.tileIndex = quint8(mask == 15 ? 4 : mask);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+
+    QVector<STerrainSectorSource> sources;
+    for(int sectorX = 0; sectorX < 3; ++sectorX)
+    {
+        STerrainSectorSource source;
+        source.memberName = QStringLiteral("first-manual-%1.sec")
+            .arg(sectorX);
+        source.sectorX = sectorX;
+        source.sectorY = 0;
+        source.type = 0;
+        source.payload = syntheticLandSector(1200);
+        source.landTileOffset = 5 + 33 * 33 * 8;
+        source.expectedPayloadSha256 = QCryptographicHash::hash(
+            source.payload, QCryptographicHash::Sha256).toHex();
+        sources.append(source);
+    }
+
+    CTerrainEditModel terrain;
+    CValidationReport setupReport;
+    QVERIFY2(terrain.loadSources(3, 1, 100.0f, sources, &setupReport, 2,
+                                 QVector<qint32>(128, 0), 0),
+             qPrintable(setupReport.toText()));
+    QCOMPARE(terrain.tileCountX(), 48);
+    QCOMPARE(terrain.tileCountY(), 16);
+    const CTerrainEditModel beforeManual = terrain;
+
+    STerrainTileBrush manualCell;
+    manualCell.centerX = 38.0f;
+    manualCell.centerY = 13.0f;
+    manualCell.radius = 0.0f;
+    manualCell.shape = ETerrainTileBrushShape::Square;
+    const STerrainTileCommand manual = terrain.makeTilePaint(
+        manualCell, ETerrainTileLayer::Land, 1, 4, 0, catalog);
+    QVERIFY(!manual.isEmpty());
+    QCOMPARE(manual.pendingVirtualVertices.size(), 4);
+    QVERIFY(terrain.apply(manual, true));
+
+    bool available = false;
+    QCOMPARE(terrain.packedTile(38, 13, ETerrainTileLayer::Land,
+                                &available), quint16(68));
+    QVERIFY(available);
+    QVERIFY(!terrain.virtualMaterialFieldActive(ETerrainTileLayer::Land));
+
+    CTerrainEditModel staged = terrain;
+    CValidationReport recoveryReport;
+    QVERIFY2(staged.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, catalog, &recoveryReport,
+                 ETerrainMaterialFieldRecovery::RecoverDeterministically),
+             qPrintable(recoveryReport.toText()));
+    QVERIFY2(!recoveryReport.hasErrors(), qPrintable(recoveryReport.toText()));
+
+    // This is the first incorrect value in the old path: each Manual corner
+    // was reset to the surrounding material before the resolver planned any
+    // physical repair.
+    for(const QPoint& vertex : {QPoint(38, 13), QPoint(39, 13),
+                                 QPoint(39, 14), QPoint(38, 14)})
+    {
+        bool found = false;
+        QCOMPARE(staged.virtualMaterialAt(ETerrainTileLayer::Land,
+                                          vertex.x(), vertex.y(), &found),
+                 qint32(2));
+        QVERIFY(found);
+    }
+
+    CTerrainVirtualMaterialField repairField;
+    QVERIFY(staged.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &repairField, true));
+    const STerrainTileCommand firstResolve = staged.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, catalog, 0x534852u, &recoveryReport, false,
+        &repairField, true, true);
+    QVERIFY2(!recoveryReport.hasErrors(), qPrintable(recoveryReport.toText()));
+
+    bool changedManualCell = false;
+    bool expandedOutward = false;
+    for(const STerrainTileDelta& delta : firstResolve.deltas)
+    {
+        if(delta.globalX == 38 && delta.globalY == 13)
+            changedManualCell = true;
+        if((delta.globalX == 37 || delta.globalX == 39)
+           && delta.globalY == 13)
+            expandedOutward = true;
+    }
+    QVERIFY(!changedManualCell);
+    QVERIFY(expandedOutward);
+
+    // Match CView's atomic Resolve command: it establishes the recovered
+    // complete field together with the physical repair. Undo must then expose
+    // the exact fieldless Manual command again, including its pending tuple.
+    STerrainTileCommand resolveTransaction = firstResolve;
+    QVERIFY(staged.apply(firstResolve, true));
+    STerrainTileCommand::SVirtualFieldDelta fieldDelta;
+    fieldDelta.layer = ETerrainTileLayer::Land;
+    fieldDelta.vertexWidth = terrain.tileCountX() + 1;
+    fieldDelta.vertexHeight = terrain.tileCountY() + 1;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &fieldDelta.beforeCurrent,
+        &fieldDelta.beforeBaseline));
+    QVERIFY(staged.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &fieldDelta.afterCurrent,
+        &fieldDelta.afterBaseline));
+    resolveTransaction.virtualFields.append(fieldDelta);
+    QVERIFY(terrain.apply(resolveTransaction, true));
+    QVERIFY(terrain.apply(resolveTransaction, false));
+    QVERIFY(terrain.apply(manual, false));
+    QVERIFY(terrain.apply(manual, true));
+
+    // A second Manual placement on an already initialized field was the old
+    // workaround. The first fieldless Manual placement must now produce the
+    // identical physical Resolve plan, rather than collapsing inward first.
+    CTerrainEditModel postFieldManual = beforeManual;
+    CValidationReport postFieldReport;
+    QVERIFY2(postFieldManual.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, catalog, &postFieldReport,
+                 ETerrainMaterialFieldRecovery::RecoverDeterministically),
+             qPrintable(postFieldReport.toText()));
+    const STerrainTileCommand repeatedManual = postFieldManual.makeTilePaint(
+        manualCell, ETerrainTileLayer::Land, 1, 4, 0, catalog);
+    QVERIFY(!repeatedManual.isEmpty());
+    QVERIFY(repeatedManual.pendingVirtualVertices.isEmpty());
+    QVERIFY(postFieldManual.apply(repeatedManual, true));
+    CTerrainVirtualMaterialField postFieldRepair;
+    QVERIFY(postFieldManual.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &postFieldRepair, true));
+    const STerrainTileCommand postFieldResolve =
+        postFieldManual.makeVirtualMapResolution(
+            ETerrainTileLayer::Land, catalog, 0x534852u, &postFieldReport,
+            false, &postFieldRepair, true, true);
+    QVERIFY2(!postFieldReport.hasErrors(), qPrintable(postFieldReport.toText()));
+    QCOMPARE(firstResolve.deltas.size(), postFieldResolve.deltas.size());
+    for(int index = 0; index < firstResolve.deltas.size(); ++index)
+    {
+        const STerrainTileDelta& first = firstResolve.deltas.at(index);
+        const STerrainTileDelta& repeated = postFieldResolve.deltas.at(index);
+        QCOMPARE(first.globalX, repeated.globalX);
+        QCOMPARE(first.globalY, repeated.globalY);
+        QCOMPARE(first.layer, repeated.layer);
+        QCOMPARE(first.before, repeated.before);
+        QCOMPARE(first.after, repeated.after);
+        QCOMPARE(first.requestedSignature.northWest,
+                 repeated.requestedSignature.northWest);
+        QCOMPARE(first.requestedSignature.northEast,
+                 repeated.requestedSignature.northEast);
+        QCOMPARE(first.requestedSignature.southEast,
+                 repeated.requestedSignature.southEast);
+        QCOMPARE(first.requestedSignature.southWest,
+                 repeated.requestedSignature.southWest);
+    }
 }
 
 void EnduranceDocumentTests::laterManualTileWinsSharedCornersAndUndoRestoresPriorValues()
@@ -9143,6 +9318,178 @@ void EnduranceDocumentTests::externalPublishedAtlasArchiveBindingProbe()
     if(!expected.isEmpty())
         QCOMPARE(QFileInfo(binding.archivePath).canonicalFilePath(),
                  QFileInfo(expected).canonicalFilePath());
+}
+
+void EnduranceDocumentTests::externalModernDraftAdoptionPairProbe()
+{
+    const QString mprPath = qEnvironmentVariable(
+        "EI_MAPPER_REAL_DRAFT_ADOPTION_MPR");
+    const QString atlasPath = qEnvironmentVariable(
+        "EI_MAPPER_REAL_DRAFT_ADOPTION_ATLAS");
+    if(mprPath.isEmpty() || atlasPath.isEmpty())
+        QSKIP("Set EI_MAPPER_REAL_DRAFT_ADOPTION_MPR and EI_MAPPER_REAL_DRAFT_ADOPTION_ATLAS for the read-only adoption-pair probe");
+
+    CValidationReport report;
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    const QByteArray mprSha256 = QCryptographicHash::hash(
+        document.originalBytes(), QCryptographicHash::Sha256).toHex();
+    const QByteArray expectedMprSha256 = qEnvironmentVariable(
+        "EI_MAPPER_REAL_DRAFT_ADOPTION_MPR_SHA256").toLatin1().toLower();
+    if(!expectedMprSha256.isEmpty())
+        QCOMPARE(mprSha256, expectedMprSha256);
+
+    const STerrainAtlasEmbeddedBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+            {atlasPath}, document.mapInfo().innerNamespace, atlasPath);
+    QVERIFY2(binding.success(), qPrintable(binding.error));
+    const int physicalSlots = int(document.mapInfo().textureCount) * 64;
+    QCOMPARE(binding.decodedAtlasTiles.size(), physicalSlots);
+    QVERIFY2(binding.canReuseDecodedAtlasTiles(
+                 atlasPath, document.mapInfo().innerNamespace, physicalSlots,
+                 &report), qPrintable(report.toText()));
+    QVERIFY2(binding.profile.validateBinding(
+                 document.mapInfo().innerNamespace,
+                 binding.decodedAtlasPixelSha256, physicalSlots, &report),
+             qPrintable(report.toText()));
+    const QByteArray expectedAtlasSha256 = qEnvironmentVariable(
+        "EI_MAPPER_REAL_DRAFT_ADOPTION_ATLAS_PIXEL_SHA256")
+        .toLatin1().toLower();
+    if(!expectedAtlasSha256.isEmpty())
+        QCOMPARE(binding.decodedAtlasPixelSha256.toLower(),
+                 expectedAtlasSha256);
+    for(int slot = 0; slot < binding.decodedAtlasTiles.size(); ++slot)
+    {
+        const QImage& tile = binding.decodedAtlasTiles.at(slot);
+        QVERIFY2(!tile.isNull(), qPrintable(QStringLiteral(
+            "physical atlas slot %1 (page %2 local %3) is null")
+            .arg(slot).arg(slot / 64).arg(slot % 64)));
+        QCOMPARE(tile.size(), binding.decodedAtlasTiles.front().size());
+    }
+
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    QSet<int> referencedSlots;
+    QSet<int> landReferencedSlots;
+    QMap<int, QString> firstLandCell;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+            for(ETerrainTileLayer layer : {ETerrainTileLayer::Land,
+                                           ETerrainTileLayer::Overlay})
+            {
+                bool available = false;
+                const quint16 packed = terrain.packedTile(x, y, layer,
+                                                          &available);
+                if(!available || packed == 0xffffu)
+                    continue;
+                const int slot = SMprPackedTile::decode(packed).atlasSlot();
+                QVERIFY2(slot >= 0 && slot < binding.decodedAtlasTiles.size(),
+                         qPrintable(QStringLiteral(
+                             "cell %1,%2 references missing physical slot %3 (page %4 local %5)")
+                             .arg(x).arg(y).arg(slot).arg(slot / 64)
+                             .arg(slot % 64)));
+                QVERIFY(!binding.decodedAtlasTiles.at(slot).isNull());
+                referencedSlots.insert(slot);
+                if(layer == ETerrainTileLayer::Land)
+                {
+                    landReferencedSlots.insert(slot);
+                    if(!firstLandCell.contains(slot))
+                        firstLandCell.insert(slot, QStringLiteral("%1,%2")
+                                             .arg(x).arg(y));
+                }
+            }
+
+    // A decoded QImage can be non-null while containing only transparent
+    // padding. Such a referenced land slot reveals the cyan clear colour as a
+    // hole, so assert actual physical coverage rather than decoder success.
+    QList<int> orderedLandSlots = landReferencedSlots.values();
+    std::sort(orderedLandSlots.begin(), orderedLandSlots.end());
+    QStringList blankLandSlots;
+    for(int slot : orderedLandSlots)
+    {
+        const QImage tile = binding.decodedAtlasTiles.at(slot)
+            .convertToFormat(QImage::Format_RGBA8888);
+        bool hasVisiblePixel = false;
+        bool allClearCyan = true;
+        for(int y = 0; y < tile.height(); ++y)
+        {
+            const uchar* row = tile.constScanLine(y);
+            for(int x = 0; x < tile.width(); ++x)
+            {
+                const uchar* pixel = row + x * 4;
+                hasVisiblePixel = hasVisiblePixel || pixel[3] != 0;
+                allClearCyan = allClearCyan
+                    && pixel[0] == 46 && pixel[1] == 181
+                    && pixel[2] == 217;
+            }
+        }
+        if(!hasVisiblePixel)
+            blankLandSlots.append(QStringLiteral(
+                "%1(page %2/local %3, first cell %4)")
+                .arg(slot).arg(slot / 64).arg(slot % 64)
+                .arg(firstLandCell.value(slot)));
+        QVERIFY2(!allClearCyan,
+                 qPrintable(QStringLiteral(
+                     "referenced land slot %1 (page %2 local %3) is the renderer clear colour")
+                     .arg(slot).arg(slot / 64).arg(slot % 64)));
+    }
+    QVERIFY2(blankLandSlots.isEmpty(),
+             qPrintable(QStringLiteral(
+                 "referenced fully-transparent land slots: %1")
+                 .arg(blankLandSlots.join(QStringLiteral(", ")))));
+
+    const QString semanticName = STerrainSemanticFieldDocument::memberName(
+        document.mapInfo().innerNamespace, QFileInfo(mprPath));
+    QMap<QString, QByteArray> members;
+    QString memberError;
+    QVERIFY2(CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
+                 atlasPath, {semanticName}, &members, nullptr, &memberError),
+             qPrintable(memberError));
+    qInfo().noquote() << QStringLiteral(
+        "draft adoption pair mprSha256:%1 atlasPixelSha256:%2 pages:%3 physicalSlots:%4 referencedSlots:%5 landReferencedSlots:%6 maxReferencedSlot:%7 slot68Sha256:%8 semanticMember:%9")
+        .arg(QString::fromLatin1(mprSha256),
+             QString::fromLatin1(binding.decodedAtlasPixelSha256))
+        .arg(document.mapInfo().textureCount).arg(physicalSlots)
+        .arg(referencedSlots.size())
+        .arg(landReferencedSlots.size())
+        .arg(referencedSlots.isEmpty() ? -1 : *std::max_element(
+                 referencedSlots.constBegin(), referencedSlots.constEnd()))
+        .arg(physicalSlots > 68 ? QString::fromLatin1(
+                 CTerrainAtlasProfileInference::pixelSha256(
+                     {binding.decodedAtlasTiles.at(68)}))
+             : QStringLiteral("missing"))
+        .arg(members.value(semanticName).isEmpty()
+                 ? QStringLiteral("absent") : QStringLiteral("present"));
+}
+
+void EnduranceDocumentTests::modernDraftAdoptionStagesPairBeforeLiveMutation()
+{
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(), "Could not locate source/render/view.cpp");
+    const int start = source.indexOf("bool CView::adoptCompleteTerrainBaseline(");
+    const int end = source.indexOf("bool CView::buildTerrainSemanticFieldMember(",
+                                   start);
+    QVERIFY(start >= 0 && end > start);
+    const QByteArray adoption = source.mid(start, end - start);
+    const int binding = adoption.indexOf("findEmbeddedArchive(");
+    const int semantic = adoption.indexOf(
+        "restoreTerrainSemanticFieldFromArchive(\n"
+        "           reopenedDocument, expectedProfile, &reopenedTerrain");
+    const int firstLiveMutation = adoption.indexOf(
+        "m_pLand->previewCanonicalSector(");
+    QVERIFY2(binding >= 0 && semantic > binding
+                 && firstLiveMutation > semantic,
+             "Draft pair/profile/semantic preflight must finish before live renderer mutation");
+    QVERIFY2(adoption.contains("bool requireSemanticMember"),
+             "Adoption no longer distinguishes an absent optional semantic field");
+
+    const int draftCall = source.indexOf(
+        "physicalDraftTiles, atlasPath, draftProfile,");
+    QVERIFY(draftCall >= 0);
+    const QByteArray draftCallText = source.mid(draftCall, 180);
+    QVERIFY2(draftCallText.contains("!semanticFieldMember.name.isEmpty()"),
+             "Draft adoption again requires a semantic member that Save did not publish");
 }
 
 void EnduranceDocumentTests::externalLegacyAdjacentAtlasProfileCollisionProbe()

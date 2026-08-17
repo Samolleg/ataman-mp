@@ -84,6 +84,15 @@ QByteArray encodeMmp8888(const QImage& image, QString* diagnostic = nullptr);
 QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps = true,
                          QString* diagnostic = nullptr);
 
+// Replace selected logical 8x8 atlas tiles in an existing DXT1 MMP while
+// retaining every compressed block owned only by the other slots. The final
+// mip levels share blocks across logical tile boundaries; intersecting blocks
+// come from the complete rebuilt page so added artwork cannot fade back to the
+// old transparent padding at distance.
+QByteArray patchMmpDxt1AtlasTiles(
+    const QByteArray& authoredMmp, const QByteArray& replacementMmp,
+    const QSet<int>& logicalSlots, QString* diagnostic = nullptr);
+
 // Compose the shared humanoid atlas with the original 2dintmmx.dll formula.
 // PNT3 pixels are already premultiplied, so routing them through a generic
 // source-over painter would premultiply translucent armor edges twice.
