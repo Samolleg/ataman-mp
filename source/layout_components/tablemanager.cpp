@@ -1182,11 +1182,11 @@ void CTableManager::initRowName()
     m_aRowToolTip[eObjParam_TRAP_AREA_RADIUS] = "Radius checked around this activation center.";
 
     m_aRowToolTip[eObjParam_TORCH_PTLINK] = "Position of the torch's light and particle effect relative to the object.";
-    m_aRowToolTip[eObjParam_TORCH_STRENGHT] = "Strength of the torch light and effect.";
+    m_aRowToolTip[eObjParam_TORCH_STRENGHT] = "Controls both the campfire particle scale and its light radius (power x 10). Use a positive value; negative values can disable the effect and do not create darkness.";
     m_aRowToolTip[eObjParam_TORCH_SOUND] = "Sound played by this torch.";
     m_aRowToolTip[eObjParam_LIGHT_SHADOW] = "Allow this light to cast shadows.";
     m_aRowToolTip[eObjParam_LIGHT_COLOR] = "Light color.";
-    m_aRowToolTip[eObjParam_LIGHT_RADIUS] = "Distance affected by the light. Negative values darken instead.";
+    m_aRowToolTip[eObjParam_LIGHT_RADIUS] = "Distance affected by the light. Negative values do not darken the scene: the game uses the absolute value and marks the light unshadowed. In bright daylight, a weaker local light may have no visible effect.";
     m_aRowToolTip[eObjParam_SOUND_INNER_RADIUS] = "Area where the sound plays at full volume.";
     m_aRowToolTip[eObjParam_SOUND_RANGE] = "Distance where the sound fades to silence.";
     m_aRowToolTip[eObjParam_SOUND_RESNAME] = "Sound resources used by this source.";
