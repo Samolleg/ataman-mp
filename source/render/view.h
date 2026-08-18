@@ -35,6 +35,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "terrain_resolve_audit.h"
 #include "terrain_tile_information_policy.h"
 #include "landscape_edit_policy.h"
+#include "terrain_save_flow_policy.h"
 #include "terrain_atlas_analyzer.h"
 #include "terrain_atlas_archive_binding.h"
 #include "terrain_atlas_profile.h"
@@ -157,6 +158,7 @@ public:
     {
         return modernTerrainPublicationRequired(true);
     }
+    ETerrainMprSavePresentation terrainMprSavePresentation() const;
     void unloadMob(QString mobName);
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
     void attachLandscapeTools(CLandscapeTools* tools);
@@ -325,6 +327,7 @@ private:
                                       bool adoptAsOpenBaseline,
                                       bool allowModernDraft = false);
     bool modernTerrainPublicationRequired(bool saveAs = false) const;
+    ETerrainMprSaveRoute currentTerrainMprSaveRoute(bool saveAs) const;
     bool persistedModernDraftRequiresPublication() const;
     bool adoptCommittedLandscapeBaseline(const QFileInfo& destination,
                                          const SMprSaveCommitResult& commit);

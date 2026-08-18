@@ -6093,13 +6093,7 @@ void CView::saveLand()
         if(!ensureTerrainAutoCatalogReady())
             return;
         const bool persistedDraft = persistedModernDraftRequiresPublication();
-        const ETerrainMprSaveRoute route = terrainMprSaveRoute(
-            m_requestedTerrainIdentityFinalization,
-            m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land),
-            m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay),
-            terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
-            terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
-            persistedDraft, false);
+        const ETerrainMprSaveRoute route = currentTerrainMprSaveRoute(false);
         ei::log(eLogInfo, QStringLiteral(
             "Save MPR route current:%1 persistedDraft:%2 route:%3")
             .arg(QDir::toNativeSeparators(
@@ -6199,14 +6193,24 @@ void CView::saveModernDraftAs()
 
 bool CView::modernTerrainPublicationRequired(bool saveAs) const
 {
-    return terrainMprSaveRoute(
+    return currentTerrainMprSaveRoute(saveAs)
+        == ETerrainMprSaveRoute::PublishModernAtlas;
+}
+
+ETerrainMprSaveRoute CView::currentTerrainMprSaveRoute(bool saveAs) const
+{
+    return ::terrainMprSaveRoute(
         m_requestedTerrainIdentityFinalization,
         m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land),
         m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay),
         terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
         terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
-        persistedModernDraftRequiresPublication(), saveAs)
-        == ETerrainMprSaveRoute::PublishModernAtlas;
+        persistedModernDraftRequiresPublication(), saveAs);
+}
+
+ETerrainMprSavePresentation CView::terrainMprSavePresentation() const
+{
+    return terrainMprSavePresentationFor(currentTerrainMprSaveRoute(false));
 }
 
 bool CView::persistedModernDraftRequiresPublication() const

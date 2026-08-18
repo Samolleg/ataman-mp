@@ -4745,6 +4745,28 @@ void MainWindow::updateDocumentActionAvailability()
     const bool dirtyMpr = terrainMprSaveActionEnabled(
         hasMpr, CLandscape::getInstance()->isDirty(),
         m_pView && m_pView->hasPendingTerrainPublication());
+    const ETerrainMprSavePresentation savePresentation =
+        hasMpr && m_pView ? m_pView->terrainMprSavePresentation()
+                          : ETerrainMprSavePresentation::PlainMpr;
+    switch(savePresentation)
+    {
+    case ETerrainMprSavePresentation::EditableModernDraft:
+        m_ui->actionSave_landscape_MPR->setText(tr("Save MPR Draft"));
+        m_ui->actionSave_landscape_MPR_as->setText(
+            tr("Finalize Draft MPR As..."));
+        break;
+    case ETerrainMprSavePresentation::PendingModernPublication:
+        m_ui->actionSave_landscape_MPR->setText(
+            tr("Finalize and Save MPR"));
+        m_ui->actionSave_landscape_MPR_as->setText(
+            tr("Finalize MPR As..."));
+        break;
+    case ETerrainMprSavePresentation::PlainMpr:
+    default:
+        m_ui->actionSave_landscape_MPR->setText(tr("Save MPR"));
+        m_ui->actionSave_landscape_MPR_as->setText(tr("Save MPR As..."));
+        break;
+    }
     m_ui->actionOpen->setEnabled(idle);
     m_ui->actionOpen_MPR->setEnabled(idle);
     m_ui->actionOpen_MOB->setEnabled(idle);

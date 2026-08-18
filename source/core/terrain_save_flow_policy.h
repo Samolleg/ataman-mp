@@ -12,6 +12,28 @@ enum class ETerrainMprSaveRoute
     PublishModernAtlas
 };
 
+enum class ETerrainMprSavePresentation
+{
+    PlainMpr,
+    EditableModernDraft,
+    PendingModernPublication
+};
+
+inline ETerrainMprSavePresentation terrainMprSavePresentationFor(
+    ETerrainMprSaveRoute route)
+{
+    switch(route)
+    {
+    case ETerrainMprSaveRoute::SaveEditableModernDraft:
+        return ETerrainMprSavePresentation::EditableModernDraft;
+    case ETerrainMprSaveRoute::PublishModernAtlas:
+        return ETerrainMprSavePresentation::PendingModernPublication;
+    case ETerrainMprSaveRoute::PlainMpr:
+    default:
+        return ETerrainMprSavePresentation::PlainMpr;
+    }
+}
+
 inline ETerrainMprSaveRoute terrainMprSaveRoute(
     bool identityPublicationRequested,
     bool landMaterialFieldActive,

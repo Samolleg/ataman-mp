@@ -668,6 +668,15 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
              ETerrainMprSaveRoute::PublishModernAtlas);
     QCOMPARE(terrainMprSaveRoute(true, false, false, false, false, true),
              ETerrainMprSaveRoute::PublishModernAtlas);
+    QCOMPARE(terrainMprSavePresentationFor(
+                 ETerrainMprSaveRoute::PlainMpr),
+             ETerrainMprSavePresentation::PlainMpr);
+    QCOMPARE(terrainMprSavePresentationFor(
+                 ETerrainMprSaveRoute::SaveEditableModernDraft),
+             ETerrainMprSavePresentation::EditableModernDraft);
+    QCOMPARE(terrainMprSavePresentationFor(
+                 ETerrainMprSaveRoute::PublishModernAtlas),
+             ETerrainMprSavePresentation::PendingModernPublication);
     QVERIFY(terrainPublicationWouldOverwriteWorkingDraft(
         QStringLiteral("C:/Maps/zone1test.mpr"),
         QStringLiteral("C:/Maps/zone1test.mpr"), true));
@@ -691,6 +700,14 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
              "Could not locate the Save MPR As action wiring");
     QVERIFY2(mainSource.contains("m_pView->saveLandAs();"),
              "Save MPR As no longer reaches the distinct destination flow");
+    QVERIFY2(mainSource.contains("Save MPR Draft"),
+             "An editable draft does not identify ordinary Save as a draft save");
+    QVERIFY2(mainSource.contains("Finalize Draft MPR As..."),
+             "An editable draft does not identify Save As as publication");
+    QVERIFY2(mainSource.contains("Finalize and Save MPR"),
+             "A normal MPR with atlas changes does not identify Save as finalization");
+    QVERIFY2(mainSource.contains("Finalize MPR As..."),
+             "A normal MPR with atlas changes does not identify Save As as finalization");
     const int saveStart = source.indexOf("void CView::saveLand()");
     const int saveEnd = source.indexOf("void CView::saveLandAs()", saveStart);
     QVERIFY(saveStart >= 0 && saveEnd > saveStart);
