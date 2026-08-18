@@ -155,7 +155,7 @@ public:
     bool hasActiveMob() const { return m_activeMob != nullptr; }
     bool hasPendingTerrainPublication() const
     {
-        return modernTerrainPublicationRequired();
+        return modernTerrainPublicationRequired(true);
     }
     void unloadMob(QString mobName);
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
@@ -324,7 +324,7 @@ private:
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
                                       bool adoptAsOpenBaseline,
                                       bool allowModernDraft = false);
-    bool modernTerrainPublicationRequired() const;
+    bool modernTerrainPublicationRequired(bool saveAs = false) const;
     bool persistedModernDraftRequiresPublication() const;
     bool adoptCommittedLandscapeBaseline(const QFileInfo& destination,
                                          const SMprSaveCommitResult& commit);

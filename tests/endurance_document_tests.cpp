@@ -662,13 +662,61 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QCOMPARE(terrainMprSaveRoute(false, false, false, false, true),
              ETerrainMprSaveRoute::PublishModernAtlas);
     QCOMPARE(terrainMprSaveRoute(false, false, false, false, false, true),
+             ETerrainMprSaveRoute::SaveEditableModernDraft);
+    QCOMPARE(terrainMprSaveRoute(false, false, false, false, false, true,
+                                 true),
              ETerrainMprSaveRoute::PublishModernAtlas);
+    QCOMPARE(terrainMprSaveRoute(true, false, false, false, false, true),
+             ETerrainMprSaveRoute::PublishModernAtlas);
+    QVERIFY(terrainPublicationWouldOverwriteWorkingDraft(
+        QStringLiteral("C:/Maps/zone1test.mpr"),
+        QStringLiteral("C:/Maps/zone1test.mpr"), true));
+    QVERIFY(!terrainPublicationWouldOverwriteWorkingDraft(
+        QStringLiteral("C:/Maps/zone1test.mpr"),
+        QStringLiteral("C:/Maps/zone1.mpr"), true));
+    QVERIFY(!terrainPublicationWouldOverwriteWorkingDraft(
+        QStringLiteral("C:/Maps/zone1test.mpr"),
+        QStringLiteral("C:/Maps/zone1test.mpr"), false));
     QVERIFY(terrainMprUsesAdjacentModernAtlas(
         QStringLiteral("C:/Maps/zone3obr test.mpr"),
         QStringLiteral("C:/Maps/zone3obr test-atlas.res")));
     QVERIFY(!terrainMprUsesAdjacentModernAtlas(
         QStringLiteral("C:/Maps/zone3obr test.mpr"),
         QStringLiteral("C:/Res/textures.res")));
+
+    const QByteArray source = viewSource();
+    const QByteArray mainSource = mainWindowSource();
+    QVERIFY2(mainSource.contains(
+                 "void MainWindow::on_actionSave_landscape_MPR_as_triggered()"),
+             "Could not locate the Save MPR As action wiring");
+    QVERIFY2(mainSource.contains("m_pView->saveLandAs();"),
+             "Save MPR As no longer reaches the distinct destination flow");
+    const int saveStart = source.indexOf("void CView::saveLand()");
+    const int saveEnd = source.indexOf("void CView::saveLandAs()", saveStart);
+    QVERIFY(saveStart >= 0 && saveEnd > saveStart);
+    const QByteArray save = source.mid(saveStart, saveEnd - saveStart);
+    QVERIFY2(save.contains("ETerrainMprSaveRoute::SaveEditableModernDraft"),
+             "Ordinary Save no longer preserves a persisted editable draft");
+    QVERIFY2(save.contains("m_pLand->filePath(), true, true"),
+             "Ordinary Save no longer commits the paired draft atlas");
+
+    const int finalizeStart = source.indexOf(
+        "void CView::finalizeVirtualTerrainAtlas()");
+    const int finalizeEnd = source.indexOf(
+        "void CView::refreshMprSettingsDock()", finalizeStart);
+    QVERIFY(finalizeStart >= 0 && finalizeEnd > finalizeStart);
+    const QByteArray finalize = source.mid(
+        finalizeStart, finalizeEnd - finalizeStart);
+    QVERIFY2(finalize.contains(
+                 "terrainPublicationWouldOverwriteWorkingDraft("),
+             "Publication can again rewrite a draft MPR without its sidecar");
+    QVERIFY2(finalize.contains(
+                 "const QFileInfo mprDestination = preselectedMprDestination;"),
+             "Publication no longer preserves the MPR selected by Save As");
+    QVERIFY2(source.contains("Save MPR As selected current:%1 destination:%2"),
+             "Save MPR As no longer records its exact source and destination");
+    QVERIFY2(source.contains("Modern terrain publication confirmed mpr:%1 res:%2"),
+             "Publication no longer records the exact committed MPR/RES pair");
 
     QVERIFY(terrainMprSaveActionEnabled(true, true, false));
     QVERIFY(terrainMprSaveActionEnabled(true, false, true));

@@ -8,6 +8,7 @@
 enum class ETerrainMprSaveRoute
 {
     PlainMpr,
+    SaveEditableModernDraft,
     PublishModernAtlas
 };
 
@@ -17,13 +18,33 @@ inline ETerrainMprSaveRoute terrainMprSaveRoute(
     bool overlayMaterialFieldActive,
     bool landUsesWorkingExtension,
     bool overlayUsesWorkingExtension,
-    bool persistedWorkingDraft = false)
+    bool persistedWorkingDraft = false,
+    bool saveAs = false)
 {
+    // A persisted working draft is already a coherent MPR + adjacent RES pair.
+    // Ordinary Save must keep updating that pair; publication is the explicit
+    // Save As operation where the final MPR destination is selected first.
+    if(persistedWorkingDraft && !saveAs && !identityPublicationRequested)
+        return ETerrainMprSaveRoute::SaveEditableModernDraft;
     return identityPublicationRequested || landMaterialFieldActive
             || overlayMaterialFieldActive || landUsesWorkingExtension
             || overlayUsesWorkingExtension || persistedWorkingDraft
         ? ETerrainMprSaveRoute::PublishModernAtlas
         : ETerrainMprSaveRoute::PlainMpr;
+}
+
+inline bool terrainPublicationWouldOverwriteWorkingDraft(
+    const QString& currentMprPath, const QString& publicationMprPath,
+    bool persistedWorkingDraft)
+{
+    if(!persistedWorkingDraft || currentMprPath.trimmed().isEmpty()
+       || publicationMprPath.trimmed().isEmpty())
+        return false;
+    const QString current = QDir::cleanPath(
+        QFileInfo(currentMprPath).absoluteFilePath());
+    const QString publication = QDir::cleanPath(
+        QFileInfo(publicationMprPath).absoluteFilePath());
+    return QString::compare(current, publication, Qt::CaseInsensitive) == 0;
 }
 
 inline bool terrainMprUsesAdjacentModernAtlas(

@@ -6030,13 +6030,8 @@ void CView::unloadLand(bool promptForSave)
         reply = QMessageBox::question(this, "Unload MPR", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(modernTerrainPublicationRequired())
-            {
-                saveLand();
-                if(m_pLand->isDirty())
-                    return;
-            }
-            else if(!saveLandscapeDocument(m_pLand->filePath()))
+            saveLand();
+            if(m_pLand->isDirty())
                 return;
         }
         else if(reply == QMessageBox::Cancel)
@@ -6097,7 +6092,36 @@ void CView::saveLand()
     {
         if(!ensureTerrainAutoCatalogReady())
             return;
-        if(modernTerrainPublicationRequired())
+        const bool persistedDraft = persistedModernDraftRequiresPublication();
+        const ETerrainMprSaveRoute route = terrainMprSaveRoute(
+            m_requestedTerrainIdentityFinalization,
+            m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land),
+            m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay),
+            terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
+            terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
+            persistedDraft, false);
+        ei::log(eLogInfo, QStringLiteral(
+            "Save MPR route current:%1 persistedDraft:%2 route:%3")
+            .arg(QDir::toNativeSeparators(
+                     m_pLand->filePath().absoluteFilePath()))
+            .arg(persistedDraft ? QStringLiteral("true")
+                                : QStringLiteral("false"))
+            .arg(route == ETerrainMprSaveRoute::SaveEditableModernDraft
+                     ? QStringLiteral("editable-draft-pair")
+                     : (route == ETerrainMprSaveRoute::PublishModernAtlas
+                            ? QStringLiteral("publish-current-target")
+                            : QStringLiteral("plain-mpr"))));
+        if(route == ETerrainMprSaveRoute::SaveEditableModernDraft)
+        {
+            if(!m_pLand->isDirty())
+                return;
+            if(saveChangedLandscapeDocument(
+                   m_pLand->filePath(), true, true))
+                emit updateMainWindowTitle(
+                    eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+            return;
+        }
+        if(route == ETerrainMprSaveRoute::PublishModernAtlas)
         {
             m_requestedTerrainMprDestination = m_pLand->filePath();
             finalizeVirtualTerrainAtlas();
@@ -6121,7 +6145,15 @@ void CView::saveLandAs()
     if(fileName.filePath().isEmpty())
         return;
 
-    if(modernTerrainPublicationRequired())
+    const bool publishModern = modernTerrainPublicationRequired(true);
+    ei::log(eLogInfo, QStringLiteral(
+        "Save MPR As selected current:%1 destination:%2 route:%3")
+        .arg(QDir::toNativeSeparators(
+                 m_pLand->filePath().absoluteFilePath()),
+             QDir::toNativeSeparators(fileName.absoluteFilePath()),
+             publishModern ? QStringLiteral("publish-selected-target")
+                           : QStringLiteral("plain-mpr-copy")));
+    if(publishModern)
     {
         m_requestedTerrainMprDestination = fileName;
         finalizeVirtualTerrainAtlas();
@@ -6165,7 +6197,7 @@ void CView::saveModernDraftAs()
     }
 }
 
-bool CView::modernTerrainPublicationRequired() const
+bool CView::modernTerrainPublicationRequired(bool saveAs) const
 {
     return terrainMprSaveRoute(
         m_requestedTerrainIdentityFinalization,
@@ -6173,7 +6205,7 @@ bool CView::modernTerrainPublicationRequired() const
         m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Overlay),
         terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
         terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
-        persistedModernDraftRequiresPublication())
+        persistedModernDraftRequiresPublication(), saveAs)
         == ETerrainMprSaveRoute::PublishModernAtlas;
 }
 
@@ -9752,6 +9784,29 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
     const bool persistedDraft = persistedModernDraftRequiresPublication();
+    ei::log(eLogInfo, QStringLiteral(
+        "Modern terrain publication entered current:%1 destination:%2 "
+        "persistedDraft:%3 identityOnly:%4")
+        .arg(QDir::toNativeSeparators(
+                 m_pLand->filePath().absoluteFilePath()),
+             QDir::toNativeSeparators(
+                 preselectedMprDestination.absoluteFilePath()),
+             persistedDraft ? QStringLiteral("true")
+                            : QStringLiteral("false"),
+             identityOnlyRequest ? QStringLiteral("true")
+                                 : QStringLiteral("false")));
+    if(terrainPublicationWouldOverwriteWorkingDraft(
+           m_pLand->filePath().absoluteFilePath(),
+           preselectedMprDestination.absoluteFilePath(), persistedDraft))
+    {
+        QMessageBox::critical(this, tr("Modern MPR publication refused"),
+            tr("The selected destination is the currently open editable draft. "
+               "Publishing over it would replace the draft MPR's atlas layout "
+               "while its adjacent draft RES still owns the working layout.\n\n"
+               "Use Save MPR to update the editable draft, or use Save MPR As "
+               "and choose the final game MPR destination. No file was changed."));
+        return;
+    }
     bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
         ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
         ||persistedDraft;
@@ -10218,6 +10273,14 @@ void CView::finalizeVirtualTerrainAtlas()
     }
     if(preview.exec()!=QDialog::Accepted)
         return;
+
+    ei::log(eLogInfo, QStringLiteral(
+        "Modern terrain publication confirmed mpr:%1 res:%2 identity:%3 "
+        "replaceIdentity:%4")
+        .arg(QDir::toNativeSeparators(mprDestination.absoluteFilePath()),
+             QDir::toNativeSeparators(texturesPath), selectedIdentity,
+             replaceIdentity ? QStringLiteral("true")
+                             : QStringLiteral("false")));
 
     QFile sourceTextures(texturesPath);
     QByteArray originalTexturesBytes;
@@ -14117,13 +14180,8 @@ bool CView::onExit()
         reply = QMessageBox::question(this, "Exit", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
         if(reply == QMessageBox::Save)
         {
-            if(modernTerrainPublicationRequired())
-            {
-                saveLand();
-                if(m_pLand->isDirty())
-                    bCloseAllowed = false;
-            }
-            else if(!saveLandscapeDocument(m_pLand->filePath()))
+            saveLand();
+            if(m_pLand->isDirty())
                 bCloseAllowed = false;
         }
         else if(reply == QMessageBox::Cancel)
