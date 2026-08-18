@@ -1135,9 +1135,9 @@ int runHeadlessCommand(QApplication& app)
             materialPaletteTabs->setCurrentIndex(1);
         const bool threeTerrainPaintModesAvailable = materialPaletteTabs
             && materialPaletteTabs->count() == 3
-            && materialPaletteTabs->tabText(0) == QStringLiteral("Modern")
-            && materialPaletteTabs->tabText(1) == QStringLiteral("Classic Auto")
-            && materialPaletteTabs->tabText(2) == QStringLiteral("Manual")
+            && materialPaletteTabs->tabText(0) == QStringLiteral("Modern (Z)")
+            && materialPaletteTabs->tabText(1) == QStringLiteral("Classic Auto (X)")
+            && materialPaletteTabs->tabText(2) == QStringLiteral("Manual (C)")
             && modernMaterialLayerTabs && classicMaterialLayerTabs
             && terrainPaintFilter && manualAtlasTileList;
         landscapeTools.setClassicAutoMaterials(
@@ -1269,7 +1269,10 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.minimumSizeHint().width() <= 320
             && landscapeTools.width() <= 320
             && materialPaletteTabs && materialPaletteTabs->height() >= 100
-            && groundMaterialScroll && groundMaterialScroll->height() >= 45;
+            // One full compact palette row remains usable after moving the
+            // former prose help into tab tooltips. Font metrics can make this
+            // 38 px in the retained headless Qt 5.12 configuration.
+            && groundMaterialScroll && groundMaterialScroll->height() >= 38;
         landscapeTools.hide();
         QLabel* atlasSourceStatus =
             landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");
