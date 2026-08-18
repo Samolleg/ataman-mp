@@ -230,6 +230,76 @@ R148_BATCH1_REVIEW = json.loads(
         "semantic_atlas_r148_batch1_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R148_BATCH2_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r148_batch2_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R149_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r149_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R150_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r150_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R151_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r151_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R152_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r152_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R153_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r153_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R154_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r154_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R156_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r156_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R157_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r157_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R158_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r158_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R160_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r160_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R161_EQUIVALENCE_PROPAGATION = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r161_equivalence_propagation.json"
+    ).read_text(encoding="utf-8")
+)
+R161_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r161_decisions.json"
+    ).read_text(encoding="utf-8")
+)
+R162_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r162_decisions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -3564,6 +3634,205 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                 "NW": 0, "NE": 1, "SE": 2, "SW": 3,
             }[corner_name])] = family_name
 
+    # R148 batch 2 contains 67 explicitly exported cards. Three untouched
+    # cards remain unresolved context, as do the three uncertain corners on
+    # the Zone7 and Zone6_2 cards. Concrete decisions expand only to their
+    # exact approved-HD owner occurrences.
+    r148_batch2_key = next((key for key in R148_BATCH2_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R148_BATCH2_REVIEW[
+            "cornerCorrections"].get(r148_batch2_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R149 resolves two previously held R148 choices.  Unchanged serialized
+    # values remain context and are deliberately absent from this correction
+    # table.  Exact owner expansion is pinned in the decision record.
+    r149_key = next((key for key in R149_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R149_REVIEW[
+            "cornerCorrections"].get(r149_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R150 exhaustively reviews every remaining Zone7 Sand / Dark corner.
+    # Only the seven changed dropdown values are corrections; the other
+    # serialized corners are contextual. The normal referenced-family prune
+    # below removes Sand / Dark after its final occurrence is reassigned.
+    r150_key = next((key for key in R150_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R150_REVIEW[
+            "cornerCorrections"].get(r150_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R151 closes the two surviving current-vs-proposed residual conflicts
+    # from the corrected post-R150 audit. The bz4g/Zone4 answer expands through
+    # its exact approved-HD owner group; Zone9 remains separate from bz3g's
+    # non-identical HD binding.
+    r151_key = next((key for key in R151_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R151_REVIEW[
+            "cornerCorrections"].get(r151_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R152 records all 18 lower-priority residual-positive review cards. Ten
+    # explicit corner overrides expand only through their queue-pinned exact
+    # approved-HD owners; eight rejection-only cards remain audit memory and
+    # deliberately produce no catalog correction.
+    r152_key = next((key for key in R152_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R152_REVIEW[
+            "cornerCorrections"].get(r152_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R153 records all 70 Tier 4 review cards. Eight concrete corner changes
+    # expand only through their queue-pinned exact approved-HD owners. The 67
+    # explicit audit-rejection cards stay review memory; six of them also carry
+    # later manual alternatives that override the stale reject comment. The
+    # one Still uncertain card and one non-brush-family boundary remain
+    # follow-ups and produce no correction.
+    r153_key = next((key for key in R153_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R153_REVIEW[
+            "cornerCorrections"].get(r153_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R154 resolves the explicitly warned non-brush-family boundary for the
+    # exact bz16h/Zone18 owner pair. The separate bz4g/Zone4 card is recorded
+    # as an explicit keep-current confirmation and adds no correction.
+    r154_key = next((key for key in R154_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R154_REVIEW[
+            "cornerCorrections"].get(r154_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R156 records the complete 70-card follow-up batch. One audit proposal
+    # and one manual alternative change two logical corners, expanded only to
+    # the five queue-pinned exact approved-HD owners. The other 68 cards are
+    # explicit keep-current audit rejections and add no catalog correction.
+    r156_key = next((key for key in R156_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R156_REVIEW[
+            "cornerCorrections"].get(r156_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R157 records the complete 70-card follow-up batch. Every card carries an
+    # explicit audit-rejection note; one card also has a later manual Sand /
+    # Gravel choice that overrides the stale note. That logical corner expands
+    # only through the two queue-pinned exact approved-HD owners.
+    r157_key = next((key for key in R157_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R157_REVIEW[
+            "cornerCorrections"].get(r157_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R158 closes the remaining 51 evidence-complete Tier 4 identities and
+    # re-reviews the reported bz2g/Zone2 slot 209 artwork. Four concrete
+    # logical changes expand to eight queue-pinned exact approved-HD owners.
+    # Forty-six explicit audit rejections remain review memory. Two Zone10
+    # Stone / Dark selections are intentionally held because that family is
+    # absent from the atlas and would otherwise be transition-only/non-brush.
+    r158_key = next((key for key in R158_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R158_REVIEW[
+            "cornerCorrections"].get(r158_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R160 records 61 explicitly submitted approved-corner cards. Twenty-seven
+    # logical corrections expand only through 48 queue-pinned exact HD owners;
+    # the three omitted cards remain unanswered and contribute no defaults.
+    r160_key = next((key for key in R160_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R160_REVIEW[
+            "cornerCorrections"].get(r160_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R161 closes a propagation omission rather than introducing a new visual
+    # judgment.  bz3g:316 and Zone9:316 render pixel-identically in both the
+    # approved HD and base-game original variants and had the same pre-review
+    # mapping.  The accepted R160 Zone9 NE correction therefore applies to the
+    # exact bz3g occurrence as well; do not ask the same artwork twice.
+    r161_key = next((key for key in R161_EQUIVALENCE_PROPAGATION[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R161_EQUIVALENCE_PROPAGATION[
+            "cornerCorrections"].get(r161_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R161 closes the current five-card queue. Only Zone7:151 NW changes;
+    # Zone7:249 is explicitly confirmed as Dark brown and the other three
+    # cards are exact audit rejections retained as do-not-reask controls.
+    # The normal referenced-family prune removes the exhausted Ground / Brown
+    # record after its final corner becomes Ground / Dirt.
+    r161_review_key = next((key for key in R161_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R161_REVIEW[
+            "cornerCorrections"].get(r161_review_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
+    # R162 records all 50 submitted Tier 4 cards. Six concrete logical corner
+    # edits expand only through nine queue-pinned exact approved-HD owners.
+    # Forty-five cards are pure keep-current controls; on two further cards a
+    # later concrete dropdown edit overrides the stale reject-button comment.
+    r162_review_key = next((key for key in R162_REVIEW[
+        "cornerCorrections"] if key.casefold() == namespace.casefold()), namespace)
+    for slot_text, corner_values in R162_REVIEW[
+            "cornerCorrections"].get(r162_review_key, {}).items():
+        slot_index = int(slot_text)
+        for corner_name, family_name in corner_values.items():
+            corrections[(slot_index, {
+                "NW": 0, "NE": 1, "SE": 2, "SW": 3,
+            }[corner_name])] = family_name
+
     if (not corrections and not family_renames and not family_aliases
             and not family_metadata_corrections):
         return recipe
@@ -3697,6 +3966,42 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
                for family in result["families"]):
             raise ValueError(
                 f"{result['namespace']}: R147 family ID {family_id} is occupied")
+        template = copy.deepcopy(next(
+            family for family in result["families"]
+            if family.get("suggestedName") == family_spec["templateFamily"]))
+        template["id"] = family_id
+        template["sourceFamily"] = family_spec["sourceFamily"]
+        template["suggestedName"] = family_spec["name"]
+        template["thumbnailSlot"] = int(family_spec["thumbnailSlot"])
+        template["uniformSlots"] = [
+            int(slot) for slot in family_spec["uniformSlots"]]
+        template["memberSlots"] = [
+            int(slot) for slot in family_spec["memberSlots"]]
+        template["paintSelectable"] = bool(family_spec["paintSelectable"])
+        result["families"].append(template)
+        result["families"].sort(key=lambda family: family["id"])
+    r148_batch2_family_key = next((
+        key for key in R148_BATCH2_REVIEW.get("newFamilies", {})
+        if key.casefold() == namespace.casefold()
+    ), result["namespace"])
+    for family_spec in R148_BATCH2_REVIEW.get(
+            "newFamilies", {}).get(r148_batch2_family_key, []):
+        if "bindings" not in result:
+            continue
+        family_id = int(family_spec["id"])
+        matches = [family for family in result["families"]
+                   if family.get("suggestedName") == family_spec["name"]]
+        if matches:
+            if int(matches[0]["id"]) != family_id:
+                raise ValueError(
+                    f"{result['namespace']}: R148 batch 2 "
+                    f"{family_spec['name']} already has another ID")
+            continue
+        if any(int(family["id"]) == family_id
+               for family in result["families"]):
+            raise ValueError(
+                f"{result['namespace']}: R148 batch 2 family ID "
+                f"{family_id} is occupied")
         template = copy.deepcopy(next(
             family for family in result["families"]
             if family.get("suggestedName") == family_spec["templateFamily"]))

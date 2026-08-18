@@ -6178,7 +6178,7 @@ void CView::saveModernDraftAs()
     if(!ensureTerrainAutoCatalogReady())
         return;
     const QFileInfo destination = QFileDialog::getSaveFileName(
-        this, tr("Save editable modern MPR draft as..."),
+        this, tr("Save MPR as modern draft..."),
         m_pLand->filePath().absoluteFilePath(), tr("Landscape (*.mpr);;)"));
     if(destination.filePath().isEmpty())
         return;
@@ -6412,10 +6412,11 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land);
     const bool overlayWorkingExtension =
         terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay);
+    const bool workingAtlasAvailable =
+        m_workingTerrainAtlas && m_workingTerrainAtlas->isValid();
     const bool workingExtension =
         terrainChangedSaveNeedsWorkingAtlasPackage(
-            allowModernDraft,
-            m_workingTerrainAtlas && m_workingTerrainAtlas->isValid(),
+            allowModernDraft, workingAtlasAvailable,
             landWorkingExtension, overlayWorkingExtension);
     QProgressDialog progress(tr("Preparing canonical terrain patches..."), QString(),
                              0, workingExtension ? 8 : 4, this);
@@ -6441,10 +6442,15 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         ? tr("Save canonical landscape")
         : tr("Save canonical landscape copy"));
     CValidationReport transactionReport;
-    if(!m_terrainEdit.appendSectorEdits(&transaction, &transactionReport)
-       || !m_mprDocument.appendMaxZEdit(m_terrainEdit.maxZ(), &transaction,
-                                        &transactionReport)
-       || transactionReport.hasErrors() || transaction.isEmpty())
+    const bool sectorEditsBuilt =
+        m_terrainEdit.appendSectorEdits(&transaction, &transactionReport);
+    const bool maxZEditBuilt = sectorEditsBuilt
+        && m_mprDocument.appendMaxZEdit(
+            m_terrainEdit.maxZ(), &transaction, &transactionReport);
+    const bool transactionBuilt = sectorEditsBuilt && maxZEditBuilt;
+    if(!terrainChangedSaveTransactionIsUsable(
+           transactionBuilt, transactionReport.hasErrors(),
+           transaction.isEmpty(), allowModernDraft, workingAtlasAvailable))
     {
         ei::log(eLogFatal, QString("Refusing changed MPR save because the canonical transaction failed path:%1 findings:%2")
             .arg(destinationPath, transactionReport.toText().trimmed()));
@@ -6471,8 +6477,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     {
         QMessageBox::critical(this, tr("Modern MPR publication required"),
             tr("This map contains modern terrain atlas edits. Use Save MPR or "
-               "Save MPR As to publish them, or use Save Editable Modern Draft "
-               "As when you intentionally need a temporary map-local atlas."));
+               "Save MPR As to publish them, or use Save MPR as modern draft "
+               "when you intentionally need a portable map-local atlas."));
         return false;
     }
     if(workingExtension)
@@ -10159,7 +10165,8 @@ void CView::finalizeVirtualTerrainAtlas()
         identityDialog.setWindowTitle(tr("Choose terrain resource identity"));
         QVBoxLayout* identityLayout = new QVBoxLayout(&identityDialog);
         QRadioButton* createIdentity = new QRadioButton(
-            tr("Create a new content identity"), &identityDialog);
+            tr("Create a new content identity (recommended)"),
+            &identityDialog);
         QRadioButton* useIdentity = new QRadioButton(
             tr("Use / replace an identity I specify"), &identityDialog);
         createIdentity->setChecked(true);
@@ -10170,9 +10177,11 @@ void CView::finalizeVirtualTerrainAtlas()
         identityEdit->setMaxLength(100);
         identityLayout->addWidget(identityEdit);
         QLabel* identityHelp = new QLabel(tr(
-            "New content defaults to <map>_<12-character content hash>. Using an "
-            "existing identity can affect every MPR that resolves the same MMP page "
-            "names after the resulting textures.res is installed."), &identityDialog);
+            "Creating a new content identity is the safest export option because it avoids conflicts with existing map atlases. "
+            "New content defaults to "
+            "<map>_<12-character content hash>. Using an existing identity can affect "
+            "every MPR that resolves the same MMP page names after the resulting "
+            "textures.res is installed."), &identityDialog);
         identityHelp->setWordWrap(true);
         identityLayout->addWidget(identityHelp);
         QLabel* identityError = new QLabel(&identityDialog);

@@ -369,6 +369,7 @@ private slots:
     void mprLengthChangingTransactionsRelocateAndStaleFailClosed();
     void failedStagedMprSaveLeavesNoDestination();
     void stagedMprTransactionProvesExactSemanticScopeWithoutDestination();
+    void zeroChangeModernDraftUsesValidatedOriginalMpr();
     void mprSaveCoordinatorBacksUpAndAtomicallyCommits();
     void mprSaveCoordinatorCommitsLengthChangingOverlay();
     void mprSaveCoordinatorReplacesSourceAndRebasesTerrain();
@@ -749,6 +750,27 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
         false, false, false, true));
     QVERIFY(!terrainChangedSaveNeedsWorkingAtlasPackage(
         false, true, false, false));
+    QVERIFY(terrainChangedSaveTransactionIsUsable(
+        true, false, true, true, true));
+    QVERIFY(!terrainChangedSaveTransactionIsUsable(
+        true, false, true, true, false));
+    QVERIFY(!terrainChangedSaveTransactionIsUsable(
+        true, false, true, false, true));
+    QVERIFY(!terrainChangedSaveTransactionIsUsable(
+        false, false, true, true, true));
+    QVERIFY(!terrainChangedSaveTransactionIsUsable(
+        true, true, true, true, true));
+    QVERIFY(terrainChangedSaveTransactionIsUsable(
+        true, false, false, false, false));
+
+    QVERIFY2(source.contains("Save MPR as modern draft..."),
+             "The portable draft action still uses the old ambiguous label");
+    QVERIFY2(source.contains(
+                 "Create a new content identity (recommended)"),
+             "The safest publication identity choice is not identified");
+    QVERIFY2(source.contains(
+                 "safest export option because it avoids conflicts with existing map atlases"),
+             "The new-identity recommendation does not explain its safety benefit");
 
     // R179: atlas artwork can change while the MPR remains within its
     // original page count. Test Current must package those working bytes based
@@ -872,6 +894,44 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     conventional.close();
     QCOMPARE(QDir::cleanPath(terrainMapTestResourcePath(QString(), mapTestMpr)),
              QDir::cleanPath(conventionalSidecar));
+}
+
+void EnduranceDocumentTests::zeroChangeModernDraftUsesValidatedOriginalMpr()
+{
+    CMprDocument baseline;
+    CValidationReport loadReport;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(),
+                                QStringLiteral("zero-change-draft-source.mpr"),
+                                &loadReport),
+             qPrintable(loadReport.toText()));
+
+    CMprEditTransaction transaction(
+        QStringLiteral("export unchanged portable modern draft"));
+    QVERIFY(transaction.isEmpty());
+
+    QTemporaryDir destinationDirectory;
+    QVERIFY(destinationDirectory.isValid());
+    const QFileInfo destination(
+        destinationDirectory.filePath(QStringLiteral("portable-draft.mpr")));
+    const SStagedMprTransactionValidation staged =
+        validateStagedMprTransaction(baseline, transaction, destination);
+
+    QVERIFY2(staged.success, qPrintable(staged.error));
+    QCOMPARE(staged.candidateBytes, baseline.originalBytes());
+    QVERIFY(staged.changedMembers.isEmpty());
+    QVERIFY(staged.semanticDiff.isEmpty());
+    QVERIFY(!destination.exists());
+
+    const QByteArray source = viewSource();
+    const int saveStart = source.indexOf(
+        "bool CView::saveChangedLandscapeDocument(");
+    const int saveEnd = source.indexOf(
+        "QByteArray CView::terrainPaintIssueReport", saveStart);
+    QVERIFY(saveStart >= 0);
+    const QByteArray save = source.mid(
+        saveStart, saveEnd > saveStart ? saveEnd - saveStart : -1);
+    QVERIFY2(save.contains("terrainChangedSaveTransactionIsUsable("),
+             "The view still rejects an unchanged draft before staged validation");
 }
 
 void EnduranceDocumentTests::unchangedMobIsByteIdentical()
@@ -8216,12 +8276,12 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
     }
     QCOMPARE(totalSlots, 16576);
     QCOMPARE(bindings, 58);
-    // The synchronized R148 batch-1 authority keeps every currently referenced
+    // The synchronized R162 authority keeps every currently referenced
     // family record and its reviewed paintability classification.
-    QCOMPARE(totalFamilies, 417);
+    QCOMPARE(totalFamilies, 415);
     // A referenced family remains transition-only when it has neither a
     // uniform tile nor a one-on-three authored stamp.
-    QCOMPARE(transitionSupportFamilies, 22);
+    QCOMPARE(transitionSupportFamilies, 24);
 }
 
 void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups()

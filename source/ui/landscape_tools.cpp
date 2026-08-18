@@ -228,16 +228,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
 
     QVBoxLayout* paintLayout = new QVBoxLayout(m_paintControls);
     paintLayout->setContentsMargins(0, 0, 0, 0);
-    QLabel* paintHelp = new QLabel(tr(
-        "Z / X / C switches Modern / Classic Auto / Manual. Tile targeting paints complete cells; Vertex targeting edits shared corners. "
-        "Modern reuses exact authored junctions and adds a generated exact blend only when one is missing. Classic Auto never changes the atlas: Safe mode applies every available exact connection and leaves only unsupported boundaries untouched. "
-        "Manual paints one selected physical atlas tile and rotation directly, without semantic blending. Hold right-click and move to sample the nearest material vertex, or the physical tile in Manual. "
-        "Alt+Wheel changes brush size. Shift+Wheel selects the automatic material or rotates the manual tile; Wheel keeps camera zoom. "
-        "Overlay surface mode adds/removes coverage. Its Terrain material selects the atlas texture; its Surface material independently controls tint, opacity, illumination, waves, and texture warp. "
-        "Overlay painting only changes the atlas texture on cells that already exist."), this);
-    paintHelp->setWordWrap(true);
-    paintHelp->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    paintLayout->addWidget(paintHelp);
     m_tilesetStatus->setWordWrap(true);
     m_tilesetStatus->setObjectName(
         QStringLiteral("terrainPaintTilesetStatus"));
@@ -329,13 +319,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     modernModeLayout->addWidget(m_materialTabs);
     QVBoxLayout* classicModeLayout = new QVBoxLayout(m_classicModePage);
     classicModeLayout->setContentsMargins(0, 0, 0, 0);
-    QLabel* classicHelp = new QLabel(tr(
-        "Uses only tiles already present in this atlas. Exact authored blends "
-        "win. Safe mode keeps every valid connection and leaves unsupported "
-        "boundary cells untouched instead of forcing a uniform tile."),
-        m_classicModePage);
-    classicHelp->setWordWrap(true);
-    classicModeLayout->addWidget(classicHelp);
     m_classicAutoSafe->setObjectName(QStringLiteral("classicAutoSafeMode"));
     m_classicAutoSafe->setChecked(settings.value(
         QStringLiteral("ui/landscape/classicAutoSafe"), true).toBool());
@@ -347,11 +330,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     classicModeLayout->addWidget(m_classicMaterialTabs);
     QVBoxLayout* manualModeLayout = new QVBoxLayout(m_manualModePage);
     manualModeLayout->setContentsMargins(0, 0, 0, 0);
-    QLabel* manualHelp = new QLabel(tr(
-        "Paints one selected physical atlas slot and rotation directly, without blending."),
-        m_manualModePage);
-    manualHelp->setWordWrap(true);
-    manualModeLayout->addWidget(manualHelp);
     m_manualTileList->setObjectName(QStringLiteral("manualAtlasTileList"));
     m_manualTileList->setIconSize(QSize(52, 52));
     m_manualTileList->setUniformItemSizes(true);
@@ -370,10 +348,22 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_paintFilter->setPlaceholderText(tr("Filter materials or atlas slots..."));
     m_paintFilter->setClearButtonEnabled(true);
     paintLayout->addWidget(m_paintFilter);
-    m_paintModeTabs->addTab(m_modernModePage, tr("Modern"));
-    m_paintModeTabs->addTab(m_classicModePage, tr("Classic Auto"));
-    m_paintModeTabs->addTab(m_manualModePage, tr("Manual"));
+    m_paintModeTabs->addTab(m_modernModePage, tr("Modern (Z)"));
+    m_paintModeTabs->addTab(m_classicModePage, tr("Classic Auto (X)"));
+    m_paintModeTabs->addTab(m_manualModePage, tr("Manual (C)"));
     m_paintModeTabs->setObjectName(QStringLiteral("materialPaletteTabs"));
+    m_paintModeTabs->setTabToolTip(0, tr(
+        "Modern reuses exact authored junctions and generates an exact blend "
+        "only when one is missing. Hold right-click and move to sample the "
+        "nearest material vertex; Shift+Wheel changes material."));
+    m_paintModeTabs->setTabToolTip(1, tr(
+        "Classic Auto uses only exact tiles already present in this atlas and "
+        "never changes the atlas. Safe mode leaves unsupported boundaries "
+        "untouched. Hold right-click and move to sample a material."));
+    m_paintModeTabs->setTabToolTip(2, tr(
+        "Manual paints the selected physical atlas tile and rotation directly, "
+        "without semantic blending. Hold right-click and move to sample a tile; "
+        "Shift+Wheel rotates it."));
     // The palette consumes the remaining height, but it must be allowed to
     // shrink and scroll when the dock is short. A fixed minimum here makes Qt
     // place the following brush controls inside the tab geometry on the first
@@ -451,7 +441,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     targetRow->addStretch(1);
     QWidget* targetWidget = new QWidget(this);
     targetWidget->setLayout(targetRow);
-    paintForm->addRow(tr("Brush size (tiles / vertices)"), sizeWidget);
+    paintForm->addRow(tr("Brush size (Alt+Wheel)"), sizeWidget);
     paintForm->addRow(tr("Brush shape"), shapeWidget);
     paintForm->addRow(tr("Paint target"), targetWidget);
     paintForm->addRow(m_randomizeUniformRotation);
@@ -459,7 +449,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintForm->addRow(m_overlayMaterialLabel, m_overlayMaterial);
     paintLayout->addLayout(paintForm);
     QPushButton* resolveMissing = new QPushButton(
-        tr("Resolve missing blends..."), this);
+        tr("Resolve missing blends... (Shift+R)"), this);
     resolveMissing->setObjectName(QStringLiteral("resolveMissingBlendsButton"));
     resolveMissing->setToolTip(tr(
         "Scan the complete map and rebuild missing or inconsistent physical "
@@ -508,10 +498,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     issueRow->addWidget(m_paintIssueCategory, 1);
     issueRow->addWidget(m_markPaintIssue);
     QPushButton* saveDraft = new QPushButton(
-        tr("Save editable modern draft as..."), this);
+        tr("Save MPR as modern draft..."), this);
     saveDraft->setObjectName(QStringLiteral("saveModernDraftButton"));
     saveDraft->setToolTip(tr(
-        "Keep unfinished modern painting in a separate MPR plus map-local atlas. "
+        "Save a portable MPR plus adjacent map-local atlas, even when the MPR "
+        "itself has no unsaved changes. "
         "Normal Save MPR and Save MPR As publish game-ready atlas pages into "
         "textures.res instead."));
     paintLayout->addWidget(exportDiagnostic);

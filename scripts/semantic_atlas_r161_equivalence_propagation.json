@@ -1,0 +1,39 @@
+{
+  "schema": "ei-semantic-atlas-r161-equivalence-propagation-v1",
+  "sourceDecisionRound": "R160",
+  "sourceDecisionKey": "semantic-atlas-pixels-1899e5f4e7a9e8e2",
+  "sourceReviewedLocation": {
+    "namespace": "zone9",
+    "slot": 316,
+    "mapping": {
+      "NW": "Ground / Common",
+      "NE": "Ground / Gravel",
+      "SE": "Ground / Common",
+      "SW": "Sand / Dark pink"
+    }
+  },
+  "missedExactEquivalentLocation": {
+    "namespace": "bz3g",
+    "slot": 316,
+    "mappingBeforePropagation": {
+      "NW": "Ground / Common",
+      "NE": "Ground / Common",
+      "SE": "Ground / Common",
+      "SW": "Sand / Dark pink"
+    }
+  },
+  "pixelEvidence": {
+    "approvedHdRenderedRgbSha256": "7F4C4B70FC86304B5D8A54D62ED93E02E35DADB9F9BFBACA7FD12756EA1A812E",
+    "baseGameOriginalRenderedRgbSha256": "B7499607E6AC7E5FF6007D034A522459A97C034FC85A43C01CE0E6CCCF9FB8D8",
+    "approvedHdPixelIdentical": true,
+    "baseGameOriginalPixelIdentical": true
+  },
+  "cornerCorrections": {
+    "bz3g": {
+      "316": {
+        "NE": "Ground / Gravel"
+      }
+    }
+  },
+  "reason": "The R160 accepted correction was reviewed on byte-identical Zone9 artwork with the same pre-review mapping. The exact bz3g occurrence was missed by namespace-limited propagation and must not be re-asked."
+}

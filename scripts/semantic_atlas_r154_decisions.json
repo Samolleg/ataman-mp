@@ -1,0 +1,98 @@
+{
+  "schema": "ei-semantic-atlas-r154-decisions-v1",
+  "source": "scripts/semantic_atlas_r154_user_answers.txt",
+  "sourceSha256": "F9E17778B0773D82897EB14E436A2EA8F3935381266A62965BEA95877955C4E5",
+  "queue": "artifacts/semantic-atlas-r154-r153-followup/questionnaire/r154-r153-followup-queue.json",
+  "queueSha256": "E21BDDB97137CA469EB04B8BEFCF74FBB9158357BE0348A2D0F59CEFCA2F7CCD",
+  "catalogInputSha256": "4B9C7F467BFF86E76A5A5D2F6B61CB20978DE29C613411E752AAAE6727A49753",
+  "catalogOutputSha256": "5EA2E6B5506ADE9049497964F806784718CBADFB390C1FC7975AAF26E3CD2EAB",
+  "counts": {
+    "submittedCards": 2,
+    "changedLogicalCorners": 1,
+    "ownerExpandedCorrections": 2,
+    "confirmedUnchangedCards": 1,
+    "confirmedUnchangedLogicalCorners": 4,
+    "ownerExpandedConfirmedUnchangedCorners": 8,
+    "paintabilityDemotions": 2
+  },
+  "cornerCorrections": {
+    "bz16h": {
+      "383": {
+        "SW": "Stone / Weathered"
+      }
+    },
+    "Zone18": {
+      "383": {
+        "SW": "Stone / Weathered"
+      }
+    }
+  },
+  "confirmedUnchanged": [
+    {
+      "key": "semantic-atlas-pixels-426154272d44ec52",
+      "namespace": "bz4g",
+      "slot": 461,
+      "owners": [
+        "bz4g",
+        "Zone4"
+      ],
+      "mapping": {
+        "NW": "Stone / Lime",
+        "NE": "Grass / Common",
+        "SE": "Ground / Common",
+        "SW": "Ground / Common"
+      },
+      "disposition": "explicitly confirmed current assignments"
+    }
+  ],
+  "reviewedChanged": [
+    {
+      "key": "semantic-atlas-pixels-83b6408424fc36c3",
+      "namespace": "bz16h",
+      "slot": 383,
+      "owners": [
+        "bz16h",
+        "Zone18"
+      ],
+      "currentMapping": {
+        "NW": "Ground / Desert algae",
+        "NE": "Ground / Desert algae",
+        "SE": "Ground / Desert algae",
+        "SW": "Stone / Beige"
+      },
+      "submittedMapping": {
+        "NW": "Ground / Desert algae",
+        "NE": "Ground / Desert algae",
+        "SE": "Ground / Desert algae",
+        "SW": "Stone / Weathered"
+      },
+      "changedCorners": [
+        "SW"
+      ],
+      "acknowledgedConsequence": "Stone / Beige loses its final brush-expressible witness and remains transition-only"
+    }
+  ],
+  "expectedPaintabilityChanges": [
+    {
+      "namespace": "bz16h",
+      "id": 11,
+      "name": "Stone / Beige",
+      "from": true,
+      "to": false
+    },
+    {
+      "namespace": "Zone18",
+      "id": 11,
+      "name": "Stone / Beige",
+      "from": true,
+      "to": false
+    }
+  ],
+  "policy": {
+    "explicitChangesOnly": true,
+    "exactOwnerPropagationOnly": true,
+    "untouchedDefaultsAreNotConfirmations": true,
+    "explicitKeepCurrentIsConfirmation": true,
+    "nonBrushConsequenceWasShownBeforeDecision": true
+  }
+}

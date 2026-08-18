@@ -96,6 +96,22 @@ inline bool terrainChangedSaveNeedsWorkingAtlasPackage(
         || landUsesWorkingExtension || overlayUsesWorkingExtension;
 }
 
+inline bool terrainChangedSaveTransactionIsUsable(
+    bool transactionBuilt, bool transactionHasErrors,
+    bool transactionEmpty, bool editableModernDraftRequested,
+    bool workingAtlasAvailable)
+{
+    if(!transactionBuilt || transactionHasErrors)
+        return false;
+
+    // Exporting an editable modern draft is also the supported way to turn a
+    // finalized identity into a portable MPR + adjacent RES pair. In that
+    // case the canonical MPR bytes may be unchanged; the newly staged atlas,
+    // embedded profile, and semantic field are the actual export payload.
+    return !transactionEmpty
+        || (editableModernDraftRequested && workingAtlasAvailable);
+}
+
 inline bool terrainMapTestNeedsWorkingAtlasPackage(
     bool workingAtlasAvailable, bool landUsesWorkingExtension,
     bool overlayUsesWorkingExtension, int workingPageCount,

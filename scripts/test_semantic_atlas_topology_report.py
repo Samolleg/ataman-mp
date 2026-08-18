@@ -89,7 +89,7 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         )
         report = build_report(catalog)
         self.assertEqual(38, report["namespaceCount"])
-        self.assertEqual(26, report["runtimeProfileCount"])
+        self.assertEqual(27, report["runtimeProfileCount"])
         # R97/R98 resolve the reviewed Sand / Irregular transition corners.
         # R105 corrects six provenance-qualified authored blend signatures;
         # R106 then applies the completed 249-card review and one explicit new
@@ -193,9 +193,45 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # restore complete signature identity between bz15h and Zone17, so the
         # shared 21-pair runtime profile is counted once; accepted rewrites also
         # redistribute six retained pairs among topology coverage buckets.
-        self.assertEqual(1355, report["totalPairCount"])
+        # R148 batch 2 applies 70 exact-owner corrections. The unavailable
+        # bz4g/Zone4 Ground / Gravel choice remains open for re-review rather
+        # than silently creating a transition-only non-brush family, so the
+        # family-pair denominator is unchanged; retained rows only move among
+        # topology coverage buckets.
+        # R149 resolves two held corners. The Zone7 Sand / Dark -> Sand / Dark
+        # pink change removes the only authored topology for one existing pair;
+        # the bz4g/Zone4 Gravel greenish correction changes no pair denominator.
+        # R150 reviews all seven remaining Zone7 Sand / Dark corners and
+        # exhausts that transition-only family. Removing the unreferenced
+        # family eliminates its seventeen remaining profile relationships;
+        # accepted ownership changes redistribute five retained pair rows.
+        # R151 changes no family-pair coverage bucket. R152 changes ten
+        # logical corners through exact owner closure; one retained pair gains
+        # a second authored topology while no family/pair record is added or
+        # removed. R153 changes no aggregate coverage bucket. R154 explicitly
+        # reassigns the last Stone / Beige brush witness in bz16h/Zone18;
+        # Stone / Beige remains transition-only, moving two owner-profile pair
+        # rows from one authored topology class to zero without changing the
+        # family-pair denominator. R156 changes one Grass corner to Ground /
+        # Light in the exact bz8k/bz9k/Zone11 owner group, moving one retained
+        # pair from the two-topology bucket to the one-topology bucket.
+        # R157 changes bz13h/Zone15 slot 384 SW from Sand / Common grayish to
+        # Sand / Gravel. This preserves the aggregate pair-coverage buckets.
+        # R158 applies four logical corrections through exact-owner closure.
+        # The reported bz2g/Zone2 slot 209 correction removes the only authored
+        # topology for one retained family pair, moving it from one topology
+        # to zero; no family or pair record is added or removed.
+        # R161 changes Zone7 slot 151 NW from the last Ground / Brown corner to
+        # Ground / Dirt. The normal family prune removes Ground / Brown and its
+        # sixteen remaining profile relationships; one Ground / Dirt pair also
+        # gains its first authored topology witness.
+        # R162's reviewed Zone17-only slot 233 corrections separate its runtime
+        # signature profile from bz15h without asserting byte-identical owner
+        # propagation. The additional seven-family profile contributes its 21
+        # honest pair rows; three retained pairs move into full coverage.
+        self.assertEqual(1343, report["totalPairCount"])
         self.assertEqual(
-            {"0": 789, "1": 86, "2": 64, "3": 184, "4": 232},
+            {"0": 776, "1": 80, "2": 59, "3": 191, "4": 237},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

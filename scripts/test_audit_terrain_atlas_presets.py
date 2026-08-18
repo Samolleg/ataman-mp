@@ -515,7 +515,9 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
                 420: {"northWest": 8, "northEast": 4,
                       # R132 changes SE to Ground / Gravel.
                       "southEast": 5, "southWest": 5},
-                428: {"northWest": 10, "northEast": 5,
+                # R153 manual review rejects the audit's greenish-gravel
+                # proposal and identifies the NE fragment as Grass / Common.
+                428: {"northWest": 10, "northEast": 8,
                       "southEast": 8, "southWest": 8},
                 # R80 explicitly reclassifies the NE quarter as Ground /
                 # Common after the earlier false-uniform recovery.
@@ -1266,7 +1268,8 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
                      "southEast": 4, "southWest": 1},
                 390: {"northWest": 13, "northEast": 13,
                       "southEast": 13, "southWest": 13},
-                414: {"northWest": 8, "northEast": 2,
+                # R148 batch 2 explicitly supersedes the old NW fragment.
+                414: {"northWest": 2, "northEast": 2,
                       "southEast": 2, "southWest": 3},
             },
             "bz4g": {
@@ -2380,8 +2383,8 @@ class ReviewedFragmentCorrectionTests(unittest.TestCase):
         zone7_recipe["slots"][412]["signature"]["southWest"] = 22
         zone7 = reviewed_fragment_corrections(zone7_recipe)
         self.assertEqual(
-            13, zone7["slots"][151]["signature"]["northWest"],
-            "the focused review selected Ground / Brown")
+            16, zone7["slots"][151]["signature"]["northWest"],
+            "the R161 review selected Ground / Dirt")
         self.assertEqual(10, zone7["slots"][163]["signature"]["southEast"])
         names = {family["id"]: family["suggestedName"]
                  for family in zone7["families"]}
@@ -2863,7 +2866,6 @@ class ReviewDocumentTests(unittest.TestCase):
         ).read_text(encoding="utf-8"))
         presets = {entry["namespace"].casefold(): entry
                    for entry in catalog["presets"]}
-
         def corner_name(namespace: str, slot: int, corner_index: int) -> str:
             preset = presets[namespace.casefold()]
             names = {int(family["id"]): family["name"]
@@ -3238,6 +3240,13 @@ class ReviewDocumentTests(unittest.TestCase):
         ).read_text(encoding="utf-8"))
         presets = {entry["namespace"].casefold(): entry
                    for entry in catalog["presets"]}
+        r158 = json.loads((
+            root / "scripts" / "semantic_atlas_r158_decisions.json"
+        ).read_text(encoding="utf-8"))
+        r158_corrections = {
+            key.casefold(): value
+            for key, value in r158.get("cornerCorrections", {}).items()
+        }
         owners = {
             "zone15": ("bz13h", "zone15"),
             "zone16": ("bz14h", "bz18h", "zone16"),
@@ -3267,6 +3276,11 @@ class ReviewDocumentTests(unittest.TestCase):
                         if owner in ("zone5_1", "zone8") \
                                 and family_name == "Grass / Irregular":
                             family_name = "Grass / Swamp"
+                        family_name = r158_corrections.get(
+                            namespace.casefold(), {}).get(
+                                str(slot), {}).get(
+                                    ("NW", "NE", "SE", "SW")[corner],
+                                    family_name)
                         with self.subTest(namespace=namespace, slot=slot,
                                           corner=corner):
                             self.assertEqual(
@@ -3465,21 +3479,54 @@ class ReviewDocumentTests(unittest.TestCase):
                 "must not be redesigned without direct user authorization"):
             self.assertIn(required, policy)
 
-    def test_r96_ground_dark_comparison_includes_every_uniform_variant(self) -> None:
+    def test_r96_ground_dark_review_scope_is_source_only(self) -> None:
         root = Path(__file__).resolve().parent.parent
-        manifest = json.loads((root / "artifacts" /
-            "semantic-atlas-r96-ground-dark-comparison" / "questionnaire" /
-            "semantic-atlas-r96-questionnaire.manifest.json"
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
         ).read_text(encoding="utf-8"))
-        self.assertEqual(5, manifest["bindingGroupCount"])
-        self.assertEqual(35, manifest["uniformVariantCount"])
-        self.assertEqual(70, manifest["pairedVariantImageCount"])
-        by_label = {row["label"]: row for row in manifest["bindingGroups"]}
-        self.assertEqual(["bz2g", "Zone2"], by_label["bz2g / Zone2"]["aliases"])
-        self.assertIn(8, by_label["bz3g"]["slots"])
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r96_review_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {row["namespace"].casefold(): row
+                   for row in catalog["presets"]}
+
         self.assertEqual(
-            [7, 8, 9, 15, 16, 31, 44, 45, 163, 198, 297, 476],
-            by_label["bz3g"]["slots"])
+            [("bz3g", 6, "Ground / Dead"),
+             ("zone9", 6, "Ground / Dead"),
+             ("Zone6", 5, "Ground / Dead"),
+             ("Zone6_2", 5, "Ground / Dead")],
+            [(namespace, int(row["familyId"]), row["name"])
+             for row in decisions["familyRenames"]
+             for namespace in row["namespaces"]])
+        self.assertEqual(
+            [("bz2g", 15, "Ground / Dark"),
+             ("Zone2", 15, "Ground / Dark")],
+            [(namespace, int(row["familyId"]), row["name"])
+             for row in decisions["explicitlyUnchanged"]
+             for namespace in row["namespaces"]])
+
+        def family_name(namespace: str, family_id: int) -> str:
+            return next(
+                row["name"] for row in presets[namespace.casefold()]["families"]
+                if int(row["id"]) == family_id)
+
+        for namespace in ("bz3g", "zone9"):
+            self.assertEqual("Ground / Dead", family_name(namespace, 6))
+        for namespace in ("Zone6", "Zone6_2"):
+            self.assertEqual("Ground / Dead", family_name(namespace, 5))
+        for namespace in ("bz2g", "Zone2"):
+            self.assertEqual("Ground / Dark", family_name(namespace, 15))
+
+        self.assertEqual(
+            [("zone9", 163), ("zone9", 198), ("zone9", 297),
+             ("zone9", 476), ("bz3g", 163), ("bz3g", 198),
+             ("bz3g", 297)],
+            [(row["namespace"], int(row["slot"]))
+             for row in decisions["falseUniformReview"]])
+        self.assertEqual(
+            [("bz3g", 476)],
+            [(row["namespace"], int(row["slot"]))
+             for row in decisions["connectedReview"]])
 
     def test_r96_renames_only_reviewed_ground_dead_bindings_and_queues_false_uniforms(self) -> None:
         """R96 changes identity names, never guesses the flagged tile corners."""
@@ -3520,20 +3567,14 @@ class ReviewDocumentTests(unittest.TestCase):
         }, {row["key"] for row in decisions["carriedUnresolvedCorners"]})
         self.assertFalse(decisions["unresolvedCornersMutated"])
 
-    def test_r97_questionnaire_covers_r96_and_r95_without_reference_leaks(self) -> None:
+    def test_r97_review_scope_covers_r96_and_r95_from_source_authority(self) -> None:
         root = Path(__file__).resolve().parent.parent
-        manifest = json.loads((root / "artifacts" /
-            "semantic-atlas-r97-ground-dead-review" / "questionnaire" /
-            "semantic-atlas-r97-questionnaire.manifest.json"
+        r96 = json.loads((root / "scripts" /
+            "semantic_atlas_r96_review_decisions.json"
         ).read_text(encoding="utf-8"))
-        self.assertEqual(25, manifest["questions"])
-        self.assertEqual(66, manifest["auditedCorners"])
-        self.assertEqual([], manifest["optionReferenceGaps"])
-        self.assertEqual([], manifest["questionedReferenceLeaks"])
-        self.assertEqual(["NW", "NE", "SW", "SE"],
-                         manifest["displayOrder"])
-        self.assertEqual(["NW", "NE", "SE", "SW"],
-                         manifest["serializationOrder"])
+        r97 = json.loads((root / "scripts" /
+            "semantic_atlas_r97_review_decisions.json"
+        ).read_text(encoding="utf-8"))
         expected_ground = {
             "r96-zone9-slot163", "r96-zone9-slot198",
             "r96-zone9-slot297", "r96-zone9-slot476",
@@ -3546,23 +3587,34 @@ class ReviewDocumentTests(unittest.TestCase):
                 194, 195, 196, 220, 374, 375, 384, 385,
                 392, 395, 396, 397, 459, 507, 508)
         }
-        self.assertEqual(expected_ground | expected_sand,
-                         set(manifest["questionKeys"]))
+        actual_ground = {
+            f'r96-{row["namespace"]}-slot{int(row["slot"])}'
+            for row in r96["falseUniformReview"]
+        }
+        actual_ground.update(
+            f'r96-{row["namespace"]}-slot{int(row["slot"])}'
+            for row in r96["connectedReview"])
+        actual_ground.update(
+            f'r96-{parts[0]}-slot{int(parts[1])}'
+            for parts in (row["key"].split(":")
+                          for row in r96["carriedUnresolvedCorners"]))
+        actual_sand = {
+            f"r98-sand-irregular-slot{int(slot)}"
+            for slot in r97["explicitSandIrregularCorners"]
+        }
+        ground_corner_count = (
+            4 * len(r96["falseUniformReview"]) +
+            4 * len(r96["connectedReview"]) +
+            len(r96["carriedUnresolvedCorners"]))
+        sand_corner_count = sum(
+            len(corners)
+            for corners in r97["explicitSandIrregularCorners"].values())
 
-        queue = json.loads((root / "scripts" /
-            "semantic_atlas_r97_sand_irregular_review_queue.json"
-        ).read_text(encoding="utf-8"))
-        self.assertEqual(29, len(queue))
-        self.assertEqual(15, len({int(row["sourceSlot"]) for row in queue}))
-        self.assertTrue(all(
-            row["currentSemantics"][0]["cornerFamily"] == "Sand / Dark"
-            for row in queue))
-        exact = [row for row in queue
-                 if row["hdEvidence"]["exactOneQuarterPixels"]]
-        self.assertEqual(
-            [(220, "NW")],
-            [(int(row["sourceSlot"]), row["sourceCorner"])
-             for row in exact])
+        self.assertEqual(expected_ground, actual_ground)
+        self.assertEqual(expected_sand, actual_sand)
+        self.assertEqual(25, len(actual_ground | actual_sand))
+        self.assertEqual(66, ground_corner_count + sand_corner_count)
+        self.assertEqual(["NW", "NE", "SE", "SW"], r97["cornerOrder"])
 
     def test_r97_r98_apply_only_explicit_ground_and_sand_corner_decisions(self) -> None:
         """R97 applies its queue; R98 closes the six reviewed SW corners."""
@@ -3926,7 +3978,8 @@ class R105AuthoredBlendDecisionTests(unittest.TestCase):
             # R124 supersedes the R105 NE value after the full audit review.
             ("zone6_2", 390): ["Stone / Lime", "Ground / Common",
                                 "Ground / Dead", "Ground / Dead"],
-            ("zone7", 249): ["Ground / Brown", "Grass / Fresh",
+            # R148 batch 2 supersedes the R105 NW family after direct review.
+            ("zone7", 249): ["Ground / Dark brown", "Grass / Fresh",
                               "Grass / Fresh", "Grass / Fresh"],
         }
         for (namespace, slot), names_expected in expected.items():
@@ -4027,6 +4080,9 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
         r129 = json.loads((
             root / "scripts" / "semantic_atlas_r129_consolidated_decisions.json"
         ).read_text(encoding="utf-8"))
+        r148_batch2 = json.loads((
+            root / "scripts" / "semantic_atlas_r148_batch2_decisions.json"
+        ).read_text(encoding="utf-8"))
         r112_corrections = {
             key.casefold(): value
             for key, value in r112.get("cornerCorrections", {}).items()
@@ -4034,6 +4090,10 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
         r129_corrections = {
             key.casefold(): value
             for key, value in r129.get("cornerCorrections", {}).items()
+        }
+        r148_batch2_corrections = {
+            key.casefold(): value
+            for key, value in r148_batch2.get("cornerCorrections", {}).items()
         }
         presets = {entry["namespace"].casefold(): entry
                    for entry in catalog["presets"]}
@@ -4063,6 +4123,9 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
                         namespace.casefold(), {}).get(
                             slot_text, {}).get(corner_name, expected)
                     expected = r129_corrections.get(
+                        namespace.casefold(), {}).get(
+                            slot_text, {}).get(corner_name, expected)
+                    expected = r148_batch2_corrections.get(
                         namespace.casefold(), {}).get(
                             slot_text, {}).get(corner_name, expected)
                     corner = {"NW": 0, "NE": 1, "SE": 2, "SW": 3}[
@@ -4440,6 +4503,20 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
             key.casefold(): value
             for key, value in r129.get("cornerCorrections", {}).items()
         }
+        r158 = json.loads((
+            root / "scripts" / "semantic_atlas_r158_decisions.json"
+        ).read_text(encoding="utf-8"))
+        r158_corrections = {
+            key.casefold(): value
+            for key, value in r158.get("cornerCorrections", {}).items()
+        }
+        r160 = json.loads((
+            root / "scripts" / "semantic_atlas_r160_decisions.json"
+        ).read_text(encoding="utf-8"))
+        r160_corrections = {
+            key.casefold(): value
+            for key, value in r160.get("cornerCorrections", {}).items()
+        }
         presets = {entry["namespace"].casefold(): entry
                    for entry in catalog["presets"]}
 
@@ -4463,9 +4540,199 @@ class R106ConsolidatedDecisionTests(unittest.TestCase):
                     expected = r129_corrections.get(
                         namespace.casefold(), {}).get(
                             slot_text, {}).get(corner, expected)
+                    expected = r158_corrections.get(
+                        namespace.casefold(), {}).get(
+                            slot_text, {}).get(corner, expected)
+                    expected = r160_corrections.get(
+                        namespace.casefold(), {}).get(
+                            slot_text, {}).get(corner, expected)
                     index = {"NW": 0, "NE": 1, "SE": 2, "SW": 3}[corner]
                     self.assertEqual(expected, names[payload[slot * 4 + index]],
                                      f"{namespace} slot {slot} {corner}")
+
+    def test_r160_applies_only_submitted_exact_owner_corrections(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r160_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {entry["namespace"].casefold(): entry
+                   for entry in catalog["presets"]}
+
+        self.assertEqual(61, decisions["counts"]["submittedCards"])
+        self.assertEqual(3, decisions["counts"]["unansweredQueueCards"])
+        self.assertEqual(27, decisions["counts"]["changedLogicalCorners"])
+        self.assertEqual(48, decisions["counts"]["ownerExpandedCorrections"])
+        applied = 0
+        for namespace, slots in decisions["cornerCorrections"].items():
+            preset = presets[namespace.casefold()]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            for slot_text, corners in slots.items():
+                slot = int(slot_text)
+                for corner, expected in corners.items():
+                    index = {"NW": 0, "NE": 1, "SE": 2, "SW": 3}[corner]
+                    self.assertEqual(
+                        expected, names[payload[slot * 4 + index]],
+                        f"{namespace} slot {slot} {corner}")
+                    applied += 1
+        self.assertEqual(48, applied)
+
+    def test_r161_propagates_reviewed_pixel_identical_slot316(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        decision = json.loads((
+            root / "scripts" /
+            "semantic_atlas_r161_equivalence_propagation.json"
+        ).read_text(encoding="utf-8"))
+        presets = {row["namespace"].casefold(): row
+                   for row in catalog["presets"]}
+
+        self.assertTrue(decision["pixelEvidence"]["approvedHdPixelIdentical"])
+        self.assertTrue(decision["pixelEvidence"][
+            "baseGameOriginalPixelIdentical"])
+        for namespace in ("bz3g", "zone9"):
+            preset = presets[namespace]
+            names = {int(row["id"]): row["name"]
+                     for row in preset["families"]}
+            payload = base64.b64decode(preset["signaturesBase64"])
+            self.assertEqual(
+                "Ground / Gravel", names[payload[316 * 4 + 1]], namespace)
+
+
+class R161CurrentQueueDecisionTests(unittest.TestCase):
+    @staticmethod
+    def mapping(preset: dict, slot: int) -> list[str]:
+        names = {int(row["id"]): row["name"]
+                 for row in preset["families"]}
+        payload = base64.b64decode(preset["signaturesBase64"], validate=True)
+        return [names[payload[slot * 4 + index]] for index in range(4)]
+
+    def test_r161_applies_only_explicit_change_and_records_rejections(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_text(encoding="utf-8"))
+        catalog_bytes = (
+            root / "assets" / "resources" / "terrain_atlas_presets.json"
+        ).read_bytes()
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r161_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {row["namespace"].casefold(): row
+                   for row in catalog["presets"]}
+
+        self.assertEqual(5, decisions["counts"]["submittedCards"])
+        self.assertEqual(1, decisions["counts"]["changedLogicalCorners"])
+        self.assertEqual(3, decisions["counts"]["explicitAuditRejectionCards"])
+        self.assertEqual([], decisions["unresolvedCards"])
+        self.assertEqual(
+            "AA39AE534C82377DDDB1CFD800213B8159BFBADB6F655B8438DB7C719B645518",
+            decisions["catalogOutputSha256"])
+        self.assertEqual(
+            "280FE229D1E62A9763A70955B9FC348BE04E19547D349712129F0CD45D1DB609",
+            decisions["sourceSha256"])
+        self.assertEqual({"Zone7": {"151": {"NW": "Ground / Dirt"}}},
+                         decisions["cornerCorrections"])
+
+        self.assertEqual(
+            ["Ground / Dirt", "Stone / Light", "Stone / Light", "Stone / Light"],
+            self.mapping(presets["zone7"], 151))
+        self.assertEqual(
+            ["Ground / Dark brown", "Grass / Fresh", "Grass / Fresh",
+             "Grass / Fresh"], self.mapping(presets["zone7"], 249))
+        self.assertNotIn(
+            "Ground / Brown",
+            {row["name"] for row in presets["zone7"]["families"]})
+
+        expected_controls = {
+            ("zone9", 341): ["Grass / Common", "Grass / Common",
+                              "Grass / Common", "Ground / Gravel"],
+            ("bz15h", 109): ["Ground / Red", "Rubble / Orange",
+                              "Ground / Red", "Rubble / Orange"],
+            ("zone17", 109): ["Ground / Red", "Rubble / Orange",
+                               "Ground / Red", "Rubble / Orange"],
+            ("zone6_2", 402): ["Grass / Common", "Ground / Common",
+                                "Ground / Gravel", "Ground / Gravel"],
+        }
+        for (namespace, slot), expected in expected_controls.items():
+            with self.subTest(namespace=namespace, slot=slot):
+                self.assertEqual(expected, self.mapping(presets[namespace], slot))
+
+        dispositions = {row["key"]: row["disposition"]
+                        for row in decisions["reviewedCards"]}
+        self.assertEqual(5, len(dispositions))
+        self.assertEqual(
+            "confirmed-current-reject-profile-alternative",
+            dispositions["r161-zone7-slot249-r164-report"])
+        for key in (
+                "semantic-atlas-pixels-af18bd1fdd4bc57a",
+                "semantic-atlas-pixels-da6cb508e2cff50c",
+                "semantic-atlas-pixels-de4b392c1063743f"):
+            self.assertEqual("rejected-keep-current", dispositions[key])
+
+
+class R162Tier4DecisionTests(unittest.TestCase):
+    @staticmethod
+    def mapping(preset: dict, slot: int) -> dict[str, str]:
+        names = {int(row["id"]): row["name"]
+                 for row in preset["families"]}
+        payload = base64.b64decode(preset["signaturesBase64"], validate=True)
+        return {corner: names[payload[slot * 4 + index]]
+                for index, corner in enumerate(("NW", "NE", "SE", "SW"))}
+
+    def test_r162_applies_explicit_values_and_records_every_review(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        catalog_path = root / "assets" / "resources" / "terrain_atlas_presets.json"
+        catalog_bytes = catalog_path.read_bytes()
+        catalog = json.loads(catalog_bytes)
+        decisions = json.loads((
+            root / "scripts" / "semantic_atlas_r162_decisions.json"
+        ).read_text(encoding="utf-8"))
+        presets = {row["namespace"].casefold(): row
+                   for row in catalog["presets"]}
+
+        counts = decisions["counts"]
+        self.assertEqual(50, counts["submittedCards"])
+        self.assertEqual(6, counts["changedLogicalCorners"])
+        self.assertEqual(9, counts["ownerExpandedCorrections"])
+        self.assertEqual(45, counts["unchangedSubmittedCards"])
+        self.assertEqual(47, counts["explicitAuditRejectionCards"])
+        self.assertEqual(45, counts["rejectionOnlyCards"])
+        self.assertEqual(2, counts["changedDespiteRejectionNoteCards"])
+        self.assertEqual(0, counts["unresolvedFollowupCards"])
+        self.assertEqual(0, counts["reReviewNonBrushAuditCorners"])
+        self.assertEqual([], decisions["unresolvedFollowups"])
+        self.assertEqual([], decisions["nonBrushFamilyReReview"])
+        self.assertEqual(
+            "C6345DFC0CCAD08245C124673E7097905CFA567212607FE1906155CA4183F271",
+            decisions["sourceAttachmentSha256"])
+        self.assertEqual(
+            decisions["catalogOutputSha256"],
+            hashlib.sha256(catalog_bytes).hexdigest().upper())
+
+        reviewed = decisions["reviewedCards"]
+        self.assertEqual(50, len(reviewed))
+        self.assertEqual(50, len({row["key"] for row in reviewed}))
+        self.assertEqual(
+            {"semantic-atlas-pixels-72fcdc3f55050f0f",
+             "semantic-atlas-pixels-4a5d1bda15e8f807"},
+            {row["key"] for row in reviewed
+             if row["changedDespiteRejectionNote"]})
+        for card in reviewed:
+            for location in card["locations"]:
+                namespace = location["namespace"]
+                slot = int(location["slot"])
+                with self.subTest(key=card["key"], namespace=namespace,
+                                  slot=slot):
+                    self.assertEqual(
+                        card["submittedMapping"],
+                        self.mapping(presets[namespace.casefold()], slot))
 
 
 class InverseCandidateCoveragePolicyTests(unittest.TestCase):
@@ -5209,20 +5476,13 @@ class R134QuarantineKeepCurrentDecisionTests(unittest.TestCase):
         catalog = json.loads(catalog_path.read_text())
         decisions = json.loads((root / "scripts" /
             "semantic_atlas_r134_quarantine_keep_current_decisions.json").read_text())
-        resolution = json.loads((root / "artifacts" /
-            "semantic-atlas-r134-quarantine-recovery" /
-            "quarantine-resolution.json").read_text())
-
         self.assertEqual(226, decisions["counts"]["inputQuarantinedRows"])
+        self.assertEqual(43, decisions["counts"]["recoveredHistoricalControls"])
         self.assertEqual(5, decisions["counts"]["reviewedCards"])
         self.assertEqual(8, decisions["counts"]["explicitKeepCurrentCorners"])
+        self.assertEqual(0, decisions["counts"]["catalogChanges"])
         self.assertEqual(0, decisions["counts"]["remainingQuarantinedRows"])
-        self.assertEqual("closed-explicit-keep-current", resolution["status"])
-        self.assertEqual(226, resolution["retiredOrRecoveredRows"])
-        self.assertEqual(0, resolution["remainingQuarantinedRows"])
-        self.assertEqual(43, resolution["recoveredHistoricalControls"])
-        self.assertEqual(0, resolution["catalogChanges"])
-        self.assertEqual(8, len(resolution["doNotReask"]))
+        self.assertEqual(8, len(decisions["explicitKeepCurrent"]))
 
         presets = {row["namespace"].casefold(): row for row in catalog["presets"]}
         cards = {

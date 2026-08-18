@@ -5,6 +5,8 @@
 #include <QListWidget>
 #include <QPointer>
 #include <QSignalSpy>
+#include <QPushButton>
+#include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
 
@@ -20,6 +22,7 @@ private slots:
     void manualPaletteFiltersNonNullPaddingAndRestoresPhysicalIdentity();
     void terrainPaletteBatchDefersIntermediateWidgetRebuilds();
     void manualPaletteIsRequestedOnlyWhenItsTabIsOpened();
+    void paintHelpLivesOnRelevantControls();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
 
@@ -225,6 +228,44 @@ void LandscapeToolsWidgetTests::manualPaletteIsRequestedOnlyWhenItsTabIsOpened()
     QCOMPARE(requested.count(), 0);
     tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Manual);
     QCOMPARE(requested.count(), 1);
+}
+
+void LandscapeToolsWidgetTests::paintHelpLivesOnRelevantControls()
+{
+    CLandscapeTools tools;
+    QTabWidget* tabs = tools.findChild<QTabWidget*>(
+        QStringLiteral("materialPaletteTabs"));
+    QVERIFY(tabs);
+    QCOMPARE(tabs->count(), 3);
+    QCOMPARE(tabs->tabText(0), QStringLiteral("Modern (Z)"));
+    QCOMPARE(tabs->tabText(1), QStringLiteral("Classic Auto (X)"));
+    QCOMPARE(tabs->tabText(2), QStringLiteral("Manual (C)"));
+    for(int index = 0; index < tabs->count(); ++index)
+        QVERIFY2(!tabs->tabToolTip(index).trimmed().isEmpty(),
+                 "A terrain paint mode has no contextual tooltip");
+
+    QPushButton* resolve = tools.findChild<QPushButton*>(
+        QStringLiteral("resolveMissingBlendsButton"));
+    QVERIFY(resolve);
+    QCOMPARE(resolve->text(),
+             QStringLiteral("Resolve missing blends... (Shift+R)"));
+    QPushButton* saveDraft = tools.findChild<QPushButton*>(
+        QStringLiteral("saveModernDraftButton"));
+    QVERIFY(saveDraft);
+    QCOMPARE(saveDraft->text(),
+             QStringLiteral("Save MPR as modern draft..."));
+
+    bool brushShortcutShown = false;
+    for(QLabel* label : tools.findChildren<QLabel*>())
+    {
+        QVERIFY2(!label->text().startsWith(QStringLiteral(
+                     "Z / X / C switches")),
+                 "The removed terrain-paint prose block is still visible");
+        if(label->text() == QStringLiteral("Brush size (Alt+Wheel)"))
+            brushShortcutShown = true;
+    }
+    QVERIFY2(brushShortcutShown,
+             "The brush-size shortcut is not shown beside its slider");
 }
 
 QTEST_MAIN(LandscapeToolsWidgetTests)
