@@ -468,6 +468,7 @@ private slots:
     void terrainTileInformationPersistsWithoutBlinking();
     void persistentPaintOperationSurvivesHistoryNavigation();
     void tileBrushFirstValidSampleOwnsUndoStroke();
+    void tileBrushViewportReleasesPolicyAfterFinishAndCancel();
     void persistentPaintOperationSurvivesDocumentTransition();
     void landscapeLayerChangesResetBrushSelection();
     void landscapeWheelDirectionUsesAvailableDelta();
@@ -775,6 +776,52 @@ void EnduranceDocumentTests::tileBrushFirstValidSampleOwnsUndoStroke()
     QVERIFY(policy.finish());
     QVERIFY(!policy.ensureForValidSample(true, false));
     QVERIFY(!policy.isActive());
+}
+
+void EnduranceDocumentTests::tileBrushViewportReleasesPolicyAfterFinishAndCancel()
+{
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+
+    const int finishStart = source.indexOf("void CView::endTileBrushGroup()");
+    const int cancelStart = source.indexOf("void CView::cancelTileBrushGroup()",
+                                           finishStart);
+    const int cancelEnd = source.indexOf("void CView::", cancelStart + 1);
+    QVERIFY2(finishStart >= 0 && cancelStart > finishStart
+                 && cancelEnd > cancelStart,
+             "Terrain stroke finish/cancel implementations were not found");
+
+    const QByteArray finish = source.mid(finishStart,
+                                          cancelStart - finishStart);
+    const QByteArray cancel = source.mid(cancelStart,
+                                          cancelEnd - cancelStart);
+    const int finishPolicy = finish.indexOf(
+        "m_tileBrushStrokePolicy.finish()");
+    const int finishResolution = finish.indexOf(
+        "m_tileStrokeFinishing = true;");
+    const int finishUndo = finish.lastIndexOf("m_pUndoStack->push(");
+    const int finishPalette = finish.indexOf(
+        "refreshWorkingTerrainPalettes();", finishUndo);
+    QCOMPARE(finish.count("m_tileBrushStrokePolicy.finish()"), 1);
+    QVERIFY2(finishResolution >= 0 && finishUndo > finishResolution
+                 && finishPolicy > finishUndo
+                 && finishPalette > finishPolicy,
+             "Completing a viewport tile stroke leaves its policy active and blocks the next stroke");
+    const int cancelFinishingGuard = cancel.indexOf(
+        "if(m_tileStrokeFinishing)");
+    const int cancelRollback = cancel.indexOf(
+        "applyTerrainTilePreview(m_tileStrokeCommand, false)");
+    const int cancelPolicy = cancel.indexOf(
+        "m_tileBrushStrokePolicy.finish()");
+    const int cancelPalette = cancel.indexOf(
+        "refreshWorkingTerrainPalettes();", cancelPolicy);
+    QCOMPARE(cancel.count("m_tileBrushStrokePolicy.finish()"), 1);
+    QVERIFY2(cancelFinishingGuard >= 0
+                 && cancelRollback > cancelFinishingGuard
+                 && cancelPolicy > cancelRollback
+                 && cancelPalette > cancelPolicy,
+             "Cancelling a viewport tile stroke leaves its policy active and blocks the next stroke");
 }
 
 void EnduranceDocumentTests::landscapeLayerChangesResetBrushSelection()

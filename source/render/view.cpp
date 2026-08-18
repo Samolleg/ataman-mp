@@ -16105,7 +16105,8 @@ void CView::pickQuickAccessTile(int index)
 
 void CView::endTileBrushGroup()
 {
-    if(m_tilePaintStrokeActive)
+    const bool strokeWasActive = m_tilePaintStrokeActive;
+    if(strokeWasActive)
     {
         m_tileStrokeFinishing = true;
         if(m_classicAutoStrokePending)
@@ -16322,6 +16323,10 @@ void CView::endTileBrushGroup()
             // only an already-generated preview is invalidated/rebuilt.
             scheduleAiGraphPreviewRegeneration();
         }
+    }
+    m_tileBrushStrokePolicy.finish();
+    if(strokeWasActive)
+    {
         // The completed command must own its undo entry before palette
         // selection signals are allowed to run.  Those signals are UI state,
         // not part of the terrain transaction that produced the new slots.
@@ -16384,43 +16389,50 @@ void CView::endTileBrushGroup()
 
 void CView::cancelTileBrushGroup()
 {
-    if(!m_tilePaintStrokeActive || m_tileStrokeFinishing)
+    if(m_tileStrokeFinishing)
         return;
 
-    // A lost button release is an abandoned preview transaction. Roll back
-    // the exact command currently visible before clearing any gesture state;
-    // no undo entry is created for a transaction the user did not finish.
-    m_terrainPreviewBatchActive = false;
-    m_pendingTerrainPreviewSectors.clear();
-    if(!m_overlaySurfaceStrokeCommand.isEmpty())
-        applyOverlaySurfacePreview(m_overlaySurfaceStrokeCommand, false);
-    else if(m_classicAutoStrokePending
-            && !m_classicAutoStrokePreviewCommand.isEmpty())
-        applyTerrainTilePreview(m_classicAutoStrokePreviewCommand, false);
-    else if(!m_tileStrokeCommand.isEmpty())
-        applyTerrainTilePreview(m_tileStrokeCommand, false);
+    const bool strokeWasActive = m_tilePaintStrokeActive;
+    if(strokeWasActive)
+    {
+        // A lost button release is an abandoned preview transaction. Roll
+        // back the exact command currently visible before clearing gesture
+        // ownership; no undo entry is created for an unfinished transaction.
+        m_terrainPreviewBatchActive = false;
+        m_pendingTerrainPreviewSectors.clear();
+        if(!m_overlaySurfaceStrokeCommand.isEmpty())
+            applyOverlaySurfacePreview(m_overlaySurfaceStrokeCommand, false);
+        else if(m_classicAutoStrokePending
+                && !m_classicAutoStrokePreviewCommand.isEmpty())
+            applyTerrainTilePreview(m_classicAutoStrokePreviewCommand, false);
+        else if(!m_tileStrokeCommand.isEmpty())
+            applyTerrainTilePreview(m_tileStrokeCommand, false);
 
-    for(int index = m_terrainPaintActions.size() - 1; index >= 0; --index)
-        if(m_terrainPaintActions.at(index).strokeId == m_tileBrushCommandId)
-            m_terrainPaintActions.removeAt(index);
-    for(int index = m_terrainPaintAudit.size() - 1; index >= 0; --index)
-        if(m_terrainPaintAudit.at(index).diagnosticStrokeId
-           == m_tileBrushCommandId)
-            m_terrainPaintAudit.removeAt(index);
+        for(int index = m_terrainPaintActions.size() - 1; index >= 0; --index)
+            if(m_terrainPaintActions.at(index).strokeId == m_tileBrushCommandId)
+                m_terrainPaintActions.removeAt(index);
+        for(int index = m_terrainPaintAudit.size() - 1; index >= 0; --index)
+            if(m_terrainPaintAudit.at(index).diagnosticStrokeId
+               == m_tileBrushCommandId)
+                m_terrainPaintAudit.removeAt(index);
 
-    m_tilePaintStrokeActive = false;
-    m_tileStrokeCommand = STerrainTileCommand();
-    m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
-    m_classicAutoStrokePreviewCommand = STerrainTileCommand();
-    m_classicAutoStrokeVertices.clear();
-    m_classicAutoStrokeAnchors.clear();
-    m_classicAutoStrokePending = false;
-    m_classicAutoStrokeMaterialId = -1;
-    m_classicAutoStrokeValidation.clear();
-    m_classicAutoStrokePreviewRefused = false;
-    m_lastTerrainPaintCenterValid = false;
-    m_tileStrokeClassicAuto = false;
-    ++m_tileBrushCommandId;
+        m_tilePaintStrokeActive = false;
+        m_tileStrokeCommand = STerrainTileCommand();
+        m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
+        m_classicAutoStrokePreviewCommand = STerrainTileCommand();
+        m_classicAutoStrokeVertices.clear();
+        m_classicAutoStrokeAnchors.clear();
+        m_classicAutoStrokePending = false;
+        m_classicAutoStrokeMaterialId = -1;
+        m_classicAutoStrokeValidation.clear();
+        m_classicAutoStrokePreviewRefused = false;
+        m_lastTerrainPaintCenterValid = false;
+        m_tileStrokeClassicAuto = false;
+        ++m_tileBrushCommandId;
+    }
+    m_tileBrushStrokePolicy.finish();
+    if(!strokeWasActive)
+        return;
 
     if(m_workingAtlasPaletteRefreshPending)
         refreshWorkingTerrainPalettes();
