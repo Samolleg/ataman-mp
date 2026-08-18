@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: MPR save-route labels
+Executable source commit: 4cec477fdb29fbef0a5aa40f91e3f68d1f1f1e20
+Executable SHA-256: FFCD0DBDAACD6C75D43BA5A660FB5D42F3D53862B351E44755BA9350BDAE8774
+Semantic catalog source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: save-label policy 3 pass / 0 fail; document 130 pass / 0 fail / 7 expected skips; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: omitted from this focused revision; use normal MPR, pending-modern, and editable-draft states to verify labels
