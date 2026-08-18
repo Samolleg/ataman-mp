@@ -1,68 +1,149 @@
 #include "QDebug"
 #include <QTextCodec>
 #include <QSaveFile>
+#include <limits>
 #include "res_file.h"
 #include "utils.h"
 
-void CResFile::buildFileMap(
-        QMap<QString, SResFileEntry>& aEntry,
-        QVector<SResHashTable>& fileTable, int offsetStream,
-        int streamLength, QString &nameBuf)
+namespace {
+bool rangeFits(qint64 start, quint64 offset, quint64 size, qint64 streamLength)
 {
-
-    SResFileEntry entry;
-    for (auto& file: fileTable)
-    {
-        if(int(file.DataOffset + file.DataSize) > streamLength - offsetStream)
-            throw new std::runtime_error("Invalid stream!");
-
-        entry.FileName = nameBuf.mid(int(file.NameOffset), file.NameLength);
-        entry.LastWriteTime = QDateTime::fromMSecsSinceEpoch(file.LastWriteTime);
-        entry.Position = offsetStream + int(file.DataOffset);
-        entry.Size = int(file.DataSize);
-        aEntry.insert(entry.FileName, entry);
-    }
-
-}
-
-bool CResFile::getFiles(QMap<QString, SResFileEntry>& aEntry, QDataStream& stream)
-{
-    qint64 startPos = stream.device()->pos();
-
-    stream >> m_header;
-    if (m_header.Signature != s_signature)
+    if (start < 0 || streamLength < start)
         return false;
 
-    stream.device()->seek(startPos + m_header.TableOffset);
-    QVector<SResHashTable> aFile;
-    QVector<char> aName;
-    aName.resize(int(m_header.NamesLenght));
+    const quint64 available = quint64(streamLength - start);
+    return offset <= available && size <= available - offset;
+}
 
-    SResHashTable hashTable;
-    for (uint i(0); i<m_header.TableSize; ++i)
+bool readRawDataExactly(QDataStream& stream, char* data, int size)
+{
+    if (size < 0 || stream.status() != QDataStream::Ok)
+        return false;
+
+    return size == 0 ||
+        (stream.readRawData(data, size) == size && stream.status() == QDataStream::Ok);
+}
+}
+
+bool CResFile::buildFileMap(
+        QMap<QString, SResFileEntry>& aEntry,
+        const SResHashTable& file, qint64 offsetStream,
+        qint64 streamLength, const QByteArray& nameBuf)
+{
+    if (!rangeFits(offsetStream, file.DataOffset, file.DataSize, streamLength))
+        return false;
+
+    const quint64 namesLength = quint64(nameBuf.size());
+    if (quint64(file.NameOffset) > namesLength ||
+        quint64(file.NameLength) > namesLength - quint64(file.NameOffset))
     {
-        stream >> hashTable;
-        aFile.append(hashTable);
+        return false;
     }
 
-    stream.readRawData(aName.data(), int(m_header.NamesLenght));
+    const qint64 position = offsetStream + qint64(file.DataOffset);
+    if (position > std::numeric_limits<int>::max() ||
+        file.DataSize > uint(std::numeric_limits<int>::max()))
+    {
+        return false;
+    }
+
+    const int nameOffset = int(file.NameOffset);
+    const int nameLength = int(file.NameLength);
+    const char* encodedName = nameLength == 0 ? "" : nameBuf.constData() + nameOffset;
     QTextCodec* codec = QTextCodec::codecForName("CP1251");
-    QString name = codec->toUnicode(aName.data());
-    buildFileMap(aEntry, aFile, int(startPos), m_bufLen, name);
+
+    SResFileEntry entry;
+    entry.FileName = codec ? codec->toUnicode(encodedName, nameLength)
+                           : QString::fromLatin1(encodedName, nameLength);
+    entry.LastWriteTime = QDateTime::fromMSecsSinceEpoch(file.LastWriteTime);
+    entry.Position = int(position);
+    entry.Size = int(file.DataSize);
+    aEntry.insert(entry.FileName, entry);
 
     return true;
 }
 
-// in: aEntry, stream
-void CResFile::readFiles(QMap<QString, SResFileEntry>& aEntry, QDataStream& stream)
+bool CResFile::getFiles(QMap<QString, SResFileEntry>& aEntry, QDataStream& stream)
 {
-    for(auto& entry: aEntry.values())
+    QIODevice* device = stream.device();
+    if (!device)
+        return false;
+
+    const qint64 startPos = device->pos();
+    const qint64 streamLength = device->size();
+    if (!rangeFits(startPos, 0, sizeof(SResFileHeader), streamLength))
+        return false;
+
+    stream >> m_header;
+    if (stream.status() != QDataStream::Ok || m_header.Signature != s_signature)
+        return false;
+
+    if (m_header.TableOffset < sizeof(SResFileHeader) ||
+        m_header.NamesLenght > uint(std::numeric_limits<int>::max()))
     {
-        QByteArray ba(entry.Size, 0);
-        stream.device()->seek(entry.Position);
-        stream.readRawData(ba.data(), entry.Size);
-        m_aFiles.insert(entry.FileName, ba);
+        return false;
     }
+
+    const quint64 tableBytes = quint64(m_header.TableSize) * sizeof(SResHashTable);
+    const quint64 namesOffset = quint64(m_header.TableOffset) + tableBytes;
+    if (!rangeFits(startPos, m_header.TableOffset, tableBytes, streamLength) ||
+        !rangeFits(startPos, namesOffset, m_header.NamesLenght, streamLength))
+    {
+        return false;
+    }
+
+    const qint64 tablePosition = startPos + qint64(m_header.TableOffset);
+    const qint64 namesPosition = startPos + qint64(namesOffset);
+    QByteArray nameData(int(m_header.NamesLenght), '\0');
+    if (!device->seek(namesPosition) ||
+        !readRawDataExactly(stream, nameData.data(), nameData.size()))
+    {
+        return false;
+    }
+
+    if (!device->seek(tablePosition))
+        return false;
+
+    QMap<QString, SResFileEntry> parsedEntries;
+    for (uint i(0); i<m_header.TableSize; ++i)
+    {
+        SResHashTable hashTable;
+        stream >> hashTable;
+        if (stream.status() != QDataStream::Ok ||
+            (hashTable.NextIndex != uint(-1) && hashTable.NextIndex >= m_header.TableSize) ||
+            !buildFileMap(parsedEntries, hashTable, startPos, streamLength, nameData))
+        {
+            return false;
+        }
+    }
+
+    aEntry = parsedEntries;
+    return true;
+}
+
+// in: aEntry, stream
+bool CResFile::readFiles(const QMap<QString, SResFileEntry>& aEntry, QDataStream& stream)
+{
+    QIODevice* device = stream.device();
+    if (!device)
+        return false;
+
+    QMap<QString, QByteArray> parsedFiles;
+    for(auto it = aEntry.constBegin(); it != aEntry.constEnd(); ++it)
+    {
+        const SResFileEntry& entry = it.value();
+        if (entry.Position < 0 || entry.Size < 0 || !device->seek(entry.Position))
+            return false;
+
+        QByteArray ba(entry.Size, 0);
+        if (!readRawDataExactly(stream, ba.data(), ba.size()))
+            return false;
+
+        parsedFiles.insert(entry.FileName, ba);
+    }
+
+    m_aFiles.swap(parsedFiles);
+    return true;
 }
 
 uint getEIStringHash32(QString value, uint hashTableSize = 0)
@@ -186,50 +267,42 @@ CResFile::CResFile(QString path)
         return;
     }
 
-    try
+    if (!file.open(QIODevice::ReadOnly))
     {
-        file.open(QIODevice::ReadOnly);
-        if (file.error() != QFile::NoError)
-        {
-            ei::log(eLogFatal, file.fileName() + " Error while open res-file");
-            return;
-        }
-
-        QByteArray buffer = file.readAll();
-        m_bufLen = buffer.length();
-        file.close();
-
-        QDataStream stream(buffer);
-        util::formatStream(stream);
-        QMap<QString, SResFileEntry> resEntries;
-        if (!getFiles(resEntries, stream))
-        {
-            ei::log(eLogFatal, "Incorrect file signature");
-            buffer.clear();
-            file.close();
-            return;
-        }
-        readFiles(resEntries, stream);
-        buffer.clear();
+        ei::log(eLogFatal, file.fileName() + " Error while open res-file");
+        return;
     }
-    catch (std::exception ex)
+
+    QByteArray buffer = file.readAll();
+    if (file.error() != QFile::NoError)
     {
-        qDebug() << ex.what();
+        ei::log(eLogFatal, file.fileName() + " Error while reading res-file");
+        return;
+    }
+    file.close();
+
+    QDataStream stream(buffer);
+    util::formatStream(stream);
+    QMap<QString, SResFileEntry> resEntries;
+    if (!getFiles(resEntries, stream) || !readFiles(resEntries, stream))
+    {
+        m_aFiles.clear();
+        ei::log(eLogFatal, "Invalid res-file structure");
     }
 }
 
 CResFile::CResFile(const QByteArray& data)
 {
-    m_bufLen = data.length();
+    m_aFiles.clear();
+    m_aEntry.clear();
     QDataStream stream(data);
     util::formatStream(stream);
     QMap<QString, SResFileEntry> resEntries;
-    if (!getFiles(resEntries, stream))
+    if (!getFiles(resEntries, stream) || !readFiles(resEntries, stream))
     {
-        qDebug() << "Incorrect file signature";
-        return;
+        m_aFiles.clear();
+        qDebug() << "Invalid res-file structure";
     }
-    readFiles(resEntries, stream);
 }
 
 void CResFile::saveToFile(QString path)

@@ -22,6 +22,7 @@
 class CSector;
 class CTile;
 class CTerrainEditModel;
+struct SMprAnimatedTileRecord;
 
 struct STerrainShadowFieldResult
 {
@@ -112,9 +113,17 @@ public:
     bool previewCanonicalMaxZ(float maxZ);
     bool previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile,
                               bool updateSector = true);
+    bool previewTerrainAtlas(const QVector<QImage>& tileImages, int textureCount);
+    void clearPreviewTerrainAtlas();
     void setDirty(bool bDirty) {m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
+    bool adoptCanonicalTerrainSave(
+        const QFileInfo& path, const QByteArray& bytes,
+        const QString& innerNamespace, uint textureCount,
+        uint textureSize, uint tileCount, uint tileSize, float maxZ,
+        const QVector<qint32>& tileTypes,
+        const QVector<SMprAnimatedTileRecord>& animatedTiles);
     const QString& mapName() const {return m_innerMapName;}
     quint64 shadowGeneration() const { return m_shadowGeneration; }
     void invalidateTerrainShadowField();
@@ -139,6 +148,11 @@ private:
     int m_renderTextureCount{1};
     QVector<QVector<CSector*>> m_aSector;
     QOpenGLTexture* m_texture;
+    QOpenGLTexture* m_baseAtlasTexture{nullptr};
+    int m_baseAtlasColumns{1};
+    QOpenGLTexture* m_previewAtlasTexture{nullptr};
+    int m_previewAtlasTextureCount{0};
+    int m_previewAtlasColumns{0};
     QFileInfo m_filePath;
     QString m_innerMapName;
     QByteArray m_originalMprData;

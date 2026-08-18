@@ -19,11 +19,13 @@
 #include <QTimer>
 #include <QProcessEnvironment>
 #include <QtEndian>
+#include <algorithm>
 #include <cmath>
 
 #include "endurance_document.h"
 #include "current_session_backup.h"
 #include "hot_reload_protocol.h"
+#include "res_archive_document.h"
 #include "runtime_providers.h"
 #include "synthetic_map_table_archive.h"
 
@@ -447,6 +449,51 @@ BOOL CALLBACK findWindowForProcess(HWND window, LPARAM parameter)
     }
     return TRUE;
 }
+
+QString nativeWindowText(HWND window)
+{
+    wchar_t text[2048]{};
+    GetWindowTextW(window, text, int(sizeof(text) / sizeof(text[0])));
+    return QString::fromWCharArray(text);
+}
+
+struct RuntimeFailureWindowContext
+{
+    DWORD pid{0};
+    QString summary;
+};
+
+BOOL CALLBACK collectChildWindowText(HWND window, LPARAM parameter)
+{
+    QString* text = reinterpret_cast<QString*>(parameter);
+    const QString child = nativeWindowText(window).trimmed();
+    if(!child.isEmpty())
+        *text += (text->isEmpty() ? QString() : QStringLiteral(" | ")) + child;
+    return TRUE;
+}
+
+BOOL CALLBACK findRuntimeFailureWindow(HWND window, LPARAM parameter)
+{
+    RuntimeFailureWindowContext* context =
+        reinterpret_cast<RuntimeFailureWindowContext*>(parameter);
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    if(pid != context->pid || !IsWindowVisible(window))
+        return TRUE;
+    wchar_t className[128]{};
+    GetClassNameW(window, className, int(sizeof(className) / sizeof(className[0])));
+    const QString title = nativeWindowText(window).trimmed();
+    QString body;
+    EnumChildWindows(window, collectChildWindowText, LPARAM(&body));
+    if(CJmvMapTestLauncher::isRuntimeFailureDialog(
+           title, QString::fromWCharArray(className), body))
+    {
+        context->summary = QStringLiteral("title=\"%1\" class=\"%2\" text=\"%3\"")
+            .arg(title, QString::fromWCharArray(className), body.left(512));
+        return FALSE;
+    }
+    return TRUE;
+}
 #endif
 }
 
@@ -454,9 +501,37 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     : QObject(parent), m_process(new QProcess(this)),
       m_hotReloadReadyTimer(new QTimer(this)),
       m_hotReloadResultTimer(new QTimer(this)),
+      m_runtimeHealthTimer(new QTimer(this)),
       m_recoveryTimer(new QTimer(this)),
       m_cleanupComplete(true), m_baseProbe(false)
 {
+    m_runtimeHealthTimer->setInterval(500);
+    connect(m_runtimeHealthTimer, &QTimer::timeout, this, [this]()
+    {
+#ifdef Q_OS_WIN
+        if(m_runtimeFailureObserved || !isRunning())
+            return;
+        const qint64 pid = runtimeGameProcessId();
+        if(pid <= 0)
+            return;
+        RuntimeFailureWindowContext context;
+        context.pid = DWORD(pid);
+        EnumWindows(findRuntimeFailureWindow, LPARAM(&context));
+        if(context.summary.isEmpty())
+            return;
+        m_runtimeFailureObserved = true;
+        m_processCrashObserved = true;
+        m_manifest.insert("runtimeFailureObserved", true);
+        m_manifest.insert("runtimeFailureEvidence", context.summary);
+        appendRunLog("Runtime failure dialog observed: " + context.summary);
+        writeManifest("runtime-failure-observed");
+        stop();
+        emit testError(QStringLiteral(
+            "The staged JMV runtime reported a fatal error. This run is failed; "
+            "GameplayReady and an unchanged process ID cannot override a native "
+            "runtime failure.\n\n%1").arg(context.summary));
+#endif
+    });
     m_recoveryTimer->setInterval(2000);
     connect(m_recoveryTimer, &QTimer::timeout,
             this, &CJmvMapTestLauncher::refreshInterruptedRecovery);
@@ -540,6 +615,7 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     });
     connect(m_process, &QProcess::started, this, [this]()
     {
+        m_runtimeHealthTimer->start();
         appendRunLog(QString("%1 started pid=%2")
                      .arg(m_usesRuntimeHost ? "Endurance runtime host" : "game.exe")
                      .arg(m_process->processId()));
@@ -557,9 +633,14 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
             this, [this](int exitCode, QProcess::ExitStatus status)
     {
         const bool restarting = m_restartPending;
-        const SJmvMapTestLaunchInput restartInput = m_restartInput;
+        const SJmvMapTestLaunchInput genericRestartInput = m_restartInput;
+        const bool terrainAtlasRestart = m_terrainAtlasRestartPending;
+        const SJmvMapTestLaunchInput terrainRestartInput =
+            m_pendingTerrainAtlasRestartInput;
+        const QString completedRunId = m_runId;
         m_hotReloadReadyTimer->stop();
         m_hotReloadResultTimer->stop();
+        m_runtimeHealthTimer->stop();
         m_pendingHotReloadSequence = 0;
         m_pendingSaveGeneration = 0;
         appendRunLog(QString("game.exe finished exitCode=%1 status=%2")
@@ -587,24 +668,47 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
                      .arg(report.value("passed").toBool())
                      .arg(report.value("errorCount").toInt())
                      .arg(report.value("warningCount").toInt()).arg(resultPath));
-        if(!restarting)
+        if(!restarting && !terrainAtlasRestart)
             emit testReportReady(report);
+        else
+            appendRunLog(
+                "Suppressing the intermediate stopped-run report while restarting the owned test process");
         QString cleanupMessage = cleanupOnly;
         if(!cleanupMessage.isEmpty())
             cleanupMessage += "\n";
         cleanupMessage += bridgeResult;
-        emit testFinished(m_runId, exitCode, cleanupMessage);
+        emit testFinished(completedRunId, exitCode, cleanupMessage);
         if(restarting)
         {
             m_restartPending = false;
             m_restartInput = SJmvMapTestLaunchInput();
-            QTimer::singleShot(0, this, [this, restartInput]()
+            QTimer::singleShot(0, this, [this, genericRestartInput]()
             {
                 QString restartError;
-                if(!launch(restartInput, &restartError))
+                if(!launch(genericRestartInput, &restartError))
                     emit testError(QCoreApplication::translate(
                         "CJmvMapTestLauncher",
                         "The fresh Test Current Map process could not be started after stopping the previous process.\n\n%1")
+                        .arg(restartError));
+            });
+        }
+        else if(terrainAtlasRestart)
+        {
+            QTimer::singleShot(0, this, [this, terrainRestartInput]()
+            {
+                m_terrainAtlasRestartPending = false;
+                m_pendingTerrainAtlasRestartInput = SJmvMapTestLaunchInput();
+                if(!m_cleanupComplete)
+                {
+                    emit testError(QStringLiteral(
+                        "The previous owned test process stopped, but its guarded cleanup did not complete. "
+                        "The changed terrain atlas was not launched; inspect the test-run recovery status."));
+                    return;
+                }
+                QString restartError;
+                if(!launch(terrainRestartInput, &restartError))
+                    emit testError(QStringLiteral(
+                        "The owned test process stopped safely, but restarting it with the changed terrain atlas failed:\n\n%1")
                         .arg(restartError));
             });
         }
@@ -636,6 +740,161 @@ CJmvMapTestLauncher::~CJmvMapTestLauncher()
 QString CJmvMapTestLauncher::testRunsRootPath()
 {
     return testRunsRoot();
+}
+
+bool CJmvMapTestLauncher::terrainAtlasHotReloadRequiresRestart(
+    const QString& runningSourceAtlasSha256, int runningAtlasPages,
+    int runningAtlasSlots, const QString& candidateSourceAtlasSha256,
+    int candidateAtlasPages, int candidateAtlasSlots)
+{
+    return runningSourceAtlasSha256.compare(
+               candidateSourceAtlasSha256, Qt::CaseInsensitive) != 0
+        || runningAtlasPages != candidateAtlasPages
+        || runningAtlasSlots != candidateAtlasSlots;
+}
+
+bool CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
+    const QByteArray& sourceMpr,
+    const QByteArray& sourceAtlasRes,
+    const QString& runtimeNamespace,
+    int expectedPages,
+    QByteArray* rebasedMpr,
+    QByteArray* rebasedAtlasRes,
+    QStringList* rebasedMmpMembers,
+    QString* error)
+{
+    if(!rebasedMpr || !rebasedAtlasRes || !rebasedMmpMembers
+       || sourceMpr.isEmpty() || sourceAtlasRes.isEmpty()
+       || expectedPages <= 0 || runtimeNamespace.isEmpty())
+    {
+        if(error) *error = "The runtime terrain-atlas rebase request is incomplete.";
+        return false;
+    }
+    CMprDocument namespaceSource;
+    CValidationReport namespaceReport;
+    if(!namespaceSource.loadBytes(sourceMpr,
+                                  QStringLiteral("runtime-atlas-source.mpr"),
+                                  &namespaceReport))
+    {
+        if(error) *error = "The run-owned MPR could not be decoded before rebasing:\n"
+            + namespaceReport.toText();
+        return false;
+    }
+    const QString sourceNamespace = namespaceSource.mapInfo().innerNamespace;
+    if(sourceNamespace.isEmpty()
+       || int(namespaceSource.mapInfo().textureCount) != expectedPages)
+    {
+        if(error) *error = QString(
+            "The run-owned MPR terrain-atlas contract differs: namespace=%1, "
+            "MPR pages=%2, expected pages=%3.")
+            .arg(sourceNamespace)
+            .arg(namespaceSource.mapInfo().textureCount)
+            .arg(expectedPages);
+        return false;
+    }
+
+    QStringList archiveErrors;
+    CResArchiveDocument sourceArchive;
+    if(!sourceArchive.loadBytes(sourceAtlasRes,
+                                QStringLiteral("run-owned-terrain-atlas.res"),
+                                &archiveErrors))
+    {
+        if(error) *error = "The run-owned terrain atlas RES is invalid:\n"
+            + archiveErrors.join('\n');
+        return false;
+    }
+    // A published RES may legitimately contain unrelated atlas identities or
+    // stale higher pages left by an older, larger version of this identity.
+    // Stage only the contiguous page set named by the MPR's exact namespace
+    // and declared page count. Counting every MMP member caused Test Current
+    // to reject (or stage the wrong pages from) otherwise valid archives.
+    QStringList sourceMembers;
+    sourceMembers.reserve(expectedPages);
+    for(int page = 0; page < expectedPages; ++page)
+    {
+        const QString expectedName = QStringLiteral("%1%2.mmp")
+            .arg(sourceNamespace).arg(page, 3, 10, QLatin1Char('0'));
+        bool found = false;
+        for(const SResArchiveMember& member : sourceArchive.members())
+        {
+            if(member.name.compare(expectedName, Qt::CaseInsensitive) != 0)
+                continue;
+            if(found)
+            {
+                if(error) *error = "The run-owned terrain atlas contains duplicate page "
+                    + expectedName + ".";
+                return false;
+            }
+            sourceMembers.append(member.name);
+            found = true;
+        }
+        if(!found)
+        {
+            if(error) *error = "The run-owned terrain atlas is missing required page "
+                + expectedName + ".";
+            return false;
+        }
+    }
+
+    CMprEditTransaction namespaceTransaction(
+        QStringLiteral("Rebase runtime terrain atlas namespace"));
+    QByteArray runtimeMpr = sourceMpr;
+    if(!namespaceSource.loadBytes(runtimeMpr,
+                                  QStringLiteral("runtime-atlas-source.mpr"),
+                                  &namespaceReport)
+       || !namespaceSource.applyIsolatedNamespaceTransaction(
+           namespaceTransaction, runtimeNamespace,
+           &runtimeMpr, &namespaceReport))
+    {
+        if(error) *error = "The run-owned MPR could not be rebased to its temporary runtime namespace:\n"
+            + namespaceReport.toText();
+        return false;
+    }
+
+    QByteArray runtimeArchive(16, '\0');
+    qToLittleEndian<quint32>(0x019CE23C,
+        reinterpret_cast<uchar*>(runtimeArchive.data()));
+    qToLittleEndian<quint32>(16,
+        reinterpret_cast<uchar*>(runtimeArchive.data() + 8));
+    CResArchiveDocument destinationArchive;
+    if(!destinationArchive.loadBytes(runtimeArchive,
+                                     QStringLiteral("runtime-atlas-empty.res"),
+                                     &archiveErrors))
+    {
+        if(error) *error = "Could not initialize the rebased terrain atlas RES:\n"
+            + archiveErrors.join('\n');
+        return false;
+    }
+    QStringList runtimeMembers;
+    QVector<SResArchiveNewMember> appendedMembers;
+    appendedMembers.reserve(sourceMembers.size());
+    for(int page = 0; page < sourceMembers.size(); ++page)
+    {
+        const QByteArray payload = sourceArchive.memberPayload(sourceMembers.at(page));
+        const QString memberName = QStringLiteral("%1%2.mmp")
+            .arg(runtimeNamespace).arg(page, 3, 10, QLatin1Char('0'));
+        if(payload.isEmpty())
+        {
+            if(error) *error = "A run-owned terrain atlas page is empty.";
+            return false;
+        }
+        SResArchiveNewMember appended;
+        appended.name = memberName;
+        appended.payload = payload;
+        appendedMembers.append(appended);
+        runtimeMembers.append(memberName);
+    }
+    if(!destinationArchive.buildWithAppendedMembers(
+           appendedMembers, &runtimeArchive, &archiveErrors))
+    {
+        if(error) *error = "Could not bulk-rebase the run-owned terrain atlas pages:\n"
+            + archiveErrors.join('\n');
+        return false;
+    }
+    *rebasedMpr = runtimeMpr;
+    *rebasedAtlasRes = runtimeArchive;
+    *rebasedMmpMembers = runtimeMembers;
+    return true;
 }
 
 QString CJmvMapTestLauncher::generationSavesPath(const QString& runRoot,
@@ -890,6 +1149,10 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
                                                 : (exitStatus == int(QProcess::CrashExit)
                                                    ? "crash" : "process-exit"));
     report.insert("cleanupMessage", cleanupMessage);
+    const bool runtimeFailureObserved = manifest.value(
+        "runtimeFailureObserved").toBool();
+    const QString runtimeFailureEvidence = manifest.value(
+        "runtimeFailureEvidence").toString();
 
     QString requestedZone = manifest.value("sessionSettings").toObject()
         .value("sourceZone").toString();
@@ -987,6 +1250,78 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
                 tablesLuaJournal.value("stagedSha256").toString(),
                 Qt::CaseInsensitive) == 0;
     }
+    const QJsonObject atlasProbe = manifest.value(
+        "terrainAtlasRuntimeProbe").toObject();
+    const bool atlasProbeRequested = !atlasProbe.isEmpty();
+    const int atlasPages = atlasProbe.value("texturePages").toInt();
+    const int atlasSlots = atlasProbe.value("activeSlots").toInt();
+    const QString textureProbeName = atlasProbe.value("textureProbeName").toString();
+    const QString textureProbeMemberName = atlasProbe.value(
+        "textureProbeMemberName").toString();
+    const QString runtimeAtlasNamespace = atlasProbe.value(
+        "runtimeNamespace").toString();
+    const QString temporaryMapName = manifest.value("temporaryMapName").toString();
+    const bool runtimeNamespaceAligned = !atlasProbeRequested
+        || (!runtimeAtlasNamespace.isEmpty() && !temporaryMapName.isEmpty()
+            && runtimeAtlasNamespace.compare(
+                temporaryMapName, Qt::CaseInsensitive) == 0);
+    const bool textureResourceRegistered = bridgeResult.contains(
+        "TEMP_TEXTURE_RES registered");
+    const bool textureProbeResolved = !atlasProbeRequested
+        || (!textureProbeMemberName.isEmpty() && bridgeResult.contains(
+            QRegularExpression(QStringLiteral(
+                "TEMP_TEXTURE_RES probe resolved name=\\\"")
+                + QRegularExpression::escape(textureProbeMemberName)
+                + QStringLiteral("\\\""))));
+    const bool textureRequestObservationArmed = !atlasProbeRequested
+        || bridgeResult.contains(
+            "TEMP_TEXTURE_RES armed terrain texture-request observation");
+    bool allTerrainPageRequestsResolved = !atlasProbeRequested;
+    int resolvedTerrainPageRequests = 0;
+    if(atlasProbeRequested && atlasPages > 0 && !runtimeAtlasNamespace.isEmpty())
+    {
+        allTerrainPageRequestsResolved = true;
+        for(int page = 0; page < atlasPages; ++page)
+        {
+            const QString memberName = QStringLiteral("%1%2.mmp")
+                .arg(runtimeAtlasNamespace).arg(page, 3, 10, QLatin1Char('0'));
+            const QRegularExpression requestPattern(
+                QStringLiteral("TERRAIN_TEXTURE_REQUEST name=\\\"")
+                + QRegularExpression::escape(memberName)
+                + QStringLiteral("\\\" result=resolved"));
+            if(bridgeResult.contains(requestPattern))
+                ++resolvedTerrainPageRequests;
+            else
+                allTerrainPageRequestsResolved = false;
+        }
+    }
+    const bool customAtlasContractValidated = !atlasProbeRequested
+        || (atlasPages > 0 && atlasSlots > 0
+            && atlasProbe.value("resourceMmpMembers").toInt() == atlasPages
+            && runtimeNamespaceAligned
+            && !atlasProbe.value("installedArchivesModified").toBool()
+            && textureResourceRegistered && textureProbeResolved
+            && textureRequestObservationArmed
+            && allTerrainPageRequestsResolved
+            && stagedLoaderObserved && gameplayReady);
+    const bool expandedAtlasRequested = atlasProbeRequested
+        && (atlasPages > 8 || atlasSlots > 512);
+    const bool expandedAtlasContractValidated = !expandedAtlasRequested
+        || (customAtlasContractValidated && atlasPages > 8 && atlasSlots > 512
+            && atlasProbe.value("exceedsLegacyEightPages").toBool());
+    const QJsonObject drawall = manifest.value("drawallStress").toObject();
+    const bool drawallRequested = drawall.value("requested").toBool();
+    const bool drawallAutoexecRedirected = !drawallRequested
+        || bridgeResult.contains("DRAWALL_AUTOEXEC redirect");
+    const QString drawallHash = drawall.value("ownedSha256").toString();
+    const bool drawallAutoexecConsumed = !drawallRequested
+        || (!drawallHash.isEmpty() && bridgeResult.contains(
+            QRegularExpression(QStringLiteral("DRAWALL_AUTOEXEC consumed.*sha256=")
+                + QRegularExpression::escape(drawallHash))));
+    const bool drawallContractValidated = !drawallRequested
+        || (!drawall.value("installedConfigurationModified").toBool()
+            && drawall.value("command").toString() == QStringLiteral("drawall 1")
+            && drawallAutoexecRedirected && drawallAutoexecConsumed);
     const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
         && QFileInfo(actualMprPath).absoluteFilePath().compare(
             QFileInfo(expectedMprPath).absoluteFilePath(),
@@ -998,8 +1333,18 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     const bool payloadHashesValidated = stagedLoaderObserved
         && actualMprMatchesOwnedPayload && actualMobMatchesOwnedPayload
         && !requestedMprHash.isEmpty() && !requestedMobHash.isEmpty();
-    const int playerInitializations = bridgeResult.count(
+    QString playerEvidenceScope = bridgeResult;
+    if(completedReloadSequence != 0)
+    {
+        const int latestDispatch = bridgeResult.lastIndexOf(
+            QString("HOT_RELOAD dispatch sequence=%1")
+                .arg(completedReloadSequence));
+        if(latestDispatch >= 0)
+            playerEvidenceScope = bridgeResult.mid(latestDispatch);
+    }
+    const int playerInitializations = playerEvidenceScope.count(
         "DIRECT_LAUNCH initialized New Game player");
+    const bool controlledPlayerConfirmed = playerInitializations == 1;
 
     bool sourceFilesUnchanged = true;
     QJsonArray changedSources;
@@ -1048,6 +1393,20 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         addUnique(&errors, "The runtime bridge produced no result evidence.");
     if(!gameplayReady || !stagedLoaderObserved)
         addUnique(&errors, "The runtime did not prove a completed staged gameplay load.");
+    if(atlasProbeRequested && !textureResourceRegistered)
+        addUnique(&errors, "The runtime did not register the run-owned terrain atlas RES.");
+    if(atlasProbeRequested && !textureProbeResolved)
+        addUnique(&errors, "The runtime did not resolve the highest-page texture from the run-owned terrain atlas RES.");
+    if(atlasProbeRequested && !textureRequestObservationArmed)
+        addUnique(&errors, "The runtime did not arm actual terrain texture-request observation.");
+    if(atlasProbeRequested && !allTerrainPageRequestsResolved)
+        addUnique(&errors, "The runtime workload did not request and resolve every expected run-owned atlas page.");
+    if(atlasProbeRequested && !customAtlasContractValidated)
+        addUnique(&errors, "The custom terrain atlas runtime contract was not proven.");
+    if(expandedAtlasRequested && !expandedAtlasContractValidated)
+        addUnique(&errors, "The expanded terrain atlas runtime contract was not proven.");
+    if(drawallRequested && !drawallContractValidated)
+        addUnique(&errors, "The run-owned Zone18 drawall staging contract was not proven.");
     if(stagedLoaderObserved && !payloadHashesValidated)
         addUnique(&errors, "The runtime loader paths could not be matched to the hash-verified staged payloads.");
     if(tablesLuaStaged && !tablesLuaLoadObserved)
@@ -1065,10 +1424,19 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
        && requestedGeneration != actualGeneration)
         addUnique(&errors, QString("Requested save generation %1 but runtime committed %2.")
                   .arg(requestedGeneration).arg(actualGeneration));
+    if(!controlledPlayerConfirmed)
+        addUnique(&errors, QString("The staged run reported %1 controlled-player "
+                                  "initializations; exactly one is required.")
+                  .arg(playerInitializations));
     if(!sourceFilesUnchanged)
         addUnique(&errors, "One or more source map files changed during the test.");
     if(!cleanupComplete)
         addUnique(&errors, "One or more owned runtime artifacts could not be cleaned up safely.");
+    if(runtimeFailureObserved)
+        addUnique(&errors, runtimeFailureEvidence.isEmpty()
+            ? QStringLiteral("A native runtime failure was observed during the staged run.")
+            : QStringLiteral("A native runtime failure was observed during the staged run: ")
+                + runtimeFailureEvidence);
     if(exitStatus == int(QProcess::CrashExit) && !stopRequested)
         addUnique(&errors, "The owned game process ended with a crash status.");
     else if(exitCode != 0 && !stopRequested)
@@ -1107,14 +1475,37 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("tablesLuaStaged", tablesLuaStaged);
     report.insert("tablesLuaRedirectObserved", tablesLuaRedirectObserved);
     report.insert("tablesLuaLoadObserved", tablesLuaLoadObserved);
+    report.insert("terrainAtlasProbeRequested", atlasProbeRequested);
+    report.insert("terrainAtlasPages", atlasPages);
+    report.insert("terrainAtlasSlots", atlasSlots);
+    report.insert("textureProbeName", textureProbeName);
+    report.insert("textureProbeMemberName", textureProbeMemberName);
+    report.insert("runtimeAtlasNamespace", runtimeAtlasNamespace);
+    report.insert("runtimeNamespaceAligned", runtimeNamespaceAligned);
+    report.insert("textureResourceRegistered", textureResourceRegistered);
+    report.insert("textureProbeResolved", textureProbeResolved);
+    report.insert("textureRequestObservationArmed", textureRequestObservationArmed);
+    report.insert("resolvedTerrainPageRequests", resolvedTerrainPageRequests);
+    report.insert("allTerrainPageRequestsResolved", allTerrainPageRequestsResolved);
+    report.insert("customAtlasContractValidated", customAtlasContractValidated);
+    report.insert("expandedAtlasRequested", expandedAtlasRequested);
+    report.insert("expandedAtlasContractValidated", expandedAtlasContractValidated);
+    report.insert("drawallRequested", drawallRequested);
+    report.insert("drawallAutoexecRedirected", drawallAutoexecRedirected);
+    report.insert("drawallAutoexecConsumed", drawallAutoexecConsumed);
+    report.insert("drawallContractValidated", drawallContractValidated);
     report.insert("playerInitializationCount", playerInitializations);
-    report.insert("reportedPlayerCount", playerInitializations > 0 ? 1 : -1);
-    report.insert("playerCountEvidence", playerInitializations > 0
-                  ? "New Game player-record initialization observed"
-                  : "not observed");
+    report.insert("reportedPlayerCount", playerInitializations);
+    report.insert("controlledPlayerConfirmed", controlledPlayerConfirmed);
+    report.insert("playerCountEvidence", controlledPlayerConfirmed
+                  ? "exactly one New Game player-record initialization observed"
+                  : QString("observed %1 New Game player-record initializations")
+                        .arg(playerInitializations));
     report.insert("sourceFilesUnchanged", sourceFilesUnchanged);
     report.insert("changedSources", changedSources);
     report.insert("cleanupComplete", cleanupComplete);
+    report.insert("runtimeFailureObserved", runtimeFailureObserved);
+    report.insert("runtimeFailureEvidence", runtimeFailureEvidence);
     report.insert("retainedArtifacts", retainedArtifacts);
     report.insert("errors", errors);
     report.insert("warnings", warnings);
@@ -1139,12 +1530,25 @@ bool CJmvMapTestLauncher::validateAutomatedResult(const QJsonObject& report,
         local.append("The staged loader was not observed.");
     if(!report.value("payloadHashesValidated").toBool())
         local.append("The loaded payload hashes were not validated.");
+    if(report.value("terrainAtlasProbeRequested").toBool()
+       && !report.value("customAtlasContractValidated").toBool())
+        local.append("The custom terrain atlas runtime contract was not validated.");
+    if(report.value("expandedAtlasRequested").toBool()
+       && !report.value("expandedAtlasContractValidated").toBool())
+        local.append("The expanded terrain atlas runtime contract was not validated.");
+    if(report.value("drawallRequested").toBool()
+       && !report.value("drawallContractValidated").toBool())
+        local.append("The run-owned Zone18 drawall staging contract was not validated.");
     if(report.value("actualZone").toString().isEmpty())
         local.append("The actually loaded zone is missing.");
+    if(!report.value("controlledPlayerConfirmed").toBool())
+        local.append("Exactly one controlled player was not proven.");
     if(!report.value("sourceFilesUnchanged").toBool())
         local.append("Source-file preservation failed.");
     if(!report.value("cleanupComplete").toBool())
         local.append("Runtime cleanup is incomplete.");
+    if(report.value("runtimeFailureObserved").toBool())
+        local.append("A native runtime failure was observed during the staged run.");
     for(const QJsonValue& error : report.value("errors").toArray())
         local.append(error.toString());
     local.removeDuplicates();
@@ -1415,6 +1819,65 @@ bool CJmvMapTestLauncher::prepareTemporaryAutoexec(const QString& engineDirector
     return true;
 }
 
+bool CJmvMapTestLauncher::isRuntimeFailureDialog(const QString& title,
+                                                 const QString& windowClass,
+                                                 const QString& bodyText)
+{
+    if(windowClass.compare(QStringLiteral("#32770"),
+                           Qt::CaseInsensitive) != 0)
+        return false;
+    const QString combined = (title + QLatin1Char('\n') + bodyText).toLower();
+    return title.contains(QStringLiteral("Microsoft Visual C++ Runtime Library"),
+                          Qt::CaseInsensitive)
+        || combined.contains(QStringLiteral("runtime error"))
+        || combined.contains(QStringLiteral("abnormal program termination"))
+        || (combined.contains(QStringLiteral("game.exe"))
+            && combined.contains(QStringLiteral("application error")));
+}
+
+bool CJmvMapTestLauncher::prepareRunOwnedDrawallAutoexec(
+    const QString& sourcePath, const QString& runRoot, bool forceDrawall,
+    QJsonObject* manifest, QString* outputPath, QString* error)
+{
+    if(outputPath)
+        outputPath->clear();
+    if(!forceDrawall)
+        return true;
+    if(!manifest || !outputPath || sourcePath.isEmpty() || runRoot.isEmpty())
+    {
+        if(error) *error = "Run-owned drawall autoexec paths are incomplete.";
+        return false;
+    }
+    QByteArray original;
+    if(!readFile(sourcePath, &original, error))
+        return false;
+    QByteArray patched = original;
+    if(!patched.isEmpty() && !patched.endsWith('\n'))
+        patched.append("\r\n");
+    patched.append("// EI Mapper Endurance run-owned Zone18 stress command\r\n"
+                   "drawall 1\r\n");
+    const QString ownedPath = QDir(runRoot).filePath("drawall/2utoexec.cfg");
+    if(!QDir().mkpath(QFileInfo(ownedPath).absolutePath())
+       || !atomicWrite(ownedPath, patched, error)
+       || fileSha256(ownedPath).compare(sha256(patched), Qt::CaseInsensitive) != 0)
+    {
+        if(error && error->isEmpty())
+            *error = "The run-owned drawall autoexec failed verification.";
+        return false;
+    }
+    QJsonObject drawall;
+    drawall.insert("requested", true);
+    drawall.insert("command", "drawall 1");
+    drawall.insert("sourcePath", QFileInfo(sourcePath).absoluteFilePath());
+    drawall.insert("sourceSha256", sha256(original));
+    drawall.insert("ownedPath", ownedPath);
+    drawall.insert("ownedSha256", sha256(patched));
+    drawall.insert("installedConfigurationModified", false);
+    manifest->insert("drawallStress", drawall);
+    *outputPath = ownedPath;
+    return true;
+}
+
 bool CJmvMapTestLauncher::prepareGodmodeBootstrap(
     const QStringList& mapDirectories, const QString& runRoot,
     const SMapSpawnPlan& spawn, double spawnZ, bool godmode,
@@ -1579,6 +2042,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_tablesLuaSourcePath.clear();
     m_stagedTablesLuaPath.clear();
     m_livePlaceholderResourcePath.clear();
+    m_drawallAutoexecPath.clear();
     m_bridgeResultPath.clear();
     m_testSavesPath.clear();
     m_bridgeSha256.clear();
@@ -1592,6 +2056,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_tablesLuaSourceSha256.clear();
     m_stagedTablesLuaSha256.clear();
     m_livePlaceholderResourceSha256.clear();
+    m_sourceTerrainTextureResourceSha256.clear();
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
     m_liveSavesPath.clear();
@@ -1603,6 +2068,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_saveGeneration = 0;
     m_pendingHotReloadSequence = 0;
     m_pendingSaveGeneration = 0;
+    m_sourceTerrainAtlasPages = 0;
+    m_sourceTerrainAtlasSlots = 0;
     m_hotReloadResultPolls = 0;
     m_baseProbe = false;
     m_usesRuntimeHost = false;
@@ -1610,6 +2077,9 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_cleanupComplete = false;
     m_stopRequested = false;
     m_processCrashObserved = false;
+    m_runtimeFailureObserved = false;
+    m_terrainAtlasRestartPending = false;
+    m_pendingTerrainAtlasRestartInput = SJmvMapTestLaunchInput();
     if(!stage(input, error))
     {
         if(error && !error->isEmpty())
@@ -1699,8 +2169,28 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
                            QDir(m_runRoot).filePath("lua-override/?.lua")+";;");
     }
     if(!m_livePlaceholderResourcePath.isEmpty())
+    {
         environment.insert("EI_MAPPER_ENDURANCE_TEMP_TEXTURE_RES",
                            m_livePlaceholderResourcePath);
+        const QString textureProbeMemberName = m_manifest.value(
+            "terrainAtlasRuntimeProbe").toObject().value(
+                "textureProbeMemberName").toString();
+        if(!textureProbeMemberName.isEmpty())
+            environment.insert("EI_MAPPER_ENDURANCE_TEXTURE_PROBE_NAME",
+                               textureProbeMemberName);
+        environment.insert("EI_MAPPER_ENDURANCE_TEXTURE_PAGE_COUNT",
+                           QString::number(input.expectedTerrainAtlasPages));
+    }
+    const QJsonObject drawall = m_manifest.value("drawallStress").toObject();
+    if(!m_drawallAutoexecPath.isEmpty())
+    {
+        environment.insert("EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC_SOURCE",
+                           drawall.value("sourcePath").toString());
+        environment.insert("EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC",
+                           m_drawallAutoexecPath);
+        environment.insert("EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC_SHA256",
+                           drawall.value("ownedSha256").toString());
+    }
     if(!m_supplementalMobDirectory.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_SUPPLEMENTAL_MOB_DIR",
                            m_supplementalMobDirectory);
@@ -1721,6 +2211,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     const bool isBase = input.profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     m_baseProbe = isBase;
     m_usesRuntimeHost = isJmv || isBase;
+    m_sourceTerrainTextureResourceSha256 =
+        input.terrainTextureResourceData.isEmpty()
+            ? QString() : sha256(input.terrainTextureResourceData);
+    m_sourceTerrainAtlasPages = input.expectedTerrainAtlasPages;
+    m_sourceTerrainAtlasSlots = input.expectedTerrainAtlasSlots;
     if((!isJmv && !isBase) || !input.profile.valid || !input.profile.runtimeStackValidated)
     {
         if(error) *error = "The active runtime stack is incomplete or does not match an exact manifest.";
@@ -2011,7 +2506,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
 
     // Journal every live artifact before creating it. A crash at any later
     // staging point can therefore be recovered without guessing ownership.
-    m_liveMprSha256 = sha256(input.mprData);
+    QByteArray runtimeMprData = input.mprData;
     m_liveMobSha256 = sha256(input.mobData);
     m_liveGrpSha256 = graphSource.sha256;
     QByteArray placeholderArchive;
@@ -2020,17 +2515,47 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     const QString temporaryMinimapRuntimeName = hasTemporaryMinimap
         ? temporaryMinimapRuntimeTextureName(input.temporaryMinimapMmp, m_runId)
         : QString();
-    const bool textureArchiveBuilt = hasTemporaryMinimap
-        ? buildSyntheticMapTextureArchive(temporaryMinimapRuntimeName,
-                                          input.temporaryMinimapMmp,
-                                          &placeholderArchive, &placeholderErrors)
-        : buildSyntheticMapPlaceholderArchive(&placeholderArchive, &placeholderErrors);
-    if(!textureArchiveBuilt)
+    int stagedTextureMmpMembers = 0;
+    QString terrainTextureProbeName = syntheticMapPlaceholderTextureName();
+    QString terrainTextureProbeMemberName = terrainTextureProbeName + ".mmp";
+    if(!input.terrainTextureResourceData.isEmpty())
     {
-        if(error) *error = "Could not build the run-owned placeholder texture archive:\n"
-            + placeholderErrors.join('\n');
-        return false;
+        // The shipped terrain loader derives MP/SEC and page names from the
+        // staged MPR filename. Rebase both archives to the same random owned
+        // identity; merely registering pages under the finalized source
+        // namespace loads geometry with untextured terrain.
+        QStringList runtimeMmpMembers;
+        if(!rebaseRuntimeTerrainAtlas(input.mprData,
+                                      input.terrainTextureResourceData,
+                                      m_temporaryMapName,
+                                      input.expectedTerrainAtlasPages,
+                                      &runtimeMprData,
+                                      &placeholderArchive,
+                                      &runtimeMmpMembers,
+                                      error))
+            return false;
+        stagedTextureMmpMembers = runtimeMmpMembers.size();
+        terrainTextureProbeMemberName = runtimeMmpMembers.constLast();
+        terrainTextureProbeName = QFileInfo(
+            terrainTextureProbeMemberName).completeBaseName();
     }
+    else
+    {
+        const bool textureArchiveBuilt = hasTemporaryMinimap
+            ? buildSyntheticMapTextureArchive(
+                temporaryMinimapRuntimeName, input.temporaryMinimapMmp,
+                &placeholderArchive, &placeholderErrors)
+            : buildSyntheticMapPlaceholderArchive(
+                &placeholderArchive, &placeholderErrors);
+        if(!textureArchiveBuilt)
+        {
+            if(error) *error =
+                "Could not build the run-owned placeholder texture archive:\n"
+                + placeholderErrors.join('\n');
+            return false;
+        }
+    }
+    m_liveMprSha256 = sha256(runtimeMprData);
     const QString resourcesDirectory = QDir(input.profile.gameRoot).filePath("Res");
     m_livePlaceholderResourcePath = QDir(resourcesDirectory).filePath(
         "EIMapperEndurance-" + m_runId + ".res");
@@ -2129,7 +2654,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     const QString stagedGrpPath = graphSource.usesExternalGraph()
         ? QDir(payloadDirectory).filePath(m_temporaryMapName + ".grp")
         : QString();
-    if(!atomicWrite(stagedMprPath, input.mprData, error) ||
+    if(!atomicWrite(stagedMprPath, runtimeMprData, error) ||
        !atomicWrite(stagedMobPath, stagedMob, error))
         return false;
     if(graphSource.usesExternalGraph()
@@ -2140,6 +2665,40 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     {
         if(error) *error = "The staged MPR failed validation:\n" + report.toText();
         return false;
+    }
+    if(!input.terrainTextureResourceData.isEmpty())
+    {
+        const int pages = int(mprDocument.mapInfo().textureCount);
+        const int activeSlots = int(mprDocument.mapInfo().tileCount);
+        const QString runtimeNamespace = mprDocument.mapInfo().innerNamespace;
+        if(runtimeNamespace.compare(m_temporaryMapName,
+                                    Qt::CaseInsensitive) != 0
+           || pages != input.expectedTerrainAtlasPages
+           || activeSlots != input.expectedTerrainAtlasSlots
+           || pages != stagedTextureMmpMembers)
+        {
+            if(error) *error = QString(
+                "The staged MPR/RES terrain atlas contract differs: "
+                "namespace=%1 expected namespace=%2, MPR pages=%3 slots=%4, "
+                "RES pages=%5, expected pages=%6 slots=%7.")
+                .arg(runtimeNamespace, m_temporaryMapName)
+                .arg(pages).arg(activeSlots).arg(stagedTextureMmpMembers)
+                .arg(input.expectedTerrainAtlasPages)
+                .arg(input.expectedTerrainAtlasSlots);
+            return false;
+        }
+        QJsonObject atlasProbe;
+        atlasProbe.insert("mode", "run-owned-expanded-terrain-atlas");
+        atlasProbe.insert("texturePages", pages);
+        atlasProbe.insert("activeSlots", activeSlots);
+        atlasProbe.insert("resourceMmpMembers", stagedTextureMmpMembers);
+        atlasProbe.insert("resourceSha256", m_livePlaceholderResourceSha256);
+        atlasProbe.insert("textureProbeName", terrainTextureProbeName);
+        atlasProbe.insert("textureProbeMemberName", terrainTextureProbeMemberName);
+        atlasProbe.insert("runtimeNamespace", runtimeNamespace);
+        atlasProbe.insert("exceedsLegacyEightPages", pages > 8);
+        atlasProbe.insert("installedArchivesModified", false);
+        m_manifest.insert("terrainAtlasRuntimeProbe", atlasProbe);
     }
     CMobDocument mobDocument;
     if(!mobDocument.load(QFileInfo(stagedMobPath), &report))
@@ -2201,7 +2760,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     liveFiles.insert("placeholderResPath", m_livePlaceholderResourcePath);
     liveFiles.insert("placeholderResSha256", m_livePlaceholderResourceSha256);
     m_manifest.insert("liveFiles", liveFiles);
-    if(!atomicWrite(m_liveMprPath, input.mprData, error) ||
+    if(!atomicWrite(m_liveMprPath, runtimeMprData, error) ||
        !atomicWrite(m_liveMobPath, stagedMob, error) ||
        !atomicWrite(m_livePlaceholderResourcePath, placeholderArchive, error))
         return false;
@@ -2241,7 +2800,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                                           input.mapSizeX,
                                           input.mapSizeY,
                                           input.spawn.position,
-                                          &stagedArchive, &stagingErrors))
+                                          &stagedArchive, &stagingErrors,
+                                          terrainTextureProbeName))
         {
             if(error) *error = "Could not stage the private test map table:\n"
                 + stagingErrors.join('\n');
@@ -2300,7 +2860,8 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.runtimeManifestId = input.profile.runtimeManifestId;
     request.runtimeComponentHashes = runtimeHashes(input.profile);
     request.stagedMprPath = stagedMprPath;
-    request.internalMapName = input.mapEntry.mprName;
+    request.internalMapName = input.syntheticMapIdentity
+        ? m_temporaryMapName : input.mapEntry.mprName;
     request.orderedStagedMobPaths << stagedMobPath;
     request.orderedStagedMobPaths << stagedSupplementalPaths;
     request.activeMobPath = stagedMobPath;
@@ -2308,6 +2869,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                                 fileSha256(input.sourceMpr.absoluteFilePath()));
     request.sourceSha256.insert(input.sourceMob.absoluteFilePath(),
                                 fileSha256(input.sourceMob.absoluteFilePath()));
+    if(!input.terrainTextureResourceData.isEmpty()
+       && input.sourceTerrainTextureResource.isFile())
+        request.sourceSha256.insert(
+            input.sourceTerrainTextureResource.absoluteFilePath(),
+            fileSha256(input.sourceTerrainTextureResource.absoluteFilePath()));
     // A generated graph is an owned staged payload, not a source file. Do not
     // put its diagnostic pseudo-path into the source-integrity inventory.
     if(graphSource.usesExternalGraph() && QFileInfo(graphSource.externalPath).isFile())
@@ -2349,12 +2915,25 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     request.sessionSettings.insert("requestedSpawnY", input.spawn.requestedPosition.y());
     request.sessionSettings.insert("spawnAdjusted", input.spawn.adjusted);
     request.sessionSettings.insert("godmode", input.godmode);
+    request.sessionSettings.insert("forceDrawall", input.forceDrawall);
     request.sessionSettings.insert("overrideWorldTime", input.overrideWorldTime);
     request.sessionSettings.insert("worldTimeHours", input.worldTimeHours);
     request.sessionSettings.insert("borrowedMapIdentity", input.borrowedMapIdentity);
     request.sessionSettings.insert("baseProbeLevel", input.baseProbeLevel);
     request.sessionSettings.insert("clearance", input.spawn.clearance);
     request.sessionSettings.insert("unobstructed", input.spawn.unobstructed);
+    if(isJmv && !prepareRunOwnedDrawallAutoexec(
+           QDir(m_engineDirectory).filePath("2utoexec.cfg"), m_runRoot,
+           input.forceDrawall, &m_manifest, &m_drawallAutoexecPath, error))
+        return false;
+    if(!m_drawallAutoexecPath.isEmpty())
+    {
+        const QJsonObject drawall = m_manifest.value("drawallStress").toObject();
+        request.sourceSha256.insert(drawall.value("sourcePath").toString(),
+                                    drawall.value("sourceSha256").toString());
+        appendRunLog(QString("Staged run-owned drawall autoexec path=%1 command=drawall 1 installedModified=false")
+                     .arg(QDir::toNativeSeparators(m_drawallAutoexecPath)));
+    }
     request.logPath = m_runLogPath;
     request.resultPath = QDir(m_runRoot).filePath("result.json");
     QStringList requestErrors;
@@ -2425,6 +3004,14 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
                       hasTemporaryMinimap ? temporaryMinimapRuntimeName
                                           : syntheticMapPlaceholderTextureName(),
                       hasTemporaryMinimap ? "reviewed-minimap" : "neutral-checker"));
+    appendRunLog(QString("Staged standalone temporary texture RES path=%1 sha256=%2 pages=%3 slots=%4 mode=%5 registration=shared-owned-process-bridge installedArchivesModified=false")
+                 .arg(QDir::toNativeSeparators(m_livePlaceholderResourcePath),
+                      m_livePlaceholderResourceSha256)
+                 .arg(input.expectedTerrainAtlasPages)
+                 .arg(input.expectedTerrainAtlasSlots)
+                 .arg(input.terrainTextureResourceData.isEmpty()
+                      ? QStringLiteral("placeholder")
+                      : QStringLiteral("expanded-terrain-atlas")));
     appendRunLog(QString("Staged temporary map=%1 exit=%2 spawn=(%3,%4) clearance=%5")
                  .arg(m_temporaryMapName).arg(input.spawn.exitId)
                  .arg(x, y).arg(input.spawn.clearance, 0, 'f', 3));
@@ -2523,6 +3110,16 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
             *error = "The primary MOB has no embedded AI_GRAPH and no matching external .grp was found. Explicit confirmation is required before hot reloading a graphless map.";
         return false;
     }
+
+    const QString candidateAtlasSha256 =
+        input.terrainTextureResourceData.isEmpty()
+            ? QString() : sha256(input.terrainTextureResourceData);
+    if(terrainAtlasHotReloadRequiresRestart(
+           m_sourceTerrainTextureResourceSha256,
+           m_sourceTerrainAtlasPages, m_sourceTerrainAtlasSlots,
+           candidateAtlasSha256, input.expectedTerrainAtlasPages,
+           input.expectedTerrainAtlasSlots))
+        return queueTerrainAtlasRestart(input, candidateAtlasSha256, error);
 
     const quint64 sequence = m_hotReloadSequence + 1;
     const quint64 generation = m_saveGeneration + 1;
@@ -2885,7 +3482,52 @@ bool CJmvMapTestLauncher::restart(const SJmvMapTestLaunchInput& input,
     {
         if(isRunning())
         {
-            appendRunLog("Graceful restart stop timed out; terminating the Endurance-owned process");
+            appendRunLog(
+                "Graceful restart stop timed out; terminating the Endurance-owned process");
+            m_process->kill();
+        }
+    });
+    return true;
+}
+
+bool CJmvMapTestLauncher::queueTerrainAtlasRestart(
+    const SJmvMapTestLaunchInput& input, const QString& candidateAtlasSha256,
+    QString* error)
+{
+    if(!isRunning())
+    {
+        if(error)
+            *error = "The owned test process exited before its terrain atlas could be restarted.";
+        return false;
+    }
+    if(m_terrainAtlasRestartPending)
+    {
+        if(error)
+            *error = "A terrain-atlas test restart is already in progress.";
+        return false;
+    }
+
+    m_pendingTerrainAtlasRestartInput = input;
+    m_terrainAtlasRestartPending = true;
+    appendRunLog(QString(
+        "Terrain atlas input changed; replacing unsafe MPR-only hot reload "
+        "with an owned-process restart oldSha256=%1 newSha256=%2 "
+        "oldPages=%3 newPages=%4 oldSlots=%5 newSlots=%6")
+        .arg(m_sourceTerrainTextureResourceSha256.isEmpty()
+                 ? QStringLiteral("(none)")
+                 : m_sourceTerrainTextureResourceSha256,
+             candidateAtlasSha256.isEmpty()
+                 ? QStringLiteral("(none)") : candidateAtlasSha256)
+        .arg(m_sourceTerrainAtlasPages).arg(input.expectedTerrainAtlasPages)
+        .arg(m_sourceTerrainAtlasSlots).arg(input.expectedTerrainAtlasSlots));
+    m_stopRequested = true;
+    m_process->terminate();
+    QTimer::singleShot(5000, this, [this]()
+    {
+        if(isRunning() && m_terrainAtlasRestartPending)
+        {
+            appendRunLog(
+                "Terrain-atlas restart stop timed out; terminating the Endurance-owned process");
             m_process->kill();
         }
     });
@@ -2980,7 +3622,9 @@ void CJmvMapTestLauncher::stop()
     if(!isRunning())
         return;
     m_stopRequested = true;
-    appendRunLog("Stop Test requested by user");
+    appendRunLog(m_runtimeFailureObserved
+        ? "Stop Test initiated after detected native runtime failure"
+        : "Stop Test requested by user");
     m_process->terminate();
     QTimer::singleShot(5000, this, [this]()
     {

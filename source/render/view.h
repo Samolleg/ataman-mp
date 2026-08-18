@@ -22,12 +22,25 @@
 #include <QFutureWatcher>
 #include <functional>
 
+#if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
+inline uint qHash(const QPoint& point, uint seed = 0)
+{
+    return qHash(qMakePair(point.x(), point.y()), seed);
+}
+#endif
+
 #include "types.h"
 #include "select_window.h"
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
+#include "terrain_resolve_audit.h"
+#include "terrain_tile_information_policy.h"
+#include "landscape_edit_policy.h"
+#include "terrain_save_flow_policy.h"
 #include "terrain_atlas_analyzer.h"
+#include "terrain_atlas_archive_binding.h"
 #include "terrain_atlas_profile.h"
+#include "landscape_tools.h"
 #include "spatial_grid.h"
 #include "particle_animation.h"
 #include "ai_graph_document.h"
@@ -50,6 +63,7 @@ class CKeyManager;
 class CMob;
 class CCamera;
 class CNode;
+class CTile;
 class CUnit;
 class CMagicTrap;
 class CKeyManager;
@@ -63,6 +77,7 @@ class CTableManager;
 class COperation;
 struct SColor;
 struct SMprSaveCommitResult;
+struct SResArchiveNewMember;
 
 struct STerrainPaintAuditAction
 {
@@ -81,6 +96,8 @@ class CTreeView;
 class IPropertyBase;
 class CTileForm;
 class CLandscapeTools;
+class CTerrainWorkingAtlas;
+struct SWorkingTerrainResolveStage;
 class CLight;
 class QOpenGLFramebufferObject;
 class RenderQueueContext;
@@ -136,8 +153,16 @@ public:
     void unloadLand(bool promptForSave = true);
     void saveLand();
     void saveLandAs();
+    void saveModernDraftAs();
     bool buildValidatedLandscapeCandidate(QByteArray* data,
-                                          CValidationReport* report = nullptr);
+                                          CValidationReport* report = nullptr,
+                                          QByteArray* terrainAtlasResource = nullptr,
+                                          int* terrainAtlasPages = nullptr,
+                                          int* terrainAtlasSlots = nullptr);
+    QString activeTerrainArchivePath() const
+    {
+        return m_activeTerrainArchivePath;
+    }
     bool buildGeneratedAiGraphCandidate(QByteArray* data,
                                         QString* error = nullptr,
                                         QString* sourceDescription = nullptr,
@@ -158,6 +183,11 @@ public:
                              const QString& commandText);
     void notifyMobScriptChanged(CMob* mob);
     bool hasActiveMob() const { return m_activeMob != nullptr; }
+    bool hasPendingTerrainPublication() const
+    {
+        return modernTerrainPublicationRequired(true);
+    }
+    ETerrainMprSavePresentation terrainMprSavePresentation() const;
     void unloadMob(QString mobName);
     void attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStack, CProgressView* pProgress, QLineEdit* pMouseCoord, CTreeView* pTree, CTileForm* pTileForm);
     void attachLandscapeTools(CLandscapeTools* tools);
@@ -209,7 +239,8 @@ public:
     void refreshUiScale();
     void moveCameraToPoint(const QVector3D& position);
     void anchorCameraRotationToViewportCenter();
-    void changeOperation(EButtonOp type);
+    void changeOperation(EButtonOp type,
+                         bool preserveLandscapeEditing = false);
     void operationSetBackup(EOperationAxisType operationType);
     void operationRevert(EOperationAxisType operationType);
     void operationApply(EOperationAxisType operationType);
@@ -285,12 +316,15 @@ public:
     quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
     void openMapParameters();
     void openAtlasTiles();
-    void pickTile(QVector3D posOnLand, bool bLand = true);
+    bool pickTile(QVector3D posOnLand, bool bLand = true);
+    void beginTerrainPaintSampling();
+    void endTerrainPaintSampling();
     void setTile(QVector3D posOnLand, bool bLand = true);
     void updatePreviewTile(QVector3D posOnLand, bool bLand = true);
     void addTileRotation(int step);
     void adjustTerrainPaintSize(int steps);
     void adjustTerrainPaintMaterial(int steps);
+    void selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode);
     bool manualTilePaintingEnabled() const;
     float terrainPaintStampSpacing() const;
     bool terrainBrushProjectsToLand() const;
@@ -304,6 +338,7 @@ public:
     void pickQuickAccessTile(int index);
     void beginTileBrushGroup();
     void endTileBrushGroup();
+    void cancelTileBrushGroup();
     void beginTerrainPreviewBatch();
     void endTerrainPreviewBatch();
     bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
@@ -347,9 +382,36 @@ private:
     void syncMprDirtyState();
     bool saveLandscapeDocument(const QFileInfo& destination);
     bool saveChangedLandscapeDocument(const QFileInfo& destination,
-                                      bool adoptAsOpenBaseline);
+                                      bool adoptAsOpenBaseline,
+                                      bool allowModernDraft = false);
+    bool modernTerrainPublicationRequired(bool saveAs = false) const;
+    ETerrainMprSaveRoute currentTerrainMprSaveRoute(bool saveAs) const;
+    bool persistedModernDraftRequiresPublication() const;
     bool adoptCommittedLandscapeBaseline(const QFileInfo& destination,
                                          const SMprSaveCommitResult& commit);
+    bool adoptCompleteTerrainBaseline(
+        const QFileInfo& destination, const QString& expectedSha256,
+        const QVector<QImage>& physicalTiles,
+        const QString& terrainArchivePath,
+        const STerrainAtlasProfile& expectedProfile,
+        bool requireSemanticMember);
+    bool buildTerrainSemanticFieldMember(
+        const QByteArray& candidateMprBytes,
+        const QFileInfo& destinationMpr,
+        const QString& mprNamespace,
+        const QByteArray& atlasPixelSha256,
+        const QByteArray& profileBytes,
+        SResArchiveNewMember* member,
+        CValidationReport* report = nullptr) const;
+    bool restoreTerrainSemanticFieldFromArchive(
+        const QFileInfo& mprFile, const QString& terrainArchivePath,
+        bool requireMember = false);
+    bool restoreTerrainSemanticFieldFromArchive(
+        const CMprDocument& document,
+        const STerrainAtlasProfile& profile,
+        CTerrainEditModel* terrain,
+        const QFileInfo& mprFile, const QString& terrainArchivePath,
+        bool requireMember) const;
     void refreshMobDirtyStates();
     void initShaders();
     void draw();
@@ -370,6 +432,10 @@ private:
                                      bool success);
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
+    bool terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell);
+    void showTerrainTileInformation(const QPoint& viewportPosition);
+    void appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
+                                       const QString& category);
     void updateTileForm(bool bGenerateNewTable = false);
     void saveSession();
     bool closeMobParameterWindow(CMob* mob);
@@ -389,9 +455,38 @@ private:
     void clearLandscapeBrushSelection();
     void selectAdjacentBehaviorPoint(int offset);
     void ensureManualTileSelection();
+    void deferTerrainAutoCatalogBuild(const QFileInfo& mprFile);
+    void queueDeferredTerrainAutoCatalogBuild();
+    bool ensureTerrainAutoCatalogReady();
     void rebuildTerrainAutoCatalog();
+    void refreshClassicAutoPalette();
+    void refreshManualAtlasPalette(bool invalidate = true);
+    void refreshWorkingTerrainPalettes();
+    void refreshTerrainFamilyUsage();
+    bool terrainResolveUiActive() const;
+    void requestResolveMissingTerrainBlends(ETerrainResolveAuditTrigger trigger);
+    void resolveMissingTerrainBlends();
     QVector<STerrainAtlasSlotUsage> terrainAtlasUsage() const;
+    QMap<int, quint64> workingTerrainAtlasUsage() const;
+    bool terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const;
+    bool realizeWorkingTerrainSignature(
+        const STerrainTransitionSignature& signature, int cellX, int cellY,
+        QMap<int, quint64>* usage, CValidationReport* report,
+        bool* generated = nullptr,
+        qint32 preferredPaintMaterial = 0,
+        qint32 preferredRuntimeType = -1,
+        SWorkingTerrainResolveStage* staging = nullptr,
+        bool requirePreferredRuntimeType = false);
+    bool syncWorkingTerrainAtlas(CValidationReport* report,
+                                 CTerrainWorkingAtlas* staging = nullptr);
+    bool ensureModernTerrainArtworkAssigned(
+        ETerrainTileLayer layer,
+        const CTerrainTransitionCatalog& catalog);
+    void refreshTerrainTilePreview(const STerrainTileCommand& command,
+                                   bool forward);
     void reviewTerrainAtlasProfile();
+    void reviewTerrainAtlasProfileAtSlot(int initialSlot);
+    void finalizeVirtualTerrainAtlas();
     void updateTerrainAtlasViewerAnnotations(const QString& status);
     void rebuildSpatialIndices();
     QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
@@ -436,6 +531,11 @@ private:
     void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
                              bool receiveStatic = true,
                              bool receiveDynamic = true);
+    bool resolveTerrainPaintFootprint(QVector3D position, bool land,
+                                      CTile** tile, STileLocation* location,
+                                      STerrainTileBrush* brush,
+                                      QPoint* detailVertex,
+                                      STerrainPaintFootprintSnapshot* footprint);
 
 
 public slots:
@@ -477,6 +577,7 @@ signals:
     void openDatabasePrototypeRequested(const QString& prototype);
     void mobStateChanged();
     void loadedMapStateChanged();
+    void mprSaveStateChanged();
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
     void cameraSpeedMultiplierChanged(double multiplier);
@@ -638,24 +739,86 @@ private:
     QVector<SMprAnimatedTileRecord> m_mprAnimatedTiles;
     STerrainAtlasAnalysis m_terrainAtlasAnalysis;
     STerrainAtlasProfile m_terrainAtlasProfile;
+    STerrainAtlasProfileSource m_terrainAtlasProfileSource;
+    QVector<QImage> m_authoredTerrainTileImages;
+    QSharedPointer<CTerrainWorkingAtlas> m_workingTerrainAtlas;
+    bool m_terrainAutoCatalogPending{false};
+    bool m_terrainAutoCatalogBuildQueued{false};
+    bool m_terrainAutoCatalogBuilding{false};
+    QFileInfo m_pendingTerrainAutoCatalogMprPath;
+    QElapsedTimer m_terrainAutoCatalogLoadTimer;
+    qint64 m_terrainAutoCatalogFirstFrameMs{-1};
+    bool m_manualAtlasPaletteDirty{true};
+    bool m_deferManualAtlasPalette{false};
+    bool m_workingAtlasPaletteRefreshPending{false};
+    STerrainAtlasEmbeddedBindingResult
+        m_prevalidatedTerrainEmbeddedBinding;
+    bool m_prevalidatedTerrainTilesAdopted{false};
+    QSet<int> m_workingAtlasProtectedSlots;
     QString m_lastAtlasReviewPromptBinding;
     QMap<qint32, int> m_terrainMaterialRepresentatives;
+    QVector<STerrainGlobalMaterialFamily> m_terrainGlobalFamilies;
+    QVector<STerrainPaintMaterialChoice> m_modernLandPaintChoices;
+    QVector<STerrainPaintMaterialChoice> m_modernUnderwaterPaintChoices;
+    QVector<STerrainPaintMaterialChoice> m_modernOverlayPaintChoices;
+    QMap<qint32, QImage> m_terrainGlobalMaterialSources;
+    QMap<qint32, STerrainGlobalMaterialSource>
+        m_terrainGlobalMaterialSourceIdentities;
+    QMap<QString, QImage> m_terrainGlobalUniformTileCache;
+    QMultiMap<QByteArray, STerrainGlobalTransitionSource>
+        m_terrainGlobalTransitionSources;
+    QMap<QString, QByteArray> m_terrainGlobalTransitionEncodedPageCache;
+    QSet<QString> m_terrainGlobalTransitionMissingPages;
+    QMap<QString, QImage> m_terrainGlobalTransitionTileCache;
+    QMultiMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
+        m_importedTerrainTransitions;
     QVector<STerrainTileDelta> m_terrainPaintAudit;
     STerrainTileCommand m_tileStrokeCommand;
     SOverlaySurfaceCommand m_overlaySurfaceStrokeCommand;
     SOverlaySurfaceSnapshot m_overlaySurfaceStrokeBaseline;
+    STerrainTileCommand m_classicAutoStrokePreviewCommand;
+    QSet<QPair<int, int>> m_classicAutoStrokeVertices;
+    QSet<QPair<int, int>> m_classicAutoStrokeAnchors;
+    bool m_classicAutoStrokePending{false};
+    ETerrainTileLayer m_classicAutoStrokeLayer{ETerrainTileLayer::Land};
+    qint32 m_classicAutoStrokeMaterialId{-1};
     QVector<STerrainPaintAuditAction> m_terrainPaintActions;
     int m_terrainPaintActionId{0};
+    ETerrainResolveAuditTrigger m_pendingTerrainResolveAuditTrigger{
+        ETerrainResolveAuditTrigger::Programmatic};
+    quint64 m_terrainResolveAuditActionId{0};
     quint32 m_terrainSemanticSeed{0};
+    quint32 m_tileStrokeDistributionSeed{0};
+    QString m_requestedTerrainResourceIdentity;
+    bool m_requestedTerrainIdentityReplacement{false};
+    bool m_requestedTerrainIdentityFinalization{false};
+    QFileInfo m_requestedTerrainMprDestination;
+    QString m_activeTerrainArchivePath;
+    bool m_legacyTerrainProfileCollision{false};
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
     CTileBrushStrokePolicy m_tileBrushStrokePolicy;
+    bool m_terrainAssignmentPromptPending{false};
+    bool m_tilePaintStrokeActive{false};
+    bool m_tileStrokeFinishing{false};
+    bool m_tileStrokeClassicAuto{false};
     bool m_terrainPaintOutlineValid{false};
     bool m_terrainPaintOutlineGeometryDirty{true};
     QVector<QVector3D> m_terrainPaintOutlineVertices;
     bool m_terrainPaintProjectionLand{true};
-    int m_terrainPaintOutlineX{0};
-    int m_terrainPaintOutlineY{0};
+    STerrainPaintFootprintSnapshot m_terrainPaintFootprint;
+    bool m_terrainPaintFootprintValid{false};
+    bool m_terrainSampleGestureActive{false};
+    bool m_terrainSampleKeyValid{false};
+    QPoint m_lastTerrainSamplePoint;
+    int m_lastTerrainSampleLayer{-1};
+    int m_lastTerrainSampleMode{-1};
+    bool m_paintIssueDragActive{false};
+    bool m_paintIssueHoverValid{false};
+    CTerrainTileInformationPolicy m_terrainTileInformationPolicy;
+    bool m_paintIssueTooltipVisible{false};
+    QPoint m_paintIssueHoverCell;
+    QSet<QPoint> m_paintIssueSelectedCells;
     QPoint m_lastTerrainPaintCenter;
     bool m_lastTerrainPaintCenterValid{false};
     bool m_lastTerrainPaintLayerLand{true};
@@ -682,6 +845,16 @@ private:
     QVector3D m_overlayBrushPickPosition;
     bool m_overlayBrushPickValid{false};
     bool m_overlayBrushPickProjectionLand{true};
+    int m_tileStrokePaletteMode{-1};
+    int m_tileStrokeTargetMode{-1};
+    bool m_tileStrokeSafeMode{false};
+    qint32 m_tileStrokeMaterialId{-1};
+    ETerrainTileLayer m_tileStrokeLayer{ETerrainTileLayer::Land};
+    int m_tileStrokeSafeSkippedVertices{0};
+    int m_tileStrokeSafeSkippedBoundaryCells{0};
+    bool m_tileStrokeUndoCheckpointed{false};
+    QString m_classicAutoStrokeValidation;
+    bool m_classicAutoStrokePreviewRefused{false};
     bool m_terrainPreviewBatchActive{false};
     QSet<QPair<int, int>> m_pendingTerrainPreviewSectors;
     QMap<QPair<int, int>, QByteArray> m_pendingTerrainPreviewBefore;

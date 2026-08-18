@@ -11,6 +11,19 @@
 #include <QTemporaryDir>
 #include <QtEndian>
 
+#include "res_file.h"
+
+// The focused target links the runtime reader without the unrelated core
+// utility implementation. Keep its stream format identical to util::formatStream
+// so the regression exercises the production parser's byte order.
+namespace util {
+void formatStream(QDataStream& stream)
+{
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+}
+}
+
 namespace {
 QByteArray syntheticRes()
 {
@@ -99,6 +112,7 @@ class ResArchiveDocumentTests : public QObject
     Q_OBJECT
 private slots:
     void noOpIsByteIdentical();
+    void legacyResReaderUsesExactNameLengthAndRejectsInvalidRanges();
     void replacementPreservesUntouchedMembersAndMetadata();
     void staleMemberHashRefusesOutput();
     void malformedArchiveIsRejected();
@@ -107,6 +121,10 @@ private slots:
     void sourceRaceRefusesSave();
     void syntheticMapTableAddsOwnedMaplessZoneLosslessly();
     void syntheticPlaceholderBuildsStandaloneResolvableChecker();
+    void bulkAppendBuildsAllMembersInOneDerivedArchive();
+    void publishMembersRequiresExplicitReplacementAndPreservesUnrelatedBytes();
+    void publishedMembersCommitInPlaceWithOptionalBackup();
+    void failedPublishedMembersCommitLeavesArchiveUntouched();
 };
 
 void ResArchiveDocumentTests::noOpIsByteIdentical()
@@ -304,6 +322,244 @@ void ResArchiveDocumentTests::syntheticMapTableAddsOwnedMaplessZoneLosslessly()
         QCOMPARE(zone.exits.first().deployRectangle.center(), QPointF(12.5, 18.25));
     }
     QCOMPARE(matches, 1);
+
+    QByteArray customStaged;
+    errors.clear();
+    QVERIFY2(buildSyntheticMapTableArchive(
+        original, "texts.res", "ed5678abcd", "island", "ed5678abcd",
+        7, 5, QPointF(12.5, 18.25), &customStaged, &errors,
+        "customatlas007"), qPrintable(errors.join('\n')));
+    CResArchiveDocument customCandidate;
+    QVERIFY(customCandidate.loadBytes(customStaged));
+    CMapTableDocument customTable;
+    QVERIFY2(customTable.loadBytes(customCandidate.memberPayload("map.txt"), &errors),
+             qPrintable(errors.join('\n')));
+    int customMatches = 0;
+    for(const SMapTableZone& zone : customTable.zones())
+    {
+        if(zone.zoneId != "ed5678abcd")
+            continue;
+        ++customMatches;
+        QCOMPARE(zone.maps.minimapTexture, QString("customatlas007"));
+        QCOMPARE(zone.maps.objectivesTexture, QString("customatlas007"));
+    }
+    QCOMPARE(customMatches, 1);
+}
+
+void ResArchiveDocumentTests::legacyResReaderUsesExactNameLengthAndRejectsInvalidRanges()
+{
+    const QByteArray bytes = syntheticRes();
+
+    // syntheticRes deliberately concatenates its names without a trailing NUL.
+    // CResFile must decode exactly NamesLenght bytes rather than scanning beyond
+    // the filename table.
+    CResFile valid(bytes);
+    QCOMPARE(valid.bufferOfFiles().size(), 3);
+    QCOMPARE(valid.bufferOfFiles().value(QStringLiteral("opaque.bin")),
+             QByteArray::fromHex("001122334455"));
+    QCOMPARE(valid.bufferOfFiles().value(QStringLiteral("mixed.CaSe")),
+             QByteArray("untouched authored payload"));
+
+    // A short names table used to be accepted after readRawData() returned a
+    // partial read. The incomplete buffer was then passed to the NUL-terminated
+    // QTextCodec overload.
+    const QByteArray truncatedNames = bytes.left(bytes.size() - 1);
+    CResFile truncated(truncatedNames);
+    QVERIFY(truncated.bufferOfFiles().isEmpty());
+
+    const quint32 tableOffset = qFromLittleEndian<quint32>(
+        reinterpret_cast<const uchar*>(bytes.constData() + 8));
+
+    QByteArray outOfRangeName = bytes;
+    qToLittleEndian<quint16>(quint16(2),
+        reinterpret_cast<uchar*>(outOfRangeName.data() + tableOffset + 16));
+    qToLittleEndian<quint32>(quint32(0xFFFFFFFF),
+        reinterpret_cast<uchar*>(outOfRangeName.data() + tableOffset + 18));
+    CResFile invalidNameRange(outOfRangeName);
+    QVERIFY(invalidNameRange.bufferOfFiles().isEmpty());
+
+    QByteArray overflowingPayloadRange = bytes;
+    qToLittleEndian<quint32>(quint32(1),
+        reinterpret_cast<uchar*>(overflowingPayloadRange.data() + tableOffset + 4));
+    qToLittleEndian<quint32>(quint32(0xFFFFFFFF),
+        reinterpret_cast<uchar*>(overflowingPayloadRange.data() + tableOffset + 8));
+    CResFile invalidPayloadRange(overflowingPayloadRange);
+    QVERIFY(invalidPayloadRange.bufferOfFiles().isEmpty());
+}
+
+void ResArchiveDocumentTests::publishedMembersCommitInPlaceWithOptionalBackup()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString archivePath = directory.filePath("textures.res");
+    const QByteArray original = syntheticRes();
+    QFile archive(archivePath);
+    QVERIFY(archive.open(QIODevice::WriteOnly));
+    QCOMPARE(archive.write(original), qint64(original.size()));
+    archive.close();
+
+    CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(original, archivePath));
+    SResPublishedMembersSaveRequest request;
+    request.source = QFileInfo(archivePath);
+    request.destination = QFileInfo(archivePath);
+    SResArchiveNewMember page;
+    page.name = QStringLiteral("zone2_deadbeef000.mmp");
+    page.payload = QByteArray("new terrain page");
+    request.published.append(page);
+    request.allowReplaceExisting = false;
+    request.createBackup = false;
+    request.backupRootOverride = directory.filePath("backups");
+    const SResPublishedMembersSaveResult withoutBackup =
+        commitStagedResPublishedMembers(baseline, request);
+    QVERIFY2(withoutBackup.success,
+             qPrintable(withoutBackup.phase + ": " + withoutBackup.error));
+    QVERIFY(withoutBackup.backupPath.isEmpty());
+
+    QFile saved(archivePath);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    const QByteArray firstPublished = saved.readAll();
+    saved.close();
+    CResArchiveDocument first;
+    QVERIFY(first.loadBytes(firstPublished, archivePath));
+    QCOMPARE(first.memberPayload("zone2_deadbeef000.mmp"),
+             QByteArray("new terrain page"));
+    QCOMPARE(first.memberPayload("opaque.bin"), baseline.memberPayload("opaque.bin"));
+
+    SResPublishedMembersSaveRequest replacement = request;
+    replacement.published[0].payload = QByteArray("replacement terrain page");
+    replacement.allowReplaceExisting = true;
+    replacement.createBackup = true;
+    CResArchiveDocument replacementBaseline;
+    QVERIFY(replacementBaseline.loadBytes(firstPublished, archivePath));
+    const SResPublishedMembersSaveResult withBackup =
+        commitStagedResPublishedMembers(replacementBaseline, replacement);
+    QVERIFY2(withBackup.success,
+             qPrintable(withBackup.phase + ": " + withBackup.error));
+    QVERIFY(!withBackup.backupPath.isEmpty());
+    QFile backup(withBackup.backupPath);
+    QVERIFY(backup.open(QIODevice::ReadOnly));
+    QCOMPARE(backup.readAll(), firstPublished);
+}
+
+void ResArchiveDocumentTests::failedPublishedMembersCommitLeavesArchiveUntouched()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString archivePath = directory.filePath("textures.res");
+    const QByteArray original = syntheticRes();
+    QFile archive(archivePath);
+    QVERIFY(archive.open(QIODevice::WriteOnly));
+    QCOMPARE(archive.write(original), qint64(original.size()));
+    archive.close();
+
+    CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(original, archivePath));
+    SResPublishedMembersSaveRequest request;
+    request.source = QFileInfo(archivePath);
+    request.destination = QFileInfo(archivePath);
+    SResArchiveNewMember page;
+    page.name = QStringLiteral("zone2_deadbeef000.mmp");
+    page.payload = QByteArray("new terrain page");
+    request.published.append(page);
+    request.createBackup = false;
+    request.simulateAtomicCommitFailure = true;
+    const SResPublishedMembersSaveResult result =
+        commitStagedResPublishedMembers(baseline, request);
+    QVERIFY(!result.success);
+    QCOMPARE(result.phase, QStringLiteral("atomic-replacement"));
+    QFile unchanged(archivePath);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), original);
+}
+
+void ResArchiveDocumentTests::bulkAppendBuildsAllMembersInOneDerivedArchive()
+{
+    CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(syntheticRes()));
+    QVector<SResArchiveNewMember> appended;
+    for(int page = 0; page < 16; ++page)
+    {
+        SResArchiveNewMember member;
+        member.name = QString("edstress00%1.mmp").arg(page, 3, 10, QLatin1Char('0'));
+        member.payload = QByteArray(257 + page, char(page));
+        appended.append(member);
+    }
+    QByteArray output;
+    QStringList errors;
+    QVERIFY2(baseline.buildWithAppendedMembers(appended, &output, &errors),
+             qPrintable(errors.join('\n')));
+    CResArchiveDocument reopened;
+    QVERIFY2(reopened.loadBytes(output, "bulk.res", &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(reopened.members().size(), baseline.members().size() + appended.size());
+    QCOMPARE(reopened.memberPayload("opaque.bin"), baseline.memberPayload("opaque.bin"));
+    for(const SResArchiveNewMember& member : appended)
+        QCOMPARE(reopened.memberPayload(member.name), member.payload);
+}
+
+void ResArchiveDocumentTests::publishMembersRequiresExplicitReplacementAndPreservesUnrelatedBytes()
+{
+    CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(syntheticRes()));
+    QVector<SResArchiveNewMember> firstPages;
+    SResArchiveNewMember firstPage;
+    firstPage.name = QStringLiteral("zone2_deadbeef000.mmp");
+    firstPage.payload = QByteArray("first-page");
+    firstPages.append(firstPage);
+    QByteArray withFirstIdentity;
+    QStringList errors;
+    QVERIFY2(baseline.buildWithPublishedMembers(
+                 firstPages, false, &withFirstIdentity, &errors),
+             qPrintable(errors.join('\n')));
+
+    CResArchiveDocument installed;
+    QVERIFY(installed.loadBytes(withFirstIdentity, QStringLiteral("textures.res")));
+    const QByteArray unrelated = installed.memberPayload(QStringLiteral("opaque.bin"));
+
+    QVector<SResArchiveNewMember> changedPages;
+    SResArchiveNewMember changedPage;
+    changedPage.name = QStringLiteral("zone2_deadbeef000.mmp");
+    changedPage.payload = QByteArray("replacement-page");
+    changedPages.append(changedPage);
+    QByteArray refused;
+    errors.clear();
+    QVERIFY(!installed.buildWithPublishedMembers(
+        changedPages, false, &refused, &errors));
+    QVERIFY(refused.isEmpty());
+
+    QByteArray replaced;
+    errors.clear();
+    QVERIFY2(installed.buildWithPublishedMembers(
+                 changedPages, true, &replaced, &errors),
+             qPrintable(errors.join('\n')));
+    CResArchiveDocument reopened;
+    QVERIFY(reopened.loadBytes(replaced, QStringLiteral("published-textures.res")));
+    QCOMPARE(reopened.memberPayload(QStringLiteral("zone2_deadbeef000.mmp")),
+             QByteArray("replacement-page"));
+    QCOMPARE(reopened.memberPayload(QStringLiteral("opaque.bin")), unrelated);
+
+    // One missing page beside colliding identity pages is an inconsistent,
+    // partial publication and must not be accepted as either update or reuse.
+    QVector<SResArchiveNewMember> partialIdentity = changedPages;
+    SResArchiveNewMember missingPage;
+    missingPage.name = QStringLiteral("zone2_deadbeef001.mmp");
+    missingPage.payload = QByteArray("second-page");
+    partialIdentity.append(missingPage);
+    QByteArray partialRefused;
+    errors.clear();
+    QVERIFY(!installed.buildWithPublishedMembers(
+        partialIdentity, false, &partialRefused, &errors));
+    QVERIFY(partialRefused.isEmpty());
+
+    // Publishing identical bytes is safe reuse and must not require the
+    // replacement authority reserved for an identity collision.
+    QByteArray reused;
+    errors.clear();
+    QVERIFY2(reopened.buildWithPublishedMembers(
+                 changedPages, false, &reused, &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(reused, replaced);
 }
 
 void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChecker()

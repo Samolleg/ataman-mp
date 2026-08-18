@@ -1,0 +1,24 @@
+{
+  "schema": "ei-ice-gradient-repair-decisions-v1",
+  "checkpoint": "R57-ICE-GRADIENT-REPAIR",
+  "authority": "explicit-user-review-with-painted-reference",
+  "status": "rejected-direction",
+  "decisions": {
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Reject tile-position gradient repair",
+      "note": "Gradient must follow distance from the irregular authored blend edge: thin beside that edge and progressively thicker toward the owner field and tile edges. Do not impose a quadrant-to-center geometric haze."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Reject tile-position gradient repair",
+      "note": "Gradient must follow distance from the irregular authored blend edge: thin beside that edge and progressively thicker toward the owner field and tile edges. Do not impose a quadrant-to-center geometric haze."
+    }
+  },
+  "approvedRoutes": [],
+  "pendingRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "rejectedMethod": "tile-position owner-edge-to-center gradient",
+  "requestedMethod": "Distance-to-authored-blend-edge repair: retain the exact irregular connected blend body, use thinner owner paint immediately beside it, and increase owner opacity smoothly with distance into the owner field until the distant tile edges are fully owned.",
+  "generationPolicy": "Do not apply either R57 candidate. Both Ice inside routes remain pending boundary-distance gradient review."
+}

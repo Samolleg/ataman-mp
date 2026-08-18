@@ -1,0 +1,52 @@
+{
+  "schema": "ei-semantic-atlas-r155-decisions-v1",
+  "source": "scripts/semantic_atlas_r155_user_answers.txt",
+  "sourceSha256": "9A8E1A3ADA5ED8AEA97C4C5FE05B4E0074D322CA3BDFB6276D4AF3F530BA90B0",
+  "queue": "artifacts/semantic-atlas-r155-stone-beige-followup/questionnaire/r155-stone-beige-queue.json",
+  "queueSha256": "3FBC769CF06BE67D15F26754C470010D8088CB4A73C43BB02FE9EC71ABB8505D",
+  "questionnaireSha256": "9A04C29ED0CAFC6438EDC385A969546B5A3465C5F1B734F9A69695DDCB878DC6",
+  "catalogInputSha256": "5EA2E6B5506ADE9049497964F806784718CBADFB390C1FC7975AAF26E3CD2EAB",
+  "catalogOutputSha256": "5EA2E6B5506ADE9049497964F806784718CBADFB390C1FC7975AAF26E3CD2EAB",
+  "counts": {
+    "submittedCards": 1,
+    "changedLogicalCorners": 0,
+    "ownerExpandedCorrections": 0,
+    "explicitlyConfirmedLogicalCorners": 2,
+    "ownerExpandedConfirmedCorners": 4,
+    "untouchedContextCorners": 2
+  },
+  "cornerCorrections": {},
+  "confirmedCurrent": [
+    {
+      "key": "semantic-atlas-pixels-ef5edc128f90ec15",
+      "namespace": "bz16h",
+      "slot": 467,
+      "owners": [
+        "bz16h",
+        "Zone18"
+      ],
+      "confirmedCorners": {
+        "SE": "Stone / Beige",
+        "SW": "Stone / Beige"
+      },
+      "untouchedContext": {
+        "NW": "Sand / Dark",
+        "NE": "Sand / Dark"
+      },
+      "currentMapping": {
+        "NW": "Sand / Dark",
+        "NE": "Sand / Dark",
+        "SE": "Stone / Beige",
+        "SW": "Stone / Beige"
+      },
+      "disposition": "explicitly confirmed remaining transition-only Stone / Beige corners; do not re-ask without new conflicting evidence"
+    }
+  ],
+  "policy": {
+    "explicitChangesOnly": true,
+    "noCatalogMutation": true,
+    "exactOwnerPropagationOnly": true,
+    "untouchedDefaultsAreNotConfirmations": true,
+    "confirmedCurrentCornersEnterReviewMemory": true
+  }
+}

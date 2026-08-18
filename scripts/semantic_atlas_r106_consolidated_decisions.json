@@ -1,0 +1,1623 @@
+{
+  "schema": "ei-semantic-atlas-r106-consolidated-decisions-v1",
+  "sourceAnswersSha256": "3D5C7CA14EBC748515E70738C3E06CA098D52E026AE0E4F8595B34435BB7925C",
+  "sourceCatalogSha256": "BD8F7C8D4FBD279C9BE8ADF56244219F0C456388B274333814AA0A86A23981DD",
+  "sourceQuestionnaire": "semantic-atlas-r106-combined-questionnaire.html",
+  "cornerOrder": [
+    "NW",
+    "NE",
+    "SE",
+    "SW"
+  ],
+  "newFamilies": {
+    "zone7": [
+      {
+        "id": 22,
+        "name": "Ground / Dark brown",
+        "templateFamily": "Ground / Brownish",
+        "sourceFamily": "reviewed/ground/dark-brown",
+        "thumbnailSlot": 133,
+        "uniformSlots": [
+          133,
+          134
+        ],
+        "memberSlots": [
+          133,
+          134,
+          335
+        ],
+        "paintSelectable": true,
+        "nameStatus": "provisional-user-suggested"
+      }
+    ],
+    "zone10": [
+      {
+        "id": 16,
+        "name": "Stone / Black",
+        "templateFamily": "Stone / Dark gray",
+        "sourceFamily": "reviewed/stone/black",
+        "thumbnailSlot": 288,
+        "uniformSlots": [],
+        "memberSlots": [
+          288
+        ],
+        "paintSelectable": false,
+        "nameStatus": "explicit-cross-atlas-family"
+      }
+    ]
+  },
+  "cornerCorrections": {
+    "bz10k": {
+      "76": {
+        "NW": "Ground / Light"
+      },
+      "247": {
+        "SW": "Ground / Light"
+      }
+    },
+    "bz11k": {
+      "6": {
+        "SW": "Stone / Black"
+      },
+      "12": {
+        "SW": "Stone / Black"
+      },
+      "17": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "20": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "31": {
+        "SE": "Stone / Black"
+      },
+      "35": {
+        "NW": "Stone / Dark",
+        "NE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "60": {
+        "NW": "Stone / Black"
+      },
+      "62": {
+        "SE": "Stone / Black"
+      },
+      "122": {
+        "NE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "131": {
+        "SW": "Stone / Black"
+      },
+      "167": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "168": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "169": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "193": {
+        "NW": "Stone / Black"
+      },
+      "201": {
+        "SW": "Stone / Black"
+      },
+      "202": {
+        "SW": "Stone / Black"
+      },
+      "208": {
+        "NE": "Stone / Black"
+      },
+      "209": {
+        "NE": "Stone / Black"
+      },
+      "247": {
+        "SW": "Stone / Black"
+      },
+      "257": {
+        "SE": "Stone / Black"
+      },
+      "258": {
+        "SE": "Stone / Black"
+      },
+      "280": {
+        "NW": "Stone / Black"
+      },
+      "291": {
+        "NW": "Stone / Black"
+      },
+      "294": {
+        "NW": "Stone / Black"
+      },
+      "307": {
+        "SE": "Ground / Light",
+        "SW": "Ground / Light"
+      },
+      "312": {
+        "NE": "Stone / Dark",
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "319": {
+        "NW": "Stone / Black"
+      },
+      "321": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SW": "Ground / Light"
+      },
+      "339": {
+        "SW": "Stone / Black"
+      },
+      "344": {
+        "NW": "Stone / Black",
+        "NE": "Stone / Black"
+      },
+      "345": {
+        "NW": "Stone / Black",
+        "NE": "Stone / Black"
+      },
+      "350": {
+        "SE": "Stone / Black"
+      },
+      "357": {
+        "SE": "Stone / Black"
+      },
+      "361": {
+        "SE": "Stone / Black"
+      },
+      "371": {
+        "NW": "Stone / Black"
+      },
+      "380": {
+        "NE": "Stone / Black"
+      },
+      "381": {
+        "NE": "Stone / Black"
+      },
+      "393": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light"
+      },
+      "408": {
+        "NW": "Stone / Black",
+        "SE": "Stone / Black"
+      },
+      "425": {
+        "NE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "428": {
+        "SW": "Ground / Stony gray"
+      },
+      "443": {
+        "SW": "Stone / Black"
+      },
+      "444": {
+        "NE": "Stone / Black"
+      },
+      "448": {
+        "SW": "Stone / Black"
+      },
+      "460": {
+        "NE": "Stone / Black",
+        "SW": "Ground / Stony gray"
+      },
+      "464": {
+        "NW": "Stone / Black"
+      },
+      "465": {
+        "NW": "Stone / Black"
+      },
+      "469": {
+        "SE": "Ground / Light",
+        "SW": "Ground / Stony gray"
+      },
+      "499": {
+        "SW": "Stone / Black"
+      },
+      "504": {
+        "NE": "Stone / Black"
+      },
+      "505": {
+        "NW": "Ground / Light"
+      },
+      "507": {
+        "SE": "Stone / Black"
+      }
+    },
+    "bz13h": {
+      "13": {
+        "NW": "Stone / Orange"
+      },
+      "14": {
+        "NW": "Stone / Orange"
+      },
+      "15": {
+        "NW": "Stone / Orange"
+      },
+      "16": {
+        "NW": "Stone / Orange"
+      },
+      "17": {
+        "NW": "Stone / Orange"
+      },
+      "18": {
+        "NW": "Stone / Orange"
+      },
+      "19": {
+        "NW": "Stone / Orange"
+      },
+      "20": {
+        "NW": "Stone / Orange"
+      },
+      "160": {
+        "SW": "Rubble / Orange"
+      },
+      "162": {
+        "SW": "Rubble / Orange"
+      },
+      "164": {
+        "SW": "Rubble / Orange"
+      },
+      "165": {
+        "SW": "Rubble / Orange"
+      },
+      "249": {
+        "NW": "Stone / Orange",
+        "SE": "Stone / Orange"
+      },
+      "252": {
+        "NW": "Stone / Orange",
+        "SE": "Stone / Orange"
+      }
+    },
+    "bz14h": {
+      "178": {
+        "NW": "Ground / Tan"
+      }
+    },
+    "bz16h": {
+      "166": {
+        "NW": "Ground / Red"
+      },
+      "168": {
+        "NW": "Ground / Red"
+      },
+      "170": {
+        "NW": "Ground / Red"
+      },
+      "171": {
+        "NW": "Ground / Red"
+      },
+      "243": {
+        "NW": "Ground / Red"
+      },
+      "245": {
+        "NW": "Ground / Red"
+      },
+      "246": {
+        "NW": "Ground / Red"
+      },
+      "247": {
+        "NW": "Ground / Red"
+      },
+      "320": {
+        "SW": "Rubble / Dry"
+      }
+    },
+    "bz18h": {
+      "178": {
+        "NW": "Ground / Tan"
+      }
+    },
+    "bz3g": {
+      "19": {
+        "SW": "Grass / Dark"
+      },
+      "20": {
+        "SW": "Grass / Dark"
+      },
+      "49": {
+        "SW": "Stone / Lime"
+      },
+      "91": {
+        "SW": "Stone / Lime"
+      },
+      "92": {
+        "SW": "Stone / Lime"
+      },
+      "311": {
+        "SW": "Stone / Lime"
+      },
+      "354": {
+        "SE": "Paving / Radial"
+      },
+      "365": {
+        "NE": "Stone / Lime",
+        "SW": "Stone / Grayish"
+      },
+      "415": {
+        "SE": "Grass / Dark",
+        "SW": "Stone / Grayish"
+      },
+      "451": {
+        "SW": "Ground / Dead"
+      },
+      "494": {
+        "NW": "Paving / Radial",
+        "NE": "Grass / Sparse light",
+        "SE": "Ground / Dead"
+      }
+    },
+    "bz4g": {
+      "48": {
+        "SW": "Grass / Fresh"
+      },
+      "49": {
+        "SW": "Grass / Fresh"
+      },
+      "50": {
+        "SW": "Grass / Fresh"
+      },
+      "156": {
+        "NE": "Grass / Dark",
+        "SW": "Grass / Dark"
+      },
+      "460": {
+        "SW": "Sand / Dark pink"
+      },
+      "466": {
+        "SW": "Sand / Dark pink"
+      }
+    },
+    "bz5g": {
+      "173": {
+        "NW": "Sand / Common"
+      },
+      "437": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Underwater",
+        "SW": "Sand / Underwater"
+      }
+    },
+    "bz6g": {
+      "173": {
+        "NW": "Sand / Common"
+      },
+      "437": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Underwater",
+        "SW": "Sand / Underwater"
+      }
+    },
+    "bz8k": {
+      "150": {
+        "NW": "Ground / Light"
+      },
+      "151": {
+        "NW": "Ground / Light"
+      },
+      "152": {
+        "NW": "Ground / Light"
+      },
+      "153": {
+        "NW": "Ground / Light"
+      },
+      "154": {
+        "NW": "Ground / Light"
+      },
+      "155": {
+        "NW": "Ground / Light"
+      },
+      "156": {
+        "NW": "Ground / Light"
+      },
+      "157": {
+        "NW": "Ground / Light"
+      },
+      "158": {
+        "NW": "Ground / Light"
+      },
+      "321": {
+        "NE": "Ground / Light"
+      },
+      "326": {
+        "SW": "Stone / Gray"
+      },
+      "360": {
+        "SW": "Stone / Gray"
+      },
+      "395": {
+        "SW": "Paving / Square"
+      },
+      "396": {
+        "SW": "Paving / Square"
+      },
+      "397": {
+        "SW": "Paving / Square"
+      },
+      "432": {
+        "NE": "Ground / Light",
+        "SW": "Paving / Square"
+      },
+      "433": {
+        "NE": "Ground / Light",
+        "SW": "Paving / Square"
+      },
+      "434": {
+        "NE": "Ground / Light",
+        "SW": "Grass / Winter faded"
+      },
+      "435": {
+        "NE": "Ground / Light"
+      },
+      "438": {
+        "SW": "Grass / Winter faded"
+      }
+    },
+    "bz9k": {
+      "150": {
+        "NW": "Ground / Light"
+      },
+      "151": {
+        "NW": "Ground / Light"
+      },
+      "152": {
+        "NW": "Ground / Light"
+      },
+      "153": {
+        "NW": "Ground / Light"
+      },
+      "154": {
+        "NW": "Ground / Light"
+      },
+      "155": {
+        "NW": "Ground / Light"
+      },
+      "156": {
+        "NW": "Ground / Light"
+      },
+      "157": {
+        "NW": "Ground / Light"
+      },
+      "158": {
+        "NW": "Ground / Light"
+      },
+      "321": {
+        "NE": "Ground / Light"
+      },
+      "326": {
+        "SW": "Stone / Gray"
+      },
+      "360": {
+        "SW": "Stone / Gray"
+      },
+      "395": {
+        "SW": "Paving / Square"
+      },
+      "396": {
+        "SW": "Paving / Square"
+      },
+      "397": {
+        "SW": "Paving / Square"
+      },
+      "432": {
+        "NE": "Ground / Light",
+        "SW": "Paving / Square"
+      },
+      "433": {
+        "NE": "Ground / Light",
+        "SW": "Paving / Square"
+      },
+      "434": {
+        "NE": "Ground / Light",
+        "SW": "Grass / Winter faded"
+      },
+      "435": {
+        "NE": "Ground / Light"
+      },
+      "438": {
+        "SW": "Grass / Winter faded"
+      }
+    },
+    "zone10": {
+      "215": {
+        "SW": "Slabs / Square"
+      },
+      "216": {
+        "SW": "Slabs / Square"
+      },
+      "281": {
+        "SE": "Stone / Dark gray",
+        "SW": "Slabs / Square"
+      },
+      "288": {
+        "NW": "Stone / Black",
+        "SW": "Slabs / Square"
+      },
+      "296": {
+        "SW": "Slabs / Square"
+      },
+      "310": {
+        "SW": "Slabs / Square"
+      },
+      "328": {
+        "NE": "Slabs / Square"
+      },
+      "347": {
+        "SW": "Slabs / Square"
+      },
+      "356": {
+        "SE": "Slabs / Square"
+      },
+      "418": {
+        "SW": "Slabs / Square"
+      },
+      "421": {
+        "NW": "Slabs / Carved",
+        "SW": "Slabs / Square"
+      },
+      "423": {
+        "SW": "Slabs / Square"
+      },
+      "428": {
+        "SW": "Slabs / Square"
+      },
+      "431": {
+        "NE": "Slabs / Carved",
+        "SW": "Slabs / Square"
+      },
+      "436": {
+        "SW": "Slabs / Square"
+      },
+      "450": {
+        "SW": "Slabs / Square"
+      },
+      "453": {
+        "SW": "Slabs / Square"
+      },
+      "477": {
+        "SW": "Slabs / Square"
+      },
+      "478": {
+        "SW": "Slabs / Square"
+      },
+      "482": {
+        "SE": "Slabs / Carved",
+        "SW": "Slabs / Square"
+      },
+      "485": {
+        "NE": "Stone / Greenish",
+        "SW": "Slabs / Square"
+      }
+    },
+    "zone11": {
+      "150": {
+        "NW": "Ground / Light"
+      },
+      "151": {
+        "NW": "Ground / Light"
+      },
+      "152": {
+        "NW": "Ground / Light"
+      },
+      "153": {
+        "NW": "Ground / Light"
+      },
+      "154": {
+        "NW": "Ground / Light"
+      },
+      "155": {
+        "NW": "Ground / Light"
+      },
+      "156": {
+        "NW": "Ground / Light"
+      },
+      "157": {
+        "NW": "Ground / Light"
+      },
+      "158": {
+        "NW": "Ground / Light"
+      },
+      "321": {
+        "NE": "Ground / Light"
+      },
+      "326": {
+        "SW": "Stone / Gray"
+      },
+      "360": {
+        "SW": "Stone / Gray"
+      },
+      "395": {
+        "SW": "Paving / Square"
+      },
+      "396": {
+        "SW": "Paving / Square"
+      },
+      "397": {
+        "SW": "Paving / Square"
+      },
+      "432": {
+        "NE": "Ground / Light",
+        "SW": "Paving / Square"
+      },
+      "433": {
+        "NE": "Ground / Light",
+        "SW": "Paving / Square"
+      },
+      "434": {
+        "NE": "Ground / Light",
+        "SW": "Grass / Winter faded"
+      },
+      "435": {
+        "NE": "Ground / Light"
+      },
+      "438": {
+        "SW": "Grass / Winter faded"
+      }
+    },
+    "zone12": {
+      "76": {
+        "NW": "Ground / Light"
+      },
+      "247": {
+        "SW": "Ground / Light"
+      }
+    },
+    "zone13": {
+      "114": {
+        "NW": "Ground / Light"
+      },
+      "373": {
+        "SE": "Grass / Tundra",
+        "SW": "Grass / Tundra"
+      },
+      "374": {
+        "SE": "Grass / Tundra",
+        "SW": "Grass / Tundra"
+      },
+      "375": {
+        "SE": "Grass / Tundra",
+        "SW": "Grass / Tundra"
+      },
+      "431": {
+        "NW": "Ground / Light",
+        "SE": "Grass / Tundra"
+      },
+      "458": {
+        "NW": "Ground / Light",
+        "NE": "Grass / Tundra",
+        "SE": "Ground / Light"
+      },
+      "471": {
+        "NE": "Grass / Tundra",
+        "SE": "Ground / Light"
+      }
+    },
+    "zone14": {
+      "6": {
+        "SW": "Stone / Black"
+      },
+      "12": {
+        "SW": "Stone / Black"
+      },
+      "17": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "20": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "31": {
+        "SE": "Stone / Black"
+      },
+      "35": {
+        "NW": "Stone / Dark",
+        "NE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "60": {
+        "NW": "Stone / Black"
+      },
+      "62": {
+        "SE": "Stone / Black"
+      },
+      "122": {
+        "NE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "131": {
+        "SW": "Stone / Black"
+      },
+      "167": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "168": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "169": {
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "193": {
+        "NW": "Stone / Black"
+      },
+      "201": {
+        "SW": "Stone / Black"
+      },
+      "202": {
+        "SW": "Stone / Black"
+      },
+      "208": {
+        "NE": "Stone / Black"
+      },
+      "209": {
+        "NE": "Stone / Black"
+      },
+      "247": {
+        "SW": "Stone / Black"
+      },
+      "257": {
+        "SE": "Stone / Black"
+      },
+      "258": {
+        "SE": "Stone / Black"
+      },
+      "280": {
+        "NW": "Stone / Black"
+      },
+      "291": {
+        "NW": "Stone / Black"
+      },
+      "294": {
+        "NW": "Stone / Black"
+      },
+      "307": {
+        "SE": "Ground / Light",
+        "SW": "Ground / Light"
+      },
+      "312": {
+        "NE": "Stone / Dark",
+        "SE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "319": {
+        "NW": "Stone / Black"
+      },
+      "321": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SW": "Ground / Light"
+      },
+      "339": {
+        "SW": "Stone / Black"
+      },
+      "344": {
+        "NW": "Stone / Black",
+        "NE": "Stone / Black"
+      },
+      "345": {
+        "NW": "Stone / Black",
+        "NE": "Stone / Black"
+      },
+      "350": {
+        "SE": "Stone / Black"
+      },
+      "357": {
+        "SE": "Stone / Black"
+      },
+      "361": {
+        "SE": "Stone / Black"
+      },
+      "371": {
+        "NW": "Stone / Black"
+      },
+      "380": {
+        "NE": "Stone / Black"
+      },
+      "381": {
+        "NE": "Stone / Black"
+      },
+      "393": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light"
+      },
+      "408": {
+        "NW": "Stone / Black",
+        "SE": "Stone / Black"
+      },
+      "425": {
+        "NE": "Stone / Black",
+        "SW": "Stone / Black"
+      },
+      "428": {
+        "SW": "Ground / Stony gray"
+      },
+      "443": {
+        "SW": "Stone / Black"
+      },
+      "444": {
+        "NE": "Stone / Black"
+      },
+      "448": {
+        "SW": "Stone / Black"
+      },
+      "460": {
+        "NE": "Stone / Black",
+        "SW": "Ground / Stony gray"
+      },
+      "464": {
+        "NW": "Stone / Black"
+      },
+      "465": {
+        "NW": "Stone / Black"
+      },
+      "469": {
+        "SE": "Ground / Light",
+        "SW": "Ground / Stony gray"
+      },
+      "499": {
+        "SW": "Stone / Black"
+      },
+      "504": {
+        "NE": "Stone / Black"
+      },
+      "505": {
+        "NW": "Ground / Light"
+      },
+      "507": {
+        "SE": "Stone / Black"
+      }
+    },
+    "zone15": {
+      "13": {
+        "NW": "Stone / Orange"
+      },
+      "14": {
+        "NW": "Stone / Orange"
+      },
+      "15": {
+        "NW": "Stone / Orange"
+      },
+      "16": {
+        "NW": "Stone / Orange"
+      },
+      "17": {
+        "NW": "Stone / Orange"
+      },
+      "18": {
+        "NW": "Stone / Orange"
+      },
+      "19": {
+        "NW": "Stone / Orange"
+      },
+      "20": {
+        "NW": "Stone / Orange"
+      },
+      "160": {
+        "SW": "Rubble / Orange"
+      },
+      "162": {
+        "SW": "Rubble / Orange"
+      },
+      "164": {
+        "SW": "Rubble / Orange"
+      },
+      "165": {
+        "SW": "Rubble / Orange"
+      },
+      "249": {
+        "NW": "Stone / Orange",
+        "SE": "Stone / Orange"
+      },
+      "252": {
+        "NW": "Stone / Orange",
+        "SE": "Stone / Orange"
+      }
+    },
+    "zone16": {
+      "178": {
+        "NW": "Ground / Tan"
+      }
+    },
+    "zone18": {
+      "166": {
+        "NW": "Ground / Red"
+      },
+      "167": {
+        "NW": "Ground / Red"
+      },
+      "168": {
+        "NW": "Ground / Red"
+      },
+      "169": {
+        "NW": "Ground / Red"
+      },
+      "189": {
+        "NW": "Ground / Red",
+        "NE": "Ground / Red"
+      },
+      "192": {
+        "NW": "Ground / Red",
+        "NE": "Ground / Red"
+      },
+      "195": {
+        "NW": "Ground / Red",
+        "NE": "Ground / Red"
+      },
+      "196": {
+        "NW": "Ground / Red",
+        "NE": "Ground / Red"
+      },
+      "324": {
+        "SW": "Rubble / Dry"
+      }
+    },
+    "zone4": {
+      "48": {
+        "SW": "Grass / Fresh"
+      },
+      "49": {
+        "SW": "Grass / Fresh"
+      },
+      "50": {
+        "SW": "Grass / Fresh"
+      },
+      "156": {
+        "NE": "Grass / Dark",
+        "SW": "Grass / Dark"
+      },
+      "460": {
+        "SW": "Sand / Dark pink"
+      },
+      "466": {
+        "SW": "Sand / Dark pink"
+      }
+    },
+    "zone6": {
+      "32": {
+        "SW": "Ground / Dead"
+      },
+      "57": {
+        "SW": "Ground / Dead"
+      },
+      "185": {
+        "NW": "Ground / Common"
+      },
+      "186": {
+        "NW": "Ground / Common"
+      },
+      "187": {
+        "NW": "Ground / Common"
+      },
+      "270": {
+        "SE": "Ground / Common"
+      },
+      "274": {
+        "NW": "Ground / Common"
+      },
+      "275": {
+        "NW": "Ground / Common"
+      },
+      "276": {
+        "NW": "Ground / Common"
+      },
+      "277": {
+        "NW": "Ground / Common"
+      },
+      "281": {
+        "NW": "Ground / Common"
+      },
+      "282": {
+        "NW": "Ground / Common"
+      },
+      "283": {
+        "NW": "Ground / Common"
+      },
+      "313": {
+        "SE": "Ground / Common",
+        "SW": "Ground / Dead"
+      },
+      "326": {
+        "NW": "Grass / Common"
+      },
+      "327": {
+        "NW": "Ground / Common"
+      },
+      "350": {
+        "NW": "Ground / Common",
+        "SE": "Ground / Common"
+      },
+      "367": {
+        "NW": "Ground / Common"
+      },
+      "368": {
+        "NW": "Ground / Common",
+        "SW": "Ground / Dead"
+      },
+      "387": {
+        "NW": "Ground / Common",
+        "NE": "Ground / Common",
+        "SW": "Ground / Dead"
+      },
+      "392": {
+        "NW": "Ground / Common"
+      },
+      "396": {
+        "NW": "Ground / Common"
+      },
+      "405": {
+        "NE": "Ground / Common"
+      },
+      "408": {
+        "NW": "Ground / Common"
+      },
+      "409": {
+        "NE": "Ground / Common",
+        "SE": "Ground / Common",
+        "SW": "Grass / Sparse light"
+      },
+      "416": {
+        "NE": "Ground / Common"
+      },
+      "427": {
+        "SE": "Ground / Common"
+      },
+      "432": {
+        "SE": "Ground / Common"
+      },
+      "437": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Sparse light"
+      },
+      "456": {
+        "SE": "Ground / Common",
+        "SW": "Grass / Sparse light"
+      },
+      "457": {
+        "NW": "Ground / Common"
+      },
+      "460": {
+        "NW": "Ground / Common"
+      },
+      "471": {
+        "NE": "Ground / Common"
+      },
+      "474": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      },
+      "504": {
+        "NW": "Stone / Lime",
+        "SE": "Stone / Lime",
+        "SW": "Grass / Irregular"
+      },
+      "509": {
+        "NE": "Ground / Common"
+      }
+    },
+    "zone6_2": {
+      "32": {
+        "SW": "Ground / Dead"
+      },
+      "57": {
+        "SW": "Ground / Dead"
+      },
+      "185": {
+        "NW": "Ground / Common"
+      },
+      "186": {
+        "NW": "Ground / Common"
+      },
+      "187": {
+        "NW": "Ground / Common"
+      },
+      "270": {
+        "SE": "Ground / Common"
+      },
+      "274": {
+        "NW": "Ground / Common"
+      },
+      "275": {
+        "NW": "Ground / Common"
+      },
+      "276": {
+        "NW": "Ground / Common"
+      },
+      "281": {
+        "NW": "Ground / Common"
+      },
+      "282": {
+        "NW": "Ground / Common"
+      },
+      "283": {
+        "NW": "Ground / Common"
+      },
+      "313": {
+        "SE": "Ground / Common",
+        "SW": "Ground / Dead"
+      },
+      "326": {
+        "NW": "Ground / Common"
+      },
+      "327": {
+        "NW": "Ground / Common"
+      },
+      "350": {
+        "NW": "Ground / Common",
+        "SE": "Ground / Common"
+      },
+      "367": {
+        "NW": "Ground / Common"
+      },
+      "368": {
+        "NW": "Ground / Common",
+        "SW": "Ground / Dead"
+      },
+      "387": {
+        "NW": "Ground / Common",
+        "NE": "Ground / Common",
+        "SW": "Ground / Dead"
+      },
+      "389": {
+        "NE": "Ground / Common"
+      },
+      "392": {
+        "NW": "Ground / Common"
+      },
+      "394": {
+        "NW": "Ground / Common"
+      },
+      "396": {
+        "NW": "Ground / Common"
+      },
+      "401": {
+        "SW": "Ground / Dead"
+      },
+      "405": {
+        "NE": "Ground / Common"
+      },
+      "408": {
+        "NW": "Ground / Common"
+      },
+      "409": {
+        "NE": "Ground / Common",
+        "SE": "Ground / Common",
+        "SW": "Grass / Sparse light"
+      },
+      "416": {
+        "NE": "Ground / Common"
+      },
+      "427": {
+        "SE": "Ground / Common"
+      },
+      "432": {
+        "SE": "Ground / Common"
+      },
+      "437": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Sparse light"
+      },
+      "456": {
+        "SE": "Ground / Common",
+        "SW": "Grass / Sparse light"
+      },
+      "457": {
+        "NW": "Ground / Common"
+      },
+      "460": {
+        "NW": "Ground / Common"
+      },
+      "471": {
+        "NE": "Ground / Common"
+      },
+      "474": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      },
+      "504": {
+        "NW": "Stone / Lime",
+        "SE": "Stone / Lime",
+        "SW": "Grass / Irregular"
+      },
+      "509": {
+        "NE": "Ground / Common"
+      }
+    },
+    "zone7": {
+      "133": {
+        "NW": "Ground / Dark brown",
+        "NE": "Ground / Dark brown",
+        "SE": "Ground / Dark brown",
+        "SW": "Ground / Dark brown"
+      },
+      "134": {
+        "NW": "Ground / Dark brown",
+        "NE": "Ground / Dark brown",
+        "SE": "Ground / Dark brown",
+        "SW": "Ground / Dark brown"
+      },
+      "335": {
+        "SE": "Ground / Dirt",
+        "SW": "Ground / Dark brown"
+      }
+    },
+    "zone8": {
+      "173": {
+        "NW": "Sand / Common"
+      },
+      "437": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Underwater",
+        "SW": "Sand / Underwater"
+      }
+    },
+    "zone9": {
+      "19": {
+        "SW": "Grass / Dark"
+      },
+      "20": {
+        "SW": "Grass / Dark"
+      },
+      "49": {
+        "SW": "Stone / Lime"
+      },
+      "91": {
+        "SW": "Stone / Lime"
+      },
+      "92": {
+        "SW": "Stone / Lime"
+      },
+      "281": {
+        "NE": "Stone / Grayish",
+        "SE": "Grass / Sparse light",
+        "SW": "Stone / Grayish"
+      },
+      "311": {
+        "SW": "Stone / Lime"
+      },
+      "354": {
+        "SE": "Paving / Radial"
+      },
+      "365": {
+        "NE": "Stone / Lime",
+        "SW": "Stone / Grayish"
+      },
+      "415": {
+        "SE": "Grass / Dark",
+        "SW": "Stone / Grayish"
+      },
+      "451": {
+        "SW": "Ground / Dead"
+      },
+      "494": {
+        "NW": "Paving / Radial",
+        "NE": "Grass / Sparse dark",
+        "SE": "Ground / Dead"
+      }
+    }
+  },
+  "exactArtworkPropagation": [
+    {
+      "owners": [
+        "bz16h"
+      ],
+      "slots": [
+        245,
+        246
+      ],
+      "pixelSha256": "0B9BB2B5F35759CDB8E4740494AEA8ECB7476A18AE34AE850F59F1F12DE05C1A",
+      "mapping": {
+        "NW": "Ground / Red",
+        "NE": "Ground / Desert algae",
+        "SE": "Ground / Desert algae",
+        "SW": "Ground / Desert algae"
+      },
+      "propagatedIdentities": [
+        "bz16h:245",
+        "bz16h:246"
+      ]
+    },
+    {
+      "owners": [
+        "bz8k",
+        "bz9k",
+        "Zone11"
+      ],
+      "slots": [
+        150,
+        156,
+        157
+      ],
+      "pixelSha256": "568D7AD22C397021EA06E9DF4A0A39F22E70E895C6054CFF1C66B8E55DAFD662",
+      "mapping": {
+        "NW": "Ground / Light",
+        "NE": "Snow / Common",
+        "SE": "Snow / Common",
+        "SW": "Snow / Common"
+      },
+      "propagatedIdentities": [
+        "bz8k:150",
+        "bz8k:156",
+        "bz8k:157",
+        "bz9k:150",
+        "bz9k:156",
+        "bz9k:157",
+        "Zone11:150",
+        "Zone11:156",
+        "Zone11:157"
+      ]
+    },
+    {
+      "owners": [
+        "bz8k",
+        "bz9k",
+        "Zone11"
+      ],
+      "slots": [
+        151,
+        154
+      ],
+      "pixelSha256": "5C41D93D74C0E502B5F8D9550F0025CB1AA97897756E9430A064D21107416D17",
+      "mapping": {
+        "NW": "Ground / Light",
+        "NE": "Snow / Common",
+        "SE": "Snow / Common",
+        "SW": "Snow / Common"
+      },
+      "propagatedIdentities": [
+        "bz8k:151",
+        "bz8k:154",
+        "bz9k:151",
+        "bz9k:154",
+        "Zone11:151",
+        "Zone11:154"
+      ]
+    },
+    {
+      "owners": [
+        "Zone13"
+      ],
+      "slots": [
+        373,
+        375
+      ],
+      "pixelSha256": "309459BC29284532488EC91FE5E5DF85725AE864098CD5E921D054FC4DCE7CA4",
+      "mapping": {
+        "NW": "Snow / Common",
+        "NE": "Snow / Common",
+        "SE": "Grass / Tundra",
+        "SW": "Grass / Tundra"
+      },
+      "propagatedIdentities": [
+        "Zone13:373",
+        "Zone13:375"
+      ]
+    },
+    {
+      "owners": [
+        "Zone18"
+      ],
+      "slots": [
+        195,
+        196
+      ],
+      "pixelSha256": "BDA3D468278C57BD53A99934BAF33E3640D5852F35672E9EC14D0E936DD10771",
+      "mapping": {
+        "NW": "Ground / Red",
+        "NE": "Ground / Red",
+        "SE": "Ground / Desert algae",
+        "SW": "Ground / Desert algae"
+      },
+      "propagatedIdentities": [
+        "Zone18:195",
+        "Zone18:196"
+      ]
+    }
+  ],
+  "exactArtworkMappingConflicts": [
+    {
+      "owners": [
+        "bz11k",
+        "Zone14"
+      ],
+      "slots": [
+        122,
+        125
+      ],
+      "pixelSha256": "CF1684D2DD512B8D041A771AC471E8BB0411C423C177BC1623809579A99709E8",
+      "reason": "byte-identical artwork has conflicting pre-R106 mappings",
+      "submittedSourceKeys": [
+        "r106-bz11k-slot122"
+      ]
+    },
+    {
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slots": [
+        172,
+        173
+      ],
+      "pixelSha256": "A9740DECFDFD7DCA1FA0F77B1EB88A443E4C67E4ABE94A3250AEF2F9F676B4AA",
+      "reason": "byte-identical artwork has conflicting pre-R106 mappings",
+      "submittedSourceKeys": [
+        "r106-bz5g-slot173"
+      ]
+    }
+  ],
+  "confirmedUnchanged": [
+    {
+      "key": "r106-bz13h-slot11",
+      "namespace": "bz13h",
+      "slot": 11,
+      "mapping": {
+        "NW": "Sand / Yellow",
+        "NE": "Sand / Yellow",
+        "SE": "Sand / Yellow",
+        "SW": "Sand / Yellow"
+      },
+      "note": "this one's fine"
+    },
+    {
+      "key": "r106-bz4g-slot204",
+      "namespace": "bz4g",
+      "slot": 204,
+      "mapping": {
+        "NW": "Ground / Gravel greenish",
+        "NE": "Ground / Gravel greenish",
+        "SE": "Ground / Gravel greenish",
+        "SW": "Ground / Gravel greenish"
+      },
+      "note": "is fine"
+    },
+    {
+      "key": "r106-zone18-slot321",
+      "namespace": "Zone18",
+      "slot": 321,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "\"bz16h slot 321 is exact in original but the approved HD artwork and current families differ\" wat; user separately confirmed the mapping is correct"
+    },
+    {
+      "key": "r106-zone3obr-slot8",
+      "namespace": "Zone3Obr",
+      "slot": 8,
+      "mapping": {
+        "NW": "Ground / Dry",
+        "NE": "Ground / Dry",
+        "SE": "Ground / Dry",
+        "SW": "Ground / Dry"
+      },
+      "note": "that meant reviewing next to other ground families known"
+    },
+    {
+      "key": "r106-zone3obr-slot38",
+      "namespace": "Zone3Obr",
+      "slot": 38,
+      "mapping": {
+        "NW": "Grass / Common",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Stone / Greenish"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r106-zone8-slot13",
+      "namespace": "Zone8",
+      "slot": 13,
+      "mapping": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Common",
+        "SE": "Sand / Common",
+        "SW": "Sand / Common"
+      },
+      "note": "is gud"
+    },
+    {
+      "key": "r106-zonemainmenunew-slot41",
+      "namespace": "ZoneMainMenuNew",
+      "slot": 41,
+      "mapping": {
+        "NW": "Ground / Dry",
+        "NE": "Ground / Dry",
+        "SE": "Ground / Dry",
+        "SW": "Ground / Dry"
+      },
+      "note": "need comparison with other ground families in other atlasi"
+    }
+  ],
+  "followUp": [
+    {
+      "key": "r106-bz10k-slot247",
+      "namespace": "bz10k",
+      "slot": 247,
+      "note": "This is actually different between hd and normal tile, normal tile is SW grass winter faded sigh"
+    },
+    {
+      "key": "r106-bz16h-slot166",
+      "namespace": "bz16h",
+      "slot": 166,
+      "note": "Ground / Dry"
+    },
+    {
+      "key": "r106-zone3obr-slot8",
+      "namespace": "Zone3Obr",
+      "slot": 8,
+      "note": "that meant reviewing next to other ground families known"
+    },
+    {
+      "key": "r106-zone7-slot133",
+      "namespace": "Zone7",
+      "slot": 133,
+      "note": "Ground/ dark brown maybe, is brown but noticably different hue from bz2g/zone2 brown so doesn't mix well for modern brush"
+    },
+    {
+      "key": "r106-zone7-slot134",
+      "namespace": "Zone7",
+      "slot": 134,
+      "note": "Ground/ dark brown maybe, is brown but noticably different hue from bz2g/zone2 brown so doesn't mix well for modern brush"
+    },
+    {
+      "key": "r106-zone7-slot335",
+      "namespace": "Zone7",
+      "slot": 335,
+      "note": "same family as Zone7 slot 134"
+    },
+    {
+      "key": "r106-zonemainmenunew-slot41",
+      "namespace": "ZoneMainMenuNew",
+      "slot": 41,
+      "note": "need comparison with other ground families in other atlasi"
+    },
+    {
+      "key": "r106-followup-bz4g-slot280",
+      "namespace": "bz4g",
+      "slot": 280,
+      "note": "User explicitly requested a just-in-case full-corner review."
+    },
+    {
+      "key": "r106-followup-zone7-dark-brown-name",
+      "namespace": "Zone7",
+      "slots": [
+        133,
+        134,
+        335
+      ],
+      "note": "Distinct identity is explicit; Ground / Dark brown is provisional naming."
+    }
+  ],
+  "counts": {
+    "submittedRows": 249,
+    "changedCards": 241,
+    "explicitAndPropagatedCorners": 482,
+    "exactArtworkGroupsPropagated": 5,
+    "exactBindingCornersPropagated": 12,
+    "exactArtworkConflictGroupsQueued": 2,
+    "followUpItems": 9
+  },
+  "interpretationNotes": [
+    "Only changed selections and unambiguous textual corrections mutate the catalog.",
+    "Untouched dropdown defaults on comment-only cards are not new confirmations.",
+    "Exact artwork propagation is blocked wherever the pre-review mappings conflict.",
+    "Similar but byte-distinct atlas bindings are not propagated automatically."
+  ]
+}

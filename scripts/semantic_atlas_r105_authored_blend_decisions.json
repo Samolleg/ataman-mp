@@ -1,0 +1,31 @@
+{
+  "schema": "ei-semantic-atlas-r105-authored-blend-decisions-v1",
+  "sourceReport": "modern-atlas-r104-provenance-test/diagnostics/terrain-paint/zone1-paint-issues.json",
+  "questionnaire": "semantic-atlas-r105-questionnaire.html",
+  "cornerOrder": ["NW", "NE", "SE", "SW"],
+  "cornerCorrections": {
+    "bz3g": {
+      "204": {"NW": "Ground / Common", "NE": "Grass / Sparse light", "SE": "Stone / Lime", "SW": "Stone / Lime"},
+      "218": {"NW": "Ground / Common", "NE": "Grass / Sparse light", "SE": "Grass / Sparse light", "SW": "Stone / Lime"},
+      "281": {"NW": "Grass / Dark", "NE": "Stone / Grayish", "SE": "Grass / Sparse light", "SW": "Stone / Grayish"},
+      "470": {"NW": "Grass / Sparse light", "NE": "Grass / Sparse light", "SE": "Grass / Sparse dark", "SW": "Stone / Lime"}
+    },
+    "zone6_2": {
+      "390": {"NW": "Stone / Lime", "NE": "Grass / Common", "SE": "Ground / Dead", "SW": "Ground / Dead"}
+    },
+    "zone7": {
+      "249": {"NW": "Ground / Brown", "NE": "Grass / Fresh", "SE": "Grass / Fresh", "SW": "Grass / Fresh"}
+    }
+  },
+  "exactBindingPropagation": {},
+  "nonPropagationEvidence": [
+    {"reviewed": "bz3g", "similarSibling": "zone9", "reason": "HD and original binding hashes differ"},
+    {"reviewed": "zone6_2", "similarSibling": "zone6", "reason": "HD and original binding hashes differ"},
+    {"reviewed": "zone7", "similarSibling": null, "reason": "no byte-identical HD or original binding peer"}
+  ],
+  "interpretationNotes": [
+    "Only explicit changed R105 answers are applied.",
+    "Questionnaire display uses NW/NE over SW/SE, while serialization remains NW,NE,SE,SW.",
+    "No similar-but-nonidentical sibling atlas receives these corrections automatically."
+  ]
+}

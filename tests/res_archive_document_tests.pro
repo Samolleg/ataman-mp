@@ -15,6 +15,7 @@ SOURCES += \
     ../source/documents/backup_manager.cpp \
     ../source/resources/mmp_inspector.cpp \
     ../source/resources/mmp_codec.cpp \
+    ../source/resources/res_file.cpp \
     ../source/core/log.cpp
 
 HEADERS += \
@@ -26,4 +27,5 @@ HEADERS += \
     ../source/documents/backup_manager.h \
     ../source/resources/mmp_inspector.h \
     ../source/resources/mmp_codec.h \
+    ../source/resources/res_file.h \
     ../source/core/log.h

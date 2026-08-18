@@ -1,0 +1,28 @@
+{
+  "schema": "ei-semantic-atlas-r100-reviewed-decisions-v1",
+  "cornerOrder": ["NW", "NE", "SE", "SW"],
+  "explicitGroups": [
+    {"owners":["bz10k","Zone12"],"slots":{"77":["Ground / Light","Snow / Common","Snow / Common","Snow / Common"],"78":["Ground / Light","Snow / Common","Snow / Common","Snow / Common"],"79":["Ground / Light","Snow / Common","Snow / Common","Snow / Common"],"279":["Ground / Light","Snow / Common","Snow / Common","Snow / Common"]}},
+    {"owners":["bz11k","Zone14"],"slots":{"5":[null,null,null,"Stone / Black"],"135":["Ice / Common","Ice / Common","Ice / Common","Stone / Black"],"166":["Stone / Black","Ice / Common","Ice / Common","Ice / Common"],"188":["Stone / Black","Stone / Black","Sand / Irregular","Sand / Irregular"],"189":["Stone / Black","Stone / Black","Sand / Irregular","Sand / Irregular"],"191":["Stone / Black","Ice / Common","Ice / Common","Ice / Common"],"192":["Stone / Black","Ice / Common","Ice / Common","Ice / Common"],"256":["Ice / Common","Ice / Common","Stone / Black","Ice / Common"],"300":["Stone / Black","Stone / Black","Stone / Black","Sand / Irregular"],"302":["Stone / Black","Stone / Black","Stone / Black","Sand / Irregular"],"351":["Ice / Common","Ice / Common","Stone / Black","Ice / Common"],"382":["Ice / Common","Ice / Common","Ice / Common","Stone / Black"],"383":["Ice / Common","Ice / Common","Ice / Common","Stone / Black"]}},
+    {"owners":["bz13h","Zone15"],"slots":{"330":["Ground / Red","Ground / Red","Ground / Red","Stone / Weathered"],"336":["Ground / Red","Rubble / Orange","Ground / Red","Rubble / Orange"],"478":["Sand / Yellow","Rubble / Orange","Sand / Yellow","Sand / Common"],"484":["Ground / Red","Sand / Common","Sand / Yellow","Sand / Yellow"]}},
+    {"owners":["bz16h"],"slots":{"321":["Rock / Lime","Rock / Lime","Rock / Lime","Rock / Orange"],"322":["Rock / Lime","Rock / Lime","Rock / Lime","Rock / Orange"],"323":["Rock / Lime","Rock / Lime","Rock / Lime","Rock / Orange"],"324":["Rock / Lime","Rock / Lime","Rock / Lime","Rock / Orange"],"449":["Rock / Orange","Rock / Lime","Rock / Lime","Rock / Lime"]}},
+    {"owners":["bz2g","Zone2"],"slots":{"198":["Ground / Dark","Ground / Brown","Grass / Burnt","Grass / Burnt"],"212":["Stone / Lime","Grass / Burnt","Grass / Burnt","Grass / Burnt"],"299":["Ground / Brown","Grass / Faded","Grass / Burnt","Grass / Burnt"],"412":["Grass / Fresh","Grass / Fresh","Grass / Common","Stone / Lime"],"493":["Grass / Faded","Ground / Dark","Ground / Dark","Grass / Burnt"]}},
+    {"owners":["Zone20"],"slots":{"159":["Slabs / Carved","Slabs / Carved","Stone / Greenish","Stone / Black"]}},
+    {"owners":["Zone10"],"slots":{"460":["Ground / Dirt","Slabs / Carved","Slabs / Carved","Slabs / Carved"]}},
+    {"owners":["Zone13"],"slots":{"446":["Snow / Common","Snow / Dark","Snow / Dark","Snow / Dark"]}},
+    {"owners":["Zone5_1"],"slots":{"104":["Grass / Swamp","Grass / Swamp","Grass / Swamp","Grass / Swamp"],"125":["Grass / Swamp","Grass / Swamp","Grass / Swamp","Grass / Swamp"],"145":["Grass / Swamp","Grass / Swamp","Grass / Swamp","Grass / Swamp"]}},
+    {"owners":["bz5g","bz6g","Zone8"],"slots":{"15":["Grass / Swamp","Grass / Swamp","Grass / Swamp","Grass / Swamp"]}},
+    {"owners":["bz3g","Zone9"],"slots":{"506":["Grass / Sparse light","Ground / Common","Stone / Lime","Stone / Grayish"]}}
+  ],
+  "familyRenames": [
+    {"owners":["Zone5_1"],"from":"Grass / Irregular","to":"Grass / Swamp"},
+    {"owners":["bz5g","bz6g","Zone8"],"from":"Grass / Irregular","to":"Grass / Swamp"}
+  ],
+  "pendingReview": [
+    {"owners":["bz11k","Zone14"],"family":"Stone / Wet","reason":"User says this family should not exist; review every remaining corner."},
+    {"owners":["bz11k","Zone14"],"family":"Slabs / Faces","reason":"User says this family should not exist; review every remaining corner."},
+    {"owners":["bz13h","Zone15"],"family":"Stone / Beige","reason":"Review every remaining corner."}
+  ],
+  "untouchedR100Cards": ["bz13h:11", "Zone3Obr:38", "Zone3Obr:39", "Zone8:13", "bz4g:204"],
+  "untouchedDefaultsConfirmed": false
+}

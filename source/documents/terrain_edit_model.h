@@ -11,6 +11,7 @@
 #include <QVector>
 
 class CMprDocument;
+class CTerrainVirtualMaterialField;
 class CMprEditTransaction;
 class CValidationReport;
 
@@ -34,6 +35,18 @@ enum class ETerrainTileLayer
     Overlay
 };
 
+enum class ETerrainMaterialFieldRecovery
+{
+    RequireExactTopology,
+    RecoverDeterministically
+};
+
+enum class ETerrainSemanticPaintPolicy
+{
+    AllowLocalHardEdges,
+    ExactExistingOnly
+};
+
 enum class ETerrainTileBrushShape
 {
     Circle,
@@ -47,6 +60,11 @@ struct STerrainTileBrush
     float radius{0.0f};
     ETerrainTileBrushShape shape{ETerrainTileBrushShape::Circle};
 };
+
+// Returns both endpoints and enough integer grid points that consecutive
+// samples always touch. Authored-atlas painting resolves the collected stroke
+// once, so sparse mouse events must not leave gaps between requested vertices.
+QVector<QPoint> terrainVertexStrokeLine(const QPoint& from, const QPoint& to);
 
 struct STerrainTransitionSignature
 {
@@ -86,6 +104,7 @@ struct STerrainSemanticPaintAudit
     qint32 backgroundMaterialId{0};
     QVector<qint32> materialPath;
     QVector<QPoint> paintedCoreCells;
+    QVector<QPoint> paintedVertices;
     QVector<QPoint> affectedCells;
     QString solverMode{"not-run"};
     int junctionPadding{0};
@@ -98,7 +117,58 @@ struct STerrainTileCommand
     QString description;
     QVector<STerrainTileDelta> deltas;
     STerrainSemanticPaintAudit semanticAudit;
-    bool isEmpty() const { return deltas.isEmpty(); }
+    struct SVirtualVertexDelta
+    {
+        int globalX{0};
+        int globalY{0};
+        ETerrainTileLayer layer{ETerrainTileLayer::Land};
+        qint32 before{0};
+        qint32 after{0};
+        // Most semantic paint commands edit only the current field. Manual
+        // physical paint updates the saved baseline at the same vertices too,
+        // so it remains an ordinary MPR edit rather than creating pending
+        // Modern state. Keep that second value sparse as well: one Manual cell
+        // must never carry four complete map-sized field snapshots.
+        bool updatesBaseline{false};
+        qint32 beforeBaseline{0};
+        qint32 afterBaseline{0};
+    };
+    QVector<SVirtualVertexDelta> virtualVertices;
+    // A freshly loaded plain MPR has no complete shared-corner field yet.
+    // Manual painting must still retain the selected decoded corners until
+    // that field is first recovered; otherwise neighbouring legacy cells can
+    // outvote the Manual tile during the first Resolve. These sparse deltas
+    // are consumed by neither save nor publication and remain reversible with
+    // their physical Manual command.
+    struct SPendingVirtualVertexDelta
+    {
+        int globalX{0};
+        int globalY{0};
+        ETerrainTileLayer layer{ETerrainTileLayer::Land};
+        qint32 before{0};
+        qint32 after{0};
+    };
+    QVector<SPendingVirtualVertexDelta> pendingVirtualVertices;
+    // Commands that establish, replace, or remove a complete semantic field
+    // must own both its current and saved-baseline state.  Keeping this state
+    // outside the command made Undo restore packed cells while leaving hidden
+    // material provenance behind.
+    struct SVirtualFieldDelta
+    {
+        ETerrainTileLayer layer{ETerrainTileLayer::Land};
+        int vertexWidth{0};
+        int vertexHeight{0};
+        QVector<qint32> beforeCurrent;
+        QVector<qint32> afterCurrent;
+        QVector<qint32> beforeBaseline;
+        QVector<qint32> afterBaseline;
+    };
+    QVector<SVirtualFieldDelta> virtualFields;
+    bool isEmpty() const
+    {
+        return deltas.isEmpty() && virtualVertices.isEmpty()
+            && pendingVirtualVertices.isEmpty() && virtualFields.isEmpty();
+    }
 };
 
 // Compose sequential live-preview commands into one reversible before/after
@@ -110,7 +180,12 @@ struct STerrainTransitionVariant
 {
     STerrainTransitionSignature signature;
     quint16 packedTile{0};
+    // Weight belongs to the physical artwork, not to each packed rotation.
+    // All rotations of one atlas slot/signature must use the same value.
     int distributionWeight{1};
+    // Decode-only entries remain available to signatureForPacked(), while
+    // automatic painting considers only reviewed semantic catalog entries.
+    bool paintSelectable{true};
 };
 
 class CTerrainTransitionCatalog
@@ -128,21 +203,44 @@ public:
     quint16 selectForPaint(const STerrainTransitionSignature& signature,
                            int globalX, int globalY, quint32 distributionSeed,
                            bool* found = nullptr) const;
+    // Exact map repair sometimes has a reviewed runtime type inherited from
+    // the physical predecessor. Restrict the deterministic paint selection to
+    // physical slots carrying that type instead of substituting another equal
+    // semantic signature.
+    quint16 selectForPaint(const STerrainTransitionSignature& signature,
+                           int globalX, int globalY, quint32 distributionSeed,
+                           const QSet<int>& allowedPhysicalSlots,
+                           bool* found = nullptr) const;
+    quint16 lowestPaintRotationForSlot(
+        const STerrainTransitionSignature& signature, quint16 selectedPacked,
+        bool* found = nullptr) const;
+    STerrainTransitionVariant variantForPacked(
+        quint16 packedTile, bool* found = nullptr) const;
+    QVector<STerrainTransitionVariant> paintVariants(
+        const STerrainTransitionSignature& signature) const;
     void setMirrorPaintGridY(bool enabled) { m_mirrorPaintGridY = enabled; }
     STerrainTransitionSignature signatureForPacked(
         quint16 packedTile, bool* found = nullptr) const;
     STerrainTransitionSignature gridSignatureForPacked(
         quint16 packedTile, bool* found = nullptr) const;
     bool hasMaterial(qint32 materialId) const;
+    void declareMaterial(qint32 materialId) { m_materialIds.insert(materialId); }
     QVector<qint32> materialIds() const;
     QVector<qint32> shortestMaterialPath(qint32 fromMaterial,
                                          qint32 toMaterial,
                                          const QMap<qint32, int>& preferredMaterials = {}) const;
     QVector<STerrainTransitionSignature> gridSignatures() const;
+    void removeAtlasSlot(int atlasSlot);
+    bool paintGridMirrored() const { return m_mirrorPaintGridY; }
     int size() const { return m_variants.size(); }
 
 private:
     static QByteArray signatureKey(const STerrainTransitionSignature& signature);
+    quint16 selectCandidates(const STerrainTransitionSignature& signature,
+                              int globalX, int globalY,
+                              quint32 distributionSeed, bool paintOnly,
+                              const QSet<int>* allowedPhysicalSlots,
+                              bool* found) const;
     QVector<STerrainTransitionVariant> m_variants;
     QHash<quint16, int> m_packedLookup;
     QHash<QByteArray, QVector<int>> m_signatureLookup;
@@ -371,6 +469,12 @@ public:
                      int textureCount = 0,
                      const QVector<qint32>& tileTypes = QVector<qint32>(),
                      int materialCount = 0);
+    void enableWorkingAtlasSlots(int slotCount);
+    bool canInstallWorkingAtlasSlotTypes(
+        const QVector<qint32>& runtimeTerrainTypes) const;
+    bool installWorkingAtlasSlotTypes(
+        const QVector<qint32>& runtimeTerrainTypes);
+    bool setWorkingAtlasSlotType(int slot, qint32 runtimeTerrainType);
 
     int vertexCountX() const { return m_vertexCountX; }
     int vertexCountY() const { return m_vertexCountY; }
@@ -479,11 +583,115 @@ public:
                                      ETerrainTileLayer layer,
                                      quint8 atlasIndex, quint8 tileIndex,
                                      quint8 rotation) const;
+    // Manual painting remains a direct physical operation. If Modern already
+    // owns an active semantic field, the catalog-aware overload also keeps
+    // that field honest: each affected vertex is recomputed from its
+    // post-command incident physical cells. On a legacy/plain map no complete
+    // semantic field is created; only the decoded Manual corners are retained
+    // sparsely for the first later Modern/Resolve recovery, so ordinary Manual
+    // saves remain ordinary MPR saves.
+    STerrainTileCommand makeTilePaint(const STerrainTileBrush& brush,
+                                     ETerrainTileLayer layer,
+                                     quint8 atlasIndex, quint8 tileIndex,
+                                     quint8 rotation,
+                                     const CTerrainTransitionCatalog& catalog,
+                                     CValidationReport* report = nullptr);
     STerrainTileCommand makeSemanticTilePaint(
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed,
+        CValidationReport* report = nullptr,
+        ETerrainSemanticPaintPolicy policy =
+            ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
+    STerrainTileCommand makeSemanticVertexPaint(
+        int selectedCellX, int selectedCellY,
+        const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed,
+        CValidationReport* report = nullptr,
+        qint32 preferredSupportId = 0,
+        ETerrainSemanticPaintPolicy policy =
+            ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
+    STerrainTileCommand makeSemanticVertexStrokePaint(
+        const QVector<QPoint>& requestedVertices,
+        const QVector<QPoint>& anchorVertices,
+        ETerrainTileLayer layer, qint32 materialId,
+        const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed,
+        CValidationReport* report = nullptr,
+        ETerrainSemanticPaintPolicy policy =
+            ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
+    // Modern flow: material identity is committed to an independent vertex
+    // field. Drag preview is deliberately uniform; release prefers authored
+    // exact tiles. The caller must realize absent tuples in the live working
+    // atlas before requesting release resolution; identities are never deferred.
+    STerrainTileCommand makeVirtualMaterialPaint(
+        int selectedCellX, int selectedCellY,
+        const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed, CValidationReport* report = nullptr,
+        bool randomizeUniformRotation = false);
+    STerrainTileCommand makeVirtualTileMaterialPaint(
+        const STerrainTileBrush& tileBrush, ETerrainTileLayer layer,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed, CValidationReport* report = nullptr,
+        bool randomizeUniformRotation = false);
+    STerrainTileCommand makeVirtualStrokeResolution(
+        const STerrainTileCommand& stroke,
+        const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+        CValidationReport* report = nullptr,
+        bool randomizeUniformRotation = false) const;
+    STerrainTileCommand makeVirtualMapResolution(
+        ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed, CValidationReport* report = nullptr,
+        bool randomizeUniformRotation = false,
+        const CTerrainVirtualMaterialField* repairField = nullptr,
+        bool allowPartialMaterialField = false,
+        bool repairDecodedCells = true) const;
+    bool recoverUnambiguousVirtualMaterialField(
+        ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
+        CTerrainVirtualMaterialField* output,
         CValidationReport* report = nullptr) const;
+    bool inferCellSignatureFromNeighbors(
+        int cellX, int cellY, ETerrainTileLayer layer,
+        const CTerrainTransitionCatalog& catalog,
+        STerrainTransitionSignature* output,
+        const QMap<int, STerrainTransitionSignature>* plannedSignatures = nullptr) const;
+    bool missingBlendRepairSignature(
+        int cellX, int cellY, ETerrainTileLayer layer,
+        const CTerrainTransitionCatalog& catalog,
+        const CTerrainVirtualMaterialField* repairField,
+        bool repairDecodedCells,
+        STerrainTransitionSignature* output,
+        const QMap<int, STerrainTransitionSignature>* plannedSignatures = nullptr) const;
+    bool copyVirtualMaterialField(ETerrainTileLayer layer,
+        CTerrainVirtualMaterialField* output,
+        bool requireComplete = true) const;
+    bool copyVirtualMaterialFieldState(
+        ETerrainTileLayer layer, QVector<qint32>* current,
+        QVector<qint32>* baseline) const;
+    bool restoreVirtualMaterialFieldState(
+        ETerrainTileLayer layer, const QVector<qint32>& current,
+        const QVector<qint32>& baseline,
+        CValidationReport* report = nullptr);
+    bool initializeVirtualMaterialField(
+        ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
+        CValidationReport* report = nullptr,
+        ETerrainMaterialFieldRecovery recovery =
+            ETerrainMaterialFieldRecovery::RequireExactTopology);
+    bool virtualMaterialFieldActive(ETerrainTileLayer layer) const;
+    QMap<int, QPoint> referencedUnassignedAtlasSlots(
+        ETerrainTileLayer layer,
+        const CTerrainTransitionCatalog& catalog) const;
+    qint32 virtualMaterialAt(ETerrainTileLayer layer, int vertexX,
+                             int vertexY, bool* found = nullptr) const;
+    bool virtualMaterialCellChanged(
+        ETerrainTileLayer layer, int cellX, int cellY) const;
+    STerrainTileCommand makeSemanticCornerMaterialPaint(
+        int selectedCellX, int selectedCellY, int vertexX, int vertexY,
+        ETerrainTileLayer layer, qint32 materialId,
+        const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+        CValidationReport* report = nullptr);
     bool apply(const STerrainTileCommand& command, bool forward,
                CValidationReport* report = nullptr);
     bool apply(const SOverlaySurfaceCommand& command, bool forward,
@@ -532,7 +740,22 @@ private:
     STerrainTileCommand makeBoundedSemanticTilePaint(
         const STerrainTileBrush& brush, ETerrainTileLayer layer,
         qint32 materialId, const CTerrainTransitionCatalog& catalog,
-        quint32 distributionSeed, CValidationReport* report) const;
+        quint32 distributionSeed, CValidationReport* report,
+        ETerrainSemanticPaintPolicy policy) const;
+    STerrainTileCommand makeVirtualMaterialPaintVertices(
+        int selectedCellX, int selectedCellY,
+        const QVector<QPoint>& requestedVertices,
+        const QSet<int>& previewCoreCells,
+        const STerrainTileBrush& auditBrush, ETerrainTileLayer layer,
+        qint32 materialId, const CTerrainTransitionCatalog& catalog,
+        quint32 distributionSeed, CValidationReport* report,
+        bool randomizeUniformRotation);
+    bool appendSemanticVirtualVertices(
+        STerrainTileCommand* command,
+        const QVector<QPoint>& acceptedVertices,
+        ETerrainTileLayer layer, qint32 materialId,
+        const CTerrainTransitionCatalog& catalog,
+        CValidationReport* report);
 
     int m_sectorCountX{0};
     int m_sectorCountY{0};
@@ -551,6 +774,15 @@ private:
     QVector<bool> m_conflictedVertices;
     QVector<SSector> m_sectors;
     QMap<QPair<int, int>, int> m_sectorLookup;
+    QVector<qint32> m_virtualLandMaterials;
+    QVector<qint32> m_virtualOverlayMaterials;
+    QVector<qint32> m_originalVirtualLandMaterials;
+    QVector<qint32> m_originalVirtualOverlayMaterials;
+    // Sparse explicit Manual corners made before a complete semantic field
+    // exists. They seed the first deterministic recovery and are retained so
+    // undoing that recovery restores the exact pre-field Manual state.
+    QMap<int, qint32> m_pendingVirtualLandMaterials;
+    QMap<int, qint32> m_pendingVirtualOverlayMaterials;
 };
 
 class CTerrainTileEditHistory

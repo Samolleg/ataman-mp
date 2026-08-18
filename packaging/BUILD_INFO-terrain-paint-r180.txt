@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: portable zero-change modern drafts, compact terrain UI, and R162 semantics
+Executable source commit: 7e66ec5f851d
+Executable SHA-256: 575DE8A7565E1E132790C2CB4C8777B08829A256B3D034003A3B7E12DFAE11E5
+Semantic catalog source commit: 5feb5c967465857241c931bc6fb56c456eb0358e
+Preset SHA-256: 1E0609597348F6405BC2AF04870773C036DB779A1D74FD3D1AE957D2ED4E9DF3
+Validation: semantic 155 pass / 0 fail; topology 4 pass / 0 fail; document 131 pass / 0 fail / 7 expected skips; virtual atlas 115 pass / 0 fail; landscape widget 8 pass / 0 fail; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Manual gate: zero-change finalized MPR must export as a portable draft pair without touching the source or installed RES; reopened draft must remain editable; publication recommendation and contextual shortcut/tooltips must render correctly

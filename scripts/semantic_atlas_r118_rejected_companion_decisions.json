@@ -1,0 +1,24 @@
+{
+  "schema": "ei-semantic-atlas-r118-rejected-companion-decisions-v1",
+  "sourceSha256": "CA49FDAAE81822AD83E8DAE3EFA7750ED54C462CA1080BAE7DE216FF377176A5",
+  "submittedCards": 37,
+  "acceptedCompanionRecommendations": 0,
+  "rejectedCompanionRecommendations": 37,
+  "catalogChanges": 0,
+  "keys": [
+    "r118-1f0121da216a", "r118-9b5c322338ab", "r118-b3d0e9aa626a",
+    "r118-07f7576cb6ed", "r118-a47d29d27e96", "r118-d86eb275799a",
+    "r118-1a966050029a", "r118-acb91a8174f2", "r118-00c664a9878c",
+    "r118-3455ca789934", "r118-7058a90660f4", "r118-ea975a88a499",
+    "r118-57aa80deeab9", "r118-f4b7ef1407c7", "r118-7ae946beef21",
+    "r118-de367ca4028f", "r118-084159975dcc", "r118-1040e3e3a51d",
+    "r118-8ae9df18a52e", "r118-d9970e279525", "r118-0fa118e8b281",
+    "r118-e92b37208349", "r118-6542c8de3b31", "r118-9cc65c1ab700",
+    "r118-3de5afae365b", "r118-c5896732e4b7", "r118-9c37f11737f4",
+    "r118-cf26947801d8", "r118-7565c64467b3", "r118-0e87a5dc416b",
+    "r118-9ca7dd6d9c0b", "r118-da27122ce9b4", "r118-416fe8499797",
+    "r118-dd8e5373922c", "r118-5ed6ca6a987b", "r118-0b65bcde84ba",
+    "r118-4b7ddd85e83b"
+  ],
+  "disposition": "Negative calibration set. Companion/topology inference is not an eligible source of review recommendations."
+}

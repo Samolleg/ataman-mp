@@ -1,0 +1,73 @@
+{
+  "schema": "ei-semantic-atlas-r107-consolidated-decisions-v1",
+  "sourceCatalogSha256": "178BCE185B8BF2C5C787EF7F452B638096C2B4489F5A2CA25F361895A59F2D80",
+  "cornerOrder": [
+    "NW",
+    "NE",
+    "SE",
+    "SW"
+  ],
+  "cornerCorrections": {
+    "bz4g": {
+      "280": {
+        "NE": "Ground / Common"
+      }
+    },
+    "zone4": {
+      "280": {
+        "NE": "Ground / Common"
+      }
+    }
+  },
+  "confirmedMappings": {
+    "bz16h:166": {
+      "NW": "Ground / Red",
+      "NE": "Ground / Plant soil",
+      "SE": "Ground / Plant soil",
+      "SW": "Ground / Plant soil"
+    },
+    "zone3obr:8": {
+      "NW": "Ground / Dry",
+      "NE": "Ground / Dry",
+      "SE": "Ground / Dry",
+      "SW": "Ground / Dry"
+    },
+    "bz5g:173": {
+      "NW": "Sand / Common",
+      "NE": "Sand / Grainy",
+      "SE": "Sand / Grainy",
+      "SW": "Sand / Grainy"
+    },
+    "zone7:133": {
+      "NW": "Ground / Dark brown",
+      "NE": "Ground / Dark brown",
+      "SE": "Ground / Dark brown",
+      "SW": "Ground / Dark brown"
+    }
+  },
+  "reviewQueue": [
+    {
+      "namespace": "bz4g",
+      "slot": 405,
+      "owners": ["bz4g", "Zone4"],
+      "reason": "User requested full four-corner review of the remaining Ground / Dry occurrence after correcting bz4g/Zone4 slot 280 NE."
+    },
+    {
+      "namespace": "Zone6",
+      "slot": 389,
+      "owners": ["Zone6"],
+      "reason": "User requested full four-corner review of this non-uniform Ground / Trampled reference against every known ground family."
+    },
+    {
+      "namespace": "Zone6_2",
+      "slot": 389,
+      "owners": ["Zone6_2"],
+      "reason": "Connected alarm: the related but byte-distinct Zone6_2 atlas assigns the same numbered tile differently at NE, so it requires an independent decision rather than propagation from Zone6."
+    }
+  ],
+  "interpretationNotes": [
+    "The trailing Ground / Dry text on the bz4g slot 280 answer is retained as review context; the explicit NE=Ground / Common selection owns the catalog change.",
+    "Exact bz4g/Zone4 atlas owners receive the same correction.",
+    "Zone6 and Zone6_2 are byte-distinct in both approved HD and original bindings, so their slot 389 questions remain separate."
+  ]
+}

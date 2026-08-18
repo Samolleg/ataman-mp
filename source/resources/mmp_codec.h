@@ -4,7 +4,11 @@
 #include <QByteArray>
 #include <QString>
 #include <QImage>
+#include <QIODevice>
+#include <QMap>
+#include <QSet>
 #include <QVector>
+#include <functional>
 
 namespace ei {
 
@@ -21,6 +25,32 @@ enum class DxtFormat
 bool decodeDxtImage(const QByteArray& compressed, int width, int height,
                     DxtFormat format, QImage* image,
                     QString* diagnostic = nullptr);
+
+// Decode one logical 8x8 terrain-atlas tile directly from the base DXT1 mip.
+// This avoids expanding a 1024/2048-pixel page merely to build one material
+// palette thumbnail. logicalSlot uses the MPR 0..63 tile ordering.
+bool decodeMmpDxt1AtlasTile(const QByteArray& mmp, int logicalSlot,
+                            QImage* image, QString* diagnostic = nullptr);
+
+// Decode one logical terrain tile without reading the rest of a large RES
+// member. payloadOffset/payloadSize identify the MMP member inside the device;
+// only its header and the DXT block-row band containing logicalSlot are read.
+bool decodeMmpDxt1AtlasTile(QIODevice* device, qint64 payloadOffset,
+                            qint64 payloadSize, int logicalSlot,
+                            QImage* image, QString* diagnostic = nullptr);
+
+// Resolve one page payload at most once while a caller requests several
+// palette tiles from the same authored MMP. Failed page lookups are cached as
+// well, preventing every material-family fallback from repeating the same RES
+// scan/read. The cache lifetime remains caller-owned and can therefore be
+// bounded to one catalog rebuild.
+using MmpPayloadLoader = std::function<bool(const QString&, QByteArray*)>;
+bool decodeMmpDxt1AtlasTileCached(
+    const QString& pageName, int logicalSlot,
+    QMap<QString, QByteArray>* payloadCache,
+    QSet<QString>* missingPageCache,
+    const MmpPayloadLoader& loader,
+    QImage* image, QString* diagnostic = nullptr);
 
 // PNT3 stores four-pixel (16-byte) literal blocks separated by byte-counted
 // transparent runs. Only the first dword of each block is a control candidate:
@@ -50,6 +80,22 @@ QByteArray encodeMmp8888(const QImage& image, QString* diagnostic = nullptr);
 // Deterministic DXT1 writer for the high-resolution zone minimap profile used
 // by shipped JMV assets.
 QByteArray encodeMmpDxt1(const QImage& image, QString* diagnostic = nullptr);
+
+// Deterministic terrain-page encoder. The 76-byte EI header is followed by a
+// complete block-safe DXT1 mip chain. Alpha is preserved with DXT1's authored
+// one-bit transparency mode; terrain pages with graded alpha must use another
+// validated codec rather than being silently flattened.
+QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps = true,
+                         QString* diagnostic = nullptr);
+
+// Replace selected logical 8x8 atlas tiles in an existing DXT1 MMP while
+// retaining every compressed block owned only by the other slots. The final
+// mip levels share blocks across logical tile boundaries; intersecting blocks
+// come from the complete rebuilt page so added artwork cannot fade back to the
+// old transparent padding at distance.
+QByteArray patchMmpDxt1AtlasTiles(
+    const QByteArray& authoredMmp, const QByteArray& replacementMmp,
+    const QSet<int>& logicalSlots, QString* diagnostic = nullptr);
 
 // Compose the shared humanoid atlas with the original 2dintmmx.dll formula.
 // PNT3 pixels are already premultiplied, so routing them through a generic

@@ -1,0 +1,164 @@
+{
+  "schema": "ei-semantic-atlas-r122-consolidated-decisions-v1",
+  "source": "scripts\\semantic_atlas_r122_user_answers.txt",
+  "queue": "artifacts\\semantic-atlas-r122-rc-feedback-review\\questionnaire\\r122-rc-feedback-queue.json",
+  "policy": "Apply only submitted corner values differing from currentMapping; propagate only through queue-recorded byte-identical owners. Apply the four explicit family/layer policy decisions exactly.",
+  "counts": {
+    "submittedCornerCards": 12,
+    "untouchedCornerCards": 2,
+    "changedCardCorners": 15,
+    "serializedOwnerCornerRows": 33,
+    "policyDecisions": 4
+  },
+  "cornerCorrections": {
+    "bz13h": {
+      "431": {
+        "NW": "Sand / Common grayish"
+      },
+      "448": {
+        "SW": "Sand / Gravel"
+      },
+      "487": {
+        "NE": "Sand / Yellow",
+        "SW": "Sand / Yellow"
+      }
+    },
+    "Zone15": {
+      "431": {
+        "NW": "Sand / Common grayish"
+      },
+      "448": {
+        "SW": "Sand / Gravel"
+      },
+      "487": {
+        "NE": "Sand / Yellow",
+        "SW": "Sand / Yellow"
+      }
+    },
+    "bz2g": {
+      "296": {
+        "SW": "Stone / Mossy"
+      },
+      "375": {
+        "SW": "Stone / Mossy"
+      }
+    },
+    "Zone2": {
+      "296": {
+        "SW": "Stone / Mossy"
+      },
+      "375": {
+        "SW": "Stone / Mossy"
+      }
+    },
+    "bz5g": {
+      "332": {
+        "NW": "Sand / Dark pink"
+      },
+      "464": {
+        "NE": "Sand / Grainy",
+        "SW": "Sand / Grainy"
+      },
+      "467": {
+        "NE": "Sand / Underwater",
+        "SW": "Sand / Underwater"
+      }
+    },
+    "bz6g": {
+      "332": {
+        "NW": "Sand / Dark pink"
+      },
+      "464": {
+        "NE": "Sand / Grainy",
+        "SW": "Sand / Grainy"
+      },
+      "467": {
+        "NE": "Sand / Underwater",
+        "SW": "Sand / Underwater"
+      }
+    },
+    "Zone8": {
+      "332": {
+        "NW": "Sand / Dark pink"
+      },
+      "464": {
+        "NE": "Sand / Grainy",
+        "SW": "Sand / Grainy"
+      },
+      "467": {
+        "NE": "Sand / Underwater",
+        "SW": "Sand / Underwater"
+      }
+    },
+    "bz8k": {
+      "368": {
+        "NW": "Ground / Light"
+      }
+    },
+    "bz9k": {
+      "368": {
+        "NW": "Ground / Light"
+      }
+    },
+    "Zone11": {
+      "368": {
+        "NW": "Ground / Light"
+      }
+    },
+    "Zone13": {
+      "468": {
+        "NE": "Ground / Light"
+      }
+    },
+    "Zone7": {
+      "220": {
+        "NE": "Ground / Dark brown"
+      },
+      "260": {
+        "SW": "Sand / Underwater"
+      }
+    }
+  },
+  "familyRenames": {
+    "BaseGipat": {
+      "Water / Still": "Water / Still dark"
+    }
+  },
+  "familyMetadataCorrections": {
+    "Zone18": {
+      "Sand / Dark": {
+        "allowedLayers": [
+          "land"
+        ]
+      },
+      "Stone / Orange": {
+        "allowedLayers": [
+          "land"
+        ]
+      },
+      "Stone / Weathered": {
+        "allowedLayers": [
+          "land"
+        ]
+      }
+    }
+  },
+  "submittedPolicyAnswers": {
+    "r122-water-still-f24371251f84": {
+      "value": "New distinct Water family (name in comment)",
+      "note": "Water / Still dark"
+    },
+    "r122-zone18-sand-dark-layer-role": {
+      "value": "Land only",
+      "note": ""
+    },
+    "r122-zone18-stone-orange-layer-role": {
+      "value": "Land only",
+      "note": ""
+    },
+    "r122-zone18-stone-weathered-layer-role": {
+      "value": "Land only",
+      "note": ""
+    }
+  }
+}

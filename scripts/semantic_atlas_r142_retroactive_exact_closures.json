@@ -1,0 +1,122 @@
+{
+  "schema": "ei-semantic-atlas-r142-retroactive-exact-closures-v1",
+  "sourceAuditBundle": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\work\\semantic-atlas-r141-retroactive-exact-closure\\bundle",
+  "sourceManifestSha256": "AF2E93F3DF4482AD487E4E0DC6A9E8EB8506358A7823BDD129E3118E5D1C92DC",
+  "sourceSafeClosuresSha256": "45C6A76198DAB18D5C03FE7C319437E9994889E4A5EB3062DE997BD96FB22F2D",
+  "sourceConflictsSha256": "C6E25FFF7E740A66C368FEFC27DB5B3C29554F24089FA994625EF887867B65EB",
+  "policy": "Apply only unambiguous byte-identical decoded HD corner closures backed by prior explicit accepted decisions. Whole-tile or whole-atlas equality is not required. Similar pixels never propagate. Rejections suppress exact proposals, and all conflicts remain queued for grouped review.",
+  "counts": {
+    "safePhysicalCorners": 10,
+    "safeExpandedCorners": 15,
+    "safeCanonicalPixelGroups": 5,
+    "conflictPhysicalCorners": 228,
+    "conflictPhysicalTileCards": 174,
+    "conflictNamespaceTileCards": 189,
+    "suppressedPriorRejectionsPhysical": 341,
+    "suppressedPriorRejectionsExpanded": 648,
+    "producerQuarantineRows": 222
+  },
+  "physicalClosures": [
+    {
+      "physicalOccurrenceId": "physical-009-hd-4ad67630a39a:232:SW",
+      "owners": ["bz5g", "bz6g", "Zone8"],
+      "slot": 232,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "canonicalCornerPixelSha256": "C5B7B6E90DC6C61BD77A39ED73FCC59CDAE0982FE20049F0CD7573158A8D6530"
+    },
+    {
+      "physicalOccurrenceId": "physical-009-hd-4ad67630a39a:313:SW",
+      "owners": ["bz5g", "bz6g", "Zone8"],
+      "slot": 313,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "canonicalCornerPixelSha256": "024510301626D12EF9F6F11587FA7FF6AF46486FE5B39D8819E8F57E0A5EAC7C"
+    },
+    {
+      "physicalOccurrenceId": "physical-010-hd-4aff5893f635:352:SW",
+      "owners": ["Zone6"],
+      "slot": 352,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "canonicalCornerPixelSha256": "446CB5F30BECF3FC54B070C6E5DEDDFCC1053A980ED3D15642176A7D1D56265E"
+    },
+    {
+      "physicalOccurrenceId": "physical-010-hd-4aff5893f635:494:SW",
+      "owners": ["Zone6"],
+      "slot": 494,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "canonicalCornerPixelSha256": "C5B7B6E90DC6C61BD77A39ED73FCC59CDAE0982FE20049F0CD7573158A8D6530"
+    },
+    {
+      "physicalOccurrenceId": "physical-012-hd-6752a5b4cefd:171:SW",
+      "owners": ["bz3g"],
+      "slot": 171,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "canonicalCornerPixelSha256": "024510301626D12EF9F6F11587FA7FF6AF46486FE5B39D8819E8F57E0A5EAC7C"
+    },
+    {
+      "physicalOccurrenceId": "physical-012-hd-6752a5b4cefd:433:SW",
+      "owners": ["bz3g"],
+      "slot": 433,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Sand / Dark pink",
+      "canonicalCornerPixelSha256": "ABCAB64ABEDC9D4F1D3D984E11C7513A490FF27EC61CE3807DDD649BF4EEBD58"
+    },
+    {
+      "physicalOccurrenceId": "physical-016-hd-916e18f19c3b:352:SW",
+      "owners": ["Zone6_2"],
+      "slot": 352,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "canonicalCornerPixelSha256": "446CB5F30BECF3FC54B070C6E5DEDDFCC1053A980ED3D15642176A7D1D56265E"
+    },
+    {
+      "physicalOccurrenceId": "physical-016-hd-916e18f19c3b:494:SW",
+      "owners": ["Zone6_2"],
+      "slot": 494,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "canonicalCornerPixelSha256": "C5B7B6E90DC6C61BD77A39ED73FCC59CDAE0982FE20049F0CD7573158A8D6530"
+    },
+    {
+      "physicalOccurrenceId": "physical-022-hd-bd5f43f33363:171:SW",
+      "owners": ["zone9"],
+      "slot": 171,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel",
+      "canonicalCornerPixelSha256": "024510301626D12EF9F6F11587FA7FF6AF46486FE5B39D8819E8F57E0A5EAC7C"
+    },
+    {
+      "physicalOccurrenceId": "physical-025-hd-ed0bc69bd4ab:82:SW",
+      "owners": ["bz2g", "Zone2"],
+      "slot": 82,
+      "corner": "SW",
+      "current": "Grass / Faded",
+      "reviewed": "Grass / Burnt",
+      "canonicalCornerPixelSha256": "D641162D34AB9D1D9FE82867EE9E97AF026684A8E28EB53B163EB5E22B499D79"
+    }
+  ],
+  "cornerCorrections": {
+    "bz5g": {"232": {"SW": "Ground / Gravel"}, "313": {"SW": "Ground / Gravel"}},
+    "bz6g": {"232": {"SW": "Ground / Gravel"}, "313": {"SW": "Ground / Gravel"}},
+    "Zone8": {"232": {"SW": "Ground / Gravel"}, "313": {"SW": "Ground / Gravel"}},
+    "Zone6": {"352": {"SW": "Ground / Gravel"}, "494": {"SW": "Ground / Gravel"}},
+    "Zone6_2": {"352": {"SW": "Ground / Gravel"}, "494": {"SW": "Ground / Gravel"}},
+    "bz3g": {"171": {"SW": "Ground / Gravel"}, "433": {"SW": "Sand / Dark pink"}},
+    "zone9": {"171": {"SW": "Ground / Gravel"}},
+    "bz2g": {"82": {"SW": "Grass / Burnt"}},
+    "Zone2": {"82": {"SW": "Grass / Burnt"}}
+  }
+}

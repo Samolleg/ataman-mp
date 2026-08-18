@@ -1,0 +1,24 @@
+{
+  "schema": "ei-ice-opaque-owner-decisions-v1",
+  "checkpoint": "R62-ICE-OPAQUE-OWNER-REACH",
+  "authority": "explicit-user-review-with-screenshot",
+  "status": "rejected-geometry",
+  "decisions": {
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Reject hard quadrant cutoff",
+      "note": "The first R62 mask has a visible square cut in the NE because the repair was clipped at the tile midlines. Remove all quadrant clipping; opacity must vary continuously across both midlines."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Reject hard quadrant cutoff",
+      "note": "R62 uses the same invalid quadrant-clipped construction. Remove all quadrant clipping; opacity must vary continuously across both midlines."
+    }
+  },
+  "approvedRoutes": [],
+  "pendingRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "rejectedMethod": "Applying owner-opacity repair to complete NW and SE quadrants while freezing the complete NE and SW quadrants, producing visible x=128/y=128 cut geometry.",
+  "requestedRepair": "Use a continuous authored-alpha ownership weight over the whole tile. Preserve the connected dark edge and fade any semantic-corner hold radially; never gate by tile quadrant, rectangle, or midline.",
+  "generationPolicy": "Do not apply R62. Both Ice inside routes remain pending continuous owner-opacity review."
+}

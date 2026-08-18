@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "loaded_map_panel_policy.h"
 #include "ui_main_window.h"
 
 #include <QWidget>
@@ -17,6 +18,7 @@
 #include <QApplication>
 #include <QStatusBar>
 #include <QProgressDialog>
+#include <QPointer>
 #include <QMouseEvent>
 #include <QDockWidget>
 #include <QToolBar>
@@ -104,6 +106,7 @@
 #include "staged_save_validator.h"
 #include "landscape_tools.h"
 #include "collection_document.h"
+#include "terrain_save_flow_policy.h"
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
 #include "database_editor_dialog.h"
@@ -117,6 +120,7 @@
 #include "unit.h"
 #include "resource_browser.h"
 #include "resource_name.h"
+#include "view.h"
 
 namespace
 {
@@ -1024,6 +1028,9 @@ MainWindow::MainWindow(QWidget* parent) :
     m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools"), this);
     m_landscapeToolsDock->setObjectName("landscapeToolsDock");
     m_landscapeToolsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_landscapeToolsDock->setMinimumWidth(260);
+    m_landscapeTools->setMinimumWidth(0);
+    m_landscapeTools->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     m_landscapeToolsDock->setFeatures(QDockWidget::DockWidgetClosable |
                                       QDockWidget::DockWidgetMovable |
                                       QDockWidget::DockWidgetFloatable);
@@ -1425,16 +1432,31 @@ MainWindow::MainWindow(QWidget* parent) :
             [this](const QString& runId, const QString& mapName)
     {
         ei::log(eLogInfo, QString("JMV direct map test started run:%1 staged-map:%2").arg(runId, mapName));
-        statusBar()->showMessage(tr("JMV direct map test is waiting for the normal menu lifecycle, then will load the staged map automatically."));
+        if(m_hotReloadProgress)
+        {
+            closeHotReloadProgress();
+            statusBar()->showMessage(tr(
+                "The owned JMV test process restarted with the changed terrain atlas and is loading the staged map."),
+                10000);
+        }
+        else
+            statusBar()->showMessage(tr("JMV direct map test is waiting for the normal menu lifecycle, then will load the staged map automatically."));
         updateMapTestAction();
     });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished, this,
             [this](const QString& runId, int exitCode, const QString& cleanupMessage)
     {
-        closeHotReloadProgress();
+        const bool terrainAtlasRestart =
+            m_mapTestLauncher->isTerrainAtlasRestartPending();
+        if(!terrainAtlasRestart)
+            closeHotReloadProgress();
         ei::log(eLogInfo, QString("JMV test launch finished run:%1 exit:%2 cleanup:%3")
                 .arg(runId).arg(exitCode).arg(cleanupMessage));
-        statusBar()->showMessage(tr("JMV direct map test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
+        if(terrainAtlasRestart)
+            statusBar()->showMessage(tr(
+                "Terrain atlas changed; restarting the owned JMV test process with the new atlas..."));
+        else
+            statusBar()->showMessage(tr("JMV direct map test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
         updateMapTestAction();
         if(m_closeAfterTestStop)
         {
@@ -1631,6 +1653,8 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::loadedMapStateChanged,
             this, &MainWindow::updateLoadedMapPanel);
+    connect(m_pView, &CView::mprSaveStateChanged,
+            this, &MainWindow::updateDocumentActionAvailability);
     connect(m_pView, &CView::updateMsg, this, [this](const QString& message)
     {
         statusBar()->showMessage(message, 5000);
@@ -1816,8 +1840,12 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::hideLandscapeToolsSignal,
             this, &MainWindow::hideLandscapeTools);
-    const auto applyLandscapeVisibility = [this](bool visible)
+    const auto applyLandscapeVisibility = [this](bool visible,
+                                                 const QPointer<CView>& view,
+                                                 const QPointer<QDockWidget>& dock)
     {
+        if(!view)
+            return;
         if(m_landscapeToolsAction)
         {
             const QSignalBlocker blocker(m_landscapeToolsAction);
@@ -1843,22 +1871,24 @@ MainWindow::MainWindow(QWidget* parent) :
         {
             // Layer isolation belongs to Landscape Tools. Closing it restores
             // the ordinary viewport instead of leaving terrain hidden.
-            m_pView->setDrawLand(true);
-            m_pView->setDrawWater(true);
+            view->setDrawLand(true);
+            view->setDrawWater(true);
         }
-        m_pView->setLandscapeEditingEnabled(visible);
-        if(visible)
-            m_landscapeToolsDock->raise();
+        view->setLandscapeEditingEnabled(visible);
+        if(visible && dock)
+            dock->raise();
         // Like Maps and Collections, hiding Landscape Tools changes only
         // visibility. Qt retains its dock area, split, tab, and floating state.
     };
     connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this,
             [this, applyLandscapeVisibility](bool visible)
     {
+        const QPointer<CView> view(m_pView);
+        const QPointer<QDockWidget> dock(m_landscapeToolsDock);
         const quint64 visibilityGeneration = ++m_landscapeVisibilityGeneration;
         if(visible)
         {
-            applyLandscapeVisibility(true);
+            applyLandscapeVisibility(true, view, dock);
             return;
         }
         // QDockWidget emits a transient hidden state while changing between
@@ -1866,13 +1896,13 @@ MainWindow::MainWindow(QWidget* parent) :
         // transition avoids both cancelling the active brush and re-entering
         // Qt's dock layout engine during that native-window move.
         QTimer::singleShot(0, this, [this, visibilityGeneration,
-                                    applyLandscapeVisibility]()
+                                    view, dock, applyLandscapeVisibility]()
         {
             if(visibilityGeneration != m_landscapeVisibilityGeneration
-               || !m_pView || !m_landscapeToolsDock
-               || m_landscapeToolsDock->isVisible())
+               || !view || !dock || dock->isVisible()
+               || m_pView != view || m_landscapeToolsDock != dock)
                 return;
-            applyLandscapeVisibility(false);
+            applyLandscapeVisibility(false, view, dock);
         });
     });
     connect(m_pView, &CView::selectionChanged,
@@ -3805,8 +3835,13 @@ void MainWindow::launchCurrentMapTest()
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     QByteArray mprData;
+    QByteArray workingTerrainAtlasResource;
+    int workingTerrainAtlasPages = 0;
+    int workingTerrainAtlasSlots = 0;
     CValidationReport mprReport;
-    if(!m_pView->buildValidatedLandscapeCandidate(&mprData, &mprReport))
+    if(!m_pView->buildValidatedLandscapeCandidate(
+           &mprData, &mprReport, &workingTerrainAtlasResource,
+           &workingTerrainAtlasPages, &workingTerrainAtlasSlots))
     {
         QMessageBox::warning(this, tr("JMV test launch"),
             tr("The current MPR edits could not be staged safely:\n\n%1")
@@ -3921,6 +3956,36 @@ void MainWindow::launchCurrentMapTest()
     input.sourceMob = mob->filePath();
     input.mprData = mprData;
     input.mobData = mobData;
+    const QFileInfo terrainAtlasResource(terrainMapTestResourcePath(
+        m_pView->activeTerrainArchivePath(),
+        input.sourceMpr.absoluteFilePath()));
+    if(!workingTerrainAtlasResource.isEmpty())
+    {
+        if(terrainAtlasResource.isFile())
+            input.sourceTerrainTextureResource = terrainAtlasResource;
+        input.terrainTextureResourceData = workingTerrainAtlasResource;
+        input.expectedTerrainAtlasPages = workingTerrainAtlasPages;
+        input.expectedTerrainAtlasSlots = workingTerrainAtlasSlots;
+    }
+    else if(terrainAtlasResource.isFile())
+    {
+        QFile archive(terrainAtlasResource.absoluteFilePath());
+        CMprDocument stagedMpr;
+        CValidationReport stagedMprReport;
+        if(!archive.open(QIODevice::ReadOnly)
+           || !stagedMpr.loadBytes(mprData, input.sourceMpr.absoluteFilePath(),
+                                   &stagedMprReport))
+        {
+            QMessageBox::warning(this, tr("Map test launch"),
+                tr("The map-specific terrain atlas package could not be read or "
+                   "matched to the staged MPR. No game process was started."));
+            return;
+        }
+        input.sourceTerrainTextureResource = terrainAtlasResource;
+        input.terrainTextureResourceData = archive.readAll();
+        input.expectedTerrainAtlasPages = int(stagedMpr.mapInfo().textureCount);
+        input.expectedTerrainAtlasSlots = int(stagedMpr.mapInfo().tileCount);
+    }
     input.generatedAiGraphData = generatedAiGraphData;
     const auto databaseSnapshot = ei::ProfileDatabaseContext::instance().current();
     if(!databaseSnapshot || databaseSnapshot->sourceArchivePath.trimmed().isEmpty())
@@ -4090,9 +4155,16 @@ void MainWindow::launchCurrentMapTest()
             // commits or rejects the staged generation. The launcher focuses the
             // game only after hotReloadFinished, so editor input stays blocked.
             progress->setRange(0, 0);
-            progress->setLabelText(tr("Applying the staged map generation in the game..."));
+            progress->setLabelText(
+                m_mapTestLauncher->isTerrainAtlasRestartPending()
+                    ? tr("Restarting the owned game with the changed terrain atlas...")
+                    : tr("Applying the staged map generation in the game..."));
             m_hotReloadProgress = progress.take();
-            statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
+            statusBar()->showMessage(
+                m_mapTestLauncher->isTerrainAtlasRestartPending()
+                    ? tr("Terrain atlas changed; the owned JMV test process is restarting safely.")
+                    : tr("Hot reload queued on the verified JMV game thread."),
+                6000);
         }
     }
     if(progress)
@@ -6106,19 +6178,38 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     progress.setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     setWorkspaceIdentity("map", zoneId, zoneId, zoneId);
+    QElapsedTimer mapLoadTimer;
+    QElapsedTimer mapLoadPhase;
+    mapLoadTimer.start();
+    mapLoadPhase.start();
     m_pView->loadLandscape(QFileInfo(mprPath));
+    const qint64 landscapeMs = mapLoadPhase.elapsed();
     progress.setLabelText(tr("Loading %1...").arg(QFileInfo(mobPath).fileName()));
     progress.setValue(2);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QFileInfo mobFile(mobPath);
+    mapLoadPhase.restart();
     m_pView->loadMob(mobFile);
+    const qint64 mobMs = mapLoadPhase.elapsed();
+    mapLoadPhase.restart();
     rememberRecentFile(QFileInfo(mprPath));
     rememberRecentFile(QFileInfo(mobPath));
+    const qint64 recentFilesMs = mapLoadPhase.elapsed();
     // The landscape title update can run before the matching MOB has finished
     // loading. Re-resolve the map identity from the completed pair so family
     // validation and hot reload cannot retain the previous map's primary MOB,
     // entrances, or custom-spawn context.
-    refreshMapTestContext();
+    mapLoadPhase.restart();
+    // The Maps browser already owns the current resource/map catalog. Opening
+    // one entry must only bind that snapshot, not rescan every configured RES
+    // and map root on the UI thread.
+    refreshMapTestContext(false, false);
+    const qint64 mapContextMs = mapLoadPhase.elapsed();
+    ei::log(eLogInfo, QString(
+        "Map workspace load phases zone:%1 landscapeMs:%2 mobMs:%3 "
+        "recentFilesMs:%4 mapContextMs:%5 totalMs:%6")
+        .arg(zoneId).arg(landscapeMs).arg(mobMs).arg(recentFilesMs)
+        .arg(mapContextMs).arg(mapLoadTimer.elapsed()));
     ei::log(eLogInfo, QString("Opened profile map zone:%1 mpr:%2 mob:%3")
         .arg(zoneId, mprPath, mobPath));
     progress.setValue(3);
@@ -6184,6 +6275,12 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
 }
 
 void MainWindow::updateLoadedMapPanel()
+{
+    scheduleLoadedMapPanelRefresh(this, &m_loadedMapPanelRefreshPending,
+        [this]() { rebuildLoadedMapPanel(); });
+}
+
+void MainWindow::rebuildLoadedMapPanel()
 {
     if(!m_loadedMapTree || !m_pView)
         return;
@@ -6383,7 +6480,31 @@ void MainWindow::updateDocumentActionAvailability()
     const bool hasActiveMob = m_pView && m_pView->hasActiveMob();
     const bool hasAnyMob = m_pView && !m_pView->mobs().isEmpty();
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
-    const bool dirtyMpr = hasMpr && CLandscape::getInstance()->isDirty();
+    const bool dirtyMpr = terrainMprSaveActionEnabled(
+        hasMpr, CLandscape::getInstance()->isDirty(),
+        m_pView && m_pView->hasPendingTerrainPublication());
+    const ETerrainMprSavePresentation savePresentation =
+        hasMpr && m_pView ? m_pView->terrainMprSavePresentation()
+                          : ETerrainMprSavePresentation::PlainMpr;
+    switch(savePresentation)
+    {
+    case ETerrainMprSavePresentation::EditableModernDraft:
+        m_ui->actionSave_landscape_MPR->setText(tr("Save MPR Draft"));
+        m_ui->actionSave_landscape_MPR_as->setText(
+            tr("Finalize Draft MPR As..."));
+        break;
+    case ETerrainMprSavePresentation::PendingModernPublication:
+        m_ui->actionSave_landscape_MPR->setText(
+            tr("Finalize and Save MPR"));
+        m_ui->actionSave_landscape_MPR_as->setText(
+            tr("Finalize MPR As..."));
+        break;
+    case ETerrainMprSavePresentation::PlainMpr:
+    default:
+        m_ui->actionSave_landscape_MPR->setText(tr("Save MPR"));
+        m_ui->actionSave_landscape_MPR_as->setText(tr("Save MPR As..."));
+        break;
+    }
     m_ui->actionOpen->setEnabled(idle);
     m_ui->actionNew_MPR->setEnabled(idle);
     m_ui->actionNew_MOB->setEnabled(idle);
@@ -8216,6 +8337,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();
     ei::log(eLogInfo, "Shutdown live view deletion started");
+    ++m_landscapeVisibilityGeneration;
     m_pView->prepareForApplicationShutdown();
     delete m_pView;
     m_pView = nullptr;

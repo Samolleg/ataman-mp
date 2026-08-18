@@ -1,0 +1,24 @@
+{
+  "schema": "ei-ice-directional-edge-decisions-v1",
+  "checkpoint": "R60-ICE-DIRECTIONAL-EDGE-FEATHER",
+  "authority": "explicit-user-review-with-drawn-reach-guide",
+  "status": "rejected-direction",
+  "decisions": {
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Reject attenuation; less pronounced than R59",
+      "note": "R60 is less pronounced than R59 and does not make the support transition reach the drawn blue guide. The blue curve marks the expected outer extent of a visibly stronger blend body, not a request for weaker opacity inside the old footprint."
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Reject attenuation; less pronounced than R59",
+      "note": "R60 is less pronounced than R59 and does not make the support transition reach the drawn blue guide. The blue curve marks the expected outer extent of a visibly stronger blend body, not a request for weaker opacity inside the old footprint."
+    }
+  },
+  "approvedRoutes": [],
+  "pendingRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "rejectedMethod": "Attenuating only R59-added owner opacity inside the existing support footprint while treating the extracted mask as an immutable alpha floor.",
+  "requestedRepair": "Use the connected faint authored support footprint as the reach envelope, but make the support transition visibly stronger through that envelope toward the drawn blue contour. Preserve continuous authored detail and the clean distant owner field.",
+  "generationPolicy": "Do not apply R60. Both Ice inside routes remain pending pronounced support-reach review."
+}

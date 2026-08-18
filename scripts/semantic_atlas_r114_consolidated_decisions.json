@@ -1,0 +1,92 @@
+{
+  "schema": "ei-semantic-atlas-r114-consolidated-decisions-v1",
+  "source": "User-submitted R114 top-50 audit disagreement review",
+  "sourceCatalogSha256": "D0B7A80C6785D0AE1D51D0214C88B439F6F8434CA5BBBD2F49FCEB6CAA120736",
+  "policy": {
+    "applyOnlyExplicitChangedDecisions": true,
+    "untouchedDefaultsAreNotConfirmations": true,
+    "commentExplicitAssignmentsAreDecisions": true,
+    "propagation": "Only exact HD+original binding owners are enumerated"
+  },
+  "cornerCorrections": {
+    "bz2g": {
+      "53": {"SE": "Grass / Common"},
+      "73": {"NE": "Stone / Lime"},
+      "131": {"SE": "Grass / Common"},
+      "186": {"NW": "Grass / Common"},
+      "210": {"SE": "Grass / Common"},
+      "246": {"SE": "Grass / Common"},
+      "342": {"NE": "Grass / Dark"},
+      "371": {"SE": "Grass / Common"},
+      "449": {"SE": "Grass / Common"},
+      "460": {"NE": "Stone / Lime"},
+      "491": {"NE": "Stone / Lime"},
+      "511": {"SW": "Grass / Dark"}
+    },
+    "Zone2": {
+      "53": {"SE": "Grass / Common"},
+      "73": {"NE": "Stone / Lime"},
+      "131": {"SE": "Grass / Common"},
+      "186": {"NW": "Grass / Common"},
+      "210": {"SE": "Grass / Common"},
+      "246": {"SE": "Grass / Common"},
+      "342": {"NE": "Grass / Dark"},
+      "371": {"SE": "Grass / Common"},
+      "449": {"SE": "Grass / Common"},
+      "460": {"NE": "Stone / Lime"},
+      "491": {"NE": "Stone / Lime"},
+      "511": {"SW": "Grass / Dark"}
+    },
+    "bz3g": {
+      "17": {"NW": "Grass / Common", "SW": "Grass / Dark"},
+      "30": {"SW": "Ground / Dead"},
+      "34": {"SW": "Ground / Dead"},
+      "36": {"SW": "Ground / Dead"},
+      "41": {"SW": "Ground / Dead"},
+      "104": {"NW": "Stone / Grayish", "SE": "Grass / Sparse dark"},
+      "108": {"NW": "Grass / Sparse dark"},
+      "114": {"SW": "Ground / Dead"},
+      "172": {"SE": "Grass / Dark"},
+      "186": {"NE": "Ground / Common"},
+      "208": {"NW": "Stone / Lime"},
+      "255": {"SW": "Ground / Dead"},
+      "278": {"NE": "Grass / Sparse dark"},
+      "298": {"SW": "Stone / Grayish"},
+      "308": {"NE": "Stone / Lime"},
+      "318": {"NW": "Grass / Sparse light", "SE": "Stone / Lime"},
+      "321": {"SE": "Paving / Radial"},
+      "324": {"SW": "Ground / Dead"},
+      "330": {"SE": "Ground / Dead"},
+      "343": {"NE": "Paving / Radial"},
+      "387": {"SE": "Stone / Lime"},
+      "388": {"SW": "Grass / Dark"},
+      "391": {"NW": "Ground / Dark underwater"},
+      "404": {"SE": "Stone / Grayish"},
+      "410": {"NW": "Stone / Grayish"},
+      "422": {"NW": "Stone / Grayish"},
+      "426": {"SE": "Grass / Dark"},
+      "462": {"NW": "Stone / Lime"},
+      "482": {"NE": "Stone / Lime"},
+      "488": {"SW": "Ground / Dead"},
+      "491": {"NW": "Stone / Lime"},
+      "496": {"NW": "Stone / Lime"},
+      "498": {"SW": "Ground / Dead"}
+    },
+    "bz4g": {
+      "115": {"SW": "Ground / Gravel greenish"},
+      "118": {"SE": "Ground / Gravel greenish"},
+      "203": {"SW": "Ground / Gravel greenish"}
+    },
+    "Zone4": {
+      "115": {"SW": "Ground / Gravel greenish"},
+      "118": {"SE": "Ground / Gravel greenish"},
+      "203": {"SW": "Ground / Gravel greenish"}
+    }
+  },
+  "counts": {
+    "submittedCards": 48,
+    "questionnaireChangedCorners": 50,
+    "commentExplicitCorners": 1,
+    "expandedOwnerCornerRows": 66
+  }
+}

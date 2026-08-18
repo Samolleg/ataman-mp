@@ -4,12 +4,14 @@
 #include <QScrollBar>
 #include <QShortcut>
 #include <QLabel>
+#include <QHash>
 
 #include "tile_form.h"
 #include "ui_tile_form.h"
 #include "resourcemanager.h"
 #include "resource_name.h"
 #include "log.h"
+#include "terrain_atlas_shape_policy.h"
 
 #include "layout_components/tablemanager.h"
 
@@ -65,6 +67,8 @@ CTileForm::CTileForm(QWidget *parent) :
     ui->tableTile->verticalHeader()->setVisible(false);
     ui->tableTile->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     ui->tableTile->horizontalHeader()->setStretchLastSection(true);
+    connect(ui->tableTile->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, [this](int) { ensureVisibleTileIcons(); });
 
     ui->tableQuick->verticalHeader()->setVisible(false);
     ui->tableQuick->setRowCount(1);
@@ -91,6 +95,7 @@ CTileForm::CTileForm(QWidget *parent) :
     ui->formLayout_2->setWidget(2, QFormLayout::FieldRole, m_pPhaseNumText.get());
     connect(m_pPhaseNumText.get(), SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onPhaseNumSet(QSharedPointer<IPropertyBase>)));
     m_arrQuickTile.resize(8);
+    ensureQuickTableItems();
 
     QTabWidget* pTab = ui->tabWidget;
     QShortcut *nextTabShortcut = new QShortcut(QKeySequence("Ctrl+Tab"), this);
@@ -113,39 +118,99 @@ void CTileForm::fitTable()
         tableWidth -= ui->tableTile->verticalScrollBar()->width();
     int cellWidth = tableWidth/8;
 
-    int iIco(0);
-    int nRow = m_nTilePerRow * m_nTextureAtlas;
-    for(int row(0); row<nRow; ++row)
-    {
-        ui->tableTile->setRowHeight(row, (row+1)%8 == 0 ? (cellWidth + 6) : cellWidth);
-        for(int col(0); col<m_nTilePerRow; ++col)
-        {
-            ui->tableTile->setColumnWidth(col, cellWidth);
-            QTableWidgetItem *item = ui->tableTile->item(row, col);
-            QIcon scaledIco = m_icoList[iIco].pixmap(QSize(m_originalTilesize, m_originalTilesize)).scaled(cellWidth, cellWidth, Qt::KeepAspectRatio);
-            item->setIcon(scaledIco);
-            ++iIco;
-        }
-    }
+    for(int col(0); col<m_nTilePerRow; ++col)
+        ui->tableTile->setColumnWidth(col, cellWidth);
+    // Expanded atlases can contain thousands of rows. QTableWidget applies its
+    // header default to every row without walking the complete model; the
+    // delegate already draws the page separator after every eighth row.
+    ui->tableTile->verticalHeader()->setDefaultSectionSize(cellWidth);
+    ensureVisibleTileIcons();
 
     //quick panel
+    ensureQuickTableItems();
     int quickColWidth = ui->tableQuick->width()/8;
     ui->tableQuick->setRowHeight(0, quickColWidth);
     for(int i(0); i<8; ++i)
     {
         ui->tableQuick->setColumnWidth(i, quickColWidth);
         QTableWidgetItem *item = ui->tableQuick->item(0, i);
-        QIcon scaledIco = m_icoList[m_arrQuickTile[i]].pixmap(QSize(m_originalTilesize, m_originalTilesize)).scaled(cellWidth, cellWidth, Qt::KeepAspectRatio);
+        QIcon scaledIco = iconForSlot(m_arrQuickTile[i]).pixmap(
+            QSize(m_originalTilesize, m_originalTilesize)).scaled(
+                cellWidth, cellWidth, Qt::KeepAspectRatio);
         item->setIcon(scaledIco);
     }
     ui->tableQuick->setFixedHeight(ui->tableQuick->horizontalHeader()->height()+quickColWidth + 2); // 2 pixel is select border
+}
+
+QIcon CTileForm::iconForSlot(int index)
+{
+    if(index < 0 || index >= m_tileImages.size())
+        return QIcon();
+    while(m_icoList.size() < m_tileImages.size())
+        m_icoList.append(QIcon());
+    if(m_icoList[index].isNull())
+        m_icoList[index] = QIcon(QPixmap::fromImage(m_tileImages.at(index)));
+    return m_icoList.at(index);
+}
+
+QTableWidgetItem* CTileForm::ensureTileItem(int row, int column)
+{
+    if(row < 0 || row >= ui->tableTile->rowCount()
+       || column < 0 || column >= m_nTilePerRow)
+        return nullptr;
+    QTableWidgetItem* item = ui->tableTile->item(row, column);
+    if(item)
+        return item;
+    item = new QTableWidgetItem;
+    item->setText(QString());
+    item->setTextAlignment(Qt::AlignTop);
+    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+    const int slot = row * m_nTilePerRow + column;
+    if(slot < m_semanticAnnotations.size())
+        item->setToolTip(m_semanticAnnotations.at(slot));
+    ui->tableTile->setItem(row, column, item);
+    return item;
+}
+
+void CTileForm::ensureQuickTableItems()
+{
+    for(int column = 0; column < ui->tableQuick->columnCount(); ++column)
+    {
+        if(ui->tableQuick->item(0, column))
+            continue;
+        QTableWidgetItem* item = new QTableWidgetItem;
+        item->setText(QString());
+        item->setTextAlignment(Qt::AlignCenter);
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        ui->tableQuick->setItem(0, column, item);
+    }
+}
+
+void CTileForm::ensureVisibleTileIcons()
+{
+    if(m_tileImages.isEmpty() || !ui->tableTile->viewport())
+        return;
+    int firstRow = ui->tableTile->rowAt(0);
+    int lastRow = ui->tableTile->rowAt(ui->tableTile->viewport()->height() - 1);
+    if(firstRow < 0) firstRow = 0;
+    if(lastRow < 0) lastRow = qMin(ui->tableTile->rowCount() - 1, firstRow + 12);
+    firstRow = qMax(0, firstRow - 1);
+    lastRow = qMin(ui->tableTile->rowCount() - 1, lastRow + 1);
+    for(int row = firstRow; row <= lastRow; ++row)
+        for(int column = 0; column < m_nTilePerRow; ++column)
+        {
+            const int slot = row * m_nTilePerRow + column;
+            QTableWidgetItem* item = ensureTileItem(row, column);
+            if(item && slot < m_tileImages.size() && item->icon().isNull())
+                item->setIcon(iconForSlot(slot));
+        }
 }
 
 QPixmap CTileForm::tileWithRot(int index, int rot)
 {
     QTransform transform;
     transform.rotate(90*rot);
-    return m_icoList[index].pixmap(QSize(32, 32)).transformed(transform);
+    return iconForSlot(index).pixmap(QSize(32, 32)).transformed(transform);
 }
 
 void CTileForm::updateMaterialData()
@@ -187,13 +252,16 @@ bool CTileForm::isGetMaterial(SMaterial& mat)
 void CTileForm::updateQuickTable()
 {
     //quick panel
+    ensureQuickTableItems();
     int quickColWidth = ui->tableQuick->width()/8;
     for(int i(0); i<8; ++i)
     {
         QTableWidgetItem *item = ui->tableQuick->item(0, i);
         item->setText("");
         item->setTextAlignment(Qt::AlignCenter);
-        QIcon scaledIco = m_icoList[m_arrQuickTile[i]].pixmap(QSize(m_originalTilesize, m_originalTilesize)).scaled(quickColWidth, quickColWidth, Qt::KeepAspectRatio);
+        QIcon scaledIco = iconForSlot(m_arrQuickTile[i]).pixmap(
+            QSize(m_originalTilesize, m_originalTilesize)).scaled(
+                quickColWidth, quickColWidth, Qt::KeepAspectRatio);
         item->setIcon(scaledIco);
     }
 }
@@ -226,10 +294,8 @@ void CTileForm::onSelectFinish()
 void CTileForm::onAddAnimTileFromTable()
 {
     QVector<int> aInd;
-    for(auto& item: ui->tableTile->selectedItems())
-    {
-        aInd.append(item->row() * m_nTilePerRow + item->column());
-    }
+    for(const QModelIndex& index : ui->tableTile->selectionModel()->selectedIndexes())
+        aInd.append(index.row() * m_nTilePerRow + index.column());
     if(aInd.isEmpty())
         return;
     if(aInd.size() == 1)
@@ -321,37 +387,43 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
     ui->tableTile->setColumnCount(m_nTilePerRow); // Одна колонка для иконок
 
     m_icoList.clear();
+    QHash<qint64, QVector<QImage>> pageTiles;
     for(int i(0); i<textureAtlasNumber; ++i)
     {
+        const qint64 pageKey = arrImage.at(i).cacheKey();
+        const auto cachedTiles = pageTiles.constFind(pageKey);
+        if(cachedTiles != pageTiles.constEnd())
+        {
+            for(const QImage& tile : cachedTiles.value())
+                m_tileImages.append(tile);
+            continue;
+        }
+        QVector<QImage> physicalPageTiles;
+        physicalPageTiles.reserve(64);
         for(int col(0); col<m_nTilePerRow; ++col)
         {
             for(int row(0); row<m_nTilePerRow; ++row)
             {
                 QImage croppedImage = arrImage[i].copy(row*m_originalTilesize, col*m_originalTilesize, m_originalTilesize, m_originalTilesize);
                 croppedImage = croppedImage.mirrored(false, true);
-                m_tileImages.append(croppedImage.convertToFormat(QImage::Format_RGBA8888));
-                QPixmap croppedPixmap = QPixmap::fromImage(croppedImage);
-                m_icoList.append(QIcon(croppedPixmap));
+                croppedImage = croppedImage.convertToFormat(QImage::Format_RGBA8888);
+                physicalPageTiles.append(croppedImage);
             }
         }
+        pageTiles.insert(pageKey, physicalPageTiles);
+        for(const QImage& tile : physicalPageTiles) m_tileImages.append(tile);
     }
 
-    int iIco(0);
-    for(int row(0); row<nRow; ++row)
-    {
-        for(int col(0); col<m_nTilePerRow; ++col)
-        {
-            QTableWidgetItem *item = new QTableWidgetItem;
-            item->setIcon(m_icoList[iIco]);
-            item->setText("");
-            item->setTextAlignment(Qt::AlignTop);
-            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
-            if(iIco < m_semanticAnnotations.size())
-                item->setToolTip(m_semanticAnnotations.at(iIco));
-            ui->tableTile->setItem(row, col, item);
-            ++iIco;
-        }
-    }
+    // Inspect Atlas is hidden during normal map loading. Preserve the full
+    // authored image vector for semantic painting, but create GPU-backed icons
+    // only for rows that the user actually opens or scrolls into view.
+    for(int slot = 0; slot < m_tileImages.size(); ++slot)
+        m_icoList.append(QIcon());
+
+    // The atlas inspector is normally hidden while an MPR opens. Creating one
+    // QTableWidgetItem per physical slot made 1024+ atlases pay UI costs even
+    // when the inspector was never opened. Visible rows are materialized by
+    // ensureVisibleTileIcons(), and arbitrary empty cells remain selectable.
 
     // set custom icon delegate
     for(int i(0); i<m_nTilePerRow; ++i)
@@ -363,7 +435,7 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
     {
         m_arrQuickTile[i] = i;
         QTableWidgetItem *item = new QTableWidgetItem;
-        item->setIcon(m_icoList[m_arrQuickTile[i]]);
+        item->setIcon(iconForSlot(m_arrQuickTile[i]));
         item->setText("");
         item->setTextAlignment(Qt::AlignCenter);
         //item->setFlags(item->flags() & ~Qt::ItemIsEditable);
@@ -387,14 +459,88 @@ void CTileForm::setSemanticAnnotations(const QStringList& annotations,
     }
 }
 
-void CTileForm::selectTile(int index)
+bool CTileForm::replaceTileImages(const QVector<QImage>& images)
 {
+    if(images.size() != m_tileImages.size())
+        return false;
+    for(int slot = 0; slot < images.size(); ++slot)
+    {
+        if(images.at(slot).isNull() || images.at(slot).size() != m_tileImages.at(slot).size())
+            return false;
+    }
+    m_tileImages = images;
+    m_icoList.clear();
+    for(int slot = 0; slot < images.size(); ++slot)
+        m_icoList.append(QIcon());
+    for(int row = 0; row < ui->tableTile->rowCount(); ++row)
+        for(int column = 0; column < m_nTilePerRow; ++column)
+            if(QTableWidgetItem* item = ui->tableTile->item(row, column))
+                item->setIcon(QIcon());
+    ensureVisibleTileIcons();
+    updateQuickTable();
+    return true;
+}
+
+bool CTileForm::adoptTileImages(const QVector<QImage>& images,
+                                const QVector<qint32>& tileTypes)
+{
+    if(images.isEmpty() || images.size() % 64 != 0
+       || !terrainAtlasLogicalCountsFitPhysicalPages(
+              images.size() / 64, tileTypes.size(), images.size(),
+              tileTypes.size()))
+        return false;
+    const QSize size = images.front().size();
+    if(size.width() <= 0 || size.width() != size.height())
+        return false;
+    for(const QImage& image : images)
+        if(image.isNull() || image.size() != size)
+            return false;
+    m_tileImages = images;
+    m_nTextureAtlas = images.size() / 64;
+    m_originalTilesize = size.width();
+    m_tileTypes.clear();
+    for(qint32 type : tileTypes)
+        m_tileTypes.append(ETileType(type));
+    m_icoList.clear();
+    for(int slot = 0; slot < images.size(); ++slot)
+        m_icoList.append(QIcon());
+    ui->tableTile->clearContents();
+    ui->tableTile->setRowCount(m_nTextureAtlas * m_nTilePerRow);
+    ui->tableTile->setColumnCount(m_nTilePerRow);
+    for(int column = 0; column < m_nTilePerRow; ++column)
+    {
+        ui->tableTile->setItemDelegateForColumn(
+            column, new IconDelegate(ui->tableTile));
+        ui->tableQuick->setItemDelegateForColumn(
+            column, new IconDelegate(ui->tableQuick));
+    }
+    for(int& slot : m_arrQuickTile)
+        if(slot < 0 || slot >= images.size())
+            slot = 0;
+    ensureVisibleTileIcons();
+    updateQuickTable();
+    return true;
+}
+
+bool CTileForm::selectTile(int index)
+{
+    // The modern painter can realize imported/generated artwork in working
+    // slots beyond the authored inspector table.  Right-click sampling must
+    // never use such a recyclable physical slot as an index into authored MPR
+    // metadata.
+    if(index < 0 || index >= m_tileImages.size()
+       || index >= m_tileTypes.size() || m_nTilePerRow <= 0)
+        return false;
     int row = index/m_nTilePerRow;
     int column = index%m_nTilePerRow;
+    if(row < 0 || row >= ui->tableTile->rowCount()
+       || column < 0 || column >= ui->tableTile->columnCount())
+        return false;
     ui->tableQuick->clearSelection();
     ui->tableTile->setCurrentCell(row, column);
     ui->comboTileType->setCurrentIndex(m_tileTypes[index]);
     //emit onSelect(tileWithRot(index));
+    return true;
 }
 
 void CTileForm::selectQuickAccessTile(int index)
@@ -624,9 +770,11 @@ void CTileForm::on_buttonOnAnimTileShow_clicked()
     {
         int cRow = (index+i)/m_nTilePerRow;
         int cCol = (index+i)%m_nTilePerRow;
-        ui->tableTile->item(cRow, cCol)->setSelected(true);
+        if(QTableWidgetItem* item = ensureTileItem(cRow, cCol))
+            item->setSelected(true);
     }
-    ui->tableTile->scrollToItem(ui->tableTile->item(row, col));
+    if(QTableWidgetItem* item = ensureTileItem(row, col))
+        ui->tableTile->scrollToItem(item);
 }
 
 
@@ -729,7 +877,14 @@ bool KeyPressEventFilter::eventFilter(QObject* obj, QEvent* event)
         auto keyCode = EKeyCode(keyEvent->nativeVirtualKey());
         switch (keyCode)
         {
-        case eKey_1 ... eKey_8:
+        case eKey_1:
+        case eKey_2:
+        case eKey_3:
+        case eKey_4:
+        case eKey_5:
+        case eKey_6:
+        case eKey_7:
+        case eKey_8:
         {
             int id = keyCode-eKey_1;
             emit setQuick(id, m_pTable->currentRow(), m_pTable->currentColumn());

@@ -2,6 +2,10 @@
 #define LANDSCAPE_TOOLS_H
 
 #include <QWidget>
+#include <QByteArray>
+#include <QImage>
+#include <QSet>
+#include <QStringList>
 #include <QVector>
 
 #include "landscape_edit_policy.h"
@@ -11,8 +15,44 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QLineEdit;
+class QListWidget;
+class QButtonGroup;
+class QGridLayout;
+class QProgressBar;
+class QResizeEvent;
+class QScrollArea;
+class QSlider;
 class QSpinBox;
+class QTabWidget;
+class QToolButton;
 struct SMaterial;
+
+struct STerrainPaintMaterialChoice
+{
+    qint32 id{0};
+    qint32 supportId{0};
+    QString name;
+    QString familyName;
+    QImage thumbnail;
+    int assignedSlots{0};
+    bool cornerOnly{false};
+    bool contextualStamp{false};
+    bool used{false};
+};
+
+enum class ETerrainPaintPaletteMode
+{
+    Modern,
+    ClassicAuto,
+    Manual
+};
+
+enum class ETerrainPaintTargetMode
+{
+    Tile,
+    Vertex
+};
 
 enum class EOverlaySurfaceOperation
 {
@@ -36,6 +76,8 @@ class CLandscapeTools : public QWidget
 public:
     explicit CLandscapeTools(QWidget* parent = nullptr);
 
+    QSize minimumSizeHint() const override;
+
     bool sculptEnabled() const;
     bool overlaySculptEnabled() const;
     bool editingEnabled() const;
@@ -57,6 +99,12 @@ public:
     float paintRadius() const;
     ETerrainTileBrushShape paintShape() const;
     bool manualTileSelectionEnabled() const;
+    bool classicAutoPaintingEnabled() const;
+    ETerrainPaintPaletteMode paintPaletteMode() const;
+    void setPaintPaletteMode(ETerrainPaintPaletteMode mode);
+    ETerrainPaintTargetMode paintTargetMode() const;
+    bool classicAutoSafeMode() const;
+    bool randomizeUniformRotation() const;
     bool landFamiliesAllowedInOverlay() const;
     bool overlayMaterialSlotLabelsVisible() const;
     void setOverlayMaterialSlotLabelsVisible(bool visible);
@@ -70,11 +118,41 @@ public:
     void adjustPaintSize(int steps);
     void adjustPaintTerrainType(int steps);
     qint32 paintTerrainType(bool* selected = nullptr) const;
+    qint32 paintTerrainSupport() const;
+    bool paintIssueMarkingEnabled() const;
+    QString paintIssueCategory() const;
+    void setPaintIssueMarkingEnabled(bool enabled);
     void setPaintTerrainTypes(const QVector<QPair<qint32, QString>>& landTypes,
                               const QVector<QPair<qint32, QString>>& underwaterTypes,
                               const QVector<QPair<qint32, QString>>& overlayTypes,
                               const QString& status = QString());
+    void setPaintMaterials(const QVector<STerrainPaintMaterialChoice>& landTypes,
+                           const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
+                           const QVector<STerrainPaintMaterialChoice>& overlayTypes,
+                           int assignedSlots, int totalSlots,
+                           const QString& status = QString(),
+                           const QString& atlasSource = QString(),
+                           const QString& atlasSourcePath = QString());
+    void setClassicAutoMaterials(
+        const QVector<STerrainPaintMaterialChoice>& landTypes,
+        const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
+        const QVector<STerrainPaintMaterialChoice>& overlayTypes);
+    void beginTerrainPaletteUpdate();
+    void endTerrainPaletteUpdate();
+    void setManualAtlasTiles(const QVector<QImage>& tiles,
+                              const QVector<qint32>& runtimeTypes,
+                              const QStringList& descriptions = QStringList(),
+                              // When supplied, each non-empty entry is the
+                              // stable physical-pixel SHA-256 + runtime-type
+                              // identity for the corresponding slot. Empty
+                              // entries are unaddressable physical padding.
+                              const QVector<QByteArray>& physicalIdentities = {});
+    void setGeneratedAtlasTileCount(int count);
+    void setUsedTerrainFamilies(const QSet<qint32>& landFamilies,
+                                const QSet<qint32>& overlayFamilies);
     bool selectPaintTerrainType(qint32 terrainType);
+    bool selectManualAtlasTile(int slot);
+    int currentManualAtlasTile() const;
     bool underwaterFamiliesVisible() const;
     void setUnderwaterFamiliesVisible(bool visible);
     bool mainTerrainVisible() const;
@@ -84,15 +162,23 @@ public:
 
 signals:
     void importHeightmapRequested();
-    void tilePickerRequested();
+    void resolveMissingBlendsRequested();
     void atlasProfileReviewRequested();
     void exportPaintDiagnosticRequested();
     void openMprSettingsRequested();
+    void saveModernDraftRequested();
     void editingStateChanged();
     void brushGeometryChanged();
     void paintTerrainTypeChanged(qint32 terrainType);
+    // The physical Manual palette is comparatively expensive to materialize.
+    // Request it only when the user actually opens that paint mode.
+    void manualAtlasPaletteRequested();
+    void manualAtlasTileRequested(int slot);
     void terrainVisibilityChanged(bool mainTerrainVisible, bool overlaysVisible);
     void overlayMaterialSlotLabelsChanged(bool visible);
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     bool m_editingActive{false};
@@ -107,12 +193,42 @@ private:
     QLabel* m_flattenLabel;
     QLabel* m_falloffLabel;
     QCheckBox* m_flipVertical;
-    QComboBox* m_paintTerrainType;
-    QDoubleSpinBox* m_paintRadius;
-    QComboBox* m_paintShape;
-    QCheckBox* m_manualTileSelection;
-    QCheckBox* m_showUnderwaterFamilies;
-    QCheckBox* m_allowLandFamiliesInOverlay;
+    QTabWidget* m_materialTabs;
+    QTabWidget* m_paintModeTabs;
+    QTabWidget* m_classicMaterialTabs;
+    QLineEdit* m_paintFilter;
+    QWidget* m_modernModePage;
+    QWidget* m_classicModePage;
+    QWidget* m_manualModePage;
+    QScrollArea* m_groundMaterialScroll;
+    QScrollArea* m_overlayMaterialScroll;
+    QWidget* m_groundMaterialPage;
+    QWidget* m_overlayMaterialPage;
+    QGridLayout* m_groundMaterialGrid;
+    QGridLayout* m_underwaterMaterialGrid;
+    QGridLayout* m_overlayMaterialGrid;
+    QButtonGroup* m_groundMaterialButtons;
+    QButtonGroup* m_overlayMaterialButtons;
+    QScrollArea* m_classicGroundMaterialScroll;
+    QScrollArea* m_classicOverlayMaterialScroll;
+    QWidget* m_classicGroundMaterialPage;
+    QWidget* m_classicOverlayMaterialPage;
+    QGridLayout* m_classicGroundMaterialGrid;
+    QGridLayout* m_classicUnderwaterMaterialGrid;
+    QGridLayout* m_classicOverlayMaterialGrid;
+    QButtonGroup* m_classicGroundMaterialButtons;
+    QButtonGroup* m_classicOverlayMaterialButtons;
+    QListWidget* m_manualTileList;
+    QSlider* m_paintRadius;
+    QLabel* m_paintRadiusValue;
+    QToolButton* m_circlePaintShape;
+    QToolButton* m_squarePaintShape;
+    QToolButton* m_tilePaintTarget;
+    QToolButton* m_vertexPaintTarget;
+    QCheckBox* m_classicAutoSafe;
+    QCheckBox* m_randomizeUniformRotation;
+    QComboBox* m_paintIssueCategory;
+    QToolButton* m_markPaintIssue;
     QCheckBox* m_showOverlayMaterialSlots;
     QComboBox* m_overlaySurfaceOperation;
     QComboBox* m_overlayMaterial;
@@ -121,14 +237,37 @@ private:
     QCheckBox* m_showMainTerrain;
     QCheckBox* m_showOverlays;
     QLabel* m_tilesetStatus;
+    QLabel* m_atlasCoverage;
+    QLabel* m_generatedAtlasTiles;
+    QProgressBar* m_atlasCapacity;
+    QLabel* m_atlasCapacityWarning;
     QWidget* m_sculptControls;
     QWidget* m_paintControls;
-    QVector<QPair<qint32, QString>> m_landPaintTypes;
-    QVector<QPair<qint32, QString>> m_underwaterPaintTypes;
-    QVector<QPair<qint32, QString>> m_overlayPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_landPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_underwaterPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_overlayPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_classicLandPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_classicUnderwaterPaintTypes;
+    QVector<STerrainPaintMaterialChoice> m_classicOverlayPaintTypes;
     QString m_paintCatalogStatus;
+    int m_paletteColumns{1};
+    int m_authoredAtlasSlots{0};
+    bool m_paletteRelayoutPending{false};
+    int m_terrainPaletteUpdateDepth{0};
+    bool m_terrainPaletteRebuildPending{false};
+    bool m_terrainPaletteRefreshPending{false};
     void updateModeVisibility();
     void refreshPaintTerrainTypes();
+    void rebuildMaterialPalette();
+    void requestMaterialPaletteRebuild();
+    void requestPaintTerrainTypesRefresh();
+    void refreshAtlasCapacity(int activeSlots);
+    void updatePaintIssueUi();
+    void updatePaintShapeUi();
+    void clearPaintMaterialSelection();
+    void applyPaintFilter();
+    void refreshPaletteColumns(bool rebuild = true);
+    QButtonGroup* activeMaterialButtons() const;
 };
 
 #endif

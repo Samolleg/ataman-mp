@@ -136,7 +136,8 @@ public:
     QImage textureImage(const QString& name, const QString& modelName);
     QImage layeredTextureImage(const QStringList& layerNames, const QString& modelName,
                                QString* diagnostic = nullptr);
-    QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount, int& texCount);
+    QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount,
+                                 int& texCount, int& atlasColumns);
     // Terrain atlases have an authored DXT mip chain. This only changes the
     // terrain sampler; character/equipment atlases deliberately remain on
     // their conservative non-mipmapped path because their small islands can
@@ -156,6 +157,33 @@ public:
     const QList<QString>& textureList() const {return m_arrCellComboBox;}
     int extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringList& inArrTextureName);
     int extractMmpToDxt1(QImage& outImage, const QString textureName);
+    // Returns the exact authored MMP payload used by terrain loading. Test
+    // Current Map uses this to preserve stock pages byte-for-byte while
+    // appending generated working-atlas pages to a run-local RES archive.
+    bool terrainMmpPayload(const QString& textureName, QByteArray* payload,
+                           QString* sourcePath = nullptr) const;
+    // Built-in semantic catalog sources refer to stock configured archives,
+    // never to the currently open map's private/finalized atlas. A private
+    // archive may reuse stock member names for completely different slots.
+    bool catalogTerrainMmpPayload(const QString& textureName,
+                                  QByteArray* payload,
+                                  QString* sourcePath = nullptr) const;
+    // Resolve the winning terrain page archive without reading the page body.
+    bool terrainMmpSourceArchive(const QString& textureName,
+                                 QString* sourcePath) const;
+    // Read and decode only one DXT1 tile band from the winning configured RES
+    // member. The exact archive/member identity keys the persistent cache.
+    bool catalogTerrainMmpTile(const QString& textureName, int logicalSlot,
+                               QImage* tile,
+                               QString* sourceIdentity = nullptr) const;
+    bool terrainMmpTile(const QString& textureName, int logicalSlot,
+                        QImage* tile, QString* sourcePath = nullptr) const;
+    // A finalized isolated MPR may carry a sibling <mpr>-atlas.res. This
+    // session-only source is searched before configured shared terrain data.
+    void setMapLocalTerrainArchive(const QString& path);
+    // Expanded, ordered RES files from the active resource profile. Used to
+    // bind a finalized atlas to one coherent archive before renderer loading.
+    QStringList configuredResourceArchivePaths() const;
 
 private:
     CTextureList();
@@ -178,6 +206,8 @@ private:
     QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;
     QList<QString> m_arrCellComboBox; //optimization for cell widget
+    QString m_mapLocalTerrainArchive;
+    mutable QMap<QString, QImage> m_catalogTerrainTileCache;
 };
 
 

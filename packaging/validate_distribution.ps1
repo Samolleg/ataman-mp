@@ -78,6 +78,64 @@ foreach ($artifact in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Ob
     $failures.Add("compiler/archive debris included: $($artifact.FullName.Substring($root.Length + 1))")
 }
 
+# Collection paths are relative to the descriptor, not to an arbitrary
+# staging source. A package can contain the MPR bytes yet still present the
+# editor with a missing map if the descriptor was moved without its relative
+# layout (the modern-atlas R34 package exposed exactly this failure).
+foreach ($collection in Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.collection') {
+    $relativeCollection = $collection.FullName.Substring($root.Length + 1)
+    $text = Get-Content -LiteralPath $collection.FullName -Raw
+    $match = [regex]::Match($text, '(?m)^\s*mpr\s*=\s*"([^"]*)"\s*$')
+    if (-not $match.Success -or [string]::IsNullOrWhiteSpace($match.Groups[1].Value)) {
+        $failures.Add("collection has no MPR reference: $relativeCollection")
+        continue
+    }
+    $reference = $match.Groups[1].Value.Replace('/', '\')
+    $resolved = [IO.Path]::GetFullPath((Join-Path $collection.DirectoryName $reference))
+    $insidePackage = $resolved.StartsWith(
+        $root + '\', [System.StringComparison]::OrdinalIgnoreCase)
+    if (-not $insidePackage) {
+        $failures.Add("collection MPR escapes the package: $relativeCollection -> $reference")
+    }
+    elseif (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        $failures.Add("collection MPR is missing: $relativeCollection -> $reference")
+    }
+}
+
+foreach ($profile in Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.semantic-atlas.json') {
+    $relative = $profile.FullName.Substring($root.Length + 1)
+    try {
+        $document = Get-Content -LiteralPath $profile.FullName -Raw | ConvertFrom-Json
+        $portableClone = $document.provenance -eq 'portable-exact-stock-atlas-clone-v1'
+        $portableModern = $document.provenance -eq 'portable-finalized-modern-atlas-v1'
+        $portableRootPath = $relative.StartsWith(
+            'terrain-atlas-profiles\', [System.StringComparison]::OrdinalIgnoreCase)
+        $portableCollectionPath = $relative.StartsWith(
+            'collections\', [System.StringComparison]::OrdinalIgnoreCase) -and
+            $relative.Contains('\terrain-atlas-profiles\')
+        $slotCount = [int]$document.atlasSlotCount
+        $complete = $slotCount -gt 0 -and $document.approved -eq $true -and
+            $document.atlasPixelSha256 -match '^[0-9a-fA-F]{64}$' -and
+            @($document.slots).Count -eq $slotCount
+        $allAssigned = @($document.slots | Where-Object { -not $_.assigned }).Count -eq 0
+        $hasAssigned = @($document.slots | Where-Object { $_.assigned }).Count -gt 0
+        $allowedStockClone = $portableClone -and $portableRootPath -and
+            $complete -and $allAssigned
+        # Modern finalized pages are physical 8x8 sheets. Their last page may
+        # contain deliberately unassigned padding, so requiring every physical
+        # slot to be assigned would reject the exact sidecar needed to reopen a
+        # packaged visual-test MPR. Keep this exception collection-local.
+        $allowedModernCollection = $portableModern -and
+            $portableCollectionPath -and $complete -and $hasAssigned
+        if (-not ($allowedStockClone -or $allowedModernCollection)) {
+            $failures.Add("pre-shipped local Material atlas override included: $relative")
+        }
+    }
+    catch {
+        $failures.Add("invalid packaged Material atlas profile: $relative ($($_.Exception.Message))")
+    }
+}
+
 $versionPath = Join-Path $root 'VERSION'
 if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) {
     $failures.Add('VERSION is missing')

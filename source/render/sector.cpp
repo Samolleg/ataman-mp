@@ -1610,6 +1610,17 @@ void CSector::updateDrawData()
     updatePosition(); //todo
 }
 
+void CSector::setTerrainAtlasLayout(int textureCount, int columns)
+{
+    for(QVector<CTile>& row : m_arrLand)
+        for(CTile& tile : row)
+            tile.setAtlasLayout(textureCount, columns);
+    for(QVector<CTile>& row : m_arrWater)
+        for(CTile& tile : row)
+            tile.setAtlasLayout(textureCount, columns);
+    updateDrawData();
+}
+
 STile::STile(ushort packedData)
 {
     m_index = packedData & 63; //first 6 bits

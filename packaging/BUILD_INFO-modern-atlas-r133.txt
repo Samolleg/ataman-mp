@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: finalized RES binding fix R133
+Executable source commit: 0c5f56bb
+Semantic source commit: a910c24c771111e7b9ad150725558e7a17f8ba8e
+Preset SHA-256: 1B8493A9CC562603D57B4BDE97F069534B94AFE9A85D1F901C0AF7941B1E6D7A
+Validation: document 100/100 + 5 expected fixture-gated skips; virtual atlas 95/95; exact live Zone3Obr and Zone4 finalized-profile archive binding PASS; --ui-widget-check PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: byte-verified reuse of the validated R120/R129 all-zone, stripe, circle, family-stamp, and uniform-brush test maps; no semantic or mask regeneration

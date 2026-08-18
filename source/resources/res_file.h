@@ -83,15 +83,14 @@ public:
 
 private:
     bool getFiles(QMap<QString, SResFileEntry>& aEntry, QDataStream& stream);
-    void readFiles(QMap<QString, SResFileEntry>& aEntry, QDataStream& stream);
-    void buildFileMap(QMap<QString, SResFileEntry>& aEntry,
-                      QVector<SResHashTable>& fileTable, int offsetStream,
-                      int streamLength, QString &nameBuf);
+    bool readFiles(const QMap<QString, SResFileEntry>& aEntry, QDataStream& stream);
+    bool buildFileMap(QMap<QString, SResFileEntry>& aEntry,
+                      const SResHashTable& fileTable, qint64 offsetStream,
+                      qint64 streamLength, const QByteArray& nameBuf);
 
 private:
     static const uint s_signature =  0x019CE23C;
     SResFileHeader m_header;
-    int m_bufLen;
     QVector<SResFileEntry> m_aEntry;
     QMap<QString, QByteArray> m_aFiles;
 

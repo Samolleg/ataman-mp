@@ -1,0 +1,814 @@
+{
+  "schema": "ei-semantic-atlas-r110-consolidated-decisions-v1",
+  "sourceAnswersSha256": "156800E055F41EA4B05D86A19D77CD77375CBF90FC9CB2F90A4BABA5CC168DAD",
+  "sourceCatalogSha256": "EF9A8A92F1B9A6DA6B0E1C3B7CCA1DE90C1039F99056DDF88336C11ACDF80960",
+  "sourceQueueSha256": "C4E200D0B487663DD27BEDF6F00EF13E332F352913DBC3A3D9FA9879AEE55ECF",
+  "cornerOrder": [
+    "NW",
+    "NE",
+    "SE",
+    "SW"
+  ],
+  "familyRenames": {
+    "bz4g": {
+      "23": "Sand / Grainy"
+    },
+    "zone4": {
+      "23": "Sand / Grainy"
+    }
+  },
+  "cornerCorrections": {
+    "bz16h": {
+      "307": {
+        "NW": "Stone / Orange",
+        "SE": "Stone / Orange"
+      }
+    },
+    "bz4g": {
+      "436": {
+        "NW": "Sand / Grainy"
+      }
+    },
+    "bz5g": {
+      "300": {
+        "NW": "Ground / Common"
+      },
+      "306": {
+        "NW": "Ground / Common"
+      },
+      "334": {
+        "NW": "Ground / Common",
+        "SE": "Ground / Common"
+      },
+      "352": {
+        "NW": "Ground / Common"
+      },
+      "374": {
+        "NE": "Ground / Common"
+      },
+      "403": {
+        "NW": "Ground / Common",
+        "NE": "Sand / Common"
+      },
+      "411": {
+        "SE": "Ground / Common"
+      },
+      "453": {
+        "NW": "Ground / Common"
+      },
+      "470": {
+        "NW": "Ground / Common"
+      },
+      "474": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      },
+      "480": {
+        "SW": "Ground / Gravel"
+      },
+      "493": {
+        "NE": "Ground / Common",
+        "SW": "Sand / Common"
+      },
+      "501": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      },
+      "510": {
+        "SE": "Ground / Common"
+      }
+    },
+    "bz6g": {
+      "300": {
+        "NW": "Ground / Common"
+      },
+      "306": {
+        "NW": "Ground / Common"
+      },
+      "334": {
+        "NW": "Ground / Common",
+        "SE": "Ground / Common"
+      },
+      "352": {
+        "NW": "Ground / Common"
+      },
+      "374": {
+        "NE": "Ground / Common"
+      },
+      "403": {
+        "NW": "Ground / Common",
+        "NE": "Sand / Common"
+      },
+      "411": {
+        "SE": "Ground / Common"
+      },
+      "453": {
+        "NW": "Ground / Common"
+      },
+      "470": {
+        "NW": "Ground / Common"
+      },
+      "474": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      },
+      "480": {
+        "SW": "Ground / Gravel"
+      },
+      "493": {
+        "NE": "Ground / Common",
+        "SW": "Sand / Common"
+      },
+      "501": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      },
+      "510": {
+        "SE": "Ground / Common"
+      }
+    },
+    "zone10": {
+      "288": {
+        "NW": "Stone / Dark gray"
+      }
+    },
+    "zone13": {
+      "280": {
+        "SW": "Sand / Common grayish"
+      },
+      "281": {
+        "SW": "Sand / Common grayish"
+      },
+      "282": {
+        "SW": "Sand / Common grayish"
+      }
+    },
+    "zone18": {
+      "307": {
+        "NW": "Stone / Orange",
+        "SE": "Stone / Orange"
+      },
+      "320": {
+        "SW": "Rubble / Dry"
+      }
+    },
+    "zone4": {
+      "436": {
+        "NW": "Sand / Grainy"
+      }
+    },
+    "zone8": {
+      "300": {
+        "NW": "Ground / Common"
+      },
+      "306": {
+        "NW": "Ground / Common"
+      },
+      "334": {
+        "NW": "Ground / Common",
+        "SE": "Ground / Common"
+      },
+      "352": {
+        "NW": "Ground / Common"
+      },
+      "374": {
+        "NE": "Ground / Common"
+      },
+      "403": {
+        "NW": "Ground / Common",
+        "NE": "Sand / Common"
+      },
+      "411": {
+        "SE": "Ground / Common"
+      },
+      "453": {
+        "NW": "Ground / Common"
+      },
+      "470": {
+        "NW": "Ground / Common"
+      },
+      "474": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      },
+      "480": {
+        "SW": "Ground / Gravel"
+      },
+      "493": {
+        "NE": "Ground / Common",
+        "SW": "Sand / Common"
+      },
+      "501": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      },
+      "510": {
+        "SE": "Ground / Common"
+      }
+    }
+  },
+  "exactBindingPropagation": [
+    {
+      "source": "bz4g:436",
+      "destinations": [
+        "Zone4:436"
+      ],
+      "corners": {
+        "NW": "Sand / Grainy"
+      }
+    },
+    {
+      "source": "Zone4:436",
+      "destinations": [
+        "bz4g:436"
+      ],
+      "corners": {
+        "NW": "Sand / Grainy"
+      }
+    },
+    {
+      "source": "bz5g:300",
+      "destinations": [
+        "bz6g:300",
+        "Zone8:300"
+      ],
+      "corners": {
+        "NW": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:306",
+      "destinations": [
+        "bz6g:306",
+        "Zone8:306"
+      ],
+      "corners": {
+        "NW": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:334",
+      "destinations": [
+        "bz6g:334",
+        "Zone8:334"
+      ],
+      "corners": {
+        "NW": "Ground / Common",
+        "SE": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:352",
+      "destinations": [
+        "bz6g:352",
+        "Zone8:352"
+      ],
+      "corners": {
+        "NW": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:374",
+      "destinations": [
+        "bz6g:374",
+        "Zone8:374"
+      ],
+      "corners": {
+        "NE": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:403",
+      "destinations": [
+        "bz6g:403",
+        "Zone8:403"
+      ],
+      "corners": {
+        "NW": "Ground / Common",
+        "NE": "Sand / Common"
+      }
+    },
+    {
+      "source": "bz5g:411",
+      "destinations": [
+        "bz6g:411",
+        "Zone8:411"
+      ],
+      "corners": {
+        "SE": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:453",
+      "destinations": [
+        "bz6g:453",
+        "Zone8:453"
+      ],
+      "corners": {
+        "NW": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:470",
+      "destinations": [
+        "bz6g:470",
+        "Zone8:470"
+      ],
+      "corners": {
+        "NW": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:474",
+      "destinations": [
+        "bz6g:474",
+        "Zone8:474"
+      ],
+      "corners": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:480",
+      "destinations": [
+        "bz6g:480",
+        "Zone8:480"
+      ],
+      "corners": {
+        "SW": "Ground / Gravel"
+      }
+    },
+    {
+      "source": "bz5g:493",
+      "destinations": [
+        "bz6g:493",
+        "Zone8:493"
+      ],
+      "corners": {
+        "NE": "Ground / Common",
+        "SW": "Sand / Common"
+      }
+    },
+    {
+      "source": "bz5g:501",
+      "destinations": [
+        "bz6g:501",
+        "Zone8:501"
+      ],
+      "corners": {
+        "NE": "Ground / Common",
+        "SW": "Ground / Common"
+      }
+    },
+    {
+      "source": "bz5g:510",
+      "destinations": [
+        "bz6g:510",
+        "Zone8:510"
+      ],
+      "corners": {
+        "SE": "Ground / Common"
+      }
+    }
+  ],
+  "confirmedUnchanged": [
+    {
+      "key": "r110-bz16h-slot320",
+      "namespace": "bz16h",
+      "slot": 320,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "gd"
+    },
+    {
+      "key": "r110-bz16h-slot321",
+      "namespace": "bz16h",
+      "slot": 321,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "gd"
+    },
+    {
+      "key": "r110-bz16h-slot322",
+      "namespace": "bz16h",
+      "slot": 322,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "gd"
+    },
+    {
+      "key": "r110-bz16h-slot323",
+      "namespace": "bz16h",
+      "slot": 323,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "good"
+    },
+    {
+      "key": "r110-bz16h-slot324",
+      "namespace": "bz16h",
+      "slot": 324,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "good"
+    },
+    {
+      "key": "r110-bz16h-slot449",
+      "namespace": "bz16h",
+      "slot": 449,
+      "mapping": {
+        "NW": "Rubble / Dry",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Paving / Sand ruins"
+      },
+      "note": "good"
+    },
+    {
+      "key": "r110-zone18-slot321",
+      "namespace": "Zone18",
+      "slot": 321,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "good"
+    },
+    {
+      "key": "r110-zone18-slot322",
+      "namespace": "Zone18",
+      "slot": 322,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "good"
+    },
+    {
+      "key": "r110-zone18-slot323",
+      "namespace": "Zone18",
+      "slot": 323,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "good"
+    },
+    {
+      "key": "r110-zone18-slot324",
+      "namespace": "Zone18",
+      "slot": 324,
+      "mapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Rubble / Dry"
+      },
+      "note": "is gfood"
+    },
+    {
+      "key": "r110-zone18-slot449",
+      "namespace": "Zone18",
+      "slot": 449,
+      "mapping": {
+        "NW": "Rubble / Dry",
+        "NE": "Paving / Sand ruins",
+        "SE": "Paving / Sand ruins",
+        "SW": "Paving / Sand ruins"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-bz16h-slot459",
+      "namespace": "bz16h",
+      "slot": 459,
+      "mapping": {
+        "NW": "Sand / Grass",
+        "NE": "Sand / Gravel",
+        "SE": "Sand / Dark",
+        "SW": "Sand / Dark"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone18-slot459",
+      "namespace": "Zone18",
+      "slot": 459,
+      "mapping": {
+        "NW": "Sand / Grass",
+        "NE": "Sand / Gravel",
+        "SE": "Sand / Dark",
+        "SW": "Sand / Dark"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone7-slot222",
+      "namespace": "Zone7",
+      "slot": 222,
+      "mapping": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Common",
+        "SE": "Sand / Common",
+        "SW": "Sand / Light"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone7-slot266",
+      "namespace": "Zone7",
+      "slot": 266,
+      "mapping": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Common",
+        "SE": "Sand / Light",
+        "SW": "Sand / Light"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone7-slot433",
+      "namespace": "Zone7",
+      "slot": 433,
+      "mapping": {
+        "NW": "Sand / Dark",
+        "NE": "Stone / Light",
+        "SE": "Sand / Dark",
+        "SW": "Sand / Light"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone7-slot435",
+      "namespace": "Zone7",
+      "slot": 435,
+      "mapping": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Dark",
+        "SE": "Sand / Light",
+        "SW": "Sand / Light"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone7-slot475",
+      "namespace": "Zone7",
+      "slot": 475,
+      "mapping": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Light",
+        "SE": "Sand / Common",
+        "SW": "Sand / Underwater"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-bz13h-slot498",
+      "namespace": "bz13h",
+      "slot": 498,
+      "mapping": {
+        "NW": "Rubble / Orange",
+        "NE": "Rubble / Orange",
+        "SE": "Stone / Desert",
+        "SW": "Stone / Desert"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-bz16h-slot463",
+      "namespace": "bz16h",
+      "slot": 463,
+      "mapping": {
+        "NW": "Stone / Desert",
+        "NE": "Stone / Desert",
+        "SE": "Stone / Desert",
+        "SW": "Stone / Desert"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone18-slot463",
+      "namespace": "Zone18",
+      "slot": 463,
+      "mapping": {
+        "NW": "Stone / Desert",
+        "NE": "Stone / Desert",
+        "SE": "Stone / Desert",
+        "SW": "Stone / Desert"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-bz11k-slot437",
+      "namespace": "bz11k",
+      "slot": 437,
+      "mapping": {
+        "NW": "Stone / Grayish",
+        "NE": "Stone / Grayish",
+        "SE": "Ice / Common",
+        "SW": "Ice / Common"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-bz11k-slot446",
+      "namespace": "bz11k",
+      "slot": 446,
+      "mapping": {
+        "NW": "Ice / Common",
+        "NE": "Stone / Grayish",
+        "SE": "Stone / Grayish",
+        "SW": "Ice / Common"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone3obr-slot38",
+      "namespace": "Zone3Obr",
+      "slot": 38,
+      "mapping": {
+        "NW": "Grass / Common",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Stone / Greenish"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone3obr-slot39",
+      "namespace": "Zone3Obr",
+      "slot": 39,
+      "mapping": {
+        "NW": "Grass / Common",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Stone / Greenish"
+      },
+      "note": "is good"
+    },
+    {
+      "key": "r110-zone3obr-slot218",
+      "namespace": "Zone3Obr",
+      "slot": 218,
+      "mapping": {
+        "NW": "Grass / Dark",
+        "NE": "Grass / Dark",
+        "SE": "Grass / Dark",
+        "SW": "Stone / Greenish"
+      },
+      "note": "is good"
+    }
+  ],
+  "unresolved": [
+    {
+      "key": "r110-bz15h-slot248",
+      "namespace": "bz15h",
+      "slot": 248,
+      "corners": [
+        "NW",
+        "NE"
+      ],
+      "currentMapping": {
+        "NW": "Ground / Plant soil",
+        "NE": "Ground / Plant soil",
+        "SE": "Stone / Orange",
+        "SW": "Stone / Orange"
+      },
+      "submittedMapping": {
+        "NW": "Still uncertain",
+        "NE": "Still uncertain",
+        "SE": "Stone / Orange",
+        "SW": "Stone / Orange"
+      },
+      "note": "maybe not plant soil but ground tan? hard to tell"
+    },
+    {
+      "key": "r110-zone17-slot248",
+      "namespace": "Zone17",
+      "slot": 248,
+      "corners": [
+        "NW",
+        "NE"
+      ],
+      "currentMapping": {
+        "NW": "Ground / Plant soil",
+        "NE": "Ground / Plant soil",
+        "SE": "Stone / Orange",
+        "SW": "Stone / Orange"
+      },
+      "submittedMapping": {
+        "NW": "Still uncertain",
+        "NE": "Still uncertain",
+        "SE": "Stone / Orange",
+        "SW": "Stone / Orange"
+      },
+      "note": "maybe not plant soil but ground tan? hard to tell"
+    },
+    {
+      "key": "r110-zone6_2-slot59",
+      "namespace": "Zone6_2",
+      "slot": 59,
+      "corners": [
+        "SW"
+      ],
+      "currentMapping": {
+        "NW": "Stone / Lime",
+        "NE": "Stone / Lime",
+        "SE": "Stone / Lime",
+        "SW": "Snow / Dark"
+      },
+      "submittedMapping": {
+        "NW": "Stone / Lime",
+        "NE": "Stone / Lime",
+        "SE": "Stone / Lime",
+        "SW": "Still uncertain"
+      },
+      "note": "might be ice common or whatever is used for ice / snow in zone6_2"
+    },
+    {
+      "key": "r110-bz16h-slot480",
+      "namespace": "bz16h",
+      "slot": 480,
+      "corners": [
+        "NW"
+      ],
+      "currentMapping": {
+        "NW": "Stone / Desert",
+        "NE": "Stone / Weathered",
+        "SE": "Stone / Weathered",
+        "SW": "Ground / Plant soil"
+      },
+      "submittedMapping": {
+        "NW": "Different existing family (describe in comment)",
+        "NE": "Stone / Weathered",
+        "SE": "Stone / Weathered",
+        "SW": "Ground / Plant soil"
+      },
+      "note": "ground orange or red"
+    },
+    {
+      "key": "r110-basegipat-slot125",
+      "namespace": "BaseGipat",
+      "slot": 125,
+      "corners": [
+        "NW",
+        "NE",
+        "SE",
+        "SW"
+      ],
+      "currentMapping": {
+        "NW": "Ground / Water",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Stone / Gray"
+      },
+      "submittedMapping": null,
+      "note": "Untouched questionnaire row; no new confirmation."
+    }
+  ],
+  "counts": {
+    "queuedRows": 53,
+    "submittedRows": 52,
+    "untouchedRows": 1,
+    "changedCorners": 68,
+    "confirmedCards": 26,
+    "unresolvedCards": 5,
+    "unresolvedCorners": 10,
+    "familyRenames": 2,
+    "exactBindingPropagationEvents": 16
+  },
+  "interpretationNotes": [
+    "Still uncertain and ambiguous comment alternatives do not mutate the catalog.",
+    "Exact binding owners propagate only when their complete pre-review mappings agree.",
+    "bz5g:403 NE and bz5g:493 SW use the explicit family named in the comment.",
+    "bz16h:480 NW remains unresolved because the comment names Ground / Orange or Red.",
+    "BaseGipat:125 was untouched and remains unresolved rather than being inferred from its default."
+  ]
+}

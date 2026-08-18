@@ -1,0 +1,88 @@
+{
+  "schema": "ei-semantic-atlas-r151-decisions-v1",
+  "source": "scripts\\semantic_atlas_r151_user_answers.txt",
+  "sourceSha256": "661A240E472891DBC4223B042464223E647DD46A45FE8663C7FD809E959072F4",
+  "queue": "artifacts\\semantic-atlas-r151-corrected-t2-review\\questionnaire\\r151-t2-batch-01-queue.json",
+  "queueSha256": "91D08CA430236C1206C5B204E27661E0B35B97B26A9C8FA0C0506C3F23EA1D4D",
+  "catalogInputSha256": "75DA0728CB71AF3DE9EED3C153CB56BF2E28EF1E0DA07F618AC14220D965FA04",
+  "counts": {
+    "submittedCards": 2,
+    "changedLogicalCorners": 2,
+    "ownerExpandedCorrections": 3,
+    "unchangedSubmittedCards": 0
+  },
+  "cornerCorrections": {
+    "bz4g": {
+      "141": {
+        "SW": "Ground / Gravel greenish"
+      }
+    },
+    "Zone4": {
+      "141": {
+        "SW": "Ground / Gravel greenish"
+      }
+    },
+    "zone9": {
+      "42": {
+        "NW": "Ground / Common"
+      }
+    }
+  },
+  "reviewedCards": [
+    {
+      "key": "semantic-atlas-pixels-cc971bb2d2f28038",
+      "submittedMapping": {
+        "NW": "Stone / Lime",
+        "NE": "Stone / Lime",
+        "SE": "Stone / Lime",
+        "SW": "Ground / Gravel greenish"
+      },
+      "comment": "",
+      "locations": [
+        {
+          "namespace": "bz4g",
+          "slot": 141,
+          "currentMapping": {
+            "NW": "Stone / Lime",
+            "NE": "Stone / Lime",
+            "SE": "Stone / Lime",
+            "SW": "Ground / Common"
+          }
+        },
+        {
+          "namespace": "Zone4",
+          "slot": 141,
+          "currentMapping": {
+            "NW": "Stone / Lime",
+            "NE": "Stone / Lime",
+            "SE": "Stone / Lime",
+            "SW": "Ground / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-a3acb6bcb480eaac",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Grass / Common"
+      },
+      "comment": "",
+      "locations": [
+        {
+          "namespace": "zone9",
+          "slot": 42,
+          "currentMapping": {
+            "NW": "Ground / Gravel",
+            "NE": "Grass / Common",
+            "SE": "Grass / Common",
+            "SW": "Grass / Common"
+          }
+        }
+      ]
+    }
+  ],
+  "policy": "apply only dropdown values changed from the current mapping; unchanged serialized corners are context, not confirmations; expand only through queue-pinned exact approved-HD owners"
+}

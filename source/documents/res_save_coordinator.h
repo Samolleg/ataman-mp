@@ -5,6 +5,9 @@
 #include <QFileInfo>
 #include <QString>
 #include <QStringList>
+#include <QVector>
+
+#include "res_archive_document.h"
 
 class CResArchiveDocument;
 
@@ -32,7 +35,62 @@ struct SResMemberSaveResult
     QStringList validationNotes;
 };
 
+struct SResPublishedMembersSaveRequest
+{
+    QFileInfo source;
+    QFileInfo destination;
+    QVector<SResArchiveNewMember> published;
+    bool allowReplaceExisting{false};
+    bool createBackup{true};
+    QString backupRootOverride;
+#ifdef QT_TESTLIB_LIB
+    bool simulateAtomicCommitFailure{false};
+#endif
+};
+
+struct SResPublishedMembersSaveResult
+{
+    bool success{false};
+    bool noOp{false};
+    QString phase;
+    QString error;
+    QString candidateSha256;
+    QString backupPath;
+    QStringList validationNotes;
+};
+
+struct SResArchiveBytesSaveRequest
+{
+    QFileInfo destination;
+    QByteArray candidateBytes;
+    bool createBackup{true};
+    QString backupRootOverride;
+#ifdef QT_TESTLIB_LIB
+    bool simulateAtomicCommitFailure{false};
+#endif
+};
+
+struct SResArchiveBytesSaveResult
+{
+    bool success{false};
+    QString phase;
+    QString error;
+    QString candidateSha256;
+    QString backupPath;
+};
+
 SResMemberSaveResult commitStagedResMemberReplacement(
     const CResArchiveDocument& baseline, const SResMemberSaveRequest& request);
+
+// Publishes a coherent page set through a staged, freshly reopened, race-checked
+// and atomic RES transaction. The caller deliberately controls whether an
+// existing destination is backed up; disabling the backup never weakens the
+// staging, race, or post-commit validation gates.
+SResPublishedMembersSaveResult commitStagedResPublishedMembers(
+    const CResArchiveDocument& baseline,
+    const SResPublishedMembersSaveRequest& request);
+
+SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
+    const SResArchiveBytesSaveRequest& request);
 
 #endif // RES_SAVE_COORDINATOR_H

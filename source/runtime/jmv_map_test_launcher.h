@@ -39,8 +39,15 @@ struct SJmvMapTestLaunchInput
     SResourceProfileEvaluation profile;
     QFileInfo sourceMpr;
     QFileInfo sourceMob;
+    QFileInfo sourceTerrainTextureResource;
     QByteArray mprData;
     QByteArray mobData;
+    // Optional complete run-owned RES containing the isolated terrain MMP
+    // pages referenced by mprData. When absent, the ordinary placeholder
+    // archive is staged for maps that use installed terrain resources.
+    QByteArray terrainTextureResourceData;
+    int expectedTerrainAtlasPages{0};
+    int expectedTerrainAtlasSlots{0};
     QByteArray generatedAiGraphData;
     QString databaseSourcePath;
     QByteArray databaseData;
@@ -52,6 +59,7 @@ struct SJmvMapTestLaunchInput
     SMapSpawnPlan spawn;
     double spawnZ{0.0};
     bool godmode{false};
+    bool forceDrawall{false};
     bool overrideWorldTime{false};
     double worldTimeHours{12.0};
     bool borrowedMapIdentity{false};
@@ -78,12 +86,18 @@ public:
     bool isHotReloadReady() const;
     bool isHotReloadPending() const { return m_pendingHotReloadSequence != 0; }
     bool isRestartPending() const { return m_restartPending; }
+    bool isTerrainAtlasRestartPending() const
+    { return m_terrainAtlasRestartPending; }
     bool isRecoveryPending() const { return m_recoveryPending; }
     QString runtimeState() const;
     quint64 saveGeneration() const { return m_saveGeneration; }
     QString runId() const { return m_runId; }
     QString temporaryMapName() const { return m_temporaryMapName; }
     QStringList startupResourceChanges(const SJmvMapTestLaunchInput& input) const;
+    qint64 activeGameProcessId() const { return runtimeGameProcessId(); }
+    bool runtimeFailureObserved() const { return m_runtimeFailureObserved; }
+    QString runtimeFailureEvidence() const
+    { return m_manifest.value("runtimeFailureEvidence").toString(); }
     void stop();
 
     static QString testRunsRootPath();
@@ -115,6 +129,9 @@ public:
         const QString& stagedTablesLuaSourcePath,
         const QString& stagedTablesLuaSha256,
         const SJmvMapTestLaunchInput& input);
+    static bool isRuntimeFailureDialog(const QString& title,
+                                       const QString& windowClass,
+                                       const QString& bodyText);
     static QJsonObject buildAuthoritativeResult(const QJsonObject& manifest,
                                                 const QString& bridgeResult,
                                                 int exitCode,
@@ -126,6 +143,18 @@ public:
     static bool analyzeCompletedRun(const QString& runRoot,
                                     QJsonObject* report,
                                     QStringList* findings = nullptr);
+    static bool rebaseRuntimeTerrainAtlas(const QByteArray& sourceMpr,
+                                          const QByteArray& sourceAtlasRes,
+                                          const QString& runtimeNamespace,
+                                          int expectedPages,
+                                          QByteArray* rebasedMpr,
+                                          QByteArray* rebasedAtlasRes,
+                                          QStringList* rebasedMmpMembers,
+                                          QString* error = nullptr);
+    static bool terrainAtlasHotReloadRequiresRestart(
+        const QString& runningSourceAtlasSha256, int runningAtlasPages,
+        int runningAtlasSlots, const QString& candidateSourceAtlasSha256,
+        int candidateAtlasPages, int candidateAtlasSlots);
     static QString recoverInterruptedRuns(bool* pending = nullptr);
     static bool hasActiveInterruptedRun(QString* description = nullptr);
     static bool requestCloseActiveInterruptedRun(QString* error = nullptr);
@@ -140,6 +169,12 @@ public:
                                          bool godmode,
                                          QJsonObject* manifest,
                                          QString* error = nullptr);
+    static bool prepareRunOwnedDrawallAutoexec(const QString& sourcePath,
+                                               const QString& runRoot,
+                                               bool forceDrawall,
+                                               QJsonObject* manifest,
+                                               QString* outputPath,
+                                               QString* error = nullptr);
     static bool prepareGodmodeBootstrap(const QStringList& mapDirectories,
                                         const QString& runRoot,
                                         const SMapSpawnPlan& spawn,
@@ -164,6 +199,9 @@ signals:
 
 private:
     bool stage(const SJmvMapTestLaunchInput& input, QString* error);
+    bool queueTerrainAtlasRestart(const SJmvMapTestLaunchInput& input,
+                                  const QString& candidateAtlasSha256,
+                                  QString* error);
     bool installBridge(QString* error);
     QString cleanup();
     bool writeManifest(const QString& state, QString* error = nullptr);
@@ -176,6 +214,7 @@ private:
     QProcess* m_process;
     QTimer* m_hotReloadReadyTimer;
     QTimer* m_hotReloadResultTimer;
+    QTimer* m_runtimeHealthTimer;
     QTimer* m_recoveryTimer;
     QString m_runId;
     QString m_temporaryMapName;
@@ -193,6 +232,7 @@ private:
     QString m_tablesLuaSourcePath;
     QString m_stagedTablesLuaPath;
     QString m_livePlaceholderResourcePath;
+    QString m_drawallAutoexecPath;
     QString m_bridgeSourcePath;
     QString m_bridgeLivePath;
     QString m_bridgeResultPath;
@@ -208,6 +248,7 @@ private:
     QString m_tablesLuaSourceSha256;
     QString m_stagedTablesLuaSha256;
     QString m_livePlaceholderResourceSha256;
+    QString m_sourceTerrainTextureResourceSha256;
     QString m_gameExePath;
     QString m_engineDirectory;
     QString m_runtimeHostPath;
@@ -223,13 +264,18 @@ private:
     quint64 m_saveGeneration{0};
     quint64 m_pendingHotReloadSequence{0};
     quint64 m_pendingSaveGeneration{0};
+    int m_sourceTerrainAtlasPages{0};
+    int m_sourceTerrainAtlasSlots{0};
     int m_hotReloadResultPolls{0};
     bool m_cleanupComplete;
     bool m_stopRequested{false};
     bool m_processCrashObserved{false};
+    bool m_runtimeFailureObserved{false};
     bool m_baseProbe;
     bool m_usesRuntimeHost{false};
     bool m_recoveryPending{false};
+    bool m_terrainAtlasRestartPending{false};
+    SJmvMapTestLaunchInput m_pendingTerrainAtlasRestartInput;
     bool m_lastPublishedRecoveryPending{false};
     QString m_lastPublishedRecoveryStatus;
     bool m_restartPending{false};

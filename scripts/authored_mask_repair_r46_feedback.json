@@ -1,0 +1,10 @@
+{
+  "schema": "ei-authored-mask-repair-feedback-v1",
+  "checkpoint": "R46-SOFT-SOURCE",
+  "authority": "explicit-user-review",
+  "status": "rejected-detail-flattening",
+  "decision": {
+    "answer": "Reject globally softened reconstruction",
+    "note": "The target is the authored transition's detailed continuous opacity/brush field. Estimating a coarse region and globally softening it destroys the painterly lobes, internal strength changes, and shaped merge detail shown in the marked source images. Preserve that detail in the mask itself; remove only false texture-derived holes."
+  }
+}

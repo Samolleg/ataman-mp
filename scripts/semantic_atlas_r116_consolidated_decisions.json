@@ -1,0 +1,61 @@
+{
+  "schema": "ei-semantic-atlas-r116-consolidated-decisions-v1",
+  "source": "User-submitted R116 held-conflict review",
+  "sourceCatalogSha256": "606F738FB948137C4AA9101FBC9D326A2523C89EDECA31D9F9873A06EEBE5DF2",
+  "policy": {
+    "applyOnlyExplicitChangedDecisions": true,
+    "untouchedCurrentAssignmentsAreNotConfirmations": true,
+    "propagation": "Only byte-identical owners grouped in the validated R116 questionnaire"
+  },
+  "logicalChangedCorners": 5,
+  "propagatedCornerCorrections": 11,
+  "cornerCorrections": {
+    "bz2g": {
+      "448": {
+        "NE": "Ground / Dirt",
+        "SW": "Ground / Dirt"
+      }
+    },
+    "Zone2": {
+      "448": {
+        "NE": "Ground / Dirt",
+        "SW": "Ground / Dirt"
+      }
+    },
+    "bz4g": {
+      "351": {
+        "NW": "Ground / Gravel greenish"
+      }
+    },
+    "Zone4": {
+      "351": {
+        "NW": "Ground / Gravel greenish"
+      }
+    },
+    "bz5g": {
+      "465": {
+        "SW": "Ground / Common"
+      }
+    },
+    "bz6g": {
+      "465": {
+        "SW": "Ground / Common"
+      }
+    },
+    "Zone8": {
+      "465": {
+        "SW": "Ground / Common"
+      }
+    },
+    "zone9": {
+      "388": {
+        "NW": "Ground / Common"
+      }
+    },
+    "bz3g": {
+      "388": {
+        "NW": "Ground / Common"
+      }
+    }
+  }
+}

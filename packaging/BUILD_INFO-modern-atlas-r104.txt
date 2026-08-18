@@ -1,0 +1,5 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: capture exact live terrain artwork provenance in paint issue reports
+Preset SHA-256: 0411D38DE59C255D36448203F4522939B4D43191AD07E45EDA882291AA09519B
+Package policy: finalized clean first-run folder; no options/settings, logs, saves, dumps, object files, generated Makefiles, or stale changelists
+Installed stock JMV assets are included only in isolated visual-test maps; EI-HD research assets are excluded.

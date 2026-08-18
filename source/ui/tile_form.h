@@ -44,7 +44,7 @@ public:
 
     void fillTable(QString mapName, int textureAtlasNumber);
     void setTileTypes(const QVector<ETileType>& arrTileType) {m_tileTypes = arrTileType;}
-    void selectTile(int index);
+    bool selectTile(int index);
     void selectQuickAccessTile(int index);
     void clearTileSelection();
     int activeMaterialindex();
@@ -62,11 +62,18 @@ public:
     void setQuickTileSet(const QVector<int>& arrIndices);
     QPixmap tileWithRot(int index) {return tileWithRot(index, m_tileRot);};
     const QVector<QImage>& tileImages() const { return m_tileImages; }
+    bool replaceTileImages(const QVector<QImage>& images);
+    bool adoptTileImages(const QVector<QImage>& images,
+                         const QVector<qint32>& tileTypes);
     void setSemanticAnnotations(const QStringList& annotations,
                                 const QString& profileStatus);
 
 private:
     void fitTable();
+    QIcon iconForSlot(int index);
+    QTableWidgetItem* ensureTileItem(int row, int column);
+    void ensureQuickTableItems();
+    void ensureVisibleTileIcons();
     QPixmap tileWithRot(int index, int rot);
     void updateMaterialData();
     void updateAnimTileData();

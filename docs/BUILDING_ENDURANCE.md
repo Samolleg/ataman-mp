@@ -263,3 +263,8 @@ The gate launches only processes it owns. It requires both the installed Zone
 `GameplayReady`, remain there for 15 seconds without producing a new native
 dump, then stops the process and verifies cleanup. Do not run it while another
 Endurance-owned test session is active.
+
+Custom terrain atlases use the stricter control-first matrix documented in
+[`validation/EXPANDED_TERRAIN_ATLAS_RUNTIME.md`](validation/EXPANDED_TERRAIN_ATLAS_RUNTIME.md).
+That gate requires captured rendered-terrain evidence in addition to ordinary
+`GameplayReady`, crash, responsiveness, resource-resolution, and cleanup proof.

@@ -197,11 +197,14 @@ back to the legacy rebuilding serializer; graph persistence remains explicit.
 
 ## Remaining goals
 
-- [ ] Integrate the approved modern painter as the third terrain mode: direct
-  placement, existing-atlas smart painting, and generated-blend painting must
-  share one atlas model.
-- [ ] Complete semantic-atlas coverage and the explicit **Finalize Atlas** flow;
-  do not import experimental generated imagery.
+- [x] Integrate the approved three-mode terrain painter: Modern resolves exact
+  authored identities before deterministic generation, Classic Auto remains
+  non-mutating with Safe enabled by default, and Manual writes the selected
+  physical slot/rotation directly. All modes share the provenance-aware working
+  atlas and one undoable stroke contract.
+- [x] Complete the reviewed semantic-atlas authority and explicit draft/finalize
+  publication flow, including paired MPR+RES identity, expanded addressing,
+  deterministic resolve, undo/redo persistence, and runtime hot reload.
 - [x] Add typed overlay-material editing with live preview, lossless undoable
   application, animation records, and per-cell material-slot inspection.
 - [ ] Add validated Base/JMV surface-material presets.
@@ -229,6 +232,8 @@ back to the legacy rebuilding serializer; graph persistence remains explicit.
 - [Overlay authoring validation](docs/validation/OVERLAY_SURFACE_AUTHORING_R1.md).
 - [New-MOB creation validation](docs/validation/NEW_MOB_CREATION_R1.md).
 - [Terrain atlas review contract](docs/TERRAIN_ATLAS_REVIEW.md).
+- [Modern terrain editor contract](docs/MODERN_TERRAIN_EDITOR_MVP.md) and
+  [R180 integration test scope](packaging/ALPHA26_TERRAIN_PAINT_MODES_R180_MODERN_DRAFT_UI_SEMANTIC_TEST.md).
 - Minimap changelists:
   [generation](docs/releases/0.3.0-alpha.19-minimap-generation.md),
   [viewport/export](docs/releases/0.3.0-alpha.20-minimap-viewport-and-export.md),

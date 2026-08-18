@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: per-MPR terrain profile collision and compositor-source fix R135
+Executable source commit: 0cb73b04
+Semantic source commit: 7f7bb525231473466c49e2919d21d179c50f3e14
+Preset SHA-256: FA33433E5855661EED054C05EBBBF9F1A7C9495D23D58EE649ACDC99F63274D9
+Validation: semantic catalog 151 tests / 3 fixture skips; topology 4/4; questionnaire contract 14/14; document 102 pass / 0 fail / 6 expected skips; virtual atlas 95/95; exact live Zone3Obr collision 3/3; exact live Zone4 collision 3/3; --ui-widget-check PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: byte-reused from validated R134; terrain fixtures and reviewed mask assets are unchanged

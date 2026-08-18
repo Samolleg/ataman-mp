@@ -297,16 +297,22 @@ int wmain(int argc, wchar_t** argv)
     {
         uintptr_t imageBase = 0;
         uint64_t initialFingerprint = 0;
-        if(mainModuleBase(process.dwProcessId, &imageBase)
-           && executableFingerprint(process.hProcess, imageBase, &initialFingerprint)
-           && ResumeThread(process.hThread) != DWORD(-1)
-           && waitForJmvPatchQuiescence(process.hProcess, imageBase,
-                                        initialFingerprint, logPath)
-           && SuspendThread(process.hThread) != DWORD(-1))
+        const bool quiescent = mainModuleBase(process.dwProcessId, &imageBase)
+            && executableFingerprint(process.hProcess, imageBase, &initialFingerprint)
+            && ResumeThread(process.hThread) != DWORD(-1)
+            && waitForJmvPatchQuiescence(process.hProcess, imageBase,
+                                         initialFingerprint, logPath);
+        if(quiescent)
         {
+            // The JMV main thread must remain runnable here. Suspending it can
+            // freeze the activation thread behind the Windows loader lock even
+            // after executable patch bytes have become stable. The detours are
+            // signature guarded and target map-loading code that is not reached
+            // until the later scripted transition.
+            writeText(logPath,
+                L"RUNTIME_HOST activating with JMV main thread runnable after patch quiescence");
             activated = invokeBridgeExport(process.hProcess, remoteBridge, bridgePath,
                                            "EnduranceActivateRuntime", logPath);
-            ResumeThread(process.hThread);
         }
     }
     else

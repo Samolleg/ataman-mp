@@ -21,7 +21,9 @@ struct STerrainAtlasMaterial
     ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
     bool underwater{false};
     int representativeSlot{-1};
+    int thumbnailSlot{-1};
     int pureVariantCount{0};
+    bool cornerOnly{false};
 };
 
 struct STerrainAtlasAnalysis

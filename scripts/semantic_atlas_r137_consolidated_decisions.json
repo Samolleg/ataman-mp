@@ -1,0 +1,1303 @@
+{
+  "schema": "ei-semantic-atlas-r137-consolidated-decisions-v1",
+  "source": "scripts\\semantic_atlas_r137_user_answers.txt",
+  "sourceSha256": "E1AD5D2FDEED9F4D3C668213BF8BDD6642685765A0A55F84BF85EB05ED51520F",
+  "queue": "artifacts\\semantic-atlas-r137-all-t3-review\\questionnaire\\r137-all-t3-queue.json",
+  "queueSha256": "EB0080FBEEA0F61E3F048BC64F665D90547A33F789EABAB91A2BE29D84DD30B3",
+  "policy": "Submitted dropdown values are authoritative. This batch contains no catalog changes: every submitted mapping equals current and every audit proposal is explicitly rejected. Record each exact owner/corner proposal as do-not-reask memory.",
+  "batchFeedback": "Every R137 T3 proposal was a miss. The current catalog mapping was kept on every card. The unproven far-family consensus tier must not be an automatic queue source or preselected correction in future reviews.",
+  "counts": {
+    "questionnaireCards": 45,
+    "receivedCards": 45,
+    "appliedCards": 45,
+    "untouchedCards": 0,
+    "changedCards": 0,
+    "changedCardCorners": 0,
+    "serializedOwnerCornerRows": 0,
+    "auditFlaggedCorners": 48,
+    "auditMatchedReviewed": 0,
+    "auditRejectedOrAdjusted": 48,
+    "explicitAuditRejectedCards": 45,
+    "additionalUnflaggedHumanCorners": 0,
+    "mappingConflictCards": 0,
+    "namespaceLevelAuditObservations": 52
+  },
+  "untouchedCards": [],
+  "submittedMappings": {
+    "r137-bz10k-slot80-664eafef6e": {
+      "NW": "Rock / Snow",
+      "NE": "Rock / Snow",
+      "SE": "Rock / Snow",
+      "SW": "Rock / Snow"
+    },
+    "r137-bz10k-slot284-7a6e45b05a": {
+      "NW": "Ground / Light",
+      "NE": "Grass / Winter faded",
+      "SE": "Ground / Light",
+      "SW": "Snow / Dark"
+    },
+    "r137-bz11k-slot143-fba5cfe768": {
+      "NW": "Stone / Black",
+      "NE": "Stone / Black",
+      "SE": "Ice / Common",
+      "SW": "Ice / Common"
+    },
+    "r137-bz11k-slot144-86b4a67c99": {
+      "NW": "Stone / Black",
+      "NE": "Stone / Black",
+      "SE": "Ice / Common",
+      "SW": "Ice / Common"
+    },
+    "r137-bz13h-slot243-fc98219004": {
+      "NW": "Stone / Orange",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Sand / Gravel"
+    },
+    "r137-bz13h-slot244-4245e35362": {
+      "NW": "Stone / Orange",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Sand / Gravel"
+    },
+    "r137-bz13h-slot245-a3dbf65730": {
+      "NW": "Stone / Orange",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Sand / Gravel"
+    },
+    "r137-bz13h-slot246-a85a126fb2": {
+      "NW": "Stone / Orange",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Sand / Gravel"
+    },
+    "r137-bz13h-slot247-8e81076390": {
+      "NW": "Stone / Orange",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Sand / Gravel"
+    },
+    "r137-bz13h-slot349-355077317c": {
+      "NW": "Rubble / Orange",
+      "NE": "Rubble / Orange",
+      "SE": "Rubble / Orange",
+      "SW": "Sand / Gravel"
+    },
+    "r137-bz13h-slot446-deb56e9a6e": {
+      "NW": "Stone / Orange",
+      "NE": "Rubble / Orange",
+      "SE": "Rubble / Orange",
+      "SW": "Sand / Gravel"
+    },
+    "r137-bz13h-slot466-43d0f80c0b": {
+      "NW": "Ground / Red",
+      "NE": "Ground / Red",
+      "SE": "Ground / Red",
+      "SW": "Sand / Yellow"
+    },
+    "r137-bz16h-slot182-4db06a39b9": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-bz16h-slot188-6dd8464fe4": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-bz16h-slot360-e96e108e98": {
+      "NW": "Paving / Sand ruins",
+      "NE": "Paving / Sand ruins",
+      "SE": "Sand / Common grayish",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-bz16h-slot368-7236e2c63d": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Common grayish",
+      "SE": "Paving / Sand ruins",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-bz16h-slot396-21289bb70b": {
+      "NW": "Sand / Common grayish",
+      "NE": "Paving / Sand ruins",
+      "SE": "Ground / Plant soil",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-bz16h-slot507-49e0152ebc": {
+      "NW": "Sand / Dark",
+      "NE": "Sand / Dark",
+      "SE": "Sand / Dark",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-bz4g-slot153-e1309af9f7": {
+      "NW": "Paving / Cobblestone",
+      "NE": "Paving / Cobblestone",
+      "SE": "Paving / Cobblestone",
+      "SW": "Paving / Cobblestone"
+    },
+    "r137-bz4g-slot211-d7989d5c3b": {
+      "NW": "Ground / Common",
+      "NE": "Sand / Common",
+      "SE": "Sand / Common",
+      "SW": "Sand / Common"
+    },
+    "r137-bz4g-slot346-c3c3018272": {
+      "NW": "Ground / Common",
+      "NE": "Sand / Common",
+      "SE": "Ground / Common",
+      "SW": "Grass / Irregular"
+    },
+    "r137-bz4g-slot485-69d99c0b40": {
+      "NW": "Ground / Common",
+      "NE": "Sand / Dark pink",
+      "SE": "Sand / Dark pink",
+      "SW": "Sand / Dark pink"
+    },
+    "r137-bz5g-slot132-2c2afdbd84": {
+      "NW": "Ground / Common",
+      "NE": "Sand / Dark pink",
+      "SE": "Sand / Dark pink",
+      "SW": "Sand / Dark pink"
+    },
+    "r137-bz5g-slot187-799e41887c": {
+      "NW": "Sand / Common",
+      "NE": "Sand / Common",
+      "SE": "Sand / Common",
+      "SW": "Sand / Underwater"
+    },
+    "r137-bz5g-slot188-04ad4f3cbc": {
+      "NW": "Sand / Common",
+      "NE": "Sand / Common",
+      "SE": "Sand / Common",
+      "SW": "Sand / Underwater"
+    },
+    "r137-bz5g-slot189-f57ea6a15d": {
+      "NW": "Sand / Common",
+      "NE": "Sand / Common",
+      "SE": "Sand / Common",
+      "SW": "Sand / Underwater"
+    },
+    "r137-bz5g-slot193-60540d5822": {
+      "NW": "Ground / Common",
+      "NE": "Sand / Underwater",
+      "SE": "Sand / Underwater",
+      "SW": "Sand / Underwater"
+    },
+    "r137-bz5g-slot194-91ca759e46": {
+      "NW": "Ground / Common",
+      "NE": "Sand / Underwater",
+      "SE": "Sand / Underwater",
+      "SW": "Sand / Underwater"
+    },
+    "r137-bz5g-slot302-c76539b196": {
+      "NW": "Stone / Light",
+      "NE": "Stone / Light",
+      "SE": "Stone / Light",
+      "SW": "Sand / Grainy"
+    },
+    "r137-bz5g-slot404-3d6e841a38": {
+      "NW": "Ground / Common",
+      "NE": "Sand / Dark pink",
+      "SE": "Ground / Common",
+      "SW": "Sand / Dark pink"
+    },
+    "r137-bz5g-slot412-ea8edf4e7d": {
+      "NW": "Ground / Common",
+      "NE": "Stone / Light",
+      "SE": "Stone / Light",
+      "SW": "Sand / Grainy"
+    },
+    "r137-bz5g-slot434-e627f358d9": {
+      "NW": "Sand / Underwater",
+      "NE": "Sand / Underwater",
+      "SE": "Sand / Underwater",
+      "SW": "Ground / Gravel"
+    },
+    "r137-zone13-slot405-09608f6c79": {
+      "NW": "Ground / Light",
+      "NE": "Ground / Light",
+      "SE": "Snow / Common",
+      "SW": "Grass / Tundra"
+    },
+    "r137-zone13-slot419-1f6330065f": {
+      "NW": "Grass / Tundra",
+      "NE": "Snow / Common",
+      "SE": "Grass / Tundra",
+      "SW": "Grass / Tundra"
+    },
+    "r137-zone13-slot490-539d2ee8da": {
+      "NW": "Ground / Light",
+      "NE": "Grass / Tundra",
+      "SE": "Snow / Common",
+      "SW": "Grass / Tundra"
+    },
+    "r137-zone13-slot499-a8742d930e": {
+      "NW": "Grass / Tundra",
+      "NE": "Grass / Tundra",
+      "SE": "Grass / Tundra",
+      "SW": "Snow / Dark"
+    },
+    "r137-zone18-slot181-e9a0176ee6": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-zone18-slot183-ec7cd493ab": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-zone18-slot185-c2480bfcc2": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-zone18-slot186-d367a87edd": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-zone18-slot187-4d63fed620": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Ground / Plant soil"
+    },
+    "r137-zone18-slot374-7c7fbdf6e3": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Stone / Weathered"
+    },
+    "r137-zone18-slot508-1125f1c329": {
+      "NW": "Ground / Red",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Sand / Common grayish"
+    },
+    "r137-zone19-slot415-5d9cb2b4ee": {
+      "NW": "Sand / Common grayish",
+      "NE": "Stone / Desert",
+      "SE": "Sand / Common grayish",
+      "SW": "Sand / Gravel"
+    },
+    "r137-zone7-slot130-e9582672d5": {
+      "NW": "Sand / Common",
+      "NE": "Sand / Common",
+      "SE": "Sand / Common",
+      "SW": "Sand / Underwater"
+    }
+  },
+  "submittedNotes": {
+    "r137-bz10k-slot80-664eafef6e": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz10k-slot284-7a6e45b05a": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz11k-slot143-fba5cfe768": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz11k-slot144-86b4a67c99": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz13h-slot243-fc98219004": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz13h-slot244-4245e35362": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz13h-slot245-a3dbf65730": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz13h-slot246-a85a126fb2": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz13h-slot247-8e81076390": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz13h-slot349-355077317c": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz13h-slot446-deb56e9a6e": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz13h-slot466-43d0f80c0b": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz16h-slot182-4db06a39b9": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz16h-slot188-6dd8464fe4": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz16h-slot360-e96e108e98": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz16h-slot368-7236e2c63d": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz16h-slot396-21289bb70b": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz16h-slot507-49e0152ebc": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz4g-slot153-e1309af9f7": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz4g-slot211-d7989d5c3b": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz4g-slot346-c3c3018272": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz4g-slot485-69d99c0b40": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot132-2c2afdbd84": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot187-799e41887c": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot188-04ad4f3cbc": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot189-f57ea6a15d": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot193-60540d5822": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot194-91ca759e46": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot302-c76539b196": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot404-3d6e841a38": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot412-ea8edf4e7d": "Audit recommendation rejected; keep current assignments.",
+    "r137-bz5g-slot434-e627f358d9": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone13-slot405-09608f6c79": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone13-slot419-1f6330065f": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone13-slot490-539d2ee8da": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone13-slot499-a8742d930e": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone18-slot181-e9a0176ee6": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone18-slot183-ec7cd493ab": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone18-slot185-c2480bfcc2": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone18-slot186-d367a87edd": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone18-slot187-4d63fed620": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone18-slot374-7c7fbdf6e3": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone18-slot508-1125f1c329": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone19-slot415-5d9cb2b4ee": "Audit recommendation rejected; keep current assignments.",
+    "r137-zone7-slot130-e9582672d5": "Audit recommendation rejected; keep current assignments."
+  },
+  "cornerCorrections": {},
+  "explicitAuditRejectedCards": [
+    "r137-bz10k-slot80-664eafef6e",
+    "r137-bz10k-slot284-7a6e45b05a",
+    "r137-bz11k-slot143-fba5cfe768",
+    "r137-bz11k-slot144-86b4a67c99",
+    "r137-bz13h-slot243-fc98219004",
+    "r137-bz13h-slot244-4245e35362",
+    "r137-bz13h-slot245-a3dbf65730",
+    "r137-bz13h-slot246-a85a126fb2",
+    "r137-bz13h-slot247-8e81076390",
+    "r137-bz13h-slot349-355077317c",
+    "r137-bz13h-slot446-deb56e9a6e",
+    "r137-bz13h-slot466-43d0f80c0b",
+    "r137-bz16h-slot182-4db06a39b9",
+    "r137-bz16h-slot188-6dd8464fe4",
+    "r137-bz16h-slot360-e96e108e98",
+    "r137-bz16h-slot368-7236e2c63d",
+    "r137-bz16h-slot396-21289bb70b",
+    "r137-bz16h-slot507-49e0152ebc",
+    "r137-bz4g-slot153-e1309af9f7",
+    "r137-bz4g-slot211-d7989d5c3b",
+    "r137-bz4g-slot346-c3c3018272",
+    "r137-bz4g-slot485-69d99c0b40",
+    "r137-bz5g-slot132-2c2afdbd84",
+    "r137-bz5g-slot187-799e41887c",
+    "r137-bz5g-slot188-04ad4f3cbc",
+    "r137-bz5g-slot189-f57ea6a15d",
+    "r137-bz5g-slot193-60540d5822",
+    "r137-bz5g-slot194-91ca759e46",
+    "r137-bz5g-slot302-c76539b196",
+    "r137-bz5g-slot404-3d6e841a38",
+    "r137-bz5g-slot412-ea8edf4e7d",
+    "r137-bz5g-slot434-e627f358d9",
+    "r137-zone13-slot405-09608f6c79",
+    "r137-zone13-slot419-1f6330065f",
+    "r137-zone13-slot490-539d2ee8da",
+    "r137-zone13-slot499-a8742d930e",
+    "r137-zone18-slot181-e9a0176ee6",
+    "r137-zone18-slot183-ec7cd493ab",
+    "r137-zone18-slot185-c2480bfcc2",
+    "r137-zone18-slot186-d367a87edd",
+    "r137-zone18-slot187-4d63fed620",
+    "r137-zone18-slot374-7c7fbdf6e3",
+    "r137-zone18-slot508-1125f1c329",
+    "r137-zone19-slot415-5d9cb2b4ee",
+    "r137-zone7-slot130-e9582672d5"
+  ],
+  "additionalUnflaggedHumanCorners": [],
+  "auditOutcomes": [
+    {
+      "key": "r137-bz10k-slot80-664eafef6e",
+      "owners": [
+        "bz10k",
+        "Zone12"
+      ],
+      "slot": 80,
+      "corner": "NW",
+      "current": "Rock / Snow",
+      "auditRecommendation": "Snow / Common",
+      "reviewed": "Rock / Snow",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1125425
+    },
+    {
+      "key": "r137-bz10k-slot80-664eafef6e",
+      "owners": [
+        "bz10k",
+        "Zone12"
+      ],
+      "slot": 80,
+      "corner": "NE",
+      "current": "Rock / Snow",
+      "auditRecommendation": "Snow / Common",
+      "reviewed": "Rock / Snow",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1110687
+    },
+    {
+      "key": "r137-bz10k-slot80-664eafef6e",
+      "owners": [
+        "bz10k",
+        "Zone12"
+      ],
+      "slot": 80,
+      "corner": "SE",
+      "current": "Rock / Snow",
+      "auditRecommendation": "Snow / Common",
+      "reviewed": "Rock / Snow",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1081701
+    },
+    {
+      "key": "r137-bz10k-slot80-664eafef6e",
+      "owners": [
+        "bz10k",
+        "Zone12"
+      ],
+      "slot": 80,
+      "corner": "SW",
+      "current": "Rock / Snow",
+      "auditRecommendation": "Snow / Common",
+      "reviewed": "Rock / Snow",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1091881
+    },
+    {
+      "key": "r137-bz10k-slot284-7a6e45b05a",
+      "owners": [
+        "bz10k",
+        "Zone12"
+      ],
+      "slot": 284,
+      "corner": "NW",
+      "current": "Ground / Light",
+      "auditRecommendation": "Stone / Lime",
+      "reviewed": "Ground / Light",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1247144
+    },
+    {
+      "key": "r137-bz11k-slot143-fba5cfe768",
+      "owners": [
+        "bz11k",
+        "Zone14"
+      ],
+      "slot": 143,
+      "corner": "NE",
+      "current": "Stone / Black",
+      "auditRecommendation": "Slabs / Faces",
+      "reviewed": "Stone / Black",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1659005
+    },
+    {
+      "key": "r137-bz11k-slot144-86b4a67c99",
+      "owners": [
+        "bz11k",
+        "Zone14"
+      ],
+      "slot": 144,
+      "corner": "NE",
+      "current": "Stone / Black",
+      "auditRecommendation": "Slabs / Faces",
+      "reviewed": "Stone / Black",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1675336
+    },
+    {
+      "key": "r137-bz13h-slot243-fc98219004",
+      "owners": [
+        "bz13h",
+        "Zone15"
+      ],
+      "slot": 243,
+      "corner": "SW",
+      "current": "Sand / Gravel",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Gravel",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1486245
+    },
+    {
+      "key": "r137-bz13h-slot244-4245e35362",
+      "owners": [
+        "bz13h",
+        "Zone15"
+      ],
+      "slot": 244,
+      "corner": "SW",
+      "current": "Sand / Gravel",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Gravel",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1466571
+    },
+    {
+      "key": "r137-bz13h-slot245-a3dbf65730",
+      "owners": [
+        "bz13h",
+        "Zone15"
+      ],
+      "slot": 245,
+      "corner": "SW",
+      "current": "Sand / Gravel",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Gravel",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1416173
+    },
+    {
+      "key": "r137-bz13h-slot246-a85a126fb2",
+      "owners": [
+        "bz13h",
+        "Zone15"
+      ],
+      "slot": 246,
+      "corner": "SW",
+      "current": "Sand / Gravel",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Gravel",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1508323
+    },
+    {
+      "key": "r137-bz13h-slot247-8e81076390",
+      "owners": [
+        "bz13h",
+        "Zone15"
+      ],
+      "slot": 247,
+      "corner": "SW",
+      "current": "Sand / Gravel",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Gravel",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.138389
+    },
+    {
+      "key": "r137-bz13h-slot349-355077317c",
+      "owners": [
+        "bz13h",
+        "Zone15"
+      ],
+      "slot": 349,
+      "corner": "SW",
+      "current": "Sand / Gravel",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Gravel",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1057351
+    },
+    {
+      "key": "r137-bz13h-slot446-deb56e9a6e",
+      "owners": [
+        "bz13h",
+        "Zone15"
+      ],
+      "slot": 446,
+      "corner": "SW",
+      "current": "Sand / Gravel",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Gravel",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.0999312
+    },
+    {
+      "key": "r137-bz13h-slot466-43d0f80c0b",
+      "owners": [
+        "bz13h",
+        "Zone15"
+      ],
+      "slot": 466,
+      "corner": "SW",
+      "current": "Sand / Yellow",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Yellow",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.0847619
+    },
+    {
+      "key": "r137-bz16h-slot182-4db06a39b9",
+      "owners": [
+        "bz16h",
+        "Zone18"
+      ],
+      "slot": 182,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1240037
+    },
+    {
+      "key": "r137-bz16h-slot188-6dd8464fe4",
+      "owners": [
+        "bz16h",
+        "Zone18"
+      ],
+      "slot": 188,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Rubble / Dry",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1233222
+    },
+    {
+      "key": "r137-bz16h-slot360-e96e108e98",
+      "owners": [
+        "bz16h"
+      ],
+      "slot": 360,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Rubble / Dry",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.121832
+    },
+    {
+      "key": "r137-bz16h-slot368-7236e2c63d",
+      "owners": [
+        "bz16h",
+        "Zone18"
+      ],
+      "slot": 368,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1059147
+    },
+    {
+      "key": "r137-bz16h-slot396-21289bb70b",
+      "owners": [
+        "bz16h"
+      ],
+      "slot": 396,
+      "corner": "SE",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1147005
+    },
+    {
+      "key": "r137-bz16h-slot507-49e0152ebc",
+      "owners": [
+        "bz16h",
+        "Zone18"
+      ],
+      "slot": 507,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1104286
+    },
+    {
+      "key": "r137-bz4g-slot153-e1309af9f7",
+      "owners": [
+        "bz4g",
+        "Zone4"
+      ],
+      "slot": 153,
+      "corner": "SW",
+      "current": "Paving / Cobblestone",
+      "auditRecommendation": "Ground / Stony gray",
+      "reviewed": "Paving / Cobblestone",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1443885
+    },
+    {
+      "key": "r137-bz4g-slot211-d7989d5c3b",
+      "owners": [
+        "bz4g",
+        "Zone4"
+      ],
+      "slot": 211,
+      "corner": "NW",
+      "current": "Ground / Common",
+      "auditRecommendation": "Ground / Dry",
+      "reviewed": "Ground / Common",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.120377
+    },
+    {
+      "key": "r137-bz4g-slot346-c3c3018272",
+      "owners": [
+        "bz4g",
+        "Zone4"
+      ],
+      "slot": 346,
+      "corner": "SE",
+      "current": "Ground / Common",
+      "auditRecommendation": "Ground / Dry",
+      "reviewed": "Ground / Common",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1045221
+    },
+    {
+      "key": "r137-bz4g-slot485-69d99c0b40",
+      "owners": [
+        "bz4g",
+        "Zone4"
+      ],
+      "slot": 485,
+      "corner": "NW",
+      "current": "Ground / Common",
+      "auditRecommendation": "Ground / Dry",
+      "reviewed": "Ground / Common",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.0874806
+    },
+    {
+      "key": "r137-bz5g-slot132-2c2afdbd84",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 132,
+      "corner": "NW",
+      "current": "Ground / Common",
+      "auditRecommendation": "Ground / Dry",
+      "reviewed": "Ground / Common",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.095813
+    },
+    {
+      "key": "r137-bz5g-slot187-799e41887c",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 187,
+      "corner": "SW",
+      "current": "Sand / Underwater",
+      "auditRecommendation": "Slabs / Square",
+      "reviewed": "Sand / Underwater",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1984326
+    },
+    {
+      "key": "r137-bz5g-slot188-04ad4f3cbc",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 188,
+      "corner": "SW",
+      "current": "Sand / Underwater",
+      "auditRecommendation": "Slabs / Square",
+      "reviewed": "Sand / Underwater",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1984894
+    },
+    {
+      "key": "r137-bz5g-slot189-f57ea6a15d",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 189,
+      "corner": "SW",
+      "current": "Sand / Underwater",
+      "auditRecommendation": "Slabs / Square",
+      "reviewed": "Sand / Underwater",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1936147
+    },
+    {
+      "key": "r137-bz5g-slot193-60540d5822",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 193,
+      "corner": "NE",
+      "current": "Sand / Underwater",
+      "auditRecommendation": "Water / Still",
+      "reviewed": "Sand / Underwater",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1265232
+    },
+    {
+      "key": "r137-bz5g-slot194-91ca759e46",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 194,
+      "corner": "NE",
+      "current": "Sand / Underwater",
+      "auditRecommendation": "Water / Still",
+      "reviewed": "Sand / Underwater",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1251514
+    },
+    {
+      "key": "r137-bz5g-slot302-c76539b196",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 302,
+      "corner": "SW",
+      "current": "Sand / Grainy",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Grainy",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1049159
+    },
+    {
+      "key": "r137-bz5g-slot404-3d6e841a38",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 404,
+      "corner": "SE",
+      "current": "Ground / Common",
+      "auditRecommendation": "Ground / Dry",
+      "reviewed": "Ground / Common",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.0964726
+    },
+    {
+      "key": "r137-bz5g-slot412-ea8edf4e7d",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 412,
+      "corner": "SW",
+      "current": "Sand / Grainy",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Grainy",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1061167
+    },
+    {
+      "key": "r137-bz5g-slot434-e627f358d9",
+      "owners": [
+        "bz5g",
+        "bz6g",
+        "Zone8"
+      ],
+      "slot": 434,
+      "corner": "NW",
+      "current": "Sand / Underwater",
+      "auditRecommendation": "Water / Still",
+      "reviewed": "Sand / Underwater",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1265168
+    },
+    {
+      "key": "r137-zone13-slot405-09608f6c79",
+      "owners": [
+        "Zone13"
+      ],
+      "slot": 405,
+      "corner": "SW",
+      "current": "Grass / Tundra",
+      "auditRecommendation": "Stone / Lime",
+      "reviewed": "Grass / Tundra",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.115566
+    },
+    {
+      "key": "r137-zone13-slot419-1f6330065f",
+      "owners": [
+        "Zone13"
+      ],
+      "slot": 419,
+      "corner": "SE",
+      "current": "Grass / Tundra",
+      "auditRecommendation": "Stone / Lime",
+      "reviewed": "Grass / Tundra",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1271787
+    },
+    {
+      "key": "r137-zone13-slot490-539d2ee8da",
+      "owners": [
+        "Zone13"
+      ],
+      "slot": 490,
+      "corner": "SW",
+      "current": "Grass / Tundra",
+      "auditRecommendation": "Stone / Lime",
+      "reviewed": "Grass / Tundra",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1224155
+    },
+    {
+      "key": "r137-zone13-slot499-a8742d930e",
+      "owners": [
+        "Zone13"
+      ],
+      "slot": 499,
+      "corner": "NW",
+      "current": "Grass / Tundra",
+      "auditRecommendation": "Stone / Lime",
+      "reviewed": "Grass / Tundra",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1282246
+    },
+    {
+      "key": "r137-zone18-slot181-e9a0176ee6",
+      "owners": [
+        "Zone18"
+      ],
+      "slot": 181,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1189192
+    },
+    {
+      "key": "r137-zone18-slot183-ec7cd493ab",
+      "owners": [
+        "Zone18"
+      ],
+      "slot": 183,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.124743
+    },
+    {
+      "key": "r137-zone18-slot185-c2480bfcc2",
+      "owners": [
+        "Zone18"
+      ],
+      "slot": 185,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1233281
+    },
+    {
+      "key": "r137-zone18-slot186-d367a87edd",
+      "owners": [
+        "Zone18"
+      ],
+      "slot": 186,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1174666
+    },
+    {
+      "key": "r137-zone18-slot187-4d63fed620",
+      "owners": [
+        "Zone18"
+      ],
+      "slot": 187,
+      "corner": "SW",
+      "current": "Ground / Plant soil",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Plant soil",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1189192
+    },
+    {
+      "key": "r137-zone18-slot374-7c7fbdf6e3",
+      "owners": [
+        "Zone18"
+      ],
+      "slot": 374,
+      "corner": "SW",
+      "current": "Stone / Weathered",
+      "auditRecommendation": "Grass / Yellow lichen",
+      "reviewed": "Stone / Weathered",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1226563
+    },
+    {
+      "key": "r137-zone18-slot508-1125f1c329",
+      "owners": [
+        "Zone18"
+      ],
+      "slot": 508,
+      "corner": "NW",
+      "current": "Ground / Red",
+      "auditRecommendation": "Stone / Weathered",
+      "reviewed": "Ground / Red",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1377137
+    },
+    {
+      "key": "r137-zone19-slot415-5d9cb2b4ee",
+      "owners": [
+        "Zone19"
+      ],
+      "slot": 415,
+      "corner": "SW",
+      "current": "Sand / Gravel",
+      "auditRecommendation": "Paving / Sand ruins",
+      "reviewed": "Sand / Gravel",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1018369
+    },
+    {
+      "key": "r137-zone7-slot130-e9582672d5",
+      "owners": [
+        "Zone7"
+      ],
+      "slot": 130,
+      "corner": "SW",
+      "current": "Sand / Underwater",
+      "auditRecommendation": "Slabs / Square",
+      "reviewed": "Sand / Underwater",
+      "auditMatchedReviewed": false,
+      "explicitAuditRejection": true,
+      "variants": [
+        "hd"
+      ],
+      "tier": "T3-CONSENSUS-FAR-FAMILY-UNPROVEN",
+      "bestFeatureDistance": 0.1952545
+    }
+  ]
+}

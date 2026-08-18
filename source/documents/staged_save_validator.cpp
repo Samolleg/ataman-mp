@@ -874,3 +874,152 @@ SMobSaveCommitResult commitGeneratedMob(
     result.success = true;
     return result;
 }
+
+SMprBytesSaveCommitResult commitValidatedMprBytes(
+    const SMprBytesSaveCommitRequest& request)
+{
+    SMprBytesSaveCommitResult result;
+    result.phase = QStringLiteral("source-check");
+    if(request.source.absoluteFilePath().isEmpty()
+       || request.destination.absoluteFilePath().isEmpty()
+       || request.expectedSourceBytes.isEmpty()
+       || request.candidateBytes.isEmpty())
+    {
+        result.error = QStringLiteral(
+            "Source, destination, expected source bytes, and candidate bytes are required.");
+        return result;
+    }
+    QByteArray sourceBytes;
+    if(!readFileBytes(request.source, &sourceBytes, &result.error))
+        return result;
+    if(sourceBytes != request.expectedSourceBytes)
+    {
+        result.error = QStringLiteral(
+            "The loaded source MPR changed on disk. Reopen it before saving.");
+        return result;
+    }
+
+    const QFileInfo initialDestination(request.destination.absoluteFilePath());
+    const bool destinationExisted = initialDestination.exists();
+    QByteArray destinationBytes;
+    if(destinationExisted
+       && !readFileBytes(initialDestination, &destinationBytes, &result.error))
+    {
+        result.phase = QStringLiteral("destination-check");
+        return result;
+    }
+
+    result.phase = QStringLiteral("staging");
+    const SStagedSaveValidation staged = validateStagedSave(
+        request.candidateBytes, request.destination);
+    result.candidateSha256 = staged.sha256;
+    if(!staged.success)
+    {
+        result.error = staged.error;
+        return result;
+    }
+
+    result.phase = QStringLiteral("pre-backup-race-check");
+    QByteArray currentSource;
+    if(!readFileBytes(request.source, &currentSource, &result.error)
+       || currentSource != sourceBytes)
+    {
+        if(result.error.isEmpty())
+            result.error = QStringLiteral(
+                "The source MPR changed while the candidate was staged.");
+        return result;
+    }
+    if(!destinationStillMatches(request.destination, destinationExisted,
+                                destinationBytes, &result.error))
+        return result;
+
+    if(destinationExisted && request.createBackup)
+    {
+        result.phase = QStringLiteral("backup");
+        const SBackupResult backup = CBackupManager(
+            request.backupRootOverride).snapshotBeforeSave(initialDestination);
+        if(!backup.success)
+        {
+            result.error = backup.error;
+            return result;
+        }
+        const QString destinationSha256 = QString::fromLatin1(
+            QCryptographicHash::hash(destinationBytes,
+                                     QCryptographicHash::Sha256).toHex());
+        if(backup.sha256.compare(destinationSha256,
+                                 Qt::CaseInsensitive) != 0)
+        {
+            result.error = QStringLiteral(
+                "The pre-save backup hash did not match the destination.");
+            return result;
+        }
+        result.backupPath = backup.backupPath;
+    }
+
+    result.phase = QStringLiteral("pre-commit-race-check");
+    if(!readFileBytes(request.source, &currentSource, &result.error)
+       || currentSource != sourceBytes)
+    {
+        if(result.error.isEmpty())
+            result.error = QStringLiteral(
+                "The source MPR changed before atomic replacement.");
+        return result;
+    }
+    if(!destinationStillMatches(request.destination, destinationExisted,
+                                destinationBytes, &result.error))
+        return result;
+
+#ifdef QT_TESTLIB_LIB
+    if(request.simulateAtomicCommitFailure)
+    {
+        result.phase = QStringLiteral("atomic-replacement");
+        result.error = QStringLiteral("Simulated atomic replacement failure.");
+        return result;
+    }
+#endif
+
+    result.phase = QStringLiteral("atomic-replacement");
+    QSaveFile output(request.destination.absoluteFilePath());
+    if(!output.open(QIODevice::WriteOnly))
+    {
+        result.error = output.errorString();
+        return result;
+    }
+    if(output.write(request.candidateBytes) != request.candidateBytes.size())
+    {
+        result.error = output.errorString();
+        output.cancelWriting();
+        return result;
+    }
+    if(!output.commit())
+    {
+        result.error = output.errorString();
+        return result;
+    }
+
+    result.phase = QStringLiteral("post-commit-validation");
+    QByteArray committedBytes;
+    if(!readFileBytes(request.destination, &committedBytes, &result.error))
+        return result;
+    if(committedBytes != request.candidateBytes)
+    {
+        result.error = QStringLiteral(
+            "The committed MPR bytes do not match the validated candidate.");
+        return result;
+    }
+    CMprDocument committed;
+    CValidationReport committedReport;
+    if(!committed.loadBytes(committedBytes,
+                            request.destination.absoluteFilePath(),
+                            &committedReport)
+       || committedReport.hasErrors())
+    {
+        result.error = QStringLiteral(
+            "The committed MPR failed a fresh reopen:\n")
+            + committedReport.toText().trimmed();
+        return result;
+    }
+    result.phase = QStringLiteral("complete");
+    result.success = true;
+    return result;
+}

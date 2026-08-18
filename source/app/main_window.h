@@ -168,6 +168,7 @@ private:
     void endWorkspaceLoad();
     void updateLoadedMapPanel();
     void updateLoadedMapMprDirtyIndicator();
+    void rebuildLoadedMapPanel();
     void updateOutlinerSelectionPath();
     void updateLogicSlotBarVisibility();
     void updateBehaviorModeUi();
@@ -298,6 +299,7 @@ private:
     QToolButton* m_behaviorModeButton{nullptr};
     QDockWidget* m_loadedMapDock;
     QTreeWidget* m_loadedMapTree;
+    bool m_loadedMapPanelRefreshPending{false};
     QTreeWidget* m_validationTree;
     QLabel* m_validationSummary;
     QTimer* m_validationTimer;

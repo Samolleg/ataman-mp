@@ -58,6 +58,8 @@ using GameStringAssignFn = void (__thiscall*)(void*, const char*);
 using GetZoneByNameFn = unsigned char* (__thiscall*)(void*, const char*);
 using GetTextureManagerFn = void* (__thiscall*)(void*);
 using AddTextureResourceFn = int (__thiscall*)(void*, const char*);
+using GetTextureDataFn = unsigned char* (__thiscall*)(void*, const char*);
+using GetTextureDataVirtualFn = unsigned char* (__thiscall*)(void*, const char*, int);
 enum class RuntimeBuild { Unsupported, JmvStarter, BaseEi };
 
 HMODULE g_instance = nullptr;
@@ -117,6 +119,7 @@ constexpr DWORD kGraphRequirementRva = 0x001955CC;
 constexpr DWORD kWorldClientGlobalRva = 0x003AF5B8;
 constexpr DWORD kWorldGetTextureManagerRva = 0x00161990;
 constexpr DWORD kTextureManagerAddResourceRva = 0x00275050;
+constexpr DWORD kTextureManagerGetDataRva = 0x00291CF0;
 constexpr UINT kDirectLaunchMessage = WM_APP + 0x45D;
 constexpr UINT kHotReloadMessage = WM_APP + 0x45E;
 constexpr unsigned char kMapLoadEntryBytes[6] = {
@@ -145,6 +148,10 @@ constexpr unsigned char kGetZoneByNameBytes[15] = {
 constexpr unsigned char kTextureManagerAddResourceBytes[8] = {
     0x6A, 0xFF, 0x68, 0xBC, 0x15, 0x73, 0x00, 0x64
 };
+constexpr unsigned char kTextureManagerGetDataBytes[15] = {
+    0x8B, 0x54, 0x24, 0x04, 0x8B, 0x01, 0x6A, 0x00,
+    0x52, 0xFF, 0x50, 0x4C, 0xC2, 0x04, 0x00
+};
 constexpr unsigned char kWorldGetTextureManagerBytes[7] = {
     0x8B, 0x81, 0x8C, 0x01, 0x00, 0x00, 0xC3
 };
@@ -163,6 +170,7 @@ enum class RuntimeState : LONG
 MapLoadFn g_originalMapLoad = nullptr;
 ZoneTransitionFn g_originalZoneTransition = nullptr;
 PlayerDefaultsResetFn g_originalPlayerDefaultsReset = nullptr;
+GetTextureDataVirtualFn g_originalGetTextureDataVirtual = nullptr;
 HMODULE g_gameModule = nullptr;
 HHOOK g_directLaunchHook = nullptr;
 volatile LONG g_directLaunchState = 0;
@@ -198,7 +206,19 @@ volatile LONG g_databaseRedirectLogCount = 0;
 volatile LONG g_tablesLuaRedirectLogCount = 0;
 volatile LONG g_mapTableRedirectLogCount = 0;
 wchar_t g_temporaryTextureResource[MAX_PATH * 4] = {};
+char g_textureProbeName[128] = {};
+int g_texturePageCount = 0;
+// EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC: run-owned startup command file.
+wchar_t g_drawallAutoexecSource[MAX_PATH * 4] = {};
+wchar_t g_drawallAutoexec[MAX_PATH * 4] = {};
+char g_drawallAutoexecSha256[65] = {};
+volatile LONG g_drawallRedirectLogged = 0;
+volatile LONG g_drawallConsumedLogged = 0;
+void* g_dllNotificationCookie = nullptr;
+volatile LONG g_futureModulePatchCount = 0;
 volatile LONG g_temporaryTextureResourceRegistered = 0;
+volatile LONG g_textureRequestObservationArmed = 0;
+volatile LONG g_textureRequestObservationCount = 0;
 wchar_t g_hotReloadRequestPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadThreadPath[MAX_PATH * 4] = {};
 wchar_t g_hotReloadRoot[MAX_PATH * 4] = {};
@@ -486,6 +506,77 @@ bool ConfigureSyntheticZone()
     return true;
 }
 
+unsigned char* __fastcall TextureDataObservationDetour(
+    void* self, void*, const char* requestedName, int mode)
+{
+    unsigned char* result = g_originalGetTextureDataVirtual
+        ? g_originalGetTextureDataVirtual(self, requestedName, mode) : nullptr;
+    if(InterlockedCompareExchange(&g_textureRequestObservationArmed, 0, 0))
+    {
+        char name[256]{};
+        const size_t probeLength = std::strlen(g_textureProbeName);
+        const size_t namespaceLength = probeLength >= 7 ? probeLength - 7 : 0;
+        if(ReadBoundedCString(requestedName, name, sizeof(name))
+           && namespaceLength > 0
+           && _strnicmp(name, g_textureProbeName, namespaceLength) == 0
+           && InterlockedIncrement(&g_textureRequestObservationCount) <= 128)
+        {
+            unsigned width = 0;
+            unsigned height = 0;
+            if(result && IsReadableRange(result, 12))
+            {
+                width = *reinterpret_cast<const unsigned*>(result + 4);
+                height = *reinterpret_cast<const unsigned*>(result + 8);
+            }
+            wchar_t message[768]{};
+            _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                         L"TERRAIN_TEXTURE_REQUEST name=\"%S\" result=%s width=%u height=%u",
+                         name, result ? L"resolved" : L"missing", width, height);
+            Log(message);
+        }
+    }
+    return result;
+}
+
+bool InstallTextureDataObservationDetour(void* manager)
+{
+    if(g_originalGetTextureDataVirtual)
+        return true;
+    if(!manager || !IsReadableRange(manager, sizeof(void*)))
+    {
+        Log(L"TEMP_TEXTURE_RES refused: texture-request observation manager is invalid");
+        return false;
+    }
+    auto** vtable = *reinterpret_cast<void***>(manager);
+    constexpr size_t slotIndex = 0x4C / sizeof(void*);
+    if(!IsReadableRange(vtable, (slotIndex + 1) * sizeof(void*)))
+    {
+        Log(L"TEMP_TEXTURE_RES refused: texture-request observation vtable is invalid");
+        return false;
+    }
+    void** slot = vtable + slotIndex;
+    g_originalGetTextureDataVirtual = reinterpret_cast<GetTextureDataVirtualFn>(*slot);
+    if(!g_originalGetTextureDataVirtual)
+    {
+        Log(L"TEMP_TEXTURE_RES refused: texture-request observation target is null");
+        return false;
+    }
+    DWORD oldProtect = 0;
+    if(!VirtualProtect(slot, sizeof(*slot), PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        g_originalGetTextureDataVirtual = nullptr;
+        Log(L"TEMP_TEXTURE_RES refused: texture-request observation protection change failed");
+        return false;
+    }
+    *slot = reinterpret_cast<void*>(&TextureDataObservationDetour);
+    DWORD ignored = 0;
+    VirtualProtect(slot, sizeof(*slot), oldProtect, &ignored);
+    InterlockedExchange(&g_textureRequestObservationCount, 0);
+    InterlockedExchange(&g_textureRequestObservationArmed, 1);
+    Log(L"TEMP_TEXTURE_RES armed terrain texture-request observation");
+    return true;
+}
+
 bool RegisterTextureResourcePath(const wchar_t* path, bool initialResource)
 {
     if(!path || !path[0]
@@ -499,7 +590,11 @@ bool RegisterTextureResourcePath(const wchar_t* path, bool initialResource)
                       sizeof(kWorldGetTextureManagerBytes)) != 0
        || std::memcmp(game + kTextureManagerAddResourceRva,
                       kTextureManagerAddResourceBytes,
-                      sizeof(kTextureManagerAddResourceBytes)) != 0)
+                      sizeof(kTextureManagerAddResourceBytes)) != 0
+       || (g_textureProbeName[0]
+           && std::memcmp(game + kTextureManagerGetDataRva,
+                          kTextureManagerGetDataBytes,
+                          sizeof(kTextureManagerGetDataBytes)) != 0))
     {
         Log(L"TEMP_TEXTURE_RES refused: texture resource registration signature does not match");
         return false;
@@ -544,6 +639,70 @@ bool RegisterTextureResourcePath(const wchar_t* path, bool initialResource)
     }
     if(initialResource)
         InterlockedExchange(&g_temporaryTextureResourceRegistered, 1);
+    const auto getTextureData = reinterpret_cast<GetTextureDataFn>(
+        game + kTextureManagerGetDataRva);
+    if(g_textureProbeName[0])
+    {
+        unsigned char* texture = getTextureData(manager, g_textureProbeName);
+        if(!texture || !IsReadableRange(texture, 0x4C))
+        {
+            Log(L"TEMP_TEXTURE_RES refused: highest-page texture probe did not resolve from the run-owned archive");
+            return false;
+        }
+        const unsigned width = *reinterpret_cast<const unsigned*>(texture + 4);
+        const unsigned height = *reinterpret_cast<const unsigned*>(texture + 8);
+        if(width == 0 || height == 0 || width > 16384 || height > 16384)
+        {
+            Log(L"TEMP_TEXTURE_RES refused: resolved texture probe has invalid dimensions");
+            return false;
+        }
+        wchar_t probeMessage[512]{};
+        _snwprintf_s(probeMessage,
+                     sizeof(probeMessage) / sizeof(probeMessage[0]), _TRUNCATE,
+                     L"TEMP_TEXTURE_RES probe resolved name=\"%S\" width=%u height=%u source=run-owned",
+                     g_textureProbeName, width, height);
+        Log(probeMessage);
+    }
+    if(!InstallTextureDataObservationDetour(manager))
+        return false;
+    if(g_texturePageCount > 0)
+    {
+        const size_t probeLength = std::strlen(g_textureProbeName);
+        const size_t namespaceLength = probeLength >= 7 ? probeLength - 7 : 0;
+        if(namespaceLength == 0 || namespaceLength > 100)
+        {
+            Log(L"TEMP_TEXTURE_RES refused: atlas preload namespace is invalid");
+            return false;
+        }
+        for(int page = 0; page < g_texturePageCount; ++page)
+        {
+            char pageName[128]{};
+            _snprintf_s(pageName, sizeof(pageName), _TRUNCATE, "%.*s%03d.mmp",
+                        int(namespaceLength), g_textureProbeName, page);
+            unsigned char* texture = getTextureData(manager, pageName);
+            unsigned width = 0;
+            unsigned height = 0;
+            if(texture && IsReadableRange(texture, 12))
+            {
+                width = *reinterpret_cast<const unsigned*>(texture + 4);
+                height = *reinterpret_cast<const unsigned*>(texture + 8);
+            }
+            wchar_t preload[512]{};
+            _snwprintf_s(preload, sizeof(preload) / sizeof(preload[0]), _TRUNCATE,
+                         L"TERRAIN_TEXTURE_REQUEST name=\"%S\" result=%s width=%u height=%u workload=explicit-preload",
+                         pageName, texture ? L"resolved" : L"missing", width, height);
+            Log(preload);
+            if(!texture || !width || !height)
+                return false;
+        }
+        wchar_t preloadSummary[256]{};
+        _snwprintf_s(preloadSummary,
+                     sizeof(preloadSummary) / sizeof(preloadSummary[0]), _TRUNCATE,
+                     L"TEMP_TEXTURE_RES explicit atlas preload complete pages=%d",
+                     g_texturePageCount);
+        Log(preloadSummary);
+    }
+    InterlockedExchange(&g_temporaryTextureResourceRegistered, 1);
     wchar_t message[1800]{};
     _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
                  L"TEMP_TEXTURE_RES registered path=\"%s\" profile=%s installed_archives_modified=false",
@@ -1419,6 +1578,64 @@ bool RewriteGodmodeMobW(LPCWSTR path, wchar_t* output, size_t capacity)
     return true;
 }
 
+bool RewriteDrawallAutoexecW(LPCWSTR path, wchar_t* output, size_t capacity)
+{
+    if(!path || !output || !capacity || !g_drawallAutoexecSource[0]
+       || !g_drawallAutoexec[0])
+        return false;
+    wchar_t full[MAX_PATH * 4]{};
+    const DWORD length = GetFullPathNameW(
+        path, DWORD(sizeof(full) / sizeof(full[0])), full, nullptr);
+    if(!length || length >= sizeof(full) / sizeof(full[0]))
+        return false;
+    NormalizeSlashes(full);
+    if(_wcsicmp(full, g_drawallAutoexecSource) != 0
+       || wcscpy_s(output, capacity, g_drawallAutoexec) != 0)
+        return false;
+    if(InterlockedCompareExchange(&g_drawallRedirectLogged, 1, 0) == 0)
+    {
+        wchar_t message[1900]{};
+        _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                     L"DRAWALL_AUTOEXEC redirect from=\"%s\" to=\"%s\" command=\"drawall 1\" installed_modified=false",
+                     full, output);
+        Log(message);
+    }
+    return true;
+}
+
+bool RewriteDrawallAutoexecA(LPCSTR path, char* output, size_t capacity)
+{
+    if(!path || !output || !capacity)
+        return false;
+    wchar_t wide[MAX_PATH * 4]{};
+    wchar_t rewritten[MAX_PATH * 4]{};
+    if(!MultiByteToWideChar(CP_ACP, 0, path, -1, wide,
+                            int(sizeof(wide) / sizeof(wide[0])))
+       || !RewriteDrawallAutoexecW(wide, rewritten,
+                                   sizeof(rewritten) / sizeof(rewritten[0])))
+        return false;
+    BOOL substituted = FALSE;
+    return WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, rewritten, -1,
+                               output, int(capacity), nullptr, &substituted) != 0
+        && !substituted;
+}
+
+void LogDrawallAutoexecConsumed(HANDLE file, bool selected)
+{
+    if(!selected || file == INVALID_HANDLE_VALUE
+       || InterlockedCompareExchange(&g_drawallConsumedLogged, 1, 0) != 0)
+        return;
+    const DWORD bytes = GetFileSize(file, nullptr);
+    wchar_t hash[65]{};
+    MultiByteToWideChar(CP_ACP, 0, g_drawallAutoexecSha256, -1,
+                        hash, int(sizeof(hash) / sizeof(hash[0])));
+    wchar_t message[512]{};
+    _snwprintf_s(message, sizeof(message) / sizeof(message[0]), _TRUNCATE,
+                 L"DRAWALL_AUTOEXEC consumed bytes=%lu sha256=%s",
+                 bytes, hash);
+    Log(message);
+}
+
 bool RewriteGodmodeMobA(LPCSTR path, char* output, size_t capacity)
 {
     if(!path || !output || !capacity)
@@ -1483,7 +1700,10 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
         return INVALID_HANDLE_VALUE;
     wchar_t owned[MAX_PATH * 4]{};
     wchar_t redirected[MAX_PATH * 4]{};
-    LPCWSTR selected = (RewriteGodmodeMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
+    const bool drawallSelected = RewriteDrawallAutoexecW(
+        path, owned, sizeof(owned) / sizeof(owned[0]));
+    LPCWSTR selected = (drawallSelected
+        || RewriteGodmodeMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
         || RewriteSupplementalMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
         || RewriteOwnedPathW(path, owned, sizeof(owned) / sizeof(owned[0]))) ? owned : path;
     if(RewriteMapTableW(selected, redirected,
@@ -1495,6 +1715,7 @@ HANDLE WINAPI HookCreateFileW(LPCWSTR path, DWORD access, DWORD share,
     else if(RewriteTablesLuaW(selected,redirected,sizeof(redirected)/sizeof(redirected[0])))selected=redirected;
     HANDLE result = g_originalCreateFileW(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
+    LogDrawallAutoexecConsumed(result, drawallSelected);
     Observe(L"CreateFileW", path, reinterpret_cast<ULONG_PTR>(result), error, caller, access, creation);
     SetLastError(error);
     return result;
@@ -1509,7 +1730,9 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
         return INVALID_HANDLE_VALUE;
     char owned[MAX_PATH * 4]{};
     char redirected[MAX_PATH * 4]{};
-    LPCSTR selected = (RewriteGodmodeMobA(path, owned, sizeof(owned))
+    const bool drawallSelected = RewriteDrawallAutoexecA(path, owned, sizeof(owned));
+    LPCSTR selected = (drawallSelected
+        || RewriteGodmodeMobA(path, owned, sizeof(owned))
         || RewriteSupplementalMobA(path, owned, sizeof(owned))
         || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
     if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
@@ -1519,6 +1742,7 @@ HANDLE WINAPI HookCreateFileA(LPCSTR path, DWORD access, DWORD share,
     else if(RewriteTablesLuaA(selected,redirected,sizeof(redirected)))selected=redirected;
     HANDLE result = g_originalCreateFileA(selected, access, share, security, creation, flags, templateFile);
     const DWORD error = GetLastError();
+    LogDrawallAutoexecConsumed(result, drawallSelected);
     if(path)
     {
         wchar_t pathW[MAX_PATH * 4]{};
@@ -1537,7 +1761,8 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR path)
         return INVALID_FILE_ATTRIBUTES;
     wchar_t owned[MAX_PATH * 4]{};
     wchar_t redirected[MAX_PATH * 4]{};
-    LPCWSTR selected = (RewriteGodmodeMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
+    LPCWSTR selected = (RewriteDrawallAutoexecW(path, owned, sizeof(owned) / sizeof(owned[0]))
+        || RewriteGodmodeMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
         || RewriteSupplementalMobW(path, owned, sizeof(owned) / sizeof(owned[0]))
         || RewriteOwnedPathW(path, owned, sizeof(owned) / sizeof(owned[0]))) ? owned : path;
     if(RewriteMapTableW(selected, redirected,
@@ -1561,7 +1786,8 @@ DWORD WINAPI HookGetFileAttributesA(LPCSTR path)
         return INVALID_FILE_ATTRIBUTES;
     char owned[MAX_PATH * 4]{};
     char redirected[MAX_PATH * 4]{};
-    LPCSTR selected = (RewriteGodmodeMobA(path, owned, sizeof(owned))
+    LPCSTR selected = (RewriteDrawallAutoexecA(path, owned, sizeof(owned))
+        || RewriteGodmodeMobA(path, owned, sizeof(owned))
         || RewriteSupplementalMobA(path, owned, sizeof(owned))
         || RewriteOwnedPathA(path, owned, sizeof(owned))) ? owned : path;
     if(RewriteMapTableA(selected, redirected, sizeof(redirected)))
@@ -2091,6 +2317,53 @@ int PatchModuleImports(HMODULE module)
     return patched;
 }
 
+struct EnduranceUnicodeString
+{
+    USHORT Length;
+    USHORT MaximumLength;
+    PWSTR Buffer;
+};
+
+struct EnduranceDllLoadedNotification
+{
+    ULONG Flags;
+    const EnduranceUnicodeString* FullDllName;
+    const EnduranceUnicodeString* BaseDllName;
+    PVOID DllBase;
+    ULONG SizeOfImage;
+};
+
+union EnduranceDllNotificationData
+{
+    EnduranceDllLoadedNotification Loaded;
+    EnduranceDllLoadedNotification Unloaded;
+};
+
+using LdrDllNotificationFn = VOID (CALLBACK *)(
+    ULONG, const EnduranceDllNotificationData*, PVOID);
+using LdrRegisterDllNotificationFn = LONG (NTAPI *)(
+    ULONG, LdrDllNotificationFn, PVOID, PVOID*);
+
+void CALLBACK ObserveLoadedModule(ULONG reason,
+                                  const EnduranceDllNotificationData* data,
+                                  PVOID)
+{
+    // Notification 1 is delivered after mapping but before the module's entry
+    // point. Patch only its already-built IAT; avoid logging under loader lock.
+    if(reason == 1 && data && data->Loaded.DllBase)
+        InterlockedAdd(&g_futureModulePatchCount,
+                       PatchModuleImports(static_cast<HMODULE>(data->Loaded.DllBase)));
+}
+
+bool InstallFutureModuleImportObservation()
+{
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    const auto subscribe = ntdll ? reinterpret_cast<LdrRegisterDllNotificationFn>(
+        GetProcAddress(ntdll, "LdrRegisterDllNotification")) : nullptr;
+    return subscribe && subscribe(0, &ObserveLoadedModule, nullptr,
+                                  &g_dllNotificationCookie) >= 0;
+}
+
 int InstallFileObservationHooks()
 {
     HMODULE kernel = GetModuleHandleW(L"KERNEL32.dll");
@@ -2172,12 +2445,13 @@ int InstallFileObservationHooks()
         while(Module32NextW(snapshot, &entry));
     }
     CloseHandle(snapshot);
+    const bool futureModules = InstallFutureModuleImportObservation();
     wchar_t summary[256]{};
     _snwprintf_s(summary, sizeof(summary) / sizeof(summary[0]), _TRUNCATE,
-                 L"TRANSITION_PROBE inspected loaded modules in owned game process modules=%d patched_imports=%d",
-                 modulesVisited, patched);
+                 L"TRANSITION_PROBE inspected loaded modules in owned game process modules=%d patched_imports=%d future_module_notifications=%d",
+                 modulesVisited, patched, futureModules ? 1 : 0);
     Log(summary);
-    return patched;
+    return futureModules ? patched : 0;
 }
 
 const char* FileNamePartA(const char* path)
@@ -2197,6 +2471,46 @@ bool IsMainMenuMpr(const char* path)
     return name && _stricmp(name, "ZoneMainMenuNew.mpr") == 0;
 }
 
+bool ReadEarlyDrawallPaths()
+{
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC_SOURCE",
+                            g_drawallAutoexecSource,
+                            DWORD(sizeof(g_drawallAutoexecSource)
+                                  / sizeof(g_drawallAutoexecSource[0])));
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC",
+                            g_drawallAutoexec,
+                            DWORD(sizeof(g_drawallAutoexec)
+                                  / sizeof(g_drawallAutoexec[0])));
+    const DWORD hashLength = GetEnvironmentVariableA(
+        "EI_MAPPER_ENDURANCE_DRAWALL_AUTOEXEC_SHA256",
+        g_drawallAutoexecSha256, DWORD(sizeof(g_drawallAutoexecSha256)));
+    if(!g_drawallAutoexecSource[0] && !g_drawallAutoexec[0] && !hashLength)
+        return true;
+    wchar_t sourceFull[MAX_PATH * 4]{};
+    wchar_t ownedFull[MAX_PATH * 4]{};
+    const DWORD sourceLength = GetFullPathNameW(
+        g_drawallAutoexecSource,
+        DWORD(sizeof(sourceFull) / sizeof(sourceFull[0])), sourceFull, nullptr);
+    const DWORD ownedLength = GetFullPathNameW(
+        g_drawallAutoexec,
+        DWORD(sizeof(ownedFull) / sizeof(ownedFull[0])), ownedFull, nullptr);
+    bool hashSafe = hashLength == 64;
+    for(DWORD i = 0; hashSafe && i < hashLength; ++i)
+        hashSafe = std::isxdigit(
+            static_cast<unsigned char>(g_drawallAutoexecSha256[i])) != 0;
+    if(!sourceLength || sourceLength >= sizeof(sourceFull) / sizeof(sourceFull[0])
+       || !ownedLength || ownedLength >= sizeof(ownedFull) / sizeof(ownedFull[0])
+       || GetFileAttributesW(sourceFull) == INVALID_FILE_ATTRIBUTES
+       || GetFileAttributesW(ownedFull) == INVALID_FILE_ATTRIBUTES
+       || !hashSafe)
+        return false;
+    NormalizeSlashes(sourceFull);
+    NormalizeSlashes(ownedFull);
+    wcscpy_s(g_drawallAutoexecSource, sourceFull);
+    wcscpy_s(g_drawallAutoexec, ownedFull);
+    return true;
+}
+
 bool ReadDirectLaunchPaths()
 {
     wchar_t mpr[MAX_PATH * 4]{};
@@ -2212,10 +2526,25 @@ bool ReadDirectLaunchPaths()
     wchar_t spawnY[64]{};
     wchar_t targetExit[16]{};
     wchar_t graphless[8]{};
+    wchar_t texturePageCount[16]{};
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_GRAPHLESS", graphless,
                             DWORD(sizeof(graphless) / sizeof(graphless[0])));
     InterlockedExchange(&g_graphlessPayload,
                         std::wcscmp(graphless, L"1") == 0 ? 1 : 0);
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_TEXTURE_PAGE_COUNT",
+                            texturePageCount,
+                            DWORD(sizeof(texturePageCount) / sizeof(texturePageCount[0])));
+    g_texturePageCount = _wtoi(texturePageCount);
+    if(g_textureProbeName[0] && (g_texturePageCount < 1 || g_texturePageCount > 256))
+    {
+        Log(L"DIRECT_LAUNCH disabled: terrain texture preload page count is invalid");
+        return false;
+    }
+    if(!ReadEarlyDrawallPaths())
+    {
+        Log(L"DIRECT_LAUNCH disabled: run-owned drawall autoexec contract is incomplete or unreadable");
+        return false;
+    }
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_GODMODE_MOB", g_godmodeMob,
                             DWORD(sizeof(g_godmodeMob) / sizeof(g_godmodeMob[0])));
     if(g_godmodeMob[0])
@@ -2347,6 +2676,29 @@ bool ReadDirectLaunchPaths()
         }
         NormalizeSlashes(full);
         wcscpy_s(g_temporaryTextureResource, full);
+    }
+    const DWORD textureProbeLength = GetEnvironmentVariableA(
+        "EI_MAPPER_ENDURANCE_TEXTURE_PROBE_NAME", g_textureProbeName,
+        DWORD(sizeof(g_textureProbeName)));
+    if(textureProbeLength >= sizeof(g_textureProbeName)
+       || (textureProbeLength && !g_temporaryTextureResource[0]))
+    {
+        Log(L"DIRECT_LAUNCH disabled: custom texture probe identity is invalid");
+        return false;
+    }
+    for(DWORD i = 0; i < textureProbeLength; ++i)
+    {
+        const unsigned char value = static_cast<unsigned char>(g_textureProbeName[i]);
+        if(!std::isalnum(value) && value != '_' && value != '-' && value != '.')
+        {
+            Log(L"DIRECT_LAUNCH disabled: custom texture probe identity is unsafe");
+            return false;
+        }
+    }
+    if(textureProbeLength && (g_texturePageCount < 1 || g_texturePageCount > 256))
+    {
+        Log(L"DIRECT_LAUNCH disabled: custom texture preload page count is invalid");
+        return false;
     }
     GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_BOOTSTRAP_MPR", bootstrapMpr,
                             DWORD(sizeof(bootstrapMpr) / sizeof(bootstrapMpr[0])));
@@ -3177,6 +3529,11 @@ bool PrepareRuntime()
             return false;
         }
     }
+    if(!ReadEarlyDrawallPaths())
+    {
+        Log(L"DIRECT_LAUNCH disabled: early run-owned drawall autoexec contract is incomplete or unreadable");
+        return false;
+    }
     g_patchedImports = InstallFileObservationHooks();
     if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
     {
@@ -3193,10 +3550,16 @@ bool ActivateRuntime()
 {
     if(!PrepareRuntime())
         return false;
-    if(InterlockedCompareExchange(&g_activated, 1, 0) != 0)
+    const LONG activationState = InterlockedCompareExchange(&g_activated, 1, 0);
+    if(activationState == 2)
         return true;
+    if(activationState != 0)
+        return false;
     if(g_runtimeBuild == RuntimeBuild::BaseEi && g_baseProbeLevel == 1)
+    {
+        InterlockedExchange(&g_activated, 2);
         return true;
+    }
     // JMV loads addon.dll while the suspended host briefly resumes for its
     // executable-patch phase. Preparation cannot patch a module which does not
     // exist yet, so refresh the import hooks now, before normal game/database
@@ -3228,7 +3591,9 @@ bool ActivateRuntime()
                  g_patchedImports, g_captureStack ? L"available" : L"unavailable",
                  directLaunch ? L"available" : L"unavailable");
     Log(message);
-    return g_patchedImports > 0 && directLaunch;
+    const bool ready = g_patchedImports > 0 && directLaunch;
+    InterlockedExchange(&g_activated, ready ? 2 : 0);
+    return ready;
 }
 
 bool InitializeDirectLaunch()

@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QDataStream>
+#include <QRegularExpression>
 #include <QRectF>
 
 #include "map_table_document.h"
@@ -136,7 +137,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
                                    int mapSizeY,
                                    const QPointF& spawn,
                                    QByteArray* outputArchive,
-                                   QStringList* errors)
+                                   QStringList* errors,
+                                   const QString& textureProbeName)
 {
     if(outputArchive)
         outputArchive->clear();
@@ -168,6 +170,14 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
         if(errors) errors->append(localErrors);
         return false;
     }
+    const QString mapTexture = textureProbeName.trimmed().isEmpty()
+        ? syntheticMapPlaceholderTextureName() : textureProbeName.trimmed();
+    if(!QRegularExpression(QStringLiteral("^[A-Za-z0-9_.-]{1,127}$"))
+           .match(mapTexture).hasMatch())
+    {
+        addError(errors, "The synthetic map texture probe name is not a safe resource basename.");
+        return false;
+    }
     SMapTableZone zone;
     zone.zoneId = zoneId;
     zone.allodId = allodId;
@@ -181,8 +191,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
     zone.maps.present = true;
     zone.maps.sectorWidth = mapSizeX;
     zone.maps.sectorHeight = mapSizeY;
-    zone.maps.minimapTexture = syntheticMapPlaceholderTextureName();
-    zone.maps.objectivesTexture = syntheticMapPlaceholderTextureName();
+    zone.maps.minimapTexture = mapTexture;
+    zone.maps.objectivesTexture = mapTexture;
     SMapTableExit exit;
     exit.exitId = 1;
     exit.destinationZoneId = "none";
@@ -235,8 +245,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
            || !item.maps.present
            || item.maps.sectorWidth != mapSizeX
            || item.maps.sectorHeight != mapSizeY
-           || item.maps.minimapTexture.compare(syntheticMapPlaceholderTextureName(), Qt::CaseInsensitive) != 0
-           || item.maps.objectivesTexture.compare(syntheticMapPlaceholderTextureName(), Qt::CaseInsensitive) != 0
+           || item.maps.minimapTexture.compare(mapTexture, Qt::CaseInsensitive) != 0
+           || item.maps.objectivesTexture.compare(mapTexture, Qt::CaseInsensitive) != 0
            || item.exits.size() != 1)
             addError(&localErrors, "The staged synthetic zone failed semantic reopen validation.");
     }

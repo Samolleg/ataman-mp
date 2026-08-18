@@ -1,0 +1,2250 @@
+{
+  "schema": "ei-semantic-atlas-r143-partial-decisions-v1",
+  "source": "scripts\\semantic_atlas_r143_user_answers.txt",
+  "sourceSha256": "BD15D07C0776B6C9A040DF350CAD5168B2C0EA0806CEAF5615017E1CB44B4CC3",
+  "queue": "artifacts\\semantic-atlas-r143-combined-outstanding-review\\questionnaire\\r143-combined-outstanding-queue.json",
+  "queueSha256": "DA84E1B2716C816ABE52811210B768123159EA40E6E35F44E488EC8E29246DA4",
+  "audit": "C:\\Users\\ilufu\\Downloads\\ПЗ Жамевю\\Codex\\work\\semantic-atlas-r143-active-card-audit\\bundle\\audit-results.json",
+  "auditSha256": "11A122C351F2D49293E8791E03B970B74343E5B36ADC5D9E3B1A9DCA3EEAAFA2",
+  "policy": "Only the 76 submitted cards are reviewed. Concrete selected families win over retained reject-audit comments. Untouched cards are not inferred. Exact decoded approved-HD byte matches inherit the reviewed mapping; conflicting exact matches fail closed.",
+  "counts": {
+    "queueCards": 175,
+    "submittedCards": 76,
+    "untouchedCards": 99,
+    "exactHdClosureCards": 1,
+    "remainingBeforePriorReviewSuppression": 98,
+    "changedCornerRows": 113
+  },
+  "submittedMappings": {
+    "r143-bz11k-slot55-038bc1bbd4": {
+      "NW": "Ice / Common",
+      "NE": "Ice / Common",
+      "SE": "Ice / Common",
+      "SW": "Stone / Dark"
+    },
+    "r143-bz11k-slot58-5c81021947": {
+      "NW": "Ice / Common",
+      "NE": "Ice / Common",
+      "SE": "Ice / Common",
+      "SW": "Stone / Dark"
+    },
+    "r143-bz11k-slot346-c8b640605f": {
+      "NW": "Stone / Black",
+      "NE": "Stone / Black",
+      "SE": "Stone / Dark",
+      "SW": "Ground / Stony gray"
+    },
+    "r143-bz11k-slot389-136285c028": {
+      "NW": "Stone / Black",
+      "NE": "Ground / Light",
+      "SE": "Ground / Light",
+      "SW": "Ground / Stony gray"
+    },
+    "r143-bz11k-slot468-f242504add": {
+      "NW": "Ground / Stony gray",
+      "NE": "Ground / Light",
+      "SE": "Ground / Light",
+      "SW": "Rock / Black"
+    },
+    "r143-bz11k-slot488-35f306cc75": {
+      "NW": "Ground / Stony gray",
+      "NE": "Ground / Light",
+      "SE": "Ground / Stony gray",
+      "SW": "Rock / Black"
+    },
+    "r143-bz11k-slot502-38b3e96621": {
+      "NW": "Ground / Light",
+      "NE": "Ground / Stony gray",
+      "SE": "Rock / Black",
+      "SW": "Rock / Black"
+    },
+    "r143-bz13h-slot192-d226903c0b": {
+      "NW": "Sand / Common grayish",
+      "NE": "Rubble / Orange",
+      "SE": "Rubble / Orange",
+      "SW": "Rubble / Orange"
+    },
+    "r143-bz13h-slot193-cbd57bc6e1": {
+      "NW": "Paving / Sand ruins",
+      "NE": "Rubble / Orange",
+      "SE": "Rubble / Orange",
+      "SW": "Rubble / Orange"
+    },
+    "r143-bz13h-slot226-3e0d1d3d1f": {
+      "NW": "Ground / Red",
+      "NE": "Ground / Red",
+      "SE": "Ground / Red",
+      "SW": "Paving / Sand ruins"
+    },
+    "r143-bz13h-slot228-cb935f2bc5": {
+      "NW": "Ground / Red",
+      "NE": "Ground / Red",
+      "SE": "Ground / Red",
+      "SW": "Paving / Sand ruins"
+    },
+    "r143-bz13h-slot347-24d10c259b": {
+      "NW": "Rubble / Orange",
+      "NE": "Rubble / Orange",
+      "SE": "Rubble / Orange",
+      "SW": "Paving / Sand ruins"
+    },
+    "r143-bz13h-slot348-abe21643bb": {
+      "NW": "Rubble / Orange",
+      "NE": "Rubble / Orange",
+      "SE": "Rubble / Orange",
+      "SW": "Paving / Sand ruins"
+    },
+    "r143-bz13h-slot351-595a632226": {
+      "NW": "Sand / Common grayish",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Sand / Gravel"
+    },
+    "r143-bz13h-slot382-2c14c46cda": {
+      "NW": "Stone / Orange",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Paving / Sand ruins"
+    },
+    "r143-bz13h-slot449-ace51ed338": {
+      "NW": "Sand / Common grayish",
+      "NE": "Ground / Red",
+      "SE": "Ground / Red",
+      "SW": "Paving / Sand ruins"
+    },
+    "r143-bz2g-slot91-d7f5b72936": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Dark",
+      "SE": "Grass / Common",
+      "SW": "Grass / Fresh"
+    },
+    "r143-bz2g-slot216-e57c30273c": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Common",
+      "SE": "Grass / Common",
+      "SW": "Grass / Fresh"
+    },
+    "r143-bz3g-slot186-f00788ecc5": {
+      "NW": "Grass / Sparse light",
+      "NE": "Ground / Common",
+      "SE": "Stone / Lime",
+      "SW": "Stone / Lime"
+    },
+    "r143-bz3g-slot416-a80a306be5": {
+      "NW": "Stone / Lime",
+      "NE": "Ground / Common",
+      "SE": "Grass / Sparse light",
+      "SW": "Stone / Grayish"
+    },
+    "r143-bz4g-slot155-6f3041cb1e": {
+      "NW": "Ground / Dark underwater",
+      "NE": "Ground / Gray",
+      "SE": "Sand / Dark pink",
+      "SW": "Ground / Gray"
+    },
+    "r143-bz4g-slot389-82f8aabd67": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Dark",
+      "SE": "Ground / Common",
+      "SW": "Stone / Lime"
+    },
+    "r143-bz4g-slot442-dbb4fc916d": {
+      "NW": "Grass / Dark",
+      "NE": "Stone / Lime",
+      "SE": "Stone / Lime",
+      "SW": "Ground / Dirt"
+    },
+    "r143-bz4g-slot449-bd5ed193d0": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Dark",
+      "SE": "Grass / Dark",
+      "SW": "Paving / Sand ruins"
+    },
+    "r143-bz4g-slot494-eb51fc43e0": {
+      "NW": "Sand / Dark pink",
+      "NE": "Sand / Dark pink",
+      "SE": "Ground / Dark underwater",
+      "SW": "Ground / Gray"
+    },
+    "r143-bz4g-slot498-3a2c2daf43": {
+      "NW": "Paving / Sand ruins",
+      "NE": "Paving / Cobblestone",
+      "SE": "Paving / Cobblestone",
+      "SW": "Ground / Gray"
+    },
+    "r143-bz4g-slot502-a0b96addb1": {
+      "NW": "Ground / Dark underwater",
+      "NE": "Sand / Dark pink",
+      "SE": "Sand / Dark pink",
+      "SW": "Ground / Gray"
+    },
+    "r143-bz4g-slot507-2197272ee9": {
+      "NW": "Ground / Gray",
+      "NE": "Sand / Dark",
+      "SE": "Ground / Gray",
+      "SW": "Ground / Gray"
+    },
+    "r143-bz8k-slot120-d7de265713": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-bz8k-slot121-51917cc5fa": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-bz8k-slot122-981739d737": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-bz8k-slot123-386518be50": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-bz8k-slot202-487438b491": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-bz8k-slot205-e0a23b058c": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-bz8k-slot254-0be372e878": {
+      "NW": "Grass / Winter normal",
+      "NE": "Grass / Winter normal",
+      "SE": "Grass / Winter normal",
+      "SW": "Grass / Winter normal"
+    },
+    "r143-bz8k-slot342-278c0f1394": {
+      "NW": "Ground / Light",
+      "NE": "Snow / Common",
+      "SE": "Ground / Light",
+      "SW": "Paving / Square"
+    },
+    "r143-bz8k-slot361-c86db99f37": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Ground / Light",
+      "SW": "Stone / Gray"
+    },
+    "r143-bz8k-slot442-dedeb0a6c3": {
+      "NW": "Ground / Light",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Snow / Common"
+    },
+    "r143-bz8k-slot453-8df9254b3d": {
+      "NW": "Ground / Light",
+      "NE": "Ground / Light",
+      "SE": "Grass / Winter normal",
+      "SW": "Grass / Winter faded"
+    },
+    "r143-bz8k-slot462-d6835efa69": {
+      "NW": "Snow / Common",
+      "NE": "Ground / Light",
+      "SE": "Grass / Yellow lichen",
+      "SW": "Grass / Yellow lichen"
+    },
+    "r143-bz8k-slot466-0ddec48ef0": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Ground / Light",
+      "SW": "Paving / Square"
+    },
+    "r143-bz8k-slot503-9f26445916": {
+      "NW": "Ground / Light",
+      "NE": "Stone / Gray",
+      "SE": "Stone / Gray",
+      "SW": "Paving / Square"
+    },
+    "r143-bz8k-slot506-be6e9c5277": {
+      "NW": "Stone / Gray",
+      "NE": "Stone / Gray",
+      "SE": "Ground / Light",
+      "SW": "Paving / Square"
+    },
+    "r143-zone10-slot149-783a70e8f4": {
+      "NW": "Stone / Greenish",
+      "NE": "Grass / Sparse dark",
+      "SE": "Stone / Dark gray",
+      "SW": "Stone / Dark gray"
+    },
+    "r143-zone10-slot299-b965265a79": {
+      "NW": "Slabs / Faces",
+      "NE": "Ground / Dirt",
+      "SE": "Ground / Dirt",
+      "SW": "Slabs / Carved"
+    },
+    "r143-zone10-slot331-03aab26e97": {
+      "NW": "Slabs / Faces",
+      "NE": "Slabs / Square",
+      "SE": "Grass / Sparse dark",
+      "SW": "Slabs / Square"
+    },
+    "r143-zone10-slot380-5887f06c2d": {
+      "NW": "Ground / Dirt",
+      "NE": "Slabs / Faces",
+      "SE": "Slabs / Faces",
+      "SW": "Slabs / Carved"
+    },
+    "r143-zone10-slot458-d90331ce2e": {
+      "NW": "Ground / Dirt",
+      "NE": "Slabs / Carved",
+      "SE": "Slabs / Faces",
+      "SW": "Slabs / Square"
+    },
+    "r143-zone10-slot480-c72b07632e": {
+      "NW": "Ground / Dirt",
+      "NE": "Slabs / Faces",
+      "SE": "Slabs / Carved",
+      "SW": "Slabs / Square"
+    },
+    "r143-zone10-slot483-4fbacdb570": {
+      "NW": "Stone / Dark gray",
+      "NE": "Grass / Sparse dark",
+      "SE": "Slabs / Carved",
+      "SW": "Slabs / Square"
+    },
+    "r143-zone13-slot20-4c1c95fa99": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-zone13-slot22-7b3d5e5b44": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-zone13-slot23-35e347b44d": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-zone13-slot201-7783d8572c": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-zone13-slot325-2531ecbbdd": {
+      "NW": "Ground / Light",
+      "NE": "Snow / Dark",
+      "SE": "Snow / Dark",
+      "SW": "Snow / Dark"
+    },
+    "r143-zone13-slot376-978ea03066": {
+      "NW": "Ground / Light",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "r143-zone18-slot445-a799d2b2ca": {
+      "NW": "Sand / Grass",
+      "NE": "Sand / Grass",
+      "SE": "Sand / Common grayish",
+      "SW": "Paving / Sand ruins"
+    },
+    "r143-zone19-slot309-ebbe3e6fe5": {
+      "NW": "Sand / Common grayish",
+      "NE": "Sand / Gravel",
+      "SE": "Sand / Common grayish",
+      "SW": "Sand / Gravel"
+    },
+    "r143-zone3obr-slot216-1a281c5d5d": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Dark",
+      "SE": "Grass / Dark",
+      "SW": "Stone / Greenish"
+    },
+    "r143-zone3obr-slot217-07e95444ee": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Dark",
+      "SE": "Grass / Dark",
+      "SW": "Stone / Greenish"
+    },
+    "r143-zone6-slot266-66cc7d44cf": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Dark",
+      "SE": "Grass / Dark",
+      "SW": "Grass / Fresh"
+    },
+    "r143-zone6-slot269-39d79af2e6": {
+      "NW": "Grass / Common",
+      "NE": "Grass / Common",
+      "SE": "Ground / Common",
+      "SW": "Grass / Dark"
+    },
+    "r143-zone6-slot411-1c62f6ff0d": {
+      "NW": "Grass / Common",
+      "NE": "Grass / Common",
+      "SE": "Ground / Common",
+      "SW": "Grass / Sparse light"
+    },
+    "r143-zone6_2-slot265-1c930db81e": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Dark",
+      "SE": "Grass / Dark",
+      "SW": "Grass / Fresh"
+    },
+    "r143-zone7-slot326-505b8f487a": {
+      "NW": "Sand / Grainy",
+      "NE": "Stone / Light",
+      "SE": "Stone / Light",
+      "SW": "Sand / Common"
+    },
+    "r143-bz10k-slot80-664eafef6e": {
+      "NW": "Rock / Snow",
+      "NE": "Rock / Snow",
+      "SE": "Rock / Snow",
+      "SW": "Rock / Snow"
+    },
+    "r143-bz11k-slot14-d7e3e48681": {
+      "NW": "Stone / Dark green",
+      "NE": "Stone / Dark green",
+      "SE": "Stone / Dark green",
+      "SW": "Stone / Dark green"
+    },
+    "r143-bz2g-slot195-4d91c0a373": {
+      "NW": "Grass / Burnt",
+      "NE": "Grass / Burnt",
+      "SE": "Grass / Burnt",
+      "SW": "Grass / Burnt"
+    },
+    "r143-bz2g-slot285-70e0b0fa1a": {
+      "NW": "Stone / Mossy",
+      "NE": "Stone / Mossy",
+      "SE": "Stone / Mossy",
+      "SW": "Stone / Mossy"
+    },
+    "r143-bz2g-slot479-608aaa18c0": {
+      "NW": "Ground / Dark",
+      "NE": "Ground / Dark",
+      "SE": "Ground / Dark",
+      "SW": "Ground / Dark"
+    },
+    "r143-bz4g-slot30-404a9ddb84": {
+      "NW": "Rock / Greenish",
+      "NE": "Rock / Greenish",
+      "SE": "Rock / Greenish",
+      "SW": "Rock / Greenish"
+    },
+    "r143-bz4g-slot153-e1309af9f7": {
+      "NW": "Paving / Cobblestone",
+      "NE": "Paving / Cobblestone",
+      "SE": "Paving / Cobblestone",
+      "SW": "Paving / Cobblestone"
+    },
+    "r143-bz4g-slot204-a0fd9496f6": {
+      "NW": "Ground / Gravel greenish",
+      "NE": "Ground / Gravel greenish",
+      "SE": "Ground / Gravel greenish",
+      "SW": "Ground / Gravel greenish"
+    },
+    "r143-zone10-slot396-06fa0740f2": {
+      "NW": "Slabs / Faces irregular",
+      "NE": "Slabs / Faces irregular",
+      "SE": "Slabs / Faces irregular",
+      "SW": "Slabs / Faces irregular"
+    },
+    "r143-zone13-slot14-b4aed71d2c": {
+      "NW": "Grass / Tundra",
+      "NE": "Grass / Tundra",
+      "SE": "Grass / Tundra",
+      "SW": "Grass / Tundra"
+    },
+    "r143-zone7-slot405-6ab7a3218e": {
+      "NW": "Ground / Brownish",
+      "NE": "Ground / Brownish",
+      "SE": "Ground / Brownish",
+      "SW": "Ground / Brownish"
+    }
+  },
+  "notes": {
+    "r143-bz11k-slot55-038bc1bbd4": "stone dark",
+    "r143-bz11k-slot58-5c81021947": "stone dark",
+    "r143-bz11k-slot346-c8b640605f": "",
+    "r143-bz11k-slot389-136285c028": "",
+    "r143-bz11k-slot468-f242504add": "",
+    "r143-bz11k-slot488-35f306cc75": "",
+    "r143-bz11k-slot502-38b3e96621": "",
+    "r143-bz13h-slot192-d226903c0b": "",
+    "r143-bz13h-slot193-cbd57bc6e1": "",
+    "r143-bz13h-slot226-3e0d1d3d1f": "",
+    "r143-bz13h-slot228-cb935f2bc5": "",
+    "r143-bz13h-slot347-24d10c259b": "",
+    "r143-bz13h-slot348-abe21643bb": "",
+    "r143-bz13h-slot351-595a632226": "",
+    "r143-bz13h-slot382-2c14c46cda": "",
+    "r143-bz13h-slot449-ace51ed338": "",
+    "r143-bz2g-slot91-d7f5b72936": "",
+    "r143-bz2g-slot216-e57c30273c": "",
+    "r143-bz3g-slot186-f00788ecc5": "",
+    "r143-bz3g-slot416-a80a306be5": "",
+    "r143-bz4g-slot155-6f3041cb1e": "",
+    "r143-bz4g-slot389-82f8aabd67": "",
+    "r143-bz4g-slot442-dbb4fc916d": "",
+    "r143-bz4g-slot449-bd5ed193d0": "",
+    "r143-bz4g-slot494-eb51fc43e0": "",
+    "r143-bz4g-slot498-3a2c2daf43": "",
+    "r143-bz4g-slot502-a0b96addb1": "",
+    "r143-bz4g-slot507-2197272ee9": "",
+    "r143-bz8k-slot120-d7de265713": "Stone gray",
+    "r143-bz8k-slot121-51917cc5fa": "SW stone gray",
+    "r143-bz8k-slot122-981739d737": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz8k-slot123-386518be50": "SW stone gray",
+    "r143-bz8k-slot202-487438b491": "SW stone gray",
+    "r143-bz8k-slot205-e0a23b058c": "SW stone gray",
+    "r143-bz8k-slot254-0be372e878": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz8k-slot342-278c0f1394": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz8k-slot361-c86db99f37": "SE ground light",
+    "r143-bz8k-slot442-dedeb0a6c3": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz8k-slot453-8df9254b3d": "",
+    "r143-bz8k-slot462-d6835efa69": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz8k-slot466-0ddec48ef0": "",
+    "r143-bz8k-slot503-9f26445916": "",
+    "r143-bz8k-slot506-be6e9c5277": "",
+    "r143-zone10-slot149-783a70e8f4": "",
+    "r143-zone10-slot299-b965265a79": "",
+    "r143-zone10-slot331-03aab26e97": "",
+    "r143-zone10-slot380-5887f06c2d": "",
+    "r143-zone10-slot458-d90331ce2e": "",
+    "r143-zone10-slot480-c72b07632e": "",
+    "r143-zone10-slot483-4fbacdb570": "",
+    "r143-zone13-slot20-4c1c95fa99": "sw stone gray",
+    "r143-zone13-slot22-7b3d5e5b44": "sw stone gray",
+    "r143-zone13-slot23-35e347b44d": "SW stone gray",
+    "r143-zone13-slot201-7783d8572c": "Audit recommendation rejected; keep current assignments.",
+    "r143-zone13-slot325-2531ecbbdd": "Audit recommendation rejected; keep current assignments.",
+    "r143-zone13-slot376-978ea03066": "Audit recommendation rejected; keep current assignments.",
+    "r143-zone18-slot445-a799d2b2ca": "",
+    "r143-zone19-slot309-ebbe3e6fe5": "",
+    "r143-zone3obr-slot216-1a281c5d5d": "",
+    "r143-zone3obr-slot217-07e95444ee": "",
+    "r143-zone6-slot266-66cc7d44cf": "",
+    "r143-zone6-slot269-39d79af2e6": "",
+    "r143-zone6-slot411-1c62f6ff0d": "",
+    "r143-zone6_2-slot265-1c930db81e": "",
+    "r143-zone7-slot326-505b8f487a": "",
+    "r143-bz10k-slot80-664eafef6e": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz11k-slot14-d7e3e48681": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz2g-slot195-4d91c0a373": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz2g-slot285-70e0b0fa1a": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz2g-slot479-608aaa18c0": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz4g-slot30-404a9ddb84": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz4g-slot153-e1309af9f7": "Audit recommendation rejected; keep current assignments.",
+    "r143-bz4g-slot204-a0fd9496f6": "Audit recommendation rejected; keep current assignments.",
+    "r143-zone10-slot396-06fa0740f2": "Audit recommendation rejected; keep current assignments.",
+    "r143-zone13-slot14-b4aed71d2c": "Audit recommendation rejected; keep current assignments.",
+    "r143-zone7-slot405-6ab7a3218e": "Audit recommendation rejected; keep current assignments."
+  },
+  "resolvedQuestionKeys": [
+    "r143-bz10k-slot80-664eafef6e",
+    "r143-bz11k-slot14-d7e3e48681",
+    "r143-bz11k-slot346-c8b640605f",
+    "r143-bz11k-slot389-136285c028",
+    "r143-bz11k-slot468-f242504add",
+    "r143-bz11k-slot488-35f306cc75",
+    "r143-bz11k-slot502-38b3e96621",
+    "r143-bz11k-slot55-038bc1bbd4",
+    "r143-bz11k-slot58-5c81021947",
+    "r143-bz13h-slot192-d226903c0b",
+    "r143-bz13h-slot193-cbd57bc6e1",
+    "r143-bz13h-slot226-3e0d1d3d1f",
+    "r143-bz13h-slot228-cb935f2bc5",
+    "r143-bz13h-slot347-24d10c259b",
+    "r143-bz13h-slot348-abe21643bb",
+    "r143-bz13h-slot351-595a632226",
+    "r143-bz13h-slot382-2c14c46cda",
+    "r143-bz13h-slot449-ace51ed338",
+    "r143-bz2g-slot195-4d91c0a373",
+    "r143-bz2g-slot216-e57c30273c",
+    "r143-bz2g-slot285-70e0b0fa1a",
+    "r143-bz2g-slot479-608aaa18c0",
+    "r143-bz2g-slot91-d7f5b72936",
+    "r143-bz3g-slot186-f00788ecc5",
+    "r143-bz3g-slot416-a80a306be5",
+    "r143-bz4g-slot153-e1309af9f7",
+    "r143-bz4g-slot155-6f3041cb1e",
+    "r143-bz4g-slot204-a0fd9496f6",
+    "r143-bz4g-slot30-404a9ddb84",
+    "r143-bz4g-slot389-82f8aabd67",
+    "r143-bz4g-slot442-dbb4fc916d",
+    "r143-bz4g-slot449-bd5ed193d0",
+    "r143-bz4g-slot494-eb51fc43e0",
+    "r143-bz4g-slot498-3a2c2daf43",
+    "r143-bz4g-slot502-a0b96addb1",
+    "r143-bz4g-slot507-2197272ee9",
+    "r143-bz8k-slot120-d7de265713",
+    "r143-bz8k-slot121-51917cc5fa",
+    "r143-bz8k-slot122-981739d737",
+    "r143-bz8k-slot123-386518be50",
+    "r143-bz8k-slot202-487438b491",
+    "r143-bz8k-slot205-e0a23b058c",
+    "r143-bz8k-slot254-0be372e878",
+    "r143-bz8k-slot342-278c0f1394",
+    "r143-bz8k-slot361-c86db99f37",
+    "r143-bz8k-slot442-dedeb0a6c3",
+    "r143-bz8k-slot453-8df9254b3d",
+    "r143-bz8k-slot462-d6835efa69",
+    "r143-bz8k-slot466-0ddec48ef0",
+    "r143-bz8k-slot503-9f26445916",
+    "r143-bz8k-slot506-be6e9c5277",
+    "r143-zone10-slot149-783a70e8f4",
+    "r143-zone10-slot299-b965265a79",
+    "r143-zone10-slot331-03aab26e97",
+    "r143-zone10-slot380-5887f06c2d",
+    "r143-zone10-slot396-06fa0740f2",
+    "r143-zone10-slot458-d90331ce2e",
+    "r143-zone10-slot480-c72b07632e",
+    "r143-zone10-slot483-4fbacdb570",
+    "r143-zone13-slot14-b4aed71d2c",
+    "r143-zone13-slot20-4c1c95fa99",
+    "r143-zone13-slot201-7783d8572c",
+    "r143-zone13-slot22-7b3d5e5b44",
+    "r143-zone13-slot23-35e347b44d",
+    "r143-zone13-slot325-2531ecbbdd",
+    "r143-zone13-slot376-978ea03066",
+    "r143-zone18-slot445-a799d2b2ca",
+    "r143-zone19-slot309-ebbe3e6fe5",
+    "r143-zone19-slot310-4fb1472636",
+    "r143-zone3obr-slot216-1a281c5d5d",
+    "r143-zone3obr-slot217-07e95444ee",
+    "r143-zone6-slot266-66cc7d44cf",
+    "r143-zone6-slot269-39d79af2e6",
+    "r143-zone6-slot411-1c62f6ff0d",
+    "r143-zone6_2-slot265-1c930db81e",
+    "r143-zone7-slot326-505b8f487a",
+    "r143-zone7-slot405-6ab7a3218e"
+  ],
+  "unresolvedQuestionKeys": [
+    "r143-bz11k-slot33-2e435e08e6",
+    "r143-bz11k-slot70-58f364e913",
+    "r143-bz11k-slot182-0337f3648d",
+    "r143-bz11k-slot187-d16aed99b1",
+    "r143-bz13h-slot229-198ae1e5ad",
+    "r143-bz13h-slot248-4b6ba2f1c1",
+    "r143-bz13h-slot341-7c72003a06",
+    "r143-bz13h-slot343-209cbf5f60",
+    "r143-bz13h-slot352-8820b23a78",
+    "r143-bz13h-slot357-e7268125a9",
+    "r143-bz13h-slot377-1c5a985cdc",
+    "r143-bz13h-slot383-853e718ef6",
+    "r143-bz13h-slot392-0f5abeafa7",
+    "r143-bz13h-slot393-6c5df3508c",
+    "r143-bz13h-slot394-7f799eae20",
+    "r143-bz13h-slot414-536b76e188",
+    "r143-bz13h-slot451-68d5b62f0a",
+    "r143-bz13h-slot472-03e72c1cce",
+    "r143-bz14h-slot184-b3b7a142e7",
+    "r143-bz14h-slot245-bd0a036a79",
+    "r143-bz16h-slot312-ddc19aacef",
+    "r143-bz16h-slot313-ff98bdf6ff",
+    "r143-bz16h-slot314-9a6b2769be",
+    "r143-bz16h-slot315-50b72a0f4f",
+    "r143-bz16h-slot338-9a6b16246c",
+    "r143-bz16h-slot340-c300615694",
+    "r143-bz16h-slot399-ca8dc724ca",
+    "r143-bz16h-slot403-88afc09146",
+    "r143-bz16h-slot443-53cb705e04",
+    "r143-bz18h-slot236-e420557ed5",
+    "r143-bz18h-slot244-e0443cad25",
+    "r143-bz2g-slot56-a6ae0ea95d",
+    "r143-bz2g-slot159-eed7a9706b",
+    "r143-bz2g-slot221-41bc2c9412",
+    "r143-bz2g-slot237-a13af456b7",
+    "r143-bz2g-slot278-74b840295f",
+    "r143-bz2g-slot282-29dcf060d6",
+    "r143-bz2g-slot298-15e21ded48",
+    "r143-bz2g-slot365-1b6e200739",
+    "r143-bz2g-slot380-325f040fb8",
+    "r143-bz2g-slot457-2684a1afd7",
+    "r143-bz3g-slot32-4902442cf2",
+    "r143-bz3g-slot208-8d83c287ba",
+    "r143-bz3g-slot238-15bfb4a43a",
+    "r143-bz3g-slot257-d124b06da4",
+    "r143-bz3g-slot274-8316b87ac5",
+    "r143-bz4g-slot40-3d5d603b45",
+    "r143-bz4g-slot115-24720e25b9",
+    "r143-bz4g-slot140-0b501f1c53",
+    "r143-bz4g-slot201-949b9b9b6b",
+    "r143-bz4g-slot233-f9c7d4f387",
+    "r143-bz4g-slot259-66489d2dc3",
+    "r143-bz4g-slot354-02acfcba91",
+    "r143-bz4g-slot355-fedac28251",
+    "r143-bz4g-slot488-e53cdd8e94",
+    "r143-bz5g-slot74-22c5927277",
+    "r143-bz5g-slot132-2c2afdbd84",
+    "r143-bz5g-slot295-69292dd28f",
+    "r143-bz5g-slot356-a97438e74e",
+    "r143-bz5g-slot368-2268dcb9ab",
+    "r143-bz5g-slot392-113eb00899",
+    "r143-bz5g-slot404-3d6e841a38",
+    "r143-bz5g-slot429-39abc06526",
+    "r143-bz5g-slot432-f174c845ce",
+    "r143-bz5g-slot458-f4ad3cf722",
+    "r143-bz5g-slot488-0bd01d0d76",
+    "r143-bz6g-slot213-98d229988e",
+    "r143-bz6g-slot233-36335dcb37",
+    "r143-bz6g-slot415-b26bccaa50",
+    "r143-bz7g-slot128-9c7f2f35b1",
+    "r143-bz7g-slot131-a9bbec6117",
+    "r143-bz8k-slot119-4c3f04aec5",
+    "r143-bz8k-slot444-9cc86caa9e",
+    "r143-zone13-slot43-f88edf1a10",
+    "r143-zone13-slot241-79f855f224",
+    "r143-zone13-slot242-aafe5a93b9",
+    "r143-zone13-slot509-72723e5e57",
+    "r143-zone14-slot338-2f53d42c89",
+    "r143-zone17-slot146-4a624edb31",
+    "r143-zone17-slot148-a11c5e1d16",
+    "r143-zone17-slot248-b1bd63310f",
+    "r143-zone19-slot46-ceaa209b93",
+    "r143-zone19-slot59-697d750d80",
+    "r143-zone19-slot353-4285711647",
+    "r143-zone19-slot354-cbe63e1be5",
+    "r143-zone19-slot410-90ca42947a",
+    "r143-zone19-slot472-04e3afca4b",
+    "r143-zone2-slot448-d8e55ce48a",
+    "r143-zone2-slot500-1ea5f8bd2a",
+    "r143-zone2-slot502-0a6f5c74c8",
+    "r143-zone4-slot41-d6a0cc4ebc",
+    "r143-zone4-slot386-2cb96f771f",
+    "r143-zone5_1-slot157-5c3077c351",
+    "r143-zone6-slot361-c81feef50c",
+    "r143-zone7-slot86-e36b182e3c",
+    "r143-zone8-slot206-20950fe98a",
+    "r143-zone8-slot207-8af75ccb0c",
+    "r143-zone8-slot214-d698df641e"
+  ],
+  "exactHdArtworkClosures": [
+    {
+      "sourceQuestionKey": "r143-zone19-slot309-ebbe3e6fe5",
+      "resolvedQuestionKeys": [
+        "r143-zone19-slot310-4fb1472636"
+      ],
+      "partiallyResolvedQuestionKey": null,
+      "locations": [
+        {
+          "namespace": "Zone19",
+          "slot": 310,
+          "tilePixelSha256": "557C4D05F5695CD447670894B5420449EF34A1894B20A154326880A90006303B",
+          "stableArtworkKey": "semantic-atlas-hd-557c4d05f5695cd4"
+        }
+      ]
+    }
+  ],
+  "changedRows": [
+    {
+      "sourceQuestionKey": "r143-bz11k-slot55-038bc1bbd4",
+      "namespace": "bz11k",
+      "slot": 55,
+      "corner": "SW",
+      "current": "Stone / Black",
+      "reviewed": "Stone / Dark",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot55-038bc1bbd4",
+      "namespace": "Zone14",
+      "slot": 55,
+      "corner": "SW",
+      "current": "Stone / Black",
+      "reviewed": "Stone / Dark",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot58-5c81021947",
+      "namespace": "bz11k",
+      "slot": 58,
+      "corner": "SW",
+      "current": "Stone / Black",
+      "reviewed": "Stone / Dark",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot58-5c81021947",
+      "namespace": "Zone14",
+      "slot": 58,
+      "corner": "SW",
+      "current": "Stone / Black",
+      "reviewed": "Stone / Dark",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot346-c8b640605f",
+      "namespace": "bz11k",
+      "slot": 346,
+      "corner": "SW",
+      "current": "Stone / Dark",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot346-c8b640605f",
+      "namespace": "Zone14",
+      "slot": 346,
+      "corner": "SW",
+      "current": "Stone / Dark",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot389-136285c028",
+      "namespace": "bz11k",
+      "slot": 389,
+      "corner": "SW",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot389-136285c028",
+      "namespace": "Zone14",
+      "slot": 389,
+      "corner": "SW",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot468-f242504add",
+      "namespace": "bz11k",
+      "slot": 468,
+      "corner": "NW",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot468-f242504add",
+      "namespace": "Zone14",
+      "slot": 468,
+      "corner": "NW",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot488-35f306cc75",
+      "namespace": "bz11k",
+      "slot": 488,
+      "corner": "NW",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot488-35f306cc75",
+      "namespace": "bz11k",
+      "slot": 488,
+      "corner": "SE",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot488-35f306cc75",
+      "namespace": "Zone14",
+      "slot": 488,
+      "corner": "NW",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot488-35f306cc75",
+      "namespace": "Zone14",
+      "slot": 488,
+      "corner": "SE",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot502-38b3e96621",
+      "namespace": "bz11k",
+      "slot": 502,
+      "corner": "NE",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz11k-slot502-38b3e96621",
+      "namespace": "Zone14",
+      "slot": 502,
+      "corner": "NE",
+      "current": "Ground / Light",
+      "reviewed": "Ground / Stony gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot192-d226903c0b",
+      "namespace": "bz13h",
+      "slot": 192,
+      "corner": "NW",
+      "current": "Sand / Dark",
+      "reviewed": "Sand / Common grayish",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot192-d226903c0b",
+      "namespace": "Zone15",
+      "slot": 192,
+      "corner": "NW",
+      "current": "Sand / Dark",
+      "reviewed": "Sand / Common grayish",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot193-cbd57bc6e1",
+      "namespace": "bz13h",
+      "slot": 193,
+      "corner": "NW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot193-cbd57bc6e1",
+      "namespace": "Zone15",
+      "slot": 193,
+      "corner": "NW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot226-3e0d1d3d1f",
+      "namespace": "bz13h",
+      "slot": 226,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot226-3e0d1d3d1f",
+      "namespace": "Zone15",
+      "slot": 226,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot228-cb935f2bc5",
+      "namespace": "bz13h",
+      "slot": 228,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot228-cb935f2bc5",
+      "namespace": "Zone15",
+      "slot": 228,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot347-24d10c259b",
+      "namespace": "bz13h",
+      "slot": 347,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot347-24d10c259b",
+      "namespace": "Zone15",
+      "slot": 347,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot348-abe21643bb",
+      "namespace": "bz13h",
+      "slot": 348,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot348-abe21643bb",
+      "namespace": "Zone15",
+      "slot": 348,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot351-595a632226",
+      "namespace": "bz13h",
+      "slot": 351,
+      "corner": "NW",
+      "current": "Sand / Gravel",
+      "reviewed": "Sand / Common grayish",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot351-595a632226",
+      "namespace": "Zone15",
+      "slot": 351,
+      "corner": "NW",
+      "current": "Sand / Gravel",
+      "reviewed": "Sand / Common grayish",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot382-2c14c46cda",
+      "namespace": "bz13h",
+      "slot": 382,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot382-2c14c46cda",
+      "namespace": "Zone15",
+      "slot": 382,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot449-ace51ed338",
+      "namespace": "bz13h",
+      "slot": 449,
+      "corner": "SW",
+      "current": "Sand / Yellow",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz13h-slot449-ace51ed338",
+      "namespace": "Zone15",
+      "slot": 449,
+      "corner": "SW",
+      "current": "Sand / Yellow",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz2g-slot91-d7f5b72936",
+      "namespace": "bz2g",
+      "slot": 91,
+      "corner": "SE",
+      "current": "Grass / Dark",
+      "reviewed": "Grass / Common",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz2g-slot91-d7f5b72936",
+      "namespace": "Zone2",
+      "slot": 91,
+      "corner": "SE",
+      "current": "Grass / Dark",
+      "reviewed": "Grass / Common",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz2g-slot216-e57c30273c",
+      "namespace": "bz2g",
+      "slot": 216,
+      "corner": "SW",
+      "current": "Grass / Common",
+      "reviewed": "Grass / Fresh",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz2g-slot216-e57c30273c",
+      "namespace": "Zone2",
+      "slot": 216,
+      "corner": "SW",
+      "current": "Grass / Common",
+      "reviewed": "Grass / Fresh",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz3g-slot186-f00788ecc5",
+      "namespace": "bz3g",
+      "slot": 186,
+      "corner": "NW",
+      "current": "Ground / Gravel",
+      "reviewed": "Grass / Sparse light",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz3g-slot416-a80a306be5",
+      "namespace": "bz3g",
+      "slot": 416,
+      "corner": "SE",
+      "current": "Grass / Sparse dark",
+      "reviewed": "Grass / Sparse light",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot155-6f3041cb1e",
+      "namespace": "bz4g",
+      "slot": 155,
+      "corner": "NW",
+      "current": "Ground / Gray",
+      "reviewed": "Ground / Dark underwater",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot155-6f3041cb1e",
+      "namespace": "Zone4",
+      "slot": 155,
+      "corner": "NW",
+      "current": "Ground / Gray",
+      "reviewed": "Ground / Dark underwater",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot389-82f8aabd67",
+      "namespace": "bz4g",
+      "slot": 389,
+      "corner": "SE",
+      "current": "Stone / Lime",
+      "reviewed": "Ground / Common",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot389-82f8aabd67",
+      "namespace": "Zone4",
+      "slot": 389,
+      "corner": "SE",
+      "current": "Stone / Lime",
+      "reviewed": "Ground / Common",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot442-dbb4fc916d",
+      "namespace": "bz4g",
+      "slot": 442,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Ground / Dirt",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot442-dbb4fc916d",
+      "namespace": "Zone4",
+      "slot": 442,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Ground / Dirt",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot449-bd5ed193d0",
+      "namespace": "bz4g",
+      "slot": 449,
+      "corner": "SW",
+      "current": "Sand / Dark pink",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot449-bd5ed193d0",
+      "namespace": "Zone4",
+      "slot": 449,
+      "corner": "SW",
+      "current": "Sand / Dark pink",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot494-eb51fc43e0",
+      "namespace": "bz4g",
+      "slot": 494,
+      "corner": "SE",
+      "current": "Ground / Gray",
+      "reviewed": "Ground / Dark underwater",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot494-eb51fc43e0",
+      "namespace": "Zone4",
+      "slot": 494,
+      "corner": "SE",
+      "current": "Ground / Gray",
+      "reviewed": "Ground / Dark underwater",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot498-3a2c2daf43",
+      "namespace": "bz4g",
+      "slot": 498,
+      "corner": "NW",
+      "current": "Sand / Common",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot498-3a2c2daf43",
+      "namespace": "Zone4",
+      "slot": 498,
+      "corner": "NW",
+      "current": "Sand / Common",
+      "reviewed": "Paving / Sand ruins",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot502-a0b96addb1",
+      "namespace": "bz4g",
+      "slot": 502,
+      "corner": "NW",
+      "current": "Ground / Gray",
+      "reviewed": "Ground / Dark underwater",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot502-a0b96addb1",
+      "namespace": "Zone4",
+      "slot": 502,
+      "corner": "NW",
+      "current": "Ground / Gray",
+      "reviewed": "Ground / Dark underwater",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot507-2197272ee9",
+      "namespace": "bz4g",
+      "slot": 507,
+      "corner": "NE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Dark",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz4g-slot507-2197272ee9",
+      "namespace": "Zone4",
+      "slot": 507,
+      "corner": "NE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Dark",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot120-d7de265713",
+      "namespace": "bz8k",
+      "slot": 120,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot120-d7de265713",
+      "namespace": "bz9k",
+      "slot": 120,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot120-d7de265713",
+      "namespace": "Zone11",
+      "slot": 120,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot121-51917cc5fa",
+      "namespace": "bz8k",
+      "slot": 121,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot121-51917cc5fa",
+      "namespace": "bz9k",
+      "slot": 121,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot121-51917cc5fa",
+      "namespace": "Zone11",
+      "slot": 121,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot122-981739d737",
+      "namespace": "bz8k",
+      "slot": 122,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot122-981739d737",
+      "namespace": "Zone13",
+      "slot": 19,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot122-981739d737",
+      "namespace": "bz9k",
+      "slot": 122,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot122-981739d737",
+      "namespace": "Zone11",
+      "slot": 122,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot122-981739d737",
+      "namespace": "Zone13",
+      "slot": 122,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot123-386518be50",
+      "namespace": "bz8k",
+      "slot": 123,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot123-386518be50",
+      "namespace": "bz9k",
+      "slot": 123,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot123-386518be50",
+      "namespace": "Zone11",
+      "slot": 123,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot202-487438b491",
+      "namespace": "bz8k",
+      "slot": 202,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot202-487438b491",
+      "namespace": "bz9k",
+      "slot": 202,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot202-487438b491",
+      "namespace": "Zone11",
+      "slot": 202,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot205-e0a23b058c",
+      "namespace": "bz8k",
+      "slot": 205,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot205-e0a23b058c",
+      "namespace": "bz9k",
+      "slot": 205,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot205-e0a23b058c",
+      "namespace": "Zone11",
+      "slot": 205,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot361-c86db99f37",
+      "namespace": "bz8k",
+      "slot": 361,
+      "corner": "SE",
+      "current": "Stone / Gray",
+      "reviewed": "Ground / Light",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot361-c86db99f37",
+      "namespace": "bz9k",
+      "slot": 361,
+      "corner": "SE",
+      "current": "Stone / Gray",
+      "reviewed": "Ground / Light",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot361-c86db99f37",
+      "namespace": "Zone11",
+      "slot": 361,
+      "corner": "SE",
+      "current": "Stone / Gray",
+      "reviewed": "Ground / Light",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot453-8df9254b3d",
+      "namespace": "bz8k",
+      "slot": 453,
+      "corner": "SW",
+      "current": "Grass / Winter normal",
+      "reviewed": "Grass / Winter faded",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot453-8df9254b3d",
+      "namespace": "bz9k",
+      "slot": 453,
+      "corner": "SW",
+      "current": "Grass / Winter normal",
+      "reviewed": "Grass / Winter faded",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot453-8df9254b3d",
+      "namespace": "Zone11",
+      "slot": 453,
+      "corner": "SW",
+      "current": "Grass / Winter normal",
+      "reviewed": "Grass / Winter faded",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot466-0ddec48ef0",
+      "namespace": "bz8k",
+      "slot": 466,
+      "corner": "SW",
+      "current": "Ground / Light",
+      "reviewed": "Paving / Square",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot466-0ddec48ef0",
+      "namespace": "bz9k",
+      "slot": 466,
+      "corner": "SW",
+      "current": "Ground / Light",
+      "reviewed": "Paving / Square",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot466-0ddec48ef0",
+      "namespace": "Zone11",
+      "slot": 466,
+      "corner": "SW",
+      "current": "Ground / Light",
+      "reviewed": "Paving / Square",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot503-9f26445916",
+      "namespace": "bz8k",
+      "slot": 503,
+      "corner": "NW",
+      "current": "Paving / Square",
+      "reviewed": "Ground / Light",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot503-9f26445916",
+      "namespace": "bz9k",
+      "slot": 503,
+      "corner": "NW",
+      "current": "Paving / Square",
+      "reviewed": "Ground / Light",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot503-9f26445916",
+      "namespace": "Zone11",
+      "slot": 503,
+      "corner": "NW",
+      "current": "Paving / Square",
+      "reviewed": "Ground / Light",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot506-be6e9c5277",
+      "namespace": "bz8k",
+      "slot": 506,
+      "corner": "SW",
+      "current": "Ground / Light",
+      "reviewed": "Paving / Square",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot506-be6e9c5277",
+      "namespace": "bz9k",
+      "slot": 506,
+      "corner": "SW",
+      "current": "Ground / Light",
+      "reviewed": "Paving / Square",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-bz8k-slot506-be6e9c5277",
+      "namespace": "Zone11",
+      "slot": 506,
+      "corner": "SW",
+      "current": "Ground / Light",
+      "reviewed": "Paving / Square",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone10-slot149-783a70e8f4",
+      "namespace": "Zone10",
+      "slot": 149,
+      "corner": "NE",
+      "current": "Stone / Dark gray",
+      "reviewed": "Grass / Sparse dark",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone10-slot299-b965265a79",
+      "namespace": "Zone10",
+      "slot": 299,
+      "corner": "SW",
+      "current": "Slabs / Faces",
+      "reviewed": "Slabs / Carved",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone10-slot331-03aab26e97",
+      "namespace": "Zone10",
+      "slot": 331,
+      "corner": "NW",
+      "current": "Slabs / Square",
+      "reviewed": "Slabs / Faces",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone10-slot380-5887f06c2d",
+      "namespace": "Zone10",
+      "slot": 380,
+      "corner": "SW",
+      "current": "Slabs / Faces",
+      "reviewed": "Slabs / Carved",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone10-slot458-d90331ce2e",
+      "namespace": "Zone10",
+      "slot": 458,
+      "corner": "NE",
+      "current": "Slabs / Faces",
+      "reviewed": "Slabs / Carved",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone10-slot480-c72b07632e",
+      "namespace": "Zone10",
+      "slot": 480,
+      "corner": "NE",
+      "current": "Slabs / Carved",
+      "reviewed": "Slabs / Faces",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone10-slot483-4fbacdb570",
+      "namespace": "Zone10",
+      "slot": 483,
+      "corner": "NW",
+      "current": "Grass / Sparse dark",
+      "reviewed": "Stone / Dark gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone10-slot483-4fbacdb570",
+      "namespace": "Zone10",
+      "slot": 483,
+      "corner": "SE",
+      "current": "Grass / Sparse dark",
+      "reviewed": "Slabs / Carved",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone13-slot20-4c1c95fa99",
+      "namespace": "Zone13",
+      "slot": 20,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone13-slot22-7b3d5e5b44",
+      "namespace": "Zone13",
+      "slot": 22,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone13-slot23-35e347b44d",
+      "namespace": "Zone13",
+      "slot": 23,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone13-slot201-7783d8572c",
+      "namespace": "Zone13",
+      "slot": 201,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone18-slot445-a799d2b2ca",
+      "namespace": "bz16h",
+      "slot": 445,
+      "corner": "SE",
+      "current": "Sand / Grass",
+      "reviewed": "Sand / Common grayish",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone19-slot309-ebbe3e6fe5",
+      "namespace": "Zone19",
+      "slot": 309,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Gravel",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone3obr-slot216-1a281c5d5d",
+      "namespace": "Zone3Obr",
+      "slot": 216,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Greenish",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone3obr-slot217-07e95444ee",
+      "namespace": "Zone3Obr",
+      "slot": 217,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Greenish",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone6-slot266-66cc7d44cf",
+      "namespace": "Zone6",
+      "slot": 266,
+      "corner": "SW",
+      "current": "Grass / Common",
+      "reviewed": "Grass / Fresh",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone6-slot269-39d79af2e6",
+      "namespace": "Zone6",
+      "slot": 269,
+      "corner": "SE",
+      "current": "Grass / Common",
+      "reviewed": "Ground / Common",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone6-slot411-1c62f6ff0d",
+      "namespace": "Zone6",
+      "slot": 411,
+      "corner": "SE",
+      "current": "Grass / Sparse light",
+      "reviewed": "Ground / Common",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone6-slot411-1c62f6ff0d",
+      "namespace": "Zone6_2",
+      "slot": 411,
+      "corner": "SE",
+      "current": "Grass / Sparse light",
+      "reviewed": "Ground / Common",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone6_2-slot265-1c930db81e",
+      "namespace": "Zone6_2",
+      "slot": 265,
+      "corner": "SW",
+      "current": "Grass / Common",
+      "reviewed": "Grass / Fresh",
+      "exactHdClosurePixelSha256": null
+    },
+    {
+      "sourceQuestionKey": "r143-zone7-slot326-505b8f487a",
+      "namespace": "Zone7",
+      "slot": 326,
+      "corner": "SW",
+      "current": "Sand / Grainy",
+      "reviewed": "Sand / Common",
+      "exactHdClosurePixelSha256": null
+    }
+  ],
+  "newFamilies": {
+    "bz13h": [
+      {
+        "id": 12,
+        "name": "Paving / Sand ruins",
+        "templateFamily": "Stone / Orange",
+        "tileType": 7,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 193,
+        "paintSelectable": false
+      }
+    ],
+    "Zone15": [
+      {
+        "id": 12,
+        "name": "Paving / Sand ruins",
+        "templateFamily": "Stone / Orange",
+        "tileType": 7,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 193,
+        "paintSelectable": false
+      }
+    ],
+    "bz4g": [
+      {
+        "id": 24,
+        "name": "Ground / Dirt",
+        "templateFamily": "Ground / Common",
+        "tileType": 1,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 442,
+        "paintSelectable": false
+      },
+      {
+        "id": 25,
+        "name": "Paving / Sand ruins",
+        "templateFamily": "Paving / Cobblestone",
+        "tileType": 7,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 449,
+        "paintSelectable": false
+      },
+      {
+        "id": 26,
+        "name": "Sand / Dark",
+        "templateFamily": "Sand / Dark pink",
+        "tileType": 3,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 507,
+        "paintSelectable": false
+      }
+    ],
+    "Zone4": [
+      {
+        "id": 24,
+        "name": "Ground / Dirt",
+        "templateFamily": "Ground / Common",
+        "tileType": 1,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 442,
+        "paintSelectable": false
+      },
+      {
+        "id": 25,
+        "name": "Paving / Sand ruins",
+        "templateFamily": "Paving / Cobblestone",
+        "tileType": 7,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 449,
+        "paintSelectable": false
+      },
+      {
+        "id": 26,
+        "name": "Sand / Dark",
+        "templateFamily": "Sand / Dark pink",
+        "tileType": 3,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 507,
+        "paintSelectable": false
+      }
+    ]
+  },
+  "cornerCorrections": {
+    "bz11k": {
+      "55": {
+        "SW": "Stone / Dark"
+      },
+      "58": {
+        "SW": "Stone / Dark"
+      },
+      "346": {
+        "SW": "Ground / Stony gray"
+      },
+      "389": {
+        "SW": "Ground / Stony gray"
+      },
+      "468": {
+        "NW": "Ground / Stony gray"
+      },
+      "488": {
+        "NW": "Ground / Stony gray",
+        "SE": "Ground / Stony gray"
+      },
+      "502": {
+        "NE": "Ground / Stony gray"
+      }
+    },
+    "Zone14": {
+      "55": {
+        "SW": "Stone / Dark"
+      },
+      "58": {
+        "SW": "Stone / Dark"
+      },
+      "346": {
+        "SW": "Ground / Stony gray"
+      },
+      "389": {
+        "SW": "Ground / Stony gray"
+      },
+      "468": {
+        "NW": "Ground / Stony gray"
+      },
+      "488": {
+        "NW": "Ground / Stony gray",
+        "SE": "Ground / Stony gray"
+      },
+      "502": {
+        "NE": "Ground / Stony gray"
+      }
+    },
+    "bz13h": {
+      "192": {
+        "NW": "Sand / Common grayish"
+      },
+      "193": {
+        "NW": "Paving / Sand ruins"
+      },
+      "226": {
+        "SW": "Paving / Sand ruins"
+      },
+      "228": {
+        "SW": "Paving / Sand ruins"
+      },
+      "347": {
+        "SW": "Paving / Sand ruins"
+      },
+      "348": {
+        "SW": "Paving / Sand ruins"
+      },
+      "351": {
+        "NW": "Sand / Common grayish"
+      },
+      "382": {
+        "SW": "Paving / Sand ruins"
+      },
+      "449": {
+        "SW": "Paving / Sand ruins"
+      }
+    },
+    "Zone15": {
+      "192": {
+        "NW": "Sand / Common grayish"
+      },
+      "193": {
+        "NW": "Paving / Sand ruins"
+      },
+      "226": {
+        "SW": "Paving / Sand ruins"
+      },
+      "228": {
+        "SW": "Paving / Sand ruins"
+      },
+      "347": {
+        "SW": "Paving / Sand ruins"
+      },
+      "348": {
+        "SW": "Paving / Sand ruins"
+      },
+      "351": {
+        "NW": "Sand / Common grayish"
+      },
+      "382": {
+        "SW": "Paving / Sand ruins"
+      },
+      "449": {
+        "SW": "Paving / Sand ruins"
+      }
+    },
+    "bz2g": {
+      "91": {
+        "SE": "Grass / Common"
+      },
+      "216": {
+        "SW": "Grass / Fresh"
+      }
+    },
+    "Zone2": {
+      "91": {
+        "SE": "Grass / Common"
+      },
+      "216": {
+        "SW": "Grass / Fresh"
+      }
+    },
+    "bz3g": {
+      "186": {
+        "NW": "Grass / Sparse light"
+      },
+      "416": {
+        "SE": "Grass / Sparse light"
+      }
+    },
+    "bz4g": {
+      "155": {
+        "NW": "Ground / Dark underwater"
+      },
+      "389": {
+        "SE": "Ground / Common"
+      },
+      "442": {
+        "SW": "Ground / Dirt"
+      },
+      "449": {
+        "SW": "Paving / Sand ruins"
+      },
+      "494": {
+        "SE": "Ground / Dark underwater"
+      },
+      "498": {
+        "NW": "Paving / Sand ruins"
+      },
+      "502": {
+        "NW": "Ground / Dark underwater"
+      },
+      "507": {
+        "NE": "Sand / Dark"
+      }
+    },
+    "Zone4": {
+      "155": {
+        "NW": "Ground / Dark underwater"
+      },
+      "389": {
+        "SE": "Ground / Common"
+      },
+      "442": {
+        "SW": "Ground / Dirt"
+      },
+      "449": {
+        "SW": "Paving / Sand ruins"
+      },
+      "494": {
+        "SE": "Ground / Dark underwater"
+      },
+      "498": {
+        "NW": "Paving / Sand ruins"
+      },
+      "502": {
+        "NW": "Ground / Dark underwater"
+      },
+      "507": {
+        "NE": "Sand / Dark"
+      }
+    },
+    "bz8k": {
+      "120": {
+        "SW": "Stone / Gray"
+      },
+      "121": {
+        "SW": "Stone / Gray"
+      },
+      "122": {
+        "SW": "Stone / Gray"
+      },
+      "123": {
+        "SW": "Stone / Gray"
+      },
+      "202": {
+        "SW": "Stone / Gray"
+      },
+      "205": {
+        "SW": "Stone / Gray"
+      },
+      "361": {
+        "SE": "Ground / Light"
+      },
+      "453": {
+        "SW": "Grass / Winter faded"
+      },
+      "466": {
+        "SW": "Paving / Square"
+      },
+      "503": {
+        "NW": "Ground / Light"
+      },
+      "506": {
+        "SW": "Paving / Square"
+      }
+    },
+    "bz9k": {
+      "120": {
+        "SW": "Stone / Gray"
+      },
+      "121": {
+        "SW": "Stone / Gray"
+      },
+      "122": {
+        "SW": "Stone / Gray"
+      },
+      "123": {
+        "SW": "Stone / Gray"
+      },
+      "202": {
+        "SW": "Stone / Gray"
+      },
+      "205": {
+        "SW": "Stone / Gray"
+      },
+      "361": {
+        "SE": "Ground / Light"
+      },
+      "453": {
+        "SW": "Grass / Winter faded"
+      },
+      "466": {
+        "SW": "Paving / Square"
+      },
+      "503": {
+        "NW": "Ground / Light"
+      },
+      "506": {
+        "SW": "Paving / Square"
+      }
+    },
+    "Zone11": {
+      "120": {
+        "SW": "Stone / Gray"
+      },
+      "121": {
+        "SW": "Stone / Gray"
+      },
+      "122": {
+        "SW": "Stone / Gray"
+      },
+      "123": {
+        "SW": "Stone / Gray"
+      },
+      "202": {
+        "SW": "Stone / Gray"
+      },
+      "205": {
+        "SW": "Stone / Gray"
+      },
+      "361": {
+        "SE": "Ground / Light"
+      },
+      "453": {
+        "SW": "Grass / Winter faded"
+      },
+      "466": {
+        "SW": "Paving / Square"
+      },
+      "503": {
+        "NW": "Ground / Light"
+      },
+      "506": {
+        "SW": "Paving / Square"
+      }
+    },
+    "Zone13": {
+      "19": {
+        "SW": "Stone / Gray"
+      },
+      "122": {
+        "SW": "Stone / Gray"
+      },
+      "20": {
+        "SW": "Stone / Gray"
+      },
+      "22": {
+        "SW": "Stone / Gray"
+      },
+      "23": {
+        "SW": "Stone / Gray"
+      },
+      "201": {
+        "SW": "Stone / Gray"
+      }
+    },
+    "Zone10": {
+      "149": {
+        "NE": "Grass / Sparse dark"
+      },
+      "299": {
+        "SW": "Slabs / Carved"
+      },
+      "331": {
+        "NW": "Slabs / Faces"
+      },
+      "380": {
+        "SW": "Slabs / Carved"
+      },
+      "458": {
+        "NE": "Slabs / Carved"
+      },
+      "480": {
+        "NE": "Slabs / Faces"
+      },
+      "483": {
+        "NW": "Stone / Dark gray",
+        "SE": "Slabs / Carved"
+      }
+    },
+    "bz16h": {
+      "445": {
+        "SE": "Sand / Common grayish"
+      }
+    },
+    "Zone19": {
+      "309": {
+        "SW": "Sand / Gravel"
+      }
+    },
+    "Zone3Obr": {
+      "216": {
+        "SW": "Stone / Greenish"
+      },
+      "217": {
+        "SW": "Stone / Greenish"
+      }
+    },
+    "Zone6": {
+      "266": {
+        "SW": "Grass / Fresh"
+      },
+      "269": {
+        "SE": "Ground / Common"
+      },
+      "411": {
+        "SE": "Ground / Common"
+      }
+    },
+    "Zone6_2": {
+      "411": {
+        "SE": "Ground / Common"
+      },
+      "265": {
+        "SW": "Grass / Fresh"
+      }
+    },
+    "Zone7": {
+      "326": {
+        "SW": "Sand / Common"
+      }
+    }
+  }
+}

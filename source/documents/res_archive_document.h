@@ -21,9 +21,16 @@ struct SResArchiveMember
     QByteArray sha256;
 };
 
-// Lossless reader and append-only member replacement for Evil Islands RES
-// archives. Existing bytes are retained verbatim; a changed payload and a
-// minimally patched copy of the original table are appended to the archive.
+struct SResArchiveNewMember
+{
+    QString name;
+    QByteArray payload;
+    quint32 lastWriteTime{0};
+};
+
+// Lossless reader and controlled member replacement for Evil Islands RES
+// archives. Ordinary replacement retains existing bytes wherever possible;
+// publishing rebuilds the archive while proving unrelated members unchanged.
 class CResArchiveDocument
 {
 public:
@@ -48,6 +55,17 @@ public:
     bool buildWithAppendedMember(const QString& name, const QByteArray& payload,
                                  quint32 lastWriteTime, QByteArray* output,
                                  QStringList* errors = nullptr) const;
+    bool buildWithAppendedMembers(const QVector<SResArchiveNewMember>& appended,
+                                  QByteArray* output,
+                                  QStringList* errors = nullptr) const;
+
+    // Publishes a coherent set of named members into an existing archive.
+    // Byte-identical existing members are reused. A differing existing member
+    // is rejected unless the caller explicitly authorizes replacement.
+    bool buildWithPublishedMembers(const QVector<SResArchiveNewMember>& published,
+                                   bool allowReplaceExisting,
+                                   QByteArray* output,
+                                   QStringList* errors = nullptr) const;
 
     static bool validateReplacement(const CResArchiveDocument& baseline,
                                     const CResArchiveDocument& candidate,
@@ -56,6 +74,11 @@ public:
                                     QStringList* errors = nullptr);
 
 private:
+    bool buildWithMembers(const QVector<SResArchiveNewMember>& requestedMembers,
+                          bool allowIdenticalExisting,
+                          bool allowReplaceExisting,
+                          QByteArray* output,
+                          QStringList* errors) const;
 
     QByteArray m_originalBytes;
     QByteArray m_tableBytes;

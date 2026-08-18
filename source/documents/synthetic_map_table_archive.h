@@ -17,7 +17,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
                                    int mapSizeY,
                                    const QPointF& spawn,
                                    QByteArray* outputArchive,
-                                   QStringList* errors = nullptr);
+                                   QStringList* errors = nullptr,
+                                   const QString& textureProbeName = QString());
 
 // Builds a standalone run-owned RES containing only Endurance's neutral
 // checkerboard. It does not borrow, replace, or rebuild any installed archive.

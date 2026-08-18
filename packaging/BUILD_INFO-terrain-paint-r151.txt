@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: terrain painting beta interactions and map-wide exact blend repair
+Executable source/changelist commit: 0c3b0c717ee3b25272ced78564c5818fd4a0c944
+Semantic source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: document 106 pass / 0 fail / 6 expected skips; virtual atlas 98 pass / 0 fail; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: carried forward byte-identically from the validated R150 package; semantic atlases remain embedded in the executable and collection-local finalized profiles remain paired with their MPRs

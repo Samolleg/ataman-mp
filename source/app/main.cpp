@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include <QApplication>
+#include <QProgressBar>
 #include <QStyleFactory>
 #include <QProxyStyle>
 #include <QIcon>
@@ -22,6 +23,7 @@
 #include <QItemSelectionModel>
 #include <QKeySequenceEdit>
 #include <QLineEdit>
+#include <QLabel>
 #include <QTemporaryDir>
 #include <QUndoCommand>
 #include <QUndoStack>
@@ -32,6 +34,7 @@
 #include <QContextMenuEvent>
 #include <QScrollBar>
 #include <QSlider>
+#include <QScrollArea>
 #include <QFormLayout>
 #include <QEventLoop>
 #include <QPainter>
@@ -73,6 +76,7 @@
 #include "ui/resource_browser.h"
 #include "ui/item_spell_constructor_dialog.h"
 #include "objects/object_base.h"
+#include "ui/tile_form.h"
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "endurance_ui_scale.h"
@@ -80,6 +84,7 @@
 #include "view.h"
 #include "preview.h"
 #include "render_scheduling.h"
+#include "landscape_operation_policy.h"
 #include "utils.h"
 
 #ifdef Q_OS_WIN
@@ -163,6 +168,31 @@ protected:
         QWidget::paintEvent(event);
     }
 };
+QtMessageHandler g_previousQtMessageHandler = nullptr;
+
+void enduranceQtMessageHandler(QtMsgType type,
+                               const QMessageLogContext& context,
+                               const QString& message)
+{
+    const QString category = QString::fromLatin1(
+        context.category ? context.category : "");
+    // Qt 5.12's Windows platform/accessibility plugins can repeatedly emit
+    // non-actionable warnings during otherwise successful editor operation.
+    // Keep application/default-category diagnostics visible and suppress only
+    // those known framework categories.
+    if((type == QtDebugMsg || type == QtInfoMsg || type == QtWarningMsg)
+       && (category.startsWith(QStringLiteral("qt.qpa."))
+           || category.startsWith(QStringLiteral("qt.accessibility"))))
+        return;
+    if(g_previousQtMessageHandler)
+        g_previousQtMessageHandler(type, context, message);
+    else
+    {
+        const QByteArray encoded = message.toLocal8Bit();
+        std::fprintf(stderr, "%s\n", encoded.constData());
+        std::fflush(stderr);
+    }
+}
 
 class CStartupSplash final: public QWidget
 {
@@ -1585,17 +1615,26 @@ int runHeadlessCommand(QApplication& app)
             && pastedBodyPartValue->valueAppliedTo(QStringList{"bd"})
                 == exactSerializedParts;
 
+        QTemporaryDir landscapeSettingsDirectory;
+        if(landscapeSettingsDirectory.isValid())
+        {
+            QSettings::setDefaultFormat(QSettings::IniFormat);
+            QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                               landscapeSettingsDirectory.path());
+            QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+                               landscapeSettingsDirectory.path());
+        }
         CLandscapeTools landscapeTools;
         const bool minimumPaintBrushIsSingleTile = qFuzzyIsNull(
             landscapeTools.paintRadius());
         landscapeTools.setPaintTerrainTypes(
             {{2, "Ground"}}, {{1, "Underwater ground"}}, {{5, "Swamp"}});
         landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
-        const bool underwaterFamiliesHiddenByDefault =
-            !landscapeTools.underwaterFamiliesVisible()
-            && !landscapeTools.selectPaintTerrainType(1);
-        landscapeTools.setUnderwaterFamiliesVisible(true);
-        const bool underwaterFamiliesCanBeShown =
+        const bool underwaterFamiliesVisibleByDefault =
+            landscapeTools.underwaterFamiliesVisible()
+            && landscapeTools.selectPaintTerrainType(1);
+        landscapeTools.setUnderwaterFamiliesVisible(false);
+        const bool underwaterFamiliesRemainVisible =
             landscapeTools.underwaterFamiliesVisible()
             && landscapeTools.selectPaintTerrainType(1);
         const bool landscapeLayersVisibleByDefault =
@@ -1623,7 +1662,7 @@ int runHeadlessCommand(QApplication& app)
         bool landModeSelectionValid = false;
         const bool programmaticModeRefreshesMaterials =
             !landscapeTools.selectPaintTerrainType(5)
-            && landscapeTools.paintTerrainType(&landModeSelectionValid) == 2
+            && landscapeTools.paintTerrainType(&landModeSelectionValid) == 1
             && landModeSelectionValid;
         landscapeTools.activateMode(ELandscapeEditMode::Sculpt, false);
         QSpinBox* flattenTarget = landscapeTools.findChild<QSpinBox*>(
@@ -1912,20 +1951,323 @@ int runHeadlessCommand(QApplication& app)
         while(minimapSmaller
               && viewportMinimap.sizeLevel() > originalMinimapSizeLevel)
             minimapSmaller->click();
+        STerrainPaintMaterialChoice irregularOnDark;
+        irregularOnDark.id = 9;
+        irregularOnDark.name = "Irregular — on Dark";
+        irregularOnDark.cornerOnly = true;
+        STerrainPaintMaterialChoice irregularOnStone = irregularOnDark;
+        irregularOnStone.name = "Irregular — on Stone";
+        landscapeTools.setPaintMaterials(
+            {irregularOnDark, irregularOnStone}, {}, {}, 2, 2);
+        landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
+        int irregularButtons = 0;
+        for(QToolButton* button : landscapeTools.findChildren<QToolButton*>())
+            irregularButtons += button->property("terrainMaterialId").toInt() == 9;
+        bool irregularSelected = false;
+        const bool uniqueMaterialPaletteCards = irregularButtons == 1
+            && landscapeTools.selectPaintTerrainType(9)
+            && landscapeTools.paintTerrainType(&irregularSelected) == 9
+            && irregularSelected;
+        STerrainPaintMaterialChoice darkGrass;
+        darkGrass.id = 101;
+        darkGrass.name = "Grass / Dark";
+        darkGrass.familyName = "Grass";
+        STerrainPaintMaterialChoice freshGrass = darkGrass;
+        freshGrass.id = 102;
+        freshGrass.name = "Grass / Fresh";
+        landscapeTools.setPaintMaterials(
+            {darkGrass, freshGrass}, {}, {}, 2, 2);
+        int grassVariantButtons = 0;
+        int grassFamilyHeadings = 0;
+        for(QToolButton* button : landscapeTools.findChildren<QToolButton*>())
+            grassVariantButtons += button->property("terrainMaterialId").toInt() == 101
+                || button->property("terrainMaterialId").toInt() == 102;
+        for(QLabel* label : landscapeTools.findChildren<QLabel*>())
+            grassFamilyHeadings += label->text() == QStringLiteral("Grass");
+        const bool materialVariantsRemainDistinctAndGrouped =
+            grassVariantButtons == 2 && grassFamilyHeadings == 1
+            && landscapeTools.selectPaintTerrainType(101)
+            && landscapeTools.selectPaintTerrainType(102);
+        landscapeTools.resize(320, 900);
+        landscapeTools.show();
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QScrollArea* groundMaterialScroll =
+            landscapeTools.findChild<QScrollArea*>("groundMaterialScroll");
+        QScrollArea* overlayMaterialScroll =
+            landscapeTools.findChild<QScrollArea*>("overlayMaterialScroll");
+        QTabWidget* materialPaletteTabs =
+            landscapeTools.findChild<QTabWidget*>("materialPaletteTabs");
+        QTabWidget* modernMaterialLayerTabs =
+            landscapeTools.findChild<QTabWidget*>("modernMaterialLayerTabs");
+        QTabWidget* classicMaterialLayerTabs =
+            landscapeTools.findChild<QTabWidget*>("classicMaterialLayerTabs");
+        QLineEdit* terrainPaintFilter =
+            landscapeTools.findChild<QLineEdit*>("terrainPaintFilter");
+        QListWidget* manualAtlasTileList =
+            landscapeTools.findChild<QListWidget*>("manualAtlasTileList");
+        QSlider* terrainPaintRadius =
+            landscapeTools.findChild<QSlider*>("terrainPaintRadius");
+        if(materialPaletteTabs)
+            materialPaletteTabs->setCurrentIndex(1);
+        const bool threeTerrainPaintModesAvailable = materialPaletteTabs
+            && materialPaletteTabs->count() == 3
+            && materialPaletteTabs->tabText(0) == QStringLiteral("Modern (Z)")
+            && materialPaletteTabs->tabText(1) == QStringLiteral("Classic Auto (X)")
+            && materialPaletteTabs->tabText(2) == QStringLiteral("Manual (C)")
+            && modernMaterialLayerTabs && classicMaterialLayerTabs
+            && terrainPaintFilter && manualAtlasTileList;
+        landscapeTools.setClassicAutoMaterials(
+            {darkGrass, freshGrass}, {}, {});
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QToolButton* classicDarkButton = nullptr;
+        QToolButton* classicFreshButton = nullptr;
+        if(classicMaterialLayerTabs)
+            for(QToolButton* button :
+                classicMaterialLayerTabs->findChildren<QToolButton*>())
+            {
+                const int id = button->property("terrainMaterialId").toInt();
+                if(id == 101) classicDarkButton = button;
+                if(id == 102) classicFreshButton = button;
+            }
+        const bool classicPaletteStartsInMultipleColumns =
+            classicDarkButton && classicFreshButton
+            && classicDarkButton->geometry().top()
+                == classicFreshButton->geometry().top()
+            && classicDarkButton->geometry().left()
+                != classicFreshButton->geometry().left();
+        const int paletteBottom = materialPaletteTabs
+            ? materialPaletteTabs->mapTo(
+                  &landscapeTools, materialPaletteTabs->rect().bottomLeft()).y()
+            : -1;
+        const int radiusTop = terrainPaintRadius
+            ? terrainPaintRadius->mapTo(
+                  &landscapeTools, terrainPaintRadius->rect().topLeft()).y()
+            : -1;
+        const bool classicPaletteFirstOpenDoesNotOverlapControls =
+            materialPaletteTabs && terrainPaintRadius
+            && paletteBottom < radiusTop
+            && classicPaletteStartsInMultipleColumns;
+        QToolButton* circlePaintShape =
+            landscapeTools.findChild<QToolButton*>("circlePaintShape");
+        QToolButton* squarePaintShape =
+            landscapeTools.findChild<QToolButton*>("squarePaintShape");
+        QToolButton* tilePaintTarget =
+            landscapeTools.findChild<QToolButton*>("tilePaintTarget");
+        QToolButton* vertexPaintTarget =
+            landscapeTools.findChild<QToolButton*>("vertexPaintTarget");
+        QCheckBox* classicAutoSafe =
+            landscapeTools.findChild<QCheckBox*>("classicAutoSafeMode");
+        QPushButton* resolveMissingBlends =
+            landscapeTools.findChild<QPushButton*>("resolveMissingBlendsButton");
+        STerrainPaintMaterialChoice irregularStamp = irregularOnDark;
+        irregularStamp.supportId = 3;
+        irregularStamp.contextualStamp = true;
+        irregularStamp.familyName = QStringLiteral("Grass");
+        landscapeTools.setClassicAutoMaterials({irregularStamp}, {}, {});
+        landscapeTools.setPaintPaletteMode(
+            ETerrainPaintPaletteMode::ClassicAuto);
+        if(vertexPaintTarget) vertexPaintTarget->setChecked(true);
+        QToolButton* contextualStampButton = nullptr;
+        for(QToolButton* button : landscapeTools.findChildren<QToolButton*>())
+            if(button->property("terrainContextualStamp").toBool()
+               && button->property("terrainMaterialId").toInt() == 9
+               && button->property("terrainSupportMaterialId").toInt() == 3)
+            {
+                contextualStampButton = button;
+                break;
+            }
+        bool contextualSelected = false;
+        const bool contextualStampVisibleForVertex = contextualStampButton
+            && contextualStampButton->isVisible()
+            && landscapeTools.selectPaintTerrainType(9)
+            && landscapeTools.paintTerrainType(&contextualSelected) == 9
+            && contextualSelected
+            && landscapeTools.paintTerrainSupport() == 3;
+        if(tilePaintTarget) tilePaintTarget->setChecked(true);
+        bool tileStampSelected = true;
+        landscapeTools.paintTerrainType(&tileStampSelected);
+        const bool contextualStampHiddenForTile = contextualStampButton
+            && !contextualStampButton->isVisible() && !tileStampSelected;
+        if(classicAutoSafe) classicAutoSafe->setChecked(true);
+        const bool tilePaintTargetKeepsShapeChoice = squarePaintShape
+            && circlePaintShape && squarePaintShape->isEnabled()
+            && circlePaintShape->isEnabled();
+        const bool terrainPaintBetaControlsAreExplicit = circlePaintShape
+            && squarePaintShape && tilePaintTarget && vertexPaintTarget
+            && classicAutoSafe && resolveMissingBlends
+            && circlePaintShape->styleSheet().contains(
+                QStringLiteral("QToolButton:checked"))
+            && tilePaintTarget->isChecked()
+            && classicAutoSafe->isChecked()
+            && tilePaintTargetKeepsShapeChoice;
+        landscapeTools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+        if(materialPaletteTabs)
+            materialPaletteTabs->setCurrentIndex(0);
+        QVector<QImage> manualTiles(2, QImage(16, 16,
+                                             QImage::Format_RGBA8888));
+        manualTiles[0].fill(Qt::red);
+        manualTiles[1].fill(Qt::green);
+        landscapeTools.setManualAtlasTiles(
+            manualTiles, {1, 2},
+            {QStringLiteral("Grass / Dark"),
+             QStringLiteral("Stone / Lime")});
+        terrainPaintFilter->setText(QStringLiteral("grass dark"));
+        const bool sharedTerrainPaintFilterWorks = manualAtlasTileList
+            && manualAtlasTileList->count() == 2
+            && !manualAtlasTileList->item(0)->isHidden()
+            && manualAtlasTileList->item(1)->isHidden();
+        const bool manualAtlasGridUsesTooltips = manualAtlasTileList
+            && manualAtlasTileList->viewMode() == QListView::IconMode
+            && manualAtlasTileList->flow() == QListView::LeftToRight
+            && manualAtlasTileList->isWrapping()
+            && manualAtlasTileList->item(0)->text().isEmpty()
+            && manualAtlasTileList->item(0)->toolTip().contains(
+                QStringLiteral("Grass / Dark"));
+        terrainPaintFilter->clear();
+        const QList<QToolButton*> paletteButtons =
+            landscapeTools.findChildren<QToolButton*>();
+        const bool materialPaletteScrollsAndFillsWidth = groundMaterialScroll
+            && overlayMaterialScroll && groundMaterialScroll->widgetResizable()
+            && overlayMaterialScroll->widgetResizable()
+            && groundMaterialScroll->horizontalScrollBarPolicy()
+                == Qt::ScrollBarAlwaysOff
+            && overlayMaterialScroll->horizontalScrollBarPolicy()
+                == Qt::ScrollBarAlwaysOff
+            && groundMaterialScroll->widget()->width()
+                >= groundMaterialScroll->viewport()->width()
+            && std::all_of(paletteButtons.cbegin(), paletteButtons.cend(),
+                [](const QToolButton* button) {
+                    return !button->property("terrainMaterialId").isValid()
+                        || button->sizePolicy().horizontalPolicy()
+                            == QSizePolicy::Expanding;
+                });
+        const bool landscapeToolsAreCompactAndPaletteFillsHeight =
+            landscapeTools.minimumSizeHint().width() <= 320
+            && landscapeTools.width() <= 320
+            && materialPaletteTabs && materialPaletteTabs->height() >= 100
+            // One full compact palette row remains usable after moving the
+            // former prose help into tab tooltips. Font metrics can make this
+            // 38 px in the retained headless Qt 5.12 configuration.
+            && groundMaterialScroll && groundMaterialScroll->height() >= 38;
+        landscapeTools.hide();
+        QLabel* atlasSourceStatus =
+            landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");
+        landscapeTools.setPaintMaterials(
+            {irregularOnDark}, {}, {}, 512, 512, QString(),
+            QStringLiteral("Default atlas"));
+        const bool defaultAtlasSourceVisible = atlasSourceStatus
+            && atlasSourceStatus->text().contains(QStringLiteral("Default atlas"));
+        const QString localAtlasPath = QStringLiteral(
+            "C:/test/profiles/zone2.semantic-atlas.json");
+        landscapeTools.setPaintMaterials(
+            {irregularOnDark}, {}, {}, 512, 512, QString(),
+            QStringLiteral("Local override: zone2.semantic-atlas.json"),
+            localAtlasPath);
+        const bool localAtlasSourceVisible = atlasSourceStatus
+            && atlasSourceStatus->text().contains(QStringLiteral("Local override"))
+            && atlasSourceStatus->toolTip().contains(
+                QDir::toNativeSeparators(localAtlasPath));
+        QLabel* generatedAtlasStatus =
+            landscapeTools.findChild<QLabel*>("generatedAtlasTileCount");
+        landscapeTools.setGeneratedAtlasTileCount(7);
+        const bool generatedAtlasCountVisible = generatedAtlasStatus
+            && generatedAtlasStatus->text() == QStringLiteral(
+                "512 original + 7 added exact = 519 active slots");
+        QProgressBar* atlasCapacity =
+            landscapeTools.findChild<QProgressBar*>("terrainAtlasCapacity");
+        QLabel* atlasCapacityWarning = landscapeTools.findChild<QLabel*>(
+            "terrainAtlasCapacityWarning");
+        const bool expandedAtlasCapacityIsYellow = atlasCapacity
+            && atlasCapacity->value() == 519
+            && atlasCapacity->styleSheet().contains(QStringLiteral("#ebbe23"))
+            && atlasCapacityWarning && atlasCapacityWarning->text().isEmpty();
+        landscapeTools.setPaintMaterials(
+            {irregularOnDark}, {}, {}, 4096, 4096);
+        landscapeTools.setGeneratedAtlasTileCount(1);
+        const bool unstableAtlasCapacityIsRedButInformational = atlasCapacity
+            && atlasCapacity->value() == 4097
+            && atlasCapacity->styleSheet().contains(QStringLiteral("#cd3737"))
+            && atlasCapacityWarning
+            && atlasCapacityWarning->text().contains(
+                QStringLiteral("Staging remains available"));
         bool semanticAtlasReviewRequested = false;
         QObject::connect(&landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                          [&semanticAtlasReviewRequested]() {
             semanticAtlasReviewRequested = true;
         });
-        bool semanticAtlasReviewButtonAvailable = false;
-        for(QPushButton* button : landscapeTools.findChildren<QPushButton*>())
-            if(button->text().contains("review semantic atlas", Qt::CaseInsensitive))
-            {
-                semanticAtlasReviewButtonAvailable = true;
-                button->click();
-                break;
-            }
-        semanticAtlasReviewButtonAvailable &= semanticAtlasReviewRequested;
+        QPushButton* materialAtlasButton =
+            landscapeTools.findChild<QPushButton*>("materialAtlasButton");
+        const bool materialAtlasButtonAvailable = materialAtlasButton != nullptr;
+        if(materialAtlasButton)
+            materialAtlasButton->click();
+        const bool materialAtlasActionWorks = materialAtlasButtonAvailable
+            && semanticAtlasReviewRequested;
+        bool modernDraftRequested = false;
+        QObject::connect(&landscapeTools,
+                         &CLandscapeTools::saveModernDraftRequested,
+                         [&modernDraftRequested]() {
+            modernDraftRequested = true;
+        });
+        QPushButton* modernDraftButton =
+            landscapeTools.findChild<QPushButton*>("saveModernDraftButton");
+        const bool modernDraftActionWorks = modernDraftButton
+            && modernDraftButton->text().contains(QStringLiteral("draft"),
+                                                   Qt::CaseInsensitive);
+        if(modernDraftButton)
+            modernDraftButton->click();
+        const QList<QPushButton*> landscapePushButtons =
+            landscapeTools.findChildren<QPushButton*>();
+        const bool redundantFinalizeActionRemoved = std::none_of(
+            landscapePushButtons.cbegin(), landscapePushButtons.cend(),
+            [](const QPushButton* button) {
+                return button->text().contains(
+                    QStringLiteral("Finalize map-specific"));
+            });
+        QComboBox* paintIssueCategory =
+            landscapeTools.findChild<QComboBox*>("paintIssueCategory");
+        QToolButton* markPaintIssueButton =
+            landscapeTools.findChild<QToolButton*>("markPaintIssueButton");
+        const bool paintIssueMarkerAvailable = paintIssueCategory
+            && paintIssueCategory->count() == 3
+            && paintIssueCategory->itemData(0).toString() == "no-blend"
+            && paintIssueCategory->itemText(0) == "No / wrong blend"
+            && paintIssueCategory->itemData(1).toString() == "tile-mismatch"
+            && paintIssueCategory->itemData(2).toString() == "wrong-rotation"
+            && markPaintIssueButton && markPaintIssueButton->isCheckable();
+        if(markPaintIssueButton) markPaintIssueButton->setChecked(true);
+        bool materialSelectedWhileMarking = false;
+        const bool paintIssueMarkerActivates = paintIssueMarkerAvailable
+            && landscapeTools.paintIssueMarkingEnabled()
+            && landscapeTools.paintIssueCategory() == "no-blend"
+            && landscapeTools.paintTerrainType(&materialSelectedWhileMarking) == 0
+            && !materialSelectedWhileMarking
+            && landscapeTools.editingEnabled()
+            && markPaintIssueButton->text().contains("MARKING");
+        bool materialSelectedAfterMarker = false;
+        int markerExitStateSignals = 0;
+        int markerExitMaterialSignals = 0;
+        QObject::connect(&landscapeTools, &CLandscapeTools::editingStateChanged,
+                         [&markerExitStateSignals]() { ++markerExitStateSignals; });
+        QObject::connect(&landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
+                         [&markerExitMaterialSignals](qint32 material) {
+            if(material == 9)
+                ++markerExitMaterialSignals;
+        });
+        const bool paintIssueMarkerMutuallyExclusive =
+            landscapeTools.selectPaintTerrainType(9)
+            && !landscapeTools.paintIssueMarkingEnabled()
+            && landscapeTools.paintTerrainType(&materialSelectedAfterMarker) == 9
+            && materialSelectedAfterMarker
+            && landscapeTools.editingEnabled()
+            && markerExitStateSignals > 0
+            && markerExitMaterialSignals == 1;
+        const bool paintIssueTemporarySelectPreservesEditing =
+            !landscapeOperationDisablesEditing(
+                EButtonOpSelect, true, true)
+            && landscapeOperationDisablesEditing(
+                EButtonOpSelect, true, false)
+             && !landscapeOperationDisablesEditing(
+                 EButtonOpTilebrush, true, false);
 
         QWidget primaryWindow;
         QLabel existingWindowChild(&primaryWindow);
@@ -2493,6 +2835,31 @@ int runHeadlessCommand(QApplication& app)
         // retain it for the remaining few statements and let process exit
         // reclaim it, matching application lifetime.
 
+        CTileForm tileForm;
+        QVector<QImage> verifiedAtlasTiles;
+        QVector<qint32> verifiedAtlasTypes;
+        verifiedAtlasTiles.reserve(64);
+        verifiedAtlasTypes.reserve(64);
+        for(int slot = 0; slot < 64; ++slot)
+        {
+            QImage tile(32, 32, QImage::Format_RGBA8888);
+            tile.fill(QColor::fromHsv((slot * 37) % 360, 180, 180));
+            verifiedAtlasTiles.append(tile);
+            verifiedAtlasTypes.append(qint32(ETileType::eGrass));
+        }
+        const bool freshTileFormAdoptsVerifiedAtlas =
+            tileForm.adoptTileImages(verifiedAtlasTiles, verifiedAtlasTypes);
+        QTableWidget* quickTileTable =
+            tileForm.findChild<QTableWidget*>(QStringLiteral("tableQuick"));
+        bool freshTileFormQuickItemsReady = freshTileFormAdoptsVerifiedAtlas
+                && quickTileTable && quickTileTable->rowCount() == 1
+                && quickTileTable->columnCount() == 8;
+        for(int column = 0; freshTileFormQuickItemsReady && column < 8; ++column)
+            freshTileFormQuickItemsReady = quickTileTable->item(0, column) != nullptr;
+        const bool adoptedPhysicalTileSelectionWorks = tileForm.selectTile(17);
+        const bool expandedWorkingTileSelectionRejected =
+            !tileForm.selectTile(1393);
+
         const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
                 && resourceNavigationPreservesDockedTarget
@@ -2512,11 +2879,11 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyResizeRepaintCoalesced && diplomacyResizeRepaintResumes
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
-                && enterCommit && clickCommit && databasePrototypeMenuEmissionWorks
+                && databasePrototypeMenuEmissionWorks
                 && databasePrototypeMainWindowRouteWorks
                 && detachedPreviewSharesViewportContext
                 && itemConstructorCloseReopenSafe
-                && settingsTabsUsable && settingsShortcutsPersist
+                && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
                 && uiScaleSettingsPersist && uiScaleLiveApply && uiScaleFontApplied
@@ -2559,8 +2926,8 @@ int runHeadlessCommand(QApplication& app)
                 && bodyPartDeltaPreservesHiddenAndDuplicates
                 && bodyPartPropertyPasteIsExact
                 && minimumPaintBrushIsSingleTile
-                && underwaterFamiliesHiddenByDefault
-                && underwaterFamiliesCanBeShown
+                && underwaterFamiliesVisibleByDefault
+                && underwaterFamiliesRemainVisible
                 && landscapeLayersVisibleByDefault
                 && landscapeVisibilityControlsWork
                 && overlaySurfaceToolSeparate
@@ -2590,7 +2957,7 @@ int runHeadlessCommand(QApplication& app)
                 && minimapPreviewCropAndViewPersist
                 && minimapViewsLinkByDefault
                 && minimapFitDoesNotDrift
-                && semanticAtlasReviewButtonAvailable
+                && materialAtlasButtonAvailable
                 && logicPointUndoAtomic && logicPointRedoAtomic
                 && viewportBackgroundConsumesClick && viewportChildConsumesClick
                 && viewportSurfaceFullyOwned
@@ -2609,7 +2976,33 @@ int runHeadlessCommand(QApplication& app)
                 && validationViewHidesAndUnchecks && validationViewReopensBesideMessageLog
                 && routineDockDiagnosticsSuppressed
                 && QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
-                && !QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling);
+                && !QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling)
+            && uniqueMaterialPaletteCards
+            && materialVariantsRemainDistinctAndGrouped
+            && materialPaletteScrollsAndFillsWidth
+            && landscapeToolsAreCompactAndPaletteFillsHeight
+            && threeTerrainPaintModesAvailable
+            && classicPaletteFirstOpenDoesNotOverlapControls
+            && terrainPaintBetaControlsAreExplicit
+            && contextualStampVisibleForVertex
+            && contextualStampHiddenForTile
+            && sharedTerrainPaintFilterWorks
+            && manualAtlasGridUsesTooltips
+            && defaultAtlasSourceVisible
+            && localAtlasSourceVisible
+            && generatedAtlasCountVisible
+            && expandedAtlasCapacityIsYellow
+            && unstableAtlasCapacityIsRedButInformational
+            && materialAtlasActionWorks
+            && modernDraftActionWorks && modernDraftRequested
+            && redundantFinalizeActionRemoved
+            && paintIssueMarkerActivates
+            && paintIssueMarkerMutuallyExclusive
+            && paintIssueTemporarySelectPreservesEditing
+            && freshTileFormAdoptsVerifiedAtlas
+            && freshTileFormQuickItemsReady
+            && adoptedPhysicalTileSelectionWorks
+            && expandedWorkingTileSelectionRejected;
         QTextStream output(stdout);
         output << "behaviorFilterUsesCachedText=" << behaviorFilterUsesCachedText
                << " behaviorFilterRebuildSafe=" << behaviorFilterRebuildSafe
@@ -2722,8 +3115,8 @@ int runHeadlessCommand(QApplication& app)
                << bodyPartDeltaPreservesHiddenAndDuplicates
                << " bodyPartPropertyPasteIsExact=" << bodyPartPropertyPasteIsExact
                << " minimumPaintBrushIsSingleTile=" << minimumPaintBrushIsSingleTile
-               << " underwaterFamiliesHiddenByDefault=" << underwaterFamiliesHiddenByDefault
-               << " underwaterFamiliesCanBeShown=" << underwaterFamiliesCanBeShown
+               << " underwaterFamiliesVisibleByDefault=" << underwaterFamiliesVisibleByDefault
+               << " underwaterFamiliesRemainVisible=" << underwaterFamiliesRemainVisible
                << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
                << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
                << " overlaySurfaceToolSeparate=" << overlaySurfaceToolSeparate
@@ -2772,7 +3165,65 @@ int runHeadlessCommand(QApplication& app)
                << minimapPreviewCropAndViewPersist
                << " minimapViewsLinkByDefault=" << minimapViewsLinkByDefault
                << " minimapFitDoesNotDrift=" << minimapFitDoesNotDrift
-               << " semanticAtlasReviewButtonAvailable=" << semanticAtlasReviewButtonAvailable
+               << " materialAtlasButtonAvailable=" << materialAtlasButtonAvailable
+               << " programmaticModeRefreshesMaterials="
+               << programmaticModeRefreshesMaterials
+               << " uniqueMaterialPaletteCards="
+               << uniqueMaterialPaletteCards
+               << " materialVariantsRemainDistinctAndGrouped="
+               << materialVariantsRemainDistinctAndGrouped
+               << " materialPaletteScrollsAndFillsWidth="
+               << materialPaletteScrollsAndFillsWidth
+               << " landscapeToolsAreCompactAndPaletteFillsHeight="
+               << landscapeToolsAreCompactAndPaletteFillsHeight
+               << " threeTerrainPaintModesAvailable="
+               << threeTerrainPaintModesAvailable
+               << " classicPaletteFirstOpenDoesNotOverlapControls="
+               << classicPaletteFirstOpenDoesNotOverlapControls
+               << " terrainPaintBetaControlsAreExplicit="
+               << terrainPaintBetaControlsAreExplicit
+               << " contextualStampVisibleForVertex="
+               << contextualStampVisibleForVertex
+               << " contextualStampHiddenForTile="
+               << contextualStampHiddenForTile
+               << " classicPaletteBottom=" << paletteBottom
+               << " terrainPaintRadiusTop=" << radiusTop
+               << " sharedTerrainPaintFilterWorks="
+               << sharedTerrainPaintFilterWorks
+               << " manualAtlasGridUsesTooltips="
+               << manualAtlasGridUsesTooltips
+               << " landscapeToolsMinimumWidth="
+               << landscapeTools.minimumSizeHint().width()
+               << " landscapeToolsWidth=" << landscapeTools.width()
+               << " materialPaletteTabsHeight="
+               << (materialPaletteTabs ? materialPaletteTabs->height() : -1)
+               << " groundMaterialScrollHeight="
+               << (groundMaterialScroll ? groundMaterialScroll->height() : -1)
+               << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible
+               << " localAtlasSourceVisible=" << localAtlasSourceVisible
+               << " generatedAtlasCountVisible=" << generatedAtlasCountVisible
+               << " modernDraftActionWorks=" << modernDraftActionWorks
+               << " modernDraftRequested=" << modernDraftRequested
+               << " redundantFinalizeActionRemoved="
+               << redundantFinalizeActionRemoved
+               << " expandedAtlasCapacityIsYellow="
+               << expandedAtlasCapacityIsYellow
+               << " unstableAtlasCapacityIsRedButInformational="
+               << unstableAtlasCapacityIsRedButInformational
+               << " materialAtlasActionWorks=" << materialAtlasActionWorks
+               << " paintIssueMarkerActivates=" << paintIssueMarkerActivates
+               << " paintIssueMarkerMutuallyExclusive="
+               << paintIssueMarkerMutuallyExclusive
+               << " paintIssueTemporarySelectPreservesEditing="
+               << paintIssueTemporarySelectPreservesEditing
+               << " freshTileFormAdoptsVerifiedAtlas="
+               << freshTileFormAdoptsVerifiedAtlas
+               << " freshTileFormQuickItemsReady="
+               << freshTileFormQuickItemsReady
+               << " adoptedPhysicalTileSelectionWorks="
+               << adoptedPhysicalTileSelectionWorks
+               << " expandedWorkingTileSelectionRejected="
+               << expandedWorkingTileSelectionRejected
                << " logicPointUndoAtomic=" << logicPointUndoAtomic
                << " logicPointRedoAtomic=" << logicPointRedoAtomic
                << " viewportBackgroundConsumesClick=" << viewportBackgroundConsumesClick
@@ -2987,6 +3438,8 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+    g_previousQtMessageHandler = qInstallMessageHandler(
+        enduranceQtMessageHandler);
     app.setWindowIcon(QIcon(":/endurance_gate.png"));
 
     // QGLWidget reads the default format when the first preview/view widget is

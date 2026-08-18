@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: Test Current terrain-atlas restart
+Executable source commit: 1daf2f2cb6b2a491b059270467f0fab29fc6708e
+Executable SHA-256: 734B37E4C3FF652AEEF10BC3DB11167D30F696C22328FF15BD109C2FB42F84BD
+Semantic catalog source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: document 130 pass / 0 fail / 7 expected skips; virtual atlas 115 pass / 0 fail; landscape widget 7 pass / 0 fail; focused JMV map-test atlas/recovery 8 pass / 0 fail; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Manual gate: published Zone1 and editable-draft Test Current must restart the owned game after an atlas change, load the painted artwork without transparent cells/crash, and retain fast hot reload when atlas bytes are unchanged
