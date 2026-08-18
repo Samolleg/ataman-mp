@@ -881,16 +881,31 @@ MainWindow::MainWindow(QWidget* parent) :
             [this](const QString& runId, const QString& mapName)
     {
         ei::log(eLogInfo, QString("JMV direct map test started run:%1 staged-map:%2").arg(runId, mapName));
-        statusBar()->showMessage(tr("JMV direct map test is waiting for the normal menu lifecycle, then will load the staged map automatically."));
+        if(m_hotReloadProgress)
+        {
+            closeHotReloadProgress();
+            statusBar()->showMessage(tr(
+                "The owned JMV test process restarted with the changed terrain atlas and is loading the staged map."),
+                10000);
+        }
+        else
+            statusBar()->showMessage(tr("JMV direct map test is waiting for the normal menu lifecycle, then will load the staged map automatically."));
         updateMapTestAction();
     });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished, this,
             [this](const QString& runId, int exitCode, const QString& cleanupMessage)
     {
-        closeHotReloadProgress();
+        const bool terrainAtlasRestart =
+            m_mapTestLauncher->isTerrainAtlasRestartPending();
+        if(!terrainAtlasRestart)
+            closeHotReloadProgress();
         ei::log(eLogInfo, QString("JMV test launch finished run:%1 exit:%2 cleanup:%3")
                 .arg(runId).arg(exitCode).arg(cleanupMessage));
-        statusBar()->showMessage(tr("JMV direct map test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
+        if(terrainAtlasRestart)
+            statusBar()->showMessage(tr(
+                "Terrain atlas changed; restarting the owned JMV test process with the new atlas..."));
+        else
+            statusBar()->showMessage(tr("JMV direct map test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
         updateMapTestAction();
         if(m_closeAfterTestStop)
         {
@@ -3143,9 +3158,16 @@ void MainWindow::launchCurrentMapTest()
         // commits or rejects the staged generation. The launcher focuses the
         // game only after hotReloadFinished, so editor input stays blocked.
         progress->setRange(0, 0);
-        progress->setLabelText(tr("Applying the staged map generation in the game..."));
+        progress->setLabelText(
+            m_mapTestLauncher->isTerrainAtlasRestartPending()
+                ? tr("Restarting the owned game with the changed terrain atlas...")
+                : tr("Applying the staged map generation in the game..."));
         m_hotReloadProgress = progress.take();
-        statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
+        statusBar()->showMessage(
+            m_mapTestLauncher->isTerrainAtlasRestartPending()
+                ? tr("Terrain atlas changed; the owned JMV test process is restarting safely.")
+                : tr("Hot reload queued on the verified JMV game thread."),
+            6000);
     }
     if(progress)
         progress->setValue(6);

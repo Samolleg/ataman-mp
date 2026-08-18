@@ -1,6 +1,8 @@
 #include <QtTest>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QHash>
 #include <QImage>
 #include <QJsonArray>
@@ -72,6 +74,7 @@ private slots:
     void authoritativeResultRejectsWrongZone();
     void analyzesPersistedAuthoritativeResult();
     void rebasesRuntimeTerrainAtlasNamespace();
+    void changedTerrainAtlasRequiresOwnedProcessRestart();
     void renderEvidenceRejectsTexturelessFrames();
     void memoryEvidenceSummarizesComparableSamples();
     void runtimeSmokeReachesGameplayReady();
@@ -81,6 +84,22 @@ private slots:
 static QString hash(const QByteArray& data)
 {
     return QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+}
+
+static QByteArray launcherSource()
+{
+    const QString relativePath = QStringLiteral(
+        "source/runtime/jmv_map_test_launcher.cpp");
+    QDir directory(QDir::currentPath());
+    for(int depth = 0; depth < 8; ++depth)
+    {
+        QFile source(directory.filePath(relativePath));
+        if(source.open(QIODevice::ReadOnly))
+            return source.readAll();
+        if(!directory.cdUp())
+            break;
+    }
+    return QByteArray();
 }
 
 #ifdef Q_OS_WIN
@@ -663,6 +682,40 @@ void JmvMapTestLauncherTests::rebasesRuntimeTerrainAtlasNamespace()
         QVERIFY(!rebasedMpr.isEmpty());
         QVERIFY(!rebasedRes.isEmpty());
     }
+}
+
+void JmvMapTestLauncherTests::changedTerrainAtlasRequiresOwnedProcessRestart()
+{
+    const QByteArray atlasA = QByteArrayLiteral("atlas-a");
+    const QByteArray atlasB = QByteArrayLiteral("atlas-b");
+    const QString hashA = hash(atlasA);
+    const QString hashB = hash(atlasB);
+
+    QVERIFY(!CJmvMapTestLauncher::terrainAtlasHotReloadRequiresRestart(
+        hashA, 8, 512, hashA, 8, 512));
+    QVERIFY(CJmvMapTestLauncher::terrainAtlasHotReloadRequiresRestart(
+        hashA, 8, 512, hashB, 8, 512));
+    QVERIFY(CJmvMapTestLauncher::terrainAtlasHotReloadRequiresRestart(
+        hashA, 8, 512, hashA, 9, 513));
+    QVERIFY(CJmvMapTestLauncher::terrainAtlasHotReloadRequiresRestart(
+        QString(), 0, 0, hashA, 8, 512));
+    QVERIFY(CJmvMapTestLauncher::terrainAtlasHotReloadRequiresRestart(
+        hashA, 8, 512, QString(), 0, 0));
+
+    const QByteArray source = launcherSource();
+    const int hotReloadStart = source.indexOf(
+        "bool CJmvMapTestLauncher::hotReload(");
+    const int hotReloadEnd = source.indexOf(
+        "bool CJmvMapTestLauncher::queueTerrainAtlasRestart(",
+        hotReloadStart);
+    QVERIFY(hotReloadStart >= 0 && hotReloadEnd > hotReloadStart);
+    const QByteArray hotReload = source.mid(
+        hotReloadStart, hotReloadEnd - hotReloadStart);
+    QVERIFY2(hotReload.contains(
+                 "terrainAtlasHotReloadRequiresRestart("),
+             "Hot reload no longer checks whether terrain atlas bytes changed");
+    QVERIFY2(hotReload.contains("queueTerrainAtlasRestart("),
+             "Changed terrain atlas bytes no longer force an owned-process restart");
 }
 
 void JmvMapTestLauncherTests::renderEvidenceRejectsTexturelessFrames()

@@ -611,6 +611,10 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int exitCode, QProcess::ExitStatus status)
     {
+        const bool terrainAtlasRestart = m_terrainAtlasRestartPending;
+        const SJmvMapTestLaunchInput restartInput =
+            m_pendingTerrainAtlasRestartInput;
+        const QString completedRunId = m_runId;
         m_hotReloadReadyTimer->stop();
         m_hotReloadResultTimer->stop();
         m_runtimeHealthTimer->stop();
@@ -641,12 +645,36 @@ CJmvMapTestLauncher::CJmvMapTestLauncher(QObject* parent)
                      .arg(report.value("passed").toBool())
                      .arg(report.value("errorCount").toInt())
                      .arg(report.value("warningCount").toInt()).arg(resultPath));
-        emit testReportReady(report);
+        if(!terrainAtlasRestart)
+            emit testReportReady(report);
+        else
+            appendRunLog(
+                "Suppressing the intermediate stopped-run notification while restarting with changed terrain atlas bytes");
         QString cleanupMessage = cleanupOnly;
         if(!cleanupMessage.isEmpty())
             cleanupMessage += "\n";
         cleanupMessage += bridgeResult;
-        emit testFinished(m_runId, exitCode, cleanupMessage);
+        emit testFinished(completedRunId, exitCode, cleanupMessage);
+        if(terrainAtlasRestart)
+        {
+            QTimer::singleShot(0, this, [this, restartInput]()
+            {
+                m_terrainAtlasRestartPending = false;
+                m_pendingTerrainAtlasRestartInput = SJmvMapTestLaunchInput();
+                if(!m_cleanupComplete)
+                {
+                    emit testError(QStringLiteral(
+                        "The previous owned test process stopped, but its guarded cleanup did not complete. "
+                        "The changed terrain atlas was not launched; inspect the test-run recovery status."));
+                    return;
+                }
+                QString restartError;
+                if(!launch(restartInput, &restartError))
+                    emit testError(QStringLiteral(
+                        "The owned test process stopped safely, but restarting it with the changed terrain atlas failed:\n\n%1")
+                        .arg(restartError));
+            });
+        }
     });
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error)
     {
@@ -675,6 +703,17 @@ CJmvMapTestLauncher::~CJmvMapTestLauncher()
 QString CJmvMapTestLauncher::testRunsRootPath()
 {
     return testRunsRoot();
+}
+
+bool CJmvMapTestLauncher::terrainAtlasHotReloadRequiresRestart(
+    const QString& runningSourceAtlasSha256, int runningAtlasPages,
+    int runningAtlasSlots, const QString& candidateSourceAtlasSha256,
+    int candidateAtlasPages, int candidateAtlasSlots)
+{
+    return runningSourceAtlasSha256.compare(
+               candidateSourceAtlasSha256, Qt::CaseInsensitive) != 0
+        || runningAtlasPages != candidateAtlasPages
+        || runningAtlasSlots != candidateAtlasSlots;
 }
 
 bool CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
@@ -1884,6 +1923,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_mapTableSourceSha256.clear();
     m_stagedMapTableSha256.clear();
     m_livePlaceholderResourceSha256.clear();
+    m_sourceTerrainTextureResourceSha256.clear();
     m_runtimeHostPath.clear();
     m_gamePidPath.clear();
     m_liveSavesPath.clear();
@@ -1895,6 +1935,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_saveGeneration = 0;
     m_pendingHotReloadSequence = 0;
     m_pendingSaveGeneration = 0;
+    m_sourceTerrainAtlasPages = 0;
+    m_sourceTerrainAtlasSlots = 0;
     m_hotReloadResultPolls = 0;
     m_baseProbe = false;
     m_usesRuntimeHost = false;
@@ -1903,6 +1945,8 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_stopRequested = false;
     m_processCrashObserved = false;
     m_runtimeFailureObserved = false;
+    m_terrainAtlasRestartPending = false;
+    m_pendingTerrainAtlasRestartInput = SJmvMapTestLaunchInput();
     if(!stage(input, error))
     {
         if(error && !error->isEmpty())
@@ -2014,6 +2058,11 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     const bool isBase = input.profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     m_baseProbe = isBase;
     m_usesRuntimeHost = isJmv || isBase;
+    m_sourceTerrainTextureResourceSha256 =
+        input.terrainTextureResourceData.isEmpty()
+            ? QString() : sha256(input.terrainTextureResourceData);
+    m_sourceTerrainAtlasPages = input.expectedTerrainAtlasPages;
+    m_sourceTerrainAtlasSlots = input.expectedTerrainAtlasSlots;
     if((!isJmv && !isBase) || !input.profile.valid || !input.profile.runtimeStackValidated)
     {
         if(error) *error = "The active runtime stack is incomplete or does not match an exact manifest.";
@@ -2773,6 +2822,16 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         return false;
     }
 
+    const QString candidateAtlasSha256 =
+        input.terrainTextureResourceData.isEmpty()
+            ? QString() : sha256(input.terrainTextureResourceData);
+    if(terrainAtlasHotReloadRequiresRestart(
+           m_sourceTerrainTextureResourceSha256,
+           m_sourceTerrainAtlasPages, m_sourceTerrainAtlasSlots,
+           candidateAtlasSha256, input.expectedTerrainAtlasPages,
+           input.expectedTerrainAtlasSlots))
+        return queueTerrainAtlasRestart(input, candidateAtlasSha256, error);
+
     const quint64 sequence = m_hotReloadSequence + 1;
     const quint64 generation = m_saveGeneration + 1;
     const QString reloadRoot = QDir(m_runRoot).filePath(
@@ -3057,6 +3116,50 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
         appendRunLog(QString("Hot reload generation=%1 uses embedded AI_GRAPH from the primary MOB")
                      .arg(generation));
     emit hotReloadQueued(sequence, request.zoneId);
+    return true;
+}
+
+bool CJmvMapTestLauncher::queueTerrainAtlasRestart(
+    const SJmvMapTestLaunchInput& input, const QString& candidateAtlasSha256,
+    QString* error)
+{
+    if(!isRunning())
+    {
+        if(error)
+            *error = "The owned test process exited before its terrain atlas could be restarted.";
+        return false;
+    }
+    if(m_terrainAtlasRestartPending)
+    {
+        if(error)
+            *error = "A terrain-atlas test restart is already in progress.";
+        return false;
+    }
+
+    m_pendingTerrainAtlasRestartInput = input;
+    m_terrainAtlasRestartPending = true;
+    appendRunLog(QString(
+        "Terrain atlas input changed; replacing unsafe MPR-only hot reload "
+        "with an owned-process restart oldSha256=%1 newSha256=%2 "
+        "oldPages=%3 newPages=%4 oldSlots=%5 newSlots=%6")
+        .arg(m_sourceTerrainTextureResourceSha256.isEmpty()
+                 ? QStringLiteral("(none)")
+                 : m_sourceTerrainTextureResourceSha256,
+             candidateAtlasSha256.isEmpty()
+                 ? QStringLiteral("(none)") : candidateAtlasSha256)
+        .arg(m_sourceTerrainAtlasPages).arg(input.expectedTerrainAtlasPages)
+        .arg(m_sourceTerrainAtlasSlots).arg(input.expectedTerrainAtlasSlots));
+    m_stopRequested = true;
+    m_process->terminate();
+    QTimer::singleShot(5000, this, [this]()
+    {
+        if(isRunning() && m_terrainAtlasRestartPending)
+        {
+            appendRunLog(
+                "Terrain-atlas restart stop timed out; terminating the Endurance-owned process");
+            m_process->kill();
+        }
+    });
     return true;
 }
 

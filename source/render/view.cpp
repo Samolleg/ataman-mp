@@ -6320,9 +6320,15 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
         return false;
     }
     *data = validation.candidateBytes;
-    if(terrainAtlasResource && m_workingTerrainAtlas
-       && m_workingTerrainAtlas->activeTextureCount()
-              > int(m_mprDocument.mapInfo().textureCount))
+    const bool workingAtlasAvailable = m_workingTerrainAtlas
+        && m_workingTerrainAtlas->isValid();
+    const bool stageWorkingAtlas = terrainMapTestNeedsWorkingAtlasPackage(
+        workingAtlasAvailable,
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
+        workingAtlasAvailable ? m_workingTerrainAtlas->activeTextureCount() : 0,
+        int(m_mprDocument.mapInfo().textureCount));
+    if(terrainAtlasResource && stageWorkingAtlas)
     {
         CMprDocument stagedDocument;
         CValidationReport stagedReport;

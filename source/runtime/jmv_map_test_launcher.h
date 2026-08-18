@@ -79,6 +79,8 @@ public:
     bool isRunning() const;
     bool isHotReloadReady() const;
     bool isHotReloadPending() const { return m_pendingHotReloadSequence != 0; }
+    bool isTerrainAtlasRestartPending() const
+    { return m_terrainAtlasRestartPending; }
     bool isRecoveryPending() const { return m_recoveryPending; }
     QString runtimeState() const;
     quint64 saveGeneration() const { return m_saveGeneration; }
@@ -131,6 +133,10 @@ public:
                                           QByteArray* rebasedAtlasRes,
                                           QStringList* rebasedMmpMembers,
                                           QString* error = nullptr);
+    static bool terrainAtlasHotReloadRequiresRestart(
+        const QString& runningSourceAtlasSha256, int runningAtlasPages,
+        int runningAtlasSlots, const QString& candidateSourceAtlasSha256,
+        int candidateAtlasPages, int candidateAtlasSlots);
     static QString recoverInterruptedRuns(bool* pending = nullptr);
     static bool hasActiveInterruptedRun(QString* description = nullptr);
     static bool requestCloseActiveInterruptedRun(QString* error = nullptr);
@@ -175,6 +181,9 @@ signals:
 
 private:
     bool stage(const SJmvMapTestLaunchInput& input, QString* error);
+    bool queueTerrainAtlasRestart(const SJmvMapTestLaunchInput& input,
+                                  const QString& candidateAtlasSha256,
+                                  QString* error);
     bool installBridge(QString* error);
     QString cleanup();
     bool writeManifest(const QString& state, QString* error = nullptr);
@@ -213,6 +222,7 @@ private:
     QString m_mapTableSourceSha256;
     QString m_stagedMapTableSha256;
     QString m_livePlaceholderResourceSha256;
+    QString m_sourceTerrainTextureResourceSha256;
     QString m_gameExePath;
     QString m_engineDirectory;
     QString m_runtimeHostPath;
@@ -228,6 +238,8 @@ private:
     quint64 m_saveGeneration{0};
     quint64 m_pendingHotReloadSequence{0};
     quint64 m_pendingSaveGeneration{0};
+    int m_sourceTerrainAtlasPages{0};
+    int m_sourceTerrainAtlasSlots{0};
     int m_hotReloadResultPolls{0};
     bool m_cleanupComplete;
     bool m_stopRequested{false};
@@ -236,6 +248,8 @@ private:
     bool m_baseProbe;
     bool m_usesRuntimeHost{false};
     bool m_recoveryPending{false};
+    bool m_terrainAtlasRestartPending{false};
+    SJmvMapTestLaunchInput m_pendingTerrainAtlasRestartInput;
     bool m_lastPublishedRecoveryPending{false};
     QString m_lastPublishedRecoveryStatus;
 };

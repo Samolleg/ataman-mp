@@ -750,6 +750,29 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QVERIFY(!terrainChangedSaveNeedsWorkingAtlasPackage(
         false, true, false, false));
 
+    // R179: atlas artwork can change while the MPR remains within its
+    // original page count. Test Current must package those working bytes based
+    // on cell provenance, not on whether another physical page was allocated.
+    QVERIFY(terrainMapTestNeedsWorkingAtlasPackage(
+        true, true, false, 8, 8));
+    QVERIFY(terrainMapTestNeedsWorkingAtlasPackage(
+        true, false, true, 8, 8));
+    QVERIFY(terrainMapTestNeedsWorkingAtlasPackage(
+        true, false, false, 9, 8));
+    QVERIFY(!terrainMapTestNeedsWorkingAtlasPackage(
+        true, false, false, 8, 8));
+    QVERIFY(!terrainMapTestNeedsWorkingAtlasPackage(
+        false, true, true, 9, 8));
+    const int candidateStart = source.indexOf(
+        "bool CView::buildValidatedLandscapeCandidate(");
+    const int candidateEnd = source.indexOf(
+        "bool CView::saveChangedLandscapeDocument(", candidateStart);
+    QVERIFY(candidateStart >= 0 && candidateEnd > candidateStart);
+    const QByteArray candidate = source.mid(
+        candidateStart, candidateEnd - candidateStart);
+    QVERIFY2(candidate.contains("terrainMapTestNeedsWorkingAtlasPackage("),
+             "Test Current still decides atlas staging from page growth alone");
+
     const STerrainPublicationLayerPlan landOnly =
         terrainPublicationLayerPlan(true, false);
     QVERIFY(landOnly.valid);

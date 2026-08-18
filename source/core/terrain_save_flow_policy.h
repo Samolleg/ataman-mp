@@ -96,6 +96,21 @@ inline bool terrainChangedSaveNeedsWorkingAtlasPackage(
         || landUsesWorkingExtension || overlayUsesWorkingExtension;
 }
 
+inline bool terrainMapTestNeedsWorkingAtlasPackage(
+    bool workingAtlasAvailable, bool landUsesWorkingExtension,
+    bool overlayUsesWorkingExtension, int workingPageCount,
+    int authoredPageCount)
+{
+    if(!workingAtlasAvailable)
+        return false;
+    // A generated/imported tile can reuse an empty physical slot in an
+    // existing page.  Page growth therefore is only a compatibility fallback,
+    // never the authority for deciding whether Test Current needs the working
+    // atlas bytes.
+    return landUsesWorkingExtension || overlayUsesWorkingExtension
+        || workingPageCount > authoredPageCount;
+}
+
 enum class ETerrainPublicationPrimaryLayer
 {
     None,
