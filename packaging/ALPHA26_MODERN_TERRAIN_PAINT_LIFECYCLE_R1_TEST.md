@@ -11,6 +11,8 @@ allowed one tile-paint stroke and then rejected every later stroke.
   and still creates no undo entry.
 - Added a regression contract covering both completion and cancellation
   ordering, including admission of later strokes.
+- Corrected Light radius and Campfire power tooltips: negative values do not
+  create darkness in the shipped game.
 
 Terrain atlas semantics, material selection, generated slots, save behavior,
 and the R162 semantic authority are otherwise unchanged.
@@ -23,4 +25,5 @@ and the R162 semantic authority are otherwise unchanged.
    is gone and the next stroke works.
 4. Undo and redo the completed strokes. Confirm each gesture owns exactly one
    history entry and the cancelled gesture owns none.
-
+5. Inspect the Radius tooltip on a Light and Light power tooltip on a Campfire;
+   confirm neither describes negative values as subtractive lighting.
