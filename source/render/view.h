@@ -477,6 +477,10 @@ private:
         qint32 preferredRuntimeType = -1,
         SWorkingTerrainResolveStage* staging = nullptr,
         bool requirePreferredRuntimeType = false);
+    bool ensureGlobalTerrainMaterialSources(
+        const STerrainTransitionSignature& signature,
+        CValidationReport* report,
+        SWorkingTerrainResolveStage* staging = nullptr);
     bool syncWorkingTerrainAtlas(CValidationReport* report,
                                  CTerrainWorkingAtlas* staging = nullptr);
     bool ensureModernTerrainArtworkAssigned(

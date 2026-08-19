@@ -10066,6 +10066,22 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
              "Palette/compositor uniforms still use name-only page lookup");
     QVERIFY2(!rebuild.contains("m_terrainGlobalBoundAtlasCache.clear()"),
              "Map switches again discard verified exact atlas bindings");
+    QVERIFY2(!rebuild.contains("for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)\n        {\n            STerrainGlobalMaterialSource selectedSource;\n            const QImage source = loadBoundGlobalUniformSource("),
+             "Palette construction again verifies every foreign atlas synchronously");
+    QVERIFY2(rebuild.contains("currentMapGlobalUniformSource("),
+             "Palette construction no longer reuses already-loaded current-map material artwork");
+    QVERIFY2(!rebuild.contains("const QImage source = loadBoundGlobalUniformSource("),
+             "Palette construction again performs foreign exact-archive verification eagerly");
+
+    const int finalizeStart = source.indexOf(
+        "void CView::finalizeVirtualTerrainAtlas()");
+    const int finalizeEnd = source.indexOf(
+        "void CView::onChangeCursorTile(QPixmap ico)", finalizeStart);
+    QVERIFY(finalizeStart >= 0 && finalizeEnd > finalizeStart);
+    const QByteArray finalize = source.mid(
+        finalizeStart, finalizeEnd - finalizeStart);
+    QVERIFY2(finalize.contains("terrain.finalize_unrealized_signature"),
+             "Publication can reach an under-sourced generation path instead of failing closed");
 
     const int refreshStart = source.indexOf(
         "void CView::refreshAfterResourceSetup()");

@@ -2081,6 +2081,11 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
     for(auto source = externalMaterialSources.constBegin();
         source != externalMaterialSources.constEnd(); ++source)
     {
+        // An opened-map uniform is authoritative for that map. External
+        // reviewed sources fill only genuine gaps; they never replace local
+        // artwork merely because the logical material id is shared.
+        if(m_materialSources.contains(source.key()))
+            continue;
         if(source.value().isNull() || source.value().size() != tileSize)
             continue;
         m_materialSources.insert(source.key(), m_generatedTilesOpaque
@@ -2092,6 +2097,21 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
         m_materialSourceSlots.remove(source.key());
     }
     m_valid = true;
+}
+
+bool CTerrainVirtualAtlas::addExternalMaterialSource(
+    qint32 material, const QImage& pixels)
+{
+    if(m_materialSources.contains(material))
+        return true;
+    if(!m_valid || pixels.isNull() || m_authoredTiles.isEmpty()
+       || pixels.size() != m_authoredTiles.front().size())
+        return false;
+    m_materialSources.insert(material, m_generatedTilesOpaque
+        ? opaqueTerrainMaterialSource(pixels)
+        : pixels.convertToFormat(QImage::Format_RGBA8888));
+    m_materialSourceSlots.remove(material);
+    return true;
 }
 
 int CTerrainVirtualAtlas::stockBlendMaskCountFor(

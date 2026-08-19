@@ -485,6 +485,7 @@ private slots:
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
     void workingAtlasKeepsCurrentMapExactVariantAheadOfImportedAliases();
     void workingAtlasKeepsMatchingRuntimeImportWhenLocalTypeDiffers();
+    void workingAtlasAcceptsLazyMaterialSourcesWithoutResettingState();
     void nonUniformResolveUsesAuthoredRotationOrGeneratesExact();
     void canonicalMasksAreAvailableWithoutStockTemplates();
     void contextFreeResolutionUsesReviewedMaterialMask();
@@ -1325,6 +1326,109 @@ void TerrainVirtualAtlasTests::workingAtlasKeepsMatchingRuntimeImportWhenLocalTy
     }
     QVERIFY2(importedCandidate,
              "A matching-runtime import was hidden by a wrong-runtime local tile");
+}
+
+void TerrainVirtualAtlasTests::workingAtlasAcceptsLazyMaterialSourcesWithoutResettingState()
+{
+    Fixture fixture;
+    CTerrainTransitionCatalog catalog = fixture.catalog;
+    catalog.declareMaterial(9);
+    QMap<qint32, qint32> runtimeTypes = reviewedFixtureMaterialTypes(catalog);
+    runtimeTypes.insert(9, 1);
+    CTestTerrainWorkingAtlas atlas(
+        catalog, fixture.images, 0x10203040u, 64, {}, {},
+        reviewedFixtureTileTypes(fixture.images.size()), runtimeTypes);
+    QVERIFY(atlas.isValid());
+    QVERIFY(atlas.hasMaterialSource(1));
+
+    const QByteArray before = atlas.stateFingerprint();
+    CValidationReport report;
+    QMap<int, quint64> usage;
+    QSet<int> protectedSlots;
+    const STerrainTransitionSignature requested = signature(1, 9, 9, 1);
+    atlas.resolve(requested, 3, 4, &usage, protectedSlots,
+                  nullptr, &report, 9, 1);
+    QVERIFY(report.hasErrors());
+    QCOMPARE(atlas.stateFingerprint(), before);
+
+    report = CValidationReport();
+    QVERIFY(atlas.addExternalMaterialSource(9, solid(qRgba(90, 70, 40, 255))));
+    // A foreign source with the same logical id must not replace the opened
+    // map's authoritative uniform artwork.
+    QVERIFY(atlas.addExternalMaterialSource(1, solid(qRgba(1, 1, 1, 255))));
+    QCOMPARE(atlas.stateFingerprint(), before);
+    bool generated = false;
+    const quint16 packed = atlas.resolve(
+        requested, 3, 4, &usage, protectedSlots,
+        &generated, &report, 9, 1);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(generated);
+    const int generatedSlot = SMprPackedTile::decode(packed).atlasSlot();
+    QVERIFY(generatedSlot >= fixture.images.size());
+
+    CTestTerrainWorkingAtlas baseline(
+        catalog, fixture.images, 0x10203040u, 64, {}, {},
+        reviewedFixtureTileTypes(fixture.images.size()), runtimeTypes);
+    QVERIFY(baseline.addExternalMaterialSource(
+        9, solid(qRgba(90, 70, 40, 255))));
+    CValidationReport baselineReport;
+    QMap<int, quint64> baselineUsage;
+    const quint16 baselinePacked = baseline.resolve(
+        requested, 3, 4, &baselineUsage, protectedSlots,
+        nullptr, &baselineReport, 9, 1);
+    QVERIFY2(!baselineReport.hasErrors(), qPrintable(baselineReport.toText()));
+    QCOMPARE(atlas.activeTileImages().at(generatedSlot),
+             baseline.activeTileImages().at(
+                 SMprPackedTile::decode(baselinePacked).atlasSlot()));
+
+    const STerrainTransitionSignature pureForeign = signature(9, 9, 9, 9);
+    atlas.resolve(pureForeign, 9, 4, &usage, protectedSlots,
+                  nullptr, &report, 9, 1);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(16, 16, 1));
+    for(int y = 0; y < field.vertexHeight(); ++y)
+        for(int x = 8; x < field.vertexWidth(); ++x)
+            QVERIFY(field.setMaterial(x, y, 9));
+    CTestTerrainVirtualAtlas publisher(
+        atlas.catalog(), atlas.activeTileImages(), 0x10203040u, {}, {}, true,
+        atlas.activeTileTypes(), runtimeTypes);
+    STerrainAtlasFinalization finalized = publisher.finalize(
+        field, QStringLiteral("LazyForeign"), 64,
+        atlas.activeTileTypes(), &report);
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
+    STerrainWorkingFinalizationOrigins origins;
+    QVERIFY2(atlas.restoreFinalizedProvenance(
+                 &finalized, &origins, QStringLiteral("LazyForeign"),
+                 field.stableSha256(), {}, &report),
+             qPrintable(report.toText()));
+    QVERIFY(!origins.canonicalGeneratedOutputs.isEmpty());
+
+    CMprDocument source;
+    QVERIFY(source.loadBytes(portableMpr(), "lazy-source.mpr", &report));
+    const STerrainPortableAtlasPackage package =
+        CTestTerrainVirtualAtlas::buildPortablePackage(
+            source, finalized, ETerrainTileLayer::Land, &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + QStringLiteral("\n") + report.toText()));
+    CMprDocument reopened;
+    QVERIFY(reopened.loadBytes(package.mprBytes, "lazy-result.mpr", &report));
+    CTerrainEditModel reopenedTerrain;
+    QVERIFY(reopenedTerrain.load(reopened, &report));
+    for(int y = 0; y < field.tileHeight(); ++y)
+        for(int x = 0; x < field.tileWidth(); ++x)
+        {
+            bool available = false;
+            const quint16 reopenedPacked = reopenedTerrain.packedTile(
+                x, y, ETerrainTileLayer::Land, &available);
+            QVERIFY(available);
+            bool decoded = false;
+            QCOMPARE(finalizedSignature(
+                finalized, reopenedPacked, &decoded),
+                field.cellSignature(x, y));
+            QVERIFY(decoded);
+        }
 }
 
 void TerrainVirtualAtlasTests::nonUniformResolveUsesAuthoredRotationOrGeneratesExact()

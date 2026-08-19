@@ -205,6 +205,9 @@ public:
     bool isValid() const { return m_valid; }
     QString error() const { return m_error; }
     void setDistributionSeed(quint32 seed) { m_distributionSeed = seed; }
+    bool hasMaterialSource(qint32 material) const
+    { return m_materialSources.contains(material); }
+    bool addExternalMaterialSource(qint32 material, const QImage& pixels);
     // Map repair can carry a reviewed predecessor runtime type that must be
     // retained exactly.  The default leaves this as the historical soft
     // tie-break for normal paint/finalization callers.
@@ -422,6 +425,10 @@ public:
     void acknowledgeChangedSlots(const QSet<int>& changed);
     void setDistributionSeed(quint32 seed)
     { if(m_resolver) m_resolver->setDistributionSeed(seed); }
+    bool hasMaterialSource(qint32 material) const
+    { return m_resolver && m_resolver->hasMaterialSource(material); }
+    bool addExternalMaterialSource(qint32 material, const QImage& pixels)
+    { return m_resolver && m_resolver->addExternalMaterialSource(material, pixels); }
     QSet<int> takeChangedSlots();
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,

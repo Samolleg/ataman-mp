@@ -641,6 +641,33 @@ QImage loadBoundGlobalUniformSource(
     return QImage();
 }
 
+QImage currentMapGlobalUniformSource(
+    const STerrainGlobalMaterialFamily& family,
+    const QString& currentNamespace, const QByteArray& currentAtlasPixelSha256,
+    const QVector<QImage>& currentTiles,
+    STerrainGlobalMaterialSource* selectedSource = nullptr)
+{
+    const auto find = [&](const QVector<STerrainGlobalMaterialSource>& sources) {
+        for(const STerrainGlobalMaterialSource& source : sources)
+        {
+            if(source.mprNamespace.compare(currentNamespace,
+                                           Qt::CaseInsensitive) != 0
+               || source.atlasPixelSha256.toLower()
+                    != currentAtlasPixelSha256.toLower()
+               || source.atlasSlotCount != currentTiles.size()
+               || source.uniformSlot < 0
+               || source.uniformSlot >= currentTiles.size())
+                continue;
+            if(selectedSource)
+                *selectedSource = source;
+            return currentTiles.at(source.uniformSlot);
+        }
+        return QImage();
+    };
+    QImage result = find(family.thumbnailSources);
+    return result.isNull() ? find(family.sources) : result;
+}
+
 QVector4D aiGraphLayerColor(int layer)
 {
     static const QVector4D colors[CAiGraphDocument::LayerCount] = {
@@ -1176,6 +1203,9 @@ struct SWorkingTerrainResolveStage
     QMap<QString, STerrainAtlasArchiveBindingResult> boundAtlasCache;
     QSet<QString> missingPages;
     QMap<QString, QImage> decodedTileCache;
+    QMap<QString, QImage> uniformTileCache;
+    QMap<qint32, QImage> materialSources;
+    QMap<qint32, STerrainGlobalMaterialSource> materialSourceIdentities;
     bool undoCheckpointRequired{false};
 };
 
@@ -10057,43 +10087,29 @@ void CView::rebuildTerrainAutoCatalog()
                     globalTransitionKey(CTerrainTransitionCatalog::rotated(
                         source.signature, rotation)), source);
         authoredTransitionsMs = catalogDetailTimer.restart();
-        const QSize requiredSize = m_pTileForm->tileImages().isEmpty()
-            ? QSize() : m_pTileForm->tileImages().front().size();
-        // A uniform anchor carries reviewed semantic meaning into both the
-        // palette and canonical blend compositor. Same-named MMP members are
-        // not sufficient identity: hydrate only from a complete configured
-        // atlas whose decoded pixels match an approved preset binding.
+        // Publish the complete semantic palette immediately, but hydrate only
+        // current-map anchors here. Foreign archives are exact-bound lazily
+        // when paint or Resolve Missing Blends actually needs their pixels.
         QElapsedTimer sourceHydrationTimer;
         sourceHydrationTimer.start();
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             STerrainGlobalMaterialSource selectedSource;
-            const QImage source = loadBoundGlobalUniformSource(
-                family, mprNamespace, requiredSize,
-                &m_terrainGlobalBoundAtlasCache,
-                &m_terrainGlobalTransitionMissingPages,
-                &m_terrainGlobalUniformTileCache, &selectedSource);
-            if(source.isNull())
+            const QImage source = currentMapGlobalUniformSource(
+                family, mprNamespace,
+                m_terrainAtlasProfile.atlasPixelSha256,
+                m_pTileForm->tileImages(), &selectedSource);
+            if(!source.isNull())
             {
-                report.add("terrain.global_family_source",
-                    EValidationSeverity::Warning,
-                    "A game-wide material family has no loadable uniform source in the configured resources",
-                    family.name);
-                continue;
+                m_terrainGlobalMaterialSources.insert(family.id, source);
+                m_terrainGlobalMaterialSourceIdentities.insert(
+                    family.id, selectedSource);
             }
-            m_terrainGlobalMaterialSources.insert(family.id, source);
-            m_terrainGlobalMaterialSourceIdentities.insert(
-                family.id, selectedSource);
             STerrainPaintMaterialChoice choice;
             choice.id = family.id;
             choice.name = family.name;
             choice.familyName = family.theme;
-            const QImage thumbnail = loadBoundGlobalUniformSource(
-                family, mprNamespace, requiredSize,
-                &m_terrainGlobalBoundAtlasCache,
-                &m_terrainGlobalTransitionMissingPages,
-                &m_terrainGlobalUniformTileCache);
-            choice.thumbnail = thumbnail.isNull() ? source : thumbnail;
+            choice.thumbnail = source;
             choice.assignedSlots = family.sources.size();
             if(family.layer == ETerrainAtlasLayer::Land)
             {
@@ -11358,6 +11374,80 @@ bool CView::terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const
     return false;
 }
 
+bool CView::ensureGlobalTerrainMaterialSources(
+    const STerrainTransitionSignature& signature,
+    CValidationReport* report, SWorkingTerrainResolveStage* staging)
+{
+    CTerrainWorkingAtlas* atlas = staging
+        ? staging->atlas.data() : m_workingTerrainAtlas.data();
+    QMap<qint32, QImage>* materialSources = staging
+        ? &staging->materialSources : &m_terrainGlobalMaterialSources;
+    QMap<qint32, STerrainGlobalMaterialSource>* sourceIdentities = staging
+        ? &staging->materialSourceIdentities
+        : &m_terrainGlobalMaterialSourceIdentities;
+    QMap<QString, STerrainAtlasArchiveBindingResult>* boundAtlasCache = staging
+        ? &staging->boundAtlasCache : &m_terrainGlobalBoundAtlasCache;
+    QSet<QString>* missingBindings = staging
+        ? &staging->missingPages : &m_terrainGlobalTransitionMissingPages;
+    QMap<QString, QImage>* decodedTiles = staging
+        ? &staging->uniformTileCache : &m_terrainGlobalUniformTileCache;
+    if(!atlas)
+        return false;
+
+    QSet<qint32> required;
+    required << signature.northWest << signature.northEast
+             << signature.southEast << signature.southWest;
+    const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
+        ? QSize() : m_authoredTerrainTileImages.front().size();
+    for(qint32 material : required)
+    {
+        if(atlas->hasMaterialSource(material))
+            continue;
+        if(materialSources->contains(material))
+        {
+            if(!atlas->addExternalMaterialSource(
+                   material, materialSources->value(material)))
+                return false;
+            continue;
+        }
+        const STerrainGlobalMaterialFamily* family = nullptr;
+        for(const STerrainGlobalMaterialFamily& candidate :
+                m_terrainGlobalFamilies)
+            if(candidate.id == material)
+            {
+                family = &candidate;
+                break;
+            }
+        if(!family)
+        {
+            if(report) report->add("terrain.global_family_source",
+                EValidationSeverity::Error,
+                "No reviewed uniform artwork source exists for a required terrain material",
+                QString::number(material));
+            return false;
+        }
+        STerrainGlobalMaterialSource selectedSource;
+        const QImage source = loadBoundGlobalUniformSource(
+            *family, m_mprDocument.mapInfo().innerNamespace, requiredSize,
+            boundAtlasCache, missingBindings, decodedTiles, &selectedSource);
+        if(source.isNull() || !atlas->addExternalMaterialSource(material, source))
+        {
+            if(report) report->add("terrain.global_family_source",
+                EValidationSeverity::Error,
+                "The exact approved uniform artwork for a required terrain material is unavailable in the configured resources",
+                family->name);
+            return false;
+        }
+        materialSources->insert(material, source);
+        sourceIdentities->insert(material, selectedSource);
+        ei::log(eLogInfo, QString(
+            "Terrain material source hydrated on demand: material:%1 namespace:%2 slot:%3")
+            .arg(material).arg(selectedSource.mprNamespace)
+            .arg(selectedSource.uniformSlot));
+    }
+    return true;
+}
+
 bool CView::realizeWorkingTerrainSignature(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     QMap<int, quint64>* usage, CValidationReport* report, bool* generated,
@@ -11504,10 +11594,28 @@ bool CView::realizeWorkingTerrainSignature(
             *generated = false;
     }
     else
+    {
+        bool exactAvailable = false;
+        if(requirePreferredRuntimeType)
+            exactAvailable = selectWorkingPaintVariantWithRuntimeType(
+                *atlas, signature, cellX, cellY, m_terrainSemanticSeed,
+                preferredRuntimeType, nullptr);
+        else
+            atlas->catalog().selectForPaint(
+                signature, cellX, cellY, m_terrainSemanticSeed,
+                &exactAvailable);
+        if(!exactAvailable
+           && !ensureGlobalTerrainMaterialSources(
+                  signature, &attempt, staging))
+        {
+            appendFindings(attempt);
+            return false;
+        }
         packed = atlas->resolve(
             signature, cellX, cellY, usage, *protectedSlots,
             generated, &attempt, preferredPaintMaterial,
             preferredRuntimeType, requirePreferredRuntimeType);
+    }
     if(!selectedTypedWorkingVariant && attempt.hasErrors()
        && hasCapacityFinding(attempt) && usage)
     {
@@ -11860,6 +11968,29 @@ void CView::finalizeVirtualTerrainAtlas()
             tr("The virtual material field is incomplete; no package was written."));
         return;
     }
+    for(int y = 0; y < field.tileHeight(); ++y)
+        for(int x = 0; x < field.tileWidth(); ++x)
+        {
+            bool found = false;
+            const STerrainTransitionSignature signature =
+                field.cellSignature(x, y, &found);
+            bool exact = false;
+            if(found)
+                catalog.selectForPaint(
+                    signature, x, y, m_terrainSemanticSeed, &exact);
+            if(!found || !exact)
+            {
+                report.add("terrain.finalize_unrealized_signature",
+                    EValidationSeverity::Error,
+                    "A material-field tuple was not realized in the live exact atlas before publication",
+                    QStringLiteral("%1,%2").arg(x).arg(y));
+                QMessageBox::critical(this, tr("Modern MPR save refused"),
+                    tr("A required terrain blend has not been realized in the live atlas. "
+                       "Run Resolve Missing Blends and retry; no file was changed.\n\n%1")
+                        .arg(report.toText()));
+                return;
+            }
+        }
     QVector<quint16> pinned;
     const ETerrainTileLayer preserved=layer==ETerrainTileLayer::Land
         ?ETerrainTileLayer::Overlay:ETerrainTileLayer::Land;
@@ -16803,6 +16934,10 @@ void CView::resolveMissingTerrainBlends()
         staged.boundAtlasCache = m_terrainGlobalBoundAtlasCache;
         staged.missingPages = m_terrainGlobalTransitionMissingPages;
         staged.decodedTileCache = m_terrainGlobalTransitionTileCache;
+        staged.uniformTileCache = m_terrainGlobalUniformTileCache;
+        staged.materialSources = m_terrainGlobalMaterialSources;
+        staged.materialSourceIdentities =
+            m_terrainGlobalMaterialSourceIdentities;
     }
     struct SMissingMapSignature
     {
@@ -17075,6 +17210,10 @@ void CView::resolveMissingTerrainBlends()
     m_terrainGlobalBoundAtlasCache = staged.boundAtlasCache;
     m_terrainGlobalTransitionMissingPages = staged.missingPages;
     m_terrainGlobalTransitionTileCache = staged.decodedTileCache;
+    m_terrainGlobalUniformTileCache = staged.uniformTileCache;
+    m_terrainGlobalMaterialSources = staged.materialSources;
+    m_terrainGlobalMaterialSourceIdentities =
+        staged.materialSourceIdentities;
     if(staged.undoCheckpointRequired)
     {
         m_pUndoStack->clear();
