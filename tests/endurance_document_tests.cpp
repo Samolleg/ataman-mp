@@ -10154,7 +10154,16 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
 
     QVERIFY2(source.contains("m_terrainGlobalHydrationPool->setMaxThreadCount(2)"),
              "Foreign terrain hydration is not kept on a bounded worker pool");
-    QVERIFY2(source.contains("QtConcurrent::run(\n            m_terrainGlobalHydrationPool"),
+    const int hydrationStart = source.indexOf(
+        "void CView::startDeferredGlobalTerrainPaletteHydration(");
+    const int hydrationEnd = source.indexOf(
+        "void CView::applyDeferredGlobalTerrainPaletteHydration(", hydrationStart);
+    QVERIFY2(hydrationStart >= 0 && hydrationEnd > hydrationStart,
+             "Deferred foreign terrain hydration implementation was not found");
+    const QByteArray hydration = source.mid(
+        hydrationStart, hydrationEnd - hydrationStart);
+    QVERIFY2(hydration.contains("QtConcurrent::run(")
+             && hydration.contains("m_terrainGlobalHydrationPool, [task]()"),
              "Each foreign terrain binding is not verified off the UI thread");
     QVERIFY2(source.contains("applyDeferredGlobalTerrainPaletteHydration("),
              "Deferred exact-binding results are never published back to the palettes");
