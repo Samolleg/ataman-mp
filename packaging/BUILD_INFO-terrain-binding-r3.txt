@@ -1,0 +1,16 @@
+EI Mapper Endurance 0.3.0-alpha.26
+Purpose: Modern terrain exact-atlas binding and current-map priority regression test
+Source commit: 471a7757
+Toolchain: Qt 5.12.12 win64_mingw73 / MinGW 7.3 x64
+
+Validation:
+- terrain_virtual_atlas_tests: 117 passed, 0 failed
+- endurance_document_tests: 168 passed, 0 failed, 7 expected fixture skips
+- retained release wrapper: PASS
+- --ui-widget-check: exit 0
+- package finalizer/distribution validator: PASS
+
+Primary regression evidence:
+- current-map same-runtime exact candidates remain authoritative after imports
+- matching-runtime imports survive when only a wrong-runtime local tile exists
+- global transition hydration requires an exact approved full-atlas binding
