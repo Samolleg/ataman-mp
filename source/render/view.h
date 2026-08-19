@@ -767,7 +767,7 @@ private:
     QMap<QString, QImage> m_terrainGlobalUniformTileCache;
     QMultiMap<QByteArray, STerrainGlobalTransitionSource>
         m_terrainGlobalTransitionSources;
-    QMap<QString, STerrainAtlasEmbeddedBindingResult>
+    QMap<QString, STerrainAtlasArchiveBindingResult>
         m_terrainGlobalBoundAtlasCache;
     QSet<QString> m_terrainGlobalTransitionMissingPages;
     QMap<QString, QImage> m_terrainGlobalTransitionTileCache;

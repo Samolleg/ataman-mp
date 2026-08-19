@@ -10048,6 +10048,10 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
              "Global terrain pixels bypass exact preset-atlas binding");
     QVERIFY2(!loader.contains("catalogTerrainMmpPayload("),
              "Global terrain pixels still use a name-only resource lookup");
+    QVERIFY2(!loader.contains("decodedAtlasTiles"),
+             "Global palette hydration again retains complete decoded atlases");
+    QVERIFY2(loader.contains("readArchiveMembers("),
+             "Bound global sources no longer decode only their requested page");
 
     const int rebuildStart = source.indexOf(
         "void CView::rebuildTerrainAutoCatalog()");
@@ -10060,6 +10064,18 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
              "Palette/compositor uniforms still use name-only tile lookup");
     QVERIFY2(!rebuild.contains("catalogTerrainMmpPayload("),
              "Palette/compositor uniforms still use name-only page lookup");
+    QVERIFY2(!rebuild.contains("m_terrainGlobalBoundAtlasCache.clear()"),
+             "Map switches again discard verified exact atlas bindings");
+
+    const int refreshStart = source.indexOf(
+        "void CView::refreshAfterResourceSetup()");
+    const int refreshEnd = source.indexOf(
+        "void CView::updateWindow()", refreshStart);
+    QVERIFY(refreshStart >= 0 && refreshEnd > refreshStart);
+    const QByteArray refresh = source.mid(
+        refreshStart, refreshEnd - refreshStart);
+    QVERIFY2(refresh.contains("m_terrainGlobalBoundAtlasCache.clear()"),
+             "Resource-profile changes no longer invalidate exact bindings");
 }
 
 void EnduranceDocumentTests::directTerrainTileDecoderReadsOnlyRequestedTileBand()
