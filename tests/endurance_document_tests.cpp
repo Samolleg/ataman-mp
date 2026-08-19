@@ -633,6 +633,7 @@ private slots:
     void overlaySculptSynchronizesSectorSeam();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
     void deferredLandscapeVisibilityStopsBeforeViewTeardown();
+    void floatingResourceBrowserClosesBeforeViewTeardown();
     void terrainCatalogWaitsForVisibleLandscapeFrame();
     void malformedMprTableIsRejected();
     void stagedMobIsReopenedWithoutCreatingDestination();
@@ -11881,6 +11882,27 @@ void EnduranceDocumentTests::deferredLandscapeVisibilityStopsBeforeViewTeardown(
                                       currentGeneration, invalidatedView));
     delete liveView.data();
     delete invalidatedView.data();
+}
+
+void EnduranceDocumentTests::floatingResourceBrowserClosesBeforeViewTeardown()
+{
+    const QByteArray source = mainWindowSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/app/main_window.cpp from the test worktree");
+
+    const int closeEvent = source.indexOf("void MainWindow::closeEvent");
+    const int secondarySweep = source.indexOf("ei::closeSecondaryWindows(this);",
+                                               closeEvent);
+    const int deleteView = source.indexOf("delete m_pView;", closeEvent);
+    QVERIFY2(closeEvent >= 0 && secondarySweep > closeEvent && deleteView > secondarySweep,
+             "MainWindow shutdown ordering was not found");
+
+    const QByteArray earlyShutdown = source.mid(closeEvent,
+                                                 secondarySweep - closeEvent);
+    QVERIFY2(earlyShutdown.contains(
+                 "ei::closeFloatingDockHost(m_resourceBrowserDock);"),
+             "Resource Browser floating host is not explicitly closed before the generic "
+             "top-level sweep and synchronous viewport teardown");
 }
 
 void EnduranceDocumentTests::terrainCatalogWaitsForVisibleLandscapeFrame()

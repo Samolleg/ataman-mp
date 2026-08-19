@@ -8305,6 +8305,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
     // generic top-level sweep; no editor-owned diagnostic may outlive main.
     ei::closeFloatingDockHost(m_messageLogDock);
     ei::closeFloatingDockHost(m_validationDock);
+    ei::closeFloatingDockHost(m_resourceBrowserDock);
     ei::closeSecondaryWindows(this);
     // Remove the editor from the desktop before synchronous scene teardown.
     // Windows otherwise presents a still-visible window as unresponsive.
