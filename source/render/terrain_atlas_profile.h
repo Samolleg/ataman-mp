@@ -53,7 +53,9 @@ struct STerrainGlobalMaterialSource
 {
     QString mprNamespace;
     QByteArray atlasIdentity;
+    QByteArray atlasPixelSha256;
     int textureCount{0};
+    int atlasSlotCount{0};
     int uniformSlot{-1};
     QString variantName;
 };

@@ -494,24 +494,25 @@ QVector<QPoint> terrainVertexBrushPoints(const STerrainTileBrush& brush,
     return result;
 }
 
-QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
-                                const QSize& requiredSize,
-                                QMap<QString, STerrainAtlasEmbeddedBindingResult>*
-                                    boundAtlasCache,
-                                QSet<QString>* missingPageCache,
-                                QMap<QString, QImage>* decodedTileCache)
+QImage loadBoundTerrainAtlasTile(
+    const QString& mprNamespace, const QByteArray& atlasPixelSha256,
+    int textureCount, int atlasSlotCount, int slot,
+    const QSize& requiredSize,
+    QMap<QString, STerrainAtlasEmbeddedBindingResult>* boundAtlasCache,
+    QSet<QString>* missingPageCache,
+    QMap<QString, QImage>* decodedTileCache)
 {
     if(!boundAtlasCache || !missingPageCache || !decodedTileCache
-       || source.atlasPixelSha256.size() != 64
-       || source.textureCount <= 0 || source.atlasSlotCount <= 0
-       || source.slot < 0 || source.slot >= source.atlasSlotCount)
+       || atlasPixelSha256.size() != 64
+       || textureCount <= 0 || atlasSlotCount <= 0
+       || slot < 0 || slot >= atlasSlotCount)
         return QImage();
     const QString bindingKey = QStringLiteral("%1|%2|%3|%4")
-        .arg(source.mprNamespace.toCaseFolded())
-        .arg(source.textureCount).arg(source.atlasSlotCount)
-        .arg(QString::fromLatin1(source.atlasPixelSha256.toLower()));
+        .arg(mprNamespace.toCaseFolded())
+        .arg(textureCount).arg(atlasSlotCount)
+        .arg(QString::fromLatin1(atlasPixelSha256.toLower()));
     const QString tileKey = QStringLiteral("%1|slot:%2|%3x%4")
-        .arg(bindingKey).arg(source.slot)
+        .arg(bindingKey).arg(slot)
         .arg(requiredSize.width()).arg(requiredSize.height());
     const auto cachedTile = decodedTileCache->constFind(tileKey);
     if(cachedTile != decodedTileCache->constEnd())
@@ -539,9 +540,9 @@ QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
            || archive.lastModified().toMSecsSinceEpoch()
                 != cachedBinding->archiveLastModifiedMs
            || cachedBinding->decodedAtlasPixelSha256.toLower()
-                != source.atlasPixelSha256.toLower()
+                != atlasPixelSha256.toLower()
            || cachedBinding->decodedAtlasTiles.size()
-                != source.atlasSlotCount)
+                != atlasSlotCount)
             cachedBinding = boundAtlasCache->erase(cachedBinding);
     }
     if(cachedBinding == boundAtlasCache->end())
@@ -549,10 +550,10 @@ QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
         QVector<QImage> decodedTiles;
         const STerrainAtlasArchiveBindingResult exact =
             CTerrainAtlasArchiveBindingResolver::findExactArchive(
-                configuredArchives, source.mprNamespace,
-                source.textureCount, source.atlasSlotCount,
-                source.atlasPixelSha256, QString(), &decodedTiles);
-        if(!exact.success() || decodedTiles.size() != source.atlasSlotCount)
+                configuredArchives, mprNamespace,
+                textureCount, atlasSlotCount,
+                atlasPixelSha256, QString(), &decodedTiles);
+        if(!exact.success() || decodedTiles.size() != atlasSlotCount)
         {
             missingPageCache->insert(bindingKey);
             return QImage();
@@ -566,13 +567,74 @@ QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
         cachedBinding = boundAtlasCache->insert(bindingKey, cached);
         missingPageCache->remove(bindingKey);
     }
-    QImage tile = cachedBinding->decodedAtlasTiles.at(source.slot)
+    QImage tile = cachedBinding->decodedAtlasTiles.at(slot)
         .convertToFormat(QImage::Format_RGBA8888);
     if(!requiredSize.isEmpty() && tile.size() != requiredSize)
         tile = tile.scaled(requiredSize, Qt::IgnoreAspectRatio,
                            Qt::SmoothTransformation);
     decodedTileCache->insert(tileKey, tile);
     return tile;
+}
+
+QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
+                                const QSize& requiredSize,
+                                QMap<QString, STerrainAtlasEmbeddedBindingResult>*
+                                    boundAtlasCache,
+                                QSet<QString>* missingPageCache,
+                                QMap<QString, QImage>* decodedTileCache)
+{
+    return loadBoundTerrainAtlasTile(
+        source.mprNamespace, source.atlasPixelSha256,
+        source.textureCount, source.atlasSlotCount, source.slot,
+        requiredSize, boundAtlasCache, missingPageCache, decodedTileCache);
+}
+
+QImage loadBoundGlobalUniformSource(
+    const STerrainGlobalMaterialFamily& family,
+    const QString& preferredNamespace, const QSize& requiredSize,
+    QMap<QString, STerrainAtlasEmbeddedBindingResult>* boundAtlasCache,
+    QSet<QString>* missingBindingCache,
+    QMap<QString, QImage>* decodedTileCache,
+    STerrainGlobalMaterialSource* selectedSource = nullptr)
+{
+    QVector<STerrainGlobalMaterialSource> sources;
+    const auto appendUnique = [&sources](
+        const STerrainGlobalMaterialSource& source) {
+        for(const STerrainGlobalMaterialSource& existing : sources)
+            if(existing.mprNamespace.compare(
+                   source.mprNamespace, Qt::CaseInsensitive) == 0
+               && existing.uniformSlot == source.uniformSlot
+               && existing.atlasPixelSha256 == source.atlasPixelSha256)
+                return;
+        sources.append(source);
+    };
+    const auto appendMatching = [&](
+        const QVector<STerrainGlobalMaterialSource>& candidates,
+        bool preferred) {
+        for(const STerrainGlobalMaterialSource& source : candidates)
+            if((source.mprNamespace.compare(
+                    preferredNamespace, Qt::CaseInsensitive) == 0)
+               == preferred)
+                appendUnique(source);
+    };
+    appendMatching(family.thumbnailSources, true);
+    appendMatching(family.sources, true);
+    appendMatching(family.thumbnailSources, false);
+    appendMatching(family.sources, false);
+    for(const STerrainGlobalMaterialSource& source : sources)
+    {
+        const QImage tile = loadBoundTerrainAtlasTile(
+            source.mprNamespace, source.atlasPixelSha256,
+            source.textureCount, source.atlasSlotCount,
+            source.uniformSlot, requiredSize, boundAtlasCache,
+            missingBindingCache, decodedTileCache);
+        if(tile.isNull())
+            continue;
+        if(selectedSource)
+            *selectedSource = source;
+        return tile;
+    }
+    return QImage();
 }
 
 QVector4D aiGraphLayerColor(int layer)
@@ -3240,7 +3302,7 @@ void CView::refreshAfterResourceSetup()
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources();
     m_terrainGlobalUniformTileCache.clear();
-    m_terrainGlobalTransitionBoundAtlasCache.clear();
+    m_terrainGlobalBoundAtlasCache.clear();
     m_terrainGlobalTransitionMissingPages.clear();
     m_terrainGlobalTransitionTileCache.clear();
     m_spatialIndexDirty = true;
@@ -9725,7 +9787,7 @@ void CView::rebuildTerrainAutoCatalog()
     // Resource precedence can change when another MPR/profile is opened.
     // Authored transition pages must be resolved from that current profile,
     // never retained by a same-named MMP member from the previous map.
-    m_terrainGlobalTransitionBoundAtlasCache.clear();
+    m_terrainGlobalBoundAtlasCache.clear();
     m_terrainGlobalTransitionMissingPages.clear();
     m_terrainGlobalTransitionTileCache.clear();
     m_modernLandPaintChoices.clear();
@@ -9993,38 +10055,20 @@ void CView::rebuildTerrainAutoCatalog()
         authoredTransitionsMs = catalogDetailTimer.restart();
         const QSize requiredSize = m_pTileForm->tileImages().isEmpty()
             ? QSize() : m_pTileForm->tileImages().front().size();
-        // Palette construction only needs individual 256x256 authored tiles.
-        // Read those DXT block bands directly from the indexed RES members;
-        // loading every complete 2048x2048 page here made map opening perform
-        // more than 100 MB of synchronous I/O before painting was even used.
-        QMap<QString, QByteArray> encodedGlobalPages;
-        QSet<QString> missingGlobalPages;
-        QSet<QString> directGlobalPages;
+        // A uniform anchor carries reviewed semantic meaning into both the
+        // palette and canonical blend compositor. Same-named MMP members are
+        // not sufficient identity: hydrate only from a complete configured
+        // atlas whose decoded pixels match an approved preset binding.
         QElapsedTimer sourceHydrationTimer;
         sourceHydrationTimer.start();
-        const auto loadCatalogTile = [&directGlobalPages](
-            const QString& name, int logicalSlot, QImage* tile,
-            QString* sourceIdentity) {
-            QString identity;
-            const bool loaded = CTextureList::getInstance()
-                ->catalogTerrainMmpTile(name, logicalSlot, tile, &identity);
-            if(loaded && !identity.isEmpty())
-                directGlobalPages.insert(identity);
-            if(sourceIdentity)
-                *sourceIdentity = identity;
-            return loaded;
-        };
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             STerrainGlobalMaterialSource selectedSource;
-            const QImage source = CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
+            const QImage source = loadBoundGlobalUniformSource(
                 family, mprNamespace, requiredSize,
-                &encodedGlobalPages, &missingGlobalPages,
-                &m_terrainGlobalUniformTileCache,
-                [](const QString& name, QByteArray* payload) {
-                    return CTextureList::getInstance()->catalogTerrainMmpPayload(
-                        name, payload);
-                }, false, &selectedSource, loadCatalogTile);
+                &m_terrainGlobalBoundAtlasCache,
+                &m_terrainGlobalTransitionMissingPages,
+                &m_terrainGlobalUniformTileCache, &selectedSource);
             if(source.isNull())
             {
                 report.add("terrain.global_family_source",
@@ -10040,14 +10084,11 @@ void CView::rebuildTerrainAutoCatalog()
             choice.id = family.id;
             choice.name = family.name;
             choice.familyName = family.theme;
-            const QImage thumbnail = CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
+            const QImage thumbnail = loadBoundGlobalUniformSource(
                 family, mprNamespace, requiredSize,
-                &encodedGlobalPages, &missingGlobalPages,
-                &m_terrainGlobalUniformTileCache,
-                [](const QString& name, QByteArray* payload) {
-                    return CTextureList::getInstance()->catalogTerrainMmpPayload(
-                        name, payload);
-                }, true, nullptr, loadCatalogTile);
+                &m_terrainGlobalBoundAtlasCache,
+                &m_terrainGlobalTransitionMissingPages,
+                &m_terrainGlobalUniformTileCache);
             choice.thumbnail = thumbnail.isNull() ? source : thumbnail;
             choice.assignedSlots = family.sources.size();
             if(family.layer == ETerrainAtlasLayer::Land)
@@ -10065,10 +10106,10 @@ void CView::rebuildTerrainAutoCatalog()
         }
         sourceHydrationMs = sourceHydrationTimer.elapsed();
         ei::log(eLogInfo, QString(
-            "Game-wide material palette source pages accessed:%1 fullPagesRead:%2 "
-            "unavailable:%3 materialTiles:%4 elapsedMs:%5")
-            .arg(directGlobalPages.size()).arg(encodedGlobalPages.size())
-            .arg(missingGlobalPages.size())
+            "Game-wide material palette exactAtlases:%1 unavailable:%2 "
+            "materialTiles:%3 elapsedMs:%4")
+            .arg(m_terrainGlobalBoundAtlasCache.size())
+            .arg(m_terrainGlobalTransitionMissingPages.size())
             .arg(m_terrainGlobalMaterialSources.size())
             .arg(sourceHydrationMs));
         catalogDetailTimer.restart();
@@ -11331,7 +11372,7 @@ bool CView::realizeWorkingTerrainSignature(
         : &m_importedTerrainTransitions;
     QMap<QString, STerrainAtlasEmbeddedBindingResult>* boundAtlasCache = staging
         ? &staging->boundAtlasCache
-        : &m_terrainGlobalTransitionBoundAtlasCache;
+        : &m_terrainGlobalBoundAtlasCache;
     QSet<QString>* missingPages = staging ? &staging->missingPages
         : &m_terrainGlobalTransitionMissingPages;
     QMap<QString, QImage>* decodedTileCache = staging
@@ -16755,7 +16796,7 @@ void CView::resolveMissingTerrainBlends()
         staged.terrainEdit = m_terrainEdit;
         staged.protectedSlots = m_workingAtlasProtectedSlots;
         staged.importedTransitions = m_importedTerrainTransitions;
-        staged.boundAtlasCache = m_terrainGlobalTransitionBoundAtlasCache;
+        staged.boundAtlasCache = m_terrainGlobalBoundAtlasCache;
         staged.missingPages = m_terrainGlobalTransitionMissingPages;
         staged.decodedTileCache = m_terrainGlobalTransitionTileCache;
     }
@@ -17027,7 +17068,7 @@ void CView::resolveMissingTerrainBlends()
     m_terrainEdit = staged.terrainEdit;
     m_workingAtlasProtectedSlots = staged.protectedSlots;
     m_importedTerrainTransitions = staged.importedTransitions;
-    m_terrainGlobalTransitionBoundAtlasCache = staged.boundAtlasCache;
+    m_terrainGlobalBoundAtlasCache = staged.boundAtlasCache;
     m_terrainGlobalTransitionMissingPages = staged.missingPages;
     m_terrainGlobalTransitionTileCache = staged.decodedTileCache;
     if(staged.undoCheckpointRequired)

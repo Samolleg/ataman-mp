@@ -593,7 +593,7 @@ private slots:
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
     void globalMaterialBrushSourceIsPayloadCoherentAndPrefersLocalUniform();
-    void globalTransitionLoaderRequiresExactPresetAtlasBinding();
+    void globalTerrainHydrationRequiresExactPresetAtlasBinding();
     void directTerrainTileDecoderReadsOnlyRequestedTileBand();
     void stockInputsCannotOverrideCanonicalOneCornerMask();
     void workingAtlasRealizesExactTransitionsBeyond512Slots();
@@ -9747,6 +9747,9 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
         {
             QVERIFY(source.uniformSlot >= 0);
             QVERIFY(source.textureCount > source.uniformSlot / 64);
+            QVERIFY(source.atlasSlotCount > source.uniformSlot);
+            QVERIFY(source.atlasSlotCount <= source.textureCount * 64);
+            QCOMPARE(source.atlasPixelSha256.size(), 64);
             QVERIFY(!source.variantName.isEmpty());
             QVERIFY(!source.atlasIdentity.isEmpty());
             QCOMPARE(source.variantName, family.name);
@@ -10023,12 +10026,12 @@ void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefer
         QImage::Format_RGBA8888));
 }
 
-void EnduranceDocumentTests::globalTransitionLoaderRequiresExactPresetAtlasBinding()
+void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBinding()
 {
     const QByteArray source = viewSource();
     QVERIFY2(!source.isEmpty(), "Could not locate source/render/view.cpp");
     const int start = source.indexOf(
-        "QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source");
+        "QImage loadBoundTerrainAtlasTile(");
     const int end = source.indexOf("QVector4D aiGraphLayerColor", start);
     QVERIFY(start >= 0 && end > start);
     const QByteArray loader = source.mid(start, end - start);
@@ -10037,10 +10040,26 @@ void EnduranceDocumentTests::globalTransitionLoaderRequiresExactPresetAtlasBindi
     // RES archives can contain the same Zone1 page names with unrelated
     // pixels. Global semantic signatures may only be paired with an archive
     // whose complete decoded atlas matches an approved preset binding.
+    QVERIFY2(loader.contains("QImage loadBoundGlobalUniformSource("),
+             "Uniform material sources bypass the bound-atlas loader");
+    QVERIFY2(loader.contains("QImage loadGlobalTransitionTile("),
+             "Global transitions bypass the bound-atlas loader");
     QVERIFY2(loader.contains("findExactArchive("),
-             "Global transition pixels bypass exact preset-atlas binding");
+             "Global terrain pixels bypass exact preset-atlas binding");
     QVERIFY2(!loader.contains("catalogTerrainMmpPayload("),
-             "Global transition pixels still use a name-only resource lookup");
+             "Global terrain pixels still use a name-only resource lookup");
+
+    const int rebuildStart = source.indexOf(
+        "void CView::rebuildTerrainAutoCatalog()");
+    const int rebuildEnd = source.indexOf(
+        "void CView::refreshClassicAutoPalette()", rebuildStart);
+    QVERIFY(rebuildStart >= 0 && rebuildEnd > rebuildStart);
+    const QByteArray rebuild = source.mid(
+        rebuildStart, rebuildEnd - rebuildStart);
+    QVERIFY2(!rebuild.contains("catalogTerrainMmpTile("),
+             "Palette/compositor uniforms still use name-only tile lookup");
+    QVERIFY2(!rebuild.contains("catalogTerrainMmpPayload("),
+             "Palette/compositor uniforms still use name-only page lookup");
 }
 
 void EnduranceDocumentTests::directTerrainTileDecoderReadsOnlyRequestedTileBand()

@@ -126,10 +126,21 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
         const QByteArray atlasIdentity = presetAtlasIdentity(preset);
         const QString mprNamespace = preset.value(QStringLiteral("namespace")).toString();
         const int slotCount = preset.value(QStringLiteral("slotCount")).toInt();
+        QVector<QByteArray> approvedPixelBindings;
+        for(const QJsonValue& bindingValue : preset.value(
+                QStringLiteral("bindings")).toArray())
+        {
+            const QByteArray pixelSha256 = bindingValue.toObject().value(
+                QStringLiteral("pixelSha256")).toString().toLatin1().toLower();
+            if(pixelSha256.size() == 64
+               && !approvedPixelBindings.contains(pixelSha256))
+                approvedPixelBindings.append(pixelSha256);
+        }
         const QByteArray signatures = QByteArray::fromBase64(
             preset.value(QStringLiteral("signaturesBase64")).toString().toLatin1());
         if(mprNamespace.isEmpty() || slotCount <= 0
-           || signatures.size() != slotCount * 4)
+           || signatures.size() != slotCount * 4
+           || approvedPixelBindings.isEmpty())
             continue;
         for(const QJsonValue& familyValue : preset.value(
                 QStringLiteral("families")).toArray())
@@ -211,18 +222,26 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
                 }
                 const auto appendSource = [&](int slot,
                                               QVector<STerrainGlobalMaterialSource>* target) {
-                    for(const STerrainGlobalMaterialSource& existing : *target)
-                        if(existing.mprNamespace.compare(
-                               mprNamespace, Qt::CaseInsensitive) == 0
-                           && existing.uniformSlot == slot)
-                            return;
-                    STerrainGlobalMaterialSource source;
-                    source.mprNamespace = mprNamespace;
-                    source.atlasIdentity = atlasIdentity;
-                    source.textureCount = (slotCount + 63) / 64;
-                    source.uniformSlot = slot;
-                    source.variantName = variantName;
-                    target->append(source);
+                    for(const QByteArray& pixelSha256 : approvedPixelBindings)
+                    {
+                        bool duplicate = false;
+                        for(const STerrainGlobalMaterialSource& existing : *target)
+                            duplicate |= existing.mprNamespace.compare(
+                                   mprNamespace, Qt::CaseInsensitive) == 0
+                                && existing.uniformSlot == slot
+                                && existing.atlasPixelSha256 == pixelSha256;
+                        if(duplicate)
+                            continue;
+                        STerrainGlobalMaterialSource source;
+                        source.mprNamespace = mprNamespace;
+                        source.atlasIdentity = atlasIdentity;
+                        source.atlasPixelSha256 = pixelSha256;
+                        source.textureCount = (slotCount + 63) / 64;
+                        source.atlasSlotCount = slotCount;
+                        source.uniformSlot = slot;
+                        source.variantName = variantName;
+                        target->append(source);
+                    }
                 };
                 for(int uniformSlot : uniformSlots)
                     appendSource(uniformSlot, &global.sources);
