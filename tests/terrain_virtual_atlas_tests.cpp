@@ -483,6 +483,8 @@ private slots:
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
+    void workingAtlasKeepsCurrentMapExactVariantAheadOfImportedAliases();
+    void workingAtlasKeepsMatchingRuntimeImportWhenLocalTypeDiffers();
     void nonUniformResolveUsesAuthoredRotationOrGeneratesExact();
     void canonicalMasksAreAvailableWithoutStockTemplates();
     void contextFreeResolutionUsesReviewedMaterialMask();
@@ -1252,6 +1254,77 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     QCOMPARE(flattened.stableSha256.size(), 64);
     QVERIFY(QRegularExpression(QStringLiteral("^caveset_[0-9a-f]{12}$"))
                 .match(flattened.isolatedNamespace).hasMatch());
+}
+
+void TerrainVirtualAtlasTests::workingAtlasKeepsCurrentMapExactVariantAheadOfImportedAliases()
+{
+    Fixture fixture;
+    CTestTerrainWorkingAtlas working(
+        fixture.catalog, fixture.images, 0x31415926u, 16);
+    const STerrainTransitionSignature exact = signature(2, 2, 2, 2);
+    CValidationReport report;
+    QVERIFY(working.addAuthoredLibraryTransition(
+        exact, solid(qRgba(241, 37, 173, 255)),
+        QStringLiteral("unrelated-global-alias"), &report,
+        QStringLiteral("OtherMap"), 326));
+
+    QMap<int, quint64> usage;
+    for(int slot = 0; slot < working.capacityLimit(); ++slot)
+        usage.insert(slot, 0);
+    QVERIFY2(working.realizeAuthoredLibraryVariants(
+        exact, &usage, {}, &report, 2), qPrintable(report.toText()));
+
+    bool importedRealized = false;
+    for(int slot = fixture.images.size(); slot < working.activeTileCount(); ++slot)
+        importedRealized |= working.tileOriginForSlot(slot)
+            == ETerrainWorkingTileOrigin::ImportedAuthored;
+    QVERIFY(importedRealized);
+
+    // Importing a global alias for some other missing tuple must not make that
+    // artwork compete with an exact same-runtime tile already authored by the
+    // current map. This is the post-merge Zone1 slot 26 regression.
+    for(int x = 0; x < 128; ++x)
+    {
+        bool found = false;
+        const quint16 packed = working.catalog().selectForPaint(
+            exact, x, 11, 0x31415926u, &found);
+        QVERIFY(found);
+        QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(), 1);
+    }
+}
+
+void TerrainVirtualAtlasTests::workingAtlasKeepsMatchingRuntimeImportWhenLocalTypeDiffers()
+{
+    Fixture fixture;
+    const QVector<qint32> sourceTypes = {0, 0, 2, 3};
+    const QMap<qint32, qint32> materialTypes = {
+        {1, 0}, {2, 1}, {3, 2}, {4, 3}};
+    CTestTerrainWorkingAtlas working(
+        fixture.catalog, fixture.images, 0x31415926u, 16, {}, {},
+        sourceTypes, materialTypes);
+    const STerrainTransitionSignature exact = signature(2, 2, 2, 2);
+    CValidationReport report;
+    QVERIFY(working.addAuthoredLibraryTransition(
+        exact, solid(qRgba(241, 37, 173, 255)),
+        QStringLiteral("matching-runtime-global"), &report,
+        QStringLiteral("OtherMap"), 326));
+
+    QMap<int, quint64> usage;
+    for(int slot = 0; slot < working.capacityLimit(); ++slot)
+        usage.insert(slot, 0);
+    QVERIFY2(working.realizeAuthoredLibraryVariants(
+        exact, &usage, {}, &report, 2, 1, true),
+        qPrintable(report.toText()));
+
+    bool importedCandidate = false;
+    for(const STerrainTransitionVariant& variant :
+            working.catalog().paintVariants(exact))
+    {
+        const int slot = SMprPackedTile::decode(variant.packedTile).atlasSlot();
+        importedCandidate |= slot >= fixture.images.size();
+    }
+    QVERIFY2(importedCandidate,
+             "A matching-runtime import was hidden by a wrong-runtime local tile");
 }
 
 void TerrainVirtualAtlasTests::nonUniformResolveUsesAuthoredRotationOrGeneratesExact()

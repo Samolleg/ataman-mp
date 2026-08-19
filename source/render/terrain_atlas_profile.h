@@ -77,8 +77,12 @@ struct STerrainGlobalTransitionSource
     STerrainTransitionSignature signature;
     ETerrainAtlasLayer layer{ETerrainAtlasLayer::Land};
     QString mprNamespace;
+    // Semantic identity groups alternate reviewed pixel revisions. Physical
+    // identity binds this source to one exact decoded atlas revision.
     QByteArray atlasIdentity;
+    QByteArray atlasPixelSha256;
     int textureCount{0};
+    int atlasSlotCount{0};
     int slot{-1};
 };
 

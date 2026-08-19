@@ -4565,8 +4565,9 @@ void CTerrainWorkingAtlas::installCatalogVariants(
 {
     if(generated)
     {
-        const STerrainTransitionSignature grid =
-            m_resolver->generatedTiles().at(sourceIndex).canonicalSignature;
+        const STerrainFinalizedTile& sourceTile =
+            m_resolver->generatedTiles().at(sourceIndex);
+        const STerrainTransitionSignature grid = sourceTile.canonicalSignature;
         const STerrainTransitionSignature base = m_workingCatalog.paintGridMirrored()
             ? CTerrainTransitionCatalog::mirroredGridY(grid) : grid;
         for(int rotation = 0; rotation < 4; ++rotation)
@@ -4578,6 +4579,14 @@ void CTerrainWorkingAtlas::installCatalogVariants(
             STerrainTransitionVariant variant;
             variant.signature = CTerrainTransitionCatalog::rotated(base, -rotation);
             variant.packedTile = packed.encode();
+            // Global-authored and canonical-generated tiles fill an exact
+            // signature/runtime gap. They are not an extra variation pool
+            // when this map already authored a selectable candidate for that
+            // exact tuple. A different runtime class remains eligible for
+            // predecessor-preserving repair.
+            if(hasSelectableAuthoredCandidate(
+                   variant.signature, sourceTile.runtimeTerrainType))
+                continue;
             m_workingCatalog.addVariant(variant);
         }
         return;
@@ -4602,6 +4611,27 @@ void CTerrainWorkingAtlas::installCatalogVariants(
         variant.packedTile = packed.encode();
         m_workingCatalog.addVariant(variant);
     }
+}
+
+bool CTerrainWorkingAtlas::hasSelectableAuthoredCandidate(
+    const STerrainTransitionSignature& signature,
+    qint32 runtimeTerrainType) const
+{
+    if(runtimeTerrainType < 0 || runtimeTerrainType >= 16)
+        return false;
+    for(const STerrainTransitionVariant& variant :
+            m_authoredCatalog.paintVariants(signature))
+    {
+        const int slot = SMprPackedTile::decode(variant.packedTile).atlasSlot();
+        if(slot < 0 || slot >= m_authoredSlotCount
+           || slot >= m_authoredImages.size()
+           || m_authoredImages.at(slot).isNull()
+           || slot >= m_workingTileTypes.size())
+            continue;
+        if(m_workingTileTypes.at(slot) == runtimeTerrainType)
+            return true;
+    }
+    return false;
 }
 
 quint16 CTerrainWorkingAtlas::resolve(

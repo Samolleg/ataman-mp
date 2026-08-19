@@ -461,6 +461,9 @@ private:
                 CValidationReport* report);
     void installCatalogVariants(bool generated, int sourceIndex,
                                 int workingSlot);
+    bool hasSelectableAuthoredCandidate(
+        const STerrainTransitionSignature& signature,
+        qint32 runtimeTerrainType) const;
 
     CTerrainTransitionCatalog m_authoredCatalog;
     CTerrainTransitionCatalog m_workingCatalog;

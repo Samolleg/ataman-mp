@@ -593,6 +593,7 @@ private slots:
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
     void globalMaterialBrushSourceIsPayloadCoherentAndPrefersLocalUniform();
+    void globalTransitionLoaderRequiresExactPresetAtlasBinding();
     void directTerrainTileDecoderReadsOnlyRequestedTileBand();
     void stockInputsCannotOverrideCanonicalOneCornerMask();
     void workingAtlasRealizesExactTransitionsBeyond512Slots();
@@ -10022,6 +10023,26 @@ void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefer
         QImage::Format_RGBA8888));
 }
 
+void EnduranceDocumentTests::globalTransitionLoaderRequiresExactPresetAtlasBinding()
+{
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(), "Could not locate source/render/view.cpp");
+    const int start = source.indexOf(
+        "QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source");
+    const int end = source.indexOf("QVector4D aiGraphLayerColor", start);
+    QVERIFY(start >= 0 && end > start);
+    const QByteArray loader = source.mid(start, end - start);
+
+    // A resource member name is not an atlas identity: different configured
+    // RES archives can contain the same Zone1 page names with unrelated
+    // pixels. Global semantic signatures may only be paired with an archive
+    // whose complete decoded atlas matches an approved preset binding.
+    QVERIFY2(loader.contains("findExactArchive("),
+             "Global transition pixels bypass exact preset-atlas binding");
+    QVERIFY2(!loader.contains("catalogTerrainMmpPayload("),
+             "Global transition pixels still use a name-only resource lookup");
+}
+
 void EnduranceDocumentTests::directTerrainTileDecoderReadsOnlyRequestedTileBand()
 {
     QVector<QImage> tiles;
@@ -10220,9 +10241,12 @@ void EnduranceDocumentTests::globalAuthoredTransitionLibraryIndexesRealStockBlen
     for(const STerrainGlobalTransitionSource& source : transitions)
     {
         QVERIFY(!source.mprNamespace.isEmpty());
+        QCOMPARE(source.atlasPixelSha256.size(), 64);
         QVERIFY(source.textureCount > 0);
+        QVERIFY(source.atlasSlotCount > 0);
         QVERIFY(source.slot >= 0);
-        QVERIFY(source.slot < source.textureCount * 64);
+        QVERIFY(source.slot < source.atlasSlotCount);
+        QVERIFY(source.atlasSlotCount <= source.textureCount * 64);
         const qint32 corners[] = {source.signature.northWest,
                                   source.signature.northEast,
                                   source.signature.southEast,

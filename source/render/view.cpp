@@ -496,17 +496,83 @@ QVector<QPoint> terrainVertexBrushPoints(const STerrainTileBrush& brush,
 
 QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
                                 const QSize& requiredSize,
-                                QMap<QString, QByteArray>* encodedPageCache,
+                                QMap<QString, STerrainAtlasEmbeddedBindingResult>*
+                                    boundAtlasCache,
                                 QSet<QString>* missingPageCache,
                                 QMap<QString, QImage>* decodedTileCache)
 {
-    return CTerrainAtlasPresetCatalog::loadGlobalTransitionSource(
-        source, requiredSize, encodedPageCache, missingPageCache,
-        decodedTileCache,
-        [](const QString& name, QByteArray* payload) {
-            return CTextureList::getInstance()->catalogTerrainMmpPayload(
-                name, payload);
-        });
+    if(!boundAtlasCache || !missingPageCache || !decodedTileCache
+       || source.atlasPixelSha256.size() != 64
+       || source.textureCount <= 0 || source.atlasSlotCount <= 0
+       || source.slot < 0 || source.slot >= source.atlasSlotCount)
+        return QImage();
+    const QString bindingKey = QStringLiteral("%1|%2|%3|%4")
+        .arg(source.mprNamespace.toCaseFolded())
+        .arg(source.textureCount).arg(source.atlasSlotCount)
+        .arg(QString::fromLatin1(source.atlasPixelSha256.toLower()));
+    const QString tileKey = QStringLiteral("%1|slot:%2|%3x%4")
+        .arg(bindingKey).arg(source.slot)
+        .arg(requiredSize.width()).arg(requiredSize.height());
+    const auto cachedTile = decodedTileCache->constFind(tileKey);
+    if(cachedTile != decodedTileCache->constEnd())
+        return cachedTile.value();
+    if(!boundAtlasCache->contains(bindingKey)
+       && missingPageCache->contains(bindingKey))
+        return QImage();
+
+    const QStringList configuredArchives = CTextureList::getInstance()
+        ->configuredResourceArchivePaths();
+    auto cachedBinding = boundAtlasCache->find(bindingKey);
+    if(cachedBinding != boundAtlasCache->end())
+    {
+        const QFileInfo archive(cachedBinding->archivePath);
+        bool stillConfigured = false;
+        for(const QString& candidate : configuredArchives)
+            if(QFileInfo(candidate).absoluteFilePath().compare(
+                   archive.absoluteFilePath(), Qt::CaseInsensitive) == 0)
+            {
+                stillConfigured = true;
+                break;
+            }
+        if(!stillConfigured || !archive.isFile()
+           || archive.size() != cachedBinding->archiveSize
+           || archive.lastModified().toMSecsSinceEpoch()
+                != cachedBinding->archiveLastModifiedMs
+           || cachedBinding->decodedAtlasPixelSha256.toLower()
+                != source.atlasPixelSha256.toLower()
+           || cachedBinding->decodedAtlasTiles.size()
+                != source.atlasSlotCount)
+            cachedBinding = boundAtlasCache->erase(cachedBinding);
+    }
+    if(cachedBinding == boundAtlasCache->end())
+    {
+        QVector<QImage> decodedTiles;
+        const STerrainAtlasArchiveBindingResult exact =
+            CTerrainAtlasArchiveBindingResolver::findExactArchive(
+                configuredArchives, source.mprNamespace,
+                source.textureCount, source.atlasSlotCount,
+                source.atlasPixelSha256, QString(), &decodedTiles);
+        if(!exact.success() || decodedTiles.size() != source.atlasSlotCount)
+        {
+            missingPageCache->insert(bindingKey);
+            return QImage();
+        }
+        STerrainAtlasEmbeddedBindingResult cached;
+        cached.archivePath = exact.archivePath;
+        cached.decodedAtlasPixelSha256 = exact.decodedAtlasPixelSha256;
+        cached.decodedAtlasTiles = decodedTiles;
+        cached.archiveSize = exact.archiveSize;
+        cached.archiveLastModifiedMs = exact.archiveLastModifiedMs;
+        cachedBinding = boundAtlasCache->insert(bindingKey, cached);
+        missingPageCache->remove(bindingKey);
+    }
+    QImage tile = cachedBinding->decodedAtlasTiles.at(source.slot)
+        .convertToFormat(QImage::Format_RGBA8888);
+    if(!requiredSize.isEmpty() && tile.size() != requiredSize)
+        tile = tile.scaled(requiredSize, Qt::IgnoreAspectRatio,
+                           Qt::SmoothTransformation);
+    decodedTileCache->insert(tileKey, tile);
+    return tile;
 }
 
 QVector4D aiGraphLayerColor(int layer)
@@ -1041,7 +1107,7 @@ struct SWorkingTerrainResolveStage
     QSet<int> protectedSlots;
     QMultiMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
         importedTransitions;
-    QMap<QString, QByteArray> encodedPageCache;
+    QMap<QString, STerrainAtlasEmbeddedBindingResult> boundAtlasCache;
     QSet<QString> missingPages;
     QMap<QString, QImage> decodedTileCache;
     bool undoCheckpointRequired{false};
@@ -3174,7 +3240,7 @@ void CView::refreshAfterResourceSetup()
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources();
     m_terrainGlobalUniformTileCache.clear();
-    m_terrainGlobalTransitionEncodedPageCache.clear();
+    m_terrainGlobalTransitionBoundAtlasCache.clear();
     m_terrainGlobalTransitionMissingPages.clear();
     m_terrainGlobalTransitionTileCache.clear();
     m_spatialIndexDirty = true;
@@ -9659,7 +9725,7 @@ void CView::rebuildTerrainAutoCatalog()
     // Resource precedence can change when another MPR/profile is opened.
     // Authored transition pages must be resolved from that current profile,
     // never retained by a same-named MMP member from the previous map.
-    m_terrainGlobalTransitionEncodedPageCache.clear();
+    m_terrainGlobalTransitionBoundAtlasCache.clear();
     m_terrainGlobalTransitionMissingPages.clear();
     m_terrainGlobalTransitionTileCache.clear();
     m_modernLandPaintChoices.clear();
@@ -11263,9 +11329,9 @@ bool CView::realizeWorkingTerrainSignature(
     QMultiMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>*
         importedTransitions = staging ? &staging->importedTransitions
         : &m_importedTerrainTransitions;
-    QMap<QString, QByteArray>* encodedPageCache = staging
-        ? &staging->encodedPageCache
-        : &m_terrainGlobalTransitionEncodedPageCache;
+    QMap<QString, STerrainAtlasEmbeddedBindingResult>* boundAtlasCache = staging
+        ? &staging->boundAtlasCache
+        : &m_terrainGlobalTransitionBoundAtlasCache;
     QSet<QString>* missingPages = staging ? &staging->missingPages
         : &m_terrainGlobalTransitionMissingPages;
     QMap<QString, QImage>* decodedTileCache = staging
@@ -11298,6 +11364,8 @@ bool CView::realizeWorkingTerrainSignature(
             const STerrainGlobalTransitionSource& right) {
             if(left.atlasIdentity != right.atlasIdentity)
                 return left.atlasIdentity < right.atlasIdentity;
+            if(left.atlasPixelSha256 != right.atlasPixelSha256)
+                return left.atlasPixelSha256 < right.atlasPixelSha256;
             if(left.slot != right.slot)
                 return left.slot < right.slot;
             return left.mprNamespace.toCaseFolded()
@@ -11306,11 +11374,14 @@ bool CView::realizeWorkingTerrainSignature(
         const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
             ? QSize() : m_authoredTerrainTileImages.front().size();
         QSet<QByteArray> importedPhysical;
+        QSet<QByteArray> importedPixels;
         CValidationReport libraryReport;
         bool importedAny = false;
         for(const STerrainGlobalTransitionSource& source : candidates)
         {
             QByteArray physicalKey = source.atlasIdentity;
+            physicalKey.append('|');
+            physicalKey.append(source.atlasPixelSha256);
             physicalKey.append('|');
             physicalKey.append(QByteArray::number(source.slot));
             if(importedPhysical.contains(physicalKey))
@@ -11318,9 +11389,17 @@ bool CView::realizeWorkingTerrainSignature(
             importedPhysical.insert(physicalKey);
             const QImage pixels = loadGlobalTransitionTile(
                 source, requiredSize,
-                encodedPageCache, missingPages, decodedTileCache);
+                boundAtlasCache, missingPages, decodedTileCache);
             if(pixels.isNull())
                 continue;
+            QByteArray pixelKey = globalTransitionKey(source.signature);
+            pixelKey.append('|');
+            pixelKey.append(terrainTilePixelSha256(pixels));
+            pixelKey.append('|');
+            pixelKey.append(QByteArray::number(preferredRuntimeType));
+            if(importedPixels.contains(pixelKey))
+                continue;
+            importedPixels.insert(pixelKey);
             const QString label = QStringLiteral("%1 slot %2")
                 .arg(source.mprNamespace).arg(source.slot);
             if(atlas->addAuthoredLibraryTransition(
@@ -16676,7 +16755,7 @@ void CView::resolveMissingTerrainBlends()
         staged.terrainEdit = m_terrainEdit;
         staged.protectedSlots = m_workingAtlasProtectedSlots;
         staged.importedTransitions = m_importedTerrainTransitions;
-        staged.encodedPageCache = m_terrainGlobalTransitionEncodedPageCache;
+        staged.boundAtlasCache = m_terrainGlobalTransitionBoundAtlasCache;
         staged.missingPages = m_terrainGlobalTransitionMissingPages;
         staged.decodedTileCache = m_terrainGlobalTransitionTileCache;
     }
@@ -16948,7 +17027,7 @@ void CView::resolveMissingTerrainBlends()
     m_terrainEdit = staged.terrainEdit;
     m_workingAtlasProtectedSlots = staged.protectedSlots;
     m_importedTerrainTransitions = staged.importedTransitions;
-    m_terrainGlobalTransitionEncodedPageCache = staged.encodedPageCache;
+    m_terrainGlobalTransitionBoundAtlasCache = staged.boundAtlasCache;
     m_terrainGlobalTransitionMissingPages = staged.missingPages;
     m_terrainGlobalTransitionTileCache = staged.decodedTileCache;
     if(staged.undoCheckpointRequired)

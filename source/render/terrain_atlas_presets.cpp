@@ -450,10 +450,21 @@ CTerrainAtlasPresetCatalog::globalAuthoredTransitions(CValidationReport* report)
         const QByteArray atlasIdentity = presetAtlasIdentity(preset);
         const QString mprNamespace = preset.value(QStringLiteral("namespace")).toString();
         const int slotCount = preset.value(QStringLiteral("slotCount")).toInt();
+        QVector<QByteArray> approvedPixelBindings;
+        for(const QJsonValue& bindingValue : preset.value(
+                QStringLiteral("bindings")).toArray())
+        {
+            const QByteArray pixelSha256 = bindingValue.toObject().value(
+                QStringLiteral("pixelSha256")).toString().toLatin1().toLower();
+            if(pixelSha256.size() == 64
+               && !approvedPixelBindings.contains(pixelSha256))
+                approvedPixelBindings.append(pixelSha256);
+        }
         const QByteArray signatures = QByteArray::fromBase64(
             preset.value(QStringLiteral("signaturesBase64")).toString().toLatin1());
         if(mprNamespace.isEmpty() || slotCount <= 0
-           || signatures.size() != slotCount * 4)
+           || signatures.size() != slotCount * 4
+           || approvedPixelBindings.isEmpty())
             continue;
         QMap<QPair<int, int>, qint32> globalByLocalAndLayer;
         for(const QJsonValue& familyValue : preset.value(
@@ -494,20 +505,25 @@ CTerrainAtlasPresetCatalog::globalAuthoredTransitions(CValidationReport* report)
                 }
                 if(!mapped)
                     continue;
-                STerrainGlobalTransitionSource source;
                 STerrainTransitionSignature previewSignature;
                 previewSignature.northWest = corners[0];
                 previewSignature.northEast = corners[1];
                 previewSignature.southEast = corners[2];
                 previewSignature.southWest = corners[3];
-                source.signature = CTerrainTransitionCatalog::mirroredGridY(
-                    previewSignature);
-                source.layer = layer;
-                source.mprNamespace = mprNamespace;
-                source.atlasIdentity = atlasIdentity;
-                source.textureCount = (slotCount + 63) / 64;
-                source.slot = slot;
-                result.append(source);
+                for(const QByteArray& pixelSha256 : approvedPixelBindings)
+                {
+                    STerrainGlobalTransitionSource source;
+                    source.signature = CTerrainTransitionCatalog::mirroredGridY(
+                        previewSignature);
+                    source.layer = layer;
+                    source.mprNamespace = mprNamespace;
+                    source.atlasIdentity = atlasIdentity;
+                    source.atlasPixelSha256 = pixelSha256;
+                    source.textureCount = (slotCount + 63) / 64;
+                    source.atlasSlotCount = slotCount;
+                    source.slot = slot;
+                    result.append(source);
+                }
                 break;
             }
     }
