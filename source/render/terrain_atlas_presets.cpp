@@ -130,7 +130,16 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
         for(const QJsonValue& bindingValue : preset.value(
                 QStringLiteral("bindings")).toArray())
         {
-            const QByteArray pixelSha256 = bindingValue.toObject().value(
+            const QJsonObject binding = bindingValue.toObject();
+            // Global Modern painting is one reviewed visual revision. Mixing
+            // an original atlas anchor with an HD current map can create a
+            // technically exact semantic transition whose artwork is visibly
+            // unrelated. Classic/Manual remain map-local; cross-atlas Modern
+            // sources are restricted to the reviewed HD binding.
+            if(binding.value(QStringLiteral("variant")).toString()
+                   != QStringLiteral("hd"))
+                continue;
+            const QByteArray pixelSha256 = binding.value(
                 QStringLiteral("pixelSha256")).toString().toLatin1().toLower();
             if(pixelSha256.size() == 64
                && !approvedPixelBindings.contains(pixelSha256))
@@ -473,7 +482,11 @@ CTerrainAtlasPresetCatalog::globalAuthoredTransitions(CValidationReport* report)
         for(const QJsonValue& bindingValue : preset.value(
                 QStringLiteral("bindings")).toArray())
         {
-            const QByteArray pixelSha256 = bindingValue.toObject().value(
+            const QJsonObject binding = bindingValue.toObject();
+            if(binding.value(QStringLiteral("variant")).toString()
+                   != QStringLiteral("hd"))
+                continue;
+            const QByteArray pixelSha256 = binding.value(
                 QStringLiteral("pixelSha256")).toString().toLatin1().toLower();
             if(pixelSha256.size() == 64
                && !approvedPixelBindings.contains(pixelSha256))

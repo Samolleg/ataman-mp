@@ -70,6 +70,7 @@ class CKeyManager;
 class CSettings;
 class CStringItem;
 class QUndoStack;
+class QThreadPool;
 struct SParam;
 class CComboBoxItem;
 class CProgressView;
@@ -459,6 +460,10 @@ private:
     void queueDeferredTerrainAutoCatalogBuild();
     bool ensureTerrainAutoCatalogReady();
     void rebuildTerrainAutoCatalog();
+    void startDeferredGlobalTerrainPaletteHydration(
+        const QString& currentNamespace, const QSize& requiredSize,
+        quint64 generation);
+    void applyDeferredGlobalTerrainPaletteHydration(quint64 generation);
     void refreshClassicAutoPalette();
     void refreshManualAtlasPalette(bool invalidate = true);
     void refreshWorkingTerrainPalettes();
@@ -775,6 +780,17 @@ private:
         m_terrainGlobalBoundAtlasCache;
     QSet<QString> m_terrainGlobalTransitionMissingPages;
     QMap<QString, QImage> m_terrainGlobalTransitionTileCache;
+    QThreadPool* m_terrainGlobalHydrationPool{nullptr};
+    quint64 m_terrainGlobalHydrationGeneration{0};
+    int m_terrainGlobalHydrationPendingJobs{0};
+    bool m_terrainGlobalHydrationPublishQueued{false};
+    QMap<qint32, int> m_terrainGlobalHydrationBestRanks;
+    QMap<qint32, QImage> m_terrainGlobalHydrationBestThumbnails;
+    QMap<qint32, STerrainGlobalMaterialSource>
+        m_terrainGlobalHydrationBestSources;
+    QString m_terrainPaintPaletteStatus;
+    QString m_terrainPaintPaletteSourceLabel;
+    QString m_terrainPaintPaletteSourcePath;
     QMultiMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
         m_importedTerrainTransitions;
     QVector<STerrainTileDelta> m_terrainPaintAudit;

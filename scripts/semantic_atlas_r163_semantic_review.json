@@ -1,0 +1,72 @@
+{
+  "schema": "ei-semantic-atlas-r163-semantic-review-v1",
+  "catalogInputSha256": "1E0609597348F6405BC2AF04870773C036DB779A1D74FD3D1AE957D2ED4E9DF3",
+  "policy": "Keep exact approved-HD Stone / Dark gray artwork when it is byte-identical to a reviewed approved-HD anchor. Do not reinterpret a green original counterpart or a generated screenshot as the approved-HD source. Tile-type-6 Water families are overlay palette materials, not Ground palette materials.",
+  "reportedEvidence": {
+    "diagnosticPath": "C:\\Users\\ilufu\\Desktop\\zone1-paint-diagnostic fuckup.json",
+    "diagnosticSha256": "A6036B2D336D95F541DB24CDF2071BC2D7187175481994F43A925683D6A4294D",
+    "screenshotPath": "C:\\Users\\ilufu\\Documents\\ShareX\\Screenshots\\2026-08\\EIMapperEndurance_7dwm8qKa8F.png",
+    "screenshotSha256": "2FA1E64D836870165FFBBF17F20E99F2B94F799B5E37238A38CA299C0C258F45"
+  },
+  "stoneDarkGrayArtworkDisposition": {
+    "target": {
+      "namespace": "Bz7g",
+      "slot": 2,
+      "currentCorners": [
+        "Stone / Dark gray",
+        "Stone / Dark gray",
+        "Stone / Dark gray",
+        "Stone / Dark gray"
+      ],
+      "approvedHdBindingPixelSha256": "C23DAB43DFB7FD60F59A6E65200FAAD049B9C53A251CB8DB3DEA216011C3852E",
+      "originalBindingPixelSha256": "DCC69F8646FE6D704E58DFCB6E0B7DAAE140169EFCB9D3F3E8AAD6D6F0135499",
+      "diagnosticPhysicalPixelSha256": "822B896EBD93501701644641144E32E623CB21BD7EBA0E91EC0E5610D8FBC598"
+    },
+    "approvedHdDecodedGroups": [
+      {
+        "decodedRgbaSha256": "2C91387B122E3CB77AA659CE596047DD6C37A63930B69EB58F43CACB0DCB3E5F",
+        "occurrences": [
+          "Bz7g:2",
+          "Zone10:3",
+          "Zone20:5",
+          "Zone5_1:1"
+        ],
+        "reviewedAnchor": "Zone20:5",
+        "reviewedAnchorTrust": "human-reviewed"
+      },
+      {
+        "decodedRgbaSha256": "B45725257552F4D805E2C25C6A70423590BE1523D04F30EB9AC8362E82205616",
+        "occurrences": [
+          "Bz7g:3",
+          "Zone10:4",
+          "Zone20:6",
+          "Zone5_1:0"
+        ],
+        "reviewedAnchor": null,
+        "reviewedAnchorTrust": "provisional-catalog-uniform"
+      }
+    ],
+    "disposition": "KEEP_CURRENT_APPROVED_HD_SOURCE",
+    "excludeFromBrushSources": false,
+    "reason": "Bz7g:2 is byte-identical in the approved-HD decode to human-reviewed Zone20:5. The installed original counterpart is a different green low-resolution texture and cannot overturn the approved-HD semantic identity. A screenshot that resembles the original while provenance names the approved-HD slot is loader/rendered-pixel authority evidence, not a semantic relabeling instruction."
+  },
+  "familyMetadataCorrections": {
+    "bz3g": {
+      "Water / Still": {
+        "allowedLayers": [
+          "overlay"
+        ],
+        "underwaterRole": "surface"
+      }
+    },
+    "zone9": {
+      "Water / Still": {
+        "allowedLayers": [
+          "overlay"
+        ],
+        "underwaterRole": "surface"
+      }
+    }
+  },
+  "catalogOutputSha256": "50CA765659E721D03AB896A78962AB675FDE7BEFF537675580DC338F63488104"
+}

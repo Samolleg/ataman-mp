@@ -4713,7 +4713,10 @@ class R162Tier4DecisionTests(unittest.TestCase):
             "C6345DFC0CCAD08245C124673E7097905CFA567212607FE1906155CA4183F271",
             decisions["sourceAttachmentSha256"])
         self.assertEqual(
-            decisions["catalogOutputSha256"],
+            "1E0609597348F6405BC2AF04870773C036DB779A1D74FD3D1AE957D2ED4E9DF3",
+            decisions["catalogOutputSha256"])
+        self.assertEqual(
+            "50CA765659E721D03AB896A78962AB675FDE7BEFF537675580DC338F63488104",
             hashlib.sha256(catalog_bytes).hexdigest().upper())
 
         reviewed = decisions["reviewedCards"]
@@ -5723,6 +5726,39 @@ class BrushThumbnailMetadataTests(unittest.TestCase):
                     list(payload[slot * 4:(slot + 1) * 4]),
                     f"{namespace} {name} thumbnail must be a proven local uniform",
                 )
+
+
+class R163WaterPaletteRoleTests(unittest.TestCase):
+    def test_bz3g_and_zone9_still_water_are_overlay_only_surface_materials(
+            self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        catalog = json.loads((root / "assets" / "resources" /
+                              "terrain_atlas_presets.json").read_text())
+        presets = {row["namespace"].casefold(): row
+                   for row in catalog["presets"]}
+        for namespace in ("bz3g", "zone9"):
+            family = next(
+                row for row in presets[namespace]["families"]
+                if row["name"] == "Water / Still")
+            self.assertEqual(6, family["tileType"])
+            self.assertEqual(["overlay"], family["allowedLayers"])
+            self.assertEqual("surface", family["underwaterRole"])
+
+    def test_bz7g_slot2_keeps_exact_reviewed_hd_dark_gray_identity(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        decision = json.loads((root / "scripts" /
+            "semantic_atlas_r163_semantic_review.json").read_text())
+        artwork = decision["stoneDarkGrayArtworkDisposition"]
+        self.assertEqual(
+            "KEEP_CURRENT_APPROVED_HD_SOURCE", artwork["disposition"])
+        self.assertFalse(artwork["excludeFromBrushSources"])
+        group = next(row for row in artwork["approvedHdDecodedGroups"]
+                     if "Bz7g:2" in row["occurrences"])
+        self.assertEqual("Zone20:5", group["reviewedAnchor"])
+        self.assertEqual("human-reviewed", group["reviewedAnchorTrust"])
+        self.assertEqual(
+            "50CA765659E721D03AB896A78962AB675FDE7BEFF537675580DC338F63488104",
+            decision["catalogOutputSha256"])
 
 
 if __name__ == "__main__":

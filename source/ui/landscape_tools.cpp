@@ -1469,7 +1469,15 @@ void CLandscapeTools::rebuildMaterialPalette()
                   button->setIconSize(QSize(52, 52));
               }
               else
-                  button->setText(choice.name.left(2).toUpper());
+              {
+                  button->setText(choice.thumbnailPending
+                      ? QString::fromUtf8("\xE2\x80\xA6")
+                      : QString::fromUtf8("\xE2\x80\x94"));
+                  button->setToolTip((choice.thumbnailPending
+                      ? tr("Exact reviewed-HD preview is loading.\n")
+                      : tr("No exact reviewed-HD preview is available.\n"))
+                      + button->toolTip());
+              }
               button->setMinimumSize(64, 64);
               button->setMaximumHeight(64);
               button->setSizePolicy(QSizePolicy::Expanding,

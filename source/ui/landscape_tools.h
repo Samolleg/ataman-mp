@@ -35,6 +35,10 @@ struct STerrainPaintMaterialChoice
     QString name;
     QString familyName;
     QImage thumbnail;
+    // The semantic brush is already selectable while its exact reviewed-HD
+    // artwork is verified off the UI thread.  A pending entry must never fall
+    // back to misleading initials that look like a finished brush preview.
+    bool thumbnailPending{false};
     int assignedSlots{0};
     bool cornerOnly{false};
     bool contextualStamp{false};

@@ -229,9 +229,13 @@ class SemanticAtlasTopologyReportTests(unittest.TestCase):
         # signature profile from bz15h without asserting byte-identical owner
         # propagation. The additional seven-family profile contributes its 21
         # honest pair rows; three retained pairs move into full coverage.
-        self.assertEqual(1343, report["totalPairCount"])
+        # R163 corrects the last two tile-type-6 Water / Still families that
+        # were still exposed as land brushes. Removing Water from the bz3g
+        # and Zone9 land palettes removes thirteen impossible land-family
+        # relationships from each distinct runtime profile.
+        self.assertEqual(1317, report["totalPairCount"])
         self.assertEqual(
-            {"0": 776, "1": 80, "2": 59, "3": 191, "4": 237},
+            {"0": 750, "1": 80, "2": 59, "3": 191, "4": 237},
             report["coverageCounts"],
         )
         for namespace in ("bz3g", "zone9"):

@@ -24,6 +24,7 @@
 #include <QJsonObject>
 #include <QSaveFile>
 #include <QSettings>
+#include <QThreadPool>
 #include <QtConcurrent>
 #include <QtEndian>
 #include <cstddef>
@@ -494,6 +495,163 @@ QVector<QPoint> terrainVertexBrushPoints(const STerrainTileBrush& brush,
     return result;
 }
 
+QString terrainAtlasBindingKey(
+    const QString& mprNamespace, const QByteArray& atlasPixelSha256,
+    int textureCount, int atlasSlotCount)
+{
+    return QStringLiteral("%1|%2|%3|%4")
+        .arg(mprNamespace.toCaseFolded())
+        .arg(textureCount).arg(atlasSlotCount)
+        .arg(QString::fromLatin1(atlasPixelSha256.toLower()));
+}
+
+QString terrainAtlasTileCacheKey(const QString& bindingKey, int slot,
+                                 const QSize& requiredSize)
+{
+    return QStringLiteral("%1|slot:%2|%3x%4")
+        .arg(bindingKey).arg(slot)
+        .arg(requiredSize.width()).arg(requiredSize.height());
+}
+
+bool terrainAtlasBindingStillValid(
+    const STerrainAtlasArchiveBindingResult& binding,
+    const QStringList& configuredArchives,
+    const QByteArray& expectedPixelSha256)
+{
+    if(!binding.success()
+       || binding.decodedAtlasPixelSha256.toLower()
+            != expectedPixelSha256.toLower())
+        return false;
+    const QFileInfo archive(binding.archivePath);
+    bool configured = false;
+    for(const QString& candidate : configuredArchives)
+        if(QFileInfo(candidate).absoluteFilePath().compare(
+               archive.absoluteFilePath(), Qt::CaseInsensitive) == 0)
+        {
+            configured = true;
+            break;
+        }
+    return configured && archive.isFile()
+        && archive.size() == binding.archiveSize
+        && archive.lastModified().toMSecsSinceEpoch()
+            == binding.archiveLastModifiedMs;
+}
+
+struct STerrainGlobalThumbnailRequest
+{
+    qint32 materialId{0};
+    int rank{0};
+    STerrainGlobalMaterialSource source;
+};
+
+struct STerrainGlobalBindingHydrationTask
+{
+    QString bindingKey;
+    QString mprNamespace;
+    QByteArray atlasPixelSha256;
+    int textureCount{0};
+    int atlasSlotCount{0};
+    QSize requiredSize;
+    QStringList configuredArchives;
+    STerrainAtlasArchiveBindingResult cachedBinding;
+    QVector<STerrainGlobalThumbnailRequest> thumbnails;
+    int priority{2};
+};
+
+struct STerrainGlobalHydratedThumbnail
+{
+    qint32 materialId{0};
+    int rank{0};
+    STerrainGlobalMaterialSource source;
+    QString tileCacheKey;
+    QImage image;
+};
+
+struct STerrainGlobalBindingHydrationResult
+{
+    QString bindingKey;
+    STerrainAtlasArchiveBindingResult binding;
+    QVector<STerrainGlobalHydratedThumbnail> thumbnails;
+    QString error;
+};
+
+STerrainGlobalBindingHydrationResult hydrateTerrainGlobalBinding(
+    const STerrainGlobalBindingHydrationTask& task)
+{
+    STerrainGlobalBindingHydrationResult result;
+    result.bindingKey = task.bindingKey;
+    QVector<QImage> decodedTiles;
+    if(terrainAtlasBindingStillValid(
+           task.cachedBinding, task.configuredArchives,
+           task.atlasPixelSha256))
+        result.binding = task.cachedBinding;
+    else
+    {
+        result.binding = CTerrainAtlasArchiveBindingResolver::findExactArchive(
+            task.configuredArchives, task.mprNamespace,
+            task.textureCount, task.atlasSlotCount,
+            task.atlasPixelSha256, QString(), &decodedTiles);
+        if(!result.binding.success())
+        {
+            result.error = result.binding.error;
+            return result;
+        }
+    }
+
+    QMap<QString, QByteArray> pagePayloads;
+    if(decodedTiles.isEmpty() && !task.thumbnails.isEmpty())
+    {
+        QStringList pageNames;
+        for(const STerrainGlobalThumbnailRequest& request : task.thumbnails)
+        {
+            const QString pageName = QStringLiteral("%1%2.mmp")
+                .arg(task.mprNamespace.toLower())
+                .arg(request.source.uniformSlot / 64, 3, 10,
+                     QLatin1Char('0'));
+            if(!pageNames.contains(pageName))
+                pageNames.append(pageName);
+        }
+        if(!CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
+               result.binding.archivePath, pageNames, &pagePayloads,
+               nullptr, &result.error))
+            return result;
+    }
+
+    for(const STerrainGlobalThumbnailRequest& request : task.thumbnails)
+    {
+        QImage tile;
+        if(request.source.uniformSlot >= 0
+           && request.source.uniformSlot < decodedTiles.size())
+            tile = decodedTiles.at(request.source.uniformSlot);
+        else
+        {
+            const QString pageName = QStringLiteral("%1%2.mmp")
+                .arg(task.mprNamespace.toLower())
+                .arg(request.source.uniformSlot / 64, 3, 10,
+                     QLatin1Char('0'));
+            QString diagnostic;
+            if(!ei::decodeMmpDxt1AtlasTile(
+                   pagePayloads.value(pageName),
+                   request.source.uniformSlot % 64, &tile, &diagnostic))
+                continue;
+        }
+        tile = tile.convertToFormat(QImage::Format_RGBA8888);
+        if(!task.requiredSize.isEmpty() && tile.size() != task.requiredSize)
+            tile = tile.scaled(task.requiredSize, Qt::IgnoreAspectRatio,
+                               Qt::SmoothTransformation);
+        STerrainGlobalHydratedThumbnail hydrated;
+        hydrated.materialId = request.materialId;
+        hydrated.rank = request.rank;
+        hydrated.source = request.source;
+        hydrated.tileCacheKey = terrainAtlasTileCacheKey(
+            task.bindingKey, request.source.uniformSlot,
+            task.requiredSize);
+        hydrated.image = tile;
+        result.thumbnails.append(hydrated);
+    }
+    return result;
+}
+
 QImage loadBoundTerrainAtlasTile(
     const QString& mprNamespace, const QByteArray& atlasPixelSha256,
     int textureCount, int atlasSlotCount, int slot,
@@ -507,13 +665,10 @@ QImage loadBoundTerrainAtlasTile(
        || textureCount <= 0 || atlasSlotCount <= 0
        || slot < 0 || slot >= atlasSlotCount)
         return QImage();
-    const QString bindingKey = QStringLiteral("%1|%2|%3|%4")
-        .arg(mprNamespace.toCaseFolded())
-        .arg(textureCount).arg(atlasSlotCount)
-        .arg(QString::fromLatin1(atlasPixelSha256.toLower()));
-    const QString tileKey = QStringLiteral("%1|slot:%2|%3x%4")
-        .arg(bindingKey).arg(slot)
-        .arg(requiredSize.width()).arg(requiredSize.height());
+    const QString bindingKey = terrainAtlasBindingKey(
+        mprNamespace, atlasPixelSha256, textureCount, atlasSlotCount);
+    const QString tileKey = terrainAtlasTileCacheKey(
+        bindingKey, slot, requiredSize);
     const auto cachedTile = decodedTileCache->constFind(tileKey);
     if(cachedTile != decodedTileCache->constEnd())
         return cachedTile.value();
@@ -526,21 +681,9 @@ QImage loadBoundTerrainAtlasTile(
     auto cachedBinding = boundAtlasCache->find(bindingKey);
     if(cachedBinding != boundAtlasCache->end())
     {
-        const QFileInfo archive(cachedBinding->archivePath);
-        bool stillConfigured = false;
-        for(const QString& candidate : configuredArchives)
-            if(QFileInfo(candidate).absoluteFilePath().compare(
-                   archive.absoluteFilePath(), Qt::CaseInsensitive) == 0)
-            {
-                stillConfigured = true;
-                break;
-            }
-        if(!stillConfigured || !archive.isFile()
-           || archive.size() != cachedBinding->archiveSize
-           || archive.lastModified().toMSecsSinceEpoch()
-                != cachedBinding->archiveLastModifiedMs
-           || cachedBinding->decodedAtlasPixelSha256.toLower()
-                != atlasPixelSha256.toLower())
+        if(!terrainAtlasBindingStillValid(
+               cachedBinding.value(), configuredArchives,
+               atlasPixelSha256))
             cachedBinding = boundAtlasCache->erase(cachedBinding);
     }
     if(cachedBinding == boundAtlasCache->end())
@@ -1244,6 +1387,14 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
 {
     setFocusPolicy(Qt::ClickFocus);
 
+    // Exact foreign terrain bindings are disk/CPU-heavy to verify.  Keep
+    // their work isolated from the global pool so a palette cannot starve
+    // unrelated editor preparation, and bound concurrency to avoid decoding
+    // several complete 256/512-slot atlases at once.
+    m_terrainGlobalHydrationPool = new QThreadPool(this);
+    m_terrainGlobalHydrationPool->setMaxThreadCount(2);
+    m_terrainGlobalHydrationPool->setExpiryTimeout(10000);
+
     m_cam.reset(new CCamera);
     m_timer = new QTimer;
     m_aReadState.resize(eReadCount);
@@ -1695,6 +1846,12 @@ CView::~CView()
     shutdownTimer.start();
     m_sculptRepeatTimer->stop();
     m_overlayPointerTimer->stop();
+    ++m_terrainGlobalHydrationGeneration;
+    if(m_terrainGlobalHydrationPool)
+    {
+        m_terrainGlobalHydrationPool->clear();
+        m_terrainGlobalHydrationPool->waitForDone();
+    }
     if(m_aiGraphRegenerationTimer)
         m_aiGraphRegenerationTimer->stop();
     if(m_aiGraphBuildWatcher)
@@ -9800,6 +9957,13 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 
 void CView::rebuildTerrainAutoCatalog()
 {
+    const quint64 hydrationGeneration =
+        ++m_terrainGlobalHydrationGeneration;
+    m_terrainGlobalHydrationPendingJobs = 0;
+    m_terrainGlobalHydrationPublishQueued = false;
+    m_terrainGlobalHydrationBestRanks.clear();
+    m_terrainGlobalHydrationBestThumbnails.clear();
+    m_terrainGlobalHydrationBestSources.clear();
     // Modern, Classic Auto, and used-family data are derived in separate
     // passes below. They describe one atomic palette state: rebuilding all
     // six widget grids after every pass made MPR open synchronously create and
@@ -10110,6 +10274,7 @@ void CView::rebuildTerrainAutoCatalog()
             choice.name = family.name;
             choice.familyName = family.theme;
             choice.thumbnail = source;
+            choice.thumbnailPending = source.isNull();
             choice.assignedSlots = family.sources.size();
             if(family.layer == ETerrainAtlasLayer::Land)
             {
@@ -10171,6 +10336,9 @@ void CView::rebuildTerrainAutoCatalog()
             QFileInfo(m_terrainAtlasProfileSource.path).fileName());
     else if(m_terrainAtlasProfileSource.kind == ETerrainAtlasProfileSource::GeneratedDraft)
         sourceLabel = tr("Generated draft");
+    m_terrainPaintPaletteStatus = status;
+    m_terrainPaintPaletteSourceLabel = sourceLabel;
+    m_terrainPaintPaletteSourcePath = m_terrainAtlasProfileSource.path;
     m_landscapeTools->setPaintMaterials(
         landChoices, underwaterChoices, overlayChoices,
         m_terrainAtlasProfile.assignedSlotCount(),
@@ -10260,6 +10428,286 @@ void CView::rebuildTerrainAutoCatalog()
         .arg(modernPaletteDataMs).arg(workingAtlasMs)
         .arg(classicPaletteDataMs).arg(manualPaletteMs)
         .arg(familyUsageMs).arg(paletteCommitMs));
+    if(m_terrainAtlasAnalysis.usable)
+    {
+        const QSize tileSize = m_authoredTerrainTileImages.isEmpty()
+            ? QSize() : m_authoredTerrainTileImages.front().size();
+        startDeferredGlobalTerrainPaletteHydration(
+            mprNamespace, tileSize, hydrationGeneration);
+    }
+}
+
+void CView::startDeferredGlobalTerrainPaletteHydration(
+    const QString& currentNamespace, const QSize& requiredSize,
+    quint64 generation)
+{
+    if(generation != m_terrainGlobalHydrationGeneration
+       || !m_terrainGlobalHydrationPool
+       || !m_terrainAtlasAnalysis.usable)
+        return;
+
+    const QStringList configuredArchives = CTextureList::getInstance()
+        ->configuredResourceArchivePaths();
+    QMap<QString, STerrainGlobalBindingHydrationTask> tasks;
+    const auto ensureTask = [&](const QString& sourceNamespace,
+                                const QByteArray& pixelSha256,
+                                int textureCount, int atlasSlotCount,
+                                int priority)
+        -> STerrainGlobalBindingHydrationTask* {
+        if(pixelSha256.size() != 64 || textureCount <= 0
+           || atlasSlotCount <= 0)
+            return nullptr;
+        // The opened atlas is already decoded and its matching material
+        // anchors were published synchronously. Re-verifying it would spend
+        // I/O without improving either previews or resolution.
+        if(sourceNamespace.compare(currentNamespace,
+                                   Qt::CaseInsensitive) == 0
+           && pixelSha256.toLower()
+                == m_terrainAtlasProfile.atlasPixelSha256.toLower()
+           && atlasSlotCount == m_authoredTerrainTileImages.size())
+            return nullptr;
+        const QString key = terrainAtlasBindingKey(
+            sourceNamespace, pixelSha256, textureCount, atlasSlotCount);
+        STerrainGlobalBindingHydrationTask& task = tasks[key];
+        if(task.bindingKey.isEmpty())
+        {
+            task.bindingKey = key;
+            task.mprNamespace = sourceNamespace;
+            task.atlasPixelSha256 = pixelSha256.toLower();
+            task.textureCount = textureCount;
+            task.atlasSlotCount = atlasSlotCount;
+            task.requiredSize = requiredSize;
+            task.configuredArchives = configuredArchives;
+            task.cachedBinding = m_terrainGlobalBoundAtlasCache.value(key);
+        }
+        task.priority = qMin(task.priority, priority);
+        return &task;
+    };
+
+    // Bindings that can satisfy an authored transition are warmed even when
+    // they do not own a palette thumbnail. This removes the old first-Resolve
+    // series of full-atlas verifications while keeping individual transition
+    // tiles lazy and memory-bounded.
+    for(const STerrainGlobalTransitionSource& source :
+            m_terrainGlobalTransitionSources.values())
+        ensureTask(source.mprNamespace, source.atlasPixelSha256,
+                   source.textureCount, source.atlasSlotCount, 2);
+
+    for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
+    {
+        if(m_terrainGlobalMaterialSources.contains(family.id))
+            continue;
+        QVector<STerrainGlobalMaterialSource> ordered;
+        const auto appendUnique = [&ordered](
+            const STerrainGlobalMaterialSource& source) {
+            for(const STerrainGlobalMaterialSource& existing : ordered)
+                if(existing.mprNamespace.compare(
+                       source.mprNamespace, Qt::CaseInsensitive) == 0
+                   && existing.atlasPixelSha256
+                        == source.atlasPixelSha256
+                   && existing.uniformSlot == source.uniformSlot)
+                    return;
+            ordered.append(source);
+        };
+        const auto appendMatching = [&](const QVector<
+                                             STerrainGlobalMaterialSource>& sources,
+                                         bool preferred) {
+            for(const STerrainGlobalMaterialSource& source : sources)
+                if((source.mprNamespace.compare(
+                        currentNamespace, Qt::CaseInsensitive) == 0)
+                   == preferred)
+                    appendUnique(source);
+        };
+        appendMatching(family.thumbnailSources, true);
+        appendMatching(family.sources, true);
+        appendMatching(family.thumbnailSources, false);
+        appendMatching(family.sources, false);
+        for(int rank = 0; rank < ordered.size(); ++rank)
+        {
+            const STerrainGlobalMaterialSource& source = ordered.at(rank);
+            STerrainGlobalBindingHydrationTask* task = ensureTask(
+                source.mprNamespace, source.atlasPixelSha256,
+                source.textureCount, source.atlasSlotCount, 1);
+            if(!task || source.uniformSlot < 0
+               || source.uniformSlot >= source.atlasSlotCount)
+                continue;
+            STerrainGlobalThumbnailRequest request;
+            request.materialId = family.id;
+            request.rank = rank;
+            request.source = source;
+            task->thumbnails.append(request);
+        }
+    }
+
+    QVector<STerrainGlobalBindingHydrationTask> orderedTasks = tasks.values()
+        .toVector();
+    std::sort(orderedTasks.begin(), orderedTasks.end(), [](
+        const STerrainGlobalBindingHydrationTask& left,
+        const STerrainGlobalBindingHydrationTask& right) {
+        if(left.priority != right.priority)
+            return left.priority < right.priority;
+        if(left.thumbnails.size() != right.thumbnails.size())
+            return left.thumbnails.size() > right.thumbnails.size();
+        return left.bindingKey < right.bindingKey;
+    });
+    m_terrainGlobalHydrationPendingJobs = orderedTasks.size();
+    ei::log(eLogInfo, QString(
+        "Deferred reviewed-HD terrain hydration queued bindings:%1 threads:%2")
+        .arg(orderedTasks.size())
+        .arg(m_terrainGlobalHydrationPool->maxThreadCount()));
+    if(orderedTasks.isEmpty())
+    {
+        applyDeferredGlobalTerrainPaletteHydration(generation);
+        return;
+    }
+
+    for(const STerrainGlobalBindingHydrationTask& task : orderedTasks)
+    {
+        auto* watcher =
+            new QFutureWatcher<STerrainGlobalBindingHydrationResult>(this);
+        connect(watcher,
+                &QFutureWatcher<STerrainGlobalBindingHydrationResult>::finished,
+                this, [this, watcher, generation]() {
+            const STerrainGlobalBindingHydrationResult result =
+                watcher->result();
+            watcher->deleteLater();
+            if(generation != m_terrainGlobalHydrationGeneration)
+                return;
+            if(result.binding.success())
+            {
+                m_terrainGlobalBoundAtlasCache.insert(
+                    result.bindingKey, result.binding);
+                m_terrainGlobalTransitionMissingPages.remove(
+                    result.bindingKey);
+                for(const STerrainGlobalHydratedThumbnail& thumbnail :
+                        result.thumbnails)
+                {
+                    if(thumbnail.image.isNull())
+                        continue;
+                    m_terrainGlobalUniformTileCache.insert(
+                        thumbnail.tileCacheKey, thumbnail.image);
+                    const int existingRank =
+                        m_terrainGlobalHydrationBestRanks.value(
+                            thumbnail.materialId,
+                            std::numeric_limits<int>::max());
+                    if(thumbnail.rank < existingRank)
+                    {
+                        m_terrainGlobalHydrationBestRanks.insert(
+                            thumbnail.materialId, thumbnail.rank);
+                        m_terrainGlobalHydrationBestThumbnails.insert(
+                            thumbnail.materialId, thumbnail.image);
+                        m_terrainGlobalHydrationBestSources.insert(
+                            thumbnail.materialId, thumbnail.source);
+                    }
+                }
+            }
+            else
+            {
+                m_terrainGlobalTransitionMissingPages.insert(
+                    result.bindingKey);
+                ei::log(eLogWarning, QString(
+                    "Deferred reviewed-HD terrain binding unavailable: %1 (%2)")
+                    .arg(result.bindingKey, result.error));
+            }
+            m_terrainGlobalHydrationPendingJobs = qMax(
+                0, m_terrainGlobalHydrationPendingJobs - 1);
+            if(!m_terrainGlobalHydrationPublishQueued)
+            {
+                m_terrainGlobalHydrationPublishQueued = true;
+                QTimer::singleShot(150, this, [this, generation]() {
+                    applyDeferredGlobalTerrainPaletteHydration(generation);
+                });
+            }
+            if(m_terrainGlobalHydrationPendingJobs == 0)
+                applyDeferredGlobalTerrainPaletteHydration(generation);
+        });
+        watcher->setFuture(QtConcurrent::run(
+            m_terrainGlobalHydrationPool, [task]() {
+                return hydrateTerrainGlobalBinding(task);
+            }));
+    }
+}
+
+void CView::applyDeferredGlobalTerrainPaletteHydration(quint64 generation)
+{
+    if(generation != m_terrainGlobalHydrationGeneration)
+        return;
+    m_terrainGlobalHydrationPublishQueued = false;
+    if(m_tilePaintStrokeActive || m_tileStrokeFinishing)
+    {
+        m_terrainGlobalHydrationPublishQueued = true;
+        QTimer::singleShot(100, this, [this, generation]() {
+            applyDeferredGlobalTerrainPaletteHydration(generation);
+        });
+        return;
+    }
+    const bool complete = m_terrainGlobalHydrationPendingJobs == 0;
+    bool changed = false;
+    const auto updateChoices = [&](QVector<STerrainPaintMaterialChoice>* choices) {
+        for(STerrainPaintMaterialChoice& choice : *choices)
+        {
+            const QImage thumbnail =
+                m_terrainGlobalHydrationBestThumbnails.value(choice.id);
+            if(!thumbnail.isNull() && choice.thumbnail != thumbnail)
+            {
+                choice.thumbnail = thumbnail;
+                changed = true;
+            }
+            const bool pending = choice.thumbnail.isNull() && !complete;
+            if(choice.thumbnailPending != pending)
+            {
+                choice.thumbnailPending = pending;
+                changed = true;
+            }
+        }
+    };
+    updateChoices(&m_modernLandPaintChoices);
+    updateChoices(&m_modernUnderwaterPaintChoices);
+    updateChoices(&m_modernOverlayPaintChoices);
+
+    // Wait for every candidate binding before choosing a generation source;
+    // otherwise completion order could make a slower, lower-priority source
+    // lose to whichever worker happened to finish first.
+    if(complete)
+    {
+        for(auto source = m_terrainGlobalHydrationBestSources.constBegin();
+            source != m_terrainGlobalHydrationBestSources.constEnd(); ++source)
+        {
+            if(m_terrainGlobalMaterialSources.contains(source.key()))
+                continue;
+            const QImage pixels =
+                m_terrainGlobalHydrationBestThumbnails.value(source.key());
+            if(pixels.isNull())
+                continue;
+            m_terrainGlobalMaterialSources.insert(source.key(), pixels);
+            m_terrainGlobalMaterialSourceIdentities.insert(
+                source.key(), source.value());
+            if(m_workingTerrainAtlas)
+                m_workingTerrainAtlas->addExternalMaterialSource(
+                    source.key(), pixels);
+        }
+    }
+
+    if(changed && m_landscapeTools)
+    {
+        m_landscapeTools->beginTerrainPaletteUpdate();
+        m_landscapeTools->setPaintMaterials(
+            m_modernLandPaintChoices, m_modernUnderwaterPaintChoices,
+            m_modernOverlayPaintChoices,
+            m_terrainAtlasProfile.assignedSlotCount(),
+            m_terrainAtlasProfile.atlasSlotCount,
+            m_terrainPaintPaletteStatus,
+            m_terrainPaintPaletteSourceLabel,
+            m_terrainPaintPaletteSourcePath);
+        refreshClassicAutoPalette();
+        m_landscapeTools->endTerrainPaletteUpdate();
+    }
+    if(complete)
+        ei::log(eLogInfo, QString(
+            "Deferred reviewed-HD terrain hydration complete exactBindings:%1 thumbnails:%2 materialSources:%3")
+            .arg(m_terrainGlobalBoundAtlasCache.size())
+            .arg(m_terrainGlobalHydrationBestThumbnails.size())
+            .arg(m_terrainGlobalMaterialSources.size()));
 }
 
 void CView::refreshClassicAutoPalette()
@@ -15904,6 +16352,23 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 "Classic Auto can paint only material families with an exact uniform tile already present in this atlas.");
         else if(!classicAuto)
         {
+            QProgressDialog artworkProgress(
+                tr("Preparing exact reviewed-HD terrain artwork..."),
+                QString(), 0, 0, this);
+            const bool showArtworkProgress = m_workingTerrainAtlas
+                && !m_workingTerrainAtlas->hasMaterialSource(terrainType);
+            if(showArtworkProgress)
+            {
+                artworkProgress.setWindowTitle(
+                    tr("Preparing terrain material"));
+                artworkProgress.setWindowModality(Qt::WindowModal);
+                artworkProgress.setCancelButton(nullptr);
+                artworkProgress.setMinimumDuration(0);
+                artworkProgress.setAutoClose(false);
+                artworkProgress.show();
+                QApplication::processEvents(
+                    QEventLoop::ExcludeUserInputEvents);
+            }
             QMap<int, quint64> usage = workingTerrainAtlasUsage();
             if(!realizeWorkingTerrainSignature(
                    pure, qRound(vertexBrush.centerX),
@@ -15911,10 +16376,12 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                    terrainType)
                || !syncWorkingTerrainAtlas(&report))
             {
+                artworkProgress.hide();
                 ++m_tileStrokeRefused;
                 emit updateMsg(report.toText());
                 return;
             }
+            artworkProgress.hide();
         }
         if(report.hasErrors())
         {

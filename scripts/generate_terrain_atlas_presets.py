@@ -300,6 +300,11 @@ R162_REVIEW = json.loads(
         "semantic_atlas_r162_decisions.json"
     ).read_text(encoding="utf-8")
 )
+R163_SEMANTIC_REVIEW = json.loads(
+    Path(__file__).with_name(
+        "semantic_atlas_r163_semantic_review.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def res_index(path: Path) -> dict[str, dict]:
@@ -3318,8 +3323,16 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         family_renames[matches[0]] = new_name
     metadata_key = next((key for key in R122_CONSOLIDATED_REVIEW.get(
         "familyMetadataCorrections", {}) if key.casefold() == namespace), namespace)
-    family_metadata_corrections = R122_CONSOLIDATED_REVIEW.get(
-        "familyMetadataCorrections", {}).get(metadata_key, {})
+    family_metadata_corrections = copy.deepcopy(
+        R122_CONSOLIDATED_REVIEW.get(
+            "familyMetadataCorrections", {}).get(metadata_key, {}))
+    r163_metadata_key = next((key for key in R163_SEMANTIC_REVIEW.get(
+        "familyMetadataCorrections", {}) if key.casefold() == namespace), namespace)
+    for family_name, fields in R163_SEMANTIC_REVIEW.get(
+            "familyMetadataCorrections", {}).get(
+                r163_metadata_key, {}).items():
+        family_metadata_corrections.setdefault(family_name, {}).update(
+            copy.deepcopy(fields))
 
     # R123 resolves the five exact BaseGipat Water corners reviewed after the
     # exhaustive all-rotation audit. Untouched corners remain R122 context.
@@ -4373,7 +4386,10 @@ def reviewed_fragment_corrections(recipe: dict) -> dict:
         if effective_name in family_metadata_corrections:
             for field, value in family_metadata_corrections[
                     effective_name].items():
-                family[field] = copy.deepcopy(value)
+                if field == "underwaterRole":
+                    family["reviewedUnderwaterRole"] = copy.deepcopy(value)
+                else:
+                    family[field] = copy.deepcopy(value)
     if namespace == "zone2":
         irregular = next(family for family in result["families"]
                          if family["id"] == 9)
@@ -4840,7 +4856,9 @@ def main() -> int:
                 "id": family["id"],
                 "name": family["suggestedName"],
                 "allowedLayers": family["allowedLayers"],
-                "underwaterRole": underwater_role(recipe, family["id"]),
+                "underwaterRole": family.get(
+                    "reviewedUnderwaterRole",
+                    underwater_role(recipe, family["id"])),
                 "tileType": family["tileType"],
                 "thumbnailSlot": resolved_thumbnail_slot(recipe, family),
                 "paintSelectable": editor_material_is_paintable(

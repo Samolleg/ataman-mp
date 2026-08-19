@@ -21,6 +21,7 @@ private slots:
     void manualPaletteDoesNotAllocateRowsForEmptyAtlasHoles();
     void manualPaletteFiltersNonNullPaddingAndRestoresPhysicalIdentity();
     void terrainPaletteBatchDefersIntermediateWidgetRebuilds();
+    void deferredTerrainThumbnailRefreshesWithoutInitialsFallback();
     void manualPaletteIsRequestedOnlyWhenItsTabIsOpened();
     void paintHelpLivesOnRelevantControls();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
@@ -215,6 +216,46 @@ void LandscapeToolsWidgetTests::terrainPaletteBatchDefersIntermediateWidgetRebui
     QVERIFY(initialButton.isNull());
     QVERIFY(buttonFor(102));
     QVERIFY(buttonFor(103));
+}
+
+void LandscapeToolsWidgetTests::deferredTerrainThumbnailRefreshesWithoutInitialsFallback()
+{
+    CLandscapeTools tools;
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+
+    STerrainPaintMaterialChoice pending;
+    pending.id = 211;
+    pending.name = QStringLiteral("Stone / Dark gray");
+    pending.familyName = QStringLiteral("Stone");
+    pending.thumbnailPending = true;
+    tools.setPaintMaterials({pending}, {}, {}, 1, 1);
+
+    const auto buttonFor = [&tools](qint32 id) {
+        for(QToolButton* button : tools.findChildren<QToolButton*>())
+            if(button->property("terrainMaterialId").toInt() == id)
+                return button;
+        return static_cast<QToolButton*>(nullptr);
+    };
+    QToolButton* loading = buttonFor(pending.id);
+    QVERIFY(loading);
+    QVERIFY(loading->icon().isNull());
+    QCOMPARE(loading->text(), QString::fromUtf8("\xE2\x80\xA6"));
+    QVERIFY2(!loading->text().contains(QStringLiteral("SD")),
+             "A missing terrain preview fell back to material initials");
+    loading->setChecked(true);
+
+    STerrainPaintMaterialChoice hydrated = pending;
+    hydrated.thumbnailPending = false;
+    hydrated.thumbnail = QImage(16, 16, QImage::Format_RGBA8888);
+    hydrated.thumbnail.fill(QColor(37, 51, 68));
+    tools.setPaintMaterials({hydrated}, {}, {}, 1, 1);
+
+    QToolButton* ready = buttonFor(hydrated.id);
+    QVERIFY(ready);
+    QVERIFY(!ready->icon().isNull());
+    QVERIFY(ready->text().isEmpty());
+    QVERIFY2(ready->isChecked(),
+             "Publishing a deferred terrain thumbnail lost brush selection");
 }
 
 void LandscapeToolsWidgetTests::manualPaletteIsRequestedOnlyWhenItsTabIsOpened()

@@ -593,6 +593,7 @@ private slots:
     void authoredPresetCatalogAllEntriesCompile();
     void globalMaterialVariantsUseOnlyUniformAnchorsAndShareThemeGroups();
     void globalMaterialBrushSourceIsPayloadCoherentAndPrefersLocalUniform();
+    void globalTerrainSourcesUseOnlyApprovedHdBindings();
     void globalTerrainHydrationRequiresExactPresetAtlasBinding();
     void directTerrainTileDecoderReadsOnlyRequestedTileBand();
     void stockInputsCannotOverrideCanonicalOneCornerMask();
@@ -9833,7 +9834,7 @@ void EnduranceDocumentTests::globalMaterialVariantsUseOnlyUniformAnchorsAndShare
     // R102 applies the explicit brush-inventory merges and names while leaving
     // false-uniform and probable-family leads out of the paint palette. R112
     // adds the reviewed Zone10 Slabs / Faces irregular uniform brush family.
-    QCOMPARE(landFamilyCount, 82);
+    QCOMPARE(landFamilyCount, 81);
     // Every currently shipped paintable JMV class has an intentional visual
     // language; Organic remains only the forward-compatible fallback.
     QCOMPARE(blendStyles.size(), 11);
@@ -10027,6 +10028,81 @@ void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefer
         QImage::Format_RGBA8888));
 }
 
+void EnduranceDocumentTests::globalTerrainSourcesUseOnlyApprovedHdBindings()
+{
+    QFile resource(QStringLiteral(":/terrain_atlas_presets.json"));
+    QVERIFY(resource.open(QIODevice::ReadOnly));
+    const QJsonObject catalog = QJsonDocument::fromJson(
+        resource.readAll()).object();
+    QMap<QString, QSet<QByteArray>> hdByNamespace;
+    QMap<QString, QSet<QByteArray>> nonHdByNamespace;
+    for(const QJsonValue& presetValue : catalog.value(
+            QStringLiteral("presets")).toArray())
+    {
+        const QJsonObject preset = presetValue.toObject();
+        const QString name = preset.value(QStringLiteral("namespace"))
+            .toString().toCaseFolded();
+        for(const QJsonValue& bindingValue : preset.value(
+                QStringLiteral("bindings")).toArray())
+        {
+            const QJsonObject binding = bindingValue.toObject();
+            const QByteArray hash = binding.value(
+                QStringLiteral("pixelSha256")).toString()
+                .toLatin1().toLower();
+            if(binding.value(QStringLiteral("variant")).toString()
+                    == QStringLiteral("hd"))
+                hdByNamespace[name].insert(hash);
+            else
+                nonHdByNamespace[name].insert(hash);
+        }
+    }
+
+    CValidationReport report;
+    const QVector<STerrainGlobalMaterialFamily> families =
+        CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    int materialSources = 0;
+    for(const STerrainGlobalMaterialFamily& family : families)
+        for(const QVector<STerrainGlobalMaterialSource>* list :
+                {&family.sources, &family.thumbnailSources})
+            for(const STerrainGlobalMaterialSource& source : *list)
+            {
+                ++materialSources;
+                const QString name = source.mprNamespace.toCaseFolded();
+                QVERIFY2(hdByNamespace.value(name).contains(
+                             source.atlasPixelSha256),
+                         qPrintable(QStringLiteral(
+                             "Global Modern material source is not an approved HD binding: %1 %2")
+                             .arg(source.mprNamespace,
+                                  QString::fromLatin1(
+                                      source.atlasPixelSha256))));
+                QSet<QByteArray> originalOnly = nonHdByNamespace.value(name);
+                originalOnly.subtract(hdByNamespace.value(name));
+                QVERIFY2(!originalOnly.contains(source.atlasPixelSha256),
+                         "Original-tier artwork can enter HD Modern generation");
+            }
+    QVERIFY(materialSources > 0);
+
+    int transitionSources = 0;
+    for(const STerrainGlobalTransitionSource& source :
+            CTerrainAtlasPresetCatalog::globalAuthoredTransitions(&report))
+    {
+        ++transitionSources;
+        const QString name = source.mprNamespace.toCaseFolded();
+        QVERIFY2(hdByNamespace.value(name).contains(
+                     source.atlasPixelSha256),
+                 qPrintable(QStringLiteral(
+                     "Global authored transition is not an approved HD binding: %1:%2 %3")
+                     .arg(source.mprNamespace).arg(source.slot)
+                     .arg(QString::fromLatin1(source.atlasPixelSha256))));
+        QSet<QByteArray> originalOnly = nonHdByNamespace.value(name);
+        originalOnly.subtract(hdByNamespace.value(name));
+        QVERIFY2(!originalOnly.contains(source.atlasPixelSha256),
+                 "Original-tier authored transition can enter HD Modern painting");
+    }
+    QVERIFY(transitionSources > 0);
+}
+
 void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBinding()
 {
     const QByteArray source = viewSource();
@@ -10073,6 +10149,15 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
              "Palette construction no longer reuses already-loaded current-map material artwork");
     QVERIFY2(!rebuild.contains("const QImage source = loadBoundGlobalUniformSource("),
              "Palette construction again performs foreign exact-archive verification eagerly");
+    QVERIFY2(rebuild.contains("startDeferredGlobalTerrainPaletteHydration("),
+             "Foreign reviewed-HD thumbnails are not hydrated after the visible map frame");
+
+    QVERIFY2(source.contains("m_terrainGlobalHydrationPool->setMaxThreadCount(2)"),
+             "Foreign terrain hydration is not kept on a bounded worker pool");
+    QVERIFY2(source.contains("QtConcurrent::run(\n            m_terrainGlobalHydrationPool"),
+             "Each foreign terrain binding is not verified off the UI thread");
+    QVERIFY2(source.contains("applyDeferredGlobalTerrainPaletteHydration("),
+             "Deferred exact-binding results are never published back to the palettes");
 
     const int finalizeStart = source.indexOf(
         "void CView::finalizeVirtualTerrainAtlas()");
@@ -11343,8 +11428,7 @@ void EnduranceDocumentTests::modernDraftAdoptionStagesPairBeforeLiveMutation()
     const QByteArray adoption = source.mid(start, end - start);
     const int binding = adoption.indexOf("findEmbeddedArchive(");
     const int semantic = adoption.indexOf(
-        "restoreTerrainSemanticFieldFromArchive(\n"
-        "           reopenedDocument, expectedProfile, &reopenedTerrain");
+        "restoreTerrainSemanticFieldFromArchive(");
     const int firstLiveMutation = adoption.indexOf(
         "m_pLand->previewCanonicalSector(");
     QVERIFY2(binding >= 0 && semantic > binding
