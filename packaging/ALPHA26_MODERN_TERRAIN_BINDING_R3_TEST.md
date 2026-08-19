@@ -9,6 +9,9 @@ regression.
   whose decoded SHA-256 matches an approved semantic preset binding. A
   same-named MMP page from another or modified RES can no longer be assigned
   approved material classification or provenance.
+- Uniform material anchors used by brush thumbnails and canonical blend
+  generation now use the same exact-atlas binding. A modified same-named page
+  can no longer supply misclassified base artwork to Modern painting.
 - Exact global atlases are cached with their archive path, size, modification
   time, namespace, shape, and decoded atlas identity. A changed resource fails
   closed and falls back to canonical generation instead of reusing stale or
@@ -37,4 +40,3 @@ An installed atlas revision that is not one of the reviewed preset bindings is
 deliberately not used as global authored artwork. If no approved configured
 archive supplies an exact transition, Modern paint may generate the canonical
 blend instead.
-
