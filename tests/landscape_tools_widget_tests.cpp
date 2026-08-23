@@ -6,6 +6,7 @@
 #include <QPointer>
 #include <QSignalSpy>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -24,6 +25,7 @@ private slots:
     void deferredTerrainThumbnailRefreshesWithoutInitialsFallback();
     void manualPaletteIsRequestedOnlyWhenItsTabIsOpened();
     void paintHelpLivesOnRelevantControls();
+    void overlaySurfaceModeLocksTileTargetAndOverlayLayer();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
 
@@ -307,6 +309,44 @@ void LandscapeToolsWidgetTests::paintHelpLivesOnRelevantControls()
     }
     QVERIFY2(brushShortcutShown,
              "The brush-size shortcut is not shown beside its slider");
+}
+
+void LandscapeToolsWidgetTests::overlaySurfaceModeLocksTileTargetAndOverlayLayer()
+{
+    CLandscapeTools tools;
+    tools.resize(730, 1500);
+    tools.setEditingEnabled(true, false);
+
+    QToolButton* tile = tools.findChild<QToolButton*>(
+        QStringLiteral("tilePaintTarget"));
+    QToolButton* vertex = tools.findChild<QToolButton*>(
+        QStringLiteral("vertexPaintTarget"));
+    QTabWidget* modernLayers = tools.findChild<QTabWidget*>(
+        QStringLiteral("modernMaterialLayerTabs"));
+    QTabWidget* classicLayers = tools.findChild<QTabWidget*>(
+        QStringLiteral("classicMaterialLayerTabs"));
+    QVERIFY(tile);
+    QVERIFY(vertex);
+    QVERIFY(modernLayers);
+    QVERIFY(classicLayers);
+
+    vertex->setChecked(true);
+    QCOMPARE(tools.paintTargetMode(), ETerrainPaintTargetMode::Vertex);
+    tools.activateMode(ELandscapeEditMode::OverlaySurface, false);
+
+    QCOMPARE(tools.paintTargetMode(), ETerrainPaintTargetMode::Tile);
+    QVERIFY(tile->isChecked());
+    QVERIFY(!vertex->isEnabled());
+    QCOMPARE(modernLayers->currentIndex(), 1);
+    QCOMPARE(classicLayers->currentIndex(), 1);
+    QVERIFY(!modernLayers->tabBar()->isEnabled());
+    QVERIFY(!classicLayers->tabBar()->isEnabled());
+
+    tools.activateMode(ELandscapeEditMode::TilePaint, false);
+    QCOMPARE(tools.paintTargetMode(), ETerrainPaintTargetMode::Vertex);
+    QVERIFY(vertex->isEnabled());
+    QVERIFY(modernLayers->tabBar()->isEnabled());
+    QVERIFY(classicLayers->tabBar()->isEnabled());
 }
 
 QTEST_MAIN(LandscapeToolsWidgetTests)

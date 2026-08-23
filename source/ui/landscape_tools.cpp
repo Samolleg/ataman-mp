@@ -25,6 +25,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTabWidget>
+#include <QTabBar>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -843,6 +844,24 @@ void CLandscapeTools::updateModeVisibility()
         const QSignalBlocker blocker(m_classicMaterialTabs);
         m_classicMaterialTabs->setCurrentIndex(overlayMode ? 1 : 0);
     }
+    m_materialTabs->tabBar()->setEnabled(!overlaySurface);
+    m_classicMaterialTabs->tabBar()->setEnabled(!overlaySurface);
+    if(overlaySurface)
+    {
+        const QSignalBlocker tileBlocker(m_tilePaintTarget);
+        const QSignalBlocker vertexBlocker(m_vertexPaintTarget);
+        m_tilePaintTarget->setChecked(true);
+        m_vertexPaintTarget->setChecked(false);
+    }
+    else if(!manualTileSelectionEnabled())
+    {
+        const int savedTarget = qBound(0, QSettings().value(
+            QStringLiteral("ui/landscape/paintTargetMode"), 1).toInt(), 1);
+        const QSignalBlocker tileBlocker(m_tilePaintTarget);
+        const QSignalBlocker vertexBlocker(m_vertexPaintTarget);
+        m_tilePaintTarget->setChecked(savedTarget == 0);
+        m_vertexPaintTarget->setChecked(savedTarget == 1);
+    }
     m_overlaySurfaceOperation->setVisible(overlaySurface);
     m_overlaySurfaceOperationLabel->setVisible(overlaySurface);
     const bool activating = overlaySurface
@@ -863,6 +882,12 @@ void CLandscapeTools::updateModeVisibility()
     m_deltaLabel->setVisible(raiseLower || noise);
     m_paintModeTabs->setEnabled((!overlaySurface || activating)
                                 && !paintIssueMarkingEnabled());
+    const bool manual = manualTileSelectionEnabled();
+    if(m_tilePaintTarget)
+        m_tilePaintTarget->setEnabled(!paintIssueMarkingEnabled() && !manual);
+    if(m_vertexPaintTarget)
+        m_vertexPaintTarget->setEnabled(!paintIssueMarkingEnabled()
+                                        && !manual && !overlaySurface);
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {
@@ -974,7 +999,8 @@ void CLandscapeTools::setPaintPaletteMode(ETerrainPaintPaletteMode mode)
 }
 ETerrainPaintTargetMode CLandscapeTools::paintTargetMode() const
 {
-    if(manualTileSelectionEnabled())
+    if(editMode() == ELandscapeEditMode::OverlaySurface
+       || manualTileSelectionEnabled())
         return ETerrainPaintTargetMode::Tile;
     return m_vertexPaintTarget && m_vertexPaintTarget->isChecked()
         ? ETerrainPaintTargetMode::Vertex : ETerrainPaintTargetMode::Tile;
@@ -1145,8 +1171,10 @@ void CLandscapeTools::updatePaintIssueUi()
             ? tr("MARKING: %1").arg(category.toUpper())
             : tr("Mark bad tiles on map"));
     if(m_paintRadius) m_paintRadius->setEnabled(!marking);
+    const bool overlaySurface = editMode() == ELandscapeEditMode::OverlaySurface;
     if(m_tilePaintTarget) m_tilePaintTarget->setEnabled(!marking && !manual);
-    if(m_vertexPaintTarget) m_vertexPaintTarget->setEnabled(!marking && !manual);
+    if(m_vertexPaintTarget)
+        m_vertexPaintTarget->setEnabled(!marking && !manual && !overlaySurface);
     if(m_paintModeTabs) m_paintModeTabs->setEnabled(!marking);
     updatePaintShapeUi();
 }

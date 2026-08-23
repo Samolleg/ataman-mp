@@ -25,6 +25,10 @@ private slots:
     void advancesAuthoredOverlayTileFrames();
     void mprSettingsUsesTopLevelWindowAndOverlaySlotToggle();
     void mprMaterialEditorReloadsSelectionAndDoesNotStealEnter();
+    void workingAtlasPreviewUpdatesFlipbookAtlasGrid();
+    void incrementalOverlayRefreshRecomputesFlipbookMetadata();
+    void mprMaterialEditorUsesLiveWorkingAtlasSlotCount();
+    void overlayActivationUsesExactWorkingAtlasMaterial();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -196,6 +200,83 @@ void OverlayMaterialAnimationTests::advancesAuthoredOverlayTileFrames()
              "Water rendering must provide the atlas page geometry to the shader");
 }
 
+void OverlayMaterialAnimationTests::workingAtlasPreviewUpdatesFlipbookAtlasGrid()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/landscape.cpp") && repository.cdUp()) {}
+    QFile landscapeFile(repository.absoluteFilePath("source/render/landscape.cpp"));
+    QVERIFY(landscapeFile.open(QIODevice::ReadOnly));
+    const QByteArray landscape = landscapeFile.readAll();
+
+    QVERIFY2(landscape.contains("m_renderTextureCount = textureCount;"),
+             "Uploading an expanded working atlas must update the atlas grid used by flipbook frame offsets");
+    QVERIFY2(landscape.contains("m_renderTextureCount = qMax(1, int(m_header.nTexture));"),
+             "Clearing a working atlas preview must restore the published flipbook atlas grid");
+}
+
+void OverlayMaterialAnimationTests::incrementalOverlayRefreshRecomputesFlipbookMetadata()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/sector.cpp") && repository.cdUp()) {}
+    QFile sectorFile(repository.absoluteFilePath("source/render/sector.cpp"));
+    QVERIFY(sectorFile.open(QIODevice::ReadOnly));
+    const QByteArray sector = sectorFile.readAll();
+    const int updateStart = sector.indexOf("void CSector::updateWaterTiles(");
+    const int updateEnd = sector.indexOf("void CSector::updateWaterDrawData(", updateStart);
+    QVERIFY(updateStart >= 0);
+    QVERIFY(updateEnd > updateStart);
+    const QByteArray update = sector.mid(updateStart, updateEnd - updateStart);
+
+    QVERIFY2(update.contains("overlayTileAnimation("),
+             "Changing an overlay tile incrementally must recompute its authored flipbook range");
+    QVERIFY2(update.contains("target.tileAnimation"),
+             "The recomputed flipbook range must be written to every changed overlay vertex");
+}
+
+void OverlayMaterialAnimationTests::mprMaterialEditorUsesLiveWorkingAtlasSlotCount()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    const QByteArray view = viewFile.readAll();
+    const int editorStart = view.indexOf("Atlas tile animation records");
+    const int editorEnd = view.indexOf("QWidget* identityPage", editorStart);
+    QVERIFY(editorStart >= 0);
+    QVERIFY(editorEnd > editorStart);
+    const QByteArray editor = view.mid(editorStart, editorEnd - editorStart);
+
+    QVERIFY2(editor.contains("activeTerrainAtlasSlotCount()"),
+             "Material Editor must validate animation records against the live working atlas");
+    QVERIFY2(!editor.contains("m_mprDocument.mapInfo().tileCount"),
+             "Material Editor still rejects valid appended working-atlas slots against the old MPR count");
+}
+
+void OverlayMaterialAnimationTests::overlayActivationUsesExactWorkingAtlasMaterial()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    QByteArray view = viewFile.readAll();
+    view.replace("\r\n", "\n");
+    const int commandStart = view.indexOf(
+        "if(!bLand && m_landscapeTools->overlaySurfaceOperation()");
+    const int commandEnd = view.indexOf(
+        "const ETerrainTileLayer layer = bLand", commandStart);
+    QVERIFY(commandStart >= 0);
+    QVERIFY(commandEnd > commandStart);
+    const QByteArray activation = view.mid(
+        commandStart, commandEnd - commandStart);
+
+    QVERIFY2(activation.contains("realizeWorkingTerrainSignature("),
+             "Modern Add Overlay must realize the selected exact uniform signature in the live working atlas");
+    QVERIFY2(activation.contains("selectWorkingPaintVariantWithRuntimeType("),
+             "Add Overlay must retain the selected family's reviewed runtime terrain type");
+    QVERIFY2(!activation.contains("m_terrainMaterialRepresentatives.value"),
+             "Add Overlay still relies on the palette representative map that global palette construction clears");
+}
+
 void OverlayMaterialAnimationTests::mapLifetimeResetsAnimationState()
 {
     QDir repository(QDir::current());
@@ -321,12 +402,14 @@ void OverlayMaterialAnimationTests::mprMaterialEditorReloadsSelectionAndDoesNotS
     QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
     QVERIFY(viewFile.open(QIODevice::ReadOnly));
     const QByteArray view = viewFile.readAll();
+    QByteArray normalizedView = view;
+    normalizedView.replace("\r\n", "\n");
 
     QVERIFY2(view.contains("showMaterialSlots->setAutoDefault(false)"),
              "Enter in a material editor must not activate or focus the slot-label toggle");
     QVERIFY2(!view.contains("else loadSelectedMaterial();"),
              "Rebuilding a non-empty material table must also refresh the editor fields");
-    QVERIFY2(view.contains("materialTable->selectRow(qBound(0, selected, draftMaterials->size() - 1));\n        loadSelectedMaterial();"),
+    QVERIFY2(normalizedView.contains("materialTable->selectRow(qBound(0, selected, draftMaterials->size() - 1));\n        loadSelectedMaterial();"),
              "The selected material values and type must reload even when the row number stays unchanged");
     QVERIFY2(view.contains("Effective geometric amplitude is world Wind strength x 0.3 x this value"),
              "Wave multiplier help must explain that zero world wind means zero geometric motion");

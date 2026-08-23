@@ -1447,6 +1447,10 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
         candidateStart, candidateEnd - candidateStart);
     QVERIFY2(candidate.contains("terrainMapTestNeedsWorkingAtlasPackage("),
              "Test Current still decides atlas staging from page growth alone");
+    QVERIFY2(candidate.contains("stageWorkingAtlas && !terrainAtlasResource"),
+             "An MPR-only candidate can still omit its required unsaved working atlas");
+    QVERIFY2(candidate.contains("mpr.test.atlas.destination"),
+             "The omitted working-atlas failure is not reported distinctly");
 
     const STerrainPublicationLayerPlan landOnly =
         terrainPublicationLayerPlan(true, false);

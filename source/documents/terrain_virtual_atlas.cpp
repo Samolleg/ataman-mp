@@ -1448,6 +1448,15 @@ void refreshFinalizationStableIdentity(
         qToLittleEndian<quint16>(packed, reinterpret_cast<uchar*>(bytes));
         stable.addData(bytes, 2);
     }
+    for(const STerrainAtlasAnimationRange& animation : finalization->animations)
+    {
+        char bytes[4];
+        qToLittleEndian<quint16>(animation.tileIndex,
+            reinterpret_cast<uchar*>(bytes));
+        qToLittleEndian<quint16>(animation.frameCount,
+            reinterpret_cast<uchar*>(bytes + 2));
+        stable.addData(bytes, 4);
+    }
     for(quint16 packed : pinnedPackedTiles)
     {
         char bytes[2];
@@ -3236,7 +3245,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     const QVector<quint16>& preferredPackedCells,
     const QVector<qint32>& preferredPaintMaterials,
     const CTerrainTransitionCatalog* authoredDecodeCatalog,
-    const QVector<bool>& preservePreferredPackedCells)
+    const QVector<bool>& preservePreferredPackedCells,
+    const QVector<STerrainAtlasAnimationRange>& animations)
 {
     STerrainAtlasFinalization result;
     result.capacityLimit = capacityLimit;
@@ -3267,10 +3277,15 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     // atlases intentionally reuse identical pixels for distinct gameplay
     // terrain classes, so those aliases must not be deduplicated together.
     QMap<QByteArray, QVector<int>> exactAuthoredOutputs;
+    // Flipbooks address contiguous physical atlas slots. Their phases must not
+    // collapse into one another or become aliases for visually identical static
+    // tiles, otherwise compaction changes both timing and unrelated terrain.
+    QSet<int> animatedOutputSlots;
     const CTerrainTransitionCatalog& decodeCatalog = authoredDecodeCatalog
         ? *authoredDecodeCatalog : m_catalog;
     const auto addAuthoredOutput = [&](int sourceSlot,
-                                       const QString& rangeError) -> bool
+                                       const QString& rangeError,
+                                       bool animationPhase = false) -> bool
     {
         if(authoredOutput.contains(sourceSlot))
             return true;
@@ -3318,6 +3333,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         const QVector<int> matchingHashes = exactAuthoredOutputs.value(dedupeKey);
         for(int outputSlot : matchingHashes)
         {
+            if(animationPhase || animatedOutputSlots.contains(outputSlot))
+                continue;
             const STerrainFinalizedTile& retained = result.tiles.at(outputSlot);
             if(retained.pixels != candidate.pixels)
                 continue; // SHA-256 collision: preserve both physical tiles.
@@ -3358,8 +3375,72 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         denseImages.append(candidate.pixels);
         result.tiles.append(candidate);
         exactAuthoredOutputs[dedupeKey].append(outputSlot);
+        if(animationPhase)
+            animatedOutputSlots.insert(outputSlot);
         return true;
     };
+    // Reserve every live flipbook before cells and pinned layers are compacted.
+    // Zero-frame records remain editable settings and therefore still pin their
+    // start slot. Allocate the union in source-slot order first: overlapping
+    // records then share the same physical phases without record order creating
+    // an artificial gap in either remapped range.
+    QSet<int> animatedSourceSlots;
+    for(int animationIndex = 0; animationIndex < animations.size();
+        ++animationIndex)
+    {
+        const STerrainAtlasAnimationRange& animation = animations.at(animationIndex);
+        const int sourceStart = int(animation.tileIndex);
+        const int physicalCount = qMax(1, int(animation.frameCount));
+        const int liveSourceSlotCount = sourceTileTypes.isEmpty()
+            ? m_authoredTiles.size()
+            : qMin(m_authoredTiles.size(), sourceTileTypes.size());
+        if(sourceStart < 0
+           || sourceStart + physicalCount > liveSourceSlotCount)
+        {
+            result.error = QStringLiteral(
+                "Animated terrain range %1 points outside the live working atlas.")
+                .arg(animationIndex);
+            if(report) report->add("terrain.finalized_animation_range",
+                EValidationSeverity::Error, result.error,
+                QStringLiteral("start %1, frames %2")
+                    .arg(sourceStart).arg(animation.frameCount));
+            return result;
+        }
+        for(int phase = 0; phase < physicalCount; ++phase)
+            animatedSourceSlots.insert(sourceStart + phase);
+    }
+    QVector<int> orderedAnimatedSourceSlots = animatedSourceSlots.values().toVector();
+    std::sort(orderedAnimatedSourceSlots.begin(), orderedAnimatedSourceSlots.end());
+    for(int sourceSlot : orderedAnimatedSourceSlots)
+        if(!addAuthoredOutput(sourceSlot, QStringLiteral(
+               "An animated terrain frame points outside the live working atlas."),
+               true))
+            return result;
+
+    for(int animationIndex = 0; animationIndex < animations.size();
+        ++animationIndex)
+    {
+        const STerrainAtlasAnimationRange& animation = animations.at(animationIndex);
+        const int sourceStart = int(animation.tileIndex);
+        const int physicalCount = qMax(1, int(animation.frameCount));
+        const int outputStart = authoredOutput.value(sourceStart, -1);
+        for(int phase = 1; phase < physicalCount; ++phase)
+            if(authoredOutput.value(sourceStart + phase, -1)
+               != outputStart + phase)
+            {
+                result.error = QStringLiteral(
+                    "Overlapping animated terrain ranges cannot be preserved as one contiguous physical sequence.");
+                if(report) report->add("terrain.finalized_animation_contiguity",
+                    EValidationSeverity::Error, result.error,
+                    QStringLiteral("animation %1, phase %2")
+                        .arg(animationIndex).arg(phase));
+                return result;
+            }
+        STerrainAtlasAnimationRange remapped;
+        remapped.tileIndex = quint16(outputStart);
+        remapped.frameCount = animation.frameCount;
+        result.animations.append(remapped);
+    }
     for(int y = 0; y < field.tileHeight(); ++y)
     {
         for(int x = 0; x < field.tileWidth(); ++x)
@@ -3550,43 +3631,36 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
         char bytes[4];qToLittleEndian<qint32>(type,reinterpret_cast<uchar*>(bytes));
         replacementMp.append(bytes,4);
     }
-    // Animated-terrain records address physical atlas slots. Copying them
-    // byte-for-byte after compaction makes an old animation start point at a
-    // newly generated material, which then cycles through unrelated tiles in
-    // game. Preserve only ranges whose complete authored frame sequence was
-    // retained and remains contiguous after remapping. Generated/imported
-    // exact tiles are deliberately static.
+    // Finalization pins every live flipbook phase before ordinary compaction;
+    // these are the resulting physical ranges. Never infer them afterward from
+    // source slot numbers or silently discard a range that happened to move.
     QByteArray remappedAnimations;
-    quint32 remappedAnimationCount=0;
-    for(quint32 index=0;index<map.animatedTileCount;++index)
+    for(int index = 0; index < finalization.animations.size(); ++index)
     {
-        const int offset=oldTailOffset+int(index)*4;
-        const quint16 oldStart=qFromLittleEndian<quint16>(
-            reinterpret_cast<const uchar*>(originalMp.constData()+offset));
-        const quint16 phaseCount=qFromLittleEndian<quint16>(
-            reinterpret_cast<const uchar*>(originalMp.constData()+offset+2));
-        bool retain=phaseCount>0;
-        int newStart=-1;
-        for(int phase=0;retain&&phase<int(phaseCount);++phase)
+        const STerrainAtlasAnimationRange& animation =
+            finalization.animations.at(index);
+        const quint64 physicalCount = qMax<quint64>(1, animation.frameCount);
+        if(quint64(animation.tileIndex) + physicalCount
+             > quint64(finalization.tileTypes.size()))
         {
-            const int oldSlot=int(oldStart)+phase;
-            if(!finalization.authoredSlotRemap.contains(oldSlot))
-            { retain=false; break; }
-            const int mapped=finalization.authoredSlotRemap.value(oldSlot);
-            if(phase==0)newStart=mapped;
-            else if(mapped!=newStart+phase)retain=false;
+            result.error = QStringLiteral(
+                "A finalized animated terrain range points outside the compacted atlas.");
+            if(report) report->add("terrain.package_animation_range",
+                EValidationSeverity::Error, result.error,
+                QStringLiteral("animation %1, start %2, frames %3")
+                    .arg(index).arg(animation.tileIndex)
+                    .arg(animation.frameCount));
+            return result;
         }
-        if(!retain)continue;
         char bytes[4];
-        qToLittleEndian<quint16>(quint16(newStart),
+        qToLittleEndian<quint16>(animation.tileIndex,
             reinterpret_cast<uchar*>(bytes));
-        qToLittleEndian<quint16>(phaseCount,
+        qToLittleEndian<quint16>(animation.frameCount,
             reinterpret_cast<uchar*>(bytes+2));
         remappedAnimations.append(bytes,4);
-        ++remappedAnimationCount;
     }
     replacementMp.append(remappedAnimations);
-    replacementMp.append(originalMp.mid(oldAnimationEnd));
+    replacementMp.append(originalMp.mid(int(map.parsedSize)));
     qToLittleEndian<quint32>(quint32(finalization.textureCount),
         reinterpret_cast<uchar*>(replacementMp.data()+16));
     qToLittleEndian<quint32>(quint32(finalization.pages.front().width()),
@@ -3595,7 +3669,7 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
         reinterpret_cast<uchar*>(replacementMp.data()+24));
     qToLittleEndian<quint32>(quint32(finalization.tiles.front().pixels.width()),
         reinterpret_cast<uchar*>(replacementMp.data()+28));
-    qToLittleEndian<quint32>(remappedAnimationCount,
+    qToLittleEndian<quint32>(quint32(finalization.animations.size()),
         reinterpret_cast<uchar*>(replacementMp.data()+34));
     CMprEditTransaction transaction(QStringLiteral("Finalize isolated terrain atlas"));
     for(const SMprArchiveMember& member:source.members())
@@ -3681,10 +3755,21 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
     }
     CMprDocument reopenedMpr;CValidationReport reopenReport;
     CResArchiveDocument reopenedRes;
+    QVector<SMprAnimatedTileRecord> expectedAnimations;
+    expectedAnimations.reserve(finalization.animations.size());
+    for(const STerrainAtlasAnimationRange& animation : finalization.animations)
+    {
+        SMprAnimatedTileRecord record;
+        record.tileIndex = animation.tileIndex;
+        record.frameCount = animation.frameCount;
+        expectedAnimations.append(record);
+    }
     if(!reopenedMpr.loadBytes(result.mprBytes,QStringLiteral("portable.mpr"),&reopenReport)
        ||reopenReport.hasErrors()
        ||reopenedMpr.mapInfo().textureCount!=quint32(finalization.textureCount)
        ||reopenedMpr.mapInfo().tileCount!=quint32(finalization.tileTypes.size())
+       ||reopenedMpr.mapInfo().materials!=source.mapInfo().materials
+       ||reopenedMpr.mapInfo().animatedTiles!=expectedAnimations
        ||!reopenedRes.loadBytes(archiveBytes,QStringLiteral("portable.res"),&errors)){
         result.error=QStringLiteral("The portable atlas package failed fresh reopen.");return result;
     }
@@ -3702,13 +3787,24 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
     const STerrainAtlasFinalization& finalization,
     ETerrainTileLayer layer, CValidationReport* report)
 {
+    return buildPortablePackage(source, editedTerrain,
+        source.mapInfo().materials, finalization, layer, report);
+}
+
+STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
+    const CMprDocument& source, const CTerrainEditModel& editedTerrain,
+    const QVector<SMprMaterialRecord>& materials,
+    const STerrainAtlasFinalization& finalization,
+    ETerrainTileLayer layer, CValidationReport* report)
+{
     STerrainPortableAtlasPackage result;
     CValidationReport stageReport;
     CMprEditTransaction transaction(QStringLiteral(
         "Stage every live terrain edit before atlas finalization"));
     if(!editedTerrain.appendSectorEdits(&transaction, &stageReport)
-       || !source.appendMaxZEdit(editedTerrain.maxZ(), &transaction,
-                                 &stageReport)
+       || !source.appendMapParametersEdit(
+              editedTerrain.maxZ(), materials,
+              source.mapInfo().animatedTiles, &transaction, &stageReport)
        || stageReport.hasErrors())
     {
         if(report)
@@ -3761,6 +3857,19 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
     const QVector<QByteArray>& authoredPagePayloads,
     CValidationReport* report)
 {
+    return buildWorkingPreviewPackage(
+        source, activeTiles, activeTileTypes, authoredPagePayloads,
+        source.mapInfo().materials, source.mapInfo().animatedTiles, report);
+}
+
+STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
+    const CMprDocument& source, const QVector<QImage>& activeTiles,
+    const QVector<qint32>& activeTileTypes,
+    const QVector<QByteArray>& authoredPagePayloads,
+    const QVector<SMprMaterialRecord>& materials,
+    const QVector<SMprAnimatedTileRecord>& animations,
+    CValidationReport* report)
+{
     STerrainPortableAtlasPackage result;
     const SMprMapInfo& map = source.mapInfo();
     if(!map.valid || activeTiles.isEmpty() || activeTiles.size() % 64 != 0
@@ -3768,7 +3877,8 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
        || authoredPagePayloads.size() != int(map.textureCount)
        || activeTiles.size() < int(map.tileCount)
        || activeTileTypes.size() < int(map.tileCount)
-       || activeTileTypes.size() > activeTiles.size())
+       || activeTileTypes.size() > activeTiles.size()
+       || materials.size() > int(std::numeric_limits<quint16>::max()))
     {
         result.error = QStringLiteral(
             "The working terrain atlas does not match the staged MPR baseline.");
@@ -3795,12 +3905,41 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
             return result;
         }
 
-    const QByteArray originalMp = source.memberPayload(map.memberName);
-    const int tileTypeOffset = 38 + int(map.materialCount) * 44;
-    const int oldTailOffset = tileTypeOffset + int(map.tileCount) * 4;
-    if(tileTypeOffset < 38 || oldTailOffset > originalMp.size())
+    // Reuse the canonical parameter validator for every live material value.
+    // Its source animation table is known to fit the persisted baseline; live
+    // working-slot animations are validated below against activeTileTypes.
+    CMprEditTransaction parameterValidation(QStringLiteral(
+        "Validate live working-atlas materials"));
+    if(!source.appendMapParametersEdit(
+           map.maxZ, materials, map.animatedTiles,
+           &parameterValidation, report))
     {
-        result.error = QStringLiteral("The staged MP tile-type array is truncated.");
+        result.error = QStringLiteral(
+            "The live material table is invalid for the working atlas.");
+        return result;
+    }
+    for(int index = 0; index < animations.size(); ++index)
+    {
+        const SMprAnimatedTileRecord& animation = animations.at(index);
+        const quint64 physicalCount = qMax<quint64>(1, animation.frameCount);
+        if(quint64(animation.tileIndex) + physicalCount
+             > quint64(activeTileTypes.size()))
+        {
+            result.error = QStringLiteral(
+                "Animated terrain range %1 points outside the live working atlas.")
+                .arg(index);
+            if(report) report->add("terrain.working_animation_range",
+                EValidationSeverity::Error, result.error,
+                QStringLiteral("start %1, frames %2")
+                    .arg(animation.tileIndex).arg(animation.frameCount));
+            return result;
+        }
+    }
+
+    const QByteArray originalMp = source.memberPayload(map.memberName);
+    if(originalMp.size() < 38 || map.parsedSize > quint64(originalMp.size()))
+    {
+        result.error = QStringLiteral("The staged MP parameter table is truncated.");
         return result;
     }
     const QVector<qint32> tileTypes = activeTileTypes;
@@ -3814,14 +3953,28 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
                 EValidationSeverity::Error, result.error);
             return result;
         }
-    QByteArray replacementMp = originalMp.left(tileTypeOffset);
-    for(qint32 type : tileTypes)
+    QByteArray replacementMp = originalMp.left(38);
+    qToLittleEndian<quint16>(quint16(materials.size()),
+        reinterpret_cast<uchar*>(replacementMp.data() + 32));
+    qToLittleEndian<quint32>(quint32(animations.size()),
+        reinterpret_cast<uchar*>(replacementMp.data() + 34));
     {
-        char bytes[4];
-        qToLittleEndian<qint32>(type, reinterpret_cast<uchar*>(bytes));
-        replacementMp.append(bytes, 4);
+        QDataStream stream(&replacementMp, QIODevice::WriteOnly | QIODevice::Append);
+        stream.setByteOrder(QDataStream::LittleEndian);
+        stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+        for(const SMprMaterialRecord& material : materials)
+            stream << qint32(material.type)
+                   << material.red << material.green << material.blue
+                   << material.opacity << material.selfIllumination
+                   << material.waveMultiplier << material.warpSpeed
+                   << material.reserved1 << material.reserved2
+                   << material.reserved3;
+        for(qint32 type : tileTypes)
+            stream << type;
+        for(const SMprAnimatedTileRecord& animation : animations)
+            stream << animation.tileIndex << animation.frameCount;
     }
-    replacementMp.append(originalMp.mid(oldTailOffset));
+    replacementMp.append(originalMp.mid(int(map.parsedSize)));
     qToLittleEndian<quint32>(quint32(textureCount),
         reinterpret_cast<uchar*>(replacementMp.data() + 16));
     qToLittleEndian<quint32>(quint32(tileSize.width() * 8),
@@ -3949,6 +4102,8 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
        || reopenReport.hasErrors()
        || reopenedMpr.mapInfo().textureCount != quint32(textureCount)
        || reopenedMpr.mapInfo().tileCount != quint32(tileTypes.size())
+       || reopenedMpr.mapInfo().materials != materials
+       || reopenedMpr.mapInfo().animatedTiles != animations
        || !reopenedRes.loadBytes(result.resourceArchiveBytes,
                                  QStringLiteral("working.res"), &errors))
     {

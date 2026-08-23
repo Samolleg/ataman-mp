@@ -136,6 +136,7 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     delete m_previewAtlasTexture;
     m_previewAtlasTexture = replacement;
     m_texture = replacement;
+    m_renderTextureCount = textureCount;
     if(textureCount != m_previewAtlasTextureCount
        || columns != m_previewAtlasColumns)
     {
@@ -154,6 +155,7 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
 void CLandscape::clearPreviewTerrainAtlas()
 {
     m_texture = m_baseAtlasTexture;
+    m_renderTextureCount = qMax(1, int(m_header.nTexture));
     if(m_previewAtlasTextureCount > 0 && QOpenGLContext::currentContext())
         for(QVector<CSector*>& row : m_aSector)
             for(CSector* sector : row)

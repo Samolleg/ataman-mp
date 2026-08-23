@@ -1052,6 +1052,23 @@ QVector<SAnimTile> renderAnimatedTiles(const QVector<SMprAnimatedTileRecord>& re
     return result;
 }
 
+void protectTerrainAnimationRanges(
+    const QVector<SMprAnimatedTileRecord>& records, int activeSlotCount,
+    QSet<int>* protectedSlots)
+{
+    if(!protectedSlots || activeSlotCount <= 0)
+        return;
+    for(const SMprAnimatedTileRecord& record : records)
+    {
+        const int start = int(record.tileIndex);
+        const int physicalCount = qMax(1, int(record.frameCount));
+        if(start < 0 || start + physicalCount > activeSlotCount)
+            continue;
+        for(int phase = 0; phase < physicalCount; ++phase)
+            protectedSlots->insert(start + phase);
+    }
+}
+
 QString openGlErrorName(GLenum error)
 {
     switch(error)
@@ -8398,13 +8415,33 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
 
     finishSculptStroke();
     endTileBrushGroup();
+    const bool workingAtlasAvailable = m_workingTerrainAtlas
+        && m_workingTerrainAtlas->isValid();
+    const bool stageWorkingAtlas = terrainMapTestNeedsWorkingAtlasPackage(
+        workingAtlasAvailable,
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
+        workingAtlasAvailable ? m_workingTerrainAtlas->activeTextureCount() : 0,
+        int(m_mprDocument.mapInfo().textureCount));
+    if(stageWorkingAtlas && !terrainAtlasResource)
+    {
+        if(report)
+            report->add(QStringLiteral("mpr.test.atlas.destination"),
+                        EValidationSeverity::Error,
+                        tr("The current terrain uses an unsaved working atlas, but this operation cannot preserve its paired RES resource."));
+        return false;
+    }
     CMprEditTransaction transaction(tr("Stage current landscape for map test"));
     CValidationReport localReport;
     if(!m_terrainEdit.appendSectorEdits(&transaction, &localReport)
-       || !m_mprDocument.appendMapParametersEdit(
-              m_terrainEdit.maxZ(), m_mprMaterials, m_mprAnimatedTiles,
-              &transaction, &localReport)
-       || localReport.hasErrors() || transaction.isEmpty())
+       || !(stageWorkingAtlas
+              ? m_mprDocument.appendMaxZEdit(
+                    m_terrainEdit.maxZ(), &transaction, &localReport)
+              : m_mprDocument.appendMapParametersEdit(
+                    m_terrainEdit.maxZ(), m_mprMaterials,
+                    m_mprAnimatedTiles, &transaction, &localReport))
+       || localReport.hasErrors()
+       || (transaction.isEmpty() && !stageWorkingAtlas))
     {
         if(report)
             for(const SValidationFinding& finding : localReport.findings())
@@ -8434,14 +8471,6 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
         return false;
     }
     *data = validation.candidateBytes;
-    const bool workingAtlasAvailable = m_workingTerrainAtlas
-        && m_workingTerrainAtlas->isValid();
-    const bool stageWorkingAtlas = terrainMapTestNeedsWorkingAtlasPackage(
-        workingAtlasAvailable,
-        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
-        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
-        workingAtlasAvailable ? m_workingTerrainAtlas->activeTextureCount() : 0,
-        int(m_mprDocument.mapInfo().textureCount));
     if(terrainAtlasResource && stageWorkingAtlas)
     {
         CMprDocument stagedDocument;
@@ -8480,7 +8509,7 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
             CTerrainVirtualAtlas::buildWorkingPreviewPackage(
                 stagedDocument, m_workingTerrainAtlas->activeTileImages(),
                 m_workingTerrainAtlas->activeTileTypes(),
-                authoredPages, report);
+                authoredPages, m_mprMaterials, m_mprAnimatedTiles, report);
         if(!package.success)
         {
             if(report)
@@ -8559,9 +8588,12 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     const bool sectorEditsBuilt =
         m_terrainEdit.appendSectorEdits(&transaction, &transactionReport);
     const bool mapParametersEditBuilt = sectorEditsBuilt
-        && m_mprDocument.appendMapParametersEdit(
-            m_terrainEdit.maxZ(), m_mprMaterials, m_mprAnimatedTiles,
-            &transaction, &transactionReport);
+        && (workingExtension
+            ? m_mprDocument.appendMaxZEdit(
+                  m_terrainEdit.maxZ(), &transaction, &transactionReport)
+            : m_mprDocument.appendMapParametersEdit(
+                  m_terrainEdit.maxZ(), m_mprMaterials, m_mprAnimatedTiles,
+                  &transaction, &transactionReport));
     const bool transactionBuilt = sectorEditsBuilt && mapParametersEditBuilt;
     if(!terrainChangedSaveTransactionIsUsable(
            transactionBuilt, transactionReport.hasErrors(),
@@ -8637,7 +8669,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         STerrainPortableAtlasPackage draft =
             CTerrainVirtualAtlas::buildWorkingPreviewPackage(
                 stagedDocument, activeTiles, activeTypes,
-                authoredPages, &draftReport);
+                authoredPages, m_mprMaterials, m_mprAnimatedTiles,
+                &draftReport);
         if(!draft.success)
         {
             QMessageBox::critical(this, tr("Modern draft save refused"),
@@ -10430,6 +10463,9 @@ void CView::rebuildTerrainAutoCatalog()
             if(currentUsage.at(slot).landCount > 0
                || currentUsage.at(slot).overlayCount > 0)
                 m_workingAtlasProtectedSlots.insert(slot);
+        protectTerrainAnimationRanges(
+            m_mprAnimatedTiles, m_workingTerrainAtlas->activeTileCount(),
+            &m_workingAtlasProtectedSlots);
         ei::log(eLogInfo, QString(
             "Modern terrain working atlas ready authoredSlots:%1 authoredPages:%2 capacitySlots:%3 extensionSlots:%4 protectedAuthoredSlots:%5")
             .arg(m_authoredTerrainTileImages.size())
@@ -12134,6 +12170,8 @@ bool CView::realizeWorkingTerrainSignature(
             for(auto it = usage->cbegin(); it != usage->cend(); ++it)
                 if(it.value() != 0)
                     protectedSlots->insert(it.key());
+            protectTerrainAnimationRanges(
+                m_mprAnimatedTiles, atlas->activeTileCount(), protectedSlots);
             CValidationReport retry;
             if(generated) *generated = false;
             packed = atlas->resolve(
@@ -12558,11 +12596,20 @@ void CView::finalizeVirtualTerrainAtlas()
         m_workingTerrainAtlas
             ? &m_workingTerrainAtlas->catalog()
             : &m_terrainAtlasAnalysis.overlayCompatibleCatalog;
+    QVector<STerrainAtlasAnimationRange> animationRanges;
+    animationRanges.reserve(m_mprAnimatedTiles.size());
+    for(const SMprAnimatedTileRecord& animation : m_mprAnimatedTiles)
+    {
+        STerrainAtlasAnimationRange range;
+        range.tileIndex = animation.tileIndex;
+        range.frameCount = animation.frameCount;
+        animationRanges.append(range);
+    }
     STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,
         kMprPackedTerrainAtlasSlotLimit,
         authoredTypes,&report,pinned,placedCellTypes,placedPackedCells,{},
-        finalizedDecodeCatalog,preservePlacedCells);
+        finalizedDecodeCatalog,preservePlacedCells,animationRanges);
     if(!finalized.success)
     {
         const QString findings=report.findings().isEmpty()
@@ -12827,7 +12874,7 @@ void CView::finalizeVirtualTerrainAtlas()
     finalized.isolatedNamespace = selectedIdentity;
 
     const STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
-        m_mprDocument,m_terrainEdit,finalized,layer,&report);
+        m_mprDocument,m_terrainEdit,m_mprMaterials,finalized,layer,&report);
     if(!package.success)
     {
         const QString findings=report.findings().isEmpty()
@@ -15041,15 +15088,16 @@ void CView::openMapParameters()
             materialTable->setItem(row, 3, color);
         }
         materialTable->resizeColumnsToContents();
+        const int atlasSlotCount = activeTerrainAtlasSlotCount();
         animationTable->setRowCount(draftAnimations->size());
         for(int row = 0; row < draftAnimations->size(); ++row)
         {
             QSpinBox* start = new QSpinBox(animationTable);
-            start->setRange(0, qMax(0, int(m_mprDocument.mapInfo().tileCount) - 1));
+            start->setRange(0, qMax(0, atlasSlotCount - 1));
             start->setValue(draftAnimations->at(row).tileIndex);
             start->setToolTip(tr("First atlas slot in the consecutive animation range."));
             QSpinBox* count = new QSpinBox(animationTable);
-            count->setRange(0, qMax(0, int(m_mprDocument.mapInfo().tileCount)));
+            count->setRange(0, qMax(0, atlasSlotCount));
             count->setValue(draftAnimations->at(row).frameCount);
             count->setToolTip(tr("Number of consecutive atlas slots. Zero disables this record."));
             animationTable->setCellWidget(row, 0, start);
@@ -15061,7 +15109,7 @@ void CView::openMapParameters()
                 (*draftAnimations)[row] = record;
                 const int end = start->value() + count->value() - 1;
                 const bool valid = count->value() == 0
-                    || end < int(m_mprDocument.mapInfo().tileCount);
+                    || end < atlasSlotCount;
                 QTableWidgetItem* state = animationTable->item(row, 2);
                 if(!state) { state = new QTableWidgetItem; animationTable->setItem(row, 2, state); }
                 state->setText(count->value() == 0 ? tr("Disabled")
@@ -15077,7 +15125,7 @@ void CView::openMapParameters()
                     [updateAnimation](int) { updateAnimation(); });
             const int end = start->value() + count->value() - 1;
             animationTable->setItem(row, 2, new QTableWidgetItem(count->value() == 0
-                ? tr("Disabled") : end < int(m_mprDocument.mapInfo().tileCount)
+                ? tr("Disabled") : end < atlasSlotCount
                     ? tr("Slots %1-%2").arg(start->value()).arg(end)
                     : tr("Invalid: exceeds atlas")));
         }
@@ -15133,16 +15181,17 @@ void CView::openMapParameters()
     };
     connect(resetMaterials, &QPushButton::clicked, dock, resetMaterialDraft);
     connect(applyMaterials, &QPushButton::clicked, dock, [=]() {
+        const quint32 atlasSlotCount = quint32(activeTerrainAtlasSlotCount());
         for(int row = 0; row < draftAnimations->size(); ++row)
         {
             const SMprAnimatedTileRecord& record = draftAnimations->at(row);
             if(record.frameCount > 0
                && quint32(record.tileIndex) + quint32(record.frameCount)
-                    > m_mprDocument.mapInfo().tileCount)
+                    > atlasSlotCount)
             {
                 QMessageBox::warning(dock, tr("Invalid tile animation"),
                     tr("Animation record %1 extends beyond the %2-slot atlas. Correct its start slot or frame count.")
-                        .arg(row).arg(m_mprDocument.mapInfo().tileCount));
+                        .arg(row).arg(atlasSlotCount));
                 return;
             }
         }
@@ -16289,14 +16338,47 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             const qint16 material = m_landscapeTools->overlayMaterialIndex(&materialSelected);
             int selectedIndex = -1;
             int selectedRotation = 0;
-            if(m_landscapeTools->manualTileSelectionEnabled())
+            const ETerrainPaintPaletteMode paletteMode =
+                m_landscapeTools->paintPaletteMode();
+            if(paletteMode == ETerrainPaintPaletteMode::Manual)
                 m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
             else
             {
                 bool terrainSelected = false;
                 const qint32 terrainType = m_landscapeTools->paintTerrainType(&terrainSelected);
-                if(terrainSelected)
-                    selectedIndex = m_terrainMaterialRepresentatives.value(terrainType, -1);
+                const qint32 runtimeType = materialRuntimeTypes(
+                    m_terrainAtlasProfile, m_terrainGlobalFamilies)
+                        .value(terrainType, -1);
+                STerrainTransitionSignature pure;
+                pure.northWest = pure.northEast = pure.southEast =
+                    pure.southWest = terrainType;
+                quint16 selectedPacked = 0;
+                bool exactSelected = terrainSelected
+                    && m_workingTerrainAtlas
+                    && runtimeType >= 0;
+                if(exactSelected
+                   && paletteMode == ETerrainPaintPaletteMode::Modern)
+                {
+                    QMap<int, quint64> usage = workingTerrainAtlasUsage();
+                    exactSelected = realizeWorkingTerrainSignature(
+                        pure, qRound(brush.centerX), qRound(brush.centerY),
+                        &usage, &report, nullptr, terrainType, runtimeType,
+                        nullptr, true)
+                        && syncWorkingTerrainAtlas(&report);
+                }
+                if(exactSelected)
+                    exactSelected = selectWorkingPaintVariantWithRuntimeType(
+                        *m_workingTerrainAtlas, pure,
+                        qRound(brush.centerX), qRound(brush.centerY),
+                        m_tileStrokeDistributionSeed, runtimeType,
+                        &selectedPacked);
+                if(exactSelected)
+                {
+                    const SMprPackedTile selected =
+                        SMprPackedTile::decode(selectedPacked);
+                    selectedIndex = selected.atlasSlot();
+                    selectedRotation = selected.rotation;
+                }
             }
             if(!materialSelected || selectedIndex < 0)
             {
@@ -17228,6 +17310,14 @@ void CView::selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode)
         if(hit)
             updatePreviewTile(position, land);
     }
+}
+
+int CView::activeTerrainAtlasSlotCount() const
+{
+    const int persistedCount = int(m_mprDocument.mapInfo().tileCount);
+    if(!m_workingTerrainAtlas || !m_workingTerrainAtlas->isValid())
+        return qMax(0, persistedCount);
+    return qMax(persistedCount, m_workingTerrainAtlas->activeTileCount());
 }
 
 bool CView::terrainResolveUiActive() const
@@ -22031,6 +22121,11 @@ bool CView::applyMprParametersPreview(
         return false;
     m_mprMaterials = materials;
     m_mprAnimatedTiles = animatedTiles;
+    protectTerrainAnimationRanges(
+        m_mprAnimatedTiles,
+        m_workingTerrainAtlas ? m_workingTerrainAtlas->activeTileCount()
+                              : activeTerrainAtlasSlotCount(),
+        &m_workingAtlasProtectedSlots);
     m_pLand->setMaterials(renderMaterials(materials));
     m_pLand->setAnimTils(renderAnimatedTiles(animatedTiles));
     syncMprDirtyState();

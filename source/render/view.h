@@ -470,6 +470,7 @@ private:
     void refreshManualAtlasPalette(bool invalidate = true);
     void refreshWorkingTerrainPalettes();
     void refreshTerrainFamilyUsage();
+    int activeTerrainAtlasSlotCount() const;
     bool terrainResolveUiActive() const;
     void requestResolveMissingTerrainBlends(ETerrainResolveAuditTrigger trigger);
     void resolveMissingTerrainBlends();

@@ -145,7 +145,8 @@ public:
         const QVector<qint32>& preferredCellTypes = {},
         const QVector<quint16>& preferredPackedCells = {},
         const QVector<qint32>& preferredPaintMaterials = {},
-        const CTerrainTransitionCatalog* authoredDecodeCatalog = nullptr)
+        const CTerrainTransitionCatalog* authoredDecodeCatalog = nullptr,
+        const QVector<STerrainAtlasAnimationRange>& authoredAnimations = {})
     {
         QVector<qint32> cellTypes = preferredCellTypes;
         if(cellTypes.isEmpty())
@@ -162,7 +163,8 @@ public:
             field, sourceNamespace, capacityLimit,
             sourceTileTypes.isEmpty() ? m_testSourceTypes : sourceTileTypes,
             report, pinnedPackedTiles, cellTypes, preferredPackedCells,
-            preferredPaintMaterials, authoredDecodeCatalog);
+            preferredPaintMaterials, authoredDecodeCatalog, {},
+            authoredAnimations);
     }
 
 private:
@@ -593,7 +595,7 @@ private slots:
     void parallelStripesAndBaseCrossResolveExactly();
     void nestedCircleMaterialPairingsResolveExactly();
     void circularPaintsKeepEveryBrushIdentityInsideAndAtOuterEdge();
-    void generatedSlotsNeverInheritCompactedAnimationRanges();
+    void finalizationPreservesAndRebasesAuthoredAnimationRanges();
     void generatedPaintMatrixSavesReopensAndMatchesVertexOracle();
 };
 
@@ -3702,9 +3704,20 @@ void TerrainVirtualAtlasTests::workingPreviewPackagePreservesAuthoredPagesAndApp
     tiles[4 * 64].fill(QColor(220, 30, 170, 255));
     QVector<qint32> tileTypes(tiles.size(), 0);
     tileTypes[4 * 64] = 7;
+    QVector<SMprMaterialRecord> liveMaterials =
+        paintedSource.mapInfo().materials;
+    if(liveMaterials.isEmpty())
+        liveMaterials.append(SMprMaterialRecord());
+    liveMaterials.front().red = 0.875f;
+    QVector<SMprAnimatedTileRecord> liveAnimations;
+    SMprAnimatedTileRecord generatedFlipbook;
+    generatedFlipbook.tileIndex = 4 * 64;
+    generatedFlipbook.frameCount = 2;
+    liveAnimations.append(generatedFlipbook);
     const STerrainPortableAtlasPackage package =
         CTestTerrainVirtualAtlas::buildWorkingPreviewPackage(
-            paintedSource, tiles, tileTypes, authoredPages, &report);
+            paintedSource, tiles, tileTypes, authoredPages,
+            liveMaterials, liveAnimations, &report);
     QVERIFY2(package.success,
              qPrintable(package.error + "\n" + report.toText()));
     CMprDocument reopened;
@@ -3713,6 +3726,8 @@ void TerrainVirtualAtlasTests::workingPreviewPackagePreservesAuthoredPagesAndApp
     QCOMPARE(reopened.mapInfo().textureCount, quint32(5));
     QCOMPARE(reopened.mapInfo().tileCount, quint32(320));
     QCOMPARE(reopened.mapInfo().tileTypes.at(4 * 64), qint32(7));
+    QCOMPARE(reopened.mapInfo().materials, liveMaterials);
+    QCOMPARE(reopened.mapInfo().animatedTiles, liveAnimations);
     CTerrainEditModel reopenedTerrain;
     QVERIFY2(reopenedTerrain.load(reopened, &report), qPrintable(report.toText()));
     const quint16 reopenedPacked = reopenedTerrain.packedTile(
@@ -6778,7 +6793,7 @@ void TerrainVirtualAtlasTests::circularPaintsKeepEveryBrushIdentityInsideAndAtOu
             }
 }
 
-void TerrainVirtualAtlasTests::generatedSlotsNeverInheritCompactedAnimationRanges()
+void TerrainVirtualAtlasTests::finalizationPreservesAndRebasesAuthoredAnimationRanges()
 {
     Fixture fixture;
     CTerrainVirtualMaterialField field;
@@ -6787,24 +6802,80 @@ void TerrainVirtualAtlasTests::generatedSlotsNeverInheritCompactedAnimationRange
     CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 0xadda11u);
     seedReviewedStockMasks(atlas, fixture);
     CValidationReport report;
-    const STerrainAtlasFinalization finalized = atlas.finalize(
-        field, QStringLiteral("AnimatedSource"), 512, {1,2,3,4}, &report);
-    QVERIFY2(finalized.success, qPrintable(finalized.error));
     CMprDocument source;
-    QVERIFY2(source.loadBytes(portableMpr(false, true),
+    QVERIFY2(source.loadBytes(portableMprWithActiveOverlay(0, 0),
         QStringLiteral("animated-source.mpr"), &report),
         qPrintable(report.toText()));
-    QCOMPARE(source.mapInfo().animatedTileCount, quint32(1));
+    QVector<STerrainAtlasAnimationRange> animationRanges;
+    STerrainAtlasAnimationRange liveAnimation;
+    liveAnimation.tileIndex = 0;
+    liveAnimation.frameCount = 4;
+    animationRanges.append(liveAnimation);
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("AnimatedSource"), 512, {1,2,3,4}, &report,
+        {}, {}, {}, {}, nullptr, animationRanges);
+    QVERIFY2(finalized.success,
+        qPrintable(finalized.error + "\n" + report.toText()));
+    CTerrainEditModel editedTerrain;
+    QVERIFY2(editedTerrain.load(source, &report), qPrintable(report.toText()));
+    QVector<SMprMaterialRecord> liveMaterials = source.mapInfo().materials;
+    QVERIFY(!liveMaterials.isEmpty());
+    liveMaterials.front().red = 0.875f;
     const STerrainPortableAtlasPackage package =
         CTestTerrainVirtualAtlas::buildPortablePackage(
-            source, finalized, ETerrainTileLayer::Land, &report);
+            source, editedTerrain, liveMaterials, finalized,
+            ETerrainTileLayer::Land, &report);
     QVERIFY2(package.success,
         qPrintable(package.error + "\n" + report.toText()));
     CMprDocument reopened;
     QVERIFY2(reopened.loadBytes(package.mprBytes,
         QStringLiteral("animated-finalized.mpr"), &report),
         qPrintable(report.toText()));
-    QCOMPARE(reopened.mapInfo().animatedTileCount, quint32(0));
+    QCOMPARE(reopened.mapInfo().animatedTileCount, quint32(1));
+    QCOMPARE(reopened.mapInfo().animatedTiles.size(), 1);
+    QCOMPARE(reopened.mapInfo().animatedTiles.front().frameCount, quint16(4));
+    QCOMPARE(reopened.mapInfo().materials, liveMaterials);
+    const int remappedStart = reopened.mapInfo().animatedTiles.front().tileIndex;
+    QVERIFY(remappedStart >= 0);
+    QVERIFY(remappedStart + 4 <= finalized.tiles.size());
+    for(int phase = 0; phase < 4; ++phase)
+    {
+        const STerrainFinalizedTile& frame = finalized.tiles.at(
+            remappedStart + phase);
+        QVERIFY(frame.authored);
+        QVERIFY2(frame.sourceSlotAliases.contains(phase),
+                 "Every source flipbook frame must survive physical compaction in order");
+    }
+
+    QVector<STerrainAtlasAnimationRange> incomplete = animationRanges;
+    incomplete.front().tileIndex = 2;
+    incomplete.front().frameCount = 3;
+    CValidationReport invalidReport;
+    const STerrainAtlasFinalization invalid = atlas.finalize(
+        field, QStringLiteral("AnimatedSource"), 512, {1,2,3,4},
+        &invalidReport, {}, {}, {}, {}, nullptr, incomplete);
+    QVERIFY(!invalid.success);
+    QVERIFY2(invalid.error.contains("animated", Qt::CaseInsensitive),
+             qPrintable(invalid.error));
+
+    QVector<STerrainAtlasAnimationRange> overlapping;
+    STerrainAtlasAnimationRange tail;
+    tail.tileIndex = 2;
+    tail.frameCount = 2;
+    overlapping.append(tail);
+    STerrainAtlasAnimationRange whole;
+    whole.tileIndex = 0;
+    whole.frameCount = 4;
+    overlapping.append(whole);
+    CValidationReport overlapReport;
+    const STerrainAtlasFinalization overlapFinalized = atlas.finalize(
+        field, QStringLiteral("AnimatedSource"), 512, {1,2,3,4},
+        &overlapReport, {}, {}, {}, {}, nullptr, overlapping);
+    QVERIFY2(overlapFinalized.success,
+        qPrintable(overlapFinalized.error + "\n" + overlapReport.toText()));
+    QCOMPARE(overlapFinalized.animations.size(), 2);
+    QCOMPARE(int(overlapFinalized.animations.at(0).tileIndex),
+             int(overlapFinalized.animations.at(1).tileIndex) + 2);
 }
 
 void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexOracle()

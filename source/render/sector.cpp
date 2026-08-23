@@ -1069,6 +1069,9 @@ void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
             ? &m_materials->at(materialIndex) : nullptr;
         const ei::SOverlayMaterialAnimation animation =
             ei::overlayMaterialAnimation(material);
+        const ei::SOverlayTileAnimation tileAnimation =
+            ei::overlayTileAnimation(m_arrWater.at(row).at(col).tileIndex(),
+                                     m_animatedTiles);
         for(int vertex = 0; vertex < 9; ++vertex)
         {
             const int index = tile * 9 + vertex;
@@ -1082,6 +1085,8 @@ void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
             target.animation = QVector4D(animation.waveMultiplier,
                 animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
                 animation.animated ? 1.0f : 0.0f);
+            target.tileAnimation = QVector3D(float(tileAnimation.startSlot),
+                float(tileAnimation.baseSlot), float(tileAnimation.frameCount));
             target.grid = QVector2D(float(gridX), float(gridY));
         }
     }

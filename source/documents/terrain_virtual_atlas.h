@@ -15,6 +15,8 @@
 
 class CValidationReport;
 class CMprDocument;
+struct SMprMaterialRecord;
+struct SMprAnimatedTileRecord;
 
 // Shipped JMV runtime validation covers complete custom terrain atlases through
 // 16 pages. Keep this separate from the 16,384-slot packed-format maximum so a
@@ -92,6 +94,18 @@ struct STerrainBlendMaskTemplate
     QByteArray maskSha256;
 };
 
+struct STerrainAtlasAnimationRange
+{
+    quint16 tileIndex{0};
+    quint16 frameCount{0};
+
+    bool operator==(const STerrainAtlasAnimationRange& other) const
+    {
+        return tileIndex == other.tileIndex
+            && frameCount == other.frameCount;
+    }
+};
+
 struct STerrainAtlasFinalization
 {
     bool success{false};
@@ -105,6 +119,7 @@ struct STerrainAtlasFinalization
     QVector<QImage> pages;
     QVector<QByteArray> pageMmpPayloads;
     QVector<qint32> tileTypes;
+    QVector<STerrainAtlasAnimationRange> animations;
     QMap<int, int> authoredSlotRemap;
     STerrainAtlasUsage usage;
     QByteArray stableSha256;
@@ -291,7 +306,8 @@ public:
                                        const QVector<quint16>& preferredPackedCells = {},
                                        const QVector<qint32>& preferredPaintMaterials = {},
                                        const CTerrainTransitionCatalog* authoredDecodeCatalog = nullptr,
-                                       const QVector<bool>& preservePreferredPackedCells = {});
+                                       const QVector<bool>& preservePreferredPackedCells = {},
+                                       const QVector<STerrainAtlasAnimationRange>& animations = {});
 
     static QImage composePage(const QVector<QImage>& tiles, int firstTile,
                               int tileSize);
@@ -309,10 +325,22 @@ public:
         const CMprDocument& source, const CTerrainEditModel& editedTerrain,
         const STerrainAtlasFinalization& finalization,
         ETerrainTileLayer layer, CValidationReport* report = nullptr);
+    static STerrainPortableAtlasPackage buildPortablePackage(
+        const CMprDocument& source, const CTerrainEditModel& editedTerrain,
+        const QVector<SMprMaterialRecord>& materials,
+        const STerrainAtlasFinalization& finalization,
+        ETerrainTileLayer layer, CValidationReport* report = nullptr);
     static STerrainPortableAtlasPackage buildWorkingPreviewPackage(
         const CMprDocument& source, const QVector<QImage>& activeTiles,
         const QVector<qint32>& activeTileTypes,
         const QVector<QByteArray>& authoredPagePayloads,
+        CValidationReport* report = nullptr);
+    static STerrainPortableAtlasPackage buildWorkingPreviewPackage(
+        const CMprDocument& source, const QVector<QImage>& activeTiles,
+        const QVector<qint32>& activeTileTypes,
+        const QVector<QByteArray>& authoredPagePayloads,
+        const QVector<SMprMaterialRecord>& materials,
+        const QVector<SMprAnimatedTileRecord>& animations,
         CValidationReport* report = nullptr);
 
 private:
