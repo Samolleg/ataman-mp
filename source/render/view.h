@@ -316,6 +316,7 @@ public:
     bool applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error = nullptr);
     quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
     void openMapParameters();
+    void openMprMaterials();
     void openAtlasTiles();
     bool pickTile(QVector3D posOnLand, bool bLand = true);
     void beginTerrainPaintSampling();
@@ -351,6 +352,11 @@ public:
     bool applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command, bool forward);
     bool applyMprParametersPreview(const QVector<SMprMaterialRecord>& materials,
                                    const QVector<SMprAnimatedTileRecord>& animatedTiles);
+    bool applyMprParametersPreviewTransaction(
+        const QVector<SMprMaterialRecord>& materials,
+        const QVector<SMprAnimatedTileRecord>& animatedTiles,
+        const QSharedPointer<CTerrainWorkingAtlas>& atlasState,
+        const STerrainTileCommand& slotRemapCommand, bool forward);
     void onLandscapeToolsShown();
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,

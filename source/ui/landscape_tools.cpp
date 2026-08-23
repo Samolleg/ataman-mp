@@ -471,6 +471,12 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_overlayMaterial->setToolTip(tr(
         "Selects the existing MPR material record stored on newly added overlay cells. "
         "It controls liquid/surface rendering properties, not the atlas texture selected above."));
+    m_overlayMaterial->setObjectName(QStringLiteral("overlaySurfaceMaterial"));
+    m_overlayMprMaterials = new QPushButton(tr("MPR Materials..."), this);
+    m_overlayMprMaterials->setObjectName(
+        QStringLiteral("overlayMprMaterialsButton"));
+    m_overlayMprMaterials->setToolTip(tr(
+        "Open the MPR surface-material and flipbook records used by overlays."));
     QFormLayout* paintForm = new QFormLayout();
     QHBoxLayout* sizeRow = new QHBoxLayout;
     sizeRow->addWidget(m_paintRadius, 1);
@@ -501,6 +507,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintForm->addRow(m_showOverlayMaterialSlots);
     paintForm->addRow(m_overlaySurfaceOperationLabel, m_overlaySurfaceOperation);
     paintForm->addRow(m_overlayMaterialLabel, m_overlayMaterial);
+    paintForm->addRow(m_overlayMprMaterials);
     paintLayout->addLayout(paintForm);
     QPushButton* resolveMissing = new QPushButton(
         tr("Resolve missing blends... (Shift+R)"), this);
@@ -567,6 +574,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     connect(importButton, &QPushButton::clicked, this, &CLandscapeTools::importHeightmapRequested);
     connect(mprSettingsButton, &QPushButton::clicked,
             this, &CLandscapeTools::openMprSettingsRequested);
+    connect(m_overlayMprMaterials, &QPushButton::clicked,
+            this, &CLandscapeTools::openMprMaterialsRequested);
     connect(resolveMissing, &QPushButton::clicked,
             this, &CLandscapeTools::resolveMissingBlendsRequested);
     connect(reviewAtlas, &QPushButton::clicked, this, &CLandscapeTools::atlasProfileReviewRequested);
@@ -836,6 +845,7 @@ void CLandscapeTools::updateModeVisibility()
     const bool overlaySurface = editMode() == ELandscapeEditMode::OverlaySurface;
     const bool overlayMode = overlaySurface
         || editMode() == ELandscapeEditMode::OverlayPaint;
+    m_overlayMprMaterials->setVisible(overlayMode);
     {
         const QSignalBlocker blocker(m_materialTabs);
         m_materialTabs->setCurrentIndex(overlayMode ? 1 : 0);

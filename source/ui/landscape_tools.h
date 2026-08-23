@@ -20,6 +20,7 @@ class QListWidget;
 class QButtonGroup;
 class QGridLayout;
 class QProgressBar;
+class QPushButton;
 class QResizeEvent;
 class QScrollArea;
 class QSlider;
@@ -170,6 +171,7 @@ signals:
     void atlasProfileReviewRequested();
     void exportPaintDiagnosticRequested();
     void openMprSettingsRequested();
+    void openMprMaterialsRequested();
     void saveModernDraftRequested();
     void editingStateChanged();
     void brushGeometryChanged();
@@ -236,6 +238,7 @@ private:
     QCheckBox* m_showOverlayMaterialSlots;
     QComboBox* m_overlaySurfaceOperation;
     QComboBox* m_overlayMaterial;
+    QPushButton* m_overlayMprMaterials;
     QLabel* m_overlaySurfaceOperationLabel;
     QLabel* m_overlayMaterialLabel;
     QCheckBox* m_showMainTerrain;

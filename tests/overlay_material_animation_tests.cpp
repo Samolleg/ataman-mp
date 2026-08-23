@@ -22,6 +22,7 @@ private slots:
     void usesSharedOverlayVertexRules();
     void gatesUnderlayEmissionByPositiveDepth();
     void resolvesAuthoredOverlayTileAnimation();
+    void givesAnimatedCellsStableIndependentPhases();
     void advancesAuthoredOverlayTileFrames();
     void mprSettingsUsesTopLevelWindowAndOverlaySlotToggle();
     void mprMaterialEditorReloadsSelectionAndDoesNotStealEnter();
@@ -165,8 +166,8 @@ void OverlayMaterialAnimationTests::shaderContractsCoverDesktopAndAngle()
     const QByteArray fragment = fragmentFile.readAll();
     const QByteArray objectFragment = objectFragmentFile.readAll();
     QVERIFY(vertex.contains("attribute vec4 a_overlayAnimation"));
-    QVERIFY2(vertex.contains("attribute vec3 a_overlayTileAnimation"),
-             "Overlay vertices must carry the authored atlas start/base/count record");
+    QVERIFY2(vertex.contains("attribute vec4 a_overlayTileAnimation"),
+             "Overlay vertices must carry start/base/count plus the per-cell phase");
     QVERIFY2(vertex.contains("u_overlayAtlasGrid"),
              "The shader must account for the complete multi-page terrain atlas");
     QVERIFY(vertex.contains("u_overlayMotionEnabled"));
@@ -436,6 +437,26 @@ void OverlayMaterialAnimationTests::resolvesAuthoredOverlayTileAnimation()
     zoneFiveWater.nPhase = 1;
     const QVector<SAnimTile> disabledRecords{zoneFiveWater};
     QVERIFY(!ei::overlayTileAnimation(64, &disabledRecords).animated);
+}
+
+void OverlayMaterialAnimationTests::givesAnimatedCellsStableIndependentPhases()
+{
+    SAnimTile record{};
+    record.tileIndex = 512;
+    record.nPhase = 24;
+    const QVector<SAnimTile> records{record};
+    const ei::SOverlayTileAnimation first =
+        ei::overlayTileAnimation(512, &records, 17u);
+    const ei::SOverlayTileAnimation repeated =
+        ei::overlayTileAnimation(512, &records, 17u);
+    const ei::SOverlayTileAnimation neighbor =
+        ei::overlayTileAnimation(512, &records, 18u);
+    QVERIFY(first.animated);
+    QCOMPARE(first.startPhase, repeated.startPhase);
+    QVERIFY(first.startPhase >= 0 && first.startPhase < 24);
+    QVERIFY2(first.startPhase != neighbor.startPhase,
+             "Every overlay cell still starts on one synchronized frame");
+    QVERIFY(!ei::overlayTileAnimation(517, &records, 17u).animated);
 }
 
 QTEST_APPLESS_MAIN(OverlayMaterialAnimationTests)

@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include <QLineEdit>
+#include <QComboBox>
 #include <QLabel>
 #include <QListWidget>
 #include <QPointer>
@@ -13,6 +14,7 @@
 
 #include "loaded_map_panel_policy.h"
 #include "landscape_tools.h"
+#include "types.h"
 
 class LandscapeToolsWidgetTests : public QObject
 {
@@ -26,6 +28,8 @@ private slots:
     void manualPaletteIsRequestedOnlyWhenItsTabIsOpened();
     void paintHelpLivesOnRelevantControls();
     void overlaySurfaceModeLocksTileTargetAndOverlayLayer();
+    void overlayModesExposeMprMaterialsShortcut();
+    void overlayMaterialDropdownRefreshesImmediately();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
 
@@ -347,6 +351,50 @@ void LandscapeToolsWidgetTests::overlaySurfaceModeLocksTileTargetAndOverlayLayer
     QVERIFY(vertex->isEnabled());
     QVERIFY(modernLayers->tabBar()->isEnabled());
     QVERIFY(classicLayers->tabBar()->isEnabled());
+}
+
+void LandscapeToolsWidgetTests::overlayModesExposeMprMaterialsShortcut()
+{
+    CLandscapeTools tools;
+    tools.resize(730, 1500);
+    tools.setEditingEnabled(true, false);
+    QPushButton* shortcut = tools.findChild<QPushButton*>(
+        QStringLiteral("overlayMprMaterialsButton"));
+    QVERIFY2(shortcut, "Overlay modes have no immediate MPR Materials action");
+    QSignalSpy requested(&tools, SIGNAL(openMprMaterialsRequested()));
+
+    tools.activateMode(ELandscapeEditMode::OverlaySurface, false);
+    QVERIFY(shortcut->isVisibleTo(&tools));
+    shortcut->click();
+    QCOMPARE(requested.count(), 1);
+
+    tools.activateMode(ELandscapeEditMode::OverlayPaint, false);
+    QVERIFY(shortcut->isVisibleTo(&tools));
+    shortcut->click();
+    QCOMPARE(requested.count(), 2);
+
+    tools.activateMode(ELandscapeEditMode::TilePaint, false);
+    QVERIFY(!shortcut->isVisibleTo(&tools));
+}
+
+void LandscapeToolsWidgetTests::overlayMaterialDropdownRefreshesImmediately()
+{
+    CLandscapeTools tools;
+    QComboBox* dropdown = tools.findChild<QComboBox*>(
+        QStringLiteral("overlaySurfaceMaterial"));
+    QVERIFY(dropdown);
+    SMaterial first{};
+    first.type = eTerrainWater;
+    tools.setOverlayMaterials({first});
+    QCOMPARE(dropdown->count(), 1);
+    QCOMPARE(dropdown->itemData(0).toInt(), 0);
+
+    SMaterial appended = first;
+    appended.R = 0.8f;
+    tools.setOverlayMaterials({first, appended});
+    QCOMPARE(dropdown->count(), 2);
+    QCOMPARE(dropdown->itemData(1).toInt(), 1);
+    QCOMPARE(tools.overlayMaterialIndex(), qint16(0));
 }
 
 QTEST_MAIN(LandscapeToolsWidgetTests)

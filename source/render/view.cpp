@@ -983,20 +983,37 @@ public:
         const QVector<SMprMaterialRecord>& beforeMaterials,
         const QVector<SMprAnimatedTileRecord>& beforeAnimatedTiles,
         const QVector<SMprMaterialRecord>& afterMaterials,
-        const QVector<SMprAnimatedTileRecord>& afterAnimatedTiles)
+        const QVector<SMprAnimatedTileRecord>& afterAnimatedTiles,
+        const QSharedPointer<CTerrainWorkingAtlas>& beforeAtlas = {},
+        const QSharedPointer<CTerrainWorkingAtlas>& afterAtlas = {},
+        const STerrainTileCommand& slotRemapCommand = STerrainTileCommand())
         : m_view(view), m_beforeMaterials(beforeMaterials),
           m_beforeAnimatedTiles(beforeAnimatedTiles),
-          m_afterMaterials(afterMaterials), m_afterAnimatedTiles(afterAnimatedTiles)
+          m_afterMaterials(afterMaterials), m_afterAnimatedTiles(afterAnimatedTiles),
+          m_beforeAtlas(beforeAtlas), m_afterAtlas(afterAtlas),
+          m_slotRemapCommand(slotRemapCommand)
     {
         setText(QObject::tr("Edit MPR surface materials and tile animations"));
     }
     void undo() override
     {
-        m_view->applyMprParametersPreview(m_beforeMaterials, m_beforeAnimatedTiles);
+        if(m_beforeAtlas)
+            m_view->applyMprParametersPreviewTransaction(
+                m_beforeMaterials, m_beforeAnimatedTiles, m_beforeAtlas,
+                m_slotRemapCommand, false);
+        else
+            m_view->applyMprParametersPreview(
+                m_beforeMaterials, m_beforeAnimatedTiles);
     }
     void redo() override
     {
-        m_view->applyMprParametersPreview(m_afterMaterials, m_afterAnimatedTiles);
+        if(m_afterAtlas)
+            m_view->applyMprParametersPreviewTransaction(
+                m_afterMaterials, m_afterAnimatedTiles, m_afterAtlas,
+                m_slotRemapCommand, true);
+        else
+            m_view->applyMprParametersPreview(
+                m_afterMaterials, m_afterAnimatedTiles);
     }
     bool invalidatesAiGraphPreview() const override
     {
@@ -1013,6 +1030,9 @@ private:
     QVector<SMprAnimatedTileRecord> m_beforeAnimatedTiles;
     QVector<SMprMaterialRecord> m_afterMaterials;
     QVector<SMprAnimatedTileRecord> m_afterAnimatedTiles;
+    QSharedPointer<CTerrainWorkingAtlas> m_beforeAtlas;
+    QSharedPointer<CTerrainWorkingAtlas> m_afterAtlas;
+    STerrainTileCommand m_slotRemapCommand;
 };
 
 QVector<SMaterial> renderMaterials(const QVector<SMprMaterialRecord>& records)
@@ -1553,6 +1573,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::exportTerrainPaintDiagnostic);
         connect(m_landscapeTools, &CLandscapeTools::openMprSettingsRequested,
                 this, &CView::openMapParameters);
+        connect(m_landscapeTools, &CLandscapeTools::openMprMaterialsRequested,
+                this, &CView::openMprMaterials);
         connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
                 this, &CView::syncLandscapeToolState);
         connect(m_landscapeTools, &CLandscapeTools::brushGeometryChanged,
@@ -8261,6 +8283,35 @@ void CView::saveLandAs()
     if(fileName.filePath().isEmpty())
         return;
 
+    const bool workingAtlasAvailable = m_workingTerrainAtlas
+        && m_workingTerrainAtlas->isValid();
+    const bool modernDraftRequired = m_pLand->isDirty()
+        && terrainSaveAsNeedsModernDraftConfirmation(
+            workingAtlasAvailable,
+            terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
+            terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay));
+    if(modernDraftRequired)
+    {
+        QMessageBox confirmation(this);
+        confirmation.setIcon(QMessageBox::Information);
+        confirmation.setWindowTitle(tr("Modern Draft pair required"));
+        confirmation.setText(tr(
+            "This map has unsaved working-atlas tiles. They cannot be stored "
+            "in an MPR alone: Save As must write a paired MPR plus adjacent "
+            "RES Modern Draft."));
+        confirmation.setInformativeText(tr(
+            "Save as Modern Draft writes both files at the selected name. "
+            "Cancel leaves the current map and destination unchanged."));
+        QPushButton* saveDraft = confirmation.addButton(
+            tr("Save as Modern Draft"), QMessageBox::AcceptRole);
+        confirmation.addButton(QMessageBox::Cancel);
+        confirmation.exec();
+        if(confirmation.clickedButton() != saveDraft)
+            return;
+        saveChangedLandscapeDocument(fileName, true, true);
+        return;
+    }
+
     const bool publishModern = modernTerrainPublicationRequired(true);
     ei::log(eLogInfo, QStringLiteral(
         "Save MPR As selected current:%1 destination:%2 route:%3")
@@ -14813,6 +14864,7 @@ void CView::openMapParameters()
     statePages->addWidget(panel);
     QVBoxLayout* layout = new QVBoxLayout(panel);
     QTabWidget* tabs = new QTabWidget(panel);
+    tabs->setObjectName(QStringLiteral("mprSettingsTabs"));
     layout->addWidget(tabs, 1);
 
     QWidget* summaryPage = new QWidget(tabs);
@@ -15197,8 +15249,40 @@ void CView::openMapParameters()
         }
         if(*draftMaterials == m_mprMaterials && *draftAnimations == m_mprAnimatedTiles)
         { resetMaterialDraft(); return; }
+        QSharedPointer<CTerrainWorkingAtlas> beforeAtlas;
+        QSharedPointer<CTerrainWorkingAtlas> afterAtlas;
+        QVector<SMprAnimatedTileRecord> normalizedAnimations = *draftAnimations;
+        STerrainTileCommand slotRemapCommand;
+        if(m_workingTerrainAtlas)
+        {
+            beforeAtlas = m_workingTerrainAtlas->createStagingCopy();
+            afterAtlas = m_workingTerrainAtlas->createStagingCopy();
+            QMap<int, int> slotRemap;
+            CValidationReport animationReport;
+            if(!afterAtlas->normalizeAnimationRanges(
+                   *draftAnimations, &normalizedAnimations,
+                   &slotRemap, &animationReport))
+            {
+                QMessageBox::warning(dock, tr("Animation repack refused"),
+                    tr("The runtime requires every flipbook to occupy one contiguous typed uniform atlas range. The working atlas could not preserve this animation without guessing or replacing a reference.\n\n%1")
+                        .arg(animationReport.toText()));
+                return;
+            }
+            CTerrainEditModel stagedTerrain = m_terrainEdit;
+            if(!stagedTerrain.installWorkingAtlasSlotTypes(
+                   afterAtlas->activeTileTypes()))
+            {
+                QMessageBox::warning(dock, tr("Animation repack refused"),
+                    tr("The repacked animation's complete runtime terrain-type table could not be installed. No atlas slots or map cells were changed."));
+                return;
+            }
+            slotRemapCommand = stagedTerrain.makeAtlasSlotRemap(slotRemap);
+        }
         m_pUndoStack->push(new CMprParametersPreviewCommand(
-            this, m_mprMaterials, m_mprAnimatedTiles, *draftMaterials, *draftAnimations));
+            this, m_mprMaterials, m_mprAnimatedTiles,
+            *draftMaterials, normalizedAnimations,
+            beforeAtlas, afterAtlas, slotRemapCommand));
+        *draftAnimations = normalizedAnimations;
     });
     QWidget* identityPage = new QWidget(tabs);
     QVBoxLayout* identityLayout = new QVBoxLayout(identityPage);
@@ -16040,6 +16124,17 @@ void CView::closeMprSettingsDock()
         return;
     delete m_mprSettingsDock.data();
     m_mprSettingsDock = nullptr;
+}
+
+void CView::openMprMaterials()
+{
+    openMapParameters();
+    if(!m_mprSettingsDock)
+        return;
+    QTabWidget* tabs = m_mprSettingsDock->findChild<QTabWidget*>(
+        QStringLiteral("mprSettingsTabs"));
+    if(tabs && tabs->count() > 1)
+        tabs->setCurrentIndex(1);
 }
 
 void CView::refreshMprSettingsDock()
@@ -22128,10 +22223,43 @@ bool CView::applyMprParametersPreview(
         &m_workingAtlasProtectedSlots);
     m_pLand->setMaterials(renderMaterials(materials));
     m_pLand->setAnimTils(renderAnimatedTiles(animatedTiles));
+    if(m_pTileForm)
+    {
+        m_pTileForm->setMaterial(renderMaterials(materials));
+        m_pTileForm->setAnimTile(renderAnimatedTiles(animatedTiles));
+    }
+    if(m_landscapeTools)
+        m_landscapeTools->setOverlayMaterials(renderMaterials(materials));
     syncMprDirtyState();
     refreshMprSettingsDock();
     update();
     return true;
+}
+
+bool CView::applyMprParametersPreviewTransaction(
+    const QVector<SMprMaterialRecord>& materials,
+    const QVector<SMprAnimatedTileRecord>& animatedTiles,
+    const QSharedPointer<CTerrainWorkingAtlas>& atlasState,
+    const STerrainTileCommand& slotRemapCommand, bool forward)
+{
+    if(!m_workingTerrainAtlas || !atlasState
+       || !m_workingTerrainAtlas->canCommitStaging(*atlasState))
+        return false;
+    CValidationReport report;
+    if(!forward && !slotRemapCommand.isEmpty()
+       && !applyTerrainTilePreview(slotRemapCommand, false))
+        return false;
+    if(!m_workingTerrainAtlas->commitStaging(*atlasState)
+       || !syncWorkingTerrainAtlas(&report))
+    {
+        ei::log(eLogWarning,
+            "Animated terrain atlas transaction refused:\n" + report.toText());
+        return false;
+    }
+    if(forward && !slotRemapCommand.isEmpty()
+       && !applyTerrainTilePreview(slotRemapCommand, true))
+        return false;
+    return applyMprParametersPreview(materials, animatedTiles);
 }
 
 void CView::finishSculptStroke()

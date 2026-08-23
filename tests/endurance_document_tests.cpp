@@ -22,6 +22,7 @@
 #include "terrain_catalog_load_policy.h"
 #include "mmp_codec.h"
 #include "operation_history_policy.h"
+#include "overlay_material_animation.h"
 #include "tile_brush_stroke_policy.h"
 #include "portable_diagnostic_writer.h"
 #include "res_archive_document.h"
@@ -632,6 +633,7 @@ private slots:
     void externalLegacyAdjacentAtlasProfileCollisionProbe();
     void externalReopenedDraftTopologyProbe();
     void externalModernDraftAdoptionPairProbe();
+    void externalOverlayAnimationMappingProbe();
     void modernDraftAdoptionStagesPairBeforeLiveMutation();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
@@ -1346,6 +1348,14 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QVERIFY(!terrainMprUsesAdjacentModernAtlas(
         QStringLiteral("C:/Maps/zone3obr test.mpr"),
         QStringLiteral("C:/Res/textures.res")));
+    QVERIFY(terrainSaveAsNeedsModernDraftConfirmation(
+        true, true, false));
+    QVERIFY(terrainSaveAsNeedsModernDraftConfirmation(
+        true, false, true));
+    QVERIFY(!terrainSaveAsNeedsModernDraftConfirmation(
+        false, true, true));
+    QVERIFY(!terrainSaveAsNeedsModernDraftConfirmation(
+        true, false, false));
 
     const QByteArray source = viewSource();
     const QByteArray mainSource = mainWindowSource();
@@ -1370,6 +1380,21 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
              "Ordinary Save no longer preserves a persisted editable draft");
     QVERIFY2(save.contains("m_pLand->filePath(), true, true"),
              "Ordinary Save no longer commits the paired draft atlas");
+    const int saveAsStart = source.indexOf("void CView::saveLandAs()");
+    const int saveAsEnd = source.indexOf(
+        "void CView::saveModernDraftAs()", saveAsStart);
+    QVERIFY(saveAsStart >= 0 && saveAsEnd > saveAsStart);
+    const QByteArray saveAs = source.mid(
+        saveAsStart, saveAsEnd - saveAsStart);
+    QVERIFY2(saveAs.contains(
+                 "terrainSaveAsNeedsModernDraftConfirmation"),
+             "Save As no longer detects a working-atlas pair requirement");
+    QVERIFY2(saveAs.contains("Modern Draft pair required")
+             && saveAs.contains("Save as Modern Draft"),
+             "Save As no longer explains or offers the paired Modern Draft route");
+    QVERIFY2(saveAs.contains("clickedButton() != saveDraft")
+             && saveAs.contains("fileName, true, true"),
+             "Save As no longer cancels without mutation or commits the selected paired draft");
 
     const int finalizeStart = source.indexOf(
         "void CView::finalizeVirtualTerrainAtlas()");
@@ -11514,6 +11539,72 @@ void EnduranceDocumentTests::externalModernDraftAdoptionPairProbe()
              : QStringLiteral("missing"))
         .arg(members.value(semanticName).isEmpty()
                  ? QStringLiteral("absent") : QStringLiteral("present"));
+}
+
+void EnduranceDocumentTests::externalOverlayAnimationMappingProbe()
+{
+    const QString mprPath = qEnvironmentVariable(
+        "EI_MAPPER_OVERLAY_ANIMATION_REPRO_MPR");
+    if(mprPath.isEmpty())
+        QSKIP("Set EI_MAPPER_OVERLAY_ANIMATION_REPRO_MPR to the read-only overlay animation repro MPR");
+
+    CValidationReport report;
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    QCOMPARE(QCryptographicHash::hash(document.originalBytes(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("16EC786E18381B822AE73012A134969256394D08A443D2F1D6E01E93A8BEC36A"));
+
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    QCOMPARE(document.mapInfo().animatedTiles.size(), 1);
+    QCOMPARE(document.mapInfo().animatedTiles.front().tileIndex, quint16(512));
+    QCOMPARE(document.mapInfo().animatedTiles.front().frameCount, quint16(24));
+    SAnimTile animation{};
+    animation.tileIndex = 512;
+    animation.nPhase = 24;
+    const QVector<SAnimTile> animations{animation};
+
+    struct ExpectedCell
+    {
+        QPoint cell;
+        quint16 packed;
+        int slot;
+        int rotation;
+        bool animated;
+    };
+    const QVector<ExpectedCell> cells{
+        {{31, 11}, 49669, 517, 3, false},
+        {{31, 10}, 506, 506, 0, false},
+        {{30, 12}, 16896, 512, 1, true},
+        {{29, 12}, 16896, 512, 1, true},
+        // Controls on both sides of the boundary prove that a phase slot is
+        // not a second animation identifier in serialized runtime mapping.
+        {{30, 11}, 16896, 512, 1, true},
+        {{32, 11}, 49669, 517, 3, false},
+        {{28, 13}, 16896, 512, 1, true},
+        {{28, 12}, 33298, 530, 2, false}
+    };
+    for(const ExpectedCell& expected : cells)
+    {
+        bool available = false;
+        const quint16 packed = terrain.packedTile(
+            expected.cell.x(), expected.cell.y(),
+            ETerrainTileLayer::Overlay, &available);
+        QVERIFY(available);
+        QCOMPARE(packed, expected.packed);
+        const SMprPackedTile decoded = SMprPackedTile::decode(packed);
+        QCOMPARE(decoded.atlasSlot(), expected.slot);
+        QCOMPARE(int(decoded.rotation), expected.rotation);
+        QCOMPARE(terrain.overlayMaterialIndex(
+                     expected.cell.x(), expected.cell.y()), qint16(0));
+        QCOMPARE(ei::overlayTileAnimation(
+                     expected.slot, &animations,
+                     quint32(expected.cell.y() * terrain.tileCountX()
+                             + expected.cell.x())).animated,
+                 expected.animated);
+    }
 }
 
 void EnduranceDocumentTests::modernDraftAdoptionStagesPairBeforeLiveMutation()

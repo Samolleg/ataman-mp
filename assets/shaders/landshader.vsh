@@ -10,7 +10,7 @@ attribute vec4 a_position;
 attribute vec3 a_normal;
 attribute vec2 a_texture;
 attribute vec4 a_overlayAnimation;
-attribute vec3 a_overlayTileAnimation;
+attribute vec4 a_overlayTileAnimation;
 attribute vec2 a_overlayGrid;
 attribute vec3 a_materialEmission;
 attribute float a_materialOpacity;
@@ -79,7 +79,8 @@ void main(void)
   {
     float logicalFrame = floor(max(0.0, u_overlayTimeSeconds) / 0.055);
     float frameSlot = a_overlayTileAnimation.x
-        + mod(logicalFrame, a_overlayTileAnimation.z);
+        + mod(a_overlayTileAnimation.w + logicalFrame,
+              a_overlayTileAnimation.z);
     v_texture += overlayTileOrigin(frameSlot)
         - overlayTileOrigin(a_overlayTileAnimation.y);
   }

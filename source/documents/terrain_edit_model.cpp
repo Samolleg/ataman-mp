@@ -3195,6 +3195,45 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     return command;
 }
 
+STerrainTileCommand CTerrainEditModel::makeAtlasSlotRemap(
+    const QMap<int, int>& slotRemap) const
+{
+    STerrainTileCommand command;
+    command.description = QStringLiteral(
+        "Repack animated terrain frames and preserve terrain references");
+    if(slotRemap.isEmpty())
+        return command;
+    for(ETerrainTileLayer layer : {ETerrainTileLayer::Land,
+                                   ETerrainTileLayer::Overlay})
+        for(int y = 0; y < tileCountY(); ++y)
+            for(int x = 0; x < tileCountX(); ++x)
+            {
+                bool available = false;
+                const quint16 before = packedTile(x, y, layer, &available);
+                if(!available)
+                    continue;
+                SMprPackedTile packed = SMprPackedTile::decode(before);
+                const auto remapped = slotRemap.constFind(packed.atlasSlot());
+                if(remapped == slotRemap.constEnd()
+                   || remapped.value() == packed.atlasSlot()
+                   || remapped.value() < 0
+                   || remapped.value() >= m_tileTypes.size()
+                   || m_tileTypes.at(remapped.value()) < 0
+                   || m_tileTypes.at(remapped.value()) >= 16)
+                    continue;
+                packed.tileIndex = quint8(remapped.value() % 64);
+                packed.atlasIndex = quint8(remapped.value() / 64);
+                STerrainTileDelta delta;
+                delta.globalX = x;
+                delta.globalY = y;
+                delta.layer = layer;
+                delta.before = before;
+                delta.after = packed.encode();
+                command.deltas.append(delta);
+            }
+    return command;
+}
+
 STerrainTileCommand CTerrainEditModel::makeTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     quint8 atlasIndex, quint8 tileIndex, quint8 rotation,

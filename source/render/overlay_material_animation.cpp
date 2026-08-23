@@ -90,7 +90,8 @@ SOverlayMaterialAnimation overlayMaterialAnimation(const SMaterial* material)
 }
 
 SOverlayTileAnimation overlayTileAnimation(int atlasSlot,
-                                           const QVector<SAnimTile>* animations)
+                                           const QVector<SAnimTile>* animations,
+                                           quint32 phaseSeed)
 {
     SOverlayTileAnimation result;
     result.baseSlot = atlasSlot;
@@ -104,6 +105,8 @@ SOverlayTileAnimation overlayTileAnimation(int atlasSlot,
             continue;
         result.startSlot = int(animation.tileIndex);
         result.frameCount = int(animation.nPhase);
+        result.startPhase = int((phaseSeed * 17u + 5u)
+                                % quint32(result.frameCount));
         result.animated = true;
         break;
     }

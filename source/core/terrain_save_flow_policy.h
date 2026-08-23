@@ -82,6 +82,14 @@ inline bool terrainMprUsesAdjacentModernAtlas(
     return QString::compare(expected, actual, Qt::CaseInsensitive) == 0;
 }
 
+inline bool terrainSaveAsNeedsModernDraftConfirmation(
+    bool workingAtlasAvailable, bool landUsesWorkingExtension,
+    bool overlayUsesWorkingExtension)
+{
+    return workingAtlasAvailable
+        && (landUsesWorkingExtension || overlayUsesWorkingExtension);
+}
+
 inline bool terrainMprSaveActionEnabled(bool hasMpr, bool mprDirty,
                                         bool identityPublicationPending)
 {

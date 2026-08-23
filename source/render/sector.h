@@ -99,7 +99,7 @@ private:
         QVector3D normal;
         QVector2D texCoord;
         QVector4D animation;
-        QVector3D tileAnimation;
+        QVector4D tileAnimation;
         QVector2D grid;
         QVector3D emission;
         float opacity{1.0f};

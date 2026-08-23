@@ -446,6 +446,15 @@ public:
     QSharedPointer<CTerrainWorkingAtlas> createStagingCopy() const;
     bool canCommitStaging(const CTerrainWorkingAtlas& staged) const;
     bool commitStaging(const CTerrainWorkingAtlas& staged);
+    // Runtime flipbooks are contiguous physical ranges. When authored uniform
+    // frames were interleaved with generated blend slots, restore that runtime
+    // contract in safe extension slots and return the exact start-slot map
+    // needed to update every activating terrain reference.
+    bool normalizeAnimationRanges(
+        const QVector<SMprAnimatedTileRecord>& animations,
+        QVector<SMprAnimatedTileRecord>* normalizedAnimations,
+        QMap<int, int>* slotRemap,
+        CValidationReport* report = nullptr);
     int workingMappingCount() const { return m_virtualToWorking.size(); }
     int catalogVariantCount() const { return m_workingCatalog.size(); }
     QSet<int> changedSlots() const { return m_changedSlots; }
@@ -509,6 +518,9 @@ private:
     QSharedPointer<CTerrainVirtualAtlas> m_resolver;
     QMap<QPair<int, int>, int> m_virtualToWorking;
     QMap<int, QPair<int, int>> m_workingToVirtual;
+    // Contiguous runtime flipbook copies retain the exact source working-slot
+    // identity without pretending to be a new authored/generated provenance.
+    QMap<int, int> m_animationCopySources;
     QSet<int> m_changedSlots;
     int m_capacityLimit{0};
 };

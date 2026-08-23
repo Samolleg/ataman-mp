@@ -583,6 +583,8 @@ public:
                                      ETerrainTileLayer layer,
                                      quint8 atlasIndex, quint8 tileIndex,
                                      quint8 rotation) const;
+    STerrainTileCommand makeAtlasSlotRemap(
+        const QMap<int, int>& slotRemap) const;
     // Manual painting remains a direct physical operation. If Modern already
     // owns an active semantic field, the catalog-aware overload also keeps
     // that field honest: each affected vertex is recomputed from its

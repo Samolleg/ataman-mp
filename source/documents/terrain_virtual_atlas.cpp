@@ -4224,11 +4224,179 @@ bool CTerrainWorkingAtlas::commitStaging(
     m_workingTileTypes = staged.m_workingTileTypes;
     m_virtualToWorking = staged.m_virtualToWorking;
     m_workingToVirtual = staged.m_workingToVirtual;
+    m_animationCopySources = staged.m_animationCopySources;
     m_changedSlots = staged.m_changedSlots;
     if(staged.m_resolver)
         m_resolver.reset(new CTerrainVirtualAtlas(*staged.m_resolver));
     else
         m_resolver.reset();
+    return true;
+}
+
+bool CTerrainWorkingAtlas::normalizeAnimationRanges(
+    const QVector<SMprAnimatedTileRecord>& animations,
+    QVector<SMprAnimatedTileRecord>* normalizedAnimations,
+    QMap<int, int>* slotRemap, CValidationReport* report)
+{
+    if(!normalizedAnimations || !slotRemap || !isValid())
+        return false;
+    normalizedAnimations->clear();
+    slotRemap->clear();
+    const auto completeUniform = [](const STerrainTransitionSignature& value) {
+        return value.northWest > 0
+            && value.northWest == value.northEast
+            && value.northWest == value.southEast
+            && value.northWest == value.southWest;
+    };
+    QVector<SMprAnimatedTileRecord> normalized = animations;
+    QVector<QVector<int>> selectedFrames(animations.size());
+    QSet<int> reservedCopies;
+
+    // Resolve the complete plan before mutation. Working slot order is the
+    // authoring/provenance order: blend identities are skipped, while exact
+    // uniform identities of another runtime type can never become phases.
+    for(int animationIndex = 0; animationIndex < animations.size();
+        ++animationIndex)
+    {
+        const SMprAnimatedTileRecord& record = animations.at(animationIndex);
+        const int physicalCount = qMax(1, int(record.frameCount));
+        const int start = int(record.tileIndex);
+        if(start < 0 || start >= activeTileCount())
+        {
+            if(report) report->add("terrain.working_animation_range",
+                EValidationSeverity::Error,
+                QStringLiteral("Animation record %1 points outside the live working atlas.")
+                    .arg(animationIndex));
+            return false;
+        }
+        if(record.frameCount == 0)
+            continue;
+
+        STerrainWorkingTileIdentity startIdentity;
+        if(!tileIdentityForSlot(start, &startIdentity)
+           || !completeUniform(startIdentity.canonicalSignature)
+           || startIdentity.runtimeTerrainType < 0
+           || startIdentity.runtimeTerrainType >= 16)
+        {
+            if(report) report->add("terrain.working_animation_identity",
+                EValidationSeverity::Error,
+                QStringLiteral("Animation record %1 does not start on a complete typed uniform terrain identity.")
+                    .arg(animationIndex));
+            return false;
+        }
+
+        QVector<int>& frameSlots = selectedFrames[animationIndex];
+        frameSlots.reserve(physicalCount);
+        for(int position = start;
+            position < activeTileCount() && frameSlots.size() < physicalCount;
+            ++position)
+        {
+            STerrainWorkingTileIdentity candidate;
+            if(tileIdentityForSlot(position, &candidate)
+               && candidate.canonicalSignature
+                    == startIdentity.canonicalSignature
+               && candidate.runtimeTerrainType
+                    == startIdentity.runtimeTerrainType)
+                frameSlots.append(position);
+        }
+        if(frameSlots.size() != physicalCount)
+        {
+            if(report) report->add("terrain.working_animation_frames",
+                EValidationSeverity::Error,
+                QStringLiteral("Animation record %1 needs %2 ordered uniform frames of runtime type %3, but only %4 remain in working-atlas provenance order. No slots were moved.")
+                    .arg(animationIndex).arg(physicalCount)
+                    .arg(startIdentity.runtimeTerrainType)
+                    .arg(frameSlots.size()));
+            return false;
+        }
+
+        bool alreadyContiguous = true;
+        for(int phase = 0; phase < frameSlots.size(); ++phase)
+            alreadyContiguous = alreadyContiguous
+                && frameSlots.at(phase) == start + phase;
+        if(alreadyContiguous)
+            continue;
+
+        int copyStart = -1;
+        for(int candidate = activeTileCount();
+            candidate + physicalCount <= m_capacityLimit; ++candidate)
+        {
+            bool free = true;
+            for(int phase = 0; phase < physicalCount; ++phase)
+                free = free && !m_workingToVirtual.contains(candidate + phase)
+                    && !reservedCopies.contains(candidate + phase);
+            if(free)
+            {
+                copyStart = candidate;
+                break;
+            }
+        }
+        if(copyStart < 0
+           || copyStart > int(std::numeric_limits<quint16>::max()))
+        {
+            if(report) report->add("terrain.working_animation_capacity",
+                EValidationSeverity::Error,
+                QStringLiteral("Animation record %1 needs %2 contiguous extension slots, but the working atlas has no safe free range. No slots were moved.")
+                    .arg(animationIndex).arg(physicalCount));
+            return false;
+        }
+        normalized[animationIndex].tileIndex = quint16(copyStart);
+        if(slotRemap->contains(start)
+           && slotRemap->value(start) != copyStart)
+        {
+            if(report) report->add("terrain.working_animation_shared_start",
+                EValidationSeverity::Error,
+                QStringLiteral("Two animation records share one start slot but require different physical ranges. No slots were moved."));
+            return false;
+        }
+        slotRemap->insert(start, copyStart);
+        for(int phase = 0; phase < physicalCount; ++phase)
+            reservedCopies.insert(copyStart + phase);
+    }
+
+    for(int animationIndex = 0; animationIndex < animations.size();
+        ++animationIndex)
+    {
+        const int copyStart = int(normalized.at(animationIndex).tileIndex);
+        if(copyStart == int(animations.at(animationIndex).tileIndex))
+            continue;
+        const QVector<int>& frames = selectedFrames.at(animationIndex);
+        for(int phase = 0; phase < frames.size(); ++phase)
+        {
+            const int sourceSlot = frames.at(phase);
+            const int destination = copyStart + phase;
+            m_workingImages[destination] = m_workingImages.at(sourceSlot);
+            m_workingTileTypes[destination] = m_workingTileTypes.at(sourceSlot);
+            const QPair<int, int> key(2, destination);
+            m_workingToVirtual.insert(destination, key);
+            m_virtualToWorking.insert(key, destination);
+            m_animationCopySources.insert(destination, sourceSlot);
+            m_changedSlots.insert(destination);
+
+            STerrainWorkingTileIdentity identity;
+            if(!tileIdentityForSlot(sourceSlot, &identity))
+                return false; // resolved above; defensive only
+            const STerrainTransitionSignature base =
+                m_workingCatalog.paintGridMirrored()
+                    ? CTerrainTransitionCatalog::mirroredGridY(
+                          identity.canonicalSignature)
+                    : identity.canonicalSignature;
+            for(int rotation = 0; rotation < 4; ++rotation)
+            {
+                SMprPackedTile packed;
+                packed.tileIndex = quint8(destination % 64);
+                packed.atlasIndex = quint8(destination / 64);
+                packed.rotation = quint8(rotation);
+                STerrainTransitionVariant variant;
+                variant.signature = CTerrainTransitionCatalog::rotated(
+                    base, -rotation);
+                variant.packedTile = packed.encode();
+                variant.paintSelectable = false;
+                m_workingCatalog.addVariant(variant);
+            }
+        }
+    }
+    *normalizedAnimations = normalized;
     return true;
 }
 
@@ -4282,6 +4450,13 @@ QByteArray CTerrainWorkingAtlas::stateFingerprint() const
         addInt(mapping.key());
         addInt(mapping.value().first);
         addInt(mapping.value().second);
+    }
+    addInt(m_animationCopySources.size());
+    for(auto copy = m_animationCopySources.constBegin();
+        copy != m_animationCopySources.constEnd(); ++copy)
+    {
+        addInt(copy.key());
+        addInt(copy.value());
     }
     addInt(m_changedSlots.size());
     for(int slot : m_changedSlots)
@@ -4435,6 +4610,8 @@ ETerrainWorkingTileOrigin CTerrainWorkingAtlas::tileOriginForSlot(
     const auto mapped = m_workingToVirtual.constFind(slot);
     if(mapped == m_workingToVirtual.constEnd())
         return ETerrainWorkingTileOrigin::Unknown;
+    if(mapped.value().first == 2)
+        return tileOriginForSlot(m_animationCopySources.value(slot, -1));
     if(mapped.value().first == 0)
         return ETerrainWorkingTileOrigin::AuthoredMap;
     const int sourceIndex = mapped.value().second;
@@ -4458,6 +4635,20 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
     const auto mapped = m_workingToVirtual.constFind(slot);
     if(mapped == m_workingToVirtual.constEnd())
         return false;
+
+    if(mapped.value().first == 2)
+    {
+        const int sourceSlot = m_animationCopySources.value(slot, -1);
+        STerrainWorkingTileIdentity source;
+        if(sourceSlot < 0 || sourceSlot == slot
+           || !tileIdentityForSlot(sourceSlot, &source))
+            return false;
+        *identity = source;
+        identity->workingSlot = slot;
+        identity->physicalPixelSha256 = imageHash(m_workingImages.at(slot));
+        identity->runtimeTerrainType = runtimeTerrainTypeForSlot(slot);
+        return true;
+    }
 
     identity->workingSlot = slot;
     identity->physicalPixelSha256 = imageHash(m_workingImages.at(slot));

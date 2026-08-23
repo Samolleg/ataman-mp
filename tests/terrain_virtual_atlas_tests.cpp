@@ -595,6 +595,7 @@ private slots:
     void parallelStripesAndBaseCrossResolveExactly();
     void nestedCircleMaterialPairingsResolveExactly();
     void circularPaintsKeepEveryBrushIdentityInsideAndAtOuterEdge();
+    void workingAtlasRepacksInterleavedUniformAnimationFramesAtomically();
     void finalizationPreservesAndRebasesAuthoredAnimationRanges();
     void generatedPaintMatrixSavesReopensAndMatchesVertexOracle();
 };
@@ -6791,6 +6792,94 @@ void TerrainVirtualAtlasTests::circularPaintsKeepEveryBrushIdentityInsideAndAtOu
                             touched ? brushMaterial : background);
                     }
             }
+}
+
+void TerrainVirtualAtlasTests::workingAtlasRepacksInterleavedUniformAnimationFramesAtomically()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    const QVector<STerrainTransitionSignature> signatures = {
+        signature(7, 7, 7, 7), signature(7, 8, 8, 7),
+        signature(7, 7, 7, 7), signature(8, 7, 7, 8),
+        signature(7, 7, 7, 7), signature(8, 8, 8, 8)
+    };
+    for(int slot = 0; slot < signatures.size(); ++slot)
+    {
+        images.append(solid(qRgba(20 + slot * 25, 40, 70, 255)));
+        STerrainTransitionVariant variant;
+        variant.signature = signatures.at(slot);
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+    const QVector<qint32> types(signatures.size(), 3);
+    CTestTerrainWorkingAtlas live(catalog, images, 0x7766u, 16,
+                                  {}, {}, types);
+    const QByteArray before = live.stateFingerprint();
+    QSharedPointer<CTerrainWorkingAtlas> staged = live.createStagingCopy();
+    SMprAnimatedTileRecord record;
+    record.tileIndex = 0;
+    record.frameCount = 3;
+    QVector<SMprAnimatedTileRecord> normalized;
+    QMap<int, int> remap;
+    CValidationReport report;
+    QVERIFY2(staged->normalizeAnimationRanges({record}, &normalized,
+        &remap, &report), qPrintable(report.toText()));
+    QCOMPARE(live.stateFingerprint(), before);
+    QCOMPARE(normalized.size(), 1);
+    QCOMPARE(normalized.front().tileIndex, quint16(6));
+    QCOMPARE(normalized.front().frameCount, quint16(3));
+    QCOMPARE(remap.value(0), 6);
+    QCOMPARE(remap.size(), 1);
+    QVERIFY(live.commitStaging(*staged));
+    for(int slot = 6; slot < 9; ++slot)
+    {
+        STerrainWorkingTileIdentity identity;
+        QVERIFY(live.tileIdentityForSlot(slot, &identity));
+        QCOMPARE(identity.canonicalSignature, signature(7, 7, 7, 7));
+        QCOMPARE(identity.runtimeTerrainType, qint32(3));
+    }
+
+    SMprPackedTile activating;
+    activating.tileIndex = 0;
+    activating.rotation = 3;
+    CMprDocument document;
+    QVERIFY2(document.loadBytes(portableMprWithActiveOverlay(
+        activating.encode(), activating.encode()),
+        QStringLiteral("animation-remap.mpr"), &report),
+        qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    terrain.enableWorkingAtlasSlots(live.capacityLimit());
+    QVERIFY(terrain.installWorkingAtlasSlotTypes(live.activeTileTypes()));
+    const STerrainTileCommand remapCommand = terrain.makeAtlasSlotRemap(remap);
+    QCOMPARE(remapCommand.deltas.size(), 16 * 16 * 2);
+    QVERIFY(terrain.apply(remapCommand, true, &report));
+    for(ETerrainTileLayer layer : {ETerrainTileLayer::Land,
+                                   ETerrainTileLayer::Overlay})
+    {
+        bool available = false;
+        const SMprPackedTile moved = SMprPackedTile::decode(
+            terrain.packedTile(0, 0, layer, &available));
+        QVERIFY(available);
+        QCOMPARE(moved.atlasSlot(), 6);
+        QCOMPARE(moved.rotation, quint8(3));
+    }
+    QVERIFY(terrain.apply(remapCommand, false, &report));
+    QCOMPARE(terrain.packedTile(0, 0, ETerrainTileLayer::Land),
+             activating.encode());
+    QCOMPARE(terrain.packedTile(0, 0, ETerrainTileLayer::Overlay),
+             activating.encode());
+
+    // A declared range without enough same-signature/runtime frames must not
+    // partially permute the live atlas or silently animate blend tiles.
+    QSharedPointer<CTerrainWorkingAtlas> invalid = live.createStagingCopy();
+    record.frameCount = 7;
+    const QByteArray invalidBefore = invalid->stateFingerprint();
+    QVERIFY(!invalid->normalizeAnimationRanges({record}, &normalized,
+        &remap, &report));
+    QCOMPARE(invalid->stateFingerprint(), invalidBefore);
 }
 
 void TerrainVirtualAtlasTests::finalizationPreservesAndRebasesAuthoredAnimationRanges()
