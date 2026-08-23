@@ -346,6 +346,8 @@ public:
     bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
+    bool terrainTileCommandInvalidatesAiGraph(
+        const STerrainTileCommand& command) const;
     bool applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command, bool forward);
     bool applyMprParametersPreview(const QVector<SMprMaterialRecord>& materials,
                                    const QVector<SMprAnimatedTileRecord>& animatedTiles);
@@ -520,6 +522,7 @@ private:
     void startAiGraphPreviewRegeneration();
     void beginAiGraphPreviewRegeneration(bool selectRegenerated);
     void scheduleAiGraphPreviewRegeneration();
+    void stopAiGraphPreviewAutoRegeneration();
     bool captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                                          QString* error);
     void syncEnvironmentPreviewWidget(float mapTimeHours);

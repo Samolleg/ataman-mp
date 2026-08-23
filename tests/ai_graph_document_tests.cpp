@@ -1,12 +1,25 @@
 #include <QtTest>
 #include <QDataStream>
 #include <QtEndian>
+#include <QUndoCommand>
 
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
+#include "render/ai_graph_preview_invalidation.h"
 #include "../source/core/map_object_placement_policy.h"
 
 namespace {
+class TestAiGraphUndoCommand : public QUndoCommand,
+                               public IAiGraphPreviewInvalidatingCommand
+{
+public:
+    TestAiGraphUndoCommand(bool invalidates, QUndoCommand* parent = nullptr)
+        : QUndoCommand(parent), m_invalidates(invalidates) {}
+    bool invalidatesAiGraphPreview() const override { return m_invalidates; }
+private:
+    bool m_invalidates;
+};
+
 QByteArray syntheticGraph(int width, int height, bool trailing = false)
 {
     QByteArray data;
@@ -135,6 +148,10 @@ private slots:
     void regenerationIndexesCollisionCoverageOnce();
     void regenerationHandlesPopulatedMapScale();
     void parsesProfileTerrainTraversalRegistry();
+    void sourceSwitchOwnsRegenerationLifecycle();
+    void invalidationClassifiesOnlyGraphBuilderInputs();
+    void invalidationTraversesUndoMacros();
+    void staticObjectNidInvalidationIsScoped();
 };
 
 void AiGraphDocumentTests::resolvesTerrainRelativeStaticObjectPlacement()
@@ -1052,6 +1069,82 @@ void AiGraphDocumentTests::parsesProfileTerrainTraversalRegistry()
     QCOMPARE(traversal.at(4).speed, 700);
     QCOMPARE(traversal.at(4).cost, 50);
     QCOMPARE(traversal.at(3).speed, -1);
+}
+
+void AiGraphDocumentTests::sourceSwitchOwnsRegenerationLifecycle()
+{
+    const SAiGraphPreviewSourceTransition loaded =
+        aiGraphPreviewSourceTransition(true, true);
+    QVERIFY(!loaded.enableAutomaticRegeneration);
+    QVERIFY(loaded.cancelPendingRegeneration);
+    QVERIFY(!loaded.queueRegeneration);
+
+    const SAiGraphPreviewSourceTransition freshGenerated =
+        aiGraphPreviewSourceTransition(false, true);
+    QVERIFY(freshGenerated.enableAutomaticRegeneration);
+    QVERIFY(!freshGenerated.cancelPendingRegeneration);
+    QVERIFY(!freshGenerated.queueRegeneration);
+
+    const SAiGraphPreviewSourceTransition staleGenerated =
+        aiGraphPreviewSourceTransition(false, false);
+    QVERIFY(staleGenerated.enableAutomaticRegeneration);
+    QVERIFY(!staleGenerated.cancelPendingRegeneration);
+    QVERIFY(staleGenerated.queueRegeneration);
+}
+
+void AiGraphDocumentTests::invalidationClassifiesOnlyGraphBuilderInputs()
+{
+    QVERIFY(aiGraphObjectPropertyInvalidatesPreview(
+        eWorldObject, eObjParam_POSITION));
+    QVERIFY(aiGraphObjectPropertyInvalidatesPreview(
+        eTorch, eObjParam_ROTATION_Z));
+    QVERIFY(aiGraphObjectPropertyInvalidatesPreview(
+        eLever, eObjParam_COMPLECTION_X));
+    QVERIFY(aiGraphObjectPropertyInvalidatesPreview(
+        eWorldObject, eObjParam_TEMPLATE));
+    QVERIFY(aiGraphObjectPropertyInvalidatesPreview(
+        eWorldObject, eObjParam_BODYPARTS));
+    QVERIFY(aiGraphObjectPropertyInvalidatesPreview(
+        eWorldObject, eObjParam_NID));
+
+    QVERIFY(!aiGraphObjectPropertyInvalidatesPreview(
+        eUnit, eObjParam_POSITION));
+    QVERIFY(!aiGraphObjectPropertyInvalidatesPreview(
+        eMagicTrap, eObjParam_ROTATION));
+    QVERIFY(!aiGraphObjectPropertyInvalidatesPreview(
+        eWorldObject, eObjParam_COMMENTS));
+    QVERIFY(!aiGraphObjectPropertyInvalidatesPreview(
+        eLever, eObjParam_LEVER_CUR_STATE));
+    QVERIFY(!aiGraphObjectPropertyInvalidatesPreview(
+        eLever, eObjParam_LEVER_RECALC_GRAPH));
+}
+
+void AiGraphDocumentTests::invalidationTraversesUndoMacros()
+{
+    QUndoCommand unrelated;
+    new TestAiGraphUndoCommand(false, &unrelated);
+    QVERIFY(!aiGraphUndoCommandInvalidatesPreview(&unrelated));
+
+    QUndoCommand mixed;
+    new TestAiGraphUndoCommand(false, &mixed);
+    QUndoCommand* nested = new QUndoCommand(&mixed);
+    new TestAiGraphUndoCommand(true, nested);
+    QVERIFY(aiGraphUndoCommandInvalidatesPreview(&mixed));
+    QVERIFY(!aiGraphUndoCommandInvalidatesPreview(nullptr));
+}
+
+void AiGraphDocumentTests::staticObjectNidInvalidationIsScoped()
+{
+    QVERIFY(aiGraphObjectPropertyInvalidatesPreview(
+        eWorldObject, eObjParam_NID));
+    QVERIFY(aiGraphObjectPropertyInvalidatesPreview(
+        eTorch, eObjParam_NID));
+    QVERIFY(aiGraphObjectPropertyInvalidatesPreview(
+        eLever, eObjParam_NID));
+    QVERIFY(!aiGraphObjectPropertyInvalidatesPreview(
+        eUnit, eObjParam_NID));
+    QVERIFY(!aiGraphObjectPropertyInvalidatesPreview(
+        eMagicTrap, eObjParam_NID));
 }
 
 QTEST_APPLESS_MAIN(AiGraphDocumentTests)

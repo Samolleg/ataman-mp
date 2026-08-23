@@ -160,6 +160,20 @@ QByteArray viewSource()
     return QByteArray();
 }
 
+QByteArray repositorySource(const QString& relativePath)
+{
+    QDir directory(QDir::currentPath());
+    for(int depth = 0; depth < 8; ++depth)
+    {
+        QFile source(directory.filePath(relativePath));
+        if(source.open(QIODevice::ReadOnly))
+            return source.readAll();
+        if(!directory.cdUp())
+            break;
+    }
+    return QByteArray();
+}
+
 QByteArray emptyMpr()
 {
     QByteArray bytes;
@@ -488,6 +502,9 @@ private slots:
     void aiGraphPersistenceConfirmationNamesSourceAndNonUndoableSave();
     void aiGraphPreviewSelectionNamesActualSource();
     void aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbeddedShadowsIt();
+    void aiGraphLoadedSourceStopsRegeneratedLifecycle();
+    void aiGraphUndoInvalidationUsesNarrowInputPolicy();
+    void aiGraphResetIdsInvalidatesStaticObjectGrouping();
     void aiGraphFileCommitIsValidatedBackedUpAndAtomic();
     void aiGraphOwnershipSwitchValidationNeverRewritesExternalFile();
     void existingGraphComponentReuseIsWarningNotBlocker();
@@ -1052,6 +1069,75 @@ void EnduranceDocumentTests::aiGraphPreviewSelectsExactExternalUnlessPrimaryEmbe
     QVERIFY(shadowed.embedded);
     QVERIFY(shadowed.path.isEmpty());
     QVERIFY(shadowed.label.contains("zone6.mob"));
+}
+
+void EnduranceDocumentTests::aiGraphLoadedSourceStopsRegeneratedLifecycle()
+{
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+
+    const int widgetStart = source.indexOf("void CView::initAiGraphPreviewWidget()");
+    const int widgetEnd = source.indexOf("void CView::syncAiGraphPreviewWidget()",
+                                         widgetStart);
+    QVERIFY2(widgetStart >= 0 && widgetEnd > widgetStart,
+             "AI graph preview widget implementation was not found");
+    const QByteArray widget = source.mid(widgetStart, widgetEnd - widgetStart);
+    const int loadedBranch = widget.indexOf("m_aiGraphPreviewUsesLoadedSource = true;");
+    QVERIFY2(loadedBranch >= 0,
+             "Loaded AI graph source-selection branch was not found");
+    QVERIFY2(widget.indexOf("stopAiGraphPreviewAutoRegeneration();", loadedBranch) > loadedBranch,
+             "Switching back to the loaded graph leaves regenerated-mode work active");
+}
+
+void EnduranceDocumentTests::aiGraphUndoInvalidationUsesNarrowInputPolicy()
+{
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+
+    const int historyStart = source.indexOf(
+        "connect(m_pUndoStack, &QUndoStack::indexChanged");
+    const int historyEnd = source.indexOf("m_lastUndoStackIndex = index;",
+                                          historyStart);
+    QVERIFY2(historyStart >= 0 && historyEnd > historyStart,
+             "Undo-stack dirty-state callback was not found");
+    const QByteArray history = source.mid(historyStart, historyEnd - historyStart);
+    QVERIFY2(history.contains("aiGraphUndoCommandInvalidatesPreview(command)"),
+             "Undo history still invalidates the AI graph for unrelated commands");
+    QVERIFY2(!history.contains(
+                 "dynamic_cast<const CTerrainTilePreviewCommand*>(command) == nullptr"),
+             "Terrain tile undo/redo is still excluded from AI graph invalidation");
+}
+
+void EnduranceDocumentTests::aiGraphResetIdsInvalidatesStaticObjectGrouping()
+{
+    const QByteArray header = repositorySource(
+        QStringLiteral("source/core/undo.h"));
+    const QByteArray implementation = repositorySource(
+        QStringLiteral("source/core/undo.cpp"));
+    QVERIFY2(!header.isEmpty() && !implementation.isEmpty(),
+             "Could not locate undo sources from the test worktree");
+
+    const int classStart = header.indexOf("class CResetIdCommand:");
+    const int classEnd = header.indexOf("class CBrushTileCommand", classStart);
+    QVERIFY2(classStart >= 0 && classEnd > classStart,
+             "Reset IDs undo command declaration was not found");
+    const QByteArray declaration = header.mid(classStart, classEnd - classStart);
+    QVERIFY(declaration.contains("IAiGraphPreviewInvalidatingCommand"));
+    QVERIFY(declaration.contains("invalidatesAiGraphPreview() const override"));
+
+    const int methodStart = implementation.indexOf(
+        "bool CResetIdCommand::invalidatesAiGraphPreview() const");
+    const int methodEnd = implementation.indexOf(
+        "void CResetIdCommand::undo()", methodStart);
+    QVERIFY2(methodStart >= 0 && methodEnd > methodStart,
+             "Reset IDs invalidation implementation was not found");
+    const QByteArray method = implementation.mid(methodStart,
+                                                  methodEnd - methodStart);
+    QVERIFY(method.contains("contributesStaticNavigationCollision"));
+    QVERIFY(method.contains("m_reconnectId.contains(node->mapId())"));
+    QVERIFY(method.contains("m_reconnectId.key(node->mapId(), 0)"));
 }
 
 void EnduranceDocumentTests::aiGraphFileCommitIsValidatedBackedUpAndAtomic()

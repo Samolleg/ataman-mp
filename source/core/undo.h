@@ -5,6 +5,7 @@
 #include <QMessageBox>
 #include "view.h"
 #include "mob/mob.h"
+#include "render/ai_graph_preview_invalidation.h"
 
 ///
 /// THis file presents types of operations that can be realized with undo\redo mechanism.
@@ -17,7 +18,8 @@ class CUnit;
 class CLogic;
 class IPropertyBase;
 
-class CDeleteNodeCommand: public QObject, public QUndoCommand
+class CDeleteNodeCommand: public QObject, public QUndoCommand,
+                          public IAiGraphPreviewInvalidatingCommand
 {
     Q_OBJECT
 public:
@@ -29,6 +31,7 @@ public:
     void redo() override;
     //bool mergeWith(const QUndoCommand *command) override;
     int id() const override { return Id; }
+    bool invalidatesAiGraphPreview() const override;
 
 signals:
     void deleteNodeSignal(uint);
@@ -61,7 +64,8 @@ private:
     int m_logicSlot;
 };
 
-class CCreateNodeCommand: public QObject, public QUndoCommand
+class CCreateNodeCommand: public QObject, public QUndoCommand,
+                          public IAiGraphPreviewInvalidatingCommand
 {
     Q_OBJECT
 public:
@@ -75,6 +79,7 @@ public:
     void redo() override;
     //bool mergeWith(const QUndoCommand *command) override;
     int id() const override { return Id; }
+    bool invalidatesAiGraphPreview() const override;
 
 signals:
     void addNodeSignal(CNode*);
@@ -521,7 +526,8 @@ private:
     QString m_oldMobName;
 };
 
-class CChangeProp : public QObject, public QUndoCommand
+class CChangeProp : public QObject, public QUndoCommand,
+                    public IAiGraphPreviewInvalidatingCommand
 {
     Q_OBJECT
 public:
@@ -535,6 +541,7 @@ public:
     void redo() override;
     //bool mergeWith(const QUndoCommand *command) override;
     int id() const override { return Id; }
+    bool invalidatesAiGraphPreview() const override;
 
 signals:
     void updateParam();
@@ -558,7 +565,8 @@ protected:
     bool m_bodyPartStateCaptured;
 };
 
-class CResetIdCommand: public QObject, public QUndoCommand
+class CResetIdCommand: public QObject, public QUndoCommand,
+                       public IAiGraphPreviewInvalidatingCommand
 {
     Q_OBJECT
 public:
@@ -570,6 +578,7 @@ public:
     void redo() override;
     //bool mergeWith(const QUndoCommand *command) override;
     int id() const override { return Id; }
+    bool invalidatesAiGraphPreview() const override;
 
 signals:
     void updateParam();
@@ -579,7 +588,8 @@ private:
     QMap<uint, uint> m_reconnectId;
 };
 
-class CBrushTileCommand: public QUndoCommand
+class CBrushTileCommand: public QUndoCommand,
+                         public IAiGraphPreviewInvalidatingCommand
 {
 public:
     enum { Id = 118 };
@@ -590,6 +600,7 @@ public:
     void redo() override;
     bool mergeWith(const QUndoCommand *command) override;
     int id() const override { return Id; }
+    bool invalidatesAiGraphPreview() const override { return true; }
 
 private:
     CView *m_pView;

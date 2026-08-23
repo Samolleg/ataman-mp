@@ -863,7 +863,8 @@ QJsonObject packedTerrainTileJson(quint16 packed)
     return result;
 }
 
-class CTerrainHeightPreviewCommand : public QUndoCommand
+class CTerrainHeightPreviewCommand : public QUndoCommand,
+                                     public IAiGraphPreviewInvalidatingCommand
 {
 public:
     CTerrainHeightPreviewCommand(CView* view, const STerrainHeightCommand& command,
@@ -882,13 +883,18 @@ public:
         }
         m_view->applyTerrainHeightPreview(m_command, true);
     }
+    bool invalidatesAiGraphPreview() const override
+    {
+        return true;
+    }
 private:
     CView* m_view;
     STerrainHeightCommand m_command;
     bool m_skipInitialRedo{false};
 };
 
-class CTerrainVerticalScalePreviewCommand : public QUndoCommand
+class CTerrainVerticalScalePreviewCommand : public QUndoCommand,
+                                            public IAiGraphPreviewInvalidatingCommand
 {
 public:
     CTerrainVerticalScalePreviewCommand(
@@ -899,12 +905,17 @@ public:
     }
     void undo() override { m_view->applyTerrainVerticalScalePreview(m_command, false); }
     void redo() override { m_view->applyTerrainVerticalScalePreview(m_command, true); }
+    bool invalidatesAiGraphPreview() const override
+    {
+        return true;
+    }
 private:
     CView* m_view;
     STerrainVerticalScaleCommand m_command;
 };
 
-class CTerrainTilePreviewCommand : public QUndoCommand
+class CTerrainTilePreviewCommand : public QUndoCommand,
+                                   public IAiGraphPreviewInvalidatingCommand
 {
 public:
     CTerrainTilePreviewCommand(CView* view, const STerrainTileCommand& command,
@@ -923,13 +934,18 @@ public:
         }
         m_view->applyTerrainTilePreview(m_command, true);
     }
+    bool invalidatesAiGraphPreview() const override
+    {
+        return m_view->terrainTileCommandInvalidatesAiGraph(m_command);
+    }
 private:
     CView* m_view;
     STerrainTileCommand m_command;
     bool m_skipInitialRedo{false};
 };
 
-class COverlaySurfacePreviewCommand : public QUndoCommand
+class COverlaySurfacePreviewCommand : public QUndoCommand,
+                                      public IAiGraphPreviewInvalidatingCommand
 {
 public:
     COverlaySurfacePreviewCommand(CView* view, const SOverlaySurfaceCommand& command,
@@ -948,13 +964,18 @@ public:
         }
         m_view->applyOverlaySurfacePreview(m_command, true);
     }
+    bool invalidatesAiGraphPreview() const override
+    {
+        return true;
+    }
 private:
     CView* m_view;
     SOverlaySurfaceCommand m_command;
     bool m_skipInitialRedo{false};
 };
 
-class CMprParametersPreviewCommand : public QUndoCommand
+class CMprParametersPreviewCommand : public QUndoCommand,
+                                     public IAiGraphPreviewInvalidatingCommand
 {
 public:
     CMprParametersPreviewCommand(
@@ -976,6 +997,15 @@ public:
     void redo() override
     {
         m_view->applyMprParametersPreview(m_afterMaterials, m_afterAnimatedTiles);
+    }
+    bool invalidatesAiGraphPreview() const override
+    {
+        if(m_beforeMaterials.size() != m_afterMaterials.size())
+            return true;
+        for(int index = 0; index < m_beforeMaterials.size(); ++index)
+            if(m_beforeMaterials.at(index).type != m_afterMaterials.at(index).type)
+                return true;
+        return false;
     }
 private:
     CView* m_view;
@@ -2151,8 +2181,7 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
             ++commandIndex)
         {
             const QUndoCommand* command = m_pUndoStack->command(commandIndex);
-            navigationChange = dynamic_cast<const CSelectionCommand*>(command) == nullptr
-                && dynamic_cast<const CTerrainTilePreviewCommand*>(command) == nullptr;
+            navigationChange = aiGraphUndoCommandInvalidatesPreview(command);
         }
         if(navigationChange)
             scheduleAiGraphPreviewRegeneration();
@@ -2864,12 +2893,21 @@ void CView::initAiGraphPreviewWidget()
             m_aiGraphPreviewUsesLoadedSource = true;
             m_aiGraphDocument = m_aiGraphLoadedDocument;
             m_aiGraphSource = m_aiGraphLoadedSource;
+            stopAiGraphPreviewAutoRegeneration();
         }
         m_aiGraphOverlayDirty = true;
         if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
             m_aiGraphPreviewToggle->setChecked(true);
         syncAiGraphPreviewWidget();
         update();
+        const SAiGraphPreviewSourceTransition transition =
+            aiGraphPreviewSourceTransition(
+                m_aiGraphPreviewUsesLoadedSource,
+                m_aiGraphRegeneratedFresh);
+        m_aiGraphAutoRegenerationEnabled =
+            transition.enableAutomaticRegeneration;
+        if(transition.queueRegeneration)
+            scheduleAiGraphPreviewRegeneration();
     });
     QShortcut* shortcut = new QShortcut(QKeySequence(Qt::Key_N), this);
     shortcut->setContext(Qt::WidgetWithChildrenShortcut);
@@ -3393,8 +3431,9 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
 
 void CView::scheduleAiGraphPreviewRegeneration()
 {
-    if(!m_aiGraphAutoRegenerationEnabled || !m_terrainEditAvailable
-       || !m_aiGraphRegenerationTimer)
+    m_aiGraphRegeneratedFresh = false;
+    if(!m_aiGraphAutoRegenerationEnabled || m_aiGraphPreviewUsesLoadedSource
+       || !m_terrainEditAvailable || !m_aiGraphRegenerationTimer)
         return;
     ++m_aiGraphBuildRequest;
     m_aiGraphPreviewUsesLoadedSource = false;
@@ -3404,9 +3443,17 @@ void CView::scheduleAiGraphPreviewRegeneration()
         m_aiGraphSource = m_aiGraphRegeneratedSource;
         m_aiGraphOverlayDirty = true;
     }
-    m_aiGraphRegeneratedFresh = false;
     m_aiGraphRegenerationPending = true;
     m_aiGraphRegenerationTimer->start();
+}
+
+void CView::stopAiGraphPreviewAutoRegeneration()
+{
+    ++m_aiGraphBuildRequest;
+    m_aiGraphAutoRegenerationEnabled = false;
+    m_aiGraphRegenerationPending = false;
+    if(m_aiGraphRegenerationTimer)
+        m_aiGraphRegenerationTimer->stop();
 }
 
 void CView::applyEnvironmentCompatibilityMode()
@@ -17041,9 +17088,6 @@ void CView::endTileBrushGroup()
         {
             m_pUndoStack->push(new CTerrainTilePreviewCommand(
                 this, m_tileStrokeCommand, true));
-            // Loaded authored graph data remains an explicit static override;
-            // only an already-generated preview is invalidated/rebuilt.
-            scheduleAiGraphPreviewRegeneration();
         }
     }
     m_tileBrushStrokePolicy.finish();
@@ -17768,6 +17812,25 @@ void CView::beginTileBrushGroup()
     m_tileStrokeSafeSkippedVertices = 0;
     m_tileStrokeSafeSkippedBoundaryCells = 0;
     m_tileStrokeUndoCheckpointed = false;
+}
+
+bool CView::terrainTileCommandInvalidatesAiGraph(
+    const STerrainTileCommand& command) const
+{
+    for(const STerrainTileDelta& delta : command.deltas)
+    {
+        if(delta.before == delta.after)
+            continue;
+        bool beforeFound = false;
+        bool afterFound = false;
+        const qint32 beforeType = m_terrainEdit.tileType(
+            delta.before, &beforeFound);
+        const qint32 afterType = m_terrainEdit.tileType(
+            delta.after, &afterFound);
+        if(!beforeFound || !afterFound || beforeType != afterType)
+            return true;
+    }
+    return false;
 }
 
 bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool forward)
