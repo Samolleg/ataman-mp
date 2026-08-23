@@ -2538,6 +2538,22 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         terrainTextureProbeMemberName = runtimeMmpMembers.constLast();
         terrainTextureProbeName = QFileInfo(
             terrainTextureProbeMemberName).completeBaseName();
+        if(hasTemporaryMinimap)
+        {
+            QByteArray compositeArchive;
+            if(!stageSyntheticMapTextureArchive(
+                   placeholderArchive,
+                   QStringLiteral("Test Current rebased terrain and minimap"),
+                   temporaryMinimapRuntimeName, input.temporaryMinimapMmp,
+                   &compositeArchive, &placeholderErrors))
+            {
+                if(error) *error =
+                    "Could not add the generated minimap to the run-owned terrain resource:\n"
+                    + placeholderErrors.join('\n');
+                return false;
+            }
+            placeholderArchive = compositeArchive;
+        }
     }
     else
     {

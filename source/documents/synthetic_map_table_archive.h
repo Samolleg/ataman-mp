@@ -32,6 +32,18 @@ bool buildSyntheticMapTextureArchive(const QString& textureName,
                                      QByteArray* outputArchive,
                                      QStringList* errors = nullptr);
 
+// Appends a generated minimap to an existing run-owned RES candidate while
+// proving every existing member survives unchanged. An identical existing
+// member is an idempotent no-op; a differing identity collision is refused.
+// This is the composite Test Current path used when the same private archive
+// already contains rebased terrain atlas pages.
+bool stageSyntheticMapTextureArchive(const QByteArray& sourceArchive,
+                                     const QString& sourceName,
+                                     const QString& textureName,
+                                     const QByteArray& mmpPayload,
+                                     QByteArray* outputArchive,
+                                     QStringList* errors = nullptr);
+
 // Updates only the selected zone's minimap field inside an already run-owned
 // texts.res candidate. The objectives field and every other member are
 // preserved. This never writes a file.

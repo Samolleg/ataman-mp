@@ -77,6 +77,7 @@ private slots:
     void authoritativeResultRejectsWrongZone();
     void analyzesPersistedAuthoritativeResult();
     void rebasesRuntimeTerrainAtlasNamespace();
+    void initialLaunchComposesGeneratedMinimapWithTerrainResource();
     void changedTerrainAtlasRequiresOwnedProcessRestart();
     void renderEvidenceRejectsTexturelessFrames();
     void memoryEvidenceSummarizesComparableSamples();
@@ -736,6 +737,31 @@ void JmvMapTestLauncherTests::rebasesRuntimeTerrainAtlasNamespace()
         QVERIFY(!rebasedMpr.isEmpty());
         QVERIFY(!rebasedRes.isEmpty());
     }
+}
+
+void JmvMapTestLauncherTests::initialLaunchComposesGeneratedMinimapWithTerrainResource()
+{
+    const QByteArray source = launcherSource();
+    const int stageStart = source.indexOf(
+        "bool CJmvMapTestLauncher::stage(");
+    const int terrainBranch = source.indexOf(
+        "if(!input.terrainTextureResourceData.isEmpty())", stageStart);
+    const int resourceIdentity = source.indexOf(
+        "m_liveMprSha256 = sha256(runtimeMprData);", terrainBranch);
+    const int mapReference = source.indexOf(
+        "stageTemporaryMinimapReference(", terrainBranch);
+    QVERIFY(stageStart >= 0);
+    QVERIFY(terrainBranch > stageStart);
+    QVERIFY(resourceIdentity > terrainBranch);
+    QVERIFY(mapReference > resourceIdentity);
+
+    const QByteArray compositeBranch = source.mid(
+        terrainBranch, resourceIdentity - terrainBranch);
+    QVERIFY2(compositeBranch.contains("stageSyntheticMapTextureArchive("),
+             "The terrain-atlas launch path can publish a generated minimap reference without packaging the matching MMP");
+    QVERIFY2(compositeBranch.indexOf("stageSyntheticMapTextureArchive(")
+                 < mapReference - terrainBranch,
+             "The generated minimap resource must be complete before map.txt is redirected to it");
 }
 
 void JmvMapTestLauncherTests::changedTerrainAtlasRequiresOwnedProcessRestart()
