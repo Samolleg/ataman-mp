@@ -15,6 +15,9 @@ private slots:
     void classifiesInvalidContextFramebufferOrResources();
     void classifiesWholeSceneFrustumRejection();
     void classifiesAsyncRebuildWindow();
+    void rollingHistoryRemainsArmedAndBoundedPastFrameLimit();
+    void markerRequiresEvidenceAndRepeatedMarkersRemainDistinct();
+    void disarmStopsAndClearsCapture();
 };
 
 static SFramePresentationTelemetry healthyFrame()
@@ -125,6 +128,62 @@ void FramePresentationTelemetryTests::classifiesAsyncRebuildWindow()
     frame.asyncUploadOrRebuildActive = true;
     QCOMPARE(classifyFramePresentation(frame),
              EFramePresentationDiagnosis::AsyncUploadOrRebuildWindow);
+}
+
+void FramePresentationTelemetryTests::rollingHistoryRemainsArmedAndBoundedPastFrameLimit()
+{
+    CFramePresentationHistory history(3);
+    history.arm();
+    for(quint64 frameId = 1; frameId <= 600; ++frameId)
+    {
+        SFramePresentationTelemetry frame = healthyFrame();
+        frame.frameId = frameId;
+        QVERIFY(history.append(frame));
+    }
+
+    QVERIFY(history.isArmed());
+    QCOMPARE(history.size(), 3);
+    const SFramePresentationMarkerSnapshot snapshot = history.snapshot();
+    QVERIFY(snapshot.isValid());
+    QCOMPARE(snapshot.frames.size(), 3);
+    QCOMPARE(snapshot.frames.at(0).frameId, quint64(598));
+    QCOMPARE(snapshot.frames.at(1).frameId, quint64(599));
+    QCOMPARE(snapshot.frames.at(2).frameId, quint64(600));
+}
+
+void FramePresentationTelemetryTests::markerRequiresEvidenceAndRepeatedMarkersRemainDistinct()
+{
+    CFramePresentationHistory history(4);
+    history.arm();
+    QVERIFY(!history.snapshot().isValid());
+
+    SFramePresentationTelemetry frame = healthyFrame();
+    frame.frameId = 41;
+    QVERIFY(history.append(frame));
+    const SFramePresentationMarkerSnapshot first = history.snapshot();
+    QVERIFY(first.isValid());
+
+    frame.frameId = 42;
+    QVERIFY(history.append(frame));
+    const SFramePresentationMarkerSnapshot second = history.snapshot();
+    QVERIFY(second.isValid());
+    QVERIFY(first.markerId != second.markerId);
+    QCOMPARE(first.frames.last().frameId, quint64(41));
+    QCOMPARE(second.frames.last().frameId, quint64(42));
+}
+
+void FramePresentationTelemetryTests::disarmStopsAndClearsCapture()
+{
+    CFramePresentationHistory history(2);
+    history.arm();
+    SFramePresentationTelemetry frame = healthyFrame();
+    frame.frameId = 1;
+    QVERIFY(history.append(frame));
+    history.disarm();
+    QVERIFY(!history.isArmed());
+    QCOMPARE(history.size(), 0);
+    QVERIFY(!history.append(frame));
+    QVERIFY(!history.snapshot().isValid());
 }
 
 QTEST_APPLESS_MAIN(FramePresentationTelemetryTests)

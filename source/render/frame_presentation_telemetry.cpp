@@ -1,5 +1,58 @@
 #include "frame_presentation_telemetry.h"
 
+CFramePresentationHistory::CFramePresentationHistory(int capacity)
+    : m_capacity(qMax(1, capacity))
+{
+    m_frames.reserve(m_capacity);
+}
+
+void CFramePresentationHistory::arm()
+{
+    m_frames.clear();
+    m_nextWrite = 0;
+    m_armed = true;
+}
+
+void CFramePresentationHistory::disarm()
+{
+    m_armed = false;
+    m_frames.clear();
+    m_nextWrite = 0;
+}
+
+bool CFramePresentationHistory::append(const SFramePresentationTelemetry& frame)
+{
+    if(!m_armed)
+        return false;
+    if(m_frames.size() < m_capacity)
+    {
+        m_frames.append(frame);
+        m_nextWrite = m_frames.size() % m_capacity;
+    }
+    else
+    {
+        m_frames[m_nextWrite] = frame;
+        m_nextWrite = (m_nextWrite + 1) % m_capacity;
+    }
+    return true;
+}
+
+SFramePresentationMarkerSnapshot CFramePresentationHistory::snapshot()
+{
+    SFramePresentationMarkerSnapshot result;
+    if(!m_armed || m_frames.isEmpty())
+        return result;
+
+    result.markerId = m_nextMarkerId++;
+    result.frames.reserve(m_frames.size());
+    if(m_frames.size() < m_capacity)
+        result.frames = m_frames;
+    else
+        for(int offset = 0; offset < m_frames.size(); ++offset)
+            result.frames.append(m_frames.at((m_nextWrite + offset) % m_capacity));
+    return result;
+}
+
 EFramePresentationDiagnosis classifyFramePresentation(
     const SFramePresentationTelemetry& frame)
 {
@@ -63,12 +116,13 @@ QString framePresentationDiagnosisName(EFramePresentationDiagnosis diagnosis)
 QString formatFramePresentationTelemetry(const SFramePresentationTelemetry& frame)
 {
     return QStringLiteral(
-        "Scene frame telemetry id:%1 diagnosis:%2 expected:%3 "
-        "context:%4 surface:%5 fbo:%6/%7/%8 status:0x%9 complete:%10 "
-        "resources:%11 visibility:L%12/O%13/S%14/D%15 camera:%16 "
-        "culling:%17 async:%18 draws:%19 terrain-draws:%20 "
-        "nodes:%21/%22/%23 sectors:%24/%25/%26")
+        "Scene frame telemetry id:%1 elapsed-ms:%2 diagnosis:%3 expected:%4 "
+        "context:%5 surface:%6 fbo:%7/%8/%9 status:0x%10 complete:%11 "
+        "resources:%12 visibility:L%13/O%14/S%15/D%16 camera:%17 "
+        "culling:%18 async:%19 draws:%20 terrain-draws:%21 "
+        "nodes:%22/%23/%24 sectors:%25/%26/%27")
         .arg(frame.frameId)
+        .arg(frame.capturedMilliseconds)
         .arg(framePresentationDiagnosisName(classifyFramePresentation(frame)))
         .arg(frame.sceneExpected ? 1 : 0)
         .arg(frame.contextCurrent ? 1 : 0)

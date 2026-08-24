@@ -4825,7 +4825,7 @@ void CView::paintGL()
 {
     makeCurrent();
     SFramePresentationTelemetry frameTelemetry;
-    const bool traceSceneFrame = m_sceneFrameTelemetryFramesRemaining > 0;
+    const bool traceSceneFrame = m_sceneFrameTelemetryHistory.isArmed();
     GLint framebufferBeforeBind = -1;
     if(traceSceneFrame)
         ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebufferBeforeBind);
@@ -4843,6 +4843,8 @@ void CView::paintGL()
         const GLenum framebufferStatus = frameContext && frameContext->functions()
             ? frameContext->functions()->glCheckFramebufferStatus(GL_FRAMEBUFFER) : 0;
         frameTelemetry.frameId = ++m_sceneFrameTelemetryFrame;
+        frameTelemetry.capturedMilliseconds = m_sceneFrameTelemetryTimer.isValid()
+            ? m_sceneFrameTelemetryTimer.elapsed() : 0;
         frameTelemetry.sceneExpected = (m_pLand && m_pLand->isMprLoad())
             || !m_aMob.isEmpty();
         frameTelemetry.contextCurrent = frameContext
@@ -4937,18 +4939,7 @@ void CView::paintGL()
         frameTelemetry.terrainSectorsTested = counters.terrainSectorsTested;
         frameTelemetry.terrainSectorsCulled = counters.terrainSectorsCulled;
         frameTelemetry.terrainSectorsVisible = counters.terrainSectorsVisible;
-        const EFramePresentationDiagnosis diagnosis =
-            classifyFramePresentation(frameTelemetry);
-        const bool healthy = diagnosis ==
-                EFramePresentationDiagnosis::SceneSubmittedToPresentationTarget
-            || diagnosis == EFramePresentationDiagnosis::NoSceneExpected;
-        ei::log(healthy ? eLogInfo : eLogWarning,
-                formatFramePresentationTelemetry(frameTelemetry));
-        --m_sceneFrameTelemetryFramesRemaining;
-        if(m_sceneFrameTelemetryFramesRemaining == 0)
-            ei::log(eLogInfo, QStringLiteral(
-                "Scene frame telemetry complete frames:%1")
-                .arg(m_sceneFrameTelemetryFrame));
+        m_sceneFrameTelemetryHistory.append(frameTelemetry);
     }
     drawTestOverlaysOpenGl();
     if(diagnoseFrame)
@@ -4967,6 +4958,7 @@ void CView::paintGL()
 
 bool CView::prepareForApplicationShutdown()
 {
+    m_sceneFrameTelemetryHistory.disarm();
     if(m_timer)
         m_timer->stop();
     if(m_mprModifyTimer)
@@ -9550,21 +9542,75 @@ void CView::armOpenGlDiagnostics(const QString& reason, int frameCount)
 
 void CView::armSceneFrameTelemetry()
 {
-    constexpr int telemetryFrames = 600;
-    m_sceneFrameTelemetryFramesRemaining = telemetryFrames;
+    if(m_sceneFrameTelemetryHistory.isArmed())
+    {
+        const int retainedFrames = m_sceneFrameTelemetryHistory.size();
+        m_sceneFrameTelemetryHistory.disarm();
+        ei::log(eLogInfo, QStringLiteral(
+            "Scene frame telemetry disarmed session:%1 captured-total:%2 retained-before-clear:%3 shortcut:Ctrl+Shift+F11")
+            .arg(m_sceneFrameTelemetrySession)
+            .arg(m_sceneFrameTelemetryFrame)
+            .arg(retainedFrames));
+        return;
+    }
+
+    ++m_sceneFrameTelemetrySession;
     m_sceneFrameTelemetryFrame = 0;
+    m_sceneFrameTelemetryHistory.arm();
+    m_sceneFrameTelemetryTimer.restart();
     ei::log(eLogInfo, QStringLiteral(
-        "Scene frame telemetry armed frames:%1 shortcut:Ctrl+Shift+F11")
-        .arg(telemetryFrames));
+        "Scene frame telemetry armed session:%1 persistent:1 ring-capacity:%2 marker:Ctrl+Shift+F10 disarm:Ctrl+Shift+F11")
+        .arg(m_sceneFrameTelemetrySession)
+        .arg(m_sceneFrameTelemetryHistory.capacity()));
     update();
 }
 
 void CView::markObservedSceneFrameFlicker()
 {
+    if(!m_sceneFrameTelemetryHistory.isArmed())
+    {
+        ei::log(eLogWarning, QStringLiteral(
+            "Scene frame telemetry marker ignored reason:not-armed arm:Ctrl+Shift+F11"));
+        return;
+    }
+
+    const SFramePresentationMarkerSnapshot snapshot =
+        m_sceneFrameTelemetryHistory.snapshot();
+    if(!snapshot.isValid())
+    {
+        ei::log(eLogWarning, QStringLiteral(
+            "Scene frame telemetry marker rejected session:%1 reason:no-captured-frames retry:Ctrl+Shift+F10")
+            .arg(m_sceneFrameTelemetrySession));
+        return;
+    }
+
+    const SFramePresentationTelemetry& first = snapshot.frames.first();
+    const SFramePresentationTelemetry& last = snapshot.frames.last();
     ei::log(eLogWarning, QStringLiteral(
-        "Scene frame telemetry user marker after-frame:%1 remaining:%2")
-        .arg(m_sceneFrameTelemetryFrame)
-        .arg(m_sceneFrameTelemetryFramesRemaining));
+        "Scene frame telemetry marker begin marker:%1 session:%2 history:%3/%4 frame-range:%5-%6 elapsed-range-ms:%7-%8")
+        .arg(snapshot.markerId)
+        .arg(m_sceneFrameTelemetrySession)
+        .arg(snapshot.frames.size())
+        .arg(m_sceneFrameTelemetryHistory.capacity())
+        .arg(first.frameId).arg(last.frameId)
+        .arg(first.capturedMilliseconds).arg(last.capturedMilliseconds));
+    for(int index = 0; index < snapshot.frames.size(); ++index)
+    {
+        const SFramePresentationTelemetry& frame = snapshot.frames.at(index);
+        const EFramePresentationDiagnosis diagnosis =
+            classifyFramePresentation(frame);
+        const bool healthy = diagnosis ==
+                EFramePresentationDiagnosis::SceneSubmittedToPresentationTarget
+            || diagnosis == EFramePresentationDiagnosis::NoSceneExpected;
+        ei::log(healthy ? eLogInfo : eLogWarning, QStringLiteral(
+            "Scene frame telemetry marker frame marker:%1 sample:%2/%3 %4")
+            .arg(snapshot.markerId).arg(index + 1).arg(snapshot.frames.size())
+            .arg(formatFramePresentationTelemetry(frame)));
+    }
+    ei::log(eLogWarning, QStringLiteral(
+        "Scene frame telemetry marker complete marker:%1 session:%2 dumped:%3 latest-frame:%4 capture-remains-armed:1")
+        .arg(snapshot.markerId).arg(m_sceneFrameTelemetrySession)
+        .arg(snapshot.frames.size()).arg(last.frameId));
 }
 
 bool CView::logOpenGlErrors(const QString& stage)

@@ -1016,8 +1016,10 @@ private:
     int m_openGlDiagnosticFramesRemaining{0};
     quint64 m_openGlDiagnosticFrame{0};
     QString m_openGlDiagnosticReason;
-    int m_sceneFrameTelemetryFramesRemaining{0};
+    CFramePresentationHistory m_sceneFrameTelemetryHistory{512};
     quint64 m_sceneFrameTelemetryFrame{0};
+    quint64 m_sceneFrameTelemetrySession{0};
+    QElapsedTimer m_sceneFrameTelemetryTimer;
     bool m_lastRenderedCameraFinite{true};
     QString m_sessionWorkspaceKind;
     QString m_sessionWorkspaceIdentifier;

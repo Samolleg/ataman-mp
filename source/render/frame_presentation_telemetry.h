@@ -2,6 +2,7 @@
 #define FRAME_PRESENTATION_TELEMETRY_H
 
 #include <QString>
+#include <QVector>
 #include <QtGlobal>
 
 enum class EFramePresentationDiagnosis
@@ -19,6 +20,7 @@ enum class EFramePresentationDiagnosis
 struct SFramePresentationTelemetry
 {
     quint64 frameId{0};
+    qint64 capturedMilliseconds{0};
     bool sceneExpected{false};
     bool contextCurrent{false};
     bool surfaceValid{false};
@@ -44,6 +46,35 @@ struct SFramePresentationTelemetry
     quint64 terrainSectorsTested{0};
     quint64 terrainSectorsCulled{0};
     quint64 terrainSectorsVisible{0};
+};
+
+struct SFramePresentationMarkerSnapshot
+{
+    quint64 markerId{0};
+    QVector<SFramePresentationTelemetry> frames;
+
+    bool isValid() const { return markerId > 0 && !frames.isEmpty(); }
+};
+
+class CFramePresentationHistory
+{
+public:
+    explicit CFramePresentationHistory(int capacity = 512);
+
+    void arm();
+    void disarm();
+    bool isArmed() const { return m_armed; }
+    int capacity() const { return m_capacity; }
+    int size() const { return m_frames.size(); }
+    bool append(const SFramePresentationTelemetry& frame);
+    SFramePresentationMarkerSnapshot snapshot();
+
+private:
+    int m_capacity{1};
+    QVector<SFramePresentationTelemetry> m_frames;
+    int m_nextWrite{0};
+    bool m_armed{false};
+    quint64 m_nextMarkerId{1};
 };
 
 EFramePresentationDiagnosis classifyFramePresentation(
