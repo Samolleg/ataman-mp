@@ -4163,7 +4163,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
                             const ei::SRenderEnvironment& environment,
                             const QVector<ei::SScenePointLight>& sceneLights,
                             RenderQueueContext& queue,
-                            float maximumDistance)
+                            float maximumDistance,
+                            SFramePresentationTelemetry* frameTelemetry)
 {
     Q_UNUSED(cameraPosition)
     if(!m_shadowFbo || !m_dynamicShadowFbo || !m_farShadowFbo || !m_farDynamicShadowFbo
@@ -4380,6 +4381,23 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     const bool localChanged = nextLocalOwners != m_localShadowOwners
         || nextLocalMatrices != m_localShadowMatrices;
     const bool rebuildLocal = localChanged || rebuildDynamic;
+    if(frameTelemetry)
+    {
+        frameTelemetry->shadowRebuildMask = 0;
+        if(rebuildStatic)
+            frameTelemetry->shadowRebuildMask |= shadowFramebufferPassBit(
+                EShadowFramebufferPass::StaticNear);
+        if(rebuildFarStatic)
+            frameTelemetry->shadowRebuildMask |= shadowFramebufferPassBit(
+                EShadowFramebufferPass::StaticFar);
+        if(rebuildDynamic)
+            frameTelemetry->shadowRebuildMask |= shadowFramebufferPassBit(
+                EShadowFramebufferPass::DynamicNear)
+                | shadowFramebufferPassBit(EShadowFramebufferPass::DynamicFar);
+        if(rebuildLocal)
+            frameTelemetry->shadowRebuildMask |= shadowFramebufferPassBit(
+                EShadowFramebufferPass::Local);
+    }
     if(!rebuildStatic && !rebuildFarStatic && !rebuildDynamic && !rebuildLocal)
         return true;
 
@@ -4411,11 +4429,27 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     const GLboolean restoreFramebufferSrgb = ei::gl::IsEnabled(GL_FRAMEBUFFER_SRGB);
     ei::gl::Disable(GL_FRAMEBUFFER_SRGB);
 #endif
+    const auto recordBoundFramebuffer = []()
+    {
+        GLint framebuffer = -1;
+        ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+        return int(framebuffer);
+    };
     const auto beginTarget = [&](QOpenGLFramebufferObject* target,
+                                 EShadowFramebufferPass pass,
                                  const QMatrix4x4& projection,
                                  const QMatrix4x4& lightView)
     {
-        target->bind();
+        const bool bindSucceeded = target->bind();
+        if(frameTelemetry)
+        {
+            SShadowFramebufferPassTelemetry& sample =
+                frameTelemetry->shadowPasses[shadowFramebufferPassIndex(pass)];
+            sample.attempted = true;
+            sample.framebufferId = int(target->handle());
+            sample.bindSucceeded = bindSucceeded;
+            sample.framebufferAfterBind = recordBoundFramebuffer();
+        }
         ei::gl::Viewport(0, 0, target->width(), target->height());
         ei::gl::ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -4424,34 +4458,45 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
         m_shadowProgram.setUniformValue("u_instanced", false);
     };
-    const auto endTarget = [&](QOpenGLFramebufferObject* target)
+    const auto endTarget = [&](QOpenGLFramebufferObject* target,
+                               EShadowFramebufferPass pass)
     {
-        target->release();
+        const bool releaseSucceeded = target->release();
         // QOpenGLFramebufferObject::release() is not a reliable presentation
         // boundary on ANGLE: the D3D-backed ES context can retain the shadow
         // FBO until Qt starts its own composition.  Every following scene draw
         // would then target the RGBA shadow atlas (and the window stays white).
         // Bind Qt's actual default target explicitly after every shadow pass.
-        QOpenGLFramebufferObject::bindDefault();
+        const bool bindDefaultSucceeded = QOpenGLFramebufferObject::bindDefault();
+        if(frameTelemetry)
+        {
+            SShadowFramebufferPassTelemetry& sample =
+                frameTelemetry->shadowPasses[shadowFramebufferPassIndex(pass)];
+            sample.releaseSucceeded = releaseSucceeded;
+            sample.bindDefaultSucceeded = bindDefaultSucceeded;
+            sample.framebufferAfterRestore = recordBoundFramebuffer();
+        }
     };
     if(rebuildStatic)
     {
         m_staticLightSpaceMatrix = nearCascade.staticMatrix;
-        beginTarget(m_shadowFbo, nearCascade.projection, nearCascade.staticView);
+        beginTarget(m_shadowFbo, EShadowFramebufferPass::StaticNear,
+                    nearCascade.projection, nearCascade.staticView);
         queue.flushShadow(&m_shadowProgram,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
                           nearCascade.staticMatrix,
                           false, true, &localOwners);
-        endTarget(m_shadowFbo);
+        endTarget(m_shadowFbo, EShadowFramebufferPass::StaticNear);
         m_staticShadowFingerprint = staticFingerprint;
     }
     if(rebuildFarStatic)
     {
         m_farStaticLightSpaceMatrix = farCascade.staticMatrix;
-        beginTarget(m_farShadowFbo, farCascade.projection, farCascade.staticView);
+        beginTarget(m_farShadowFbo, EShadowFramebufferPass::StaticFar,
+                    farCascade.projection, farCascade.staticView);
         queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
                           farCascade.staticMatrix, false, true, &localOwners);
-        endTarget(m_farShadowFbo);
+        endTarget(m_farShadowFbo, EShadowFramebufferPass::StaticFar);
         m_farStaticShadowFingerprint = farStaticFingerprint;
     }
     if(rebuildDynamic)
@@ -4460,22 +4505,34 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         // Updating the matrix on every paint while redrawing the animated map
         // at 15 Hz made unit shadows jump and flicker during camera pans.
         m_dynamicLightSpaceMatrix = nearCascade.dynamicMatrix;
-        beginTarget(m_dynamicShadowFbo, nearCascade.projection, nearCascade.dynamicView);
+        beginTarget(m_dynamicShadowFbo, EShadowFramebufferPass::DynamicNear,
+                    nearCascade.projection, nearCascade.dynamicView);
         queue.flushShadow(&m_shadowProgram,
                           qMin(safeMaximumDistance, m_nearShadowSplit + 24.0f),
                           nearCascade.dynamicMatrix,
                           true, false, &localOwners);
-        endTarget(m_dynamicShadowFbo);
+        endTarget(m_dynamicShadowFbo, EShadowFramebufferPass::DynamicNear);
         m_farDynamicLightSpaceMatrix = farCascade.dynamicMatrix;
-        beginTarget(m_farDynamicShadowFbo, farCascade.projection, farCascade.dynamicView);
+        beginTarget(m_farDynamicShadowFbo, EShadowFramebufferPass::DynamicFar,
+                    farCascade.projection, farCascade.dynamicView);
         queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
                           farCascade.dynamicMatrix, true, false, &localOwners);
-        endTarget(m_farDynamicShadowFbo);
+        endTarget(m_farDynamicShadowFbo, EShadowFramebufferPass::DynamicFar);
         m_shadowUpdateTimer.restart();
     }
     if(rebuildLocal)
     {
-        m_localShadowFbo->bind();
+        const bool localBindSucceeded = m_localShadowFbo->bind();
+        if(frameTelemetry)
+        {
+            SShadowFramebufferPassTelemetry& sample =
+                frameTelemetry->shadowPasses[shadowFramebufferPassIndex(
+                    EShadowFramebufferPass::Local)];
+            sample.attempted = true;
+            sample.framebufferId = int(m_localShadowFbo->handle());
+            sample.bindSucceeded = localBindSucceeded;
+            sample.framebufferAfterBind = recordBoundFramebuffer();
+        }
         ei::gl::Viewport(0, 0, m_localShadowFbo->width(), m_localShadowFbo->height());
         ei::gl::ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -4493,8 +4550,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
             queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
                               local.matrix, false, false, nullptr, local.owner);
         }
-        m_localShadowFbo->release();
-        QOpenGLFramebufferObject::bindDefault();
+        endTarget(m_localShadowFbo, EShadowFramebufferPass::Local);
         m_localShadowOwners = nextLocalOwners;
         m_localShadowMatrices = nextLocalMatrices;
         m_localShadowAtlasRects = nextLocalRects;
@@ -4901,7 +4957,7 @@ void CView::paintGL()
     ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if(diagnoseFrame)
         logOpenGlDiagnosticState(QStringLiteral("frame/initial-clear"), true);
-    draw();
+    draw(traceSceneFrame ? &frameTelemetry : nullptr);
     if(diagnoseFrame)
         logOpenGlDiagnosticState(QStringLiteral("frame/scene-complete"), true);
     if(timeGpu)
@@ -4939,7 +4995,6 @@ void CView::paintGL()
         frameTelemetry.terrainSectorsTested = counters.terrainSectorsTested;
         frameTelemetry.terrainSectorsCulled = counters.terrainSectorsCulled;
         frameTelemetry.terrainSectorsVisible = counters.terrainSectorsVisible;
-        m_sceneFrameTelemetryHistory.append(frameTelemetry);
     }
     drawTestOverlaysOpenGl();
     if(diagnoseFrame)
@@ -4953,6 +5008,13 @@ void CView::paintGL()
     // terrain initialization here so exact atlas validation and the landscape
     // renderer finish first, while palettes/catalogs cannot delay this frame.
     queueDeferredTerrainAutoCatalogBuild();
+    if(traceSceneFrame)
+    {
+        GLint framebufferAtReturn = -1;
+        ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebufferAtReturn);
+        frameTelemetry.framebufferAtPaintReturn = framebufferAtReturn;
+        m_sceneFrameTelemetryHistory.append(frameTelemetry);
+    }
     //doneCurrent();
 }
 
@@ -6993,7 +7055,7 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     m_particleProgram.release();
 }
 
-void CView::draw()
+void CView::draw(SFramePresentationTelemetry* frameTelemetry)
 {
 
     QMatrix4x4 camMatrix = m_minimapCaptureActive
@@ -7096,6 +7158,18 @@ void CView::draw()
         && environmentEnabled && !m_openGlesCompatibility
         && shadowQuality > 0
         && ensureShadowFramebuffers(shadowQuality);
+    if(frameTelemetry)
+    {
+        frameTelemetry->fullEnvironment = environmentEnabled;
+        frameTelemetry->shadowsEnabled = shadowsEnabled;
+        const QOpenGLFramebufferObject* shadowTargets[] = {
+            m_shadowFbo, m_farShadowFbo, m_dynamicShadowFbo,
+            m_farDynamicShadowFbo, m_localShadowFbo
+        };
+        for(int index = 0; index < kShadowFramebufferPassCount; ++index)
+            frameTelemetry->shadowFramebufferIds[index] = shadowTargets[index]
+                ? int(shadowTargets[index]->handle()) : -1;
+    }
     const bool terrainShadowsEnabled = !m_minimapCaptureActive
         && environmentEnabled && !m_openGlesCompatibility
         && m_terrainShadowsVisible
@@ -7300,6 +7374,12 @@ void CView::draw()
     bool terrainDrawn = false;
     const auto drawTerrainColor = [&](bool withShadows)
     {
+        if(frameTelemetry)
+        {
+            GLint framebuffer = -1;
+            ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+            frameTelemetry->framebufferBeforeTerrainColor = framebuffer;
+        }
         if(!m_landProgram.bind())
             close();
         m_landProgram.setUniformValue("u_projMmatrix", m_projection);
@@ -7445,8 +7525,14 @@ void CView::draw()
         }
         const bool shadowReady = environmentEnabled && shadowsEnabled
             && renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,
-                               renderQueue, maximumShadowDistance);
+                               renderQueue, maximumShadowDistance, frameTelemetry);
         drawTerrainColor(shadowReady);
+        if(frameTelemetry)
+        {
+            GLint framebuffer = -1;
+            ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+            frameTelemetry->framebufferBeforeObjectFlush = framebuffer;
+        }
         renderQueue.flush();
         logOpenGlErrors(QStringLiteral("draw/object-queue"));
         ei::gl::DepthFunc(GL_LEQUAL);
@@ -7509,6 +7595,12 @@ void CView::draw()
         performance.counters().animationComponentsEvaluated = animation.componentsEvaluated;
     }
 
+    if(frameTelemetry)
+    {
+        GLint framebuffer = -1;
+        ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+        frameTelemetry->framebufferBeforeWaterOverlay = framebuffer;
+    }
     if (m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawWater)
     {
         //turn to landshader again

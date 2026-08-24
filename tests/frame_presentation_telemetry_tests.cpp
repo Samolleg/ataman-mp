@@ -15,6 +15,8 @@ private slots:
     void classifiesInvalidContextFramebufferOrResources();
     void classifiesWholeSceneFrustumRejection();
     void classifiesAsyncRebuildWindow();
+    void classifiesShadowRestoreFailureBeforeColorPass();
+    void retainsFullEnvironmentShadowLifecycleCheckpoints();
     void rollingHistoryRemainsArmedAndBoundedPastFrameLimit();
     void markerRequiresEvidenceAndRepeatedMarkersRemainDistinct();
     void disarmStopsAndClearsCapture();
@@ -128,6 +130,76 @@ void FramePresentationTelemetryTests::classifiesAsyncRebuildWindow()
     frame.asyncUploadOrRebuildActive = true;
     QCOMPARE(classifyFramePresentation(frame),
              EFramePresentationDiagnosis::AsyncUploadOrRebuildWindow);
+}
+
+void FramePresentationTelemetryTests::classifiesShadowRestoreFailureBeforeColorPass()
+{
+    SFramePresentationTelemetry frame = healthyFrame();
+    frame.defaultFramebuffer = 0;
+    frame.framebufferAfterBind = 0;
+    frame.fullEnvironment = true;
+    frame.shadowsEnabled = true;
+    frame.shadowRebuildMask = shadowFramebufferPassBit(
+        EShadowFramebufferPass::DynamicNear);
+    SShadowFramebufferPassTelemetry& dynamicNear =
+        frame.shadowPasses[shadowFramebufferPassIndex(
+            EShadowFramebufferPass::DynamicNear)];
+    dynamicNear.attempted = true;
+    dynamicNear.framebufferId = 23;
+    dynamicNear.bindSucceeded = true;
+    dynamicNear.framebufferAfterBind = 23;
+    dynamicNear.releaseSucceeded = true;
+    dynamicNear.bindDefaultSucceeded = false;
+    dynamicNear.framebufferAfterRestore = 23;
+    frame.framebufferBeforeTerrainColor = 23;
+
+    QCOMPARE(classifyFramePresentation(frame),
+             EFramePresentationDiagnosis::WrongPresentationTarget);
+}
+
+void FramePresentationTelemetryTests::retainsFullEnvironmentShadowLifecycleCheckpoints()
+{
+    SFramePresentationTelemetry frame = healthyFrame();
+    frame.defaultFramebuffer = 0;
+    frame.framebufferAfterBind = 0;
+    frame.fullEnvironment = true;
+    frame.shadowsEnabled = true;
+    frame.shadowFramebufferIds = {{11, 12, 13, 14, 15}};
+    frame.shadowRebuildMask = shadowFramebufferPassBit(
+        EShadowFramebufferPass::DynamicNear)
+        | shadowFramebufferPassBit(EShadowFramebufferPass::DynamicFar)
+        | shadowFramebufferPassBit(EShadowFramebufferPass::Local);
+    for(EShadowFramebufferPass pass : {
+            EShadowFramebufferPass::DynamicNear,
+            EShadowFramebufferPass::DynamicFar,
+            EShadowFramebufferPass::Local})
+    {
+        SShadowFramebufferPassTelemetry& sample =
+            frame.shadowPasses[shadowFramebufferPassIndex(pass)];
+        sample.attempted = true;
+        sample.framebufferId = frame.shadowFramebufferIds[
+            shadowFramebufferPassIndex(pass)];
+        sample.bindSucceeded = true;
+        sample.framebufferAfterBind = sample.framebufferId;
+        sample.releaseSucceeded = true;
+        sample.bindDefaultSucceeded = true;
+        sample.framebufferAfterRestore = 0;
+    }
+    frame.framebufferBeforeTerrainColor = 0;
+    frame.framebufferBeforeObjectFlush = 0;
+    frame.framebufferBeforeWaterOverlay = 0;
+    frame.framebufferAtPaintReturn = 0;
+
+    QCOMPARE(classifyFramePresentation(frame),
+             EFramePresentationDiagnosis::SceneSubmittedToPresentationTarget);
+    const QString formatted = formatFramePresentationTelemetry(frame);
+    QVERIFY(formatted.contains(QStringLiteral("full-environment:1 shadows:1")));
+    QVERIFY(formatted.contains(QStringLiteral("shadow-rebuild:0x1c")));
+    QVERIFY(formatted.contains(QStringLiteral("shadow-fbos:11/12/13/14/15")));
+    QVERIFY(formatted.contains(QStringLiteral("dynamic-near:13/1/13/1/1/0")));
+    QVERIFY(formatted.contains(QStringLiteral("dynamic-far:14/1/14/1/1/0")));
+    QVERIFY(formatted.contains(QStringLiteral("local:15/1/15/1/1/0")));
+    QVERIFY(formatted.contains(QStringLiteral("color-targets:0/0/0/0")));
 }
 
 void FramePresentationTelemetryTests::rollingHistoryRemainsArmedAndBoundedPastFrameLimit()

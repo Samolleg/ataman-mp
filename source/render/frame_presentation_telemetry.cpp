@@ -64,6 +64,26 @@ EFramePresentationDiagnosis classifyFramePresentation(
     if(!frame.defaultFramebufferBound
        || frame.framebufferAfterBind != frame.defaultFramebuffer)
         return EFramePresentationDiagnosis::WrongPresentationTarget;
+    if(frame.fullEnvironment && frame.shadowsEnabled)
+    {
+        for(const SShadowFramebufferPassTelemetry& pass : frame.shadowPasses)
+            if(pass.attempted
+               && (!pass.bindSucceeded
+                   || pass.framebufferAfterBind != pass.framebufferId
+                   || !pass.releaseSucceeded
+                   || !pass.bindDefaultSucceeded
+                   || pass.framebufferAfterRestore != frame.defaultFramebuffer))
+                return EFramePresentationDiagnosis::WrongPresentationTarget;
+    }
+    const int colorTargets[] = {
+        frame.framebufferBeforeTerrainColor,
+        frame.framebufferBeforeObjectFlush,
+        frame.framebufferBeforeWaterOverlay,
+        frame.framebufferAtPaintReturn
+    };
+    for(int target : colorTargets)
+        if(target >= 0 && target != frame.defaultFramebuffer)
+            return EFramePresentationDiagnosis::WrongPresentationTarget;
     if(!frame.landscapeVisible && !frame.overlaysVisible
        && !frame.staticObjectsVisible && !frame.dynamicObjectsVisible)
         return EFramePresentationDiagnosis::AllWorldVisibilityDisabled;
@@ -115,7 +135,7 @@ QString framePresentationDiagnosisName(EFramePresentationDiagnosis diagnosis)
 
 QString formatFramePresentationTelemetry(const SFramePresentationTelemetry& frame)
 {
-    return QStringLiteral(
+    QString result = QStringLiteral(
         "Scene frame telemetry id:%1 elapsed-ms:%2 diagnosis:%3 expected:%4 "
         "context:%5 surface:%6 fbo:%7/%8/%9 status:0x%10 complete:%11 "
         "resources:%12 visibility:L%13/O%14/S%15/D%16 camera:%17 "
@@ -145,4 +165,44 @@ QString formatFramePresentationTelemetry(const SFramePresentationTelemetry& fram
         .arg(frame.nodesVisited).arg(frame.nodesCulled).arg(frame.nodesSubmitted)
         .arg(frame.terrainSectorsTested).arg(frame.terrainSectorsCulled)
         .arg(frame.terrainSectorsVisible);
+    const auto passText = [&frame](const QString& name,
+                                  EShadowFramebufferPass pass)
+    {
+        const SShadowFramebufferPassTelemetry& sample =
+            frame.shadowPasses[shadowFramebufferPassIndex(pass)];
+        return QStringLiteral("%1:%2/%3/%4/%5/%6/%7")
+            .arg(name).arg(sample.framebufferId)
+            .arg(sample.bindSucceeded ? 1 : 0)
+            .arg(sample.framebufferAfterBind)
+            .arg(sample.releaseSucceeded ? 1 : 0)
+            .arg(sample.bindDefaultSucceeded ? 1 : 0)
+            .arg(sample.framebufferAfterRestore);
+    };
+    result += QStringLiteral(
+        " full-environment:%1 shadows:%2 shadow-rebuild:0x%3 "
+        "shadow-fbos:%4/%5/%6/%7/%8 shadow-passes:[%9 %10 %11 %12 %13] "
+        "color-targets:%14/%15/%16/%17")
+        .arg(frame.fullEnvironment ? 1 : 0)
+        .arg(frame.shadowsEnabled ? 1 : 0)
+        .arg(QString::number(frame.shadowRebuildMask, 16))
+        .arg(frame.shadowFramebufferIds[0])
+        .arg(frame.shadowFramebufferIds[1])
+        .arg(frame.shadowFramebufferIds[2])
+        .arg(frame.shadowFramebufferIds[3])
+        .arg(frame.shadowFramebufferIds[4])
+        .arg(passText(QStringLiteral("static-near"),
+                      EShadowFramebufferPass::StaticNear))
+        .arg(passText(QStringLiteral("static-far"),
+                      EShadowFramebufferPass::StaticFar))
+        .arg(passText(QStringLiteral("dynamic-near"),
+                      EShadowFramebufferPass::DynamicNear))
+        .arg(passText(QStringLiteral("dynamic-far"),
+                      EShadowFramebufferPass::DynamicFar))
+        .arg(passText(QStringLiteral("local"),
+                      EShadowFramebufferPass::Local))
+        .arg(frame.framebufferBeforeTerrainColor)
+        .arg(frame.framebufferBeforeObjectFlush)
+        .arg(frame.framebufferBeforeWaterOverlay)
+        .arg(frame.framebufferAtPaintReturn);
+    return result;
 }

@@ -424,7 +424,7 @@ private:
         bool requireMember) const;
     void refreshMobDirtyStates();
     void initShaders();
-    void draw();
+    void draw(SFramePresentationTelemetry* frameTelemetry = nullptr);
     void scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
                                            bool cameraMoving);
     void drawTestOverlaysOpenGl();
@@ -545,7 +545,8 @@ private:
                          const ei::SRenderEnvironment& environment,
                          const QVector<ei::SScenePointLight>& sceneLights,
                          RenderQueueContext& queue,
-                         float maximumDistance);
+                         float maximumDistance,
+                         SFramePresentationTelemetry* frameTelemetry);
     bool ensureShadowFramebuffers(int quality);
     void releaseShadowFramebuffers();
     bool beginEditorQueryFramebuffer();

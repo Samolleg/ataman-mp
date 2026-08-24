@@ -5,6 +5,42 @@
 #include <QVector>
 #include <QtGlobal>
 
+#include <array>
+
+enum class EShadowFramebufferPass
+{
+    StaticNear = 0,
+    StaticFar,
+    DynamicNear,
+    DynamicFar,
+    Local,
+    Count
+};
+
+constexpr int kShadowFramebufferPassCount =
+    static_cast<int>(EShadowFramebufferPass::Count);
+
+inline int shadowFramebufferPassIndex(EShadowFramebufferPass pass)
+{
+    return static_cast<int>(pass);
+}
+
+inline quint8 shadowFramebufferPassBit(EShadowFramebufferPass pass)
+{
+    return quint8(1u << unsigned(shadowFramebufferPassIndex(pass)));
+}
+
+struct SShadowFramebufferPassTelemetry
+{
+    bool attempted{false};
+    int framebufferId{-1};
+    bool bindSucceeded{false};
+    int framebufferAfterBind{-1};
+    bool releaseSucceeded{false};
+    bool bindDefaultSucceeded{false};
+    int framebufferAfterRestore{-1};
+};
+
 enum class EFramePresentationDiagnosis
 {
     NoSceneExpected,
@@ -46,6 +82,17 @@ struct SFramePresentationTelemetry
     quint64 terrainSectorsTested{0};
     quint64 terrainSectorsCulled{0};
     quint64 terrainSectorsVisible{0};
+    bool fullEnvironment{false};
+    bool shadowsEnabled{false};
+    quint8 shadowRebuildMask{0};
+    std::array<int, kShadowFramebufferPassCount> shadowFramebufferIds{{
+        -1, -1, -1, -1, -1}};
+    std::array<SShadowFramebufferPassTelemetry,
+               kShadowFramebufferPassCount> shadowPasses{};
+    int framebufferBeforeTerrainColor{-1};
+    int framebufferBeforeObjectFlush{-1};
+    int framebufferBeforeWaterOverlay{-1};
+    int framebufferAtPaintReturn{-1};
 };
 
 struct SFramePresentationMarkerSnapshot
