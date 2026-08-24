@@ -74,6 +74,7 @@
 #include "tile.h"
 #include "view_frustum.h"
 #include "render_performance.h"
+#include "frame_presentation_telemetry.h"
 #include "render_queue.h"
 #include "render_environment.h"
 #include "shadow_cascade.h"
@@ -1538,6 +1539,16 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
         }
         update();
     });
+    QShortcut* frameTelemetryShortcut = new QShortcut(
+        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F11), this);
+    frameTelemetryShortcut->setContext(Qt::ApplicationShortcut);
+    connect(frameTelemetryShortcut, &QShortcut::activated,
+            this, &CView::armSceneFrameTelemetry);
+    QShortcut* frameTelemetryMarkerShortcut = new QShortcut(
+        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F10), this);
+    frameTelemetryMarkerShortcut->setContext(Qt::ApplicationShortcut);
+    connect(frameTelemetryMarkerShortcut, &QShortcut::activated,
+            this, &CView::markObservedSceneFrameFlicker);
 }
 
 void CView::attachLandscapeTools(CLandscapeTools* tools)
@@ -4813,10 +4824,39 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
 void CView::paintGL()
 {
     makeCurrent();
+    SFramePresentationTelemetry frameTelemetry;
+    const bool traceSceneFrame = m_sceneFrameTelemetryFramesRemaining > 0;
+    GLint framebufferBeforeBind = -1;
+    if(traceSceneFrame)
+        ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebufferBeforeBind);
     // Treat framebuffer ownership as a frame-entry invariant. Shadow-map and
     // diagnostic passes are allowed to bind private FBOs, but the visible
     // scene must always begin on the widget/context default target.
     const bool defaultFramebufferBound = QOpenGLFramebufferObject::bindDefault();
+    QOpenGLContext* frameContext = QOpenGLContext::currentContext();
+    if(traceSceneFrame)
+    {
+        GLint framebufferAfterBind = -1;
+        ei::gl::GetIntegerv(GL_FRAMEBUFFER_BINDING, &framebufferAfterBind);
+        const GLuint defaultFramebuffer = frameContext
+            ? frameContext->defaultFramebufferObject() : GLuint(-1);
+        const GLenum framebufferStatus = frameContext && frameContext->functions()
+            ? frameContext->functions()->glCheckFramebufferStatus(GL_FRAMEBUFFER) : 0;
+        frameTelemetry.frameId = ++m_sceneFrameTelemetryFrame;
+        frameTelemetry.sceneExpected = (m_pLand && m_pLand->isMprLoad())
+            || !m_aMob.isEmpty();
+        frameTelemetry.contextCurrent = frameContext
+            && QGLContext::currentContext() == context();
+        frameTelemetry.surfaceValid = frameContext && frameContext->surface();
+        frameTelemetry.defaultFramebufferBound = defaultFramebufferBound
+            && framebufferAfterBind == GLint(defaultFramebuffer);
+        frameTelemetry.framebufferComplete =
+            framebufferStatus == GL_FRAMEBUFFER_COMPLETE;
+        frameTelemetry.framebufferBeforeBind = framebufferBeforeBind;
+        frameTelemetry.defaultFramebuffer = int(defaultFramebuffer);
+        frameTelemetry.framebufferAfterBind = framebufferAfterBind;
+        frameTelemetry.framebufferStatus = uint(framebufferStatus);
+    }
     const bool diagnoseFrame = m_openGlDiagnosticFramesRemaining > 0;
     if(diagnoseFrame)
     {
@@ -4829,7 +4869,7 @@ void CView::paintGL()
                 ? m_pLand->filePath().fileName() : QStringLiteral("none"))
             .arg(m_aMob.size()));
         ei::log(defaultFramebufferBound ? eLogInfo : eLogWarning,
-            QStringLiteral("OpenGL diagnostic presentation target rebound:%1")
+            QStringLiteral("OpenGL diagnostic presentation target bind-default-success:%1")
                 .arg(defaultFramebufferBound ? 1 : 0));
         logOpenGlDiagnosticState(QStringLiteral("frame/begin"));
     }
@@ -4847,7 +4887,7 @@ void CView::paintGL()
     const bool collectStats = (statsOption && statsOption->value())
         || qApp->property("renderBenchmark").toBool();
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
-    performance.beginFrame(collectStats);
+    performance.beginFrame(collectStats || traceSceneFrame, collectStats);
     if(collectStats && m_gpuTimer && m_gpuTimerPending && m_gpuTimer->isResultAvailable())
     {
         performance.recordGpuTime(m_gpuTimer->waitForResult());
@@ -4868,6 +4908,48 @@ void CView::paintGL()
         m_gpuTimerPending = true;
     }
     performance.endFrame();
+    if(traceSceneFrame)
+    {
+        const SRenderFrameCounters& counters = performance.currentFrameCounters();
+        const COptBool* cullingOption = m_pSettings
+            ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
+        frameTelemetry.resourcesValid = m_program.isLinked()
+            && m_landProgram.isLinked() && m_skyProgram.isLinked()
+            && m_shadowProgram.isLinked() && m_selectProgram.isLinked();
+        frameTelemetry.landscapeVisible = m_landscapeVisible && m_bDrawLand;
+        frameTelemetry.overlaysVisible = m_landscapeVisible && m_bDrawWater;
+        frameTelemetry.staticObjectsVisible = m_staticObjectsVisible;
+        frameTelemetry.dynamicObjectsVisible = m_dynamicObjectsVisible;
+        frameTelemetry.frustumCullingEnabled = !cullingOption
+            || cullingOption->value();
+        frameTelemetry.cameraFinite = m_lastRenderedCameraFinite;
+        frameTelemetry.asyncUploadOrRebuildActive = m_terrainAutoCatalogBuilding
+            || m_terrainAutoCatalogBuildQueued
+            || m_terrainGlobalHydrationPendingJobs > 0
+            || m_unitAppearanceBatchPending
+            || (m_unitAppearanceWatcher && m_unitAppearanceWatcher->isRunning())
+            || (m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning());
+        frameTelemetry.sceneDrawCalls = counters.drawCalls;
+        frameTelemetry.terrainDrawCalls = counters.terrainDrawCalls;
+        frameTelemetry.nodesVisited = counters.nodesVisited;
+        frameTelemetry.nodesCulled = counters.nodesCulled;
+        frameTelemetry.nodesSubmitted = counters.nodesSubmitted;
+        frameTelemetry.terrainSectorsTested = counters.terrainSectorsTested;
+        frameTelemetry.terrainSectorsCulled = counters.terrainSectorsCulled;
+        frameTelemetry.terrainSectorsVisible = counters.terrainSectorsVisible;
+        const EFramePresentationDiagnosis diagnosis =
+            classifyFramePresentation(frameTelemetry);
+        const bool healthy = diagnosis ==
+                EFramePresentationDiagnosis::SceneSubmittedToPresentationTarget
+            || diagnosis == EFramePresentationDiagnosis::NoSceneExpected;
+        ei::log(healthy ? eLogInfo : eLogWarning,
+                formatFramePresentationTelemetry(frameTelemetry));
+        --m_sceneFrameTelemetryFramesRemaining;
+        if(m_sceneFrameTelemetryFramesRemaining == 0)
+            ei::log(eLogInfo, QStringLiteral(
+                "Scene frame telemetry complete frames:%1")
+                .arg(m_sceneFrameTelemetryFrame));
+    }
     drawTestOverlaysOpenGl();
     if(diagnoseFrame)
     {
@@ -6926,6 +7008,18 @@ void CView::draw()
         ? m_minimapCaptureView : m_cam->update();
     QVector3D cameraAnchor, cameraPivot, cameraRotation;
     m_cam->getLocation(cameraAnchor, cameraPivot, cameraRotation);
+    m_lastRenderedCameraFinite = true;
+    for(int index = 0; index < 16; ++index)
+        m_lastRenderedCameraFinite = m_lastRenderedCameraFinite
+            && std::isfinite(double(camMatrix.constData()[index]))
+            && std::isfinite(double(m_projection.constData()[index]));
+    m_lastRenderedCameraFinite = m_lastRenderedCameraFinite
+        && std::isfinite(double(cameraAnchor.x()))
+        && std::isfinite(double(cameraAnchor.y()))
+        && std::isfinite(double(cameraAnchor.z()))
+        && std::isfinite(double(cameraPivot.x()))
+        && std::isfinite(double(cameraPivot.y()))
+        && std::isfinite(double(cameraPivot.z()));
     bool cameraEyeOk = false;
     const QVector3D renderedCameraEye = ei::cameraEyeFromView(camMatrix, &cameraEyeOk);
     const QVector3D cameraPosition = m_minimapCaptureActive
@@ -9452,6 +9546,25 @@ void CView::armOpenGlDiagnostics(const QString& reason, int frameCount)
     ei::log(eLogInfo, QStringLiteral(
         "OpenGL diagnostics armed reason:%1 frames:%2")
         .arg(reason).arg(m_openGlDiagnosticFramesRemaining));
+}
+
+void CView::armSceneFrameTelemetry()
+{
+    constexpr int telemetryFrames = 600;
+    m_sceneFrameTelemetryFramesRemaining = telemetryFrames;
+    m_sceneFrameTelemetryFrame = 0;
+    ei::log(eLogInfo, QStringLiteral(
+        "Scene frame telemetry armed frames:%1 shortcut:Ctrl+Shift+F11")
+        .arg(telemetryFrames));
+    update();
+}
+
+void CView::markObservedSceneFrameFlicker()
+{
+    ei::log(eLogWarning, QStringLiteral(
+        "Scene frame telemetry user marker after-frame:%1 remaining:%2")
+        .arg(m_sceneFrameTelemetryFrame)
+        .arg(m_sceneFrameTelemetryFramesRemaining));
 }
 
 bool CView::logOpenGlErrors(const QString& stage)

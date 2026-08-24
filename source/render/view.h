@@ -49,6 +49,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "minimap_bake.h"
 #include "tile_brush_stroke_policy.h"
 #include "shadow_cascade.h"
+#include "frame_presentation_telemetry.h"
 
 class QLineEdit;
 class QFrame;
@@ -439,6 +440,8 @@ private:
     void logShaderProgramDiagnostics(const QString& name,
                                      const QOpenGLShaderProgram& program,
                                      bool success);
+    void armSceneFrameTelemetry();
+    void markObservedSceneFrameFlicker();
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     bool terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell);
@@ -1013,6 +1016,9 @@ private:
     int m_openGlDiagnosticFramesRemaining{0};
     quint64 m_openGlDiagnosticFrame{0};
     QString m_openGlDiagnosticReason;
+    int m_sceneFrameTelemetryFramesRemaining{0};
+    quint64 m_sceneFrameTelemetryFrame{0};
+    bool m_lastRenderedCameraFinite{true};
     QString m_sessionWorkspaceKind;
     QString m_sessionWorkspaceIdentifier;
     QString m_sessionWorkspaceDisplayName;
