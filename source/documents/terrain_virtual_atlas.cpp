@@ -4341,17 +4341,21 @@ bool CTerrainWorkingAtlas::normalizeAnimationRanges(
             return false;
         }
         normalized[animationIndex].tileIndex = quint16(copyStart);
-        if(slotRemap->contains(start)
-           && slotRemap->value(start) != copyStart)
-        {
-            if(report) report->add("terrain.working_animation_shared_start",
-                EValidationSeverity::Error,
-                QStringLiteral("Two animation records share one start slot but require different physical ranges. No slots were moved."));
-            return false;
-        }
-        slotRemap->insert(start, copyStart);
         for(int phase = 0; phase < physicalCount; ++phase)
+        {
+            const int sourceSlot = frameSlots.at(phase);
+            const int destination = copyStart + phase;
+            if(slotRemap->contains(sourceSlot)
+               && slotRemap->value(sourceSlot) != destination)
+            {
+                if(report) report->add("terrain.working_animation_shared_frame",
+                    EValidationSeverity::Error,
+                    QStringLiteral("Two animation records share a frame slot but require different physical ranges. No slots were moved."));
+                return false;
+            }
+            slotRemap->insert(sourceSlot, destination);
             reservedCopies.insert(copyStart + phase);
+        }
     }
 
     for(int animationIndex = 0; animationIndex < animations.size();

@@ -6831,7 +6831,9 @@ void TerrainVirtualAtlasTests::workingAtlasRepacksInterleavedUniformAnimationFra
     QCOMPARE(normalized.front().tileIndex, quint16(6));
     QCOMPARE(normalized.front().frameCount, quint16(3));
     QCOMPARE(remap.value(0), 6);
-    QCOMPARE(remap.size(), 1);
+    QCOMPARE(remap.value(2), 7);
+    QCOMPARE(remap.value(4), 8);
+    QCOMPARE(remap.size(), 3);
     QVERIFY(live.commitStaging(*staged));
     for(int slot = 6; slot < 9; ++slot)
     {
@@ -6844,9 +6846,12 @@ void TerrainVirtualAtlasTests::workingAtlasRepacksInterleavedUniformAnimationFra
     SMprPackedTile activating;
     activating.tileIndex = 0;
     activating.rotation = 3;
+    SMprPackedTile authoredPhase;
+    authoredPhase.tileIndex = 4;
+    authoredPhase.rotation = 2;
     CMprDocument document;
     QVERIFY2(document.loadBytes(portableMprWithActiveOverlay(
-        activating.encode(), activating.encode()),
+        activating.encode(), authoredPhase.encode()),
         QStringLiteral("animation-remap.mpr"), &report),
         qPrintable(report.toText()));
     CTerrainEditModel terrain;
@@ -6863,14 +6868,15 @@ void TerrainVirtualAtlasTests::workingAtlasRepacksInterleavedUniformAnimationFra
         const SMprPackedTile moved = SMprPackedTile::decode(
             terrain.packedTile(0, 0, layer, &available));
         QVERIFY(available);
-        QCOMPARE(moved.atlasSlot(), 6);
-        QCOMPARE(moved.rotation, quint8(3));
+        QCOMPARE(moved.atlasSlot(), layer == ETerrainTileLayer::Land ? 6 : 8);
+        QCOMPARE(moved.rotation, layer == ETerrainTileLayer::Land
+            ? quint8(3) : quint8(2));
     }
     QVERIFY(terrain.apply(remapCommand, false, &report));
     QCOMPARE(terrain.packedTile(0, 0, ETerrainTileLayer::Land),
              activating.encode());
     QCOMPARE(terrain.packedTile(0, 0, ETerrainTileLayer::Overlay),
-             activating.encode());
+             authoredPhase.encode());
 
     // A declared range without enough same-signature/runtime frames must not
     // partially permute the live atlas or silently animate blend tiles.

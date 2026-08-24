@@ -634,6 +634,7 @@ private slots:
     void externalReopenedDraftTopologyProbe();
     void externalModernDraftAdoptionPairProbe();
     void externalOverlayAnimationMappingProbe();
+    void externalOverlaySurfaceMappingProbe();
     void modernDraftAdoptionStagesPairBeforeLiveMutation();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
@@ -8841,13 +8842,17 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     QVERIFY(!available);
     QVERIFY(terrain.makeOverlayActivation(point, 1, 0, 1, 2).isEmpty());
     const SOverlaySurfaceCommand materialChange = terrain.makeOverlayActivation(
-        point, 0, 0, 1, 2);
+        point, 0, 0, 0, 1);
     QVERIFY(!materialChange.isEmpty());
-    QVERIFY(terrain.apply(materialChange, true));
+    QVERIFY(history.execute(&terrain, materialChange));
     QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(0));
+    QCOMPARE(terrain.packedTile(2, 3, ETerrainTileLayer::Overlay),
+             activatedTile);
     QVERIFY(available);
-    QVERIFY(terrain.apply(materialChange, false));
+    QVERIFY(history.undo(&terrain));
     QCOMPARE(terrain.overlayMaterialIndex(2, 3, &available), qint16(1));
+    QCOMPARE(terrain.packedTile(2, 3, ETerrainTileLayer::Overlay),
+             activatedTile);
 
     CMprEditTransaction transaction("activate one synthetic overlay cell");
     QVERIFY(terrain.appendSectorEdits(&transaction));
@@ -11575,16 +11580,16 @@ void EnduranceDocumentTests::externalOverlayAnimationMappingProbe()
         bool animated;
     };
     const QVector<ExpectedCell> cells{
-        {{31, 11}, 49669, 517, 3, false},
+        {{31, 11}, 49669, 517, 3, true},
         {{31, 10}, 506, 506, 0, false},
         {{30, 12}, 16896, 512, 1, true},
         {{29, 12}, 16896, 512, 1, true},
-        // Controls on both sides of the boundary prove that a phase slot is
-        // not a second animation identifier in serialized runtime mapping.
+        // Controls on both sides prove that every authored physical phase in
+        // the declared contiguous range participates in the same animation.
         {{30, 11}, 16896, 512, 1, true},
-        {{32, 11}, 49669, 517, 3, false},
+        {{32, 11}, 49669, 517, 3, true},
         {{28, 13}, 16896, 512, 1, true},
-        {{28, 12}, 33298, 530, 2, false}
+        {{28, 12}, 33298, 530, 2, true}
     };
     for(const ExpectedCell& expected : cells)
     {
@@ -11604,6 +11609,69 @@ void EnduranceDocumentTests::externalOverlayAnimationMappingProbe()
                      quint32(expected.cell.y() * terrain.tileCountX()
                              + expected.cell.x())).animated,
                  expected.animated);
+    }
+}
+
+void EnduranceDocumentTests::externalOverlaySurfaceMappingProbe()
+{
+    const QString mprPath = qEnvironmentVariable(
+        "EI_MAPPER_OVERLAY_SURFACE_REPRO_MPR");
+    if(mprPath.isEmpty())
+        QSKIP("Set EI_MAPPER_OVERLAY_SURFACE_REPRO_MPR to the read-only overlay-surface repro MPR");
+
+    CValidationReport report;
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    QCOMPARE(QCryptographicHash::hash(document.originalBytes(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("B6CBBED55918B430FD04D3C4B6D16EE00FCFADA17AB4503D673A7E523CE0F22A"));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+
+    QCOMPARE(terrain.tileCountX(), 176);
+    QCOMPARE(terrain.tileCountY(), 144);
+    QCOMPARE(document.mapInfo().animatedTiles.size(), 1);
+    QCOMPARE(document.mapInfo().animatedTiles.front().tileIndex, quint16(508));
+    QCOMPARE(document.mapInfo().animatedTiles.front().frameCount, quint16(31));
+    SAnimTile animation{};
+    animation.tileIndex = 508;
+    animation.nPhase = 31;
+    const QVector<SAnimTile> animations{animation};
+    struct ExpectedCell
+    {
+        QPoint cell;
+        qint16 material;
+        int slot;
+        int rotation;
+        bool animated;
+        int startPhase;
+    };
+    const QVector<ExpectedCell> cells{
+        {{5, 0}, 2, 508, 1, true, 0},
+        {{13, 0}, 2, 517, 0, true, 9},
+        {{8, 8}, 2, 538, 0, true, 30},
+        {{67, 8}, 2, 488, 2, false, 0},
+        {{70, 35}, 1, 489, 1, false, 0},
+        {{71, 41}, 1, 488, 0, false, 0},
+        {{132, 47}, 1, 487, 0, false, 0}
+    };
+    for(const ExpectedCell& expected : cells)
+    {
+        bool available = false;
+        const qint16 material = terrain.overlayMaterialIndex(
+            expected.cell.x(), expected.cell.y(), &available);
+        QVERIFY(available);
+        QCOMPARE(material, expected.material);
+        const SMprPackedTile packed = SMprPackedTile::decode(
+            terrain.packedTile(expected.cell.x(), expected.cell.y(),
+                               ETerrainTileLayer::Overlay));
+        QCOMPARE(packed.atlasSlot(), expected.slot);
+        QCOMPARE(int(packed.rotation), expected.rotation);
+        const ei::SOverlayTileAnimation resolved =
+            ei::overlayTileAnimation(expected.slot, &animations);
+        QCOMPARE(resolved.animated, expected.animated);
+        QCOMPARE(resolved.startPhase, expected.startPhase);
     }
 }
 

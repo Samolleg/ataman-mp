@@ -93,20 +93,23 @@ SOverlayTileAnimation overlayTileAnimation(int atlasSlot,
                                            const QVector<SAnimTile>* animations,
                                            quint32 phaseSeed)
 {
+    Q_UNUSED(phaseSeed);
     SOverlayTileAnimation result;
     result.baseSlot = atlasSlot;
     if(!animations)
         return result;
     for(const SAnimTile& animation : *animations)
     {
-        // Sectors reference the first slot. Later sequence slots remain usable
-        // as ordinary static atlas tiles when they are authored directly.
-        if(int(animation.tileIndex) != atlasSlot || animation.nPhase < 2)
+        const int startSlot = int(animation.tileIndex);
+        const int frameCount = int(animation.nPhase);
+        // Native maps preserve a cell's authored phase by referencing any
+        // physical slot in the declared contiguous flipbook range.
+        if(frameCount < 2 || atlasSlot < startSlot
+           || atlasSlot >= startSlot + frameCount)
             continue;
-        result.startSlot = int(animation.tileIndex);
-        result.frameCount = int(animation.nPhase);
-        result.startPhase = int((phaseSeed * 17u + 5u)
-                                % quint32(result.frameCount));
+        result.startSlot = startSlot;
+        result.frameCount = frameCount;
+        result.startPhase = atlasSlot - startSlot;
         result.animated = true;
         break;
     }

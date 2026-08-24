@@ -840,11 +840,10 @@ void CLandscapeTools::updateModeVisibility()
         || editMode() == ELandscapeEditMode::OverlaySculpt;
     m_sculptControls->setVisible(sculpt);
     m_paintControls->setVisible(!sculpt);
-    m_showOverlayMaterialSlots->setVisible(
-        editMode() == ELandscapeEditMode::OverlayPaint);
     const bool overlaySurface = editMode() == ELandscapeEditMode::OverlaySurface;
     const bool overlayMode = overlaySurface
         || editMode() == ELandscapeEditMode::OverlayPaint;
+    m_showOverlayMaterialSlots->setVisible(overlayMode);
     m_overlayMprMaterials->setVisible(overlayMode);
     {
         const QSignalBlocker blocker(m_materialTabs);

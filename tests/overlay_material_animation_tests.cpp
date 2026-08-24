@@ -431,8 +431,16 @@ void OverlayMaterialAnimationTests::resolvesAuthoredOverlayTileAnimation()
     QCOMPARE(active.startSlot, 64);
     QCOMPARE(active.baseSlot, 64);
     QCOMPARE(active.frameCount, 32);
+    QCOMPARE(active.startPhase, 0);
 
-    QVERIFY(!ei::overlayTileAnimation(65, &records).animated);
+    const ei::SOverlayTileAnimation authoredPhase =
+        ei::overlayTileAnimation(81, &records);
+    QVERIFY(authoredPhase.animated);
+    QCOMPARE(authoredPhase.startSlot, 64);
+    QCOMPARE(authoredPhase.baseSlot, 81);
+    QCOMPARE(authoredPhase.frameCount, 32);
+    QCOMPARE(authoredPhase.startPhase, 17);
+    QVERIFY(!ei::overlayTileAnimation(96, &records).animated);
     QVERIFY(!ei::overlayTileAnimation(64, nullptr).animated);
     zoneFiveWater.nPhase = 1;
     const QVector<SAnimTile> disabledRecords{zoneFiveWater};
@@ -446,17 +454,19 @@ void OverlayMaterialAnimationTests::givesAnimatedCellsStableIndependentPhases()
     record.nPhase = 24;
     const QVector<SAnimTile> records{record};
     const ei::SOverlayTileAnimation first =
-        ei::overlayTileAnimation(512, &records, 17u);
+        ei::overlayTileAnimation(517, &records, 17u);
     const ei::SOverlayTileAnimation repeated =
-        ei::overlayTileAnimation(512, &records, 17u);
+        ei::overlayTileAnimation(517, &records, 17u);
     const ei::SOverlayTileAnimation neighbor =
-        ei::overlayTileAnimation(512, &records, 18u);
+        ei::overlayTileAnimation(518, &records, 18u);
     QVERIFY(first.animated);
     QCOMPARE(first.startPhase, repeated.startPhase);
-    QVERIFY(first.startPhase >= 0 && first.startPhase < 24);
+    QCOMPARE(first.startPhase, 5);
+    QCOMPARE(neighbor.startPhase, 6);
     QVERIFY2(first.startPhase != neighbor.startPhase,
-             "Every overlay cell still starts on one synchronized frame");
-    QVERIFY(!ei::overlayTileAnimation(517, &records, 17u).animated);
+             "Authored per-cell phase offsets were synchronized");
+    QVERIFY(!ei::overlayTileAnimation(511, &records, 17u).animated);
+    QVERIFY(!ei::overlayTileAnimation(536, &records, 17u).animated);
 }
 
 QTEST_APPLESS_MAIN(OverlayMaterialAnimationTests)

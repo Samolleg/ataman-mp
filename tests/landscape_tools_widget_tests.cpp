@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include <QCheckBox>
 #include <QLineEdit>
 #include <QComboBox>
 #include <QLabel>
@@ -29,6 +30,7 @@ private slots:
     void paintHelpLivesOnRelevantControls();
     void overlaySurfaceModeLocksTileTargetAndOverlayLayer();
     void overlayModesExposeMprMaterialsShortcut();
+    void overlaySurfaceModesExposeMaterialSlotLabels();
     void overlayMaterialDropdownRefreshesImmediately();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
@@ -375,6 +377,31 @@ void LandscapeToolsWidgetTests::overlayModesExposeMprMaterialsShortcut()
 
     tools.activateMode(ELandscapeEditMode::TilePaint, false);
     QVERIFY(!shortcut->isVisibleTo(&tools));
+}
+
+void LandscapeToolsWidgetTests::overlaySurfaceModesExposeMaterialSlotLabels()
+{
+    CLandscapeTools tools;
+    tools.resize(730, 1500);
+    tools.setEditingEnabled(true, false);
+    QCheckBox* labels = tools.findChild<QCheckBox*>(
+        QStringLiteral("showOverlayMaterialSlotLabels"));
+    QVERIFY(labels);
+    QComboBox* operation = nullptr;
+    for(QComboBox* combo : tools.findChildren<QComboBox*>())
+        if(combo->findText(QStringLiteral("Remove surface")) >= 0)
+            operation = combo;
+    QVERIFY(operation);
+
+    tools.activateMode(ELandscapeEditMode::OverlaySurface, false);
+    operation->setCurrentIndex(0);
+    QVERIFY2(labels->isVisibleTo(&tools),
+             "Add Overlay Surface hides material-slot inspection");
+    operation->setCurrentIndex(1);
+    QVERIFY2(labels->isVisibleTo(&tools),
+             "Remove Overlay Surface hides material-slot inspection");
+    tools.activateMode(ELandscapeEditMode::OverlayPaint, false);
+    QVERIFY(labels->isVisibleTo(&tools));
 }
 
 void LandscapeToolsWidgetTests::overlayMaterialDropdownRefreshesImmediately()
