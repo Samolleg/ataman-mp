@@ -469,9 +469,9 @@ bool ConfigureSyntheticZone()
     // The launcher appends this exact random record to a run-local map.txt
     // before game.exe starts. Change numeric fields only; strings and container
     // ownership remain exactly as constructed by the game parser. Hot-reload
-    // generation payloads deliberately use the generic names map.mpr/map.mob;
-    // those filesystem names are redirected by MapLoadDetour and are not the
-    // logical MPR/MOB names stored in the persistent synthetic map-table record.
+    // generation payload filenames are redirected by MapLoadDetour and are not
+    // the logical MPR/MOB names stored in the persistent synthetic map-table
+    // record.
     unsigned char* zone = FindZoneCandidate(g_sourceZone, g_sourceZone, g_sourceZone);
     if(!zone)
     {

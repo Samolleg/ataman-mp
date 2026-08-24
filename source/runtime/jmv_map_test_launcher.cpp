@@ -898,9 +898,17 @@ bool CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
 }
 
 QString CJmvMapTestLauncher::generationSavesPath(const QString& runRoot,
-                                                 quint64 generation)
+                                                  quint64 generation)
 {
     return saveGenerationPath(runRoot, generation);
+}
+
+QString CJmvMapTestLauncher::generationPayloadFileName(
+    quint64 generation, const QString& extension)
+{
+    return QStringLiteral("map-generation-%1.%2")
+        .arg(generation, 6, 10, QLatin1Char('0'))
+        .arg(extension);
 }
 
 bool CJmvMapTestLauncher::validateJmvGameRootPaths(
@@ -3142,10 +3150,21 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
     const QString reloadRoot = QDir(m_runRoot).filePath(
         QString("generations/%1").arg(generation, 6, 10, QLatin1Char('0')));
     const QString generationSavePath = QDir(reloadRoot).filePath("saves");
-    const QString payloadMpr = QDir(reloadRoot).filePath("map.mpr");
-    const QString payloadMob = QDir(reloadRoot).filePath("map.mob");
+    // The game retains map identity beyond the loader call. A directory-only
+    // generation boundary still presents repeated reloads as the same map.*
+    // identity, so qualify every engine-visible companion filename as well as
+    // its immutable parent directory.
+    const QString payloadMpr = QDir(reloadRoot).filePath(
+        CJmvMapTestLauncher::generationPayloadFileName(
+            generation, QStringLiteral("mpr")));
+    const QString payloadMob = QDir(reloadRoot).filePath(
+        CJmvMapTestLauncher::generationPayloadFileName(
+            generation, QStringLiteral("mob")));
     const QString payloadGrp = graphSource.usesExternalGraph()
-        ? QDir(reloadRoot).filePath("map.grp") : QString();
+        ? QDir(reloadRoot).filePath(
+              CJmvMapTestLauncher::generationPayloadFileName(
+                  generation, QStringLiteral("grp")))
+        : QString();
     const QString payloadDatabase = QDir(reloadRoot).filePath("database.res");
     const bool hasGeneratedMinimap = !input.temporaryMinimapMmp.isEmpty();
     const QString minimapTextureName = hasGeneratedMinimap

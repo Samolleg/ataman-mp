@@ -79,6 +79,7 @@ private slots:
     void rebasesRuntimeTerrainAtlasNamespace();
     void initialLaunchComposesGeneratedMinimapWithTerrainResource();
     void changedTerrainAtlasRequiresOwnedProcessRestart();
+    void repeatedHotReloadUsesDistinctEngineVisiblePayloadNames();
     void renderEvidenceRejectsTexturelessFrames();
     void memoryEvidenceSummarizesComparableSamples();
     void runtimeSmokeReachesGameplayReady();
@@ -796,6 +797,22 @@ void JmvMapTestLauncherTests::changedTerrainAtlasRequiresOwnedProcessRestart()
              "Hot reload no longer checks whether terrain atlas bytes changed");
     QVERIFY2(hotReload.contains("queueTerrainAtlasRestart("),
              "Changed terrain atlas bytes no longer force an owned-process restart");
+}
+
+void JmvMapTestLauncherTests::repeatedHotReloadUsesDistinctEngineVisiblePayloadNames()
+{
+    const QString firstMpr = CJmvMapTestLauncher::generationPayloadFileName(1, "mpr");
+    const QString unchangedMpr = CJmvMapTestLauncher::generationPayloadFileName(2, "mpr");
+    const QString changedMpr = CJmvMapTestLauncher::generationPayloadFileName(3, "mpr");
+    QCOMPARE(firstMpr, QString("map-generation-000001.mpr"));
+    QCOMPARE(unchangedMpr, QString("map-generation-000002.mpr"));
+    QCOMPARE(changedMpr, QString("map-generation-000003.mpr"));
+    QVERIFY(firstMpr != unchangedMpr);
+    QVERIFY(unchangedMpr != changedMpr);
+    QCOMPARE(CJmvMapTestLauncher::generationPayloadFileName(2, "mob"),
+             QString("map-generation-000002.mob"));
+    QCOMPARE(CJmvMapTestLauncher::generationPayloadFileName(2, "grp"),
+             QString("map-generation-000002.grp"));
 }
 
 void JmvMapTestLauncherTests::renderEvidenceRejectsTexturelessFrames()

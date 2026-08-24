@@ -102,6 +102,8 @@ public:
 
     static QString testRunsRootPath();
     static QString generationSavesPath(const QString& runRoot, quint64 generation);
+    static QString generationPayloadFileName(quint64 generation,
+                                             const QString& extension);
     static bool validateJmvGameRootPaths(const QString& selectedGameRoot,
                                          const QString& workPath,
                                          const QString& resourcesPath,
