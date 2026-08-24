@@ -157,6 +157,8 @@ public:
         const QString& runningSourceAtlasSha256, int runningAtlasPages,
         int runningAtlasSlots, const QString& candidateSourceAtlasSha256,
         int candidateAtlasPages, int candidateAtlasSlots);
+    static bool priorInProcessReloadRequiresOwnedProcessRestart(
+        quint64 dispatchedReloadSequence);
     static QString recoverInterruptedRuns(bool* pending = nullptr);
     static bool hasActiveInterruptedRun(QString* description = nullptr);
     static bool requestCloseActiveInterruptedRun(QString* error = nullptr);

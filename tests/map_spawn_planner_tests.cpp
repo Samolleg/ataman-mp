@@ -2,6 +2,21 @@
 
 #include "map_spawn_planner.h"
 
+static QByteArray mainWindowSource()
+{
+    const QString relativePath = QStringLiteral("source/app/main_window.cpp");
+    QDir directory(QDir::currentPath());
+    for(int depth = 0; depth < 8; ++depth)
+    {
+        QFile source(directory.filePath(relativePath));
+        if(source.open(QIODevice::ReadOnly))
+            return source.readAll();
+        if(!directory.cdUp())
+            break;
+    }
+    return QByteArray();
+}
+
 class MapSpawnPlannerTests : public QObject
 {
     Q_OBJECT
@@ -14,6 +29,7 @@ private slots:
     void keepsNearbyFallbackInsideFirstUsableEntrance();
     void selectedEntranceDoesNotFallThrough();
     void customSpawnMovesAwayFromObstacle();
+    void preservesCustomSpawnAcrossSameZoneDocumentReplacement();
 };
 
 static SMapTravelZone zone(int id, const QRectF& rectangle)
@@ -116,6 +132,34 @@ void MapSpawnPlannerTests::customSpawnMovesAwayFromObstacle()
     QVERIFY(plan.adjusted);
     QCOMPARE(plan.exitId, 3);
     QCOMPARE(plan.requestedPosition, QPointF(5.0, 5.0));
+}
+
+void MapSpawnPlannerTests::preservesCustomSpawnAcrossSameZoneDocumentReplacement()
+{
+    SMapSpawnPlan spawn;
+    spawn.valid = true;
+    spawn.custom = true;
+    spawn.exitId = 1;
+    spawn.position = QPointF(54.0, 138.0);
+
+    QVERIFY(CMapSpawnPlanner::canPreserveCustomSpawnAcrossDocumentReplacement(
+        spawn, QStringLiteral("gz1g"), QStringLiteral("GZ1G"), true));
+    QVERIFY(!CMapSpawnPlanner::canPreserveCustomSpawnAcrossDocumentReplacement(
+        spawn, QStringLiteral("gz1g"), QStringLiteral("gz2g"), true));
+    QVERIFY(!CMapSpawnPlanner::canPreserveCustomSpawnAcrossDocumentReplacement(
+        spawn, QStringLiteral("gz1g"), QStringLiteral("gz1g"), false));
+    spawn.valid = false;
+    QVERIFY(!CMapSpawnPlanner::canPreserveCustomSpawnAcrossDocumentReplacement(
+        spawn, QStringLiteral("gz1g"), QStringLiteral("gz1g"), true));
+
+    const QByteArray source = mainWindowSource();
+    QVERIFY2(!source.isEmpty(), "Could not locate source/app/main_window.cpp");
+    const int saveStateConnection = source.indexOf(
+        "connect(m_pView, &CView::mprSaveStateChanged");
+    QVERIFY(saveStateConnection >= 0);
+    const QByteArray connection = source.mid(saveStateConnection, 400);
+    QVERIFY2(connection.contains("preserveCustomSpawnAfterDocumentReplacement();"),
+             "MPR baseline adoption still leaves Play From Here keyed to the replaced document");
 }
 
 QTEST_APPLESS_MAIN(MapSpawnPlannerTests)

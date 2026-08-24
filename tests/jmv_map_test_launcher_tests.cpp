@@ -80,6 +80,8 @@ private slots:
     void initialLaunchComposesGeneratedMinimapWithTerrainResource();
     void changedTerrainAtlasRequiresOwnedProcessRestart();
     void repeatedHotReloadUsesDistinctEngineVisiblePayloadNames();
+    void repeatedRebootstrapRequiresOwnedProcessRestart();
+    void authoritativeResultSeparatesOpenedFromCommittedGeneration();
     void renderEvidenceRejectsTexturelessFrames();
     void memoryEvidenceSummarizesComparableSamples();
     void runtimeSmokeReachesGameplayReady();
@@ -106,6 +108,11 @@ static QByteArray launcherSource()
     }
     return QByteArray();
 }
+
+static QJsonObject resultManifest(const QString& runRoot,
+                                  const QString& sourcePath);
+static QString successfulBridgeEvidence(const QString& runRoot,
+                                        const QString& zone = "zone1");
 
 #ifdef Q_OS_WIN
 struct RuntimeWindowSearch
@@ -815,6 +822,89 @@ void JmvMapTestLauncherTests::repeatedHotReloadUsesDistinctEngineVisiblePayloadN
              QString("map-generation-000002.grp"));
 }
 
+void JmvMapTestLauncherTests::repeatedRebootstrapRequiresOwnedProcessRestart()
+{
+    QVERIFY(!CJmvMapTestLauncher::priorInProcessReloadRequiresOwnedProcessRestart(0));
+    QVERIFY(CJmvMapTestLauncher::priorInProcessReloadRequiresOwnedProcessRestart(1));
+    QVERIFY(CJmvMapTestLauncher::priorInProcessReloadRequiresOwnedProcessRestart(2));
+
+    const QByteArray source = launcherSource();
+    const int hotReloadStart = source.indexOf(
+        "bool CJmvMapTestLauncher::hotReload(");
+    const int hotReloadEnd = source.indexOf(
+        "bool CJmvMapTestLauncher::queueTerrainAtlasRestart(", hotReloadStart);
+    QVERIFY(hotReloadStart >= 0 && hotReloadEnd > hotReloadStart);
+    const QByteArray hotReload = source.mid(
+        hotReloadStart, hotReloadEnd - hotReloadStart);
+    QVERIFY2(hotReload.contains(
+                 "priorInProcessReloadRequiresOwnedProcessRestart(m_hotReloadSequence)"),
+             "A second in-process New Game rebootstrap is still allowed");
+    QVERIFY2(hotReload.contains("return restart(input, error);"),
+             "The exhausted rebootstrap lifecycle is not replaced by an owned-process restart");
+}
+
+void JmvMapTestLauncherTests::authoritativeResultSeparatesOpenedFromCommittedGeneration()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    QJsonObject manifest = resultManifest(temp.path(), source);
+
+    QJsonArray reloads;
+    for(int generation = 1; generation <= 2; ++generation)
+    {
+        const QString root = QDir(temp.path()).filePath(
+            QString("generations/%1").arg(generation, 6, 10, QLatin1Char('0')));
+        QJsonObject reload;
+        reload.insert("sequence", QString::number(generation));
+        reload.insert("generation", QString::number(generation));
+        reload.insert("zoneId", "zone2");
+        reload.insert("entranceId", 1);
+        reload.insert("mprPath", QDir(root).filePath(
+            QString("map-generation-%1.mpr").arg(generation, 6, 10, QLatin1Char('0'))));
+        reload.insert("mobPath", QDir(root).filePath(
+            QString("map-generation-%1.mob").arg(generation, 6, 10, QLatin1Char('0'))));
+        reload.insert("mprSha256", QString("mpr-hash-%1").arg(generation));
+        reload.insert("mobSha256", QString("mob-hash-%1").arg(generation));
+        reload.insert("savePath", QDir(root).filePath("saves"));
+        reloads.append(reload);
+    }
+    manifest.insert("hotReloads", reloads);
+    const QJsonObject first = reloads.at(0).toObject();
+    const QJsonObject second = reloads.at(1).toObject();
+    const QString evidence = successfulBridgeEvidence(temp.path()) + QString(
+        "HOT_RELOAD dispatch sequence=1 generation=1 runtime_state=GameplayReady zone=\"zone2\" entrance_id=1 thread=1\n"
+        "DIRECT_LAUNCH initialized New Game player zone=\"zone2\" entrance_id=1 entrance_index=0 before transition\n"
+        "DIRECT_LAUNCH redirecting normal single-player transition loader mpr=\"%1\" mob=\"%2\" context=0x1\n"
+        "HOT_RELOAD completed sequence=1 transition_result=1 staged_loader=observed\n"
+        "HOT_RELOAD dispatch sequence=2 generation=2 runtime_state=GameplayReady zone=\"zone2\" entrance_id=1 thread=1\n"
+        "DIRECT_LAUNCH initialized New Game player zone=\"zone2\" entrance_id=1 entrance_index=0 before transition\n"
+        "DIRECT_LAUNCH redirecting normal single-player transition loader mpr=\"%3\" mob=\"%4\" context=0x2\n")
+        .arg(first.value("mprPath").toString(), first.value("mobPath").toString(),
+             second.value("mprPath").toString(), second.value("mobPath").toString());
+
+    const QJsonObject report = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, evidence, -1073741819, int(QProcess::CrashExit), false,
+        "Removed all owned runtime artifacts");
+    QCOMPARE(report.value("requestedGeneration").toString(), QString("2"));
+    QCOMPARE(report.value("attemptedGeneration").toString(), QString("2"));
+    QCOMPARE(report.value("actualGeneration").toString(), QString("1"));
+    QCOMPARE(report.value("completedReloadSequence").toString(), QString("1"));
+    QCOMPARE(report.value("attemptedMprPath").toString(),
+             second.value("mprPath").toString());
+    QCOMPARE(report.value("actualMprPath").toString(),
+             first.value("mprPath").toString());
+    QCOMPARE(report.value("actualMprSha256").toString(),
+             first.value("mprSha256").toString());
+    QCOMPARE(report.value("attemptedMprSha256").toString(),
+             second.value("mprSha256").toString());
+    QCOMPARE(report.value("playerInitializationCount").toInt(), 1);
+    QCOMPARE(report.value("attemptedPlayerInitializationCount").toInt(), 1);
+    QVERIFY(!report.value("controlledPlayerConfirmed").toBool());
+    QVERIFY(!report.value("payloadHashesValidated").toBool());
+}
+
 void JmvMapTestLauncherTests::renderEvidenceRejectsTexturelessFrames()
 {
 #ifdef Q_OS_WIN
@@ -1522,7 +1612,7 @@ static QJsonObject resultManifest(const QString& runRoot, const QString& sourceP
 }
 
 static QString successfulBridgeEvidence(const QString& runRoot,
-                                        const QString& zone = "zone1")
+                                        const QString& zone)
 {
     return QString(
         "2026-07-21T00:00:00Z DIRECT_LAUNCH initialized New Game player zone=\"%1\" entrance_id=2 entrance_index=1 before transition\n"

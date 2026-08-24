@@ -753,6 +753,16 @@ bool CJmvMapTestLauncher::terrainAtlasHotReloadRequiresRestart(
         || runningAtlasSlots != candidateAtlasSlots;
 }
 
+bool CJmvMapTestLauncher::priorInProcessReloadRequiresOwnedProcessRestart(
+    quint64 dispatchedReloadSequence)
+{
+    // The bridge's complete New Game bootstrap is a one-reload lifecycle.
+    // The exact R5 failure opened the second generation-qualified payload and
+    // then crashed before the bootstrap could publish completion. Start a
+    // fresh owned process instead of re-entering that lifecycle a third time.
+    return dispatchedReloadSequence > 0;
+}
+
 bool CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
     const QByteArray& sourceMpr,
     const QByteArray& sourceAtlasRes,
@@ -1170,10 +1180,6 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         .value("activeGeneration").toString().toULongLong();
     QString requestedMprHash;
     QString requestedMobHash;
-    QString expectedMprPath = manifest.value("liveFiles").toObject()
-        .value("mprPath").toString();
-    QString expectedMobPath = manifest.value("liveFiles").toObject()
-        .value("mobPath").toString();
     QString saveNamespace = manifest.value("isolatedSaves").toObject()
         .value("testPath").toString();
     const QJsonArray reloads = manifest.value("hotReloads").toArray();
@@ -1186,8 +1192,6 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
             .toULongLong();
         requestedMprHash = latest.value("mprSha256").toString();
         requestedMobHash = latest.value("mobSha256").toString();
-        expectedMprPath = latest.value("mprPath").toString();
-        expectedMobPath = latest.value("mobPath").toString();
         saveNamespace = latest.value("savePath").toString(saveNamespace);
     }
     if(requestedMprHash.isEmpty() || requestedMobHash.isEmpty())
@@ -1201,19 +1205,60 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     int actualEntrance = 0;
     quint64 actualGeneration = 0;
     quint64 completedReloadSequence = 0;
+    quint64 attemptedReloadSequence = 0;
+    quint64 attemptedGeneration = 0;
+    QString actualMprPath;
+    QString actualMobPath;
+    QString attemptedMprPath;
+    QString attemptedMobPath;
     const QRegularExpression reloadExpression(
         "HOT_RELOAD dispatch sequence=(\\d+) generation=(\\d+).*zone=\\\"([^\\\"]+)\\\" entrance_id=(\\d+)");
+    QVector<QRegularExpressionMatch> reloadEvents;
     QRegularExpressionMatchIterator reloadMatches = reloadExpression.globalMatch(bridgeResult);
     while(reloadMatches.hasNext())
+        reloadEvents.append(reloadMatches.next());
+    const QRegularExpression loaderExpression(
+        "redirecting normal single-player transition loader mpr=\\\"([^\\\"]+)\\\" mob=\\\"([^\\\"]+)\\\"");
+    const auto loaderPathsInRange = [&](int start, int end,
+                                        QString* mpr, QString* mob)
     {
-        const QRegularExpressionMatch match = reloadMatches.next();
+        QRegularExpressionMatchIterator loaders = loaderExpression.globalMatch(
+            bridgeResult.mid(start, end - start));
+        while(loaders.hasNext())
+        {
+            const QRegularExpressionMatch loader = loaders.next();
+            if(mpr) *mpr = loader.captured(1);
+            if(mob) *mob = loader.captured(2);
+        }
+    };
+    int completedEvidenceStart = -1;
+    int completedEvidenceEnd = -1;
+    int attemptedEvidenceStart = -1;
+    int attemptedEvidenceEnd = -1;
+    for(int index = 0; index < reloadEvents.size(); ++index)
+    {
+        const QRegularExpressionMatch match = reloadEvents.at(index);
+        const int rangeStart = match.capturedStart();
+        const int rangeEnd = index + 1 < reloadEvents.size()
+            ? reloadEvents.at(index + 1).capturedStart() : bridgeResult.size();
         const quint64 sequence = match.captured(1).toULongLong();
-        if(bridgeResult.contains(QString("HOT_RELOAD completed sequence=%1").arg(sequence)))
+        attemptedReloadSequence = sequence;
+        attemptedGeneration = match.captured(2).toULongLong();
+        attemptedEvidenceStart = rangeStart;
+        attemptedEvidenceEnd = rangeEnd;
+        loaderPathsInRange(rangeStart, rangeEnd,
+                           &attemptedMprPath, &attemptedMobPath);
+        if(bridgeResult.mid(rangeStart, rangeEnd - rangeStart).contains(
+               QString("HOT_RELOAD completed sequence=%1").arg(sequence)))
         {
             completedReloadSequence = sequence;
             actualGeneration = match.captured(2).toULongLong();
             actualZone = match.captured(3);
             actualEntrance = match.captured(4).toInt();
+            completedEvidenceStart = rangeStart;
+            completedEvidenceEnd = rangeEnd;
+            loaderPathsInRange(rangeStart, rangeEnd,
+                               &actualMprPath, &actualMobPath);
         }
     }
     if(actualZone.isEmpty())
@@ -1229,23 +1274,46 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         }
     }
 
-    QString actualMprPath;
-    QString actualMobPath;
-    const QRegularExpression loaderExpression(
-        "redirecting normal single-player transition loader mpr=\\\"([^\\\"]+)\\\" mob=\\\"([^\\\"]+)\\\"");
-    QRegularExpressionMatchIterator loaderMatches = loaderExpression.globalMatch(bridgeResult);
-    while(loaderMatches.hasNext())
+    if(actualMprPath.isEmpty() && completedReloadSequence == 0)
     {
-        const QRegularExpressionMatch match = loaderMatches.next();
-        actualMprPath = match.captured(1);
-        actualMobPath = match.captured(2);
+        const int initialEvidenceEnd = reloadEvents.isEmpty()
+            ? bridgeResult.size() : reloadEvents.front().capturedStart();
+        loaderPathsInRange(0, initialEvidenceEnd,
+                           &actualMprPath, &actualMobPath);
     }
+
+    const auto reloadPayload = [&reloads](quint64 sequence)
+    {
+        for(const QJsonValue& value : reloads)
+        {
+            const QJsonObject reload = value.toObject();
+            if(reload.value("sequence").toString().toULongLong() == sequence)
+                return reload;
+        }
+        return QJsonObject();
+    };
+    QJsonObject actualPayload = manifest.value("liveFiles").toObject();
+    if(completedReloadSequence != 0)
+        actualPayload = reloadPayload(completedReloadSequence);
+    const QJsonObject attemptedPayload = attemptedReloadSequence != 0
+        ? reloadPayload(attemptedReloadSequence) : QJsonObject();
+    const QString actualExpectedMprPath = actualPayload.value("mprPath").toString();
+    const QString actualExpectedMobPath = actualPayload.value("mobPath").toString();
+    const QString actualExpectedMprHash = actualPayload.value("mprSha256").toString();
+    const QString actualExpectedMobHash = actualPayload.value("mobSha256").toString();
+    const QString attemptedExpectedMprPath = attemptedPayload.value("mprPath").toString();
+    const QString attemptedExpectedMobPath = attemptedPayload.value("mobPath").toString();
 
     const bool gameplayReady = bridgeResult.contains(
         QRegularExpression("RUNTIME_STATE.*to=GameplayReady"));
-    const bool stagedLoaderObserved = bridgeResult.contains(
-        "DIRECT_LAUNCH staged map loader returned result=1")
-        || completedReloadSequence != 0;
+    const quint64 requestedReloadSequence = reloads.isEmpty() ? 0
+        : reloads.last().toObject().value("sequence").toString().toULongLong();
+    const bool requestedReloadCompleted = requestedReloadSequence == 0
+        ? completedReloadSequence == 0
+        : completedReloadSequence == requestedReloadSequence;
+    const bool stagedLoaderObserved = requestedReloadSequence == 0
+        ? bridgeResult.contains("DIRECT_LAUNCH staged map loader returned result=1")
+        : requestedReloadCompleted;
     const bool tablesLuaStaged = manifest.contains("tablesLua");
     const QJsonObject tablesLuaJournal = manifest.value("tablesLua").toObject();
     const bool tablesLuaRedirectObserved = bridgeResult.contains("TABLES_LUA_REDIRECT");
@@ -1332,27 +1400,39 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
             && drawallAutoexecRedirected && drawallAutoexecConsumed);
     const bool actualMprMatchesOwnedPayload = !actualMprPath.isEmpty()
         && QFileInfo(actualMprPath).absoluteFilePath().compare(
-            QFileInfo(expectedMprPath).absoluteFilePath(),
+            QFileInfo(actualExpectedMprPath).absoluteFilePath(),
             Qt::CaseInsensitive) == 0;
     const bool actualMobMatchesOwnedPayload = !actualMobPath.isEmpty()
         && QFileInfo(actualMobPath).absoluteFilePath().compare(
-            QFileInfo(expectedMobPath).absoluteFilePath(),
+            QFileInfo(actualExpectedMobPath).absoluteFilePath(),
+            Qt::CaseInsensitive) == 0;
+    const bool attemptedMprMatchesOwnedPayload = !attemptedMprPath.isEmpty()
+        && QFileInfo(attemptedMprPath).absoluteFilePath().compare(
+            QFileInfo(attemptedExpectedMprPath).absoluteFilePath(),
+            Qt::CaseInsensitive) == 0;
+    const bool attemptedMobMatchesOwnedPayload = !attemptedMobPath.isEmpty()
+        && QFileInfo(attemptedMobPath).absoluteFilePath().compare(
+            QFileInfo(attemptedExpectedMobPath).absoluteFilePath(),
             Qt::CaseInsensitive) == 0;
     const bool payloadHashesValidated = stagedLoaderObserved
+        && requestedReloadCompleted
         && actualMprMatchesOwnedPayload && actualMobMatchesOwnedPayload
         && !requestedMprHash.isEmpty() && !requestedMobHash.isEmpty();
     QString playerEvidenceScope = bridgeResult;
-    if(completedReloadSequence != 0)
-    {
-        const int latestDispatch = bridgeResult.lastIndexOf(
-            QString("HOT_RELOAD dispatch sequence=%1")
-                .arg(completedReloadSequence));
-        if(latestDispatch >= 0)
-            playerEvidenceScope = bridgeResult.mid(latestDispatch);
-    }
+    if(completedEvidenceStart >= 0 && completedEvidenceEnd > completedEvidenceStart)
+        playerEvidenceScope = bridgeResult.mid(
+            completedEvidenceStart, completedEvidenceEnd - completedEvidenceStart);
     const int playerInitializations = playerEvidenceScope.count(
         "DIRECT_LAUNCH initialized New Game player");
-    const bool controlledPlayerConfirmed = playerInitializations == 1;
+    const QString attemptedPlayerEvidence = attemptedEvidenceStart >= 0
+        && attemptedEvidenceEnd > attemptedEvidenceStart
+        ? bridgeResult.mid(attemptedEvidenceStart,
+                           attemptedEvidenceEnd - attemptedEvidenceStart)
+        : QString();
+    const int attemptedPlayerInitializations = attemptedPlayerEvidence.count(
+        "DIRECT_LAUNCH initialized New Game player");
+    const bool controlledPlayerConfirmed = requestedReloadCompleted
+        && playerInitializations == 1;
 
     bool sourceFilesUnchanged = true;
     QJsonArray changedSources;
@@ -1433,9 +1513,16 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         addUnique(&errors, QString("Requested save generation %1 but runtime committed %2.")
                   .arg(requestedGeneration).arg(actualGeneration));
     if(!controlledPlayerConfirmed)
-        addUnique(&errors, QString("The staged run reported %1 controlled-player "
-                                  "initializations; exactly one is required.")
-                  .arg(playerInitializations));
+    {
+        if(!requestedReloadCompleted && requestedReloadSequence > 0)
+            addUnique(&errors, QString(
+                "Requested hot reload sequence %1 did not complete its controlled-player lifecycle.")
+                .arg(requestedReloadSequence));
+        else
+            addUnique(&errors, QString("The staged run reported %1 controlled-player "
+                                      "initializations; exactly one is required.")
+                      .arg(playerInitializations));
+    }
     if(!sourceFilesUnchanged)
         addUnique(&errors, "One or more source map files changed during the test.");
     if(!cleanupComplete)
@@ -1469,14 +1556,24 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("actualEntrance", actualEntrance);
     report.insert("requestedGeneration", QString::number(requestedGeneration));
     report.insert("actualGeneration", QString::number(actualGeneration));
+    report.insert("attemptedGeneration", QString::number(attemptedGeneration));
+    report.insert("attemptedReloadSequence", QString::number(attemptedReloadSequence));
     report.insert("saveNamespace", saveNamespace);
     report.insert("completedReloadSequence", QString::number(completedReloadSequence));
     report.insert("mprSha256", requestedMprHash);
     report.insert("mobSha256", requestedMobHash);
-    report.insert("actualMprSha256", actualMprMatchesOwnedPayload ? requestedMprHash : QString());
-    report.insert("actualMobSha256", actualMobMatchesOwnedPayload ? requestedMobHash : QString());
+    report.insert("actualMprSha256", actualMprMatchesOwnedPayload
+                  ? actualExpectedMprHash : QString());
+    report.insert("actualMobSha256", actualMobMatchesOwnedPayload
+                  ? actualExpectedMobHash : QString());
     report.insert("actualMprPath", actualMprPath);
     report.insert("actualMobPath", actualMobPath);
+    report.insert("attemptedMprPath", attemptedMprPath);
+    report.insert("attemptedMobPath", attemptedMobPath);
+    report.insert("attemptedMprSha256", attemptedMprMatchesOwnedPayload
+                  ? attemptedPayload.value("mprSha256").toString() : QString());
+    report.insert("attemptedMobSha256", attemptedMobMatchesOwnedPayload
+                  ? attemptedPayload.value("mobSha256").toString() : QString());
     report.insert("gameplayReady", gameplayReady);
     report.insert("stagedLoaderObserved", stagedLoaderObserved);
     report.insert("payloadHashesValidated", payloadHashesValidated);
@@ -1503,12 +1600,17 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("drawallAutoexecConsumed", drawallAutoexecConsumed);
     report.insert("drawallContractValidated", drawallContractValidated);
     report.insert("playerInitializationCount", playerInitializations);
+    report.insert("attemptedPlayerInitializationCount",
+                  attemptedPlayerInitializations);
     report.insert("reportedPlayerCount", playerInitializations);
     report.insert("controlledPlayerConfirmed", controlledPlayerConfirmed);
     report.insert("playerCountEvidence", controlledPlayerConfirmed
                   ? "exactly one New Game player-record initialization observed"
-                  : QString("observed %1 New Game player-record initializations")
-                        .arg(playerInitializations));
+                  : (!requestedReloadCompleted && requestedReloadSequence > 0
+                     ? QString("requested reload incomplete after %1 player-record initialization(s)")
+                           .arg(attemptedPlayerInitializations)
+                     : QString("observed %1 New Game player-record initializations")
+                           .arg(playerInitializations)));
     report.insert("sourceFilesUnchanged", sourceFilesUnchanged);
     report.insert("changedSources", changedSources);
     report.insert("cleanupComplete", cleanupComplete);
@@ -3144,6 +3246,15 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
            candidateAtlasSha256, input.expectedTerrainAtlasPages,
            input.expectedTerrainAtlasSlots))
         return queueTerrainAtlasRestart(input, candidateAtlasSha256, error);
+
+    if(priorInProcessReloadRequiresOwnedProcessRestart(m_hotReloadSequence))
+    {
+        appendRunLog(QString(
+            "Prior in-process hot reload sequence=%1; replacing the next "
+            "unsafe New Game rebootstrap with a fresh Endurance-owned process")
+            .arg(m_hotReloadSequence));
+        return restart(input, error);
+    }
 
     const quint64 sequence = m_hotReloadSequence + 1;
     const quint64 generation = m_saveGeneration + 1;

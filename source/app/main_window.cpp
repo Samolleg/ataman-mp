@@ -1653,8 +1653,11 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::loadedMapStateChanged,
             this, &MainWindow::updateLoadedMapPanel);
-    connect(m_pView, &CView::mprSaveStateChanged,
-            this, &MainWindow::updateDocumentActionAvailability);
+    connect(m_pView, &CView::mprSaveStateChanged, this, [this]()
+    {
+        preserveCustomSpawnAfterDocumentReplacement();
+        updateDocumentActionAvailability();
+    });
     connect(m_pView, &CView::updateMsg, this, [this](const QString& message)
     {
         statusBar()->showMessage(message, 5000);
@@ -3176,6 +3179,58 @@ QString MainWindow::currentMapContextKey() const
         : QString();
     return QString("%1|%2").arg(QDir::cleanPath(mprPath), m_mapTestEntry.zoneId)
         .toCaseFolded();
+}
+
+void MainWindow::preserveCustomSpawnAfterDocumentReplacement()
+{
+    if(!m_customSpawn.valid || !m_customSpawn.custom
+       || m_customSpawnContextKey.isEmpty() || !m_pView)
+        return;
+
+    const QString replacementContext = currentMapContextKey();
+    if(replacementContext == m_customSpawnContextKey)
+        return;
+
+    const int separator = m_customSpawnContextKey.lastIndexOf(QLatin1Char('|'));
+    const QString previousZone = separator >= 0
+        ? m_customSpawnContextKey.mid(separator + 1) : QString();
+    QVector3D projected = m_customSpawnPosition;
+    const bool terrainPointValid = CLandscape::getInstance()->isMprLoad()
+        && CLandscape::getInstance()->projectPt(projected);
+    if(!CMapSpawnPlanner::canPreserveCustomSpawnAcrossDocumentReplacement(
+           m_customSpawn, previousZone, m_mapTestEntry.zoneId,
+           terrainPointValid))
+    {
+        if(m_playFromHereButton && m_playFromHereButton->isChecked())
+            m_playFromHereButton->setChecked(false);
+        return;
+    }
+
+    m_customSpawn.position = QPointF(projected.x(), projected.y());
+    m_customSpawnPosition = projected;
+    m_customSpawnContextKey = replacementContext;
+    if(m_playFromHereButton && !m_playFromHereButton->isChecked())
+    {
+        const QSignalBlocker blocker(m_playFromHereButton);
+        m_playFromHereButton->setChecked(true);
+    }
+    m_pView->setTestSpawnMarker(projected, m_customSpawn.adjusted);
+    m_pView->setTestSpawnMarkerSelected(m_customSpawnSelected);
+    if(m_spawnPositionLabel)
+        m_spawnPositionLabel->setText(tr("Custom: %1, %2, %3%4")
+            .arg(projected.x(), 0, 'f', 2).arg(projected.y(), 0, 'f', 2)
+            .arg(projected.z(), 0, 'f', 2)
+            .arg(m_customSpawn.adjusted ? tr(" (adjusted)") : QString()));
+    updateCustomSpawnControls();
+    updateEntranceOverlays();
+    updateMapTestAction();
+    ei::log(eLogInfo, QStringLiteral(
+        "Play From Here preserved across MPR document replacement zone:%1 "
+        "position:%2,%3,%4")
+        .arg(m_mapTestEntry.zoneId)
+        .arg(projected.x(), 0, 'f', 3)
+        .arg(projected.y(), 0, 'f', 3)
+        .arg(projected.z(), 0, 'f', 3));
 }
 
 void MainWindow::moveCameraToActiveSpawn()

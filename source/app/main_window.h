@@ -160,6 +160,7 @@ private:
     void setCustomSpawnPicking(bool enabled);
     void updateCustomSpawnControls();
     QString currentMapContextKey() const;
+    void preserveCustomSpawnAfterDocumentReplacement();
     void moveCameraToActiveSpawn();
     void updateEntranceOverlays();
     void updateOperationAvailability(bool hasSelection = false);
