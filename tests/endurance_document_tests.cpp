@@ -12585,7 +12585,10 @@ void EnduranceDocumentTests::terrainCatalogWaitsForVisibleLandscapeFrame()
         "bool CView::prepareForApplicationShutdown", paintStart);
     QVERIFY(paintStart >= 0 && shutdownStart > paintStart);
     const QByteArray paint = source.mid(paintStart, shutdownStart - paintStart);
-    const int draw = paint.indexOf("draw();");
+    int draw = paint.indexOf("draw();");
+    if(draw < 0)
+        draw = paint.indexOf(
+            "draw(traceSceneFrame ? &frameTelemetry : nullptr);");
     const int overlays = paint.indexOf("drawTestOverlaysOpenGl();", draw);
     const int queue = paint.indexOf("queueDeferredTerrainAutoCatalogBuild();",
                                     overlays);
