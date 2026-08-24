@@ -34,6 +34,9 @@ private slots:
     void incrementalOverlayRefreshRecomputesFlipbookMetadata();
     void mprMaterialEditorUsesLiveWorkingAtlasSlotCount();
     void overlayActivationUsesExactWorkingAtlasMaterial();
+    void overlaySurfaceUsesOverlayLayerAuthority();
+    void overlaySurfaceSlotLabelsRender();
+    void workingAtlasRefreshesSavePresentation();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -323,6 +326,78 @@ void OverlayMaterialAnimationTests::overlayActivationUsesExactWorkingAtlasMateri
              "Add Overlay must retain the selected family's reviewed runtime terrain type");
     QVERIFY2(!activation.contains("m_terrainMaterialRepresentatives.value"),
              "Add Overlay still relies on the palette representative map that global palette construction clears");
+}
+
+void OverlayMaterialAnimationTests::overlaySurfaceUsesOverlayLayerAuthority()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QFile operationFile(repository.absoluteFilePath("source/app/operationmanager.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    QVERIFY(operationFile.open(QIODevice::ReadOnly));
+    QByteArray view = viewFile.readAll();
+    QByteArray operation = operationFile.readAll();
+    view.replace("\r\n", "\n");
+    operation.replace("\r\n", "\n");
+
+    const int selectionStart = view.indexOf("void CView::ensureManualTileSelection()");
+    const int selectionEnd = view.indexOf("void CView::deferTerrainAutoCatalogBuild", selectionStart);
+    QVERIFY(selectionStart >= 0);
+    QVERIFY(selectionEnd > selectionStart);
+    const QByteArray selection = view.mid(selectionStart, selectionEnd - selectionStart);
+    QVERIFY2(selection.contains("terrainTileEditLayerIsLand()"),
+             "Manual Overlay Surface preview still derives Land/Overlay from an incomplete mode comparison");
+    QVERIFY2(operation.contains("m_pView->terrainTileEditLayerIsLand()"),
+             "Tile-brush sampling still trusts mutable scene state instead of the active landscape mode");
+    const int activationStart = view.indexOf(
+        "if(!bLand && m_landscapeTools->overlaySurfaceOperation()");
+    const int activationEnd = view.indexOf(
+        "const ETerrainTileLayer layer = bLand", activationStart);
+    QVERIFY(activationStart >= 0);
+    QVERIFY(activationEnd > activationStart);
+    const QByteArray activation = view.mid(
+        activationStart, activationEnd - activationStart);
+    QVERIFY2(activation.contains(
+                 "m_tileStrokeLayer = ETerrainTileLayer::Overlay;"),
+             "Overlay Surface telemetry does not record the actual operation layer");
+    QVERIFY2(activation.contains(
+                 "m_tileStrokeMaterialId = materialSelected ? material : -1;"),
+             "Overlay Surface telemetry does not record its selected MPR material");
+}
+
+void OverlayMaterialAnimationTests::overlaySurfaceSlotLabelsRender()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    QByteArray view = viewFile.readAll();
+    view.replace("\r\n", "\n");
+    const int drawStart = view.indexOf("void CView::drawTestOverlaysOpenGl()");
+    const int drawEnd = view.indexOf("void CView::", drawStart + 1);
+    QVERIFY(drawStart >= 0);
+    QVERIFY(drawEnd > drawStart);
+    const QByteArray draw = view.mid(drawStart, drawEnd - drawStart);
+    QVERIFY2(draw.contains("ELandscapeEditMode::OverlaySurface"),
+             "The material-slot checkbox is exposed in Overlay Surface mode but its renderer is disabled");
+}
+
+void OverlayMaterialAnimationTests::workingAtlasRefreshesSavePresentation()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    QByteArray view = viewFile.readAll();
+    view.replace("\r\n", "\n");
+    const int syncStart = view.indexOf("void CView::syncMprDirtyState()");
+    const int syncEnd = view.indexOf("bool CView::applyMprParametersPreview", syncStart);
+    QVERIFY(syncStart >= 0);
+    QVERIFY(syncEnd > syncStart);
+    const QByteArray sync = view.mid(syncStart, syncEnd - syncStart);
+    QVERIFY2(sync.contains("emit mprSaveStateChanged();"),
+             "A terrain edit does not refresh dynamic Finalize and Save labels when the MPR was already dirty");
 }
 
 void OverlayMaterialAnimationTests::mapLifetimeResetsAnimationState()

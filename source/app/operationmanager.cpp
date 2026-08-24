@@ -1177,7 +1177,7 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
     case eKey_8:
     {
         m_pView->pickQuickAccessTile(key-eKey_1);
-        bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
 
         m_pView->updatePreviewTile(
             m_pView->getTerrainBrushPos(), bLand);
@@ -1206,7 +1206,7 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
 {
     Q_UNUSED(pOp);
     m_lastPos = pEvent->pos();
-    bool bLand = CScene::getInstance()->isLandTileEditMode();
+    const bool bLand = m_pView->terrainTileEditLayerIsLand();
     bool hit = false;
     m_lastLandPos = m_pView->getTerrainBrushPos(
         pEvent->x(), pEvent->y(), &hit, true);
@@ -1238,7 +1238,7 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
     if(pEvent->button() == Qt::RightButton)
         m_pView->endTerrainPaintSampling();
     if (pEvent->button() == Qt::LeftButton) {
-        const bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
         // Always resolve the release position. The view de-duplicates an
         // unchanged center, while a short/fast gesture cannot lose its tail.
         bool hit = false;
@@ -1255,7 +1255,7 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
     }
     if(!m_pView->isPreviewTile()) // if we finished brushing, we will come here
     {
-        bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
         bool hit = false;
         const QVector3D landPos = m_pView->getTerrainBrushPos(
             pEvent->pos().x(), pEvent->pos().y(), &hit);
@@ -1269,7 +1269,7 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
 void CTileBrush::synchronizePointerAfterCameraNavigation(const QPoint& position)
 {
     m_lastPos = position;
-    const bool land = CScene::getInstance()->isLandTileEditMode();
+    const bool land = m_pView->terrainTileEditLayerIsLand();
     m_lastLandPos = m_pView->getTerrainPos(position.x(), position.y(), land);
     m_pView->updatePreviewTile(m_lastLandPos, land);
 }
@@ -1291,7 +1291,7 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
         if(m_pView->isPreviewTile())
             m_pView->setPreviewTile(false);
 
-        bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
         bool hit = false;
         const QVector3D landPos(m_pView->getTerrainBrushPos(
             pEvent->x(), pEvent->y(), &hit));
@@ -1344,7 +1344,7 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
     }
     else if(pEvent->buttons() & Qt::RightButton)
     {
-        const bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
         bool hit = false;
         const QVector3D landPos = m_pView->getTerrainBrushPos(
             pEvent->x(), pEvent->y(), &hit);
@@ -1363,7 +1363,7 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
 //        if(!m_pView->isPreviewTile())
 //            m_pView->setPreviewTile();
 
-        bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
         bool hit = false;
         const QVector3D landPos = m_pView->getTerrainBrushPos(
             pEvent->x(), pEvent->y(), &hit);
@@ -1397,7 +1397,7 @@ void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
         if(m_pView->manualTilePaintingEnabled())
         {
             m_pView->addTileRotation(step);
-            const bool bLand = CScene::getInstance()->isLandTileEditMode();
+            const bool bLand = m_pView->terrainTileEditLayerIsLand();
             m_pView->updatePreviewTile(
                 m_pView->getTerrainBrushPos(), bLand);
             CStatusConnector::getInstance()->updateStatus(

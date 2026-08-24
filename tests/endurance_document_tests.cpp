@@ -636,6 +636,7 @@ private slots:
     void externalOverlayAnimationMappingProbe();
     void externalOverlaySurfaceMappingProbe();
     void externalZone11OverlayRegridProbe();
+    void externalZone1TestoOverlayMappingProbe();
     void modernDraftAdoptionStagesPairBeforeLiveMutation();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
@@ -651,6 +652,7 @@ private slots:
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void overlayActivationDeactivationIsLosslessAndUndoable();
+    void overlayActivationMixedBrushPreservesActiveAndPaintsInactive();
     void overlaySculptChangesOnlyActiveOverlayGeometry();
     void overlaySculptSynchronizesSectorSeam();
     void conflictingTerrainSeamIsPreservedAndNotEditable();
@@ -11671,6 +11673,202 @@ void EnduranceDocumentTests::externalOverlaySurfaceMappingProbe()
         QCOMPARE(int(packed.rotation), expected.rotation);
         const ei::SOverlayTileAnimation resolved =
             ei::overlayTileAnimation(expected.slot, &animations);
+        QCOMPARE(resolved.animated, expected.animated);
+        QCOMPARE(resolved.startPhase, expected.startPhase);
+    }
+}
+
+void EnduranceDocumentTests::overlayActivationMixedBrushPreservesActiveAndPaintsInactive()
+{
+    CValidationReport report;
+    CMprDocument baseline;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(syntheticLandSector(1200)),
+                                "overlay-mixed-activation.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline));
+    COverlaySurfaceEditHistory history;
+
+    STerrainTileBrush point;
+    point.centerX = 2.0f;
+    point.centerY = 3.0f;
+    point.radius = 0.0f;
+    const SOverlaySurfaceCommand initial = terrain.makeOverlayActivation(
+        point, 1, 0, 1, 2, &report);
+    QVERIFY2(history.execute(&terrain, initial, &report),
+             qPrintable(report.toText()));
+    const quint16 originalActiveTile = terrain.packedTile(
+        2, 3, ETerrainTileLayer::Overlay);
+
+    STerrainTileBrush mixed;
+    mixed.centerX = 2.5f;
+    mixed.centerY = 3.0f;
+    mixed.radius = 0.6f;
+    mixed.shape = ETerrainTileBrushShape::Square;
+    SMprPackedTile selected;
+    selected.atlasIndex = 0;
+    selected.tileIndex = 0;
+    selected.rotation = 3;
+    const SOverlaySurfaceCommand repaint = terrain.makeOverlayActivation(
+        mixed, 0, selected.atlasIndex, selected.tileIndex,
+        selected.rotation, &report);
+    QVERIFY2(!repaint.isEmpty(), qPrintable(report.toText()));
+    QVERIFY2(history.execute(&terrain, repaint, &report),
+             qPrintable(report.toText()));
+
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3), qint16(0));
+    QCOMPARE(terrain.packedTile(2, 3, ETerrainTileLayer::Overlay),
+             originalActiveTile);
+    QCOMPARE(terrain.overlayMaterialIndex(3, 3), qint16(0));
+    QCOMPARE(terrain.packedTile(3, 3, ETerrainTileLayer::Overlay),
+             selected.encode());
+
+    QVERIFY(history.undo(&terrain, &report));
+    QCOMPARE(terrain.overlayMaterialIndex(2, 3), qint16(1));
+    QCOMPARE(terrain.packedTile(2, 3, ETerrainTileLayer::Overlay),
+             originalActiveTile);
+    bool available = true;
+    QCOMPARE(terrain.overlayMaterialIndex(3, 3, &available), qint16(-1));
+    QVERIFY(!available);
+    QVERIFY(history.redo(&terrain, &report));
+    QCOMPARE(terrain.packedTile(2, 3, ETerrainTileLayer::Overlay),
+             originalActiveTile);
+    QCOMPARE(terrain.packedTile(3, 3, ETerrainTileLayer::Overlay),
+             selected.encode());
+}
+
+void EnduranceDocumentTests::externalZone1TestoOverlayMappingProbe()
+{
+    const QString mprPath = qEnvironmentVariable(
+        "EI_MAPPER_ZONE1TESTO_REPRO_MPR");
+    const QString atlasPath = qEnvironmentVariable(
+        "EI_MAPPER_ZONE1TESTO_REPRO_ATLAS");
+    if(mprPath.isEmpty() || atlasPath.isEmpty())
+        QSKIP("Set EI_MAPPER_ZONE1TESTO_REPRO_MPR and EI_MAPPER_ZONE1TESTO_REPRO_ATLAS to the read-only finalized pair");
+
+    CValidationReport report;
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    QCOMPARE(QCryptographicHash::hash(document.originalBytes(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("1830D1017B8F6C92E8F6D1BA85627529CEB40889E63E6EE179B5A7922202FCA7"));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    QCOMPARE(terrain.tileCountX(), 176);
+    QCOMPARE(terrain.tileCountY(), 144);
+    QCOMPARE(document.mapInfo().animatedTiles.size(), 1);
+    QCOMPARE(document.mapInfo().animatedTiles.front().tileIndex, quint16(504));
+    QCOMPARE(document.mapInfo().animatedTiles.front().frameCount, quint16(31));
+    QVERIFY(document.mapInfo().materials.size() > 3);
+    const SMprMaterialRecord& waveMaterial = document.mapInfo().materials.at(0);
+    const SMprMaterialRecord& stillMaterial = document.mapInfo().materials.at(3);
+    QCOMPARE(waveMaterial.type, qint32(3));
+    QVERIFY(qAbs(waveMaterial.opacity - 0.6f) < 0.0001f);
+    QVERIFY(qAbs(waveMaterial.waveMultiplier - 0.8f) < 0.0001f);
+    QCOMPARE(stillMaterial.type, qint32(1));
+    QVERIFY(qAbs(stillMaterial.opacity - 1.0f) < 0.0001f);
+    QFile atlasFile(atlasPath);
+    QVERIFY(atlasFile.open(QIODevice::ReadOnly));
+    QCOMPARE(QCryptographicHash::hash(atlasFile.readAll(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("1DB36BC96750434BB21FBE2BAD84DD6182226A87FA5BB8537ABE69A9F86C265A"));
+    const STerrainAtlasEmbeddedBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+            {atlasPath}, document.mapInfo().innerNamespace, atlasPath);
+    QVERIFY2(binding.success(), qPrintable(binding.error));
+    QCOMPARE(binding.decodedAtlasTiles.size(), 576);
+    QCOMPARE(binding.decodedAtlasPixelSha256,
+             QByteArrayLiteral("6799d8c4aaf7a40c005afedcf94130264505dcdf7200abe3cf94a5875480bb7e"));
+    QCOMPARE(binding.profile.slotDefinitions.size(), 576);
+    QCOMPARE(binding.profile.provenance,
+             QStringLiteral("portable-working-modern-atlas-v1"));
+    QSet<QByteArray> physicalFrameHashes;
+    for(int slot = 504; slot <= 535; ++slot)
+    {
+        const QImage image = binding.decodedAtlasTiles.at(slot)
+            .convertToFormat(QImage::Format_RGBA8888);
+        quint64 red = 0, green = 0, blue = 0, alpha = 0;
+        for(int y = 0; y < image.height(); ++y)
+        {
+            const uchar* row = image.constScanLine(y);
+            for(int x = 0; x < image.width(); ++x)
+            {
+                red += row[x * 4]; green += row[x * 4 + 1];
+                blue += row[x * 4 + 2]; alpha += row[x * 4 + 3];
+            }
+        }
+        const quint64 pixels = quint64(image.width()) * image.height();
+        physicalFrameHashes.insert(
+            CTerrainAtlasProfileInference::pixelSha256({image}));
+        const auto definition = std::find_if(
+            binding.profile.slotDefinitions.constBegin(),
+            binding.profile.slotDefinitions.constEnd(),
+            [slot](const STerrainAtlasProfileSlot& value)
+            { return value.slot == slot; });
+        QVERIFY(definition != binding.profile.slotDefinitions.constEnd());
+        QCOMPARE(definition->signature.northWest, qint32(1278168451));
+        QCOMPARE(definition->signature.northEast, qint32(1278168451));
+        QCOMPARE(definition->signature.southEast, qint32(1278168451));
+        QCOMPARE(definition->signature.southWest, qint32(1278168451));
+        QVERIFY(red / pixels >= 44 && red / pixels <= 53);
+        QVERIFY(green / pixels >= 88 && green / pixels <= 100);
+        QVERIFY(blue / pixels >= 78 && blue / pixels <= 90);
+        QCOMPARE(alpha / pixels, quint64(255));
+    }
+    QCOMPARE(physicalFrameHashes.size(), 32);
+    QVector<SAnimTile> animations;
+    for(const SMprAnimatedTileRecord& record : document.mapInfo().animatedTiles)
+    {
+        SAnimTile animation{};
+        animation.tileIndex = record.tileIndex;
+        animation.nPhase = record.frameCount;
+        animations.append(animation);
+    }
+    struct ExpectedCell
+    {
+        QPoint cell;
+        qint16 material;
+        quint16 packed;
+        int slot;
+        int rotation;
+        bool animated;
+        int startPhase;
+    };
+    const QVector<ExpectedCell> cells{
+        {{11, 13}, 0, 16888, 504, 1, true, 0},
+        {{10, 13}, 3, 16905, 521, 1, true, 17},
+        {{8, 13}, 3, 16899, 515, 1, true, 11},
+        {{8, 14}, 3, 49684, 532, 3, true, 28},
+        {{9, 13}, 3, 49687, 535, 3, false, 0},
+        {{9, 14}, 3, 49687, 535, 3, false, 0},
+        {{10, 14}, 0, 49687, 535, 3, false, 0},
+        {{11, 14}, 0, 16888, 504, 1, true, 0},
+        {{7, 13}, 3, 16899, 515, 1, true, 11},
+        {{7, 14}, 3, 49684, 532, 3, true, 28},
+        {{12, 13}, 0, 33293, 525, 2, true, 21},
+        {{12, 14}, 0, 49685, 533, 3, true, 29}
+    };
+    for(const ExpectedCell& expected : cells)
+    {
+        bool materialAvailable = false;
+        bool packedAvailable = false;
+        const qint16 material = terrain.overlayMaterialIndex(
+            expected.cell.x(), expected.cell.y(), &materialAvailable);
+        const quint16 raw = terrain.packedTile(
+            expected.cell.x(), expected.cell.y(),
+            ETerrainTileLayer::Overlay, &packedAvailable);
+        const SMprPackedTile packed = SMprPackedTile::decode(raw);
+        const ei::SOverlayTileAnimation resolved = ei::overlayTileAnimation(
+            packed.atlasSlot(), &animations,
+            quint32(expected.cell.y() * terrain.tileCountX()
+                    + expected.cell.x()));
+        QVERIFY(materialAvailable);
+        QVERIFY(packedAvailable);
+        QCOMPARE(material, expected.material);
+        QCOMPARE(raw, expected.packed);
+        QCOMPARE(packed.atlasSlot(), expected.slot);
+        QCOMPARE(int(packed.rotation), expected.rotation);
         QCOMPARE(resolved.animated, expected.animated);
         QCOMPARE(resolved.startPhase, expected.startPhase);
     }

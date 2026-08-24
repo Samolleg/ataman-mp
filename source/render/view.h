@@ -330,6 +330,7 @@ public:
     void selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode);
     bool manualTilePaintingEnabled() const;
     float terrainPaintStampSpacing() const;
+    bool terrainTileEditLayerIsLand() const;
     bool terrainBrushProjectsToLand() const;
     void setDrawWater(bool bDraw = true);
     void setDrawLand(bool bDraw = true);

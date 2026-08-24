@@ -1605,7 +1605,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
             if(!m_hasViewportMousePos || !m_landscapeTools
                || !m_landscapeTools->editingEnabled())
                 return;
-            const bool land = CScene::getInstance()->isLandTileEditMode();
+            const bool land = terrainTileEditLayerIsLand();
             bool hit = false;
             const QVector3D position = getTerrainBrushPos(
                 m_lastViewportMousePos.x(), m_lastViewportMousePos.y(), &hit);
@@ -1627,7 +1627,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
             }
             if(m_hasViewportMousePos)
             {
-                const bool land = CScene::getInstance()->isLandTileEditMode();
+                const bool land = terrainTileEditLayerIsLand();
                 updatePreviewTile(getTerrainBrushPos(m_lastViewportMousePos.x(),
                                                       m_lastViewportMousePos.y()), land);
             }
@@ -1642,7 +1642,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
             onChangeCursorTile(m_pTileForm->tileWithRot(slot));
             if(m_hasViewportMousePos)
             {
-                const bool land = CScene::getInstance()->isLandTileEditMode();
+                const bool land = terrainTileEditLayerIsLand();
                 updatePreviewTile(getTerrainBrushPos(
                     m_lastViewportMousePos.x(), m_lastViewportMousePos.y()),
                     land);
@@ -1890,8 +1890,7 @@ void CView::ensureManualTileSelection()
         onChangeCursorTile(m_pTileForm->tileWithRot(selectedIndex));
         if(m_hasViewportMousePos)
         {
-            const bool land = m_landscapeTools->editMode()
-                != ELandscapeEditMode::OverlayPaint;
+            const bool land = terrainTileEditLayerIsLand();
             updatePreviewTile(getTerrainBrushPos(m_lastViewportMousePos.x(),
                                                  m_lastViewportMousePos.y()), land);
         }
@@ -5185,7 +5184,9 @@ void CView::drawTestOverlaysOpenGl()
 {
     const bool showOverlayMaterialSlots = m_landscapeTools
         && m_landscapeTools->editingEnabled()
-        && m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint
+        && (m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint
+            || m_landscapeTools->editMode()
+                == ELandscapeEditMode::OverlaySurface)
         && m_landscapeTools->overlayMaterialSlotLabelsVisible()
         && m_terrainEditAvailable;
     const bool paintIssueOverlay = m_landscapeTools
@@ -13617,7 +13618,7 @@ void CView::onChangeCursorTile(QPixmap ico)
     painter.setRenderHint(QPainter::Antialiasing);
 
     // Устанавливаем цвет и толщину пера для стрелки
-    QPen pen(CScene::getInstance()->isLandTileEditMode() ? Qt::red : Qt::green);
+    QPen pen(terrainTileEditLayerIsLand() ? Qt::red : Qt::green);
     pen.setWidth(2);
     painter.setPen(pen);
 
@@ -16670,6 +16671,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!bLand && m_landscapeTools->overlaySurfaceOperation()
                      != EOverlaySurfaceOperation::PaintExisting)
     {
+        m_tileStrokeLayer = ETerrainTileLayer::Overlay;
         QElapsedTimer overlayCommandTimer;
         overlayCommandTimer.start();
         SOverlaySurfaceCommand surfaceCommand;
@@ -16682,6 +16684,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         {
             bool materialSelected = false;
             const qint16 material = m_landscapeTools->overlayMaterialIndex(&materialSelected);
+            m_tileStrokeMaterialId = materialSelected ? material : -1;
             int selectedIndex = -1;
             int selectedRotation = 0;
             const ETerrainPaintPaletteMode paletteMode =
@@ -17276,9 +17279,16 @@ void CView::onLandscapeToolsShown()
         reviewTerrainAtlasProfile();
 }
 
+bool CView::terrainTileEditLayerIsLand() const
+{
+    return m_landscapeTools
+        ? m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
+        : CScene::getInstance()->isLandTileEditMode();
+}
+
 bool CView::terrainBrushProjectsToLand() const
 {
-    if(CScene::getInstance()->isLandTileEditMode())
+    if(terrainTileEditLayerIsLand())
         return true;
     return m_landscapeTools
         && m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
@@ -17526,9 +17536,7 @@ void CView::endTileBrushGroup()
         // not part of the terrain transaction that produced the new slots.
         if(m_workingAtlasPaletteRefreshPending)
             refreshWorkingTerrainPalettes();
-        m_pLand->setDirty(m_terrainEdit.isDirty());
-        emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
-                                  m_terrainEdit.isDirty() ? "*" : "");
+        syncMprDirtyState();
         const QString safeDetail = m_tileStrokeSafeMode
             && (m_tileStrokeSafeSkippedVertices > 0
                 || m_tileStrokeSafeSkippedBoundaryCells > 0)
@@ -17649,7 +17657,7 @@ void CView::selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode)
     syncLandscapeToolState();
     if(m_hasViewportMousePos)
     {
-        const bool land = CScene::getInstance()->isLandTileEditMode();
+        const bool land = terrainTileEditLayerIsLand();
         bool hit = false;
         const QVector3D position = getTerrainBrushPos(
             m_lastViewportMousePos.x(), m_lastViewportMousePos.y(), &hit);
@@ -22457,6 +22465,7 @@ void CView::syncMprDirtyState()
         return;
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag,
                                dirty ? "*" : "");
+    emit mprSaveStateChanged();
 }
 
 bool CView::applyMprParametersPreview(
