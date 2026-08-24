@@ -1719,13 +1719,12 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
                && readOverlayMaterial(payload, overlayMaterialOffset, localTile)
                     == materialIndex)
                 continue;
-            // Add over an existing surface is a material repaint. Its packed
-            // overlay tile owns geometry, blend and authored flipbook phase;
-            // replacing it creates serialized rectangular holes and can break
-            // animation. Only a genuinely inactive cell needs a new tile.
-            if(!wasActive)
-                writePackedTile(payload, overlayTileOffset, localTile,
-                                selected.encode());
+            // Add Surface is the atomic selected-brush authoring operation:
+            // it writes both the packed atlas tile and MPR surface material.
+            // Existing geometry/heights stay intact; only genuinely inactive
+            // cells need their overlay vertices initialized below.
+            writePackedTile(payload, overlayTileOffset, localTile,
+                            selected.encode());
             writeOverlayMaterial(payload, overlayMaterialOffset, localTile, materialIndex);
             if(!wasActive)
                 activatedCells.append({sectorIndex, localTile, x, y});

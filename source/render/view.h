@@ -220,6 +220,14 @@ public:
     QVector3D getTerrainBrushPos(bool* hit = nullptr);
     QVector3D getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
                                  bool* hit = nullptr, bool forcePick = false);
+    // The position returned by getTerrainBrushPos already records which
+    // surface supplied its XY/Z. Footprint admission must query that same
+    // layer or a valid hover can disappear before preview/commit.
+    static bool terrainPaintPickUsesLandLayer(bool land,
+                                              bool projectionLand)
+    {
+        return land || (!land && projectionLand);
+    }
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
                            bool land = true);
     bool projectToRegeneratedNavigation(const QPointF& requested,

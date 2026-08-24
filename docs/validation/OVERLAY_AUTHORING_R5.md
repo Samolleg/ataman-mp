@@ -8,7 +8,9 @@ the canonical SEC edit model and retains the staged MPR save contract.
 
 - **Add / remove overlay surfaces** is a distinct Landscape Tool. **Paint
   existing overlays** now only changes atlas tiles on active cells.
-- Add-surface picking prefers an existing overlay under the cursor. Its outline
+- Add-surface picking prefers an existing overlay under the cursor. Footprint
+  admission queries that same picked layer, so a valid Manual hover cannot
+  disappear before preview or commit. Its outline
   is blue and projected to that surface; where no overlay exists it uses the
   terrain and the terrain-colored outline. Overlay outline edges fall back to
   terrain projection outside thin/disconnected coverage instead of vanishing.
@@ -19,6 +21,9 @@ the canonical SEC edit model and retains the staged MPR save contract.
   They preserve genuinely active neighboring seams but never resurrect hidden
   vertex data from a removed/source overlay cell. Undo still restores the exact
   previous SEC bytes.
+- Add Surface writes the selected packed atlas tile and selected MPR surface
+  material together on active and inactive cells. Existing surface heights are
+  preserved; **Paint existing overlays** remains the texture-only workflow.
 - Activation at raw height 65535 clamps only the new overlay vertex to maxZ and
   reports possible coplanar overlap. It does not fail the stroke or rescale the
   MPR height range.
@@ -46,9 +51,9 @@ Use only copied maps or an isolated mod workspace.
    with the same atlas and surface materials must be a no-op.
 3. Remove a patch and add it again. It must initialize from current land, not
    restore its former sculpted/hidden shape. Undo and redo must remain exact.
-4. Change only **Surface material (tint / animation)** and add over an existing
-   active cell. The stored material choice must update independently of the
-   atlas texture; visible differences depend on the authored material records.
+4. Select a different atlas tile and **Surface material (tint / animation)**,
+   then add over an existing active cell. Both stored choices must change as one
+   undoable action without moving the existing overlay geometry.
 5. At high terrain that reaches MPR maxZ, adding must succeed with a clamp
    warning rather than refusing the stroke. Inspect for coplanar overlap, then
    lower the terrain or increase maxZ if clearance is required.

@@ -16538,11 +16538,8 @@ bool CView::resolveTerrainPaintFootprint(
        || !tile || !location || !brush || !detailVertex || !footprint)
         return false;
 
-    const bool activatingOverlay = !land
-        && m_landscapeTools->overlaySurfaceOperation()
-            == EOverlaySurfaceOperation::Activate;
-    const bool pickLand = land || (!land
-        && (m_terrainPaintProjectionLand || activatingOverlay));
+    const bool pickLand = terrainPaintPickUsesLandLayer(
+        land, m_terrainPaintProjectionLand);
     if(!m_pLand->pickTile(position, *tile, *location, pickLand))
         return false;
 

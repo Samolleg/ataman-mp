@@ -1648,6 +1648,10 @@ int runHeadlessCommand(QApplication& app)
                 == EOverlaySurfaceOperation::Activate
             && !landscapeTools.manualTileSelectionEnabled()
             && landscapeTools.selectPaintTerrainType(5);
+        const bool overlaySurfaceAdmissionFollowsPickedLayer =
+            CView::terrainPaintPickUsesLandLayer(true, true)
+            && CView::terrainPaintPickUsesLandLayer(false, true)
+            && !CView::terrainPaintPickUsesLandLayer(false, false);
         QCheckBox* overlaySlotLabels = landscapeTools.findChild<QCheckBox*>(
             QStringLiteral("showOverlayMaterialSlotLabels"));
         const bool overlaySlotLabelsAvailableInOverlaySurface = overlaySlotLabels
@@ -2933,6 +2937,7 @@ int runHeadlessCommand(QApplication& app)
                 && landscapeLayersVisibleByDefault
                 && landscapeVisibilityControlsWork
                 && overlaySurfaceToolSeparate
+                && overlaySurfaceAdmissionFollowsPickedLayer
                 && overlaySlotLabelsAvailableInOverlaySurface
                 && overlaySlotLabelsAvailableInOverlayPaint
                 && overlaySlotLabelsHiddenOutsideOverlayModes
@@ -3123,6 +3128,8 @@ int runHeadlessCommand(QApplication& app)
                << " landscapeLayersVisibleByDefault=" << landscapeLayersVisibleByDefault
                << " landscapeVisibilityControlsWork=" << landscapeVisibilityControlsWork
                << " overlaySurfaceToolSeparate=" << overlaySurfaceToolSeparate
+               << " overlaySurfaceAdmissionFollowsPickedLayer="
+               << overlaySurfaceAdmissionFollowsPickedLayer
                << " overlaySlotLabelsAvailableInOverlaySurface="
                << overlaySlotLabelsAvailableInOverlaySurface
                << " overlaySlotLabelsAvailableInOverlayPaint="
