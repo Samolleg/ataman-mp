@@ -5,7 +5,7 @@ uniform bool u_overlayMotionEnabled;
 uniform float u_overlayTimeSeconds;
 uniform vec3 u_overlayWindDirection;
 uniform float u_overlayWindStrength;
-uniform vec2 u_overlayAtlasGrid;
+uniform vec3 u_overlayAtlasGrid;
 attribute vec4 a_position;
 attribute vec3 a_normal;
 attribute vec2 a_texture;
@@ -26,14 +26,18 @@ const float PI = 3.14159265358979323846;
 
 vec2 overlayTileOrigin(float slot)
 {
-  float tileSide = max(1.0, u_overlayAtlasGrid.y);
+  float columns = max(1.0, u_overlayAtlasGrid.x);
+  float rows = max(1.0, u_overlayAtlasGrid.y);
+  float tileSide = max(1.0, u_overlayAtlasGrid.z);
   float slotsPerPage = tileSide * tileSide;
   float page = floor(slot / slotsPerPage);
   float localSlot = slot - page * slotsPerPage;
   float column = mod(localSlot, tileSide);
   float row = floor(localSlot / tileSide);
-  return vec2((page + column / tileSide) / max(1.0, u_overlayAtlasGrid.x),
-              (tileSide - 1.0 - row) / tileSide);
+  float pageColumn = mod(page, columns);
+  float pageRow = floor(page / columns);
+  return vec2((pageColumn + column / tileSide) / columns,
+              (pageRow + (tileSide - 1.0 - row) / tileSide) / rows);
 }
 
 float tableSine(float angle)

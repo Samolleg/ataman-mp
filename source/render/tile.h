@@ -4,6 +4,7 @@
 #include <QOpenGLContext>
 #include <QOpenGLShaderProgram>
 #include <QPointer>
+#include <QVector2D>
 #include <QVector3D>
 #include <QtMath>
 #include "types.h"
@@ -77,6 +78,23 @@ public:
         const int rows = qMax(1, (safeTextures + safeColumns - 1)
                                   / safeColumns);
         return float(atlasIndex / safeColumns) / float(rows);
+    }
+    static QVector2D atlasTileOrigin(int atlasSlot, int textureCount,
+                                     int columns)
+    {
+        const int safeSlot = qMax(0, atlasSlot);
+        const int atlasIndex = safeSlot / 64;
+        const int localSlot = safeSlot % 64;
+        const int safeTextures = qMax(1, textureCount);
+        const int safeColumns = qBound(1, columns, safeTextures);
+        const int rows = qMax(1, (safeTextures + safeColumns - 1)
+                                  / safeColumns);
+        const int pageColumn = atlasIndex % safeColumns;
+        return QVector2D(
+            (float(pageColumn) + float(localSlot % 8) / 8.0f)
+                / float(safeColumns),
+            atlasPageRowOrigin(atlasIndex, safeTextures, safeColumns)
+                + float(7 - localSlot / 8) / 8.0f / float(rows));
     }
     void setMaxZ(float maxZ) { m_maxZ = maxZ; }
     const QVector<QVector<SSecVertex>>& arrVertex(){return m_arrVertex;}

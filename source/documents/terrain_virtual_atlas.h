@@ -311,6 +311,8 @@ public:
 
     static QImage composePage(const QVector<QImage>& tiles, int firstTile,
                               int tileSize);
+    static QImage composeAtlasGrid(const QVector<QImage>& tiles,
+                                   int textureCount, int columns);
     // Decode the exact physical slot vector that the editor/game will observe
     // after MMP DXT1 encoding. This includes page padding slots and is the only
     // valid pixel/count identity for a portable finalized profile.

@@ -1,6 +1,9 @@
 #include <QtTest>
 
+#include <cmath>
+
 #include "overlay_material_animation.h"
+#include "tile.h"
 
 class OverlayMaterialAnimationTests : public QObject
 {
@@ -27,6 +30,7 @@ private slots:
     void mprSettingsUsesTopLevelWindowAndOverlaySlotToggle();
     void mprMaterialEditorReloadsSelectionAndDoesNotStealEnter();
     void workingAtlasPreviewUpdatesFlipbookAtlasGrid();
+    void workingAtlasRegridPreservesLogicalTileOrigins();
     void incrementalOverlayRefreshRecomputesFlipbookMetadata();
     void mprMaterialEditorUsesLiveWorkingAtlasSlotCount();
     void overlayActivationUsesExactWorkingAtlasMaterial();
@@ -213,6 +217,49 @@ void OverlayMaterialAnimationTests::workingAtlasPreviewUpdatesFlipbookAtlasGrid(
              "Uploading an expanded working atlas must update the atlas grid used by flipbook frame offsets");
     QVERIFY2(landscape.contains("m_renderTextureCount = qMax(1, int(m_header.nTexture));"),
              "Clearing a working atlas preview must restore the published flipbook atlas grid");
+}
+
+void OverlayMaterialAnimationTests::workingAtlasRegridPreservesLogicalTileOrigins()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("assets/shaders/landshader.vsh")
+          && repository.cdUp()) {}
+    QFile vertexFile(repository.absoluteFilePath("assets/shaders/landshader.vsh"));
+    QFile landscapeFile(repository.absoluteFilePath("source/render/landscape.cpp"));
+    QVERIFY(vertexFile.open(QIODevice::ReadOnly));
+    QVERIFY(landscapeFile.open(QIODevice::ReadOnly));
+    const QByteArray vertex = vertexFile.readAll();
+    const QByteArray landscape = landscapeFile.readAll();
+
+    QVERIFY2(vertex.contains("uniform vec3 u_overlayAtlasGrid"),
+             "Flipbook addressing receives only page count and still assumes one page row");
+    QVERIFY2(vertex.contains("u_overlayAtlasGrid.x")
+             && vertex.contains("u_overlayAtlasGrid.y")
+             && vertex.contains("u_overlayAtlasGrid.z"),
+             "Flipbook addressing must use atlas columns, rows and tile side");
+    QVERIFY2(landscape.contains("m_renderAtlasColumns"),
+             "Working-atlas upload does not publish its changed page stride to the shader");
+
+    const QSizeF originalPixels(16384.0, 2048.0);
+    const QSizeF expandedPixels(6144.0, 6144.0);
+    for(int slot : {0, 78, 109, 255, 489, 511})
+    {
+        const QVector2D original = CTile::atlasTileOrigin(slot, 8, 8);
+        const QVector2D expanded = CTile::atlasTileOrigin(slot, 9, 3);
+        const float originalLocalX = std::fmod(
+            original.x() * float(originalPixels.width()), 2048.0f);
+        const float originalLocalY = std::fmod(
+            original.y() * float(originalPixels.height()), 2048.0f);
+        const float expandedLocalX = std::fmod(
+            expanded.x() * float(expandedPixels.width()), 2048.0f);
+        const float expandedLocalY = std::fmod(
+            expanded.y() * float(expandedPixels.height()), 2048.0f);
+        QVERIFY(qAbs(originalLocalX - expandedLocalX) < 0.01f);
+        QVERIFY(qAbs(originalLocalY - expandedLocalY) < 0.01f);
+    }
+    const QVector2D zone11Phase = CTile::atlasTileOrigin(78, 9, 3);
+    QVERIFY(qAbs(zone11Phase.x() - 7.0f / 12.0f) < 0.0001f);
+    QVERIFY(qAbs(zone11Phase.y() - 1.0f / 4.0f) < 0.0001f);
 }
 
 void OverlayMaterialAnimationTests::incrementalOverlayRefreshRecomputesFlipbookMetadata()

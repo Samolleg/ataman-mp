@@ -117,17 +117,13 @@ void CTile::generateDrawVertexData(QVector<SVertexData>& outData, int& curIndex)
 {
     QVector<QVector2D> tCoord; // store x,y min and x,y max
     tCoord.resize(2);
-    const int pageColumn = m_atlasTexIndex % m_atlasColumns;
-    tCoord[0].setX((m_index%8/8.0f+pageColumn)/m_atlasColumns);
+    tCoord[0] = atlasTileOrigin(tileIndex(), m_texAtlasNumber,
+                               m_atlasColumns);
     // QOpenGLTexture uploads QImage scanline zero as the bottom of the GL
     // texture. previewTerrainAtlas writes page row zero into those first
     // scanlines, so packed atlas pages advance upward without another flip.
     // Reversing pageRow here made a 3x3 atlas sample pages 6-8 for stock pages
     // 0-2 and could make the entire map appear as one generated/blank texture.
-    tCoord[0].setY(atlasPageRowOrigin(m_atlasTexIndex,
-                                      m_texAtlasNumber, m_atlasColumns)
-                    +(7-int(m_index/8))/8.0f/m_atlasRows);
-
     tCoord[1].setX(tCoord[0].x() + 1.0f/8.0f/m_atlasColumns);
     tCoord[1].setY(tCoord[0].y() + 1.0f/8.0f/m_atlasRows);
     tCoord[0] += QVector2D(4.0f/512.0f/m_atlasColumns,

@@ -3200,6 +3200,38 @@ QImage CTerrainVirtualAtlas::composePage(const QVector<QImage>& tiles,
     return page;
 }
 
+QImage CTerrainVirtualAtlas::composeAtlasGrid(
+    const QVector<QImage>& tiles, int textureCount, int columns)
+{
+    if(textureCount <= 0 || tiles.size() != textureCount * 64
+       || columns <= 0 || columns > textureCount || tiles.isEmpty())
+        return {};
+    const int tileSize = tiles.front().width();
+    if(tileSize <= 0 || tiles.front().height() != tileSize)
+        return {};
+    for(const QImage& tile : tiles)
+        if(tile.size() != QSize(tileSize, tileSize))
+            return {};
+    const int pageSize = tileSize * 8;
+    const int rows = (textureCount + columns - 1) / columns;
+    QImage combined(pageSize * columns, pageSize * rows,
+                    QImage::Format_RGBA8888);
+    combined.fill(Qt::transparent);
+    for(int page = 0; page < textureCount; ++page)
+    {
+        const QImage pageImage = composePage(tiles, page * 64, tileSize);
+        if(pageImage.size() != QSize(pageSize, pageSize))
+            return {};
+        const int pageColumn = page % columns;
+        const int pageRow = page / columns;
+        for(int y = 0; y < pageSize; ++y)
+            memcpy(combined.scanLine(pageRow * pageSize + y)
+                       + pageColumn * pageSize * 4,
+                   pageImage.constScanLine(y), size_t(pageSize) * 4u);
+    }
+    return combined;
+}
+
 bool CTerrainVirtualAtlas::decodePhysicalTileImages(
     const STerrainAtlasFinalization& finalization, QVector<QImage>* images,
     CValidationReport* report)

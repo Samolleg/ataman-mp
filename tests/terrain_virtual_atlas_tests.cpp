@@ -545,6 +545,7 @@ private slots:
     void finalizesAtValidatedRuntimeCeilingBeyond512();
     void capacityRefusalNeverSubstitutes();
     void rawPageCompositionPreservesEveryUntouchedSlot();
+    void asymmetricAtlasGridPreservesEveryLogicalSlotPixel();
     void pageOrientationMipmapsAlphaAndReopen();
     void namespacesAreIsolated();
     void identityBaselineRequiresExactSharedCornerTopology();
@@ -599,6 +600,35 @@ private slots:
     void finalizationPreservesAndRebasesAuthoredAnimationRanges();
     void generatedPaintMatrixSavesReopensAndMatchesVertexOracle();
 };
+
+void TerrainVirtualAtlasTests::asymmetricAtlasGridPreservesEveryLogicalSlotPixel()
+{
+    QVector<QImage> tiles;
+    tiles.reserve(9 * 64);
+    for(int slot = 0; slot < 9 * 64; ++slot)
+    {
+        QImage tile(4, 4, QImage::Format_RGBA8888);
+        tile.fill(QColor::fromRgb((slot * 17) & 255,
+                                  (slot * 43) & 255,
+                                  (slot * 97) & 255));
+        tiles.append(tile);
+    }
+    const QImage grid = CTerrainVirtualAtlas::composeAtlasGrid(tiles, 9, 3);
+    QCOMPARE(grid.size(), QSize(96, 96));
+    for(int slot = 0; slot < tiles.size(); ++slot)
+    {
+        const int page = slot / 64;
+        const int local = slot % 64;
+        const int x = (page % 3) * 32 + (local % 8) * 4 + 2;
+        const int y = (page / 3) * 32 + (7 - local / 8) * 4 + 2;
+        QCOMPARE(grid.pixelColor(x, y), tiles.at(slot).pixelColor(2, 2));
+    }
+    QVERIFY(CTerrainVirtualAtlas::composeAtlasGrid(tiles, 9, 10).isNull());
+    QVERIFY(CTerrainVirtualAtlas::composeAtlasGrid(tiles, 8, 8).isNull());
+    QVector<QImage> malformed = tiles;
+    malformed[109] = QImage(3, 4, QImage::Format_RGBA8888);
+    QVERIFY(CTerrainVirtualAtlas::composeAtlasGrid(malformed, 9, 3).isNull());
+}
 
 void TerrainVirtualAtlasTests::approvedIceInsideMasksDriveRuntimeGeneration()
 {

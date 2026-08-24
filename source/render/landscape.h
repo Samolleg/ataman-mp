@@ -146,6 +146,7 @@ private:
     QVector<ETileType> m_aTileTypes; //array using tyle type on current map
     QVector<SAnimTile> m_aAnimTile;
     int m_renderTextureCount{1};
+    int m_renderAtlasColumns{1};
     QVector<QVector<CSector*>> m_aSector;
     QOpenGLTexture* m_texture;
     QOpenGLTexture* m_baseAtlasTexture{nullptr};

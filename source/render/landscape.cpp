@@ -55,6 +55,7 @@ void CLandscape::unloadMpr()
     m_aTileTypes.clear();
     m_aAnimTile.clear();
     m_renderTextureCount = 1;
+    m_renderAtlasColumns = 1;
     m_bDirty = false;
     delete m_terrainShadowTexture;
     m_terrainShadowTexture = nullptr;
@@ -105,22 +106,10 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
             .arg(maximumTextureSize));
         return false;
     }
-    QImage combined(pageSize * columns, pageSize * rows,
-                    QImage::Format_RGBA8888);
-    combined.fill(Qt::transparent);
-    for(int page = 0; page < textureCount; ++page)
-    {
-        const QImage pageImage = CTerrainVirtualAtlas::composePage(
-            tileImages, page * 64, tileSize);
-        if(pageImage.size() != QSize(pageSize, pageSize))
-            return false;
-        const int pageColumn = page % columns;
-        const int pageRow = page / columns;
-        for(int y = 0; y < pageSize; ++y)
-            memcpy(combined.scanLine(pageRow * pageSize + y)
-                       + pageColumn * pageSize * 4,
-                   pageImage.constScanLine(y), size_t(pageSize) * 4u);
-    }
+    const QImage combined = CTerrainVirtualAtlas::composeAtlasGrid(
+        tileImages, textureCount, columns);
+    if(combined.isNull())
+        return false;
     QOpenGLTexture* replacement = new QOpenGLTexture(
         combined, QOpenGLTexture::GenerateMipMaps);
     if(!replacement->isCreated())
@@ -137,6 +126,7 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     m_previewAtlasTexture = replacement;
     m_texture = replacement;
     m_renderTextureCount = textureCount;
+    m_renderAtlasColumns = columns;
     if(textureCount != m_previewAtlasTextureCount
        || columns != m_previewAtlasColumns)
     {
@@ -156,6 +146,7 @@ void CLandscape::clearPreviewTerrainAtlas()
 {
     m_texture = m_baseAtlasTexture;
     m_renderTextureCount = qMax(1, int(m_header.nTexture));
+    m_renderAtlasColumns = qMax(1, m_baseAtlasColumns);
     if(m_previewAtlasTextureCount > 0 && QOpenGLContext::currentContext())
         for(QVector<CSector*>& row : m_aSector)
             for(CSector* sector : row)
@@ -351,6 +342,7 @@ void CLandscape::readMap(const QFileInfo& path)
     m_renderTextureCount = qMax(1, texCount);
     m_baseAtlasTexture = m_texture;
     m_baseAtlasColumns = atlasColumns;
+    m_renderAtlasColumns = qMax(1, atlasColumns);
     ei::log(eLogInfo, QString("MPR terrain atlas complete file:%1 textureCount:%2")
             .arg(path.fileName()).arg(texCount));
 
@@ -552,8 +544,10 @@ void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum
     refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
-    program->setUniformValue("u_overlayAtlasGrid",
-                             QVector2D(float(m_renderTextureCount), 8.0f));
+    const int atlasRows = qMax(1, (m_renderTextureCount
+        + m_renderAtlasColumns - 1) / m_renderAtlasColumns);
+    program->setUniformValue("u_overlayAtlasGrid", QVector3D(
+        float(m_renderAtlasColumns), float(atlasRows), 8.0f));
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
         {
@@ -810,8 +804,10 @@ void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* fr
     refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
-    program->setUniformValue("u_overlayAtlasGrid",
-                             QVector2D(float(m_renderTextureCount), 8.0f));
+    const int atlasRows = qMax(1, (m_renderTextureCount
+        + m_renderAtlasColumns - 1) / m_renderAtlasColumns);
+    program->setUniformValue("u_overlayAtlasGrid", QVector3D(
+        float(m_renderAtlasColumns), float(atlasRows), 8.0f));
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
         {

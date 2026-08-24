@@ -635,6 +635,7 @@ private slots:
     void externalModernDraftAdoptionPairProbe();
     void externalOverlayAnimationMappingProbe();
     void externalOverlaySurfaceMappingProbe();
+    void externalZone11OverlayRegridProbe();
     void modernDraftAdoptionStagesPairBeforeLiveMutation();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
@@ -11673,6 +11674,98 @@ void EnduranceDocumentTests::externalOverlaySurfaceMappingProbe()
         QCOMPARE(resolved.animated, expected.animated);
         QCOMPARE(resolved.startPhase, expected.startPhase);
     }
+}
+
+void EnduranceDocumentTests::externalZone11OverlayRegridProbe()
+{
+    const QString mprPath = qEnvironmentVariable(
+        "EI_MAPPER_ZONE11_REPRO_MPR");
+    if(mprPath.isEmpty())
+        QSKIP("Set EI_MAPPER_ZONE11_REPRO_MPR to the read-only Zone11 MPR");
+
+    CValidationReport report;
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    QCOMPARE(QCryptographicHash::hash(document.originalBytes(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("427414848D89887DFB648E98634A92451B9D887A2C8912C25171E8DA1F4D9A3B"));
+    QCOMPARE(document.mapInfo().textureCount, quint32(8));
+    QCOMPARE(document.mapInfo().animatedTiles.size(), 1);
+    QCOMPARE(document.mapInfo().animatedTiles.front().tileIndex, quint16(78));
+    QCOMPARE(document.mapInfo().animatedTiles.front().frameCount, quint16(32));
+
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    SAnimTile animation{};
+    animation.tileIndex = 78;
+    animation.nPhase = 32;
+    const QVector<SAnimTile> animations{animation};
+    QSet<int> overlaySlots;
+    int animatedCells = 0;
+    int nonAnimatedOverlayCells = 0;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool materialAvailable = false;
+            const qint16 material = terrain.overlayMaterialIndex(
+                x, y, &materialAvailable);
+            if(!materialAvailable || material < 0)
+                continue;
+            bool packedAvailable = false;
+            const quint16 packed = terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &packedAvailable);
+            QVERIFY(packedAvailable);
+            const int slot = SMprPackedTile::decode(packed).atlasSlot();
+            overlaySlots.insert(slot);
+            const ei::SOverlayTileAnimation resolved =
+                ei::overlayTileAnimation(slot, &animations,
+                    quint32(y * terrain.tileCountX() + x));
+            if(resolved.animated)
+                ++animatedCells;
+            else
+                ++nonAnimatedOverlayCells;
+            for(int phase = 0; phase < (resolved.animated ? 32 : 1); ++phase)
+            {
+                const int renderedSlot = resolved.animated
+                    ? 78 + ((resolved.startPhase + phase) % 32) : slot;
+                const QVector2D oldOrigin = CTile::atlasTileOrigin(
+                    renderedSlot, 8, 8);
+                const QVector2D newOrigin = CTile::atlasTileOrigin(
+                    renderedSlot, 9, 3);
+                const int oldPixelX = qRound(oldOrigin.x() * 16384.0f);
+                const int oldPixelY = qRound(oldOrigin.y() * 2048.0f);
+                const int newPixelX = qRound(newOrigin.x() * 6144.0f);
+                const int newPixelY = qRound(newOrigin.y() * 6144.0f);
+                QCOMPARE(oldPixelX % 2048, newPixelX % 2048);
+                QCOMPARE(oldPixelY % 2048, newPixelY % 2048);
+            }
+        }
+    int landControlCells = 0;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            const int slot = SMprPackedTile::decode(terrain.packedTile(
+                x, y, ETerrainTileLayer::Land)).atlasSlot();
+            if(slot >= 78 && slot <= 109)
+                continue;
+            ++landControlCells;
+            const QVector2D oldOrigin = CTile::atlasTileOrigin(slot, 8, 8);
+            const QVector2D newOrigin = CTile::atlasTileOrigin(slot, 9, 3);
+            QCOMPARE(qRound(oldOrigin.x() * 16384.0f) % 2048,
+                     qRound(newOrigin.x() * 6144.0f) % 2048);
+            QCOMPARE(qRound(oldOrigin.y() * 2048.0f) % 2048,
+                     qRound(newOrigin.y() * 6144.0f) % 2048);
+        }
+    QVERIFY(animatedCells > 0);
+    QCOMPARE(nonAnimatedOverlayCells, 0);
+    QVERIFY(landControlCells > 0);
+    QVERIFY(overlaySlots.contains(78));
+    qInfo() << "Zone11 overlay regrid probe"
+            << "tiles" << terrain.tileCountX() << terrain.tileCountY()
+            << "activeSlots" << overlaySlots.size()
+            << "animatedCells" << animatedCells
+            << "landControlCells" << landControlCells;
 }
 
 void EnduranceDocumentTests::modernDraftAdoptionStagesPairBeforeLiveMutation()
