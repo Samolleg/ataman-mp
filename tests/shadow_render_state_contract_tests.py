@@ -56,6 +56,35 @@ class ShadowRenderStateContractTests(unittest.TestCase):
             shadow_pass.rindex("bindDefault()"),
         )
 
+    def test_visible_frame_is_not_cleared_or_drawn_before_shadow_rebuilds_finish(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        paint = view.split("void CView::paintGL()", 1)[1].split(
+            "bool CView::prepareForApplicationShutdown", 1
+        )[0]
+        draw = view.split("void CView::draw(", 1)[1].split(
+            "SMinimapSceneCaptureResult CView::captureMinimapScene", 1
+        )[0]
+
+        # A shadow refresh may switch through several private FBOs.  Until it
+        # finishes, the presentation target must retain the previous complete
+        # frame; otherwise a compositor can expose a clear/sky-only frame.
+        self.assertNotIn(
+            "Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)", paint
+        )
+        self.assertIn("const auto beginVisibleFrame", draw)
+        self.assertEqual(draw.count("beginVisibleFrame();"), 2)
+        self.assertLess(
+            draw.index("renderShadowMap(cameraPosition, cameraPivot"),
+            draw.index("beginVisibleFrame();"),
+        )
+        visible_frame = draw.split("const auto beginVisibleFrame", 1)[1].split(
+            "const auto visibleNodes", 1
+        )[0]
+        self.assertIn(
+            "Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)", visible_frame
+        )
+        self.assertIn("drawSkybox(camMatrix, environment)", visible_frame)
+
 
 if __name__ == "__main__":
     unittest.main()

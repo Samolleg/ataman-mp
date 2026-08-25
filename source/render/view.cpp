@@ -5068,9 +5068,8 @@ void CView::paintGL()
     const bool timeGpu = collectStats && m_gpuTimer && !m_gpuTimerPending;
     if(timeGpu)
         m_gpuTimer->begin();
-    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if(diagnoseFrame)
-        logOpenGlDiagnosticState(QStringLiteral("frame/initial-clear"), true);
+        logOpenGlDiagnosticState(QStringLiteral("frame/preserved-before-offscreen"), true);
     draw(traceSceneFrame ? &frameTelemetry : nullptr);
     if(diagnoseFrame)
         logOpenGlDiagnosticState(QStringLiteral("frame/scene-complete"), true);
@@ -7317,16 +7316,6 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         m_pLand->updateTerrainShadowVisibility(
             environment.sunDirection, !m_sculptStrokeActive);
     syncEnvironmentPreviewWidget(environment.timeHours);
-    // Fill the open lower edge of the stock sky cylinder with the same color
-    // that distant geometry converges to. This removes the editor-only black
-    // seam without modifying the profile sky asset.
-    if(environmentEnabled && fogEnabled)
-        ei::gl::ClearColor(environment.fogColor.x(), environment.fogColor.y(),
-                     environment.fogColor.z(), 1.0f);
-    else
-        ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    ei::gl::Clear(GL_COLOR_BUFFER_BIT);
-
     QVector<ei::SScenePointLight> sceneLights;
     QVector<ei::SScenePointLight> shadowLights;
     if(environmentEnabled && sceneLightsEnabled)
@@ -7424,6 +7413,35 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         performance.setFrameMetadata(metadata);
     }
 
+    bool visibleFrameBegun = false;
+    const auto beginVisibleFrame = [&]()
+    {
+        if(visibleFrameBegun)
+            return;
+        // Shadow rendering is an offscreen producer. Keep the previous
+        // complete frame intact until all requested atlas rebuilds finish, then
+        // begin the new presentation frame exactly once. Some legacy Qt/NVIDIA
+        // composition paths can expose intermediate default-framebuffer
+        // contents even though paintGL has not returned yet.
+        QOpenGLFramebufferObject::bindDefault();
+        ei::gl::Viewport(0, 0, m_width, m_height);
+        // Fill the open lower edge of the stock sky cylinder with the same
+        // color that distant geometry converges to. This removes the
+        // editor-only black seam without modifying the profile sky asset.
+        if(environmentEnabled && fogEnabled)
+            ei::gl::ClearColor(environment.fogColor.x(), environment.fogColor.y(),
+                               environment.fogColor.z(), 1.0f);
+        else
+            ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        if(m_openGlDiagnosticFramesRemaining > 0)
+            logOpenGlDiagnosticState(QStringLiteral("frame/visible-clear"), true);
+        if(environmentEnabled && skyEnabled && !m_caveEnvironment)
+            drawSkybox(camMatrix, environment);
+        logOpenGlErrors(QStringLiteral("draw/sky"));
+        visibleFrameBegun = true;
+    };
+
     const auto visibleNodes = [this, &frustum, cullingEnabled, &performance](CMob* mob)
     {
         if(m_minimapCaptureActive)
@@ -7452,9 +7470,6 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             && node && node->nodeState() != ENodeState::eHidden
             && isMinimapStaticGeometry(node);
     };
-    if(environmentEnabled && skyEnabled && !m_caveEnvironment)
-        drawSkybox(camMatrix, environment);
-    logOpenGlErrors(QStringLiteral("draw/sky"));
     // Set modelview-projection matrix
 
     // Bind shader pipeline for use
@@ -7642,6 +7657,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         const bool shadowReady = environmentEnabled && shadowsEnabled
             && renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,
                                renderQueue, maximumShadowDistance, frameTelemetry);
+        beginVisibleFrame();
         drawTerrainColor(shadowReady);
         if(frameTelemetry)
         {
@@ -7698,7 +7714,10 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     }
 
     if(!terrainDrawn)
+    {
+        beginVisibleFrame();
         drawTerrainColor(false);
+    }
 
     renderQueue.end();
     if(performance.collecting())
