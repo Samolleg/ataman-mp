@@ -593,6 +593,7 @@ private slots:
     void terrainSemanticFieldRoundTripsWithoutPlacementHistory();
     void terrainSemanticFieldRejectsWrongMprOrAtlasBinding();
     void mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlasCapacity();
+    void restoredTerrainFamiliesAreMarkedUsedBeforeFirstPaint();
     void terrainSaveRouteDoesNotHashArtworkPerMapCell();
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void interruptedTerrainStrokeRejectsUnownedStamp();
@@ -1401,11 +1402,14 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
                  "terrainSaveAsNeedsModernDraftConfirmation"),
              "Save As no longer detects a working-atlas pair requirement");
     QVERIFY2(saveAs.contains("Modern Draft pair required")
-             && saveAs.contains("Save as Modern Draft"),
-             "Save As no longer explains or offers the paired Modern Draft route");
-    QVERIFY2(saveAs.contains("clickedButton() != saveDraft")
-             && saveAs.contains("fileName, true, true"),
-             "Save As no longer cancels without mutation or commits the selected paired draft");
+             && saveAs.contains("Save as Modern Draft")
+             && saveAs.contains("Finalize and Save As"),
+             "Save As no longer offers both paired-draft and final publication routes");
+    QVERIFY2(saveAs.contains("clickedButton() == saveDraft")
+             && saveAs.contains("fileName, true, true")
+             && saveAs.contains("clickedButton() == finalizeAndSaveAs")
+             && saveAs.contains("m_requestedTerrainMprDestination = fileName"),
+             "Save As no longer routes the selected destination to the explicit draft/finalize choice");
 
     const int finalizeStart = source.indexOf(
         "void CView::finalizeVirtualTerrainAtlas()");
@@ -1427,16 +1431,33 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     const int publicationAuthorized = finalize.indexOf(
         "Modern terrain publication authorized mpr:%1 res:%2");
     const int publicationRead = finalize.indexOf("QFile sourceTextures(texturesPath)");
-    QVERIFY2(publicationPreflight >= 0
+    const int publicationCommit = finalize.indexOf(
+        "commitStagedResPublishedMembers");
+    QVERIFY2(publicationRead >= 0 && publicationPreflight > publicationRead
              && publicationAuthorized > publicationPreflight
-             && publicationRead > publicationAuthorized,
-             "Publication can reach an installed RES before stopping an Endurance-owned test runtime");
+             && publicationCommit > publicationAuthorized,
+             "Publication does not defer the owned-runtime/watcher boundary until immediately before archive mutation");
+    QVERIFY2(finalize.contains("createTexturesBackup ? tr(")
+             && finalize.contains(
+                 "Backing up and atomically replacing textures.res...")
+             && finalize.contains("Atomically replacing textures.res..."),
+             "The no-backup path still claims that it is creating a backup");
     QVERIFY2(source.contains("Modern terrain publication succeeded mpr:%1 res:%2"),
              "Publication no longer records the exact committed MPR/RES pair after both commits succeed");
     QVERIFY2(mainSource.contains("Stop Test Current and continue")
              && mainSource.contains("m_mapTestLauncher->stop()")
              && mainSource.contains("m_mapTestLauncher->isRunning()"),
              "The publication preflight no longer offers to stop and waits for the owned test runtime");
+    const QByteArray browserSource = repositorySource(
+        QStringLiteral("source/ui/resource_browser.cpp"));
+    const QByteArray browserHeader = repositorySource(
+        QStringLiteral("source/ui/resource_browser.h"));
+    QVERIFY2(browserHeader.contains("beginInternalPublication")
+             && browserHeader.contains("finishInternalPublication"),
+             "Terrain publication cannot suspend and complete the Resource Browser's watcher transaction");
+    QVERIFY2(browserSource.contains("m_archiveWatcher->removePath")
+             && browserSource.contains("beginLoad(m_loadedSources"),
+             "A self-authored RES still prompts as an external change instead of refreshing directly");
 
     const int prewarmStart = source.indexOf(
         "void CView::prewarmModernTerrainFamily(");
@@ -12404,6 +12425,23 @@ void EnduranceDocumentTests::externalZone1TestOverlays5RuntimeFlipbookProbe()
     qInfo() << "R7 flipbook record/start references"
             << start << count << exactStartCells << referencedFrameSlots
             << "atlasSlots" << binding.decodedAtlasTiles.size();
+}
+
+void EnduranceDocumentTests::restoredTerrainFamiliesAreMarkedUsedBeforeFirstPaint()
+{
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+    const int start = source.indexOf("bool CView::ensureTerrainAutoCatalogReady()");
+    const int end = source.indexOf("void CView::unloadLand", start);
+    QVERIFY(start >= 0 && end > start);
+    const QByteArray load = source.mid(start, end - start);
+    const int catalog = load.indexOf("rebuildTerrainAutoCatalog();");
+    const int restore = load.indexOf("restoreTerrainSemanticFieldFromArchive(",
+                                     catalog);
+    const int usage = load.indexOf("refreshTerrainFamilyUsage();", restore);
+    QVERIFY2(catalog >= 0 && restore > catalog && usage > restore,
+             "Loaded semantic fields are restored after the only usage scan, so every family appears unused until the first paint");
 }
 
 void EnduranceDocumentTests::externalZone1TestOverlays6DraftFinalizationProbe()

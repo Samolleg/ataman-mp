@@ -35,6 +35,27 @@ class ShadowRenderStateContractTests(unittest.TestCase):
         self.assertIn("renderShadowMap(cameraPosition, cameraPivot", view)
         self.assertIn("queue.flushShadow", view)
 
+    def test_shadow_batch_does_not_expose_the_presentation_target_between_passes(self):
+        view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
+        shadow_pass = view.split("bool CView::renderShadowMap", 1)[1].split(
+            "QString CView::captureShadowDiagnostics", 1
+        )[0]
+        end_target = shadow_pass.split("const auto endTarget", 1)[1].split(
+            "if(rebuildStatic)", 1
+        )[0]
+        final_restore = shadow_pass[
+            shadow_pass.rindex("endTarget(m_localShadowFbo") :
+            shadow_pass.index("m_shadowInitialized = true")
+        ]
+
+        self.assertNotIn("target->release()", end_target)
+        self.assertNotIn("bindDefault()", end_target)
+        self.assertEqual(final_restore.count("bindDefault()"), 1)
+        self.assertLess(
+            shadow_pass.rindex("endTarget(m_localShadowFbo"),
+            shadow_pass.rindex("bindDefault()"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

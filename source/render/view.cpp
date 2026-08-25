@@ -4512,23 +4512,17 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
         m_shadowProgram.setUniformValue("u_instanced", false);
     };
-    const auto endTarget = [&](QOpenGLFramebufferObject* target,
+    const auto endTarget = [&](QOpenGLFramebufferObject*,
                                EShadowFramebufferPass pass)
     {
-        const bool releaseSucceeded = target->release();
-        // QOpenGLFramebufferObject::release() is not a reliable presentation
-        // boundary on ANGLE: the D3D-backed ES context can retain the shadow
-        // FBO until Qt starts its own composition.  Every following scene draw
-        // would then target the RGBA shadow atlas (and the window stays white).
-        // Bind Qt's actual default target explicitly after every shadow pass.
-        const bool bindDefaultSucceeded = QOpenGLFramebufferObject::bindDefault();
         if(frameTelemetry)
         {
             SShadowFramebufferPassTelemetry& sample =
                 frameTelemetry->shadowPasses[shadowFramebufferPassIndex(pass)];
-            sample.releaseSucceeded = releaseSucceeded;
-            sample.bindDefaultSucceeded = bindDefaultSucceeded;
-            sample.framebufferAfterRestore = recordBoundFramebuffer();
+            // Shadow targets form one offscreen batch.  Directly binding the
+            // next target relinquishes this pass without exposing the
+            // presentation framebuffer between white-cleared atlas rebuilds.
+            sample.releaseSucceeded = true;
         }
     };
     if(rebuildStatic)
@@ -4609,6 +4603,20 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         m_localShadowMatrices = nextLocalMatrices;
         m_localShadowAtlasRects = nextLocalRects;
     }
+    // Return to Qt's presentation target exactly once, after every offscreen
+    // shadow pass is complete.  Releasing each FBO separately binds the
+    // default framebuffer between passes and can expose its inherited clear
+    // state through legacy Qt/NVIDIA composition while the camera is panning.
+    const bool bindDefaultSucceeded = QOpenGLFramebufferObject::bindDefault();
+    const int framebufferAfterRestore = recordBoundFramebuffer();
+    if(frameTelemetry)
+        for(SShadowFramebufferPassTelemetry& sample :
+            frameTelemetry->shadowPasses)
+            if(sample.attempted)
+            {
+                sample.bindDefaultSucceeded = bindDefaultSucceeded;
+                sample.framebufferAfterRestore = framebufferAfterRestore;
+            }
     m_shadowInitialized = true;
     queue.setLocalShadowOwners(m_localShadowOwners);
     ei::gl::Viewport(0, 0, m_width, m_height);
@@ -8364,6 +8372,10 @@ bool CView::ensureTerrainAutoCatalogReady()
     phaseTimer.restart();
     restoreTerrainSemanticFieldFromArchive(
         filePath, m_activeTerrainArchivePath, false);
+    // The authoritative field is restored after the lightweight catalog was
+    // built.  Publish its actual material usage immediately; otherwise every
+    // family appears unused until the first paint triggers another scan.
+    refreshTerrainFamilyUsage();
     const qint64 semanticFieldRestoreMs = phaseTimer.elapsed();
     phaseTimer.restart();
     emit mprSaveStateChanged();
@@ -8526,7 +8538,8 @@ void CView::saveLandAs()
             workingAtlasAvailable,
             terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
             terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay));
-    if(modernDraftRequired)
+    const bool persistedDraft = persistedModernDraftRequiresPublication();
+    if(modernDraftRequired || persistedDraft)
     {
         QMessageBox confirmation(this);
         confirmation.setIcon(QMessageBox::Information);
@@ -8536,15 +8549,27 @@ void CView::saveLandAs()
             "in an MPR alone: Save As must write a paired MPR plus adjacent "
             "RES Modern Draft."));
         confirmation.setInformativeText(tr(
-            "Save as Modern Draft writes both files at the selected name. "
-            "Cancel leaves the current map and destination unchanged."));
+            "Save as Modern Draft keeps the editable working atlas beside the "
+            "selected MPR. Finalize and Save As publishes a clean runtime "
+            "atlas. Cancel leaves the current map and destination unchanged."));
         QPushButton* saveDraft = confirmation.addButton(
             tr("Save as Modern Draft"), QMessageBox::AcceptRole);
+        QPushButton* finalizeAndSaveAs = confirmation.addButton(
+            tr("Finalize and Save As"), QMessageBox::ActionRole);
         confirmation.addButton(QMessageBox::Cancel);
         confirmation.exec();
-        if(confirmation.clickedButton() != saveDraft)
+        if(confirmation.clickedButton() == saveDraft)
+        {
+            saveChangedLandscapeDocument(fileName, true, true);
             return;
-        saveChangedLandscapeDocument(fileName, true, true);
+        }
+        if(confirmation.clickedButton() == finalizeAndSaveAs)
+        {
+            m_requestedTerrainMprDestination = fileName;
+            finalizeVirtualTerrainAtlas();
+        }
+        else
+            return;
         return;
     }
 
@@ -13569,18 +13594,6 @@ void CView::finalizeVirtualTerrainAtlas()
     if(preview.exec()!=QDialog::Accepted)
         return;
 
-    bool publicationReady = true;
-    emit terrainPublicationPreflightRequested(texturesPath, &publicationReady);
-    if(!publicationReady)
-        return;
-    ei::log(eLogInfo, QStringLiteral(
-        "Modern terrain publication authorized mpr:%1 res:%2 identity:%3 "
-        "replaceIdentity:%4")
-        .arg(QDir::toNativeSeparators(mprDestination.absoluteFilePath()),
-             QDir::toNativeSeparators(texturesPath), selectedIdentity,
-             replaceIdentity ? QStringLiteral("true")
-                             : QStringLiteral("false")));
-
     QFile sourceTextures(texturesPath);
     QByteArray originalTexturesBytes;
     CResArchiveDocument sourceArchive;
@@ -13756,6 +13769,21 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
 
+    // All inputs and rollback material are now validated.  Stop an owned test
+    // runtime and suspend the Resource Browser watcher only at the external
+    // write boundary, not while the user is still reviewing destinations.
+    bool publicationReady = true;
+    emit terrainPublicationPreflightRequested(texturesPath, &publicationReady);
+    if(!publicationReady)
+        return;
+    ei::log(eLogInfo, QStringLiteral(
+        "Modern terrain publication authorized mpr:%1 res:%2 identity:%3 "
+        "replaceIdentity:%4")
+        .arg(QDir::toNativeSeparators(mprDestination.absoluteFilePath()),
+             QDir::toNativeSeparators(texturesPath), selectedIdentity,
+             replaceIdentity ? QStringLiteral("true")
+                             : QStringLiteral("false")));
+
     // Large RES archives can take long enough to look hung. Build the complete
     // candidate away from the GUI thread and keep one visible progress dialog
     // alive through staging, replacement, and post-commit verification.
@@ -13788,6 +13816,7 @@ void CView::finalizeVirtualTerrainAtlas()
     if(stagedResBytes.isEmpty())
     {
         publishProgress.close();
+        emit terrainPublicationFinished(texturesPath, false);
         QMessageBox::critical(this, tr("Atlas publication refused"),
             tr("The complete textures.res candidate could not be built. No "
                "output was written.\n\n%1")
@@ -13801,6 +13830,7 @@ void CView::finalizeVirtualTerrainAtlas()
                             &stagedResErrors))
     {
         publishProgress.close();
+        emit terrainPublicationFinished(texturesPath, false);
         QMessageBox::critical(this, tr("Atlas publication refused"),
             tr("The complete staged textures.res failed reopen. No output was "
                "written.\n\n%1")
@@ -13820,6 +13850,7 @@ void CView::finalizeVirtualTerrainAtlas()
            portableProfile.atlasSlotCount, &stagedEmbeddedReport))
     {
         publishProgress.close();
+        emit terrainPublicationFinished(texturesPath, false);
         QMessageBox::critical(this, tr("Atlas publication refused"),
             tr("The staged textures.res did not reopen with its exact "
                "embedded material profile. No output was written.\n\n%1")
@@ -13827,8 +13858,9 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
 
-    publishProgress.setLabelText(tr(
-        "Backing up and atomically replacing textures.res..."));
+    publishProgress.setLabelText(createTexturesBackup ? tr(
+        "Backing up and atomically replacing textures.res...")
+        : tr("Atomically replacing textures.res..."));
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     SResPublishedMembersSaveRequest resRequest;
     resRequest.source = QFileInfo(texturesPath);
@@ -13850,6 +13882,7 @@ void CView::finalizeVirtualTerrainAtlas()
     if(!resResult.success)
     {
         publishProgress.close();
+        emit terrainPublicationFinished(texturesPath, false);
         QMessageBox::critical(this, tr("textures.res publication failed"),
             tr("The selected archive was not replaced.\n\nPhase: %1\n%2")
                 .arg(resResult.phase, resResult.error));
@@ -13900,6 +13933,7 @@ void CView::finalizeVirtualTerrainAtlas()
         publishProgress.close();
         const bool resRestored = restorePublishedRes();
         const bool mprRestored = restorePublishedMpr();
+        emit terrainPublicationFinished(texturesPath, true);
         QMessageBox::critical(this, tr("MPR publication failed"),
             tr("Publication did not complete. textures.res rollback: %1; "
                "MPR rollback: %2.\n\nPhase: %3\n%4")
@@ -13916,12 +13950,14 @@ void CView::finalizeVirtualTerrainAtlas()
            !semanticFieldMember.name.isEmpty()))
     {
         publishProgress.close();
+        emit terrainPublicationFinished(texturesPath, true);
         QMessageBox::critical(this, tr("Modern MPR saved; reopen required"),
             tr("The validated textures.res and MPR are saved, but this session "
                "could not adopt them. Reopen the MPR before editing further."));
         return;
     }
     publishProgress.close();
+    emit terrainPublicationFinished(texturesPath, true);
     m_requestedTerrainResourceIdentity.clear();
     m_requestedTerrainIdentityReplacement = false;
     m_requestedTerrainIdentityFinalization = false;

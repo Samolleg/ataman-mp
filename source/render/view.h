@@ -619,6 +619,8 @@ signals:
     void mprSaveStateChanged();
     void terrainPublicationPreflightRequested(
         const QString& resourceArchivePath, bool* accepted);
+    void terrainPublicationFinished(
+        const QString& resourceArchivePath, bool committed);
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
     void cameraSpeedMultiplierChanged(double multiplier);

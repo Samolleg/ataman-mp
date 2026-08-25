@@ -815,6 +815,51 @@ void CResourceBrowser::indexedArchiveChanged(const QString& archivePath)
         m_archiveWatcher->addPath(archivePath);
 }
 
+void CResourceBrowser::beginInternalPublication(const QString& archivePath)
+{
+    const QString absolute = QFileInfo(archivePath).absoluteFilePath();
+    const QString normalized = QDir::cleanPath(absolute).toLower();
+    if(normalized.isEmpty())
+        return;
+    m_internalPublications.insert(normalized);
+    if(m_archiveWatcher && m_archiveWatcher->files().contains(
+           absolute, Qt::CaseInsensitive))
+        m_archiveWatcher->removePath(absolute);
+}
+
+void CResourceBrowser::finishInternalPublication(
+    const QString& archivePath, bool committed)
+{
+    const QString absolute = QFileInfo(archivePath).absoluteFilePath();
+    const QString normalized = QDir::cleanPath(absolute).toLower();
+    m_internalPublications.remove(normalized);
+
+    bool loaded = false;
+    for(const QString& source : m_loadedSources)
+        if(QDir::cleanPath(QFileInfo(source).absoluteFilePath()).compare(
+               QDir::cleanPath(absolute), Qt::CaseInsensitive) == 0)
+        {
+            loaded = true;
+            break;
+        }
+    if(!loaded)
+        return;
+
+    if(committed)
+    {
+        const QString label = m_activeProfileMode ? m_activeProfileName
+            : QFileInfo(m_loadedSources.value(0)).fileName();
+        beginLoad(m_loadedSources, m_activeProfileMode, label);
+        if(m_activeProfileMode)
+            emit activeResourcesPublished(absolute);
+        return;
+    }
+    if(m_archiveWatcher && QFileInfo::exists(absolute)
+       && !m_archiveWatcher->files().contains(
+              absolute, Qt::CaseInsensitive))
+        m_archiveWatcher->addPath(absolute);
+}
+
 void CResourceBrowser::finishLoad()
 {
     const SResourceBrowserLoadResult result = m_loadWatcher->result();

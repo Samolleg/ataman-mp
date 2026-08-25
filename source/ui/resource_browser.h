@@ -53,6 +53,9 @@ public:
                                  const QString& profileName);
     bool selectResourceReference(const QString& reference);
     bool uiContractSatisfied() const;
+    void beginInternalPublication(const QString& archivePath);
+    void finishInternalPublication(const QString& archivePath,
+                                   bool committed);
 
 signals:
     void databaseEditorRequested(const QString& archivePath);
