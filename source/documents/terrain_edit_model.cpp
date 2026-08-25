@@ -1630,7 +1630,11 @@ qint16 CTerrainEditModel::overlayMaterialIndex(int globalTileX, int globalTileY,
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
     const STerrainTileBrush& brush, qint16 materialIndex,
     quint8 atlasIndex, quint8 tileIndex, quint8 rotation,
-    CValidationReport* report) const
+    CValidationReport* report,
+    const CTerrainTransitionCatalog* uniformCatalog,
+    const STerrainTransitionSignature& uniformSignature,
+    quint32 distributionSeed, bool randomizeUniformRotation,
+    qint32 requiredRuntimeType) const
 {
     SOverlaySurfaceCommand command;
     command.description = QStringLiteral("Activate overlay surface");
@@ -1668,6 +1672,17 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
         return it.value();
     };
     QVector<SActivatedCell> activatedCells;
+    QSet<int> allowedUniformSlots;
+    if(uniformCatalog && requiredRuntimeType >= 0)
+        for(const STerrainTransitionVariant& variant :
+                uniformCatalog->paintVariants(uniformSignature))
+        {
+            bool typeFound = false;
+            const qint32 type = tileType(variant.packedTile, &typeFound);
+            if(typeFound && type == requiredRuntimeType)
+                allowedUniformSlots.insert(SMprPackedTile::decode(
+                    variant.packedTile).atlasSlot());
+        }
     const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
     const int maximumX = qMin(tileCountX() - 1,
                               int(std::floor(brush.centerX + brush.radius)));
@@ -1715,7 +1730,29 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
                 + kTileBlockSize;
             const bool wasActive = readOverlayMaterial(
                 payload, overlayMaterialOffset, localTile) >= 0;
-            if(readPackedTile(payload, overlayTileOffset, localTile) == selected.encode()
+            quint16 selectedForCell = selected.encode();
+            if(uniformCatalog)
+            {
+                bool variantFound = false;
+                selectedForCell = selectUniformInteriorTile(
+                    *uniformCatalog, uniformSignature, x, y,
+                    terrainPaintLayerSeed(distributionSeed,
+                                          ETerrainTileLayer::Overlay),
+                    randomizeUniformRotation, &variantFound,
+                    requiredRuntimeType >= 0 ? &allowedUniformSlots : nullptr);
+                const int selectedSlot = SMprPackedTile::decode(
+                    selectedForCell).atlasSlot();
+                if(!variantFound || selectedSlot < 0
+                   || selectedSlot >= m_tileTypes.size())
+                {
+                    if(report)
+                        report->add("terrain.overlay_activation_variant",
+                            EValidationSeverity::Error,
+                            "Add Overlay Surface could not select an exact typed uniform brush variant");
+                    return SOverlaySurfaceCommand();
+                }
+            }
+            if(readPackedTile(payload, overlayTileOffset, localTile) == selectedForCell
                && readOverlayMaterial(payload, overlayMaterialOffset, localTile)
                     == materialIndex)
                 continue;
@@ -1724,7 +1761,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
             // Existing geometry/heights stay intact; only genuinely inactive
             // cells need their overlay vertices initialized below.
             writePackedTile(payload, overlayTileOffset, localTile,
-                            selected.encode());
+                            selectedForCell);
             writeOverlayMaterial(payload, overlayMaterialOffset, localTile, materialIndex);
             if(!wasActive)
                 activatedCells.append({sectorIndex, localTile, x, y});
@@ -4076,6 +4113,64 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                         finding.message, finding.location);
     return expanded;
 #endif
+}
+
+STerrainTileCommand CTerrainEditModel::makeUniformTilePaint(
+    const STerrainTileBrush& brush, ETerrainTileLayer layer,
+    const STerrainTransitionSignature& uniformSignature,
+    const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+    bool randomizeUniformRotation, CValidationReport* report) const
+{
+    STerrainTileCommand combined;
+    combined.description = layer == ETerrainTileLayer::Land
+        ? QStringLiteral("Paint uniform terrain tiles")
+        : QStringLiteral("Paint uniform overlay tiles");
+    CTerrainEditModel staged = *this;
+    const quint32 paintSeed = terrainPaintLayerSeed(distributionSeed, layer);
+    const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
+    const int maximumX = qMin(tileCountX() - 1,
+                              int(std::floor(brush.centerX + brush.radius)));
+    const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
+    const int maximumY = qMin(tileCountY() - 1,
+                              int(std::floor(brush.centerY + brush.radius)));
+    for(int y = minimumY; y <= maximumY; ++y)
+        for(int x = minimumX; x <= maximumX; ++x)
+        {
+            if(!tileInsideBrush(brush, x, y))
+                continue;
+            bool available = false;
+            staged.packedTile(x, y, layer, &available);
+            if(!available)
+                continue;
+            bool selected = false;
+            const quint16 packed = selectUniformInteriorTile(
+                catalog, uniformSignature, x, y, paintSeed,
+                randomizeUniformRotation, &selected);
+            if(!selected)
+            {
+                if(report)
+                    report->add("terrain.uniform_only_missing",
+                        EValidationSeverity::Error,
+                        "Uniform-only Modern paint has no exact uniform tile for the selected family");
+                return STerrainTileCommand();
+            }
+            const SMprPackedTile decoded = SMprPackedTile::decode(packed);
+            STerrainTileBrush point;
+            point.centerX = float(x);
+            point.centerY = float(y);
+            point.radius = 0.0f;
+            const STerrainTileCommand stamp = staged.makeTilePaint(
+                point, layer, decoded.atlasIndex, decoded.tileIndex,
+                decoded.rotation, catalog, report);
+            if(report && report->hasErrors())
+                return STerrainTileCommand();
+            if(stamp.isEmpty())
+                continue;
+            if(!staged.apply(stamp, true, report))
+                return STerrainTileCommand();
+            appendTerrainTileCommand(&combined, stamp);
+        }
+    return combined;
 }
 
 QVector<QPoint> terrainVertexStrokeLine(const QPoint& from, const QPoint& to)

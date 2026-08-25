@@ -12,6 +12,7 @@
 #include <QVector>
 #include <QVector3D>
 #include <QFuture>
+#include <QSet>
 #include <functional>
 
 //#include "sector.h"
@@ -113,7 +114,8 @@ public:
     bool previewCanonicalMaxZ(float maxZ);
     bool previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile,
                               bool updateSector = true);
-    bool previewTerrainAtlas(const QVector<QImage>& tileImages, int textureCount);
+    bool previewTerrainAtlas(const QVector<QImage>& tileImages, int textureCount,
+                             const QSet<int>& changedSlots = QSet<int>());
     void clearPreviewTerrainAtlas();
     void setDirty(bool bDirty) {m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
@@ -137,6 +139,14 @@ private:
     bool readHeader(QDataStream& stream);
     bool serializeMpr(const QString& zoneName, CResFile& mprFile);
     bool uploadTerrainShadowTexture(const STerrainShadowFieldResult& result);
+    bool previewTerrainAtlasFullUpload(const QVector<QImage>& tileImages,
+                                       int textureCount, int columns, int rows);
+    bool previewTerrainAtlasIncremental(const QVector<QImage>& tileImages,
+                                        int textureCount, int columns, int rows,
+                                        const QSet<int>& changedSlots);
+    bool previewTerrainAtlasRegridCopy(const QVector<QImage>& tileImages,
+                                       int textureCount, int columns, int rows,
+                                       const QSet<int>& changedSlots);
     void refreshMaterialDrawDataIfNeeded();
 
 private:

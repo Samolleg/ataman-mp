@@ -145,6 +145,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_vertexPaintTarget(new QToolButton(this))
     , m_classicAutoSafe(new QCheckBox(
           tr("Safe: exact authored blends only"), this))
+    , m_modernAutoResolveBlends(new QCheckBox(
+          tr("Auto-resolve blends"), this))
     , m_randomizeUniformRotation(new QCheckBox(
           tr("Vary uniform texture rotation across strokes"), this))
     , m_paintIssueCategory(new QComboBox(this))
@@ -364,6 +366,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
 
     QVBoxLayout* modernModeLayout = new QVBoxLayout(m_modernModePage);
     modernModeLayout->setContentsMargins(0, 0, 0, 0);
+    m_modernAutoResolveBlends->setObjectName(
+        QStringLiteral("modernAutoResolveBlends"));
+    m_modernAutoResolveBlends->setChecked(settings.value(
+        QStringLiteral("ui/landscape/modernAutoResolveBlends"), true).toBool());
+    m_modernAutoResolveBlends->setToolTip(tr(
+        "When enabled, Modern strokes realize exact transition tiles around "
+        "the painted uniform cells. Disable it to stamp only uniform tiles "
+        "without creating or selecting blend tiles."));
+    modernModeLayout->addWidget(m_modernAutoResolveBlends);
     modernModeLayout->addWidget(m_materialTabs);
     QVBoxLayout* classicModeLayout = new QVBoxLayout(m_classicModePage);
     classicModeLayout->setContentsMargins(0, 0, 0, 0);
@@ -670,6 +681,12 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         emit editingStateChanged();
         applyPaintFilter();
         QTimer::singleShot(0, this, [this]() { refreshPaletteColumns(); });
+    });
+    connect(m_modernAutoResolveBlends, &QCheckBox::toggled, this,
+            [this](bool checked) {
+        QSettings().setValue(
+            QStringLiteral("ui/landscape/modernAutoResolveBlends"), checked);
+        emit editingStateChanged();
     });
     m_paintModeTabs->setCurrentIndex(qBound(0,
         settings.value(QStringLiteral("ui/landscape/paintPaletteMode"), 0)
@@ -1017,6 +1034,20 @@ ETerrainPaintTargetMode CLandscapeTools::paintTargetMode() const
 bool CLandscapeTools::classicAutoSafeMode() const
 {
     return m_classicAutoSafe && m_classicAutoSafe->isChecked();
+}
+bool CLandscapeTools::modernAutoResolveBlends() const
+{
+    return m_modernAutoResolveBlends
+        && m_modernAutoResolveBlends->isChecked();
+}
+bool CLandscapeTools::tilePaintPreviewEnabled() const
+{
+    if(!editingEnabled())
+        return false;
+    const ELandscapeEditMode mode = editMode();
+    return mode == ELandscapeEditMode::TilePaint
+        || mode == ELandscapeEditMode::OverlayPaint
+        || mode == ELandscapeEditMode::OverlaySurface;
 }
 bool CLandscapeTools::randomizeUniformRotation() const
 {

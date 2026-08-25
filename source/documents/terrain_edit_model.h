@@ -505,7 +505,12 @@ public:
     SOverlaySurfaceCommand makeOverlayActivation(
         const STerrainTileBrush& brush, qint16 materialIndex,
         quint8 atlasIndex, quint8 tileIndex, quint8 rotation,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        const CTerrainTransitionCatalog* uniformCatalog = nullptr,
+        const STerrainTransitionSignature& uniformSignature = {},
+        quint32 distributionSeed = 0,
+        bool randomizeUniformRotation = false,
+        qint32 requiredRuntimeType = -1) const;
     SOverlaySurfaceCommand makeOverlayDeactivation(
         const STerrainTileBrush& brush,
         CValidationReport* report = nullptr) const;
@@ -605,6 +610,15 @@ public:
         CValidationReport* report = nullptr,
         ETerrainSemanticPaintPolicy policy =
             ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
+    // Direct Modern uniform-only policy. Each covered cell receives a proven
+    // uniform variant/rotation while the catalog-aware Manual reconciliation
+    // keeps any existing semantic field consistent with the physical result.
+    STerrainTileCommand makeUniformTilePaint(
+        const STerrainTileBrush& brush, ETerrainTileLayer layer,
+        const STerrainTransitionSignature& uniformSignature,
+        const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+        bool randomizeUniformRotation,
+        CValidationReport* report = nullptr) const;
     STerrainTileCommand makeSemanticVertexPaint(
         int selectedCellX, int selectedCellY,
         const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,

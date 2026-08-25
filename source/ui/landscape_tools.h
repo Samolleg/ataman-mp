@@ -109,6 +109,8 @@ public:
     void setPaintPaletteMode(ETerrainPaintPaletteMode mode);
     ETerrainPaintTargetMode paintTargetMode() const;
     bool classicAutoSafeMode() const;
+    bool modernAutoResolveBlends() const;
+    bool tilePaintPreviewEnabled() const;
     bool randomizeUniformRotation() const;
     bool landFamiliesAllowedInOverlay() const;
     bool overlayMaterialSlotLabelsVisible() const;
@@ -232,6 +234,7 @@ private:
     QToolButton* m_tilePaintTarget;
     QToolButton* m_vertexPaintTarget;
     QCheckBox* m_classicAutoSafe;
+    QCheckBox* m_modernAutoResolveBlends;
     QCheckBox* m_randomizeUniformRotation;
     QComboBox* m_paintIssueCategory;
     QToolButton* m_markPaintIssue;

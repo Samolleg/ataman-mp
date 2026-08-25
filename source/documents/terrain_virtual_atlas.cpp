@@ -4346,47 +4346,53 @@ bool CTerrainWorkingAtlas::normalizeAnimationRanges(
         for(int phase = 0; phase < frameSlots.size(); ++phase)
             alreadyContiguous = alreadyContiguous
                 && frameSlots.at(phase) == start + phase;
-        if(alreadyContiguous)
-            continue;
-
-        int copyStart = -1;
-        for(int candidate = activeTileCount();
-            candidate + physicalCount <= m_capacityLimit; ++candidate)
+        int activationStart = start;
+        if(!alreadyContiguous)
         {
-            bool free = true;
-            for(int phase = 0; phase < physicalCount; ++phase)
-                free = free && !m_workingToVirtual.contains(candidate + phase)
-                    && !reservedCopies.contains(candidate + phase);
-            if(free)
+            int copyStart = -1;
+            for(int candidate = activeTileCount();
+                candidate + physicalCount <= m_capacityLimit; ++candidate)
             {
-                copyStart = candidate;
-                break;
+                bool free = true;
+                for(int phase = 0; phase < physicalCount; ++phase)
+                    free = free && !m_workingToVirtual.contains(candidate + phase)
+                        && !reservedCopies.contains(candidate + phase);
+                if(free)
+                {
+                    copyStart = candidate;
+                    break;
+                }
             }
+            if(copyStart < 0
+               || copyStart > int(std::numeric_limits<quint16>::max()))
+            {
+                if(report) report->add("terrain.working_animation_capacity",
+                    EValidationSeverity::Error,
+                    QStringLiteral("Animation record %1 needs %2 contiguous extension slots, but the working atlas has no safe free range. No slots were moved.")
+                        .arg(animationIndex).arg(physicalCount));
+                return false;
+            }
+            activationStart = copyStart;
+            normalized[animationIndex].tileIndex = quint16(copyStart);
+            for(int phase = 0; phase < physicalCount; ++phase)
+                reservedCopies.insert(copyStart + phase);
         }
-        if(copyStart < 0
-           || copyStart > int(std::numeric_limits<quint16>::max()))
-        {
-            if(report) report->add("terrain.working_animation_capacity",
-                EValidationSeverity::Error,
-                QStringLiteral("Animation record %1 needs %2 contiguous extension slots, but the working atlas has no safe free range. No slots were moved.")
-                    .arg(animationIndex).arg(physicalCount));
-            return false;
-        }
-        normalized[animationIndex].tileIndex = quint16(copyStart);
+
+        // Every cell authored with one of the selected physical frames must
+        // reference the exact record start. Runtime supplies its independent
+        // phase; a frame-member reference is otherwise static.
         for(int phase = 0; phase < physicalCount; ++phase)
         {
             const int sourceSlot = frameSlots.at(phase);
-            const int destination = copyStart + phase;
             if(slotRemap->contains(sourceSlot)
-               && slotRemap->value(sourceSlot) != destination)
+               && slotRemap->value(sourceSlot) != activationStart)
             {
                 if(report) report->add("terrain.working_animation_shared_frame",
                     EValidationSeverity::Error,
                     QStringLiteral("Two animation records share a frame slot but require different physical ranges. No slots were moved."));
                 return false;
             }
-            slotRemap->insert(sourceSlot, destination);
-            reservedCopies.insert(copyStart + phase);
+            slotRemap->insert(sourceSlot, activationStart);
         }
     }
 

@@ -484,6 +484,13 @@ private:
         const QString& currentNamespace, const QSize& requiredSize,
         quint64 generation);
     void applyDeferredGlobalTerrainPaletteHydration(quint64 generation);
+    void queueModernTerrainFamilyPrewarm(qint32 terrainType);
+    void prewarmModernTerrainFamily(qint32 terrainType,
+                                    ETerrainTileLayer layer,
+                                    quint64 requestGeneration);
+    bool adoptPrewarmedTerrainFamily(qint32 terrainType,
+                                     ETerrainTileLayer layer,
+                                     CValidationReport* report);
     void refreshClassicAutoPalette();
     void refreshManualAtlasPalette(bool invalidate = true);
     void refreshWorkingTerrainPalettes();
@@ -774,6 +781,10 @@ private:
     STerrainAtlasProfileSource m_terrainAtlasProfileSource;
     QVector<QImage> m_authoredTerrainTileImages;
     QSharedPointer<CTerrainWorkingAtlas> m_workingTerrainAtlas;
+    QSharedPointer<SWorkingTerrainResolveStage> m_preparedTerrainFamilyStage;
+    qint32 m_preparedTerrainFamily{-1};
+    ETerrainTileLayer m_preparedTerrainFamilyLayer{ETerrainTileLayer::Land};
+    quint64 m_terrainFamilyPrewarmGeneration{0};
     bool m_terrainAutoCatalogPending{false};
     bool m_terrainAutoCatalogBuildQueued{false};
     bool m_terrainAutoCatalogBuilding{false};
@@ -892,6 +903,7 @@ private:
     int m_tileStrokePaletteMode{-1};
     int m_tileStrokeTargetMode{-1};
     bool m_tileStrokeSafeMode{false};
+    bool m_tileStrokeAutoResolveBlends{true};
     qint32 m_tileStrokeMaterialId{-1};
     ETerrainTileLayer m_tileStrokeLayer{ETerrainTileLayer::Land};
     int m_tileStrokeSafeSkippedVertices{0};

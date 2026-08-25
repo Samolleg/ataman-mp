@@ -597,6 +597,7 @@ private slots:
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void interruptedTerrainStrokeRejectsUnownedStamp();
     void workingAtlasPublicationPreservesActiveStrokeTransaction();
+    void workingAtlasPreviewPublishesOnlyChangedPhysicalTiles();
     void resolveMissingBlendsStagesDeterministicLoadBaseline();
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
     void zone1NamespaceTemplateSeparatesLandOverlayAndVariants();
@@ -638,6 +639,7 @@ private slots:
     void externalZone11OverlayRegridProbe();
     void externalZone1TestoOverlayMappingProbe();
     void externalZone1TestOverlays3MappingProbe();
+    void externalZone1TestOverlays4NoAnimMappingProbe();
     void modernDraftAdoptionStagesPairBeforeLiveMutation();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
@@ -653,6 +655,8 @@ private slots:
     void zone1NamespaceTemplateMatchesPrivateFixture();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void overlayActivationDeactivationIsLosslessAndUndoable();
+    void overlayActivationDistributesUniformVariantsAndRotations();
+    void modernUniformOnlyPaintNeverSelectsBlendTiles();
     void overlayActivationMixedBrushPaintsSelectedTileAndMaterial();
     void overlaySculptChangesOnlyActiveOverlayGeometry();
     void overlaySculptSynchronizesSectorSeam();
@@ -6958,7 +6962,7 @@ void EnduranceDocumentTests::mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlas
     const int assignmentGate = setTile.indexOf(
         "ensureModernTerrainArtworkAssigned(layer, semanticCatalog)");
     const int modernPaint = setTile.indexOf(
-        "makeVirtualTileMaterialPaint(");
+        "makeVirtualTileMaterialPaint(", assignmentGate);
     QVERIFY2(assignmentGate >= 0 && modernPaint > assignmentGate,
              "Modern paint can initialize semantics before checking live unassigned artwork");
     QVERIFY2(source.contains("reviewTerrainAtlasProfileAtSlot"),
@@ -7365,6 +7369,85 @@ void EnduranceDocumentTests::workingAtlasPublicationPreservesActiveStrokeTransac
                                         released);
     QVERIFY2(released >= 0 && undoOwned > released && flushed > undoOwned,
              "Deferred palette refresh can run before the completed stroke owns its undo entry");
+}
+
+void EnduranceDocumentTests::workingAtlasPreviewPublishesOnlyChangedPhysicalTiles()
+{
+    const QByteArray view = viewSource();
+    const QByteArray landscape = repositorySource(
+        QStringLiteral("source/render/landscape.cpp"));
+    const QByteArray header = repositorySource(
+        QStringLiteral("source/render/landscape.h"));
+    QVERIFY2(!view.isEmpty() && !landscape.isEmpty() && !header.isEmpty(),
+             "Could not locate terrain preview publication sources");
+    QVERIFY2(header.contains("const QSet<int>& changedSlots"),
+             "The landscape preview API cannot receive physical change ownership");
+    QVERIFY2(view.contains("activeImages, atlas->activeTextureCount(), changed"),
+             "Working-atlas publication still drops its changed-slot set");
+    QVERIFY2(landscape.contains("glTexSubImage2D"),
+             "Unchanged atlas layouts still rebuild every physical page");
+    QVERIFY2(landscape.contains("glCopyTexSubImage2D"),
+             "The first extension regrid still re-uploads all authored pages from CPU images");
+    QVERIFY2(landscape.contains("GL_FRAMEBUFFER_BINDING")
+             && landscape.contains("GL_TEXTURE_BINDING_2D"),
+             "The incremental preview path does not preserve caller GL state");
+    QVERIFY2(landscape.contains("previewTerrainAtlasFullUpload"),
+             "Incremental publication has no fail-closed full-upload fallback");
+    const int incrementalStart = landscape.indexOf(
+        "bool CLandscape::previewTerrainAtlasIncremental(");
+    const int regridStart = landscape.indexOf(
+        "bool CLandscape::previewTerrainAtlasRegridCopy(", incrementalStart);
+    QVERIFY(incrementalStart >= 0 && regridStart > incrementalStart);
+    const QByteArray incremental = landscape.mid(
+        incrementalStart, regridStart - incrementalStart);
+    const int stagingAllocation = incremental.indexOf(
+        "QOpenGLTexture* candidate");
+    const int publication = incremental.indexOf(
+        "m_previewAtlasTexture = candidate");
+    const int successGate = incremental.lastIndexOf(
+        "if(installed)", publication);
+    QVERIFY2(stagingAllocation >= 0 && successGate > stagingAllocation
+             && publication > successGate,
+             "Incremental GL failure can publish a partially updated preview");
+    const int stateCapture = landscape.indexOf(
+        "gl->glGetIntegerv(GL_TEXTURE_BINDING_2D", regridStart);
+    const int regridAllocation = landscape.indexOf(
+        "QOpenGLTexture* candidate", regridStart);
+    QVERIFY2(stateCapture >= 0 && regridAllocation > stateCapture,
+             "Regrid candidate allocation occurs before caller GL state is captured");
+
+    const int prewarmStart = view.indexOf(
+        "void CView::prewarmModernTerrainFamily(");
+    const int adoptStart = view.indexOf(
+        "bool CView::adoptPrewarmedTerrainFamily(", prewarmStart);
+    const int nextMethod = view.indexOf(
+        "void CView::refreshClassicAutoPalette()", adoptStart);
+    QVERIFY(prewarmStart >= 0 && adoptStart > prewarmStart
+            && nextMethod > adoptStart);
+    const QByteArray prewarm = view.mid(prewarmStart,
+                                        adoptStart - prewarmStart);
+    const QByteArray adopt = view.mid(adoptStart, nextMethod - adoptStart);
+    QVERIFY2(!prewarm.contains("syncWorkingTerrainAtlas("),
+             "Selection prewarm exposes uncommitted slots in renderer/picker");
+    QVERIFY2(prewarm.contains("QtConcurrent::run(")
+             && prewarm.contains("staged->atlas->resolve("),
+             "Exact-family realization still blocks the GUI event after selection");
+    const int authoredImport = prewarm.indexOf(
+        "addAuthoredLibraryTransition(");
+    const int authoredRealize = prewarm.indexOf(
+        "realizeAuthoredLibraryVariants(", authoredImport);
+    const int canonicalResolve = prewarm.indexOf(
+        "staged->atlas->resolve(", authoredRealize);
+    QVERIFY2(authoredImport >= 0 && authoredRealize > authoredImport
+             && canonicalResolve > authoredRealize,
+             "Worker prewarm bypasses approved-HD authored exact candidates before canonical generation");
+    QVERIFY2(prewarm.contains("guiMs:%4 workerMs:%5"),
+             "Prewarm telemetry does not separate GUI snapshot and worker time");
+    const int stagedPublish = adopt.indexOf(
+        "syncWorkingTerrainAtlas(report, staged->atlas.data())");
+    const int liveCommit = adopt.indexOf("commitStaging(*staged->atlas)");
+    QVERIFY2(stagedPublish >= 0 && liveCommit > stagedPublish,
+             "Prepared family is committed before its renderer/picker publication succeeds");
 }
 
 void EnduranceDocumentTests::resolveMissingBlendsStagesDeterministicLoadBaseline()
@@ -8958,6 +9041,117 @@ void EnduranceDocumentTests::overlayActivationDeactivationIsLosslessAndUndoable(
     quint16 maxedHeight = 0;
     maxedHeightStream >> maxedHeight;
     QCOMPARE(maxedHeight, quint16(65535));
+}
+
+void EnduranceDocumentTests::overlayActivationDistributesUniformVariantsAndRotations()
+{
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(syntheticLandSector(1200)),
+                                "overlay-variant-stamp.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline));
+
+    CTerrainTransitionCatalog catalog;
+    STerrainTransitionSignature uniform;
+    uniform.northWest = uniform.northEast = uniform.southEast
+        = uniform.southWest = 7;
+    for(int slot = 0; slot < 2; ++slot)
+        for(int rotation = 0; rotation < 4; ++rotation)
+        {
+            SMprPackedTile packed;
+            packed.tileIndex = quint8(slot);
+            packed.rotation = quint8(rotation);
+            STerrainTransitionVariant variant;
+            variant.signature = uniform;
+            variant.packedTile = packed.encode();
+            QVERIFY(catalog.addVariant(variant));
+        }
+
+    STerrainTileBrush brush;
+    brush.centerX = 8.0f;
+    brush.centerY = 8.0f;
+    brush.radius = 2.0f;
+    brush.shape = ETerrainTileBrushShape::Square;
+    const SOverlaySurfaceCommand command = terrain.makeOverlayActivation(
+        brush, 1, 0, 0, 0, &report, &catalog, uniform, 0x5a17u, true);
+    QVERIFY2(!command.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(terrain.apply(command, true, &report));
+
+    QSet<quint16> selected;
+    for(int y = 6; y <= 10; ++y)
+        for(int x = 6; x <= 10; ++x)
+            selected.insert(terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay));
+    QVERIFY2(selected.size() > 1,
+             "Add Overlay Surface stamped one packed tile/rotation over the whole brush");
+    for(quint16 packed : selected)
+    {
+        bool decoded = false;
+        QCOMPARE(catalog.gridSignatureForPacked(packed, &decoded), uniform);
+        QVERIFY(decoded);
+    }
+}
+
+void EnduranceDocumentTests::modernUniformOnlyPaintNeverSelectsBlendTiles()
+{
+    CMprDocument baseline;
+    CValidationReport report;
+    QVERIFY2(baseline.loadBytes(syntheticMpr(syntheticLandSector(1200)),
+                                "modern-uniform-only.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(baseline));
+
+    CTerrainTransitionCatalog catalog;
+    STerrainTransitionSignature uniform;
+    uniform.northWest = uniform.northEast = uniform.southEast
+        = uniform.southWest = 7;
+    for(int slot = 0; slot < 2; ++slot)
+        for(int rotation = 0; rotation < 4; ++rotation)
+        {
+            SMprPackedTile packed;
+            packed.tileIndex = quint8(slot);
+            packed.rotation = quint8(rotation);
+            STerrainTransitionVariant variant;
+            variant.signature = uniform;
+            variant.packedTile = packed.encode();
+            QVERIFY(catalog.addVariant(variant));
+        }
+    STerrainTransitionSignature blend = uniform;
+    blend.northWest = 3;
+    SMprPackedTile blendPacked;
+    blendPacked.tileIndex = 2;
+    STerrainTransitionVariant blendVariant;
+    blendVariant.signature = blend;
+    blendVariant.packedTile = blendPacked.encode();
+    QVERIFY(catalog.addVariant(blendVariant));
+
+    STerrainTileBrush brush;
+    brush.centerX = 8.0f;
+    brush.centerY = 8.0f;
+    brush.radius = 2.0f;
+    brush.shape = ETerrainTileBrushShape::Square;
+    const STerrainTileCommand command = terrain.makeUniformTilePaint(
+        brush, ETerrainTileLayer::Land, uniform, catalog, 0x9173u, true,
+        &report);
+    QVERIFY2(!command.isEmpty(), qPrintable(report.toText()));
+    QVERIFY(terrain.apply(command, true, &report));
+    QSet<quint16> painted;
+    for(int y = 6; y <= 10; ++y)
+        for(int x = 6; x <= 10; ++x)
+        {
+            const quint16 packed = terrain.packedTile(
+                x, y, ETerrainTileLayer::Land);
+            painted.insert(packed);
+            bool decoded = false;
+            QCOMPARE(catalog.gridSignatureForPacked(packed, &decoded), uniform);
+            QVERIFY(decoded);
+        }
+    QVERIFY(painted.size() > 1);
+    QVERIFY(terrain.apply(command, false, &report));
+    QVERIFY(terrain.apply(command, true, &report));
 }
 
 void EnduranceDocumentTests::semanticAtlasTransitionsCannotTransitivelyMergeMaterialAnchors()
@@ -11896,6 +12090,131 @@ void EnduranceDocumentTests::externalZone1TestOverlays3MappingProbe()
                 << maximumRawClearance
                 << "pixels" << pixels;
     }
+}
+
+void EnduranceDocumentTests::externalZone1TestOverlays4NoAnimMappingProbe()
+{
+    const QString mprPath = qEnvironmentVariable(
+        "EI_MAPPER_ZONE1TESTOVERLAYS4_REPRO_MPR");
+    const QString atlasPath = qEnvironmentVariable(
+        "EI_MAPPER_ZONE1TESTOVERLAYS4_REPRO_ATLAS");
+    if(mprPath.isEmpty() || atlasPath.isEmpty())
+        QSKIP("Set the R6 read-only finalized MPR/atlas pair environment variables");
+    CValidationReport report;
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    QCOMPARE(QCryptographicHash::hash(document.originalBytes(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("B0D594F6ADB16DB162F06AE740ABAEE3BDC2FF7E751943EB56D44D4040F51943"));
+    QFile atlasFile(atlasPath);
+    QVERIFY(atlasFile.open(QIODevice::ReadOnly));
+    QCOMPARE(QCryptographicHash::hash(atlasFile.readAll(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("B9494F0901D70D26ACF89592B05AFCA0A6E45B9E485F62DB045C34FE56147627"));
+    const STerrainAtlasEmbeddedBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+            {atlasPath}, document.mapInfo().innerNamespace, atlasPath);
+    QVERIFY2(binding.success(), qPrintable(binding.error));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+
+    QMap<int, int> overlaySlots;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 raw = terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &available);
+            if(available)
+                ++overlaySlots[SMprPackedTile::decode(raw).atlasSlot()];
+        }
+    qInfo() << "R6 exact fixture atlas/animations/overlay-slots"
+            << binding.decodedAtlasTiles.size()
+            << document.mapInfo().animatedTiles.size()
+            << overlaySlots;
+    for(const SMprAnimatedTileRecord& record : document.mapInfo().animatedTiles)
+        qInfo() << "R6 animation" << record.tileIndex << record.frameCount;
+    QCOMPARE(document.mapInfo().animatedTiles.size(), 1);
+    QCOMPARE(document.mapInfo().animatedTiles.front().tileIndex, quint16(504));
+    QCOMPARE(document.mapInfo().animatedTiles.front().frameCount, quint16(32));
+    const QSet<int> expectedFrameMemberBases{507, 510, 511, 516, 517, 532};
+    QSet<int> actualFrameMemberBases;
+    QMap<int, int> frameMemberMaterials;
+    for(auto slot = overlaySlots.constBegin(); slot != overlaySlots.constEnd(); ++slot)
+        if(slot.key() >= 504 && slot.key() < 536)
+            actualFrameMemberBases.insert(slot.key());
+    QCOMPARE(actualFrameMemberBases, expectedFrameMemberBases);
+    QCOMPARE(overlaySlots.value(504), 0);
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool packedAvailable = false;
+            const int slot = SMprPackedTile::decode(terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &packedAvailable)).atlasSlot();
+            if(!packedAvailable || slot < 504 || slot >= 536)
+                continue;
+            bool materialAvailable = false;
+            const qint16 material = terrain.overlayMaterialIndex(
+                x, y, &materialAvailable);
+            QVERIFY(materialAvailable);
+            ++frameMemberMaterials[material];
+        }
+    qInfo() << "R6 frame-member surface materials" << frameMemberMaterials;
+    QCOMPARE(std::accumulate(frameMemberMaterials.cbegin(),
+                             frameMemberMaterials.cend(), 0), 150);
+    for(auto item = frameMemberMaterials.constBegin();
+        item != frameMemberMaterials.constEnd(); ++item)
+    {
+        QVERIFY(item.key() >= 0 && item.key() < document.mapInfo().materials.size());
+        const SMprMaterialRecord& material =
+            document.mapInfo().materials.at(item.key());
+        qInfo() << "R6 surface material" << item.key() << "cells" << item.value()
+                << "type" << material.type << "opacity" << material.opacity
+                << "selfIllumination" << material.selfIllumination
+                << "waveMultiplier" << material.waveMultiplier
+                << "warpSpeed" << material.warpSpeed
+                << "reserved" << material.reserved1 << material.reserved2
+                << material.reserved3;
+    }
+    QMap<int, int> exactStartRemap;
+    for(int slot = 504; slot < 536; ++slot)
+        exactStartRemap.insert(slot, 504);
+    const STerrainTileCommand normalizeToRuntimeStart =
+        terrain.makeAtlasSlotRemap(exactStartRemap);
+    QCOMPARE(normalizeToRuntimeStart.deltas.size(), 150);
+    QVERIFY2(terrain.apply(normalizeToRuntimeStart, true, &report),
+             qPrintable(report.toText()));
+    int normalizedStartCells = 0;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool available = false;
+            const int slot = SMprPackedTile::decode(terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &available)).atlasSlot();
+            if(available && slot == 504)
+                ++normalizedStartCells;
+        }
+    QCOMPARE(normalizedStartCells, 150);
+    QVERIFY2(terrain.apply(normalizeToRuntimeStart, false, &report),
+             qPrintable(report.toText()));
+    QCOMPARE(SMprPackedTile::decode(terrain.packedTile(
+                 normalizeToRuntimeStart.deltas.front().globalX,
+                 normalizeToRuntimeStart.deltas.front().globalY,
+                 normalizeToRuntimeStart.deltas.front().layer)).atlasSlot(),
+             SMprPackedTile::decode(
+                 normalizeToRuntimeStart.deltas.front().before).atlasSlot());
+    const qint32 frameRuntimeType = document.mapInfo().tileTypes.at(504);
+    for(int slot = 504; slot < 536; ++slot)
+    {
+        QCOMPARE(document.mapInfo().tileTypes.at(slot), frameRuntimeType);
+        qInfo() << "R6 frame" << slot << "runtimeType" << frameRuntimeType
+                << "pixels" << CTerrainAtlasProfileInference::pixelSha256(
+                       {binding.decodedAtlasTiles.at(slot)});
+    }
+    QVERIFY(!overlaySlots.isEmpty());
+    for(auto slot = overlaySlots.constBegin(); slot != overlaySlots.constEnd(); ++slot)
+        QVERIFY(slot.key() >= 0 && slot.key() < binding.decodedAtlasTiles.size());
 }
 
 void EnduranceDocumentTests::externalZone1TestoOverlayMappingProbe()

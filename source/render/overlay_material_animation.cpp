@@ -93,7 +93,6 @@ SOverlayTileAnimation overlayTileAnimation(int atlasSlot,
                                            const QVector<SAnimTile>* animations,
                                            quint32 phaseSeed)
 {
-    Q_UNUSED(phaseSeed);
     SOverlayTileAnimation result;
     result.baseSlot = atlasSlot;
     if(!animations)
@@ -102,14 +101,14 @@ SOverlayTileAnimation overlayTileAnimation(int atlasSlot,
     {
         const int startSlot = int(animation.tileIndex);
         const int frameCount = int(animation.nPhase);
-        // Native maps preserve a cell's authored phase by referencing any
-        // physical slot in the declared contiguous flipbook range.
-        if(frameCount < 2 || atlasSlot < startSlot
-           || atlasSlot >= startSlot + frameCount)
+        // Runtime activation is keyed by the record start. The remaining
+        // contiguous slots are frame storage and are never activation aliases.
+        if(frameCount < 2 || atlasSlot != startSlot)
             continue;
         result.startSlot = startSlot;
         result.frameCount = frameCount;
-        result.startPhase = atlasSlot - startSlot;
+        result.startPhase = int((phaseSeed * 17u + 5u)
+                                % quint32(result.frameCount));
         result.animated = true;
         break;
     }

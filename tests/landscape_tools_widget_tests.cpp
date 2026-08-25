@@ -7,11 +7,17 @@
 #include <QListWidget>
 #include <QPointer>
 #include <QSignalSpy>
+#include <QSettings>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QOffscreenSurface>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
+#include <QOpenGLTexture>
+#include <QOpenGLTextureBlitter>
 
 #include "loaded_map_panel_policy.h"
 #include "landscape_tools.h"
@@ -28,12 +34,124 @@ private slots:
     void deferredTerrainThumbnailRefreshesWithoutInitialsFallback();
     void manualPaletteIsRequestedOnlyWhenItsTabIsOpened();
     void paintHelpLivesOnRelevantControls();
+    void modernAutoResolveBlendsIsExplicitAndModeScoped();
+    void sculptModeNeverAdmitsTilePreview();
     void overlaySurfaceModeLocksTileTargetAndOverlayLayer();
     void overlayModesExposeMprMaterialsShortcut();
     void overlaySurfaceModesExposeMaterialSlotLabels();
     void overlayMaterialDropdownRefreshesImmediately();
+    void compressedTerrainAtlasFramebufferCapability();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
+
+void LandscapeToolsWidgetTests::compressedTerrainAtlasFramebufferCapability()
+{
+    QOffscreenSurface surface;
+    surface.create();
+    QOpenGLContext context;
+    if(!context.create() || !context.makeCurrent(&surface))
+        QSKIP("The selected headless platform plugin exposes no OpenGL context");
+    QOpenGLTexture compressed(QOpenGLTexture::Target2D);
+    QVERIFY(compressed.create());
+    compressed.setSize(256, 256);
+    compressed.setFormat(QOpenGLTexture::RGBA_DXT1);
+    compressed.setMipLevels(1);
+    compressed.allocateStorage(QOpenGLTexture::RGBA,
+                               QOpenGLTexture::UInt8);
+    QVERIFY2(compressed.isStorageAllocated(),
+             "Retained context cannot allocate the shipped DXT1 atlas format");
+    QOpenGLFunctions* gl = context.functions();
+    GLuint framebuffer = 0;
+    gl->glGenFramebuffers(1, &framebuffer);
+    gl->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    gl->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D, compressed.textureId(), 0);
+    const GLenum status = gl->glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    qInfo("retained DXT1 framebuffer status=0x%x complete=%d",
+          uint(status), status == GL_FRAMEBUFFER_COMPLETE ? 1 : 0);
+    QByteArray redDxt(256 * 256 / 2, char(0));
+    for(int offset = 0; offset < redDxt.size(); offset += 8)
+    {
+        redDxt[offset + 0] = char(0x00);
+        redDxt[offset + 1] = char(0xf8);
+    }
+    compressed.setCompressedData(redDxt.size(), redDxt.constData());
+    QOpenGLTexture target(QOpenGLTexture::Target2D);
+    QVERIFY(target.create());
+    target.setSize(256, 256);
+    target.setFormat(QOpenGLTexture::RGBA8_UNorm);
+    target.setMipLevels(1);
+    target.allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
+    gl->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D, target.textureId(), 0);
+    QCOMPARE(gl->glCheckFramebufferStatus(GL_FRAMEBUFFER),
+             GLenum(GL_FRAMEBUFFER_COMPLETE));
+    gl->glViewport(0, 0, 256, 256);
+    gl->glDisable(GL_BLEND);
+    gl->glDisable(GL_DEPTH_TEST);
+    gl->glDisable(GL_CULL_FACE);
+    QOpenGLTextureBlitter blitter;
+    QVERIFY(blitter.create());
+    blitter.bind();
+    blitter.blit(compressed.textureId(),
+        QOpenGLTextureBlitter::targetTransform(
+            QRectF(0, 0, 256, 256), QRect(0, 0, 256, 256)),
+        QOpenGLTextureBlitter::OriginBottomLeft);
+    blitter.release();
+    uchar pixel[4] = {0, 0, 0, 0};
+    gl->glReadPixels(128, 128, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    QVERIFY2(pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40,
+             "Retained context could not sample DXT1 into an RGBA regrid target");
+    blitter.destroy();
+    gl->glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl->glDeleteFramebuffers(1, &framebuffer);
+    target.destroy();
+    compressed.destroy();
+    context.doneCurrent();
+}
+
+void LandscapeToolsWidgetTests::modernAutoResolveBlendsIsExplicitAndModeScoped()
+{
+    QSettings settings;
+    settings.remove(QStringLiteral("ui/landscape/modernAutoResolveBlends"));
+    CLandscapeTools tools;
+    tools.resize(730, 1500);
+    tools.setEditingEnabled(true, false);
+    QCheckBox* autoResolve = tools.findChild<QCheckBox*>(
+        QStringLiteral("modernAutoResolveBlends"));
+    QVERIFY2(autoResolve,
+             "Modern painting has no explicit Auto-resolve blends control");
+    QVERIFY(autoResolve->isChecked());
+
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+    tools.activateMode(ELandscapeEditMode::TilePaint, false);
+    QVERIFY(autoResolve->isVisibleTo(&tools));
+    QVERIFY(tools.modernAutoResolveBlends());
+    autoResolve->setChecked(false);
+    QVERIFY(!tools.modernAutoResolveBlends());
+
+    tools.activateMode(ELandscapeEditMode::OverlaySurface, false);
+    QVERIFY2(autoResolve->isVisibleTo(&tools),
+             "Add Overlay Surface hides the Modern blend policy");
+    QVERIFY(!tools.modernAutoResolveBlends());
+
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::ClassicAuto);
+    QVERIFY(!autoResolve->isVisibleTo(&tools));
+}
+
+void LandscapeToolsWidgetTests::sculptModeNeverAdmitsTilePreview()
+{
+    CLandscapeTools tools;
+    tools.setEditingEnabled(true, false);
+    tools.activateMode(ELandscapeEditMode::Sculpt, false);
+    QVERIFY(!tools.tilePaintPreviewEnabled());
+    tools.activateMode(ELandscapeEditMode::OverlaySculpt, false);
+    QVERIFY(!tools.tilePaintPreviewEnabled());
+    tools.activateMode(ELandscapeEditMode::TilePaint, false);
+    QVERIFY(tools.tilePaintPreviewEnabled());
+    tools.activateMode(ELandscapeEditMode::OverlaySurface, false);
+    QVERIFY(tools.tilePaintPreviewEnabled());
+}
 
 void LandscapeToolsWidgetTests::loadedMapRefreshWaitsForTreeItemMutationToReturn()
 {

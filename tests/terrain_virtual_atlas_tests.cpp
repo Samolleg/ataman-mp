@@ -6861,9 +6861,10 @@ void TerrainVirtualAtlasTests::workingAtlasRepacksInterleavedUniformAnimationFra
     QCOMPARE(normalized.front().tileIndex, quint16(6));
     QCOMPARE(normalized.front().frameCount, quint16(3));
     QCOMPARE(remap.value(0), 6);
-    QCOMPARE(remap.value(2), 7);
-    QCOMPARE(remap.value(4), 8);
+    QCOMPARE(remap.value(2), 6);
+    QCOMPARE(remap.value(4), 6);
     QCOMPARE(remap.size(), 3);
+    const QMap<int, int> activationRemap = remap;
     QVERIFY(live.commitStaging(*staged));
     for(int slot = 6; slot < 9; ++slot)
     {
@@ -6872,6 +6873,16 @@ void TerrainVirtualAtlasTests::workingAtlasRepacksInterleavedUniformAnimationFra
         QCOMPARE(identity.canonicalSignature, signature(7, 7, 7, 7));
         QCOMPARE(identity.runtimeTerrainType, qint32(3));
     }
+
+    QSharedPointer<CTerrainWorkingAtlas> contiguous = live.createStagingCopy();
+    record.tileIndex = 6;
+    QVERIFY2(contiguous->normalizeAnimationRanges({record}, &normalized,
+        &remap, &report), qPrintable(report.toText()));
+    QCOMPARE(normalized.front().tileIndex, quint16(6));
+    QCOMPARE(remap.value(6), 6);
+    QCOMPARE(remap.value(7), 6);
+    QCOMPARE(remap.value(8), 6);
+    QCOMPARE(remap.size(), 3);
 
     SMprPackedTile activating;
     activating.tileIndex = 0;
@@ -6888,7 +6899,8 @@ void TerrainVirtualAtlasTests::workingAtlasRepacksInterleavedUniformAnimationFra
     QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
     terrain.enableWorkingAtlasSlots(live.capacityLimit());
     QVERIFY(terrain.installWorkingAtlasSlotTypes(live.activeTileTypes()));
-    const STerrainTileCommand remapCommand = terrain.makeAtlasSlotRemap(remap);
+    const STerrainTileCommand remapCommand = terrain.makeAtlasSlotRemap(
+        activationRemap);
     QCOMPARE(remapCommand.deltas.size(), 16 * 16 * 2);
     QVERIFY(terrain.apply(remapCommand, true, &report));
     for(ETerrainTileLayer layer : {ETerrainTileLayer::Land,
@@ -6898,7 +6910,7 @@ void TerrainVirtualAtlasTests::workingAtlasRepacksInterleavedUniformAnimationFra
         const SMprPackedTile moved = SMprPackedTile::decode(
             terrain.packedTile(0, 0, layer, &available));
         QVERIFY(available);
-        QCOMPARE(moved.atlasSlot(), layer == ETerrainTileLayer::Land ? 6 : 8);
+        QCOMPARE(moved.atlasSlot(), 6);
         QCOMPARE(moved.rotation, layer == ETerrainTileLayer::Land
             ? quint8(3) : quint8(2));
     }

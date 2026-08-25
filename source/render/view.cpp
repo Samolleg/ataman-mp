@@ -659,7 +659,8 @@ QImage loadBoundTerrainAtlasTile(
     const QSize& requiredSize,
     QMap<QString, STerrainAtlasArchiveBindingResult>* boundAtlasCache,
     QSet<QString>* missingPageCache,
-    QMap<QString, QImage>* decodedTileCache)
+    QMap<QString, QImage>* decodedTileCache,
+    const QStringList* configuredArchivesOverride = nullptr)
 {
     if(!boundAtlasCache || !missingPageCache || !decodedTileCache
        || atlasPixelSha256.size() != 64
@@ -677,8 +678,9 @@ QImage loadBoundTerrainAtlasTile(
        && missingPageCache->contains(bindingKey))
         return QImage();
 
-    const QStringList configuredArchives = CTextureList::getInstance()
-        ->configuredResourceArchivePaths();
+    const QStringList configuredArchives = configuredArchivesOverride
+        ? *configuredArchivesOverride
+        : CTextureList::getInstance()->configuredResourceArchivePaths();
     auto cachedBinding = boundAtlasCache->find(bindingKey);
     if(cachedBinding != boundAtlasCache->end())
     {
@@ -726,15 +728,17 @@ QImage loadBoundTerrainAtlasTile(
 
 QImage loadGlobalTransitionTile(const STerrainGlobalTransitionSource& source,
                                 const QSize& requiredSize,
-                                QMap<QString, STerrainAtlasArchiveBindingResult>*
-                                    boundAtlasCache,
-                                QSet<QString>* missingPageCache,
-                                QMap<QString, QImage>* decodedTileCache)
+                                 QMap<QString, STerrainAtlasArchiveBindingResult>*
+                                     boundAtlasCache,
+                                 QSet<QString>* missingPageCache,
+                                 QMap<QString, QImage>* decodedTileCache,
+                                 const QStringList* configuredArchivesOverride = nullptr)
 {
     return loadBoundTerrainAtlasTile(
         source.mprNamespace, source.atlasPixelSha256,
         source.textureCount, source.atlasSlotCount, source.slot,
-        requiredSize, boundAtlasCache, missingPageCache, decodedTileCache);
+        requiredSize, boundAtlasCache, missingPageCache, decodedTileCache,
+        configuredArchivesOverride);
 }
 
 QImage loadBoundGlobalUniformSource(
@@ -972,6 +976,41 @@ public:
 private:
     CView* m_view;
     SOverlaySurfaceCommand m_command;
+    bool m_skipInitialRedo{false};
+};
+
+class COverlayTerrainPreviewCommand : public QUndoCommand,
+                                      public IAiGraphPreviewInvalidatingCommand
+{
+public:
+    COverlayTerrainPreviewCommand(CView* view,
+        const SOverlaySurfaceCommand& surface,
+        const STerrainTileCommand& terrain, bool alreadyApplied)
+        : m_view(view), m_surface(surface), m_terrain(terrain),
+          m_skipInitialRedo(alreadyApplied)
+    {
+        setText(QObject::tr("Add overlay surface and resolve terrain tiles"));
+    }
+    void undo() override
+    {
+        m_view->applyTerrainTilePreview(m_terrain, false);
+        m_view->applyOverlaySurfacePreview(m_surface, false);
+    }
+    void redo() override
+    {
+        if(m_skipInitialRedo)
+        {
+            m_skipInitialRedo = false;
+            return;
+        }
+        m_view->applyOverlaySurfacePreview(m_surface, true);
+        m_view->applyTerrainTilePreview(m_terrain, true);
+    }
+    bool invalidatesAiGraphPreview() const override { return true; }
+private:
+    CView* m_view;
+    SOverlaySurfaceCommand m_surface;
+    STerrainTileCommand m_terrain;
     bool m_skipInitialRedo{false};
 };
 
@@ -1420,6 +1459,16 @@ struct SWorkingTerrainResolveStage
     bool undoCheckpointRequired{false};
 };
 
+struct STerrainFamilyPrewarmResult
+{
+    QSharedPointer<SWorkingTerrainResolveStage> staged;
+    quint64 requestGeneration{0};
+    qint32 terrainType{-1};
+    ETerrainTileLayer layer{ETerrainTileLayer::Land};
+    QString error;
+    qint64 workerMilliseconds{0};
+};
+
 QByteArray terrainTilePixelSha256(const QImage& source);
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
@@ -1616,10 +1665,10 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 &CLandscapeTools::manualAtlasPaletteRequested,
                 this, [this]() { refreshManualAtlasPalette(false); });
         connect(m_landscapeTools, &CLandscapeTools::paintTerrainTypeChanged,
-                this, [this](qint32 terrainType)
+                 this, [this](qint32 terrainType)
         {
-            Q_UNUSED(terrainType);
             cancelTileBrushGroup();
+            queueModernTerrainFamilyPrewarm(terrainType);
             if(!manualTilePaintingEnabled())
             {
                 setPreviewTile(false);
@@ -10350,6 +10399,9 @@ void CView::rebuildTerrainAutoCatalog()
 {
     const quint64 hydrationGeneration =
         ++m_terrainGlobalHydrationGeneration;
+    ++m_terrainFamilyPrewarmGeneration;
+    m_preparedTerrainFamilyStage.clear();
+    m_preparedTerrainFamily = -1;
     m_terrainGlobalHydrationPendingJobs = 0;
     m_terrainGlobalHydrationPublishQueued = false;
     m_terrainGlobalHydrationBestRanks.clear();
@@ -11097,11 +11149,287 @@ void CView::applyDeferredGlobalTerrainPaletteHydration(quint64 generation)
         m_landscapeTools->endTerrainPaletteUpdate();
     }
     if(complete)
+    {
         ei::log(eLogInfo, QString(
             "Deferred reviewed-HD terrain hydration complete exactBindings:%1 thumbnails:%2 materialSources:%3")
             .arg(m_terrainGlobalBoundAtlasCache.size())
             .arg(m_terrainGlobalHydrationBestThumbnails.size())
             .arg(m_terrainGlobalMaterialSources.size()));
+        if(m_landscapeTools)
+        {
+            bool selected = false;
+            const qint32 material =
+                m_landscapeTools->paintTerrainType(&selected);
+            if(selected)
+                queueModernTerrainFamilyPrewarm(material);
+        }
+    }
+}
+
+void CView::queueModernTerrainFamilyPrewarm(qint32 terrainType)
+{
+    const quint64 requestGeneration = ++m_terrainFamilyPrewarmGeneration;
+    m_preparedTerrainFamilyStage.clear();
+    m_preparedTerrainFamily = -1;
+    if(terrainType < 0 || !m_landscapeTools || !m_workingTerrainAtlas
+       || !m_workingTerrainAtlas->isValid()
+       || m_landscapeTools->paintPaletteMode()
+            != ETerrainPaintPaletteMode::Modern
+       || m_landscapeTools->manualTileSelectionEnabled()
+       || m_tilePaintStrokeActive || m_tileStrokeFinishing)
+        return;
+    const ETerrainTileLayer layer = terrainTileEditLayerIsLand()
+        ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+    // Yield selection/hover painting first. The copy below may hydrate an exact
+    // reviewed-HD tile, but it cannot dirty the live atlas or MPR document.
+    QTimer::singleShot(0, this, [this, terrainType, layer,
+                                 requestGeneration]() {
+        prewarmModernTerrainFamily(terrainType, layer, requestGeneration);
+    });
+}
+
+void CView::prewarmModernTerrainFamily(qint32 terrainType,
+                                       ETerrainTileLayer layer,
+                                       quint64 requestGeneration)
+{
+    if(requestGeneration != m_terrainFamilyPrewarmGeneration
+       || m_tilePaintStrokeActive || m_tileStrokeFinishing
+       || !m_workingTerrainAtlas || !m_landscapeTools
+       || !m_terrainGlobalHydrationPool
+       || m_landscapeTools->paintPaletteMode()
+            != ETerrainPaintPaletteMode::Modern)
+        return;
+    bool selected = false;
+    if(m_landscapeTools->paintTerrainType(&selected) != terrainType || !selected)
+        return;
+
+    QElapsedTimer guiTimer;
+    guiTimer.start();
+    QSharedPointer<SWorkingTerrainResolveStage> staged(
+        new SWorkingTerrainResolveStage);
+    staged->atlas = m_workingTerrainAtlas->createStagingCopy();
+    staged->terrainEdit = m_terrainEdit;
+    staged->protectedSlots = m_workingAtlasProtectedSlots;
+    staged->importedTransitions = m_importedTerrainTransitions;
+    staged->boundAtlasCache = m_terrainGlobalBoundAtlasCache;
+    staged->missingPages = m_terrainGlobalTransitionMissingPages;
+    staged->decodedTileCache = m_terrainGlobalTransitionTileCache;
+    staged->uniformTileCache = m_terrainGlobalUniformTileCache;
+    staged->materialSources = m_terrainGlobalMaterialSources;
+    staged->materialSourceIdentities =
+        m_terrainGlobalMaterialSourceIdentities;
+    if(!staged->atlas)
+        return;
+
+    STerrainTransitionSignature pure;
+    pure.northWest = pure.northEast = pure.southEast = pure.southWest =
+        terrainType;
+    const bool typedOverlay = layer == ETerrainTileLayer::Overlay
+        && m_landscapeTools->editMode()
+            == ELandscapeEditMode::OverlaySurface
+        && m_landscapeTools->overlaySurfaceOperation()
+            == EOverlaySurfaceOperation::Activate;
+    const qint32 runtimeType = typedOverlay
+        ? materialRuntimeTypes(m_terrainAtlasProfile,
+                               m_terrainGlobalFamilies)
+              .value(terrainType, -1)
+        : -1;
+    if(typedOverlay && runtimeType < 0)
+        return;
+    QMap<int, quint64> usage = workingTerrainAtlasUsage();
+    QList<STerrainGlobalTransitionSource> authoredCandidates =
+        m_terrainGlobalTransitionSources.values(globalTransitionKey(pure));
+    std::sort(authoredCandidates.begin(), authoredCandidates.end(), [](
+        const STerrainGlobalTransitionSource& left,
+        const STerrainGlobalTransitionSource& right) {
+        if(left.atlasIdentity != right.atlasIdentity)
+            return left.atlasIdentity < right.atlasIdentity;
+        if(left.atlasPixelSha256 != right.atlasPixelSha256)
+            return left.atlasPixelSha256 < right.atlasPixelSha256;
+        if(left.slot != right.slot)
+            return left.slot < right.slot;
+        return left.mprNamespace.toCaseFolded()
+            < right.mprNamespace.toCaseFolded();
+    });
+    const QStringList configuredArchives = CTextureList::getInstance()
+        ->configuredResourceArchivePaths();
+    const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
+        ? QSize() : m_authoredTerrainTileImages.front().size();
+    const quint32 semanticSeed = m_terrainSemanticSeed;
+    const qint64 guiMilliseconds = guiTimer.elapsed();
+    auto* watcher = new QFutureWatcher<STerrainFamilyPrewarmResult>(this);
+    connect(watcher, &QFutureWatcher<STerrainFamilyPrewarmResult>::finished,
+            this, [this, watcher, guiMilliseconds]() {
+        const STerrainFamilyPrewarmResult result = watcher->result();
+        watcher->deleteLater();
+        if(result.requestGeneration != m_terrainFamilyPrewarmGeneration)
+            return;
+        if(!result.error.isEmpty() || !result.staged)
+        {
+            ei::log(eLogWarning, QString(
+                "Terrain family worker prewarm refused material:%1 error:%2 guiMs:%3 workerMs:%4")
+                .arg(result.terrainType).arg(result.error)
+                .arg(guiMilliseconds).arg(result.workerMilliseconds));
+            return;
+        }
+        m_preparedTerrainFamilyStage = result.staged;
+        m_preparedTerrainFamily = result.terrainType;
+        m_preparedTerrainFamilyLayer = result.layer;
+        ei::log(eLogInfo, QString(
+            "Terrain family worker prewarmed without publishing or dirtying live atlas: material:%1 layer:%2 changedSlots:%3 guiMs:%4 workerMs:%5")
+            .arg(result.terrainType)
+            .arg(result.layer == ETerrainTileLayer::Land
+                ? QStringLiteral("land") : QStringLiteral("overlay"))
+            .arg(result.staged->atlas->changedSlots().size())
+            .arg(guiMilliseconds).arg(result.workerMilliseconds));
+    });
+    watcher->setFuture(QtConcurrent::run(
+        m_terrainGlobalHydrationPool,
+        [staged, pure, usage, terrainType, runtimeType, typedOverlay,
+         layer, requestGeneration, authoredCandidates, configuredArchives,
+         requiredSize, semanticSeed]() mutable {
+        STerrainFamilyPrewarmResult result;
+        result.requestGeneration = requestGeneration;
+        result.terrainType = terrainType;
+        result.layer = layer;
+        QElapsedTimer workerTimer;
+        workerTimer.start();
+        CValidationReport report;
+        bool exactAvailable = false;
+        if(typedOverlay)
+            exactAvailable = selectWorkingPaintVariantWithRuntimeType(
+                *staged->atlas, pure, 0, 0, semanticSeed,
+                runtimeType, nullptr);
+        else
+            staged->atlas->catalog().selectForPaint(
+                pure, 0, 0, semanticSeed, &exactAvailable);
+        if(!exactAvailable)
+        {
+            QSet<QByteArray> importedPhysical;
+            QSet<QByteArray> importedPixels;
+            bool importedAny = false;
+            for(const STerrainGlobalTransitionSource& source :
+                    authoredCandidates)
+            {
+                QByteArray physicalKey = source.atlasIdentity + '|'
+                    + source.atlasPixelSha256 + '|'
+                    + QByteArray::number(source.slot);
+                if(importedPhysical.contains(physicalKey))
+                    continue;
+                importedPhysical.insert(physicalKey);
+                const QImage pixels = loadGlobalTransitionTile(
+                    source, requiredSize, &staged->boundAtlasCache,
+                    &staged->missingPages, &staged->decodedTileCache,
+                    &configuredArchives);
+                if(pixels.isNull())
+                    continue;
+                QByteArray pixelKey = globalTransitionKey(source.signature)
+                    + '|' + terrainTilePixelSha256(pixels) + '|'
+                    + QByteArray::number(runtimeType);
+                if(importedPixels.contains(pixelKey))
+                    continue;
+                importedPixels.insert(pixelKey);
+                const QString label = QStringLiteral("%1 slot %2")
+                    .arg(source.mprNamespace).arg(source.slot);
+                if(staged->atlas->addAuthoredLibraryTransition(
+                       source.signature, pixels, label, &report,
+                       source.mprNamespace, source.slot))
+                {
+                    importedAny = true;
+                    staged->importedTransitions.insert(
+                        globalTransitionKey(source.signature),
+                        qMakePair(source.signature, pixels));
+                }
+            }
+            if(importedAny && !report.hasErrors())
+                staged->atlas->realizeAuthoredLibraryVariants(
+                    pure, &usage, staged->protectedSlots, &report,
+                    terrainType, runtimeType, typedOverlay);
+        }
+        bool generated = false;
+        quint16 packed = 0;
+        if(!report.hasErrors())
+            packed = staged->atlas->resolve(
+                pure, 0, 0, &usage, staged->protectedSlots, &generated,
+                &report, terrainType, runtimeType, typedOverlay);
+        const int slot = SMprPackedTile::decode(packed).atlasSlot();
+        if(report.hasErrors())
+            result.error = report.toText().trimmed();
+        else if(slot < 0 || slot >= staged->atlas->activeTileCount())
+            result.error = QStringLiteral(
+                "Prepared exact family returned an invalid physical slot.");
+        else if(typedOverlay
+                && staged->atlas->runtimeTerrainTypeForSlot(slot)
+                    != runtimeType)
+            result.error = QStringLiteral(
+                "Prepared overlay family did not retain its exact runtime type.");
+        else if(!staged->terrainEdit.setWorkingAtlasSlotType(
+                    slot, staged->atlas->runtimeTerrainTypeForSlot(slot)))
+            result.error = QStringLiteral(
+                "Prepared exact family could not stage its runtime type.");
+        if(result.error.isEmpty())
+            result.staged = staged;
+        result.workerMilliseconds = workerTimer.elapsed();
+        return result;
+    }));
+}
+
+bool CView::adoptPrewarmedTerrainFamily(qint32 terrainType,
+                                        ETerrainTileLayer layer,
+                                        CValidationReport* report)
+{
+    if(!m_preparedTerrainFamilyStage
+       || m_preparedTerrainFamily != terrainType
+       || m_preparedTerrainFamilyLayer != layer)
+        return false;
+    QSharedPointer<SWorkingTerrainResolveStage> staged =
+        m_preparedTerrainFamilyStage;
+    m_preparedTerrainFamilyStage.clear();
+    m_preparedTerrainFamily = -1;
+    ++m_terrainFamilyPrewarmGeneration;
+    if(staged->undoCheckpointRequired || !m_workingTerrainAtlas
+       || !m_workingTerrainAtlas->canCommitStaging(*staged->atlas)
+       || !m_terrainEdit.canInstallWorkingAtlasSlotTypes(
+              staged->atlas->activeTileTypes()))
+    {
+        if(report) report->add("terrain.family_prewarm_stale",
+            EValidationSeverity::Warning,
+            "The prepared terrain family became stale and will be realized by the normal exact path.");
+        return false;
+    }
+    // Publication is delayed until the first valid committed sample. Thus a
+    // selection/mode change can discard this object without exposing staged
+    // slots in either the renderer or Manual picker.
+    if(!staged->atlas->changedSlots().isEmpty()
+       && !syncWorkingTerrainAtlas(report, staged->atlas.data()))
+        return false;
+    if(!m_workingTerrainAtlas->commitStaging(*staged->atlas)
+       || !m_terrainEdit.installWorkingAtlasSlotTypes(
+              m_workingTerrainAtlas->activeTileTypes()))
+    {
+        if(report) report->add("terrain.family_prewarm_commit",
+            EValidationSeverity::Error,
+            "The prepared exact terrain family could not be adopted atomically.");
+        return false;
+    }
+    m_workingTerrainAtlas->setDistributionSeed(m_tileStrokeDistributionSeed);
+    m_workingAtlasProtectedSlots = staged->protectedSlots;
+    m_importedTerrainTransitions = staged->importedTransitions;
+    m_terrainGlobalBoundAtlasCache = staged->boundAtlasCache;
+    m_terrainGlobalTransitionMissingPages = staged->missingPages;
+    m_terrainGlobalTransitionTileCache = staged->decodedTileCache;
+    m_terrainGlobalUniformTileCache = staged->uniformTileCache;
+    m_terrainGlobalMaterialSources = staged->materialSources;
+    m_terrainGlobalMaterialSourceIdentities =
+        staged->materialSourceIdentities;
+    if(m_landscapeTools)
+        m_landscapeTools->setGeneratedAtlasTileCount(
+            m_workingTerrainAtlas->generatedTileCount());
+    refreshWorkingTerrainPalettes();
+    ei::log(eLogInfo, QString(
+        "Terrain family prewarm adopted on first committed sample material:%1")
+        .arg(terrainType));
+    return true;
 }
 
 void CView::refreshClassicAutoPalette()
@@ -12654,7 +12982,7 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
     {
         makeCurrent();
         rendererInstalled = m_pLand->previewTerrainAtlas(
-            activeImages, atlas->activeTextureCount());
+            activeImages, atlas->activeTextureCount(), changed);
         doneCurrent();
         if(!rendererInstalled)
             pickerRestored = m_pTileForm->adoptTileImages(
@@ -16673,6 +17001,20 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     m_lastTerrainPaintCenterValid = true;
     m_lastTerrainPaintLayerLand = bLand;
     CValidationReport report;
+    if(semanticPaint && preselectedMaterial
+       && m_landscapeTools->paintPaletteMode()
+            == ETerrainPaintPaletteMode::Modern)
+    {
+        adoptPrewarmedTerrainFamily(preselectedTerrainType,
+            bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay,
+            &report);
+        if(report.hasErrors())
+        {
+            ++m_tileStrokeRefused;
+            emit updateMsg(report.toText());
+            return;
+        }
+    }
     if(!bLand && m_landscapeTools->overlaySurfaceOperation()
                      != EOverlaySurfaceOperation::PaintExisting)
     {
@@ -16680,6 +17022,10 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         QElapsedTimer overlayCommandTimer;
         overlayCommandTimer.start();
         SOverlaySurfaceCommand surfaceCommand;
+        const ETerrainPaintPaletteMode paletteMode =
+            m_landscapeTools->paintPaletteMode();
+        qint32 runtimeType = -1;
+        STerrainTransitionSignature pure;
         if(m_landscapeTools->overlaySurfaceOperation()
            == EOverlaySurfaceOperation::Deactivate)
         {
@@ -16692,18 +17038,15 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             m_tileStrokeMaterialId = materialSelected ? material : -1;
             int selectedIndex = -1;
             int selectedRotation = 0;
-            const ETerrainPaintPaletteMode paletteMode =
-                m_landscapeTools->paintPaletteMode();
             if(paletteMode == ETerrainPaintPaletteMode::Manual)
                 m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
             else
             {
                 bool terrainSelected = false;
                 const qint32 terrainType = m_landscapeTools->paintTerrainType(&terrainSelected);
-                const qint32 runtimeType = materialRuntimeTypes(
+                runtimeType = materialRuntimeTypes(
                     m_terrainAtlasProfile, m_terrainGlobalFamilies)
                         .value(terrainType, -1);
-                STerrainTransitionSignature pure;
                 pure.northWest = pure.northEast = pure.southEast =
                     pure.southWest = terrainType;
                 quint16 selectedPacked = 0;
@@ -16713,6 +17056,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 if(exactSelected
                    && paletteMode == ETerrainPaintPaletteMode::Modern)
                 {
+                    adoptPrewarmedTerrainFamily(
+                        terrainType, ETerrainTileLayer::Overlay, &report);
                     QMap<int, quint64> usage = workingTerrainAtlasUsage();
                     exactSelected = realizeWorkingTerrainSignature(
                         pure, qRound(brush.centerX), qRound(brush.centerY),
@@ -16741,7 +17086,11 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             }
             surfaceCommand = m_terrainEdit.makeOverlayActivation(
                 brush, material, quint8(selectedIndex / 64), quint8(selectedIndex % 64),
-                quint8(selectedRotation & 3), &report);
+                quint8(selectedRotation & 3), &report,
+                paletteMode == ETerrainPaintPaletteMode::Manual
+                    ? nullptr : &m_workingTerrainAtlas->catalog(),
+                pure, m_tileStrokeDistributionSeed,
+                m_landscapeTools->randomizeUniformRotation(), runtimeType);
         }
         m_overlayCommandNsecs += overlayCommandTimer.nsecsElapsed();
         ++m_tileStrokeActions;
@@ -16762,9 +17111,36 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             emit updateMsg(tr("Overlay surface edit was refused; no undo entry was created."));
             return;
         }
+        STerrainTileCommand semanticOverlayCommand;
+        const bool resolveModernOverlay =
+            m_landscapeTools->overlaySurfaceOperation()
+                == EOverlaySurfaceOperation::Activate
+            && paletteMode == ETerrainPaintPaletteMode::Modern
+            && m_tileStrokeAutoResolveBlends;
+        if(resolveModernOverlay)
+        {
+            semanticOverlayCommand = m_terrainEdit.makeVirtualTileMaterialPaint(
+                brush, ETerrainTileLayer::Overlay,
+                pure.northWest, m_workingTerrainAtlas->catalog(),
+                m_tileStrokeDistributionSeed, &report,
+                m_landscapeTools->randomizeUniformRotation());
+            if(report.hasErrors()
+               || (!semanticOverlayCommand.isEmpty()
+                   && !applyTerrainTilePreview(semanticOverlayCommand, true)))
+            {
+                applyOverlaySurfacePreview(surfaceCommand, false);
+                ++m_tileStrokeRefused;
+                emit updateMsg(report.hasErrors() ? report.toText()
+                    : tr("The semantic Add Overlay preview was refused; no edit was kept."));
+                return;
+            }
+        }
         ++m_tileStrokeApplied;
         m_tileStrokeChangedTiles += surfaceCommand.sectors.size();
         appendOverlaySurfaceCommand(&m_overlaySurfaceStrokeCommand, surfaceCommand);
+        if(!semanticOverlayCommand.isEmpty())
+            appendTerrainTileCommand(&m_tileStrokeCommand,
+                                     semanticOverlayCommand);
         if(surfaceCommand.heightClampedVertexCount > 0)
             emit updateMsg(tr("Added overlay surface; %1 vertex/vertices were clamped to MPR maxZ and may overlap the land until the terrain or maxZ is adjusted.")
                                .arg(surfaceCommand.heightClampedVertexCount));
@@ -16985,6 +17361,11 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 semanticCatalog, m_tileStrokeDistributionSeed, &report,
                 classicPolicy);
         }
+        else if(!m_tileStrokeAutoResolveBlends)
+            command = m_terrainEdit.makeUniformTilePaint(
+                tileTarget ? brush : vertexBrush, layer, pure,
+                semanticCatalog, m_tileStrokeDistributionSeed,
+                m_landscapeTools->randomizeUniformRotation(), &report);
         else if(tileTarget)
             command = m_terrainEdit.makeVirtualTileMaterialPaint(
                 brush, layer, terrainType, semanticCatalog,
@@ -17139,6 +17520,15 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
 {
     if(!m_pLand->isMprLoad())
         return;
+    if(!m_landscapeTools || !m_landscapeTools->tilePaintPreviewEnabled())
+    {
+        m_terrainPaintFootprintValid = false;
+        m_terrainPaintOutlineValid = false;
+        setPreviewTile(false);
+        unsetCursor();
+        update();
+        return;
+    }
     // Hover traffic can already be queued while an MPR is opening. A hover is
     // not an explicit paint request and must not pull paint-only initialization
     // ahead of the first landscape frame.
@@ -17355,7 +17745,8 @@ void CView::endTileBrushGroup()
             if(!m_classicAutoStrokeValidation.isEmpty())
                 emit updateMsg(m_classicAutoStrokeValidation);
         }
-        if(!m_tileStrokeClassicAuto
+        if(m_tileStrokeAutoResolveBlends
+           && !m_tileStrokeClassicAuto
            && m_tileStrokePaletteMode
                   != int(ETerrainPaintPaletteMode::Manual)
            && (!m_tileStrokeCommand.virtualVertices.isEmpty()
@@ -17524,7 +17915,12 @@ void CView::endTileBrushGroup()
         m_tilePaintStrokeActive = false;
         m_tileStrokeFinishing = false;
         refreshTerrainFamilyUsage();
-        if(m_pUndoStack && !m_overlaySurfaceStrokeCommand.isEmpty())
+        if(m_pUndoStack && !m_overlaySurfaceStrokeCommand.isEmpty()
+           && !m_tileStrokeCommand.isEmpty())
+            m_pUndoStack->push(new COverlayTerrainPreviewCommand(
+                this, m_overlaySurfaceStrokeCommand,
+                m_tileStrokeCommand, true));
+        else if(m_pUndoStack && !m_overlaySurfaceStrokeCommand.isEmpty())
             m_pUndoStack->push(new COverlaySurfacePreviewCommand(
                 this, m_overlaySurfaceStrokeCommand, true));
         else if(m_pUndoStack && !m_tileStrokeCommand.isEmpty())
@@ -17608,7 +18004,11 @@ void CView::cancelTileBrushGroup()
         m_terrainPreviewBatchActive = false;
         m_pendingTerrainPreviewSectors.clear();
         if(!m_overlaySurfaceStrokeCommand.isEmpty())
+        {
+            if(!m_tileStrokeCommand.isEmpty())
+                applyTerrainTilePreview(m_tileStrokeCommand, false);
             applyOverlaySurfacePreview(m_overlaySurfaceStrokeCommand, false);
+        }
         else if(m_classicAutoStrokePending
                 && !m_classicAutoStrokePreviewCommand.isEmpty())
             applyTerrainTilePreview(m_classicAutoStrokePreviewCommand, false);
@@ -18221,6 +18621,10 @@ void CView::beginTileBrushGroup()
         ? int(m_landscapeTools->paintTargetMode()) : -1;
     m_tileStrokeSafeMode = m_tileStrokeClassicAuto
         && m_landscapeTools->classicAutoSafeMode();
+    m_tileStrokeAutoResolveBlends = !m_landscapeTools
+        || m_landscapeTools->paintPaletteMode()
+             != ETerrainPaintPaletteMode::Modern
+        || m_landscapeTools->modernAutoResolveBlends();
     // Draw one nonce only when a new committed stroke begins. Every preview
     // recomputation within that stroke keeps this immutable seed; undo/redo
     // later replays captured packed values and never consults randomness.
