@@ -23,6 +23,7 @@ struct SMprAnimatedTileRecord;
 // future higher limit requires its own controlled runtime proof.
 constexpr int kValidatedShippedTerrainAtlasSlotLimit = 1024;
 constexpr int kMprPackedTerrainAtlasSlotLimit = 16384;
+constexpr int kTerrainAtlasSlotsPerPage = 64;
 
 enum class ETerrainBlendStyle
 {
@@ -448,10 +449,11 @@ public:
     QSharedPointer<CTerrainWorkingAtlas> createStagingCopy() const;
     bool canCommitStaging(const CTerrainWorkingAtlas& staged) const;
     bool commitStaging(const CTerrainWorkingAtlas& staged);
-    // Runtime flipbooks are contiguous physical ranges. When authored uniform
-    // frames were interleaved with generated blend slots, restore that runtime
-    // contract in safe extension slots and return the exact start-slot map
-    // needed to update every activating terrain reference.
+    // Runtime flipbooks are contiguous physical ranges inside one MMP page.
+    // When authored uniform frames were interleaved with generated blend slots
+    // or crossed a page boundary, restore that runtime contract in safe
+    // extension slots and return the exact start-slot map needed to update
+    // every activating terrain reference.
     bool normalizeAnimationRanges(
         const QVector<SMprAnimatedTileRecord>& animations,
         QVector<SMprAnimatedTileRecord>* normalizedAnimations,

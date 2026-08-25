@@ -3411,21 +3411,22 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             animatedOutputSlots.insert(outputSlot);
         return true;
     };
-    // Reserve every live flipbook before cells and pinned layers are compacted.
-    // Zero-frame records remain editable settings and therefore still pin their
-    // start slot. Allocate the union in source-slot order first: overlapping
-    // records then share the same physical phases without record order creating
-    // an artificial gap in either remapped range.
-    QSet<int> animatedSourceSlots;
+    // Reserve complete source pages containing live flipbooks before cells and
+    // pinned layers are compacted. The shipped runtime advances a flipbook's
+    // local tile index while retaining its MMP texture; a numerically contiguous
+    // range that crosses a 64-slot page therefore samples unrelated artwork.
+    // Keeping each source page intact also lets overlapping records share exact
+    // phases without record order creating artificial gaps.
+    QSet<int> animatedSourcePages;
+    const int liveSourceSlotCount = sourceTileTypes.isEmpty()
+        ? m_authoredTiles.size()
+        : qMin(m_authoredTiles.size(), sourceTileTypes.size());
     for(int animationIndex = 0; animationIndex < animations.size();
         ++animationIndex)
     {
         const STerrainAtlasAnimationRange& animation = animations.at(animationIndex);
         const int sourceStart = int(animation.tileIndex);
         const int physicalCount = qMax(1, int(animation.frameCount));
-        const int liveSourceSlotCount = sourceTileTypes.isEmpty()
-            ? m_authoredTiles.size()
-            : qMin(m_authoredTiles.size(), sourceTileTypes.size());
         if(sourceStart < 0
            || sourceStart + physicalCount > liveSourceSlotCount)
         {
@@ -3438,16 +3439,37 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
                     .arg(sourceStart).arg(animation.frameCount));
             return result;
         }
-        for(int phase = 0; phase < physicalCount; ++phase)
-            animatedSourceSlots.insert(sourceStart + phase);
-    }
-    QVector<int> orderedAnimatedSourceSlots = animatedSourceSlots.values().toVector();
-    std::sort(orderedAnimatedSourceSlots.begin(), orderedAnimatedSourceSlots.end());
-    for(int sourceSlot : orderedAnimatedSourceSlots)
-        if(!addAuthoredOutput(sourceSlot, QStringLiteral(
-               "An animated terrain frame points outside the live working atlas."),
-               true))
+        if(physicalCount > kTerrainAtlasSlotsPerPage
+           || sourceStart % kTerrainAtlasSlotsPerPage + physicalCount
+                > kTerrainAtlasSlotsPerPage)
+        {
+            result.error = QStringLiteral(
+                "Animated terrain range %1 crosses an MMP texture page. The game advances flipbook frames only inside the starting page.")
+                .arg(animationIndex);
+            if(report) report->add("terrain.finalized_animation_page",
+                EValidationSeverity::Error, result.error,
+                QStringLiteral("start %1, frames %2")
+                    .arg(sourceStart).arg(animation.frameCount));
             return result;
+        }
+        animatedSourcePages.insert(
+            sourceStart / kTerrainAtlasSlotsPerPage);
+    }
+    QVector<int> orderedAnimatedSourcePages =
+        animatedSourcePages.values().toVector();
+    std::sort(orderedAnimatedSourcePages.begin(),
+              orderedAnimatedSourcePages.end());
+    for(int sourcePage : orderedAnimatedSourcePages)
+    {
+        const int pageStart = sourcePage * kTerrainAtlasSlotsPerPage;
+        const int pageEnd = qMin(pageStart + kTerrainAtlasSlotsPerPage,
+                                 liveSourceSlotCount);
+        for(int sourceSlot = pageStart; sourceSlot < pageEnd; ++sourceSlot)
+            if(!addAuthoredOutput(sourceSlot, QStringLiteral(
+                   "An animated terrain page points outside the live working atlas."),
+                   true))
+                return result;
+    }
 
     for(int animationIndex = 0; animationIndex < animations.size();
         ++animationIndex)
@@ -3456,6 +3478,19 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         const int sourceStart = int(animation.tileIndex);
         const int physicalCount = qMax(1, int(animation.frameCount));
         const int outputStart = authoredOutput.value(sourceStart, -1);
+        if(outputStart < 0
+           || outputStart % kTerrainAtlasSlotsPerPage + physicalCount
+                > kTerrainAtlasSlotsPerPage)
+        {
+            result.error = QStringLiteral(
+                "A finalized animated terrain range does not fit inside one MMP texture page.");
+            if(report) report->add("terrain.finalized_animation_page",
+                EValidationSeverity::Error, result.error,
+                QStringLiteral("animation %1, start %2, frames %3")
+                    .arg(animationIndex).arg(outputStart)
+                    .arg(animation.frameCount));
+            return result;
+        }
         for(int phase = 1; phase < physicalCount; ++phase)
             if(authoredOutput.value(sourceStart + phase, -1)
                != outputStart + phase)
@@ -3678,6 +3713,19 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
             result.error = QStringLiteral(
                 "A finalized animated terrain range points outside the compacted atlas.");
             if(report) report->add("terrain.package_animation_range",
+                EValidationSeverity::Error, result.error,
+                QStringLiteral("animation %1, start %2, frames %3")
+                    .arg(index).arg(animation.tileIndex)
+                    .arg(animation.frameCount));
+            return result;
+        }
+        if(physicalCount > quint64(kTerrainAtlasSlotsPerPage)
+           || int(animation.tileIndex % kTerrainAtlasSlotsPerPage)
+                + int(physicalCount) > kTerrainAtlasSlotsPerPage)
+        {
+            result.error = QStringLiteral(
+                "A finalized animated terrain range crosses an MMP texture page.");
+            if(report) report->add("terrain.package_animation_page",
                 EValidationSeverity::Error, result.error,
                 QStringLiteral("animation %1, start %2, frames %3")
                     .arg(index).arg(animation.tileIndex)
@@ -3961,6 +4009,19 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
                 "Animated terrain range %1 points outside the live working atlas.")
                 .arg(index);
             if(report) report->add("terrain.working_animation_range",
+                EValidationSeverity::Error, result.error,
+                QStringLiteral("start %1, frames %2")
+                    .arg(animation.tileIndex).arg(animation.frameCount));
+            return result;
+        }
+        if(physicalCount > quint64(kTerrainAtlasSlotsPerPage)
+           || int(animation.tileIndex % kTerrainAtlasSlotsPerPage)
+                + int(physicalCount) > kTerrainAtlasSlotsPerPage)
+        {
+            result.error = QStringLiteral(
+                "Animated terrain range %1 crosses an MMP texture page. Apply the animation in the Material Editor to repack it before Test Current.")
+                .arg(index);
+            if(report) report->add("terrain.working_animation_page",
                 EValidationSeverity::Error, result.error,
                 QStringLiteral("start %1, frames %2")
                     .arg(animation.tileIndex).arg(animation.frameCount));
@@ -4303,6 +4364,15 @@ bool CTerrainWorkingAtlas::normalizeAnimationRanges(
         }
         if(record.frameCount == 0)
             continue;
+        if(physicalCount > kTerrainAtlasSlotsPerPage)
+        {
+            if(report) report->add("terrain.working_animation_page",
+                EValidationSeverity::Error,
+                QStringLiteral("Animation record %1 needs %2 frames, but the game can advance only within one %3-slot MMP texture page. No slots were moved.")
+                    .arg(animationIndex).arg(physicalCount)
+                    .arg(kTerrainAtlasSlotsPerPage));
+            return false;
+        }
 
         STerrainWorkingTileIdentity startIdentity;
         if(!tileIdentityForSlot(start, &startIdentity)
@@ -4342,7 +4412,9 @@ bool CTerrainWorkingAtlas::normalizeAnimationRanges(
             return false;
         }
 
-        bool alreadyContiguous = true;
+        bool alreadyContiguous =
+            start % kTerrainAtlasSlotsPerPage + physicalCount
+                <= kTerrainAtlasSlotsPerPage;
         for(int phase = 0; phase < frameSlots.size(); ++phase)
             alreadyContiguous = alreadyContiguous
                 && frameSlots.at(phase) == start + phase;
@@ -4353,6 +4425,9 @@ bool CTerrainWorkingAtlas::normalizeAnimationRanges(
             for(int candidate = activeTileCount();
                 candidate + physicalCount <= m_capacityLimit; ++candidate)
             {
+                if(candidate % kTerrainAtlasSlotsPerPage + physicalCount
+                     > kTerrainAtlasSlotsPerPage)
+                    continue;
                 bool free = true;
                 for(int phase = 0; phase < physicalCount; ++phase)
                     free = free && !m_workingToVirtual.contains(candidate + phase)

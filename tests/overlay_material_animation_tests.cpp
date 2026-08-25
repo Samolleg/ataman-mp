@@ -33,6 +33,7 @@ private slots:
     void workingAtlasRegridPreservesLogicalTileOrigins();
     void incrementalOverlayRefreshRecomputesFlipbookMetadata();
     void mprMaterialEditorUsesLiveWorkingAtlasSlotCount();
+    void mprAnimationResolvedRangeUsesReadableForeground();
     void overlayActivationUsesExactWorkingAtlasMaterial();
     void overlaySurfaceUsesOverlayLayerAuthority();
     void overlaySurfaceSlotLabelsRender();
@@ -301,6 +302,26 @@ void OverlayMaterialAnimationTests::mprMaterialEditorUsesLiveWorkingAtlasSlotCou
              "Material Editor must validate animation records against the live working atlas");
     QVERIFY2(!editor.contains("m_mprDocument.mapInfo().tileCount"),
              "Material Editor still rejects valid appended working-atlas slots against the old MPR count");
+}
+
+void OverlayMaterialAnimationTests::mprAnimationResolvedRangeUsesReadableForeground()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    const QByteArray view = viewFile.readAll();
+    const int editorStart = view.indexOf("Atlas tile animation records");
+    const int editorEnd = view.indexOf("QWidget* identityPage", editorStart);
+    QVERIFY(editorStart >= 0);
+    QVERIFY(editorEnd > editorStart);
+    const QByteArray editor = view.mid(editorStart, editorEnd - editorStart);
+
+    QVERIFY2(editor.contains(
+                 "QBrush readableAnimationRangeForeground(QColor(Qt::white))"),
+             "Resolved animation ranges do not define a readable foreground for the dark table");
+    QVERIFY2(editor.count("readableAnimationRangeForeground") >= 3,
+             "The readable foreground is not applied both initially and after editing a range");
 }
 
 void OverlayMaterialAnimationTests::overlayActivationUsesExactWorkingAtlasMaterial()

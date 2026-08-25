@@ -597,7 +597,9 @@ private slots:
     void nestedCircleMaterialPairingsResolveExactly();
     void circularPaintsKeepEveryBrushIdentityInsideAndAtOuterEdge();
     void workingAtlasRepacksInterleavedUniformAnimationFramesAtomically();
+    void workingAtlasKeepsFlipbooksInsideOnePhysicalPage();
     void finalizationPreservesAndRebasesAuthoredAnimationRanges();
+    void finalizationKeepsFlipbooksInsideOnePhysicalPage();
     void generatedPaintMatrixSavesReopensAndMatchesVertexOracle();
 };
 
@@ -6930,6 +6932,60 @@ void TerrainVirtualAtlasTests::workingAtlasRepacksInterleavedUniformAnimationFra
     QCOMPARE(invalid->stateFingerprint(), invalidBefore);
 }
 
+void TerrainVirtualAtlasTests::workingAtlasKeepsFlipbooksInsideOnePhysicalPage()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    const STerrainTransitionSignature water = signature(7, 7, 7, 7);
+    for(int slot = 0; slot < 100; ++slot)
+    {
+        images.append(solid(qRgba(20 + slot, 80, 110, 255)));
+        STerrainTransitionVariant variant;
+        variant.signature = water;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot % 64);
+        packed.atlasIndex = quint8(slot / 64);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+    const QVector<qint32> types(100, 6);
+    CTestTerrainWorkingAtlas live(catalog, images, 0x50432u, 192,
+                                  {}, {}, types, {{7, 6}});
+    const QByteArray before = live.stateFingerprint();
+    QSharedPointer<CTerrainWorkingAtlas> staged = live.createStagingCopy();
+    SMprAnimatedTileRecord record;
+    record.tileIndex = 56;
+    record.frameCount = 32;
+    QVector<SMprAnimatedTileRecord> normalized;
+    QMap<int, int> remap;
+    CValidationReport report;
+    QVERIFY2(staged->normalizeAnimationRanges({record}, &normalized,
+        &remap, &report), qPrintable(report.toText()));
+    QCOMPARE(live.stateFingerprint(), before);
+    QCOMPARE(normalized.size(), 1);
+    QCOMPARE(normalized.front().tileIndex, quint16(128));
+    QCOMPARE(normalized.front().frameCount, quint16(32));
+    QVERIFY(int(normalized.front().tileIndex % 64)
+            + int(normalized.front().frameCount) <= 64);
+    for(int source = 56; source < 88; ++source)
+        QCOMPARE(remap.value(source), 128);
+    for(int destination = 128; destination < 160; ++destination)
+    {
+        STerrainWorkingTileIdentity identity;
+        QVERIFY(staged->tileIdentityForSlot(destination, &identity));
+        QCOMPARE(identity.canonicalSignature, water);
+        QCOMPARE(identity.runtimeTerrainType, qint32(6));
+    }
+
+    QSharedPointer<CTerrainWorkingAtlas> tooLong = live.createStagingCopy();
+    record.tileIndex = 0;
+    record.frameCount = 65;
+    const QByteArray tooLongBefore = tooLong->stateFingerprint();
+    QVERIFY(!tooLong->normalizeAnimationRanges({record}, &normalized,
+        &remap, &report));
+    QCOMPARE(tooLong->stateFingerprint(), tooLongBefore);
+}
+
 void TerrainVirtualAtlasTests::finalizationPreservesAndRebasesAuthoredAnimationRanges()
 {
     Fixture fixture;
@@ -7013,6 +7069,57 @@ void TerrainVirtualAtlasTests::finalizationPreservesAndRebasesAuthoredAnimationR
     QCOMPARE(overlapFinalized.animations.size(), 2);
     QCOMPARE(int(overlapFinalized.animations.at(0).tileIndex),
              int(overlapFinalized.animations.at(1).tileIndex) + 2);
+}
+
+void TerrainVirtualAtlasTests::finalizationKeepsFlipbooksInsideOnePhysicalPage()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    const STerrainTransitionSignature water = signature(7, 7, 7, 7);
+    for(int slot = 0; slot < 104; ++slot)
+    {
+        images.append(solid(qRgba(20 + slot, 80, 110, 255)));
+        STerrainTransitionVariant variant;
+        variant.signature = water;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot % 64);
+        packed.atlasIndex = quint8(slot / 64);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+    const QVector<qint32> types(104, 6);
+    CTestTerrainVirtualAtlas atlas(catalog, images, 0x50464u,
+        {}, {}, true, types, {{7, 6}});
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1, 7));
+    STerrainAtlasAnimationRange first;
+    first.tileIndex = 0;
+    first.frameCount = 40;
+    STerrainAtlasAnimationRange second;
+    second.tileIndex = 64;
+    second.frameCount = 40;
+    CValidationReport report;
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("PageLocalFlipbooks"), 192, types, &report,
+        {}, {}, {}, {}, nullptr, {first, second});
+    QVERIFY2(finalized.success,
+        qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
+    QCOMPARE(finalized.animations.size(), 2);
+    for(const STerrainAtlasAnimationRange& animation : finalized.animations)
+        QVERIFY(int(animation.tileIndex % 64) + int(animation.frameCount) <= 64);
+    QCOMPARE(finalized.animations.at(0).tileIndex, quint16(0));
+    QCOMPARE(finalized.animations.at(1).tileIndex, quint16(64));
+
+    STerrainAtlasAnimationRange crossing;
+    crossing.tileIndex = 56;
+    crossing.frameCount = 32;
+    CValidationReport invalidReport;
+    const STerrainAtlasFinalization invalid = atlas.finalize(
+        field, QStringLiteral("CrossingFlipbook"), 192, types,
+        &invalidReport, {}, {}, {}, {}, nullptr, {crossing});
+    QVERIFY(!invalid.success);
+    QVERIFY2(invalid.error.contains("page", Qt::CaseInsensitive),
+             qPrintable(invalid.error));
 }
 
 void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexOracle()

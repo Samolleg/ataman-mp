@@ -640,6 +640,7 @@ private slots:
     void externalZone1TestoOverlayMappingProbe();
     void externalZone1TestOverlays3MappingProbe();
     void externalZone1TestOverlays4NoAnimMappingProbe();
+    void externalZone1TestOverlays5RuntimeFlipbookProbe();
     void modernDraftAdoptionStagesPairBeforeLiveMutation();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
@@ -4290,6 +4291,22 @@ void EnduranceDocumentTests::mprMaterialAndAnimationEditRejectsInvalidValues()
     QVERIFY(!baseline.appendMapParametersEdit(baseline.mapInfo().maxZ,
                                                materials, animations,
                                                &transaction, &report));
+
+    CMprDocument wideAtlas;
+    CValidationReport wideReport;
+    QVERIFY2(wideAtlas.loadBytes(
+        syntheticMpr(syntheticOverlaySector(), syntheticMp(128)),
+        "animation-page-invalid.mpr", &wideReport),
+        qPrintable(wideReport.toText()));
+    SMprAnimatedTileRecord crossingPage;
+    crossingPage.tileIndex = 56;
+    crossingPage.frameCount = 32;
+    CMprEditTransaction crossingTransaction("crossing animation page");
+    QVERIFY(!wideAtlas.appendMapParametersEdit(
+        wideAtlas.mapInfo().maxZ, wideAtlas.mapInfo().materials,
+        {crossingPage}, &crossingTransaction, &wideReport));
+    QVERIFY(crossingTransaction.isEmpty());
+    QVERIFY(wideReport.toText().contains("mpr.animation_page"));
 }
 
 void EnduranceDocumentTests::terrainDiagnosticsArePreApplyAndPolicyExplicit()
@@ -12215,6 +12232,151 @@ void EnduranceDocumentTests::externalZone1TestOverlays4NoAnimMappingProbe()
     QVERIFY(!overlaySlots.isEmpty());
     for(auto slot = overlaySlots.constBegin(); slot != overlaySlots.constEnd(); ++slot)
         QVERIFY(slot.key() >= 0 && slot.key() < binding.decodedAtlasTiles.size());
+}
+
+void EnduranceDocumentTests::externalZone1TestOverlays5RuntimeFlipbookProbe()
+{
+    const QString mprPath = qEnvironmentVariable(
+        "EI_MAPPER_ZONE1TESTOVERLAYS5_REPRO_MPR");
+    const QString atlasPath = qEnvironmentVariable(
+        "EI_MAPPER_ZONE1TESTOVERLAYS5_REPRO_ATLAS");
+    if(mprPath.isEmpty() || atlasPath.isEmpty())
+        QSKIP("Set the R7 read-only finalized MPR/atlas pair environment variables");
+
+    CValidationReport report;
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    QCOMPARE(QCryptographicHash::hash(document.originalBytes(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("105E70A6C0B043D2C64975062C1504C7C4EDB6003679859A82628CE379A7A2D2"));
+    QFile atlasFile(atlasPath);
+    QVERIFY(atlasFile.open(QIODevice::ReadOnly));
+    QCOMPARE(QCryptographicHash::hash(atlasFile.readAll(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("748C0AF0B132B00D66EF4120EE8EC91C1DBC1A9CC872815297A22B0E748FA10C"));
+
+    const STerrainAtlasEmbeddedBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+            {atlasPath}, document.mapInfo().innerNamespace, atlasPath);
+    QVERIFY2(binding.success(), qPrintable(binding.error));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    QCOMPARE(document.mapInfo().animatedTiles.size(), 1);
+    const SMprAnimatedTileRecord record =
+        document.mapInfo().animatedTiles.front();
+    const int start = int(record.tileIndex);
+    const int count = int(record.frameCount);
+    QVERIFY(count >= 2);
+    QVERIFY(start >= 0 && start + count <= binding.decodedAtlasTiles.size());
+    QVERIFY(start + count <= document.mapInfo().tileTypes.size());
+    QVERIFY2((start % 64) + count > 64,
+             "The exact regression fixture no longer crosses its physical MMP page");
+
+    int exactStartCells = 0;
+    QMap<int, int> referencedFrameSlots;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool available = false;
+            const int slot = SMprPackedTile::decode(terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &available)).atlasSlot();
+            if(!available)
+                continue;
+            if(slot == start)
+                ++exactStartCells;
+            if(slot >= start && slot < start + count)
+                ++referencedFrameSlots[slot];
+        }
+    QVERIFY2(exactStartCells > 0,
+             "No overlay cell references the runtime animation start slot");
+    QCOMPARE(referencedFrameSlots.size(), 1);
+    QVERIFY(referencedFrameSlots.contains(start));
+
+    const qint32 runtimeType = document.mapInfo().tileTypes.at(start);
+    const STerrainAtlasProfileSlot* firstDefinition = nullptr;
+    for(const STerrainAtlasProfileSlot& definition : binding.profile.slotDefinitions)
+        if(definition.slot == start)
+            firstDefinition = &definition;
+    QVERIFY(firstDefinition);
+    const STerrainTransitionSignature signature = firstDefinition->signature;
+    QSet<QByteArray> frameHashes;
+    for(int slot = start; slot < start + count; ++slot)
+    {
+        QCOMPARE(document.mapInfo().tileTypes.at(slot), runtimeType);
+        const STerrainAtlasProfileSlot* definition = nullptr;
+        for(const STerrainAtlasProfileSlot& candidate : binding.profile.slotDefinitions)
+            if(candidate.slot == slot)
+                definition = &candidate;
+        QVERIFY(definition);
+        QCOMPARE(definition->signature, signature);
+        const QImage frame = binding.decodedAtlasTiles.at(slot)
+            .convertToFormat(QImage::Format_RGBA8888);
+        const QByteArray hash = CTerrainAtlasProfileInference::pixelSha256({frame});
+        frameHashes.insert(hash);
+        quint64 red = 0, green = 0, blue = 0, alpha = 0;
+        for(int y = 0; y < frame.height(); ++y)
+        {
+            const uchar* row = frame.constScanLine(y);
+            for(int x = 0; x < frame.width(); ++x)
+            {
+                red += row[x * 4]; green += row[x * 4 + 1];
+                blue += row[x * 4 + 2]; alpha += row[x * 4 + 3];
+            }
+        }
+        const quint64 pixels = quint64(frame.width()) * frame.height();
+        qInfo() << "R7 flipbook frame" << slot
+                << "runtimeType" << runtimeType
+                << "signature" << definition->signature.northWest
+                << definition->signature.northEast
+                << definition->signature.southEast
+                << definition->signature.southWest
+                << "meanRgba" << red / pixels << green / pixels
+                << blue / pixels << alpha / pixels
+                << "sha256" << hash;
+    }
+    QCOMPARE(frameHashes.size(), count);
+
+    const STerrainAtlasAnalysis analysis =
+        binding.profile.usableAnalysis(&report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+    QMap<qint32, qint32> materialRuntimeTypes;
+    for(const STerrainAtlasProfileFamily& family : binding.profile.families)
+        materialRuntimeTypes.insert(family.id, family.tileType);
+    CTerrainWorkingAtlas working(
+        analysis.overlayCompatibleCatalog, binding.decodedAtlasTiles,
+        0x50432u, kMprPackedTerrainAtlasSlotLimit, {}, {},
+        document.mapInfo().tileTypes, materialRuntimeTypes);
+    QSharedPointer<CTerrainWorkingAtlas> staged = working.createStagingCopy();
+    QVector<SMprAnimatedTileRecord> normalized;
+    QMap<int, int> remap;
+    CValidationReport normalizeReport;
+    QVERIFY2(staged->normalizeAnimationRanges(
+        {record}, &normalized, &remap, &normalizeReport),
+        qPrintable(normalizeReport.toText()));
+    QCOMPARE(normalized.size(), 1);
+    QCOMPARE(normalized.front().tileIndex, quint16(539));
+    QCOMPARE(normalized.front().frameCount, record.frameCount);
+    QVERIFY2((int(normalized.front().tileIndex) % 64)
+                 + int(normalized.front().frameCount) <= 64,
+             "The exact runtime flipbook still crosses an MMP page after normalization");
+    QVERIFY(normalized.front().tileIndex != record.tileIndex);
+    QCOMPARE(remap.value(start), int(normalized.front().tileIndex));
+    QCOMPARE(staged->activeTileImages().size(), 9 * 64);
+    for(int phase = 0; phase < count; ++phase)
+    {
+        STerrainWorkingTileIdentity identity;
+        QVERIFY(staged->tileIdentityForSlot(
+            int(normalized.front().tileIndex) + phase, &identity));
+        QCOMPARE(identity.sourceSlot, start + phase);
+        STerrainWorkingTileIdentity sourceIdentity;
+        QVERIFY(working.tileIdentityForSlot(start + phase, &sourceIdentity));
+        QCOMPARE(identity.physicalPixelSha256,
+                 sourceIdentity.physicalPixelSha256);
+    }
+    qInfo() << "R7 flipbook record/start references"
+            << start << count << exactStartCells << referencedFrameSlots
+            << "atlasSlots" << binding.decodedAtlasTiles.size();
 }
 
 void EnduranceDocumentTests::externalZone1TestoOverlayMappingProbe()

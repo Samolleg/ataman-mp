@@ -15714,6 +15714,7 @@ void CView::openMapParameters()
 
     refreshMaterialTables = [=]() {
         *materialUiLoading = true;
+        const QBrush readableAnimationRangeForeground(QColor(Qt::white));
         const int selected = materialTable->currentRow();
         materialTable->setRowCount(draftMaterials->size());
         for(int row = 0; row < draftMaterials->size(); ++row)
@@ -15755,7 +15756,9 @@ void CView::openMapParameters()
                 state->setText(count->value() == 0 ? tr("Disabled")
                     : valid ? tr("Slots %1-%2").arg(start->value()).arg(end)
                             : tr("Invalid: exceeds atlas"));
-                state->setForeground(valid ? QBrush() : QBrush(QColor(220, 80, 80)));
+                state->setForeground(valid
+                    ? readableAnimationRangeForeground
+                    : QBrush(QColor(220, 80, 80)));
                 *materialDraftDirty = true;
                 applyMaterials->setEnabled(true); resetMaterials->setEnabled(true);
             };
@@ -15764,10 +15767,15 @@ void CView::openMapParameters()
             connect(count, QOverload<int>::of(&QSpinBox::valueChanged), dock,
                     [updateAnimation](int) { updateAnimation(); });
             const int end = start->value() + count->value() - 1;
-            animationTable->setItem(row, 2, new QTableWidgetItem(count->value() == 0
-                ? tr("Disabled") : end < atlasSlotCount
-                    ? tr("Slots %1-%2").arg(start->value()).arg(end)
-                    : tr("Invalid: exceeds atlas")));
+            QTableWidgetItem* rangeState = new QTableWidgetItem(
+                count->value() == 0 ? tr("Disabled")
+                    : end < atlasSlotCount
+                        ? tr("Slots %1-%2").arg(start->value()).arg(end)
+                        : tr("Invalid: exceeds atlas"));
+            rangeState->setForeground(end < atlasSlotCount
+                ? readableAnimationRangeForeground
+                : QBrush(QColor(220, 80, 80)));
+            animationTable->setItem(row, 2, rangeState);
         }
         *materialUiLoading = false;
         if(!draftMaterials->isEmpty())
