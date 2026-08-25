@@ -4400,6 +4400,12 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     if(!rebuildStatic && !rebuildFarStatic && !rebuildDynamic && !rebuildLocal)
         return true;
 
+    // Shadow atlases use white as their empty-depth encoding.  GL clear color
+    // is context state, not framebuffer state, so leaving that value behind
+    // makes the next presentation-target clear start from the atlas sentinel.
+    // Preserve the caller's visible-frame clear color across every rebuild.
+    GLfloat savedClearColor[4]{};
+    ei::gl::GetFloatv(GL_COLOR_CLEAR_VALUE, savedClearColor);
     RenderPerformanceContext& shadowPerformance = RenderPerformanceContext::instance();
     if(shadowPerformance.collecting())
     {
@@ -4557,6 +4563,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
     m_shadowInitialized = true;
     queue.setLocalShadowOwners(m_localShadowOwners);
     ei::gl::Viewport(0, 0, m_width, m_height);
+    ei::gl::ClearColor(savedClearColor[0], savedClearColor[1],
+                       savedClearColor[2], savedClearColor[3]);
 #ifdef GL_FRAMEBUFFER_SRGB
     if(restoreFramebufferSrgb)
         ei::gl::Enable(GL_FRAMEBUFFER_SRGB);
