@@ -600,6 +600,7 @@ private slots:
     void workingAtlasKeepsFlipbooksInsideOnePhysicalPage();
     void finalizationPreservesAndRebasesAuthoredAnimationRanges();
     void finalizationKeepsFlipbooksInsideOnePhysicalPage();
+    void finalizationCompactsAnimationBlocksWithoutSourcePageDebris();
     void generatedPaintMatrixSavesReopensAndMatchesVertexOracle();
 };
 
@@ -7120,6 +7121,51 @@ void TerrainVirtualAtlasTests::finalizationKeepsFlipbooksInsideOnePhysicalPage()
     QVERIFY(!invalid.success);
     QVERIFY2(invalid.error.contains("page", Qt::CaseInsensitive),
              qPrintable(invalid.error));
+}
+
+void TerrainVirtualAtlasTests::finalizationCompactsAnimationBlocksWithoutSourcePageDebris()
+{
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    const STerrainTransitionSignature water = signature(7, 7, 7, 7);
+    for(int slot = 0; slot < 64; ++slot)
+    {
+        images.append(solid(qRgba(20 + slot, 80, 110, 255)));
+        STerrainTransitionVariant variant;
+        variant.signature = water;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(slot);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+    const QVector<qint32> types(64, 6);
+    CTestTerrainVirtualAtlas atlas(catalog, images, 0x50432u,
+        {}, {}, true, types, {{7, 6}});
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1, 7));
+    STerrainAtlasAnimationRange animation;
+    animation.tileIndex = 28;
+    animation.frameCount = 32;
+    SMprPackedTile selected;
+    selected.tileIndex = 28;
+    CValidationReport report;
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, QStringLiteral("CompactFlipbook"), 128, types, &report,
+        {}, {6}, {selected.encode()}, {7}, &catalog, {animation});
+    QVERIFY2(finalized.success,
+        qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
+    QCOMPARE(finalized.animations.size(), 1);
+    QCOMPARE(finalized.animations.front().tileIndex, quint16(0));
+    QCOMPARE(finalized.animations.front().frameCount, quint16(32));
+    QCOMPARE(finalized.requiredSlots, 32);
+    for(int phase = 0; phase < 32; ++phase)
+        QVERIFY(finalized.tiles.at(phase).sourceSlotAliases.contains(28 + phase));
+    for(int obsolete = 0; obsolete < 28; ++obsolete)
+        QVERIFY2(!finalized.authoredSlotRemap.contains(obsolete),
+                 "Unused source-page prefix survived clean flipbook compaction");
+    for(int obsolete = 60; obsolete < 64; ++obsolete)
+        QVERIFY2(!finalized.authoredSlotRemap.contains(obsolete),
+                 "Unused source-page suffix survived clean flipbook compaction");
 }
 
 void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexOracle()

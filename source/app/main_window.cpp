@@ -1428,6 +1428,62 @@ MainWindow::MainWindow(QWidget* parent) :
                 .arg(bool(databasePrototypeNavigation))
                 .arg(reinterpret_cast<quintptr>(m_pView), 0, 16));
     m_mapTestLauncher = new CJmvMapTestLauncher(this);
+    connect(m_pView, &CView::terrainPublicationPreflightRequested,
+            this, [this](const QString& resourceArchivePath, bool* accepted)
+    {
+        if(!accepted)
+            return;
+        *accepted = true;
+        if(!m_mapTestLauncher || !m_mapTestLauncher->isRunning())
+            return;
+
+        QMessageBox prompt(QMessageBox::Warning,
+            tr("Test Current is using game resources"),
+            tr("The game process launched by Endurance is still running and may "
+               "hold the selected resource archive open. Windows cannot "
+               "atomically replace an archive while the game is using it.\n\n"
+               "%1\n\nStop Test Current before publishing?")
+                .arg(QDir::toNativeSeparators(resourceArchivePath)),
+            QMessageBox::NoButton, this);
+        QPushButton* stopAndContinue = prompt.addButton(
+            tr("Stop Test Current and continue"), QMessageBox::AcceptRole);
+        prompt.addButton(QMessageBox::Cancel);
+        prompt.exec();
+        if(prompt.clickedButton() != stopAndContinue)
+        {
+            *accepted = false;
+            return;
+        }
+
+        QProgressDialog stopping(
+            tr("Stopping Test Current and releasing game resources..."),
+            QString(), 0, 0, this);
+        stopping.setWindowTitle(tr("Preparing terrain publication"));
+        stopping.setCancelButton(nullptr);
+        stopping.setWindowModality(Qt::WindowModal);
+        stopping.setMinimumDuration(0);
+        stopping.show();
+        QEventLoop waitForStop;
+        QTimer timeout;
+        timeout.setSingleShot(true);
+        connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished,
+                &waitForStop, &QEventLoop::quit);
+        connect(&timeout, &QTimer::timeout,
+                &waitForStop, &QEventLoop::quit);
+        timeout.start(8000);
+        m_mapTestLauncher->stop();
+        if(m_mapTestLauncher->isRunning())
+            waitForStop.exec(QEventLoop::ExcludeUserInputEvents);
+        stopping.close();
+        if(m_mapTestLauncher->isRunning())
+        {
+            *accepted = false;
+            QMessageBox::critical(this, tr("Terrain publication paused"),
+                tr("The Endurance-owned game process did not release its "
+                   "resources in time. Publication was not started. Stop the "
+                   "test process and retry."));
+        }
+    });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)
     {

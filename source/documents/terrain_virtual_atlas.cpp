@@ -3411,13 +3411,21 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             animatedOutputSlots.insert(outputSlot);
         return true;
     };
-    // Reserve complete source pages containing live flipbooks before cells and
-    // pinned layers are compacted. The shipped runtime advances a flipbook's
-    // local tile index while retaining its MMP texture; a numerically contiguous
-    // range that crosses a 64-slot page therefore samples unrelated artwork.
-    // Keeping each source page intact also lets overlapping records share exact
-    // phases without record order creating artificial gaps.
-    QSet<int> animatedSourcePages;
+    // Reserve only the live frame blocks before cells and pinned layers are
+    // compacted. The runtime advances a flipbook's local tile index while
+    // retaining its MMP texture, so every block must remain contiguous inside
+    // one 64-slot page. Preserving the complete source page retained obsolete
+    // pre-repack frame copies and unrelated blend tiles indefinitely. Merge
+    // overlapping source ranges, pack those blocks atomically, and use only
+    // otherwise-live authored slots as page alignment when two blocks cannot
+    // share the same output page.
+    struct SAnimationSourceBlock
+    {
+        int start{0};
+        int end{0};
+    };
+    QVector<SAnimationSourceBlock> animationBlocks;
+    QSet<int> animatedSourceSlots;
     const int liveSourceSlotCount = sourceTileTypes.isEmpty()
         ? m_authoredTiles.size()
         : qMin(m_authoredTiles.size(), sourceTileTypes.size());
@@ -3452,21 +3460,67 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
                     .arg(sourceStart).arg(animation.frameCount));
             return result;
         }
-        animatedSourcePages.insert(
-            sourceStart / kTerrainAtlasSlotsPerPage);
+        SAnimationSourceBlock block;
+        block.start = sourceStart;
+        block.end = sourceStart + physicalCount;
+        animationBlocks.append(block);
+        for(int sourceSlot = block.start; sourceSlot < block.end; ++sourceSlot)
+            animatedSourceSlots.insert(sourceSlot);
     }
-    QVector<int> orderedAnimatedSourcePages =
-        animatedSourcePages.values().toVector();
-    std::sort(orderedAnimatedSourcePages.begin(),
-              orderedAnimatedSourcePages.end());
-    for(int sourcePage : orderedAnimatedSourcePages)
+    std::sort(animationBlocks.begin(), animationBlocks.end(), [](
+        const SAnimationSourceBlock& left,
+        const SAnimationSourceBlock& right) {
+        return left.start != right.start
+            ? left.start < right.start : left.end < right.end;
+    });
+    QVector<SAnimationSourceBlock> mergedBlocks;
+    for(const SAnimationSourceBlock& block : animationBlocks)
     {
-        const int pageStart = sourcePage * kTerrainAtlasSlotsPerPage;
-        const int pageEnd = qMin(pageStart + kTerrainAtlasSlotsPerPage,
-                                 liveSourceSlotCount);
-        for(int sourceSlot = pageStart; sourceSlot < pageEnd; ++sourceSlot)
+        if(mergedBlocks.isEmpty()
+           || block.start > mergedBlocks.back().end)
+            mergedBlocks.append(block);
+        else
+            mergedBlocks.back().end = qMax(
+                mergedBlocks.back().end, block.end);
+    }
+    for(const SAnimationSourceBlock& block : mergedBlocks)
+    {
+        const int blockLength = block.end - block.start;
+        const int outputOffset = denseImages.size()
+            % kTerrainAtlasSlotsPerPage;
+        if(outputOffset + blockLength > kTerrainAtlasSlotsPerPage)
+        {
+            int paddingNeeded = kTerrainAtlasSlotsPerPage - outputOffset;
+            for(int sourceSlot = 0;
+                sourceSlot < liveSourceSlotCount && paddingNeeded > 0;
+                ++sourceSlot)
+            {
+                if(animatedSourceSlots.contains(sourceSlot)
+                   || authoredOutput.contains(sourceSlot))
+                    continue;
+                const int before = denseImages.size();
+                if(!addAuthoredOutput(sourceSlot, QStringLiteral(
+                       "An animated terrain page-alignment slot points outside the live working atlas."),
+                       true))
+                    return result;
+                if(denseImages.size() > before)
+                    --paddingNeeded;
+            }
+            if(paddingNeeded > 0)
+            {
+                result.error = QStringLiteral(
+                    "Animated terrain blocks cannot be aligned without inventing atlas padding.");
+                if(report) report->add(
+                    "terrain.finalized_animation_alignment",
+                    EValidationSeverity::Error, result.error,
+                    QStringLiteral("source block %1-%2")
+                        .arg(block.start).arg(block.end - 1));
+                return result;
+            }
+        }
+        for(int sourceSlot = block.start; sourceSlot < block.end; ++sourceSlot)
             if(!addAuthoredOutput(sourceSlot, QStringLiteral(
-                   "An animated terrain page points outside the live working atlas."),
+                   "An animated terrain block points outside the live working atlas."),
                    true))
                 return result;
     }

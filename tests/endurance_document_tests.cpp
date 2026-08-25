@@ -641,6 +641,7 @@ private slots:
     void externalZone1TestOverlays3MappingProbe();
     void externalZone1TestOverlays4NoAnimMappingProbe();
     void externalZone1TestOverlays5RuntimeFlipbookProbe();
+    void externalZone1TestOverlays6DraftFinalizationProbe();
     void modernDraftAdoptionStagesPairBeforeLiveMutation();
     void semanticAtlasProfileRejectsBindingMismatchAndAmbiguity();
     void semanticAtlasReviewEditsAndStoreAreDeterministic();
@@ -1421,8 +1422,34 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
              "Publication no longer preserves the MPR selected by Save As");
     QVERIFY2(source.contains("Save MPR As selected current:%1 destination:%2"),
              "Save MPR As no longer records its exact source and destination");
-    QVERIFY2(source.contains("Modern terrain publication confirmed mpr:%1 res:%2"),
-             "Publication no longer records the exact committed MPR/RES pair");
+    const int publicationPreflight = finalize.indexOf(
+        "terrainPublicationPreflightRequested");
+    const int publicationAuthorized = finalize.indexOf(
+        "Modern terrain publication authorized mpr:%1 res:%2");
+    const int publicationRead = finalize.indexOf("QFile sourceTextures(texturesPath)");
+    QVERIFY2(publicationPreflight >= 0
+             && publicationAuthorized > publicationPreflight
+             && publicationRead > publicationAuthorized,
+             "Publication can reach an installed RES before stopping an Endurance-owned test runtime");
+    QVERIFY2(source.contains("Modern terrain publication succeeded mpr:%1 res:%2"),
+             "Publication no longer records the exact committed MPR/RES pair after both commits succeed");
+    QVERIFY2(mainSource.contains("Stop Test Current and continue")
+             && mainSource.contains("m_mapTestLauncher->stop()")
+             && mainSource.contains("m_mapTestLauncher->isRunning()"),
+             "The publication preflight no longer offers to stop and waits for the owned test runtime");
+
+    const int prewarmStart = source.indexOf(
+        "void CView::prewarmModernTerrainFamily(");
+    const int prewarmEnd = source.indexOf(
+        "bool CView::adoptPrewarmedTerrainFamily(", prewarmStart);
+    QVERIFY(prewarmStart >= 0 && prewarmEnd > prewarmStart);
+    const QByteArray prewarm = source.mid(prewarmStart, prewarmEnd - prewarmStart);
+    const int candidateLoop = prewarm.indexOf(
+        "for(const STerrainGlobalTransitionSource& source :");
+    const int exactOnlyGate = prewarm.indexOf("if(!exactAvailable)");
+    QVERIFY2(candidateLoop >= 0
+             && (exactOnlyGate < 0 || candidateLoop < exactOnlyGate),
+             "A previously realized uniform still prevents the rest of its physical family from being staged before blends");
 
     QVERIFY(terrainMprSaveActionEnabled(true, true, false));
     QVERIFY(terrainMprSaveActionEnabled(true, false, true));
@@ -12377,6 +12404,125 @@ void EnduranceDocumentTests::externalZone1TestOverlays5RuntimeFlipbookProbe()
     qInfo() << "R7 flipbook record/start references"
             << start << count << exactStartCells << referencedFrameSlots
             << "atlasSlots" << binding.decodedAtlasTiles.size();
+}
+
+void EnduranceDocumentTests::externalZone1TestOverlays6DraftFinalizationProbe()
+{
+    const QString mprPath = qEnvironmentVariable(
+        "EI_MAPPER_ZONE1TESTOVERLAYS6_REPRO_MPR");
+    const QString atlasPath = qEnvironmentVariable(
+        "EI_MAPPER_ZONE1TESTOVERLAYS6_REPRO_ATLAS");
+    if(mprPath.isEmpty() || atlasPath.isEmpty())
+        QSKIP("Set the R9 read-only draft MPR/atlas pair environment variables");
+
+    CValidationReport report;
+    CMprDocument document;
+    QVERIFY2(document.load(QFileInfo(mprPath), &report),
+             qPrintable(report.toText()));
+    QCOMPARE(QCryptographicHash::hash(document.originalBytes(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("093B61A6C49B0893FF1261136F771D18D3113AC430C22FCDBB2813F90D325BB7"));
+    QFile atlasFile(atlasPath);
+    QVERIFY(atlasFile.open(QIODevice::ReadOnly));
+    QCOMPARE(QCryptographicHash::hash(atlasFile.readAll(),
+                 QCryptographicHash::Sha256).toHex().toUpper(),
+             QByteArrayLiteral("F5B3DA7BE5398E6226DAB3476FF7B0C4BFBE21205EC66DEAC442B766ABA1BE7C"));
+
+    const STerrainAtlasEmbeddedBindingResult binding =
+        CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+            {atlasPath}, document.mapInfo().innerNamespace, atlasPath);
+    QVERIFY2(binding.success(), qPrintable(binding.error));
+    QCOMPARE(document.mapInfo().animatedTiles.size(), 2);
+    QCOMPARE(document.mapInfo().animatedTiles.at(0).tileIndex, quint16(540));
+    QCOMPARE(document.mapInfo().animatedTiles.at(0).frameCount, quint16(32));
+    QCOMPARE(document.mapInfo().animatedTiles.at(1).tileIndex, quint16(714));
+    QCOMPARE(document.mapInfo().animatedTiles.at(1).frameCount, quint16(19));
+    const STerrainAtlasAnalysis analysis = binding.profile.usableAnalysis(&report);
+    QVERIFY2(analysis.usable, qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+    QVERIFY2(terrain.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, analysis.landCatalog, &report,
+                 ETerrainMaterialFieldRecovery::RecoverDeterministically),
+             qPrintable(report.toText()));
+    CTerrainVirtualMaterialField field;
+    QVERIFY(terrain.copyVirtualMaterialField(ETerrainTileLayer::Land, &field));
+
+    QVector<quint16> pinnedOverlay;
+    QVector<qint32> placedTypes;
+    QVector<quint16> placedPacked;
+    QVector<bool> preservePlaced;
+    QSet<int> referencedSlots;
+    for(int y = 0; y < terrain.tileCountY(); ++y)
+        for(int x = 0; x < terrain.tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 overlay = terrain.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &available);
+            if(available && overlay != 0xffffu)
+            {
+                pinnedOverlay.append(overlay);
+                referencedSlots.insert(SMprPackedTile::decode(overlay).atlasSlot());
+            }
+            const quint16 land = terrain.packedTile(
+                x, y, ETerrainTileLayer::Land, &available);
+            bool typeFound = false;
+            placedTypes.append(available
+                ? terrain.tileType(land, &typeFound) : -1);
+            placedPacked.append(available ? land : quint16(0));
+            preservePlaced.append(true);
+            if(available)
+                referencedSlots.insert(SMprPackedTile::decode(land).atlasSlot());
+        }
+    QStringList referencedObsolete;
+    for(int obsolete = 504; obsolete < 536; ++obsolete)
+        if(referencedSlots.contains(obsolete))
+            referencedObsolete.append(QString::number(obsolete));
+    qInfo() << "R9 exact draft referenced pre-repack slots"
+            << referencedObsolete;
+
+    QMap<qint32, qint32> materialRuntimeTypes;
+    for(const STerrainAtlasProfileFamily& family : binding.profile.families)
+        materialRuntimeTypes.insert(family.id, family.tileType);
+    CTerrainVirtualAtlas atlas(
+        analysis.landCatalog, binding.decodedAtlasTiles, 0x50432u,
+        {}, {}, true, document.mapInfo().tileTypes, materialRuntimeTypes);
+    QVector<STerrainAtlasAnimationRange> animations;
+    for(const SMprAnimatedTileRecord& source : document.mapInfo().animatedTiles)
+    {
+        STerrainAtlasAnimationRange animation;
+        animation.tileIndex = source.tileIndex;
+        animation.frameCount = source.frameCount;
+        animations.append(animation);
+    }
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        field, document.mapInfo().innerNamespace,
+        kMprPackedTerrainAtlasSlotLimit, document.mapInfo().tileTypes,
+        &report, pinnedOverlay, placedTypes, placedPacked, {},
+        &analysis.overlayCompatibleCatalog, preservePlaced, animations);
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n") + report.toText()));
+    QCOMPARE(finalized.animations.size(), 2);
+    QCOMPARE(finalized.animations.at(0).tileIndex, quint16(0));
+    QCOMPARE(finalized.animations.at(0).frameCount, quint16(32));
+    QCOMPARE(finalized.animations.at(1).tileIndex, quint16(32));
+    QCOMPARE(finalized.animations.at(1).frameCount, quint16(19));
+    for(int obsolete = 504; obsolete < 536; ++obsolete)
+        QVERIFY2(!finalized.authoredSlotRemap.contains(obsolete),
+                 "Clean finalization retained an obsolete Emerald source-frame copy");
+    for(const STerrainAtlasAnimationRange& animation : finalized.animations)
+    {
+        QVERIFY(int(animation.tileIndex % 64) + int(animation.frameCount) <= 64);
+        const STerrainTransitionSignature signature =
+            finalized.tiles.at(animation.tileIndex).canonicalSignature;
+        QVERIFY(signature.northWest == signature.northEast
+                && signature.northWest == signature.southEast
+                && signature.northWest == signature.southWest);
+        for(int phase = 1; phase < animation.frameCount; ++phase)
+            QCOMPARE(finalized.tiles.at(animation.tileIndex + phase)
+                         .canonicalSignature,
+                     signature);
+    }
 }
 
 void EnduranceDocumentTests::externalZone1TestoOverlayMappingProbe()

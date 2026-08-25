@@ -11295,15 +11295,12 @@ void CView::prewarmModernTerrainFamily(qint32 terrainType,
         QElapsedTimer workerTimer;
         workerTimer.start();
         CValidationReport report;
-        bool exactAvailable = false;
-        if(typedOverlay)
-            exactAvailable = selectWorkingPaintVariantWithRuntimeType(
-                *staged->atlas, pure, 0, 0, semanticSeed,
-                runtimeType, nullptr);
-        else
-            staged->atlas->catalog().selectForPaint(
-                pure, 0, 0, semanticSeed, &exactAvailable);
-        if(!exactAvailable)
+        // Stage every exact authored physical variant for the selected
+        // uniform family in one batch, even when the opened map already has
+        // one selectable instance. Painting still prefers current-map
+        // artwork, but keeping the family batch contiguous prevents a later
+        // Shift+R from allocating blend tiles between prospective flipbook
+        // frames.
         {
             QSet<QByteArray> importedPhysical;
             QSet<QByteArray> importedPixels;
@@ -13572,8 +13569,12 @@ void CView::finalizeVirtualTerrainAtlas()
     if(preview.exec()!=QDialog::Accepted)
         return;
 
+    bool publicationReady = true;
+    emit terrainPublicationPreflightRequested(texturesPath, &publicationReady);
+    if(!publicationReady)
+        return;
     ei::log(eLogInfo, QStringLiteral(
-        "Modern terrain publication confirmed mpr:%1 res:%2 identity:%3 "
+        "Modern terrain publication authorized mpr:%1 res:%2 identity:%3 "
         "replaceIdentity:%4")
         .arg(QDir::toNativeSeparators(mprDestination.absoluteFilePath()),
              QDir::toNativeSeparators(texturesPath), selectedIdentity,
@@ -13926,6 +13927,11 @@ void CView::finalizeVirtualTerrainAtlas()
     m_requestedTerrainIdentityFinalization = false;
     refreshMprSettingsDock();
     emit mprSaveStateChanged();
+    ei::log(eLogInfo, QStringLiteral(
+        "Modern terrain publication succeeded mpr:%1 res:%2 identity:%3")
+        .arg(QDir::toNativeSeparators(mprDestination.absoluteFilePath()),
+             QDir::toNativeSeparators(texturesPath),
+             finalized.isolatedNamespace));
     emit updateMsg(tr("Modern terrain atlas published in place: %1")
         .arg(QDir::toNativeSeparators(texturesPath)));
     QMessageBox::information(this, tr("Modern MPR saved"),
