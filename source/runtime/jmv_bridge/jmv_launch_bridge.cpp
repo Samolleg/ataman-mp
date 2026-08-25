@@ -3150,14 +3150,19 @@ bool ProcessHotReloadOnGameThread()
     wchar_t zone[128]{};
     MultiByteToWideChar(CP_ACP, 0, g_sourceZone, -1, zone,
                         int(sizeof(zone) / sizeof(zone[0])));
+    const wchar_t* reloadMode = runtimeState == RuntimeState::GameplayReady
+        ? L"direct-zone-transition"
+        : (runtimeState == RuntimeState::MainMenuReady
+           ? L"complete-new-game" : L"main-menu-rebootstrap");
     _snwprintf_s(queued, sizeof(queued) / sizeof(queued[0]), _TRUNCATE,
-                 L"HOT_RELOAD dispatch sequence=%llu generation=%llu runtime_state=%s zone=\"%s\" entrance_id=%d thread=%lu",
+                 L"HOT_RELOAD dispatch sequence=%llu generation=%llu runtime_state=%s reload_mode=%s zone=\"%s\" entrance_id=%d thread=%lu",
                  request.sequence, request.generation, RuntimeStateName(runtimeState),
-                 zone, request.entranceId, GetCurrentThreadId());
+                 reloadMode, zone, request.entranceId, GetCurrentThreadId());
     Log(queued);
 
     InterlockedExchange(&g_pendingMapLoadProbeCount, 0);
-    if(runtimeState != RuntimeState::MainMenuReady)
+    if(runtimeState != RuntimeState::MainMenuReady
+       && runtimeState != RuntimeState::GameplayReady)
     {
         InterlockedExchange(&g_pendingStateAwareReload, 1);
         SetRuntimeState(RuntimeState::Transitioning,
@@ -3192,11 +3197,20 @@ bool ProcessHotReloadOnGameThread()
         return false;
     }
     InterlockedExchange(&g_directLaunchState, 3);
-    const int transitionResult = 1;
-    auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
-    const auto newGame = reinterpret_cast<NewGameBootstrapFn>(game + kNewGameBootstrapRva);
-    Log(L"HOT_RELOAD invoking complete New Game bootstrap from MainMenuReady");
-    newGame(g_zoneTransitionController);
+    int transitionResult = 1;
+    if(runtimeState == RuntimeState::GameplayReady)
+    {
+        Log(L"HOT_RELOAD invoking direct gameplay zone transition without New Game teardown");
+        transitionResult = g_originalZoneTransition(
+            g_zoneTransitionController, g_sourceZone, 0);
+    }
+    else
+    {
+        auto* game = reinterpret_cast<unsigned char*>(g_gameModule);
+        const auto newGame = reinterpret_cast<NewGameBootstrapFn>(game + kNewGameBootstrapRva);
+        Log(L"HOT_RELOAD invoking complete New Game bootstrap from MainMenuReady");
+        newGame(g_zoneTransitionController);
+    }
     const bool redirected = InterlockedCompareExchange(&g_directLaunchState, 6, 4) == 4;
     if(!redirected)
     {

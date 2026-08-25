@@ -80,7 +80,8 @@ private slots:
     void initialLaunchComposesGeneratedMinimapWithTerrainResource();
     void changedTerrainAtlasRequiresOwnedProcessRestart();
     void repeatedHotReloadUsesDistinctEngineVisiblePayloadNames();
-    void repeatedRebootstrapRequiresOwnedProcessRestart();
+    void repeatedGameplayHotReloadRemainsInProcess();
+    void authoritativeResultAcceptsRepeatedUnchangedGeneration();
     void authoritativeResultSeparatesOpenedFromCommittedGeneration();
     void renderEvidenceRejectsTexturelessFrames();
     void memoryEvidenceSummarizesComparableSamples();
@@ -97,6 +98,22 @@ static QByteArray launcherSource()
 {
     const QString relativePath = QStringLiteral(
         "source/runtime/jmv_map_test_launcher.cpp");
+    QDir directory(QDir::currentPath());
+    for(int depth = 0; depth < 8; ++depth)
+    {
+        QFile source(directory.filePath(relativePath));
+        if(source.open(QIODevice::ReadOnly))
+            return source.readAll();
+        if(!directory.cdUp())
+            break;
+    }
+    return QByteArray();
+}
+
+static QByteArray bridgeSource()
+{
+    const QString relativePath = QStringLiteral(
+        "source/runtime/jmv_bridge/jmv_launch_bridge.cpp");
     QDir directory(QDir::currentPath());
     for(int depth = 0; depth < 8; ++depth)
     {
@@ -744,6 +761,36 @@ void JmvMapTestLauncherTests::rebasesRuntimeTerrainAtlasNamespace()
                  int(externalDocument.mapInfo().textureCount));
         QVERIFY(!rebasedMpr.isEmpty());
         QVERIFY(!rebasedRes.isEmpty());
+        CMprDocument externalReopened;
+        CValidationReport externalReopenedReport;
+        QVERIFY2(externalReopened.loadBytes(
+                     rebasedMpr, "published-rebased.mpr", &externalReopenedReport),
+                 qPrintable(externalReopenedReport.toText()));
+        QCOMPARE(externalReopened.mapInfo().animatedTiles,
+                 externalDocument.mapInfo().animatedTiles);
+        QCOMPARE(externalReopened.mapInfo().animatedTileCount,
+                 externalDocument.mapInfo().animatedTileCount);
+        QStringList animationRecords;
+        for(const SMprAnimatedTileRecord& record
+            : externalDocument.mapInfo().animatedTiles)
+        {
+            animationRecords.append(QStringLiteral("%1:%2")
+                .arg(record.tileIndex).arg(record.frameCount));
+        }
+        qInfo().noquote()
+            << QStringLiteral(
+                "PUBLISHED_ATLAS source_mpr_sha256=%1 source_res_sha256=%2 "
+                "source_namespace=%3 source_animation_count=%4 "
+                "source_animation_records=%5 staged_mpr_sha256=%6 "
+                "staged_res_sha256=%7 staged_namespace=%8 "
+                "staged_animation_count=%9 staged_animation_records=%10")
+                .arg(hash(externalMpr), hash(externalRes),
+                     externalDocument.mapInfo().innerNamespace)
+                .arg(externalDocument.mapInfo().animatedTileCount)
+                .arg(animationRecords.join(','), hash(rebasedMpr),
+                     hash(rebasedRes), externalReopened.mapInfo().innerNamespace)
+                .arg(externalReopened.mapInfo().animatedTileCount)
+                .arg(animationRecords.join(','));
     }
 }
 
@@ -822,12 +869,8 @@ void JmvMapTestLauncherTests::repeatedHotReloadUsesDistinctEngineVisiblePayloadN
              QString("map-generation-000002.grp"));
 }
 
-void JmvMapTestLauncherTests::repeatedRebootstrapRequiresOwnedProcessRestart()
+void JmvMapTestLauncherTests::repeatedGameplayHotReloadRemainsInProcess()
 {
-    QVERIFY(!CJmvMapTestLauncher::priorInProcessReloadRequiresOwnedProcessRestart(0));
-    QVERIFY(CJmvMapTestLauncher::priorInProcessReloadRequiresOwnedProcessRestart(1));
-    QVERIFY(CJmvMapTestLauncher::priorInProcessReloadRequiresOwnedProcessRestart(2));
-
     const QByteArray source = launcherSource();
     const int hotReloadStart = source.indexOf(
         "bool CJmvMapTestLauncher::hotReload(");
@@ -836,11 +879,115 @@ void JmvMapTestLauncherTests::repeatedRebootstrapRequiresOwnedProcessRestart()
     QVERIFY(hotReloadStart >= 0 && hotReloadEnd > hotReloadStart);
     const QByteArray hotReload = source.mid(
         hotReloadStart, hotReloadEnd - hotReloadStart);
-    QVERIFY2(hotReload.contains(
-                 "priorInProcessReloadRequiresOwnedProcessRestart(m_hotReloadSequence)"),
-             "A second in-process New Game rebootstrap is still allowed");
-    QVERIFY2(hotReload.contains("return restart(input, error);"),
-             "The exhausted rebootstrap lifecycle is not replaced by an owned-process restart");
+    QVERIFY2(!hotReload.contains(
+                 "priorInProcessReloadRequiresOwnedProcessRestart"),
+             "Reload count still replaces a safe repeated in-process transaction with a restart");
+    QVERIFY2(hotReload.contains("PostThreadMessageW(DWORD(threadId), kHotReloadMessage"),
+             "A validated unchanged request can disappear before reaching the bridge thread");
+    QVERIFY2(hotReload.contains("emit hotReloadQueued(sequence, request.zoneId)"),
+             "A dispatched unchanged request has no explicit queued result boundary");
+
+    const QByteArray bridge = bridgeSource();
+    const int processStart = bridge.indexOf("bool ProcessHotReloadOnGameThread()");
+    const int processEnd = bridge.indexOf(
+        "LRESULT CALLBACK DirectLaunchMessageHook", processStart);
+    QVERIFY(processStart >= 0 && processEnd > processStart);
+    const QByteArray process = bridge.mid(processStart, processEnd - processStart);
+    QVERIFY2(process.contains("runtimeState == RuntimeState::GameplayReady"),
+             "Ordinary gameplay reload has no distinct ownership-safe lifecycle");
+    QVERIFY2(process.contains("g_originalZoneTransition(")
+                 && process.contains("g_zoneTransitionController, g_sourceZone, 0)"),
+             "Ordinary gameplay reload still destroys and recreates global New Game state");
+}
+
+void JmvMapTestLauncherTests::authoritativeResultAcceptsRepeatedUnchangedGeneration()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString source = QDir(temp.path()).filePath("source.mob");
+    writeFile(source, QByteArray("source map"));
+    QJsonObject manifest = resultManifest(temp.path(), source);
+
+    QJsonArray reloads;
+    for(int generation = 1; generation <= 2; ++generation)
+    {
+        const QString root = QDir(temp.path()).filePath(
+            QString("generations/%1").arg(generation, 6, 10, QLatin1Char('0')));
+        QJsonObject reload;
+        reload.insert("sequence", QString::number(generation));
+        reload.insert("generation", QString::number(generation));
+        reload.insert("zoneId", "zone1");
+        reload.insert("entranceId", 2);
+        reload.insert("mprPath", QDir(root).filePath(
+            QString("map-generation-%1.mpr").arg(generation, 6, 10, QLatin1Char('0'))));
+        reload.insert("mobPath", QDir(root).filePath(
+            QString("map-generation-%1.mob").arg(generation, 6, 10, QLatin1Char('0'))));
+        reload.insert("mprSha256", "unchanged-mpr-hash");
+        reload.insert("mobSha256", "unchanged-mob-hash");
+        reload.insert("savePath", QDir(root).filePath("saves"));
+        reloads.append(reload);
+    }
+    manifest.insert("hotReloads", reloads);
+    const QJsonObject first = reloads.at(0).toObject();
+    const QJsonObject second = reloads.at(1).toObject();
+    const QString evidence = successfulBridgeEvidence(temp.path()) + QString(
+        "HOT_RELOAD dispatch sequence=1 generation=1 runtime_state=GameplayReady reload_mode=direct-zone-transition zone=\"zone1\" entrance_id=2 thread=1\n"
+        "DIRECT_LAUNCH redirecting normal single-player transition loader mpr=\"%1\" mob=\"%2\" context=0x1\n"
+        "HOT_RELOAD completed sequence=1 transition_result=1 staged_loader=observed\n"
+        "HOT_RELOAD dispatch sequence=2 generation=2 runtime_state=GameplayReady reload_mode=direct-zone-transition zone=\"zone1\" entrance_id=2 thread=1\n"
+        "DIRECT_LAUNCH redirecting normal single-player transition loader mpr=\"%3\" mob=\"%4\" context=0x2\n"
+        "HOT_RELOAD completed sequence=2 transition_result=1 staged_loader=observed\n")
+        .arg(first.value("mprPath").toString(), first.value("mobPath").toString(),
+             second.value("mprPath").toString(), second.value("mobPath").toString());
+
+    const QJsonObject report = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, evidence, 0, int(QProcess::NormalExit), true,
+        "Removed all owned runtime artifacts");
+    QCOMPARE(report.value("requestedGeneration").toString(), QString("2"));
+    QCOMPARE(report.value("actualGeneration").toString(), QString("2"));
+    QCOMPARE(report.value("completedReloadSequence").toString(), QString("2"));
+    QCOMPARE(report.value("reloadExecutionMode").toString(),
+             QString("direct-zone-transition"));
+    QCOMPARE(report.value("playerInitializationCount").toInt(), 0);
+    QCOMPARE(report.value("sessionPlayerInitializationCount").toInt(), 1);
+    QVERIFY(report.value("controlledPlayerConfirmed").toBool());
+    QVERIFY(report.value("payloadHashesValidated").toBool());
+    QVERIFY(report.value("passed").toBool());
+
+    const QString thirdRoot = QDir(temp.path()).filePath(
+        QStringLiteral("generations/000003"));
+    QJsonObject third;
+    third.insert("sequence", "3");
+    third.insert("generation", "3");
+    third.insert("zoneId", "zone1");
+    third.insert("entranceId", 2);
+    third.insert("mprPath", QDir(thirdRoot).filePath(
+        QStringLiteral("map-generation-000003.mpr")));
+    third.insert("mobPath", QDir(thirdRoot).filePath(
+        QStringLiteral("map-generation-000003.mob")));
+    third.insert("mprSha256", "changed-mpr-hash");
+    third.insert("mobSha256", "changed-mob-hash");
+    third.insert("savePath", QDir(thirdRoot).filePath("saves"));
+    reloads.append(third);
+    manifest.insert("hotReloads", reloads);
+    const QString changedEvidence = evidence + QString(
+        "HOT_RELOAD dispatch sequence=3 generation=3 runtime_state=GameplayReady reload_mode=direct-zone-transition zone=\"zone1\" entrance_id=2 thread=1\n"
+        "DIRECT_LAUNCH redirecting normal single-player transition loader mpr=\"%1\" mob=\"%2\" context=0x3\n"
+        "HOT_RELOAD completed sequence=3 transition_result=1 staged_loader=observed\n")
+        .arg(third.value("mprPath").toString(), third.value("mobPath").toString());
+    const QJsonObject changedReport = CJmvMapTestLauncher::buildAuthoritativeResult(
+        manifest, changedEvidence, 0, int(QProcess::NormalExit), true,
+        "Removed all owned runtime artifacts");
+    QCOMPARE(changedReport.value("requestedGeneration").toString(), QString("3"));
+    QCOMPARE(changedReport.value("actualGeneration").toString(), QString("3"));
+    QCOMPARE(changedReport.value("completedReloadSequence").toString(), QString("3"));
+    QCOMPARE(changedReport.value("reloadExecutionMode").toString(),
+             QString("direct-zone-transition"));
+    QCOMPARE(changedReport.value("playerInitializationCount").toInt(), 0);
+    QCOMPARE(changedReport.value("sessionPlayerInitializationCount").toInt(), 1);
+    QVERIFY(changedReport.value("controlledPlayerConfirmed").toBool());
+    QVERIFY(changedReport.value("payloadHashesValidated").toBool());
+    QVERIFY(changedReport.value("passed").toBool());
 }
 
 void JmvMapTestLauncherTests::authoritativeResultSeparatesOpenedFromCommittedGeneration()

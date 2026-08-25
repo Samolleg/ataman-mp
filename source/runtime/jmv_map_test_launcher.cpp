@@ -753,16 +753,6 @@ bool CJmvMapTestLauncher::terrainAtlasHotReloadRequiresRestart(
         || runningAtlasSlots != candidateAtlasSlots;
 }
 
-bool CJmvMapTestLauncher::priorInProcessReloadRequiresOwnedProcessRestart(
-    quint64 dispatchedReloadSequence)
-{
-    // The bridge's complete New Game bootstrap is a one-reload lifecycle.
-    // The exact R5 failure opened the second generation-qualified payload and
-    // then crashed before the bootstrap could publish completion. Start a
-    // fresh owned process instead of re-entering that lifecycle a third time.
-    return dispatchedReloadSequence > 0;
-}
-
 bool CJmvMapTestLauncher::rebaseRuntimeTerrainAtlas(
     const QByteArray& sourceMpr,
     const QByteArray& sourceAtlasRes,
@@ -1211,8 +1201,11 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     QString actualMobPath;
     QString attemptedMprPath;
     QString attemptedMobPath;
+    QString reloadExecutionMode;
+    QString attemptedReloadExecutionMode;
     const QRegularExpression reloadExpression(
-        "HOT_RELOAD dispatch sequence=(\\d+) generation=(\\d+).*zone=\\\"([^\\\"]+)\\\" entrance_id=(\\d+)");
+        "HOT_RELOAD dispatch sequence=(\\d+) generation=(\\d+).*?"
+        "(?:reload_mode=([^ ]+) )?zone=\\\"([^\\\"]+)\\\" entrance_id=(\\d+)");
     QVector<QRegularExpressionMatch> reloadEvents;
     QRegularExpressionMatchIterator reloadMatches = reloadExpression.globalMatch(bridgeResult);
     while(reloadMatches.hasNext())
@@ -1244,6 +1237,7 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         const quint64 sequence = match.captured(1).toULongLong();
         attemptedReloadSequence = sequence;
         attemptedGeneration = match.captured(2).toULongLong();
+        attemptedReloadExecutionMode = match.captured(3);
         attemptedEvidenceStart = rangeStart;
         attemptedEvidenceEnd = rangeEnd;
         loaderPathsInRange(rangeStart, rangeEnd,
@@ -1253,8 +1247,9 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         {
             completedReloadSequence = sequence;
             actualGeneration = match.captured(2).toULongLong();
-            actualZone = match.captured(3);
-            actualEntrance = match.captured(4).toInt();
+            reloadExecutionMode = match.captured(3);
+            actualZone = match.captured(4);
+            actualEntrance = match.captured(5).toInt();
             completedEvidenceStart = rangeStart;
             completedEvidenceEnd = rangeEnd;
             loaderPathsInRange(rangeStart, rangeEnd,
@@ -1431,8 +1426,14 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
         : QString();
     const int attemptedPlayerInitializations = attemptedPlayerEvidence.count(
         "DIRECT_LAUNCH initialized New Game player");
+    const int sessionPlayerInitializations = bridgeResult.count(
+        "DIRECT_LAUNCH initialized New Game player");
+    const bool directGameplayReload = reloadExecutionMode
+        == QStringLiteral("direct-zone-transition");
     const bool controlledPlayerConfirmed = requestedReloadCompleted
-        && playerInitializations == 1;
+        && (directGameplayReload
+            ? playerInitializations == 0 && sessionPlayerInitializations == 1
+            : playerInitializations == 1);
 
     bool sourceFilesUnchanged = true;
     QJsonArray changedSources;
@@ -1519,8 +1520,13 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
                 "Requested hot reload sequence %1 did not complete its controlled-player lifecycle.")
                 .arg(requestedReloadSequence));
         else
-            addUnique(&errors, QString("The staged run reported %1 controlled-player "
-                                      "initializations; exactly one is required.")
+            addUnique(&errors, directGameplayReload
+                ? QString("The direct gameplay reload reported %1 reload player "
+                          "initializations and %2 session initialization(s); "
+                          "zero and exactly one are required.")
+                      .arg(playerInitializations).arg(sessionPlayerInitializations)
+                : QString("The staged run reported %1 controlled-player "
+                          "initializations; exactly one is required.")
                       .arg(playerInitializations));
     }
     if(!sourceFilesUnchanged)
@@ -1558,6 +1564,8 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("actualGeneration", QString::number(actualGeneration));
     report.insert("attemptedGeneration", QString::number(attemptedGeneration));
     report.insert("attemptedReloadSequence", QString::number(attemptedReloadSequence));
+    report.insert("reloadExecutionMode", reloadExecutionMode);
+    report.insert("attemptedReloadExecutionMode", attemptedReloadExecutionMode);
     report.insert("saveNamespace", saveNamespace);
     report.insert("completedReloadSequence", QString::number(completedReloadSequence));
     report.insert("mprSha256", requestedMprHash);
@@ -1600,12 +1608,15 @@ QJsonObject CJmvMapTestLauncher::buildAuthoritativeResult(
     report.insert("drawallAutoexecConsumed", drawallAutoexecConsumed);
     report.insert("drawallContractValidated", drawallContractValidated);
     report.insert("playerInitializationCount", playerInitializations);
+    report.insert("sessionPlayerInitializationCount", sessionPlayerInitializations);
     report.insert("attemptedPlayerInitializationCount",
                   attemptedPlayerInitializations);
     report.insert("reportedPlayerCount", playerInitializations);
     report.insert("controlledPlayerConfirmed", controlledPlayerConfirmed);
     report.insert("playerCountEvidence", controlledPlayerConfirmed
-                  ? "exactly one New Game player-record initialization observed"
+                  ? (directGameplayReload
+                     ? "one session player retained; no New Game player-record initialization during direct reload"
+                     : "exactly one New Game player-record initialization observed")
                   : (!requestedReloadCompleted && requestedReloadSequence > 0
                      ? QString("requested reload incomplete after %1 player-record initialization(s)")
                            .arg(attemptedPlayerInitializations)
@@ -3246,15 +3257,6 @@ bool CJmvMapTestLauncher::hotReload(const SJmvMapTestLaunchInput& input,
            candidateAtlasSha256, input.expectedTerrainAtlasPages,
            input.expectedTerrainAtlasSlots))
         return queueTerrainAtlasRestart(input, candidateAtlasSha256, error);
-
-    if(priorInProcessReloadRequiresOwnedProcessRestart(m_hotReloadSequence))
-    {
-        appendRunLog(QString(
-            "Prior in-process hot reload sequence=%1; replacing the next "
-            "unsafe New Game rebootstrap with a fresh Endurance-owned process")
-            .arg(m_hotReloadSequence));
-        return restart(input, error);
-    }
 
     const quint64 sequence = m_hotReloadSequence + 1;
     const quint64 generation = m_saveGeneration + 1;
