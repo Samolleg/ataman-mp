@@ -816,6 +816,56 @@ QImage currentMapGlobalUniformSource(
     return result.isNull() ? find(family.sources) : result;
 }
 
+QImage cachedGlobalUniformSource(
+    const STerrainGlobalMaterialFamily& family,
+    const QString& preferredNamespace, const QSize& requiredSize,
+    const QMap<QString, QImage>& decodedTileCache,
+    STerrainGlobalMaterialSource* selectedSource = nullptr)
+{
+    QVector<STerrainGlobalMaterialSource> sources;
+    const auto appendUnique = [&sources](
+        const STerrainGlobalMaterialSource& source) {
+        for(const STerrainGlobalMaterialSource& existing : sources)
+            if(existing.mprNamespace.compare(
+                   source.mprNamespace, Qt::CaseInsensitive) == 0
+               && existing.uniformSlot == source.uniformSlot
+               && existing.atlasPixelSha256 == source.atlasPixelSha256)
+                return;
+        sources.append(source);
+    };
+    const auto appendMatching = [&] (
+        const QVector<STerrainGlobalMaterialSource>& candidates,
+        bool preferred) {
+        for(const STerrainGlobalMaterialSource& source : candidates)
+            if((source.mprNamespace.compare(
+                    preferredNamespace, Qt::CaseInsensitive) == 0)
+               == preferred)
+                appendUnique(source);
+    };
+    appendMatching(family.thumbnailSources, true);
+    appendMatching(family.sources, true);
+    appendMatching(family.thumbnailSources, false);
+    appendMatching(family.sources, false);
+    for(const STerrainGlobalMaterialSource& source : sources)
+    {
+        if(source.uniformSlot < 0
+           || source.uniformSlot >= source.atlasSlotCount)
+            continue;
+        const QString bindingKey = terrainAtlasBindingKey(
+            source.mprNamespace, source.atlasPixelSha256,
+            source.textureCount, source.atlasSlotCount);
+        const QString tileKey = terrainAtlasTileCacheKey(
+            bindingKey, source.uniformSlot, requiredSize);
+        const auto cached = decodedTileCache.constFind(tileKey);
+        if(cached == decodedTileCache.constEnd() || cached.value().isNull())
+            continue;
+        if(selectedSource)
+            *selectedSource = source;
+        return cached.value();
+    }
+    return QImage();
+}
+
 QVector4D aiGraphLayerColor(int layer)
 {
     static const QVector4D colors[CAiGraphDocument::LayerCount] = {
@@ -10727,10 +10777,17 @@ void CView::rebuildTerrainAutoCatalog()
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             STerrainGlobalMaterialSource selectedSource;
-            const QImage source = currentMapGlobalUniformSource(
+            QImage source = currentMapGlobalUniformSource(
                 family, mprNamespace,
                 m_terrainAtlasProfile.atlasPixelSha256,
                 m_pTileForm->tileImages(), &selectedSource);
+            if(source.isNull())
+                source = cachedGlobalUniformSource(
+                    family, mprNamespace,
+                    m_authoredTerrainTileImages.isEmpty()
+                        ? QSize()
+                        : m_authoredTerrainTileImages.front().size(),
+                    m_terrainGlobalUniformTileCache, &selectedSource);
             if(!source.isNull())
             {
                 m_terrainGlobalMaterialSources.insert(family.id, source);
@@ -11082,15 +11139,15 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
             }
             m_terrainGlobalHydrationPendingJobs = qMax(
                 0, m_terrainGlobalHydrationPendingJobs - 1);
-            if(!m_terrainGlobalHydrationPublishQueued)
+            if(m_terrainGlobalHydrationPendingJobs == 0)
+                applyDeferredGlobalTerrainPaletteHydration(generation);
+            else if(!m_terrainGlobalHydrationPublishQueued)
             {
                 m_terrainGlobalHydrationPublishQueued = true;
                 QTimer::singleShot(150, this, [this, generation]() {
                     applyDeferredGlobalTerrainPaletteHydration(generation);
                 });
             }
-            if(m_terrainGlobalHydrationPendingJobs == 0)
-                applyDeferredGlobalTerrainPaletteHydration(generation);
         });
         watcher->setFuture(QtConcurrent::run(
             m_terrainGlobalHydrationPool, [task]() {
@@ -11700,6 +11757,18 @@ void CView::refreshTerrainFamilyUsage()
                                         signature.southEast, signature.southWest})
                         overlay.insert(value);
             }
+    const auto updateChoices = [](QVector<STerrainPaintMaterialChoice>* choices,
+                                  const QSet<qint32>& used) {
+        for(STerrainPaintMaterialChoice& choice : *choices)
+            choice.used = used.contains(choice.id);
+    };
+    // These vectors are the authoritative source for deferred thumbnail
+    // publication. Keep their usage state in sync before updating the current
+    // widget copy, otherwise a later thumbnail result moves every brush back
+    // into the Unused section.
+    updateChoices(&m_modernLandPaintChoices, land);
+    updateChoices(&m_modernUnderwaterPaintChoices, land);
+    updateChoices(&m_modernOverlayPaintChoices, overlay);
     m_landscapeTools->setUsedTerrainFamilies(land, overlay);
 }
 

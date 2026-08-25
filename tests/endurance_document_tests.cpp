@@ -10534,6 +10534,9 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
              "Palette construction again verifies every foreign atlas synchronously");
     QVERIFY2(rebuild.contains("currentMapGlobalUniformSource("),
              "Palette construction no longer reuses already-loaded current-map material artwork");
+    QVERIFY2(rebuild.contains("cachedGlobalUniformSource(")
+             && rebuild.contains("m_terrainGlobalUniformTileCache"),
+             "A second map load discards already-verified reviewed-HD thumbnails and republishes an empty palette while decoding them again");
     QVERIFY2(!rebuild.contains("const QImage source = loadBoundGlobalUniformSource("),
              "Palette construction again performs foreign exact-archive verification eagerly");
     QVERIFY2(rebuild.contains("startDeferredGlobalTerrainPaletteHydration("),
@@ -12442,6 +12445,24 @@ void EnduranceDocumentTests::restoredTerrainFamiliesAreMarkedUsedBeforeFirstPain
     const int usage = load.indexOf("refreshTerrainFamilyUsage();", restore);
     QVERIFY2(catalog >= 0 && restore > catalog && usage > restore,
              "Loaded semantic fields are restored after the only usage scan, so every family appears unused until the first paint");
+
+    const int refreshStart = source.indexOf(
+        "void CView::refreshTerrainFamilyUsage()");
+    const int refreshEnd = source.indexOf(
+        "QVector<STerrainAtlasSlotUsage> CView::terrainAtlasUsage() const",
+        refreshStart);
+    QVERIFY(refreshStart >= 0 && refreshEnd > refreshStart);
+    const QByteArray refresh = source.mid(
+        refreshStart, refreshEnd - refreshStart);
+    const int backingLand = refresh.indexOf("m_modernLandPaintChoices");
+    const int backingUnderwater = refresh.indexOf(
+        "m_modernUnderwaterPaintChoices");
+    const int backingOverlay = refresh.indexOf("m_modernOverlayPaintChoices");
+    const int widgetPublish = refresh.indexOf("setUsedTerrainFamilies");
+    QVERIFY2(backingLand >= 0 && backingUnderwater > backingLand
+             && backingOverlay > backingUnderwater
+             && widgetPublish > backingOverlay,
+             "Usage is updated only in the current widget copy; deferred thumbnail publication later restores every backing choice to unused");
 }
 
 void EnduranceDocumentTests::externalZone1TestOverlays6DraftFinalizationProbe()
