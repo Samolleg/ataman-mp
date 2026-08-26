@@ -658,6 +658,8 @@ private slots:
     void classicAutoSafeTileSkipsUnsupportedCoreInsteadOfHardSeam();
     void manualPaintShowsCellFootprintAndLiftedTilePreview();
     void zone1NamespaceTemplateMatchesPrivateFixture();
+    void zone1R16SquareOverlayBrushCoversDisplayedCells();
+    void modernSquareTileStampResolvesAlreadySemanticCoreCells();
     void terrainHeightTransactionReopensAndPreservesOverlay();
     void overlayActivationDeactivationIsLosslessAndUndoable();
     void overlayActivationDistributesUniformVariantsAndRotations();
@@ -9013,6 +9015,132 @@ void EnduranceDocumentTests::zone1NamespaceTemplateMatchesPrivateFixture()
     for(const QPoint& center : sandwichDarkCenters)
         applyJunctionSample(groundSandwich, sandwichChanged, center, 3);
     verifyJunctionSeams(groundSandwich, sandwichChanged);
+}
+
+void EnduranceDocumentTests::zone1R16SquareOverlayBrushCoversDisplayedCells()
+{
+    const QString fixture = qEnvironmentVariable("ENDURANCE_ZONE1_R16_MPR_FIXTURE");
+    if(fixture.isEmpty())
+        QSKIP("Set ENDURANCE_ZONE1_R16_MPR_FIXTURE to the read-only Zone1 MPR used by the R16 repro.");
+    QFile source(fixture);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QCOMPARE(QCryptographicHash::hash(source.readAll(), QCryptographicHash::Sha256).toHex(),
+             QByteArray("9d0ac909872898f0e72c4eec8acaedb9866bb1c18b4ee2ebe2b854790982dfa4"));
+
+    CMprDocument document;
+    CValidationReport report;
+    QVERIFY2(document.load(QFileInfo(fixture), &report), qPrintable(report.toText()));
+    CTerrainEditModel terrain;
+    QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
+
+    // Exact R16 stroke regions recovered from its resolve journal. A square
+    // Tile target displays and commits all 49 cells; inactive overlay cells
+    // must not silently turn that square into the reported sparse stamp.
+    const QVector<QPoint> centers({QPoint(8, 44), QPoint(8, 52)});
+    for(const QPoint& center : centers)
+    {
+        int availableCells = 0;
+        for(int y = center.y() - 3; y <= center.y() + 3; ++y)
+            for(int x = center.x() - 3; x <= center.x() + 3; ++x)
+            {
+                bool available = false;
+                terrain.packedTile(x, y, ETerrainTileLayer::Overlay, &available);
+                availableCells += available ? 1 : 0;
+            }
+        QCOMPARE(availableCells, 49);
+    }
+}
+
+void EnduranceDocumentTests::modernSquareTileStampResolvesAlreadySemanticCoreCells()
+{
+    CMprDocument document;
+    QVERIFY(document.loadBytes(syntheticMpr(
+        syntheticLandSector(1200), syntheticMp(32)),
+        "modern-square-semantic-core.mpr"));
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.load(document));
+
+    CTerrainTransitionCatalog catalog;
+    for(int mask = 0; mask < 16; ++mask)
+    {
+        STerrainTransitionVariant variant;
+        variant.signature.northWest = (mask & 1) ? 2 : 1;
+        variant.signature.northEast = (mask & 2) ? 2 : 1;
+        variant.signature.southEast = (mask & 4) ? 2 : 1;
+        variant.signature.southWest = (mask & 8) ? 2 : 1;
+        SMprPackedTile packed;
+        packed.tileIndex = quint8(mask);
+        variant.packedTile = packed.encode();
+        QVERIFY(catalog.addVariant(variant));
+    }
+
+    CValidationReport report;
+    QVERIFY2(terrain.initializeVirtualMaterialField(
+        ETerrainTileLayer::Land, catalog, &report,
+        ETerrainMaterialFieldRecovery::RecoverDeterministically),
+        qPrintable(report.toText()));
+    QVector<qint32> current;
+    QVector<qint32> baseline;
+    QVERIFY(terrain.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &current, &baseline));
+    const int vertexWidth = terrain.tileCountX() + 1;
+    for(int y = 7; y <= 10; ++y)
+        for(int x = 7; x <= 10; ++x)
+        {
+            current[y * vertexWidth + x] = 2;
+            baseline[y * vertexWidth + x] = 2;
+        }
+    QVERIFY2(terrain.restoreVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, current, baseline, &report),
+        qPrintable(report.toText()));
+
+    // Reproduce the R16 first-stamp mismatch: recovery already describes an
+    // inner part of the requested square as the selected material, while its
+    // packed artwork still belongs to the old material. One Modern tile stamp
+    // must make the complete displayed 7x7 core physically and semantically
+    // consistent without relying on a later map-wide Shift+R repair.
+    STerrainTileBrush brush;
+    brush.centerX = 8.0f;
+    brush.centerY = 8.0f;
+    brush.radius = 3.0f;
+    brush.shape = ETerrainTileBrushShape::Square;
+    STerrainTileCommand stamp = terrain.makeVirtualTileMaterialPaint(
+        brush, ETerrainTileLayer::Land, 2, catalog,
+        0x52313653u, &report, true);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QCOMPARE(stamp.semanticAudit.paintedCoreCells.size(), 49);
+
+    CTerrainEditModel planned = terrain;
+    QVERIFY2(planned.apply(stamp, true, &report), qPrintable(report.toText()));
+    const STerrainTileCommand resolution = planned.makeVirtualStrokeResolution(
+        stamp, catalog, 0x52313653u, &report, true, 2);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    bool centerResolved = false;
+    for(const STerrainTileDelta& delta : resolution.deltas)
+        if(delta.globalX == 8 && delta.globalY == 8
+           && delta.layer == ETerrainTileLayer::Land)
+            centerResolved = true;
+    QVERIFY2(centerResolved,
+             "Release resolution omitted an already-semantic tile-target core cell");
+    appendTerrainTileCommand(&stamp, resolution);
+    QVERIFY2(terrain.apply(stamp, true, &report), qPrintable(report.toText()));
+
+    for(int y = 5; y <= 11; ++y)
+        for(int x = 5; x <= 11; ++x)
+        {
+            bool available = false;
+            const quint16 packed = terrain.packedTile(
+                x, y, ETerrainTileLayer::Land, &available);
+            QVERIFY(available);
+            bool decoded = false;
+            const STerrainTransitionSignature exact =
+                catalog.gridSignatureForPacked(packed, &decoded);
+            QVERIFY(decoded);
+            QCOMPARE(exact.northWest, qint32(2));
+            QCOMPARE(exact.northEast, qint32(2));
+            QCOMPARE(exact.southEast, qint32(2));
+            QCOMPARE(exact.southWest, qint32(2));
+        }
 }
 
 void EnduranceDocumentTests::terrainHeightTransactionReopensAndPreservesOverlay()

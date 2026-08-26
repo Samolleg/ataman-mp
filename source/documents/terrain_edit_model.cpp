@@ -6617,6 +6617,17 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
             for(int x:{vertex.x()-1,vertex.x()})
                 if(x>=0&&x<tileCountX()&&y>=0&&y<tileCountY())
                     affected.insert(y*tileCountX()+x);
+    // A tile-target stamp owns every displayed core cell. Some of those cells
+    // can already have the requested semantic corners after deterministic
+    // recovery while still retaining stale packed artwork. They therefore
+    // produce no changed vertex and used to be skipped by release resolution,
+    // leaving holes in the committed square until a later map-wide Resolve.
+    // Resolve the core cells directly as well as the blend ring incident to
+    // genuinely changed vertices.
+    for(const QPoint& cell:stroke.semanticAudit.paintedCoreCells)
+        if(cell.x()>=0&&cell.x()<tileCountX()
+           &&cell.y()>=0&&cell.y()<tileCountY())
+            affected.insert(cell.y()*tileCountX()+cell.x());
     QVector<int> cells=affected.values().toVector();std::sort(cells.begin(),cells.end());
     int unresolved=0;
     for(int cell:cells)
