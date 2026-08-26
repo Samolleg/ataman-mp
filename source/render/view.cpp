@@ -10990,6 +10990,7 @@ void CView::rebuildTerrainAutoCatalog()
             .arg(m_workingTerrainAtlas->capacityLimit()
                  - m_authoredTerrainTileImages.size())
             .arg(m_workingAtlasProtectedSlots.size()));
+        primeWorkingTerrainAtlasPreview(&report);
         refreshClassicAutoPalette();
         classicPaletteDataMs = catalogDetailTimer.restart();
         refreshManualAtlasPalette();
@@ -13245,7 +13246,8 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
     {
         makeCurrent();
         rendererInstalled = m_pLand->previewTerrainAtlas(
-            activeImages, atlas->activeTextureCount(), changed);
+            activeImages, atlas->activeTextureCount(), changed,
+            previousImages);
         doneCurrent();
         if(!rendererInstalled)
             pickerRestored = m_pTileForm->adoptTileImages(
@@ -13295,16 +13297,51 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
     return true;
 }
 
+bool CView::primeWorkingTerrainAtlasPreview(CValidationReport* report)
+{
+    if(!m_workingTerrainAtlas || !m_pLand)
+        return false;
+    const QVector<QImage> activeImages =
+        m_workingTerrainAtlas->activeTileImages();
+    const int textureCount = m_workingTerrainAtlas->activeTextureCount();
+    if(activeImages.isEmpty() || textureCount <= 0
+       || activeImages.size() != textureCount * 64)
+    {
+        if(report) report->add("terrain.working_atlas_prime_shape",
+            EValidationSeverity::Error,
+            "The working terrain atlas could not be primed because its initial physical layout is incomplete.");
+        ei::log(eLogWarning,
+            "Working terrain atlas preview prime refused: incomplete initial layout");
+        return false;
+    }
+    QElapsedTimer timer;
+    timer.start();
+    makeCurrent();
+    const bool installed = m_pLand->previewTerrainAtlas(
+        activeImages, textureCount);
+    doneCurrent();
+    if(!installed)
+    {
+        if(report) report->add("terrain.working_atlas_prime_renderer",
+            EValidationSeverity::Error,
+            "The initial working terrain atlas could not be installed before painting was enabled.");
+        ei::log(eLogWarning,
+            "Working terrain atlas preview prime failed before paint enablement");
+        return false;
+    }
+    ei::log(eLogInfo, QString(
+        "Working terrain atlas preview primed before paint: slots:%1 pages:%2 elapsedMs:%3")
+        .arg(activeImages.size()).arg(textureCount).arg(timer.elapsed()));
+    return true;
+}
+
 void CView::presentCompletedTerrainPublication()
 {
-    // Terrain atlas upload and sector-buffer replacement are both complete at
-    // this point. Present that coherent state synchronously before returning
-    // to Qt's event loop; a merely queued update allowed legacy compositor
-    // paths to expose the offscreen upload interval as a one-frame flash.
-    if(isValid() && isVisible())
-        updateGL();
-    else
-        update();
+    // Sector buffers, picker images, and the stable working-atlas texture now
+    // describe one state. Queue the normal widget frame so Qt coalesces the
+    // earlier sector update instead of entering QGLWidget's immediate
+    // paint-and-swap path while the paint event is still being handled.
+    update();
 }
 
 void CView::finalizeVirtualTerrainAtlas()

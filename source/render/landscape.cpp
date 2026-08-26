@@ -115,8 +115,10 @@ bool CLandscape::previewTerrainAtlasFullUpload(
 
 bool CLandscape::previewTerrainAtlasIncremental(
     const QVector<QImage>& tileImages, int textureCount, int columns, int rows,
-    const QSet<int>& changedSlots)
+    const QSet<int>& changedSlots,
+    const QVector<QImage>& rollbackTileImages)
 {
+    Q_UNUSED(rows)
     if(!m_previewAtlasTexture || !m_previewAtlasTexture->isCreated()
        || textureCount != m_previewAtlasTextureCount
        || columns != m_previewAtlasColumns || changedSlots.isEmpty())
@@ -127,120 +129,82 @@ bool CLandscape::previewTerrainAtlasIncremental(
         if(slot < 0 || slot >= tileImages.size()
            || tileImages.at(slot).size() != QSize(tileSize, tileSize))
             return false;
+    // A same-layout publication updates the existing GL object. Keep a CPU
+    // snapshot for the touched slots so a driver-side upload error can restore
+    // the complete prior atlas before the transaction is rejected.
+    if(rollbackTileImages.size() != tileImages.size())
+        return false;
+    for(int slot : changedSlots)
+        if(rollbackTileImages.at(slot).size() != QSize(tileSize, tileSize))
+            return false;
 
     QOpenGLFunctions* gl = QOpenGLContext::currentContext()->functions();
-    QOpenGLExtraFunctions* glExtra =
-        QOpenGLContext::currentContext()->extraFunctions();
-    GLint priorFramebuffer = 0;
-    GLint priorReadBuffer = GL_BACK;
     GLint priorActiveTexture = GL_TEXTURE0;
     GLint priorTexture = 0;
     GLint priorUnpackAlignment = 4;
-    gl->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &priorFramebuffer);
-    gl->glGetIntegerv(GL_READ_BUFFER, &priorReadBuffer);
     gl->glGetIntegerv(GL_ACTIVE_TEXTURE, &priorActiveTexture);
     gl->glActiveTexture(GL_TEXTURE0);
     gl->glGetIntegerv(GL_TEXTURE_BINDING_2D, &priorTexture);
     gl->glGetIntegerv(GL_UNPACK_ALIGNMENT, &priorUnpackAlignment);
     while(gl->glGetError() != GL_NO_ERROR) {}
 
-    const int width = columns * pageSize;
-    const int height = rows * pageSize;
-    QOpenGLTexture* candidate = new QOpenGLTexture(QOpenGLTexture::Target2D);
-    const int mipLevels = 1 + int(std::floor(std::log2(
-        double(qMax(width, height)))));
-    bool installed = candidate->create();
-    if(installed)
-    {
-        candidate->setSize(width, height);
-        candidate->setFormat(QOpenGLTexture::RGBA8_UNorm);
-        candidate->setMipLevels(mipLevels);
-        candidate->allocateStorage(QOpenGLTexture::RGBA,
-                                   QOpenGLTexture::UInt8);
-        candidate->setMinificationFilter(
-            QOpenGLTexture::NearestMipMapLinear);
-        candidate->setMagnificationFilter(QOpenGLTexture::Nearest);
-        candidate->setWrapMode(QOpenGLTexture::Repeat);
-        installed = candidate->isStorageAllocated();
-    }
-    GLuint framebuffer = 0;
-    if(installed)
-    {
-        gl->glGenFramebuffers(1, &framebuffer);
-        gl->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-        gl->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                                   GL_TEXTURE_2D,
-                                   m_previewAtlasTexture->textureId(), 0);
-        installed = gl->glCheckFramebufferStatus(GL_FRAMEBUFFER)
-            == GL_FRAMEBUFFER_COMPLETE;
-        if(installed)
-            glExtra->glReadBuffer(GL_COLOR_ATTACHMENT0);
-    }
-    if(installed)
-    {
-        gl->glBindTexture(GL_TEXTURE_2D, candidate->textureId());
-        gl->glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0,
-                                width, height);
-        installed = gl->glGetError() == GL_NO_ERROR;
-    }
+    const GLuint previewTextureId = m_previewAtlasTexture->textureId();
+    gl->glBindTexture(GL_TEXTURE_2D, previewTextureId);
     gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    for(int slot : changedSlots)
-    {
-        if(!installed)
-            break;
-        const int page = slot / 64;
-        const int local = slot % 64;
-        const int x = (page % columns) * pageSize
-            + (local % 8) * tileSize;
-        const int y = (page / columns) * pageSize
-            + (7 - local / 8) * tileSize;
-        const QImage image = tileImages.at(slot).format()
-            == QImage::Format_RGBA8888 ? tileImages.at(slot)
-            : tileImages.at(slot).convertToFormat(QImage::Format_RGBA8888);
-        gl->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, tileSize, tileSize,
-                            GL_RGBA, GL_UNSIGNED_BYTE, image.constBits());
-    }
+    const auto uploadChangedSlots = [&](const QVector<QImage>& images) {
+        for(int slot : changedSlots)
+        {
+            const int page = slot / 64;
+            const int local = slot % 64;
+            const int x = (page % columns) * pageSize
+                + (local % 8) * tileSize;
+            const int y = (page / columns) * pageSize
+                + (7 - local / 8) * tileSize;
+            const QImage image = images.at(slot).format()
+                == QImage::Format_RGBA8888 ? images.at(slot)
+                : images.at(slot).convertToFormat(QImage::Format_RGBA8888);
+            gl->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y,
+                                tileSize, tileSize, GL_RGBA,
+                                GL_UNSIGNED_BYTE, image.constBits());
+        }
+        return gl->glGetError() == GL_NO_ERROR;
+    };
+
+    bool installed = uploadChangedSlots(tileImages);
     if(installed)
-        installed = gl->glGetError() == GL_NO_ERROR;
-    if(installed)
     {
-        candidate->generateMipMaps();
+        gl->glGenerateMipmap(GL_TEXTURE_2D);
         installed = gl->glGetError() == GL_NO_ERROR;
     }
+    bool rollbackInstalled = true;
+    const auto rollbackChangedSlots = [&]() {
+        while(gl->glGetError() != GL_NO_ERROR) {}
+        bool restored = uploadChangedSlots(rollbackTileImages);
+        if(restored)
+        {
+            gl->glGenerateMipmap(GL_TEXTURE_2D);
+            restored = gl->glGetError() == GL_NO_ERROR;
+        }
+        return restored;
+    };
+    if(!installed)
+        rollbackInstalled = rollbackChangedSlots();
+
     gl->glPixelStorei(GL_UNPACK_ALIGNMENT, priorUnpackAlignment);
-    gl->glBindFramebuffer(GL_FRAMEBUFFER, GLuint(priorFramebuffer));
-    glExtra->glReadBuffer(GLenum(priorReadBuffer));
-    if(framebuffer)
-        gl->glDeleteFramebuffers(1, &framebuffer);
-    const GLuint oldPreviewId = m_previewAtlasTexture->textureId();
-    if(installed)
-    {
-        QOpenGLTexture* previous = m_previewAtlasTexture;
-        m_previewAtlasTexture = candidate;
-        m_texture = candidate;
-        previous->destroy();
-        delete previous;
-        gl->glBindTexture(GL_TEXTURE_2D,
-            GLuint(priorTexture) == oldPreviewId
-                ? candidate->textureId() : GLuint(priorTexture));
-    }
-    else
-    {
-        if(candidate->isCreated())
-            candidate->destroy();
-        delete candidate;
-        gl->glBindTexture(GL_TEXTURE_2D, GLuint(priorTexture));
-    }
+    gl->glBindTexture(GL_TEXTURE_2D, GLuint(priorTexture));
     gl->glActiveTexture(GLenum(priorActiveTexture));
     if(!installed)
     {
-        ei::log(eLogWarning,
-            "Incremental terrain atlas staging failed before publication; prior preview retained");
+        ei::log(rollbackInstalled ? eLogWarning : eLogFatal,
+            rollbackInstalled
+                ? "In-place terrain atlas upload failed; prior changed-slot pixels and mipmaps were restored"
+                : "In-place terrain atlas upload and rollback failed; renderer publication is inconsistent");
         return false;
     }
     ei::log(eLogInfo, QString(
-        "Working terrain atlas incremental upload: changedSlots:%1 pages:%2 grid:%3")
-        .arg(changedSlots.size()).arg(textureCount).arg(columns));
+        "Working terrain atlas in-place upload: changedSlots:%1 pages:%2 grid:%3 texture:%4 framebufferTouched:false")
+        .arg(changedSlots.size()).arg(textureCount).arg(columns)
+        .arg(previewTextureId));
     return true;
 }
 
@@ -459,7 +423,8 @@ bool CLandscape::previewTerrainAtlasRegridCopy(
 
 bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
                                      int textureCount,
-                                     const QSet<int>& changedSlots)
+                                     const QSet<int>& changedSlots,
+                                     const QVector<QImage>& rollbackTileImages)
 {
     if(textureCount <= 0 || tileImages.size() != textureCount * 64
        || !QOpenGLContext::currentContext())
@@ -485,10 +450,20 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     QElapsedTimer uploadTimer;
     uploadTimer.start();
     QString route = QStringLiteral("full");
-    bool installed = previewTerrainAtlasIncremental(
-        tileImages, textureCount, columns, rows, changedSlots);
-    if(installed)
-        route = QStringLiteral("incremental");
+    const bool stableLayout = m_previewAtlasTexture
+        && m_previewAtlasTexture->isCreated()
+        && textureCount == m_previewAtlasTextureCount
+        && columns == m_previewAtlasColumns && !changedSlots.isEmpty();
+    bool installed = false;
+    if(stableLayout)
+    {
+        installed = previewTerrainAtlasIncremental(
+            tileImages, textureCount, columns, rows, changedSlots,
+            rollbackTileImages);
+        if(!installed)
+            return false;
+        route = QStringLiteral("in-place");
+    }
     else if(previewTerrainAtlasRegridCopy(
                 tileImages, textureCount, columns, rows, changedSlots))
     {

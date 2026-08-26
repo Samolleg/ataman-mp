@@ -114,8 +114,10 @@ public:
     bool previewCanonicalMaxZ(float maxZ);
     bool previewCanonicalTile(int globalX, int globalY, bool land, quint16 packedTile,
                               bool updateSector = true);
-    bool previewTerrainAtlas(const QVector<QImage>& tileImages, int textureCount,
-                             const QSet<int>& changedSlots = QSet<int>());
+    bool previewTerrainAtlas(
+        const QVector<QImage>& tileImages, int textureCount,
+        const QSet<int>& changedSlots = QSet<int>(),
+        const QVector<QImage>& rollbackTileImages = QVector<QImage>());
     void clearPreviewTerrainAtlas();
     void setDirty(bool bDirty) {m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
@@ -143,7 +145,8 @@ private:
                                        int textureCount, int columns, int rows);
     bool previewTerrainAtlasIncremental(const QVector<QImage>& tileImages,
                                         int textureCount, int columns, int rows,
-                                        const QSet<int>& changedSlots);
+                                        const QSet<int>& changedSlots,
+                                        const QVector<QImage>& rollbackTileImages);
     bool previewTerrainAtlasRegridCopy(const QVector<QImage>& tileImages,
                                        int textureCount, int columns, int rows,
                                        const QSet<int>& changedSlots);

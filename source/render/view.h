@@ -521,6 +521,7 @@ private:
     bool syncWorkingTerrainAtlas(CValidationReport* report,
                                  CTerrainWorkingAtlas* staging = nullptr,
                                  bool presentCompletedFrame = false);
+    bool primeWorkingTerrainAtlasPreview(CValidationReport* report);
     void presentCompletedTerrainPublication();
     bool ensureModernTerrainArtworkAssigned(
         ETerrainTileLayer layer,
