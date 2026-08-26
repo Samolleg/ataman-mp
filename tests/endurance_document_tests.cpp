@@ -6721,6 +6721,18 @@ void EnduranceDocumentTests::firstResolvePreservesFreshManualTileSemanticCorners
                  qint32(2));
         QVERIFY(found);
     }
+    QVector<qint32> recoveredCurrent;
+    QVector<qint32> recoveredBaseline;
+    QVERIFY(staged.copyVirtualMaterialFieldState(
+        ETerrainTileLayer::Land, &recoveredCurrent, &recoveredBaseline));
+    const int recoveredVertexWidth = staged.tileCountX() + 1;
+    for(const QPoint& vertex : {QPoint(38, 13), QPoint(39, 13),
+                                 QPoint(39, 14), QPoint(38, 14)})
+    {
+        const int index = vertex.y() * recoveredVertexWidth + vertex.x();
+        QCOMPARE(recoveredCurrent.at(index), qint32(2));
+        QCOMPARE(recoveredBaseline.at(index), qint32(1));
+    }
 
     CTerrainVirtualMaterialField repairField;
     QVERIFY(staged.copyVirtualMaterialField(
@@ -7461,6 +7473,24 @@ void EnduranceDocumentTests::terrainStrokePublishesAtlasAndSectorAsOneFrame()
         applyResolution, publishAtlas - applyResolution);
     QVERIFY2(!atomicWindow.contains("processEvents("),
              "Terrain release yields a visible frame between sector and atlas publication");
+
+    const int paintStart = source.indexOf(
+        "void CView::setTile(QVector3D posOnLand, bool bLand)");
+    const int paintEnd = source.indexOf(
+        "void CView::setTile(QMap<STileLocation, STileInfo>& arrTileData)",
+        paintStart);
+    QVERIFY(paintStart >= 0 && paintEnd > paintStart);
+    const QByteArray paint = source.mid(paintStart, paintEnd - paintStart);
+    const int firstPaintApply = paint.indexOf(
+        "applyTerrainTilePreview(command, true)");
+    const int firstPaintPublish = paint.lastIndexOf(
+        "syncWorkingTerrainAtlas(");
+    QVERIFY2(firstPaintApply >= 0 && firstPaintPublish > firstPaintApply,
+             "A direct Modern stamp can publish its atlas before the matching cell/VBO update");
+    const QByteArray paintAtomicWindow = paint.mid(
+        firstPaintApply, firstPaintPublish - firstPaintApply);
+    QVERIFY2(!paintAtomicWindow.contains("processEvents("),
+             "A direct Modern stamp yields a visible frame between cell and atlas publication");
 }
 
 void EnduranceDocumentTests::resolveRouteOwnershipOnlyAuditsRepairCandidates()
@@ -7475,20 +7505,29 @@ void EnduranceDocumentTests::resolveRouteOwnershipOnlyAuditsRepairCandidates()
     QVERIFY(resolveStart >= 0 && resolveEnd > resolveStart);
     const QByteArray resolve = source.mid(resolveStart,
                                            resolveEnd - resolveStart);
-    const int candidateField = resolve.indexOf("routeOwnershipCandidates");
+    const int candidateField = resolve.indexOf("routeOwnershipEvidenceCells");
     const int plan = resolve.indexOf(
         "planConnectedTerrainRouteOwnership(", candidateField);
     const int candidateArgument = resolve.indexOf(
-        "routeOwnershipCandidates", plan);
-    const int irrelevantGate = resolve.indexOf(
-        "if(!routeOwnershipCandidate)", plan);
+        "routeOwnershipEvidenceCells", plan);
     const int warning = resolve.indexOf(
         "terrain.resolve_route_ownership_preserved", plan);
     QVERIFY2(candidateField >= 0 && plan > candidateField
                  && candidateArgument > plan,
-             "Resolve still expands route ownership across every transition on the map");
-    QVERIFY2(irrelevantGate > plan && warning > irrelevantGate,
-             "Resolve still reports ownership ambiguity before proving that the cell needs repair");
+             "Resolve still scopes ownership to ordinary repair candidates instead of explicit route evidence");
+    QVERIFY2(!resolve.contains(
+                 "semanticRepairCells.at(cell)\n                        ||"),
+             "Every ordinary legacy repair candidate still seeds the route-ownership planner");
+    QVERIFY2(!resolve.contains("if(!routeOwnershipCandidate)\n                        continue;"),
+             "The ownership extension still suppresses the legacy resolver outside evidence-backed components");
+    const QByteArray evidenceScan = resolve.mid(
+        candidateField, plan - candidateField);
+    QVERIFY2(!evidenceScan.contains("tileIdentityForSlot("),
+             "Route evidence still hashes a complete 256x256 tile image for every map cell");
+    QVERIFY2(evidenceScan.contains("tileOriginForSlot("),
+             "Route evidence no longer uses the cached working-slot origin");
+    QVERIFY2(warning > plan,
+             "Resolve reports ownership ambiguity before planning an evidence-backed component");
 }
 
 void EnduranceDocumentTests::workingAtlasPreviewPublishesOnlyChangedPhysicalTiles()
@@ -7563,11 +7602,10 @@ void EnduranceDocumentTests::workingAtlasPreviewPublishesOnlyChangedPhysicalTile
              "Worker prewarm bypasses approved-HD authored exact candidates before canonical generation");
     QVERIFY2(prewarm.contains("guiMs:%4 workerMs:%5"),
              "Prewarm telemetry does not separate GUI snapshot and worker time");
-    const int stagedPublish = adopt.indexOf(
-        "syncWorkingTerrainAtlas(report, staged->atlas.data())");
     const int liveCommit = adopt.indexOf("commitStaging(*staged->atlas)");
-    QVERIFY2(stagedPublish >= 0 && liveCommit > stagedPublish,
-             "Prepared family is committed before its renderer/picker publication succeeds");
+    QVERIFY2(liveCommit >= 0
+             && !adopt.contains("syncWorkingTerrainAtlas("),
+             "Prepared family still publishes its atlas before the matching first paint cells exist");
 }
 
 void EnduranceDocumentTests::resolveMissingBlendsStagesDeterministicLoadBaseline()

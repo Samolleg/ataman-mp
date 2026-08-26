@@ -1860,6 +1860,14 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
                 QStringLiteral("Recovered %1 material-field vertex hole(s) adjacent to unavailable legacy cells")
                     .arg(recoveredUnsetVertices));
     }
+    // This recovered field is the load/legacy baseline. Sparse Manual or
+    // uniform-only Modern corners below are current-session intent and must
+    // not be copied into that baseline. Route ownership is inferred from the
+    // current-versus-baseline delta; assigning the baseline after applying the
+    // pending map erased that evidence and made the resolver preserve the
+    // freshly painted transition as "ambiguous".
+    const QVector<qint32> recoveredBaseline = active;
+
     // Before the first Modern/Resolve operation, Manual has only its physical
     // MPR edit plus these sparse explicit corners. Recovery votes reconstruct
     // the rest of the legacy map, but must not allow the incident legacy cells
@@ -1920,9 +1928,9 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
             QStringLiteral("Recovered one deterministic working-draft material field across %1 packed topology conflict(s)")
                 .arg(recoveredConflicts), firstRecoveredConflict);
     if(layer == ETerrainTileLayer::Land)
-        m_originalVirtualLandMaterials = active;
+        m_originalVirtualLandMaterials = recoveredBaseline;
     else
-        m_originalVirtualOverlayMaterials = active;
+        m_originalVirtualOverlayMaterials = recoveredBaseline;
     return true;
 }
 
@@ -1979,8 +1987,8 @@ bool CTerrainEditModel::recoverUnambiguousVirtualMaterialField(
         }
     if((ambiguousVertices > 0 || undecodableCells > 0) && report)
         report->add("terrain.virtual_repair_ambiguous_vertices",
-            EValidationSeverity::Warning,
-            QStringLiteral("Preserved disputed terrain: %1 shared-corner vertex/vertices were not unanimous and %2 cell(s) could not be decoded")
+            EValidationSeverity::Info,
+            QStringLiteral("Legacy terrain disagrees at %1 shared corner(s), and %2 cell(s) could not be decoded. Those locations were left unchanged while exact repairs continued elsewhere.")
                 .arg(ambiguousVertices).arg(undecodableCells));
     return true;
 }

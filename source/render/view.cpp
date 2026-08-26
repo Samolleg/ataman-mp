@@ -11501,12 +11501,10 @@ bool CView::adoptPrewarmedTerrainFamily(qint32 terrainType,
             "The prepared terrain family became stale and will be realized by the normal exact path.");
         return false;
     }
-    // Publication is delayed until the first valid committed sample. Thus a
-    // selection/mode change can discard this object without exposing staged
-    // slots in either the renderer or Manual picker.
-    if(!staged->atlas->changedSlots().isEmpty()
-       && !syncWorkingTerrainAtlas(report, staged->atlas.data()))
-        return false;
+    // Keep the prepared pixels private until the matching map cells have been
+    // applied. The caller publishes the committed working atlas immediately
+    // after rebuilding those sector buffers, without yielding a frame between
+    // the two sides of the paint transaction.
     if(!m_workingTerrainAtlas->commitStaging(*staged->atlas)
        || !m_terrainEdit.installWorkingAtlasSlotTypes(
               m_workingTerrainAtlas->activeTileTypes()))
@@ -11526,12 +11524,8 @@ bool CView::adoptPrewarmedTerrainFamily(qint32 terrainType,
     m_terrainGlobalMaterialSources = staged->materialSources;
     m_terrainGlobalMaterialSourceIdentities =
         staged->materialSourceIdentities;
-    if(m_landscapeTools)
-        m_landscapeTools->setGeneratedAtlasTileCount(
-            m_workingTerrainAtlas->generatedTileCount());
-    refreshWorkingTerrainPalettes();
     ei::log(eLogInfo, QString(
-        "Terrain family prewarm adopted on first committed sample material:%1")
+        "Terrain family prewarm adopted for atomic first sample material:%1")
         .arg(terrainType));
     return true;
 }
@@ -17157,11 +17151,13 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     m_lastTerrainPaintCenterValid = true;
     m_lastTerrainPaintLayerLand = bLand;
     CValidationReport report;
+    bool workingAtlasPublicationPending = false;
     if(semanticPaint && preselectedMaterial
        && m_landscapeTools->paintPaletteMode()
             == ETerrainPaintPaletteMode::Modern)
     {
-        adoptPrewarmedTerrainFamily(preselectedTerrainType,
+        workingAtlasPublicationPending = adoptPrewarmedTerrainFamily(
+            preselectedTerrainType,
             bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay,
             &report);
         if(report.hasErrors())
@@ -17212,14 +17208,19 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 if(exactSelected
                    && paletteMode == ETerrainPaintPaletteMode::Modern)
                 {
-                    adoptPrewarmedTerrainFamily(
-                        terrainType, ETerrainTileLayer::Overlay, &report);
+                    workingAtlasPublicationPending =
+                        adoptPrewarmedTerrainFamily(
+                            terrainType, ETerrainTileLayer::Overlay, &report)
+                        || workingAtlasPublicationPending;
                     QMap<int, quint64> usage = workingTerrainAtlasUsage();
                     exactSelected = realizeWorkingTerrainSignature(
                         pure, qRound(brush.centerX), qRound(brush.centerY),
                         &usage, &report, nullptr, terrainType, runtimeType,
-                        nullptr, true)
-                        && syncWorkingTerrainAtlas(&report);
+                        nullptr, true);
+                    workingAtlasPublicationPending =
+                        (exactSelected && m_workingTerrainAtlas
+                         && !m_workingTerrainAtlas->changedSlots().isEmpty())
+                        || workingAtlasPublicationPending;
                 }
                 if(exactSelected)
                     exactSelected = selectWorkingPaintVariantWithRuntimeType(
@@ -17290,6 +17291,17 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                     : tr("The semantic Add Overlay preview was refused; no edit was kept."));
                 return;
             }
+        }
+        if(workingAtlasPublicationPending
+           && !syncWorkingTerrainAtlas(&report))
+        {
+            if(!semanticOverlayCommand.isEmpty())
+                applyTerrainTilePreview(semanticOverlayCommand, false);
+            applyOverlaySurfacePreview(surfaceCommand, false);
+            ++m_tileStrokeRefused;
+            emit updateMsg(report.hasErrors() ? report.toText()
+                : tr("The overlay atlas and surface could not be published together; no edit was kept."));
+            return;
         }
         ++m_tileStrokeApplied;
         m_tileStrokeChangedTiles += surfaceCommand.sectors.size();
@@ -17388,14 +17400,17 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             if(!realizeWorkingTerrainSignature(
                    pure, qRound(vertexBrush.centerX),
                    qRound(vertexBrush.centerY), &usage, &report, nullptr,
-                   terrainType)
-               || !syncWorkingTerrainAtlas(&report))
+                   terrainType))
             {
                 artworkProgress.hide();
                 ++m_tileStrokeRefused;
                 emit updateMsg(report.toText());
                 return;
             }
+            workingAtlasPublicationPending =
+                (m_workingTerrainAtlas
+                 && !m_workingTerrainAtlas->changedSlots().isEmpty())
+                || workingAtlasPublicationPending;
             artworkProgress.hide();
         }
         if(report.hasErrors())
@@ -17593,6 +17608,17 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             m_terrainPaintActions.append(audit);
             ++m_tileStrokeRefused;
             emit updateMsg(tr("Terrain preview was refused; no undo entry was created."));
+        }
+        else if(workingAtlasPublicationPending
+                && !syncWorkingTerrainAtlas(&report))
+        {
+            applyTerrainTilePreview(command, false);
+            audit.outcome = QStringLiteral("refused");
+            audit.validation += report.toText();
+            m_terrainPaintActions.append(audit);
+            ++m_tileStrokeRefused;
+            emit updateMsg(report.hasErrors() ? report.toText()
+                : tr("The terrain atlas and painted cells could not be published together; no edit was kept."));
         }
         else
         {
@@ -18298,6 +18324,20 @@ void CView::resolveMissingTerrainBlends()
         return;
 
     CValidationReport report;
+    const auto userResolveReportText = [&report]() {
+        CValidationReport visible;
+        for(const SValidationFinding& finding : report.findings())
+        {
+            if(finding.code == QStringLiteral(
+                   "terrain.virtual_repair_ambiguous_vertices")
+               || finding.code == QStringLiteral(
+                   "terrain.virtual_identity_topology_recovered"))
+                continue;
+            visible.add(finding.code, finding.severity,
+                        finding.message, finding.location);
+        }
+        return visible.findings().isEmpty() ? QString() : visible.toText();
+    };
     const auto fieldAudit = [](const CTerrainEditModel& terrainEdit,
                                ETerrainTileLayer layer) {
         STerrainResolveSemanticFieldAudit result;
@@ -18494,6 +18534,7 @@ void CView::resolveMissingTerrainBlends()
     };
     QMap<QByteArray, SMissingMapSignature> missing;
     CTerrainVirtualMaterialField repairFields[2];
+    CTerrainVirtualMaterialField routeFields[2];
     bool completeRepairFields[2] = {false, false};
     STerrainRouteOwnershipPlan routePlans[2];
     QMap<int, qint32> routeOwners[2];
@@ -18518,6 +18559,14 @@ void CView::resolveMissingTerrainBlends()
                         "The map-wide resolver could not establish a deterministic material field");
                 break;
             }
+            if(!staged.terrainEdit.copyVirtualMaterialField(
+                   layer, &routeFields[layerIndex], false))
+            {
+                report.add("terrain.resolve_route_field",
+                    EValidationSeverity::Error,
+                    "The map-wide resolver could not copy the current semantic edit field.");
+                break;
+            }
             const bool completeField =
                 staged.terrainEdit.copyVirtualMaterialField(layer, &field, true);
             completeRepairFields[layerIndex] = completeField;
@@ -18533,7 +18582,7 @@ void CView::resolveMissingTerrainBlends()
             const int cellCount = field.tileWidth() * field.tileHeight();
             QVector<STerrainTransitionSignature> routeSignatures(cellCount);
             QVector<bool> routeAvailable(cellCount, false);
-            QVector<bool> routeOwnershipCandidates(cellCount, false);
+            QVector<bool> routeOwnershipEvidenceCells(cellCount, false);
             QVector<bool> semanticRepairCells(cellCount, false);
             QVector<STerrainTransitionSignature> semanticRepairSignatures(
                 cellCount);
@@ -18550,7 +18599,7 @@ void CView::resolveMissingTerrainBlends()
                     const quint16 packed = staged.terrainEdit.packedTile(
                         x, y, layer, &available);
                     bool signatureFound = false;
-                    routeSignatures[cell] = field.cellSignature(
+                    routeSignatures[cell] = routeFields[layerIndex].cellSignature(
                         x, y, &signatureFound);
                     routeAvailable[cell] = available && signatureFound;
                     STerrainTransitionSignature repairSignature;
@@ -18574,22 +18623,39 @@ void CView::resolveMissingTerrainBlends()
                        && provenanceSignature == routeSignatures.at(cell))
                         exactGeneratedRouteOwners[cell] =
                             provenance.routeOwnerMaterial;
-                    STerrainWorkingTileIdentity currentIdentity;
-                    const bool currentIdentityFound = available
-                        && staged.atlas->tileIdentityForSlot(
-                            SMprPackedTile::decode(packed).atlasSlot(),
-                            &currentIdentity);
-                    routeOwnershipCandidates[cell] =
-                        semanticRepairCells.at(cell)
-                        || (currentIdentityFound
-                            && currentIdentity.origin
-                                == ETerrainWorkingTileOrigin::CanonicalGenerated);
+                    const int vertexWidth = field.tileWidth() + 1;
+                    const int northWest = y * vertexWidth + x;
+                    const int northEast = northWest + 1;
+                    const int southWest = northWest + vertexWidth;
+                    const int southEast = southWest + 1;
+                    const bool deltaFieldAvailable =
+                        currentVertexMaterials.size()
+                            == vertexWidth * (field.tileHeight() + 1)
+                        && baselineVertexMaterials.size()
+                            == currentVertexMaterials.size();
+                    const bool semanticDeltaEvidence = deltaFieldAvailable
+                        && (currentVertexMaterials.at(northWest)
+                                != baselineVertexMaterials.at(northWest)
+                            || currentVertexMaterials.at(northEast)
+                                != baselineVertexMaterials.at(northEast)
+                            || currentVertexMaterials.at(southEast)
+                                != baselineVertexMaterials.at(southEast)
+                            || currentVertexMaterials.at(southWest)
+                                != baselineVertexMaterials.at(southWest));
+                    const bool canonicalGeneratedEvidence = available
+                        && staged.atlas->tileOriginForSlot(
+                            SMprPackedTile::decode(packed).atlasSlot())
+                                == ETerrainWorkingTileOrigin::CanonicalGenerated;
+                    routeOwnershipEvidenceCells[cell] =
+                        routeAvailable.at(cell)
+                        && (semanticDeltaEvidence
+                            || canonicalGeneratedEvidence);
                 }
             routePlans[layerIndex] = planConnectedTerrainRouteOwnership(
                 field.tileWidth(), field.tileHeight(), routeSignatures,
                 routeAvailable, currentVertexMaterials,
                 baselineVertexMaterials, exactGeneratedRouteOwners,
-                routeOwnershipCandidates);
+                routeOwnershipEvidenceCells);
             routeOwners[layerIndex] =
                 routePlans[layerIndex].ownerByCell;
             preserveRouteComponents[layerIndex] =
@@ -18607,17 +18673,19 @@ void CView::resolveMissingTerrainBlends()
                     const int cell = y * field.tileWidth() + x;
                     const bool semanticRepairNeeded =
                         semanticRepairCells.at(cell);
+                    const int componentIndex = routePlans[layerIndex]
+                        .componentByCell.value(cell, -1);
+                    const bool routeOwnershipPlanned = componentIndex >= 0;
+                    const bool routeOwnershipEvidence =
+                        routeOwnershipEvidenceCells.at(cell);
                     STerrainTransitionSignature signature =
-                        semanticRepairNeeded
-                            ? semanticRepairSignatures.at(cell)
-                            : routeSignatures.at(cell);
+                        routeOwnershipPlanned || routeOwnershipEvidence
+                            ? routeSignatures.at(cell)
+                            : semanticRepairSignatures.at(cell);
                     const bool signatureFound =
-                        semanticRepairNeeded || routeAvailable.at(cell);
+                        routeOwnershipPlanned || routeOwnershipEvidence
+                        ? routeAvailable.at(cell) : semanticRepairNeeded;
                     if(!signatureFound)
-                        continue;
-                    const bool routeOwnershipCandidate =
-                        routeOwnershipCandidates.at(cell);
-                    if(!routeOwnershipCandidate)
                         continue;
                     const qint32 routeOwner =
                         routeOwners[layerIndex].value(cell, 0);
@@ -18625,14 +18693,9 @@ void CView::resolveMissingTerrainBlends()
                     const STerrainTransitionVariant currentVariant =
                         staged.atlas->catalog().variantForPacked(
                             before, &currentVariantFound);
-                    STerrainWorkingTileIdentity currentIdentity;
-                    const bool currentIdentityFound =
-                        staged.atlas->tileIdentityForSlot(
-                            SMprPackedTile::decode(before).atlasSlot(),
-                            &currentIdentity);
                     const bool currentIsCanonicalGenerated =
-                        currentIdentityFound
-                        && currentIdentity.origin
+                        staged.atlas->tileOriginForSlot(
+                            SMprPackedTile::decode(before).atlasSlot())
                             == ETerrainWorkingTileOrigin::CanonicalGenerated;
                     const bool routeRepairNeeded = routeOwner > 0
                         && currentVariantFound
@@ -18644,7 +18707,8 @@ void CView::resolveMissingTerrainBlends()
                                            signature.southEast,
                                            signature.southWest})
                         signatureMaterials.insert(material);
-                    if(signatureMaterials.size() > 2)
+                    if(signatureMaterials.size() > 2
+                       && routeOwnershipEvidence)
                     {
                         preserveRouteComponents[layerIndex].insert(cell);
                         ++preservedRouteCellCount;
@@ -18654,10 +18718,9 @@ void CView::resolveMissingTerrainBlends()
                                 .arg(x).arg(y));
                         continue;
                     }
-                    if(signatureMaterials.size() == 2 && routeOwner == 0)
+                    if(signatureMaterials.size() == 2
+                       && routeOwnershipPlanned && routeOwner == 0)
                     {
-                        const int componentIndex = routePlans[layerIndex]
-                            .componentByCell.value(cell, -1);
                         if(componentIndex >= 0
                            && !warnedRouteComponents[layerIndex]
                                    .contains(componentIndex))
@@ -18851,12 +18914,11 @@ void CView::resolveMissingTerrainBlends()
     if(combined.isEmpty())
     {
         progress.setValue(5);
-        const QString detail = report.findings().isEmpty()
-            ? QString() : QStringLiteral("\n\n") + report.toText();
+        const QString visibleReport = userResolveReportText();
+        const QString detail = visibleReport.isEmpty()
+            ? QString() : QStringLiteral("\n\n") + visibleReport;
         QMessageBox::information(this, tr("Resolve missing blends"), tr(
-            "No unambiguous terrain cell needed repair. Existing cells with "
-            "ambiguous shared-corner or route-ownership evidence were "
-            "deliberately preserved.%1").arg(detail));
+            "No terrain cell needed repair.%1").arg(detail));
         finishAudit(QStringLiteral("no-op"));
         return;
     }
@@ -18963,8 +19025,9 @@ void CView::resolveMissingTerrainBlends()
     progress.setValue(5);
     QString resolvedMessage = tr("Resolved %1 terrain cell(s) in one undo step; %2 exact atlas tuple(s) were added.")
         .arg(combined.deltas.size()).arg(generated);
-    if(!report.findings().isEmpty())
-        resolvedMessage += QStringLiteral(" ") + report.toText();
+    const QString visibleReport = userResolveReportText();
+    if(!visibleReport.isEmpty())
+        resolvedMessage += QStringLiteral(" ") + visibleReport;
     emit updateMsg(resolvedMessage);
     finishAudit(QStringLiteral("committed"));
 }
