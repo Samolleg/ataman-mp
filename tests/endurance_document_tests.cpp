@@ -7638,15 +7638,26 @@ void EnduranceDocumentTests::workingAtlasPreviewPublishesOnlyChangedPhysicalTile
     QVERIFY(incrementalStart >= 0 && regridStart > incrementalStart);
     const QByteArray incremental = landscape.mid(
         incrementalStart, regridStart - incrementalStart);
-    const int stagingAllocation = incremental.indexOf(
-        "QOpenGLTexture* candidate");
-    const int publication = incremental.indexOf(
-        "m_previewAtlasTexture = candidate");
-    const int successGate = incremental.lastIndexOf(
-        "if(installed)", publication);
-    QVERIFY2(stagingAllocation >= 0 && successGate > stagingAllocation
-             && publication > successGate,
-             "Incremental GL failure can publish a partially updated preview");
+    QVERIFY2(!incremental.contains("QOpenGLTexture* candidate")
+                 && !incremental.contains("glBindFramebuffer"),
+             "A same-layout stamp still replaces the atlas texture or touches an offscreen framebuffer");
+    QVERIFY2(incremental.contains(
+                 "const GLuint previewTextureId = m_previewAtlasTexture->textureId()")
+                 && incremental.contains("uploadChangedSlots(tileImages)")
+                 && incremental.contains("uploadChangedSlots(rollbackTileImages)"),
+             "Same-layout publication no longer keeps a stable texture identity with explicit changed-slot rollback pixels");
+    const int failedUpload = incremental.indexOf("if(!installed)");
+    const int rollback = incremental.indexOf(
+        "rollbackInstalled = rollbackChangedSlots()", failedUpload);
+    const int restoreTexture = incremental.indexOf(
+        "gl->glBindTexture(GL_TEXTURE_2D, GLuint(priorTexture))", rollback);
+    const int failureReturn = incremental.indexOf("return false", restoreTexture);
+    QVERIFY2(failedUpload >= 0 && rollback > failedUpload
+                 && restoreTexture > rollback && failureReturn > restoreTexture,
+             "Incremental GL failure no longer restores the prior changed-slot pixels, mipmaps, and caller binding before rejection");
+    QVERIFY2(incremental.contains("glGenerateMipmap(GL_TEXTURE_2D)")
+                 && incremental.contains("framebufferTouched:false"),
+             "Same-layout publication no longer refreshes mipmaps or truthfully records that it left framebuffer ownership untouched");
     const int stateCapture = landscape.indexOf(
         "gl->glGetIntegerv(GL_TEXTURE_BINDING_2D", regridStart);
     const int regridAllocation = landscape.indexOf(
