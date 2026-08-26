@@ -599,7 +599,7 @@ private slots:
     void interruptedTerrainStrokeRejectsUnownedStamp();
     void workingAtlasPublicationPreservesActiveStrokeTransaction();
     void terrainStrokePublishesAtlasAndSectorAsOneFrame();
-    void resolveRouteOwnershipOnlyAuditsRepairCandidates();
+    void resolveUsesPreRouteBoundedPathForGroundAndOverlay();
     void workingAtlasPreviewPublishesOnlyChangedPhysicalTiles();
     void resolveMissingBlendsStagesDeterministicLoadBaseline();
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
@@ -7574,7 +7574,7 @@ void EnduranceDocumentTests::terrainStrokePublishesAtlasAndSectorAsOneFrame()
              "A completed live terrain atlas/cell transaction is only queued for a later frame, allowing the compositor to expose the offscreen upload interval");
 }
 
-void EnduranceDocumentTests::resolveRouteOwnershipOnlyAuditsRepairCandidates()
+void EnduranceDocumentTests::resolveUsesPreRouteBoundedPathForGroundAndOverlay()
 {
     const QByteArray source = viewSource();
     QVERIFY2(!source.isEmpty(),
@@ -7586,33 +7586,27 @@ void EnduranceDocumentTests::resolveRouteOwnershipOnlyAuditsRepairCandidates()
     QVERIFY(resolveStart >= 0 && resolveEnd > resolveStart);
     const QByteArray resolve = source.mid(resolveStart,
                                            resolveEnd - resolveStart);
-    const int layerGate = resolve.indexOf(
-        "const bool routeOwnershipEnabled = layer == ETerrainTileLayer::Overlay");
-    const int candidateField = resolve.indexOf("routeOwnershipEvidenceCells");
-    const int plan = resolve.indexOf(
-        "planConnectedTerrainRouteOwnership(", candidateField);
-    const int candidateArgument = resolve.indexOf(
-        "routeOwnershipEvidenceCells", plan);
-    const int warning = resolve.indexOf(
-        "terrain.resolve_route_ownership_preserved", plan);
-    QVERIFY2(layerGate >= 0 && layerGate < candidateField,
-             "The overlay-only route-ownership repair is still applied to Ground and can suppress ordinary land blend repair");
-    QVERIFY2(candidateField >= 0 && plan > candidateField
-                 && candidateArgument > plan,
-             "Resolve still scopes ownership to ordinary repair candidates instead of explicit route evidence");
-    QVERIFY2(!resolve.contains(
-                 "semanticRepairCells.at(cell)\n                        ||"),
-             "Every ordinary legacy repair candidate still seeds the route-ownership planner");
-    QVERIFY2(!resolve.contains("if(!routeOwnershipCandidate)\n                        continue;"),
-             "The ownership extension still suppresses the legacy resolver outside evidence-backed components");
-    const QByteArray evidenceScan = resolve.mid(
-        candidateField, plan - candidateField);
-    QVERIFY2(!evidenceScan.contains("tileIdentityForSlot("),
-             "Route evidence still hashes a complete 256x256 tile image for every map cell");
-    QVERIFY2(evidenceScan.contains("tileOriginForSlot("),
-             "Route evidence no longer uses the cached working-slot origin");
-    QVERIFY2(warning > plan,
-             "Resolve reports ownership ambiguity before planning an evidence-backed component");
+    QVERIFY2(!resolve.contains("planConnectedTerrainRouteOwnership("),
+             "Shift+R still invokes the connected-route planner instead of the bounded pre-route repair path");
+    QVERIFY2(!resolve.contains("routeOwnershipEvidenceCells")
+                 && !resolve.contains("routeOwners[")
+                 && !resolve.contains("forceRouteSelection[")
+                 && !resolve.contains("preserveRouteComponents["),
+             "Shift+R still builds or applies map-wide route-ownership state");
+    QVERIFY2(!resolve.contains("terrain.resolve_route_ownership_preserved"),
+             "Ordinary Shift+R can still emit connected-route ambiguity warnings");
+    QVERIFY2(resolve.contains("for(ETerrainTileLayer layer : layers)"),
+             "Ground and Overlay no longer share the same bounded repair path");
+    QVERIFY2(resolve.contains("missingBlendRepairSignature("),
+             "Shift+R no longer limits tuple discovery to cells whose packed artwork disagrees with the recovered semantic field");
+    const int mapResolution = resolve.indexOf("makeVirtualMapResolution(");
+    QVERIFY2(mapResolution >= 0,
+             "Shift+R no longer resolves its bounded repair candidates");
+    const QByteArray mapResolutionCall = resolve.mid(mapResolution, 700);
+    QVERIFY2(!mapResolutionCall.contains("routeOwners")
+                 && !mapResolutionCall.contains("forceRouteSelection")
+                 && !mapResolutionCall.contains("preserveRouteComponents"),
+             "Shift+R still passes connected-route overrides into ordinary map resolution");
 }
 
 void EnduranceDocumentTests::workingAtlasPreviewPublishesOnlyChangedPhysicalTiles()

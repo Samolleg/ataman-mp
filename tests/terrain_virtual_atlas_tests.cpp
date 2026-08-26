@@ -5140,86 +5140,118 @@ void TerrainVirtualAtlasTests::mapResolutionReachesFixedPointInOneCommand()
     damaged.packedTile = 5;
     QVERIFY(fixture.catalog.addVariant(damaged));
 
-    QByteArray payload;
-    QDataStream stream(&payload, QIODevice::WriteOnly);
-    stream.setByteOrder(QDataStream::LittleEndian);
-    stream << quint32(0xCF4BF774) << quint8(0);
-    payload.append(QByteArray(33 * 33 * 8, '\0'));
-    payload.append(QByteArray(16 * 16 * 2, '\0'));
-    STerrainSectorSource source;
-    source.memberName = QStringLiteral("CaveSet000000.SEC");
-    source.sectorX = 0;
-    source.sectorY = 0;
-    source.type = 0;
-    source.payload = payload;
-    source.landTileOffset = 5 + 33 * 33 * 8;
-    CTerrainEditModel model;
-    CValidationReport report;
-    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
-                              QVector<qint32>(64, 1), 0));
+    const ETerrainTileLayer layers[] = {
+        ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
+    for(const ETerrainTileLayer layer : layers)
+    {
+        const bool overlay = layer == ETerrainTileLayer::Overlay;
+        const int vertexBlockSize = 33 * 33 * 8;
+        const int tileBlockSize = 16 * 16 * 2;
+        QByteArray payload;
+        QDataStream stream(&payload, QIODevice::WriteOnly);
+        stream.setByteOrder(QDataStream::LittleEndian);
+        stream << quint32(0xCF4BF774) << quint8(overlay ? 3 : 0);
+        payload.append(QByteArray(vertexBlockSize, '\0'));
+        if(overlay)
+            payload.append(QByteArray(vertexBlockSize, '\0'));
+        payload.append(QByteArray(tileBlockSize, '\0'));
+        if(overlay)
+        {
+            payload.append(QByteArray(tileBlockSize, '\0'));
+            // Material zero keeps every overlay tile active.
+            payload.append(QByteArray(tileBlockSize, '\0'));
+        }
+        STerrainSectorSource source;
+        source.memberName = QStringLiteral("CaveSet000000.SEC");
+        source.sectorX = 0;
+        source.sectorY = 0;
+        source.type = overlay ? 3 : 0;
+        source.payload = payload;
+        source.overlayVertexOffset = overlay ? 5 + vertexBlockSize : 0;
+        source.landTileOffset = 5 + vertexBlockSize
+            + (overlay ? vertexBlockSize : 0);
+        source.overlayTileOffset = overlay
+            ? source.landTileOffset + tileBlockSize : 0;
+        source.overlayMaterialOffset = overlay
+            ? source.overlayTileOffset + tileBlockSize : 0;
+        CTerrainEditModel model;
+        CValidationReport report;
+        QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                                  QVector<qint32>(64, 1), overlay ? 1 : 0));
 
-    // A coherent vertical 1/2 boundary is present everywhere except for a
-    // long consecutive damaged chain. Each lower cell can be inferred only
-    // after its upper neighbour is considered, so one map-resolution command
-    // must settle the complete connected repair rather than requiring a
-    // second user invocation or repeated full-map scans.
-    STerrainTileCommand setup;
-    for(int y = 0; y < 16; ++y)
-        for(int x = 8; x < 16; ++x)
+        // This is the pre-connected-route fixed-point contract shared by
+        // Ground and Overlay: a coherent vertical 1/2 boundary is present
+        // everywhere except for one consecutive damaged chain. One bounded
+        // map-resolution command repairs exactly that chain, owns one exact
+        // undo/redo delta set, and the next invocation is a no-op.
+        STerrainTileCommand setup;
+        for(int y = 0; y < 16; ++y)
+            for(int x = 8; x < 16; ++x)
+            {
+                STerrainTileDelta delta;
+                delta.globalX = x;
+                delta.globalY = y;
+                delta.layer = layer;
+                delta.before = 0;
+                delta.after = x == 8 ? 4 : 1;
+                setup.deltas.append(delta);
+            }
+        QVERIFY(model.apply(setup, true, &report));
+        STerrainTileCommand corrupt;
+        for(int y = 3; y <= 12; ++y)
         {
             STerrainTileDelta delta;
-            delta.globalX = x;
+            delta.globalX = 8;
             delta.globalY = y;
-            delta.layer = ETerrainTileLayer::Land;
-            delta.before = 0;
-            delta.after = x == 8 ? 4 : 1;
-            setup.deltas.append(delta);
+            delta.layer = layer;
+            delta.before = 4;
+            delta.after = 5;
+            corrupt.deltas.append(delta);
         }
-    QVERIFY(model.apply(setup, true, &report));
-    STerrainTileCommand corrupt;
-    for(int y = 3; y <= 12; ++y)
-    {
-        STerrainTileDelta delta;
-        delta.globalX = 8;
-        delta.globalY = y;
-        delta.layer = ETerrainTileLayer::Land;
-        delta.before = 4;
-        delta.after = 5;
-        corrupt.deltas.append(delta);
-    }
-    QVERIFY(model.apply(corrupt, true, &report));
+        QVERIFY(model.apply(corrupt, true, &report));
 
-    CTerrainVirtualMaterialField sparseRecovery;
-    QVERIFY(sparseRecovery.resize(model.tileCountX(), model.tileCountY()));
-    for(int y = 0; y <= sparseRecovery.tileHeight(); ++y)
-        for(int x = 0; x <= sparseRecovery.tileWidth(); ++x)
-            sparseRecovery.setMaterial(
-                x, y, std::numeric_limits<qint32>::min());
-    CValidationReport repairReport;
-    const STerrainTileCommand repair = model.makeVirtualMapResolution(
-        ETerrainTileLayer::Land, fixture.catalog, 0x46495850u,
-        &repairReport, false, &sparseRecovery, true, false);
-    QVERIFY2(!repairReport.hasErrors(), qPrintable(repairReport.toText()));
-    QCOMPARE(repair.deltas.size(), 10);
-    QSet<QPair<int, int>> repaired;
-    for(const STerrainTileDelta& delta : repair.deltas)
-    {
-        QCOMPARE(delta.after, quint16(4));
-        repaired.insert(qMakePair(delta.globalX, delta.globalY));
-    }
-    QSet<QPair<int, int>> expected;
-    for(int y = 3; y <= 12; ++y)
-        expected.insert(qMakePair(8, y));
-    QCOMPARE(repaired, expected);
-    QVERIFY(model.apply(repair, true, &report));
+        CTerrainVirtualMaterialField sparseRecovery;
+        QVERIFY(sparseRecovery.resize(model.tileCountX(), model.tileCountY()));
+        for(int y = 0; y <= sparseRecovery.tileHeight(); ++y)
+            for(int x = 0; x <= sparseRecovery.tileWidth(); ++x)
+                sparseRecovery.setMaterial(
+                    x, y, std::numeric_limits<qint32>::min());
+        CValidationReport repairReport;
+        const STerrainTileCommand repair = model.makeVirtualMapResolution(
+            layer, fixture.catalog, 0x46495850u,
+            &repairReport, false, &sparseRecovery, true, false);
+        QVERIFY2(!repairReport.hasErrors(), qPrintable(repairReport.toText()));
+        QCOMPARE(repair.deltas.size(), 10);
+        QSet<QPair<int, int>> repaired;
+        for(const STerrainTileDelta& delta : repair.deltas)
+        {
+            QCOMPARE(delta.layer, layer);
+            QCOMPARE(delta.after, quint16(4));
+            repaired.insert(qMakePair(delta.globalX, delta.globalY));
+        }
+        QSet<QPair<int, int>> expected;
+        for(int y = 3; y <= 12; ++y)
+            expected.insert(qMakePair(8, y));
+        QCOMPARE(repaired, expected);
 
-    CValidationReport settledReport;
-    const STerrainTileCommand settled = model.makeVirtualMapResolution(
-        ETerrainTileLayer::Land, fixture.catalog, 0x46495850u,
-        &settledReport, false, &sparseRecovery, true, false);
-    QVERIFY2(!settledReport.hasErrors(), qPrintable(settledReport.toText()));
-    QVERIFY2(settled.isEmpty(),
-             "Resolve Missing Blends must be idempotent after one command");
+        QVERIFY(model.apply(repair, true, &report));
+        for(int y = 3; y <= 12; ++y)
+            QCOMPARE(model.packedTile(8, y, layer), quint16(4));
+        QVERIFY(model.apply(repair, false, &report));
+        for(int y = 3; y <= 12; ++y)
+            QCOMPARE(model.packedTile(8, y, layer), quint16(5));
+        QVERIFY(model.apply(repair, true, &report));
+        for(int y = 3; y <= 12; ++y)
+            QCOMPARE(model.packedTile(8, y, layer), quint16(4));
+
+        CValidationReport settledReport;
+        const STerrainTileCommand settled = model.makeVirtualMapResolution(
+            layer, fixture.catalog, 0x46495850u,
+            &settledReport, false, &sparseRecovery, true, false);
+        QVERIFY2(!settledReport.hasErrors(), qPrintable(settledReport.toText()));
+        QVERIFY2(settled.isEmpty(),
+                 "Resolve Missing Blends must be idempotent after one command");
+    }
 }
 
 void TerrainVirtualAtlasTests::mapResolutionPrefersAuthoritativeVirtualField()

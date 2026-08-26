@@ -18604,17 +18604,14 @@ void CView::resolveMissingTerrainBlends()
                     + finding.location);
             const bool sharedCornerPreserved = finding.code == QStringLiteral(
                 "terrain.virtual_map_ambiguous_skipped");
-            const bool routeOwnershipPreserved = finding.code == QStringLiteral(
-                "terrain.resolve_route_ownership_preserved");
-            if(!sharedCornerPreserved && !routeOwnershipPreserved)
+            if(!sharedCornerPreserved)
                 continue;
             const int count = leadingCount.indexIn(finding.message) >= 0
                 ? leadingCount.cap(1).toInt() : 0;
             audit.skippedCellCount += count;
             STerrainResolveSkippedReason skipped;
-            skipped.reason = sharedCornerPreserved
-                ? QStringLiteral("ambiguous-shared-corner-preserved")
-                : QStringLiteral("route-ownership-ambiguous-preserved");
+            skipped.reason = QStringLiteral(
+                "ambiguous-shared-corner-preserved");
             skipped.count = count;
             audit.skippedReasons.append(skipped);
         }
@@ -18747,17 +18744,10 @@ void CView::resolveMissingTerrainBlends()
         int x{0};
         int y{0};
         qint32 runtimeType{-1};
-        qint32 routeOwnerMaterial{0};
     };
     QMap<QByteArray, SMissingMapSignature> missing;
     CTerrainVirtualMaterialField repairFields[2];
-    CTerrainVirtualMaterialField routeFields[2];
     bool completeRepairFields[2] = {false, false};
-    STerrainRouteOwnershipPlan routePlans[2];
-    QMap<int, qint32> routeOwners[2];
-    QSet<int> forceRouteSelection[2];
-    QSet<int> preserveRouteComponents[2];
-    QSet<int> warnedRouteComponents[2];
     const ETerrainTileLayer layers[] = {
         ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
     if(!report.hasErrors())
@@ -18765,12 +18755,6 @@ void CView::resolveMissingTerrainBlends()
         for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
         {
             const ETerrainTileLayer layer = layers[layerIndex];
-            // Connected route ownership was introduced for the reported
-            // Lava-on-Water overlay repair. Ground contains ordinary authored
-            // multi-material junctions at map scale; treating those as route
-            // evidence made the established Ground resolver preserve valid
-            // candidates and added a full-map ownership scan to every Shift+R.
-            const bool routeOwnershipEnabled = layer == ETerrainTileLayer::Overlay;
             CTerrainVirtualMaterialField& field = repairFields[layerIndex];
             if(!staged.terrainEdit.initializeVirtualMaterialField(
                    layer, staged.atlas->catalog(), &report,
@@ -18780,15 +18764,6 @@ void CView::resolveMissingTerrainBlends()
                     report.add("terrain.resolve_map_field",
                         EValidationSeverity::Error,
                         "The map-wide resolver could not establish a deterministic material field");
-                break;
-            }
-            if(routeOwnershipEnabled
-               && !staged.terrainEdit.copyVirtualMaterialField(
-                   layer, &routeFields[layerIndex], false))
-            {
-                report.add("terrain.resolve_route_field",
-                    EValidationSeverity::Error,
-                    "The map-wide resolver could not copy the current semantic edit field.");
                 break;
             }
             const bool completeField =
@@ -18803,101 +18778,6 @@ void CView::resolveMissingTerrainBlends()
                     "The map-wide resolver could not copy the recovered material field");
                 break;
             }
-            const int cellCount = field.tileWidth() * field.tileHeight();
-            QVector<STerrainTransitionSignature> routeSignatures(cellCount);
-            QVector<bool> routeAvailable(cellCount, false);
-            QVector<bool> routeOwnershipEvidenceCells(cellCount, false);
-            QVector<bool> semanticRepairCells(cellCount, false);
-            QVector<STerrainTransitionSignature> semanticRepairSignatures(
-                cellCount);
-            QVector<qint32> exactGeneratedRouteOwners(cellCount, 0);
-            QVector<qint32> currentVertexMaterials;
-            QVector<qint32> baselineVertexMaterials;
-            if(routeOwnershipEnabled)
-                staged.terrainEdit.copyVirtualMaterialFieldState(
-                    layer, &currentVertexMaterials,
-                    &baselineVertexMaterials);
-            for(int y = 0; y < field.tileHeight(); ++y)
-                for(int x = 0; x < field.tileWidth(); ++x)
-                {
-                    const int cell = y * field.tileWidth() + x;
-                    bool available = false;
-                    const quint16 packed = staged.terrainEdit.packedTile(
-                        x, y, layer, &available);
-                    bool signatureFound = false;
-                    if(routeOwnershipEnabled)
-                    {
-                        routeSignatures[cell] = routeFields[layerIndex]
-                            .cellSignature(x, y, &signatureFound);
-                        routeAvailable[cell] = available && signatureFound;
-                    }
-                    STerrainTransitionSignature repairSignature;
-                    semanticRepairCells[cell] = available
-                        && staged.terrainEdit.missingBlendRepairSignature(
-                            x, y, layer, staged.atlas->catalog(),
-                            &field, completeField, &repairSignature);
-                    if(semanticRepairCells.at(cell))
-                        semanticRepairSignatures[cell] = repairSignature;
-                    if(routeOwnershipEnabled)
-                    {
-                        bool provenanceFound = false;
-                        const STerrainTransitionVariant provenance =
-                            staged.atlas->catalog().variantForPacked(
-                                packed, &provenanceFound);
-                        bool provenanceSignatureFound = false;
-                        const STerrainTransitionSignature provenanceSignature =
-                            staged.atlas->catalog().gridSignatureForPacked(
-                                packed, &provenanceSignatureFound);
-                        if(provenanceFound
-                           && provenance.canonicalGeneratedRoute
-                           && provenanceSignatureFound
-                           && provenanceSignature
-                                == routeSignatures.at(cell))
-                            exactGeneratedRouteOwners[cell] =
-                                provenance.routeOwnerMaterial;
-                        const int vertexWidth = field.tileWidth() + 1;
-                        const int northWest = y * vertexWidth + x;
-                        const int northEast = northWest + 1;
-                        const int southWest = northWest + vertexWidth;
-                        const int southEast = southWest + 1;
-                        const bool deltaFieldAvailable =
-                            currentVertexMaterials.size()
-                                == vertexWidth * (field.tileHeight() + 1)
-                            && baselineVertexMaterials.size()
-                                == currentVertexMaterials.size();
-                        const bool semanticDeltaEvidence = deltaFieldAvailable
-                            && (currentVertexMaterials.at(northWest)
-                                    != baselineVertexMaterials.at(northWest)
-                                || currentVertexMaterials.at(northEast)
-                                    != baselineVertexMaterials.at(northEast)
-                                || currentVertexMaterials.at(southEast)
-                                    != baselineVertexMaterials.at(southEast)
-                                || currentVertexMaterials.at(southWest)
-                                    != baselineVertexMaterials.at(southWest));
-                        const bool canonicalGeneratedEvidence = available
-                            && staged.atlas->tileOriginForSlot(
-                                SMprPackedTile::decode(packed).atlasSlot())
-                                    == ETerrainWorkingTileOrigin::CanonicalGenerated;
-                        routeOwnershipEvidenceCells[cell] =
-                            routeAvailable.at(cell)
-                            && (semanticDeltaEvidence
-                                || canonicalGeneratedEvidence);
-                    }
-                }
-            if(routeOwnershipEnabled)
-            {
-                routePlans[layerIndex] = planConnectedTerrainRouteOwnership(
-                    field.tileWidth(), field.tileHeight(), routeSignatures,
-                    routeAvailable, currentVertexMaterials,
-                    baselineVertexMaterials, exactGeneratedRouteOwners,
-                    routeOwnershipEvidenceCells);
-                routeOwners[layerIndex] =
-                    routePlans[layerIndex].ownerByCell;
-                preserveRouteComponents[layerIndex] =
-                    routePlans[layerIndex].preservedCells;
-            }
-            int preservedRouteCellCount = 0;
-            QStringList preservedRouteExamples;
             for(int y = 0; y < field.tileHeight(); ++y)
                 for(int x = 0; x < field.tileWidth(); ++x)
                 {
@@ -18906,94 +18786,11 @@ void CView::resolveMissingTerrainBlends()
                         x, y, layer, &available);
                     if(!available)
                         continue;
-                    const int cell = y * field.tileWidth() + x;
-                    const bool semanticRepairNeeded =
-                        semanticRepairCells.at(cell);
-                    const int componentIndex = routePlans[layerIndex]
-                        .componentByCell.value(cell, -1);
-                    const bool routeOwnershipPlanned = componentIndex >= 0;
-                    const bool routeOwnershipEvidence =
-                        routeOwnershipEvidenceCells.at(cell);
-                    STerrainTransitionSignature signature =
-                        routeOwnershipPlanned || routeOwnershipEvidence
-                            ? routeSignatures.at(cell)
-                            : semanticRepairSignatures.at(cell);
-                    const bool signatureFound =
-                        routeOwnershipPlanned || routeOwnershipEvidence
-                        ? routeAvailable.at(cell) : semanticRepairNeeded;
-                    if(!signatureFound)
+                    STerrainTransitionSignature signature;
+                    if(!staged.terrainEdit.missingBlendRepairSignature(
+                           x, y, layer, staged.atlas->catalog(),
+                           &field, completeField, &signature))
                         continue;
-                    const qint32 routeOwner =
-                        routeOwners[layerIndex].value(cell, 0);
-                    bool currentVariantFound = false;
-                    const STerrainTransitionVariant currentVariant =
-                        staged.atlas->catalog().variantForPacked(
-                            before, &currentVariantFound);
-                    const bool currentIsCanonicalGenerated =
-                        staged.atlas->tileOriginForSlot(
-                            SMprPackedTile::decode(before).atlasSlot())
-                            == ETerrainWorkingTileOrigin::CanonicalGenerated;
-                    const bool routeRepairNeeded = routeOwner > 0
-                        && currentVariantFound
-                        && currentIsCanonicalGenerated
-                        && currentVariant.routeOwnerMaterial != routeOwner;
-                    QSet<qint32> signatureMaterials;
-                    for(qint32 material : {signature.northWest,
-                                           signature.northEast,
-                                           signature.southEast,
-                                           signature.southWest})
-                        signatureMaterials.insert(material);
-                    if(signatureMaterials.size() > 2
-                       && routeOwnershipEvidence)
-                    {
-                        preserveRouteComponents[layerIndex].insert(cell);
-                        ++preservedRouteCellCount;
-                        if(preservedRouteExamples.size() < 4)
-                            preservedRouteExamples.append(QString(
-                                "multi-material junction at %1,%2")
-                                .arg(x).arg(y));
-                        continue;
-                    }
-                    if(signatureMaterials.size() == 2
-                       && routeOwnershipPlanned && routeOwner == 0)
-                    {
-                        if(componentIndex >= 0
-                           && !warnedRouteComponents[layerIndex]
-                                   .contains(componentIndex))
-                        {
-                            warnedRouteComponents[layerIndex].insert(
-                                componentIndex);
-                            const STerrainRouteOwnershipComponent& component =
-                                routePlans[layerIndex].components.at(
-                                    componentIndex);
-                            QString reason = QStringLiteral(
-                                "missing exact generated provenance");
-                            if(component.ambiguity
-                               == ETerrainRouteOwnershipAmbiguity::MixedSemanticDelta)
-                                reason = QStringLiteral("mixed semantic delta");
-                            else if(component.ambiguity
-                               == ETerrainRouteOwnershipAmbiguity::MixedGeneratedProvenance)
-                                reason = QStringLiteral(
-                                    "mixed exact generated provenance");
-                            else if(component.ambiguity
-                               == ETerrainRouteOwnershipAmbiguity::MultiMaterialJunction)
-                                reason = QStringLiteral(
-                                    "adjacent multi-material junction");
-                            preservedRouteCellCount +=
-                                component.cellIndexes.size();
-                            if(preservedRouteExamples.size() < 4)
-                                preservedRouteExamples.append(QString(
-                                    "%1/%2: %3")
-                                    .arg(component.firstMaterial)
-                                    .arg(component.secondMaterial)
-                                    .arg(reason));
-                        }
-                        continue;
-                    }
-                    if(!semanticRepairNeeded && !routeRepairNeeded)
-                        continue;
-                    if(routeRepairNeeded)
-                        forceRouteSelection[layerIndex].insert(cell);
                     const qint32 runtimeType =
                         staged.atlas->runtimeTerrainTypeForSlot(
                             SMprPackedTile::decode(before).atlasSlot());
@@ -19007,28 +18804,17 @@ void CView::resolveMissingTerrainBlends()
                     }
                     if(selectWorkingPaintVariantWithRuntimeType(
                            *staged.atlas, signature, x, y,
-                           m_terrainSemanticSeed, runtimeType, nullptr,
-                           routeOwner))
+                           m_terrainSemanticSeed, runtimeType, nullptr))
                         continue;
                     SMissingMapSignature item;
-                    item.signature = signature;item.x = x;item.y = y;
+                    item.signature = signature;
+                    item.x = x;
+                    item.y = y;
                     item.runtimeType = runtimeType;
-                    item.routeOwnerMaterial = routeOwner;
                     missing.insert(runtimeTypedTransitionKey(
-                                       signature, runtimeType, routeOwner),
+                                       signature, runtimeType),
                                    item);
                 }
-            if(preservedRouteCellCount > 0)
-                report.add(
-                    "terrain.resolve_route_ownership_preserved",
-                    EValidationSeverity::Warning,
-                    QString("%1 repair candidate cell(s) were preserved byte-for-byte because connected-route ownership was ambiguous. Examples: %2")
-                        .arg(preservedRouteCellCount)
-                        .arg(preservedRouteExamples.join(
-                            QStringLiteral("; "))),
-                    layer == ETerrainTileLayer::Land
-                        ? QStringLiteral("land")
-                        : QStringLiteral("overlay"));
             progress.setValue(layerIndex + 1);
             QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         }
@@ -19043,7 +18829,7 @@ void CView::resolveMissingTerrainBlends()
     {
         if(!realizeWorkingTerrainSignature(item.value().signature,
                item.value().x, item.value().y, &usage, &report, nullptr,
-               item.value().routeOwnerMaterial,
+               0,
                item.value().runtimeType, &staged, true))
             break;
         ++generated;
@@ -19071,12 +18857,6 @@ void CView::resolveMissingTerrainBlends()
                     &repairFields[layer == ETerrainTileLayer::Land ? 0 : 1],
                     true,
                     completeRepairFields[
-                        layer == ETerrainTileLayer::Land ? 0 : 1],
-                    &routeOwners[
-                        layer == ETerrainTileLayer::Land ? 0 : 1],
-                    &forceRouteSelection[
-                        layer == ETerrainTileLayer::Land ? 0 : 1],
-                    &preserveRouteComponents[
                         layer == ETerrainTileLayer::Land ? 0 : 1]);
             appendTerrainTileCommand(&combined, command);
         }
@@ -19114,11 +18894,10 @@ void CView::resolveMissingTerrainBlends()
                     break;
                 }
                 decision.blendProvenance = identity.blendProvenance;
-                decision.routeOwnerMaterial = identity.routeOwnerMaterial;
             }
             else
                 decision.origin = QStringLiteral("unknown");
-            const QString key = QStringLiteral("%1,%2,%3,%4|%5|%6|%7|%8|%9|%10")
+            const QString key = QStringLiteral("%1,%2,%3,%4|%5|%6|%7|%8|%9")
                 .arg(decision.signature.northWest)
                 .arg(decision.signature.northEast)
                 .arg(decision.signature.southEast)
@@ -19126,7 +18905,6 @@ void CView::resolveMissingTerrainBlends()
                 .arg(decision.predecessorRuntimeType)
                 .arg(decision.selectedRuntimeType)
                 .arg(decision.selectedWorkingSlot)
-                .arg(decision.routeOwnerMaterial)
                 .arg(decision.origin)
                 .arg(decision.blendProvenance);
             const auto existing = runtimeDecisionIndexes.constFind(key);
