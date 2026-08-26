@@ -417,11 +417,15 @@ QByteArray globalTransitionKey(const STerrainTransitionSignature& signature)
 }
 
 QByteArray runtimeTypedTransitionKey(
-    const STerrainTransitionSignature& signature, qint32 runtimeTerrainType)
+    const STerrainTransitionSignature& signature, qint32 runtimeTerrainType,
+    qint32 routeOwnerMaterial = 0)
 {
     QByteArray key = globalTransitionKey(signature);
     char typeBytes[4];
     qToLittleEndian<qint32>(runtimeTerrainType,
+        reinterpret_cast<uchar*>(typeBytes));
+    key.append(typeBytes, 4);
+    qToLittleEndian<qint32>(routeOwnerMaterial,
         reinterpret_cast<uchar*>(typeBytes));
     key.append(typeBytes, 4);
     return key;
@@ -431,7 +435,8 @@ bool selectWorkingPaintVariantWithRuntimeType(
     const CTerrainWorkingAtlas& atlas,
     const STerrainTransitionSignature& signature,
     int cellX, int cellY, quint32 distributionSeed,
-    qint32 runtimeTerrainType, quint16* packedTile)
+    qint32 runtimeTerrainType, quint16* packedTile,
+    qint32 preferredRouteOwnerMaterial = 0)
 {
     if(runtimeTerrainType < 0 || runtimeTerrainType >= 16)
         return false;
@@ -449,7 +454,8 @@ bool selectWorkingPaintVariantWithRuntimeType(
         return false;
     bool found = false;
     const quint16 selected = atlas.catalog().selectForPaint(
-        signature, cellX, cellY, distributionSeed, typedSlots, &found);
+        signature, cellX, cellY, distributionSeed, typedSlots,
+        preferredRouteOwnerMaterial, &found);
     if(found && packedTile)
         *packedTile = selected;
     return found;
@@ -12766,10 +12772,11 @@ bool CView::realizeWorkingTerrainSignature(
     if(requirePreferredRuntimeType)
         alreadyExact = selectWorkingPaintVariantWithRuntimeType(
             *atlas, signature, cellX, cellY, m_terrainSemanticSeed,
-            preferredRuntimeType, nullptr);
+            preferredRuntimeType, nullptr, preferredPaintMaterial);
     else
         atlas->catalog().selectForPaint(
-            signature, cellX, cellY, m_terrainSemanticSeed, &alreadyExact);
+            signature, cellX, cellY, m_terrainSemanticSeed,
+            preferredPaintMaterial, &alreadyExact);
     if(!alreadyExact)
     {
         QList<STerrainGlobalTransitionSource> candidates =
@@ -12867,7 +12874,7 @@ bool CView::realizeWorkingTerrainSignature(
     const bool selectedTypedWorkingVariant = requirePreferredRuntimeType
         && selectWorkingPaintVariantWithRuntimeType(
             *atlas, signature, cellX, cellY, m_terrainSemanticSeed,
-            preferredRuntimeType, &packed);
+            preferredRuntimeType, &packed, preferredPaintMaterial);
     if(selectedTypedWorkingVariant)
     {
         if(generated)
@@ -12879,11 +12886,11 @@ bool CView::realizeWorkingTerrainSignature(
         if(requirePreferredRuntimeType)
             exactAvailable = selectWorkingPaintVariantWithRuntimeType(
                 *atlas, signature, cellX, cellY, m_terrainSemanticSeed,
-                preferredRuntimeType, nullptr);
+                preferredRuntimeType, nullptr, preferredPaintMaterial);
         else
             atlas->catalog().selectForPaint(
                 signature, cellX, cellY, m_terrainSemanticSeed,
-                &exactAvailable);
+                preferredPaintMaterial, &exactAvailable);
         if(!exactAvailable
            && !ensureGlobalTerrainMaterialSources(
                   signature, &attempt, staging))
@@ -13324,9 +13331,11 @@ void CView::finalizeVirtualTerrainAtlas()
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QVector<qint32> placedCellTypes;
     QVector<quint16> placedPackedCells;
+    QVector<qint32> placedRouteOwners;
     QVector<bool> preservePlacedCells;
     placedCellTypes.reserve(field.tileWidth()*field.tileHeight());
     placedPackedCells.reserve(field.tileWidth()*field.tileHeight());
+    placedRouteOwners.reserve(field.tileWidth()*field.tileHeight());
     preservePlacedCells.reserve(field.tileWidth()*field.tileHeight());
     for(int y=0;y<field.tileHeight();++y)
         for(int x=0;x<field.tileWidth();++x)
@@ -13338,6 +13347,14 @@ void CView::finalizeVirtualTerrainAtlas()
                 ?m_terrainEdit.tileType(packed,&typeFound):-1;
             placedCellTypes.append(typeFound?type:-1);
             placedPackedCells.append(available?packed:quint16(0));
+            bool routeFound = false;
+            const STerrainTransitionVariant route =
+                m_workingTerrainAtlas
+                    ? m_workingTerrainAtlas->catalog().variantForPacked(
+                          packed, &routeFound)
+                    : STerrainTransitionVariant();
+            placedRouteOwners.append(
+                routeFound ? route.routeOwnerMaterial : 0);
             preservePlacedCells.append(
                 !m_terrainEdit.virtualMaterialCellChanged(layer,x,y));
         }
@@ -13357,7 +13374,8 @@ void CView::finalizeVirtualTerrainAtlas()
     STerrainAtlasFinalization finalized=atlas.finalize(
         field,m_mprDocument.mapInfo().innerNamespace,
         kMprPackedTerrainAtlasSlotLimit,
-        authoredTypes,&report,pinned,placedCellTypes,placedPackedCells,{},
+        authoredTypes,&report,pinned,placedCellTypes,placedPackedCells,
+        placedRouteOwners,
         finalizedDecodeCatalog,preservePlacedCells,animationRanges);
     if(!finalized.success)
     {
@@ -17934,7 +17952,9 @@ void CView::endTileBrushGroup()
                         field.cellSignature(x,y,&found);
                     if(!found)continue;
                     m_workingTerrainAtlas->catalog().selectForPaint(
-                        signature,x,y,m_terrainSemanticSeed,&exactAvailable);
+                        signature,x,y,m_terrainSemanticSeed,
+                        m_tileStrokeCommand.semanticAudit.requestedMaterialId,
+                        &exactAvailable);
                     if(!exactAvailable)
                     {
                         // Qt's retained MinGW 7.3 kit compiles as C++11, where
@@ -18031,7 +18051,8 @@ void CView::endTileBrushGroup()
                 STerrainTileCommand resolution=m_terrainEdit.makeVirtualStrokeResolution(
                     m_tileStrokeCommand,catalog,m_tileStrokeDistributionSeed,&releaseReport,
                     m_landscapeTools
-                        &&m_landscapeTools->randomizeUniformRotation());
+                        &&m_landscapeTools->randomizeUniformRotation(),
+                    m_tileStrokeCommand.semanticAudit.requestedMaterialId);
                 if(releaseReport.hasErrors())
                 {
                     applyTerrainTilePreview(m_tileStrokeCommand,false);
@@ -18303,14 +18324,19 @@ void CView::resolveMissingTerrainBlends()
             audit.validationFindings.append(finding.location.isEmpty()
                 ? finding.code : finding.code + QStringLiteral(" @ ")
                     + finding.location);
-            if(finding.code != QStringLiteral(
-                   "terrain.virtual_map_ambiguous_skipped"))
+            const bool sharedCornerPreserved = finding.code == QStringLiteral(
+                "terrain.virtual_map_ambiguous_skipped");
+            const bool routeOwnershipPreserved = finding.code == QStringLiteral(
+                "terrain.resolve_route_ownership_preserved");
+            if(!sharedCornerPreserved && !routeOwnershipPreserved)
                 continue;
             const int count = leadingCount.indexIn(finding.message) >= 0
                 ? leadingCount.cap(1).toInt() : 0;
             audit.skippedCellCount += count;
             STerrainResolveSkippedReason skipped;
-            skipped.reason = QStringLiteral("ambiguous-shared-corner-preserved");
+            skipped.reason = sharedCornerPreserved
+                ? QStringLiteral("ambiguous-shared-corner-preserved")
+                : QStringLiteral("route-ownership-ambiguous-preserved");
             skipped.count = count;
             audit.skippedReasons.append(skipped);
         }
@@ -18443,10 +18469,16 @@ void CView::resolveMissingTerrainBlends()
         int x{0};
         int y{0};
         qint32 runtimeType{-1};
+        qint32 routeOwnerMaterial{0};
     };
     QMap<QByteArray, SMissingMapSignature> missing;
     CTerrainVirtualMaterialField repairFields[2];
     bool completeRepairFields[2] = {false, false};
+    STerrainRouteOwnershipPlan routePlans[2];
+    QMap<int, qint32> routeOwners[2];
+    QSet<int> forceRouteSelection[2];
+    QSet<int> preserveRouteComponents[2];
+    QSet<int> warnedRouteComponents[2];
     const ETerrainTileLayer layers[] = {
         ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
     if(!report.hasErrors())
@@ -18477,6 +18509,46 @@ void CView::resolveMissingTerrainBlends()
                     "The map-wide resolver could not copy the recovered material field");
                 break;
             }
+            const int cellCount = field.tileWidth() * field.tileHeight();
+            QVector<STerrainTransitionSignature> routeSignatures(cellCount);
+            QVector<bool> routeAvailable(cellCount, false);
+            QVector<qint32> exactGeneratedRouteOwners(cellCount, 0);
+            QVector<qint32> currentVertexMaterials;
+            QVector<qint32> baselineVertexMaterials;
+            staged.terrainEdit.copyVirtualMaterialFieldState(
+                layer, &currentVertexMaterials, &baselineVertexMaterials);
+            for(int y = 0; y < field.tileHeight(); ++y)
+                for(int x = 0; x < field.tileWidth(); ++x)
+                {
+                    const int cell = y * field.tileWidth() + x;
+                    bool available = false;
+                    const quint16 packed = staged.terrainEdit.packedTile(
+                        x, y, layer, &available);
+                    bool signatureFound = false;
+                    routeSignatures[cell] = field.cellSignature(
+                        x, y, &signatureFound);
+                    routeAvailable[cell] = available && signatureFound;
+                    bool provenanceFound = false;
+                    const STerrainTransitionVariant provenance =
+                        staged.atlas->catalog().variantForPacked(
+                            packed, &provenanceFound);
+                    bool provenanceSignatureFound = false;
+                    const STerrainTransitionSignature provenanceSignature =
+                        staged.atlas->catalog().gridSignatureForPacked(
+                            packed, &provenanceSignatureFound);
+                    if(provenanceFound
+                       && provenance.canonicalGeneratedRoute
+                       && provenanceSignatureFound
+                       && provenanceSignature == routeSignatures.at(cell))
+                        exactGeneratedRouteOwners[cell] =
+                            provenance.routeOwnerMaterial;
+                }
+            routePlans[layerIndex] = planConnectedTerrainRouteOwnership(
+                field.tileWidth(), field.tileHeight(), routeSignatures,
+                routeAvailable, currentVertexMaterials,
+                baselineVertexMaterials, exactGeneratedRouteOwners);
+            routeOwners[layerIndex] =
+                routePlans[layerIndex].ownerByCell;
             for(int y = 0; y < field.tileHeight(); ++y)
                 for(int x = 0; x < field.tileWidth(); ++x)
                 {
@@ -18485,11 +18557,111 @@ void CView::resolveMissingTerrainBlends()
                         x, y, layer, &available);
                     if(!available)
                         continue;
+                    const int cell = y * field.tileWidth() + x;
                     STerrainTransitionSignature signature;
-                    if(!staged.terrainEdit.missingBlendRepairSignature(
-                           x, y, layer, staged.atlas->catalog(),
-                           &field, completeField, &signature))
+                    const bool semanticRepairNeeded =
+                        staged.terrainEdit.missingBlendRepairSignature(
+                            x, y, layer, staged.atlas->catalog(),
+                            &field, completeField, &signature);
+                    bool signatureFound = semanticRepairNeeded;
+                    if(!signatureFound)
+                        signature = field.cellSignature(
+                            x, y, &signatureFound);
+                    if(!signatureFound)
                         continue;
+                    const qint32 routeOwner =
+                        routeOwners[layerIndex].value(cell, 0);
+                    bool currentVariantFound = false;
+                    const STerrainTransitionVariant currentVariant =
+                        staged.atlas->catalog().variantForPacked(
+                            before, &currentVariantFound);
+                    STerrainWorkingTileIdentity currentIdentity;
+                    const bool currentIdentityFound =
+                        staged.atlas->tileIdentityForSlot(
+                            SMprPackedTile::decode(before).atlasSlot(),
+                            &currentIdentity);
+                    const bool currentIsCanonicalGenerated =
+                        currentIdentityFound
+                        && currentIdentity.origin
+                            == ETerrainWorkingTileOrigin::CanonicalGenerated;
+                    const bool routeRepairNeeded = routeOwner > 0
+                        && currentVariantFound
+                        && currentIsCanonicalGenerated
+                        && currentVariant.routeOwnerMaterial != routeOwner;
+                    QSet<qint32> signatureMaterials;
+                    for(qint32 material : {signature.northWest,
+                                           signature.northEast,
+                                           signature.southEast,
+                                           signature.southWest})
+                        signatureMaterials.insert(material);
+                    if(signatureMaterials.size() > 2)
+                    {
+                        preserveRouteComponents[layerIndex].insert(cell);
+                        report.add(
+                            "terrain.resolve_route_ownership_preserved",
+                            EValidationSeverity::Warning,
+                            "1 multi-material junction cell was preserved byte-for-byte because two-material route ownership is not applicable",
+                            QString("%1 %2,%3")
+                                .arg(layer == ETerrainTileLayer::Land
+                                    ? QStringLiteral("land")
+                                    : QStringLiteral("overlay"))
+                                .arg(x).arg(y));
+                        continue;
+                    }
+                    if(signatureMaterials.size() == 2 && routeOwner == 0)
+                    {
+                        preserveRouteComponents[layerIndex].unite(
+                            routePlans[layerIndex].preservedCells);
+                        int componentIndex = -1;
+                        for(int index = 0;
+                            index < routePlans[layerIndex].components.size();
+                            ++index)
+                            if(routePlans[layerIndex].components.at(index)
+                                   .cellIndexes.contains(cell))
+                            {
+                                componentIndex = index;
+                                break;
+                            }
+                        if(componentIndex >= 0
+                           && !warnedRouteComponents[layerIndex]
+                                   .contains(componentIndex))
+                        {
+                            warnedRouteComponents[layerIndex].insert(
+                                componentIndex);
+                            const STerrainRouteOwnershipComponent& component =
+                                routePlans[layerIndex].components.at(
+                                    componentIndex);
+                            QString reason = QStringLiteral(
+                                "missing exact generated provenance");
+                            if(component.ambiguity
+                               == ETerrainRouteOwnershipAmbiguity::MixedSemanticDelta)
+                                reason = QStringLiteral("mixed semantic delta");
+                            else if(component.ambiguity
+                               == ETerrainRouteOwnershipAmbiguity::MixedGeneratedProvenance)
+                                reason = QStringLiteral(
+                                    "mixed exact generated provenance");
+                            else if(component.ambiguity
+                               == ETerrainRouteOwnershipAmbiguity::MultiMaterialJunction)
+                                reason = QStringLiteral(
+                                    "adjacent multi-material junction");
+                            report.add(
+                                "terrain.resolve_route_ownership_preserved",
+                                EValidationSeverity::Warning,
+                                QString("%1 connected %2/%3 transition cell(s) were preserved byte-for-byte because route ownership has %4")
+                                    .arg(component.cellIndexes.size())
+                                    .arg(component.firstMaterial)
+                                    .arg(component.secondMaterial)
+                                    .arg(reason),
+                                layer == ETerrainTileLayer::Land
+                                    ? QStringLiteral("land")
+                                    : QStringLiteral("overlay"));
+                        }
+                        continue;
+                    }
+                    if(!semanticRepairNeeded && !routeRepairNeeded)
+                        continue;
+                    if(routeRepairNeeded)
+                        forceRouteSelection[layerIndex].insert(cell);
                     const qint32 runtimeType =
                         staged.atlas->runtimeTerrainTypeForSlot(
                             SMprPackedTile::decode(before).atlasSlot());
@@ -18503,12 +18675,15 @@ void CView::resolveMissingTerrainBlends()
                     }
                     if(selectWorkingPaintVariantWithRuntimeType(
                            *staged.atlas, signature, x, y,
-                           m_terrainSemanticSeed, runtimeType, nullptr))
+                           m_terrainSemanticSeed, runtimeType, nullptr,
+                           routeOwner))
                         continue;
                     SMissingMapSignature item;
                     item.signature = signature;item.x = x;item.y = y;
                     item.runtimeType = runtimeType;
-                    missing.insert(runtimeTypedTransitionKey(signature, runtimeType),
+                    item.routeOwnerMaterial = routeOwner;
+                    missing.insert(runtimeTypedTransitionKey(
+                                       signature, runtimeType, routeOwner),
                                    item);
                 }
             progress.setValue(layerIndex + 1);
@@ -18525,7 +18700,8 @@ void CView::resolveMissingTerrainBlends()
     {
         if(!realizeWorkingTerrainSignature(item.value().signature,
                item.value().x, item.value().y, &usage, &report, nullptr,
-               0, item.value().runtimeType, &staged, true))
+               item.value().routeOwnerMaterial,
+               item.value().runtimeType, &staged, true))
             break;
         ++generated;
     }
@@ -18552,6 +18728,12 @@ void CView::resolveMissingTerrainBlends()
                     &repairFields[layer == ETerrainTileLayer::Land ? 0 : 1],
                     true,
                     completeRepairFields[
+                        layer == ETerrainTileLayer::Land ? 0 : 1],
+                    &routeOwners[
+                        layer == ETerrainTileLayer::Land ? 0 : 1],
+                    &forceRouteSelection[
+                        layer == ETerrainTileLayer::Land ? 0 : 1],
+                    &preserveRouteComponents[
                         layer == ETerrainTileLayer::Land ? 0 : 1]);
             appendTerrainTileCommand(&combined, command);
         }
@@ -18589,10 +18771,11 @@ void CView::resolveMissingTerrainBlends()
                     break;
                 }
                 decision.blendProvenance = identity.blendProvenance;
+                decision.routeOwnerMaterial = identity.routeOwnerMaterial;
             }
             else
                 decision.origin = QStringLiteral("unknown");
-            const QString key = QStringLiteral("%1,%2,%3,%4|%5|%6|%7|%8|%9")
+            const QString key = QStringLiteral("%1,%2,%3,%4|%5|%6|%7|%8|%9|%10")
                 .arg(decision.signature.northWest)
                 .arg(decision.signature.northEast)
                 .arg(decision.signature.southEast)
@@ -18600,6 +18783,7 @@ void CView::resolveMissingTerrainBlends()
                 .arg(decision.predecessorRuntimeType)
                 .arg(decision.selectedRuntimeType)
                 .arg(decision.selectedWorkingSlot)
+                .arg(decision.routeOwnerMaterial)
                 .arg(decision.origin)
                 .arg(decision.blendProvenance);
             const auto existing = runtimeDecisionIndexes.constFind(key);
@@ -18623,9 +18807,12 @@ void CView::resolveMissingTerrainBlends()
     if(combined.isEmpty())
     {
         progress.setValue(5);
+        const QString detail = report.findings().isEmpty()
+            ? QString() : QStringLiteral("\n\n") + report.toText();
         QMessageBox::information(this, tr("Resolve missing blends"), tr(
-            "No unambiguous terrain cell needed repair. Existing cells at "
-            "disputed shared corners were deliberately preserved."));
+            "No unambiguous terrain cell needed repair. Existing cells with "
+            "ambiguous shared-corner or route-ownership evidence were "
+            "deliberately preserved.%1").arg(detail));
         finishAudit(QStringLiteral("no-op"));
         return;
     }
@@ -18730,8 +18917,11 @@ void CView::resolveMissingTerrainBlends()
     refreshClassicAutoPalette();
     refreshManualAtlasPalette();
     progress.setValue(5);
-    emit updateMsg(tr("Resolved %1 terrain cell(s) in one undo step; %2 exact atlas tuple(s) were added.")
-        .arg(combined.deltas.size()).arg(generated));
+    QString resolvedMessage = tr("Resolved %1 terrain cell(s) in one undo step; %2 exact atlas tuple(s) were added.")
+        .arg(combined.deltas.size()).arg(generated);
+    if(!report.findings().isEmpty())
+        resolvedMessage += QStringLiteral(" ") + report.toText();
+    emit updateMsg(resolvedMessage);
     finishAudit(QStringLiteral("committed"));
 }
 

@@ -560,6 +560,11 @@ private slots:
     void virtualTilePaintTargetsFourCellCorners();
     void mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly();
     void mapResolutionPreservesRuntimeTypeForTiedGeneratedBlends();
+    void connectedRouteOwnershipUsesSemanticDeltaAcrossAllTopologies();
+    void connectedRouteOwnershipMirrorUsesReversePaintIntent();
+    void routeOwnerFiltersOppositeGeneratedExactCandidates();
+    void ambiguousAndMultiMaterialRouteComponentsArePreserved();
+    void mapResolutionNormalizesRouteOwnerAndIsIdempotent();
     void mapResolutionReachesFixedPointInOneCommand();
     void mapResolutionPrefersAuthoritativeVirtualField();
     void mapResolutionDoesNotChooseAWinningSideForTiedBorders();
@@ -3148,6 +3153,31 @@ void TerrainVirtualAtlasTests::workingAtlasCarriesGeneratedTerrainType()
     QVERIFY(slot >= fixture.images.size());
     QCOMPARE(working.runtimeTerrainTypeForSlot(slot), qint32(7));
     QCOMPARE(working.activeTileTypes().at(slot), qint32(7));
+    bool routeFound = false;
+    const STerrainTransitionVariant routed =
+        working.catalog().variantForPacked(packed, &routeFound);
+    QVERIFY(routeFound);
+    QCOMPARE(routed.routeOwnerMaterial, qint32(1));
+    QVERIFY(routed.canonicalGeneratedRoute);
+
+    CTestTerrainVirtualAtlas finalizer(fixture.catalog, fixture.images);
+    seedReviewedPairMasks(finalizer, 1, 2, fixture.images.at(0),
+                          fixture.images.at(1));
+    CTerrainVirtualMaterialField field;
+    QVERIFY(field.resize(1, 1, 1));
+    QVERIFY(field.setMaterial(1, 0, 2));
+    QVERIFY(field.setMaterial(1, 1, 2));
+    const STerrainAtlasFinalization finalized = finalizer.finalize(
+        field, QStringLiteral("RouteOwnerFinalized"), 512,
+        sourceTypes, &report, {}, {}, {}, {2});
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n")
+                        + report.toText()));
+    QCOMPARE(finalized.packedCells.size(), 1);
+    const int finalizedSlot = SMprPackedTile::decode(
+        finalized.packedCells.front()).atlasSlot();
+    QCOMPARE(finalized.tiles.at(finalizedSlot).routeOwnerMaterial,
+             qint32(2));
 }
 
 void TerrainVirtualAtlasTests::stagedResolveUsesPredecessorTypeOverAuthoredAndSemanticMajority()
@@ -4421,16 +4451,31 @@ void TerrainVirtualAtlasTests::virtualPaintPreviewAndUndoPreserveDesiredIdentity
         bool generated = false;
         const quint16 packed = working.resolve(painted.cellSignature(x,y), x, y,
                                                &usage, protectedSlots, &generated,
-                                               &releaseReport);
+                                               &releaseReport, 2);
         if(!releaseReport.hasErrors())
             ++usage[SMprPackedTile::decode(packed).atlasSlot()];
     }
     QVERIFY2(!releaseReport.hasErrors(), qPrintable(releaseReport.toText()));
     const STerrainTileCommand resolved=model.makeVirtualStrokeResolution(
-        command,working.catalog(),99,&releaseReport);
+        command,working.catalog(),99,&releaseReport,false,2);
     QVERIFY2(!releaseReport.hasErrors(), qPrintable(releaseReport.toText()));
     QCOMPARE(resolved.semanticAudit.solverMode,QString("virtual-release-exact"));
     QVERIFY(!resolved.deltas.isEmpty());
+    for(const STerrainTileDelta& delta : resolved.deltas)
+    {
+        bool routeFound = false;
+        const STerrainTransitionVariant route =
+            working.catalog().variantForPacked(delta.after, &routeFound);
+        QVERIFY(routeFound);
+        QSet<qint32> materials;
+        for(qint32 material : {delta.requestedSignature.northWest,
+                               delta.requestedSignature.northEast,
+                               delta.requestedSignature.southEast,
+                               delta.requestedSignature.southWest})
+            materials.insert(material);
+        QCOMPARE(route.routeOwnerMaterial,
+                 materials.size() == 2 ? qint32(2) : qint32(0));
+    }
     QVERIFY(model.apply(resolved,true,&report));
     CTerrainVirtualMaterialField afterResolution;
     QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&afterResolution));
@@ -4514,6 +4559,320 @@ void TerrainVirtualAtlasTests::mapResolutionRepairsWrongPhysicalBlendAndUndoesEx
     QCOMPARE(model.packedTile(8,8,ETerrainTileLayer::Land),quint16(0));
     QVERIFY(model.apply(repair,false,&report));
     QCOMPARE(model.packedTile(8,8,ETerrainTileLayer::Land),quint16(1));
+}
+
+void TerrainVirtualAtlasTests::connectedRouteOwnershipUsesSemanticDeltaAcrossAllTopologies()
+{
+    const qint32 water = 10;
+    const qint32 lava = 20;
+    const int tileWidth = 4;
+    const int tileHeight = 3;
+    const QVector<qint32> current = {
+        water, water, water, water, water,
+        water, lava,  lava,  water, lava,
+        water, lava,  water, lava,  water,
+        water, water, water, water, water
+    };
+    const QVector<qint32> baseline(current.size(), water);
+    QVector<STerrainTransitionSignature> signatures;
+    for(int y = 0; y < tileHeight; ++y)
+        for(int x = 0; x < tileWidth; ++x)
+        {
+            const int nw = y * (tileWidth + 1) + x;
+            signatures.append(signature(
+                current.at(nw), current.at(nw + 1),
+                current.at(nw + tileWidth + 2),
+                current.at(nw + tileWidth + 1)));
+        }
+    const STerrainRouteOwnershipPlan plan =
+        planConnectedTerrainRouteOwnership(
+            tileWidth, tileHeight, signatures,
+            QVector<bool>(tileWidth * tileHeight, true),
+            current, baseline,
+            QVector<qint32>(tileWidth * tileHeight, 0));
+
+    QCOMPARE(plan.components.size(), 1);
+    QSet<int> observedTopologies;
+    int ownedCells = 0;
+    for(const STerrainRouteOwnershipComponent& component : plan.components)
+    {
+        if(component.ownerMaterial != lava)
+            continue;
+        QCOMPARE(component.evidence,
+                 ETerrainRouteOwnershipEvidence::SemanticDelta);
+        for(int cell : component.cellIndexes)
+        {
+            QCOMPARE(plan.ownerByCell.value(cell), lava);
+            const STerrainTransitionSignature value = signatures.at(cell);
+            QMap<qint32, int> counts;
+            for(qint32 material : {value.northWest, value.northEast,
+                                   value.southEast, value.southWest})
+                ++counts[material];
+            if(counts.size() != 2)
+                continue;
+            const int lavaCount = counts.value(lava);
+            if(lavaCount == 1)
+                observedTopologies.insert(1); // outer 1/4
+            else if(lavaCount == 3)
+                observedTopologies.insert(3); // inside 3/4
+            else if(value.northWest == value.southEast
+                    && value.northEast == value.southWest)
+                observedTopologies.insert(22); // diagonal 2/4
+            else
+                observedTopologies.insert(2); // adjacent 2/4
+            ++ownedCells;
+        }
+    }
+    QVERIFY(ownedCells > 0);
+    QCOMPARE(observedTopologies, QSet<int>({1, 2, 3, 22}));
+    QVERIFY(plan.preservedCells.isEmpty());
+
+    QVector<qint32> reopenedOwners(tileWidth * tileHeight, 0);
+    for(auto owner = plan.ownerByCell.constBegin();
+        owner != plan.ownerByCell.constEnd(); ++owner)
+        reopenedOwners[owner.key()] = lava;
+    const STerrainRouteOwnershipPlan reopenedPlan =
+        planConnectedTerrainRouteOwnership(
+            tileWidth, tileHeight, signatures,
+            QVector<bool>(tileWidth * tileHeight, true),
+            current, current, reopenedOwners);
+    QCOMPARE(reopenedPlan.ownerByCell, plan.ownerByCell);
+    QCOMPARE(reopenedPlan.components.size(), 1);
+    QCOMPARE(reopenedPlan.components.front().evidence,
+             ETerrainRouteOwnershipEvidence::GeneratedProvenance);
+}
+
+void TerrainVirtualAtlasTests::connectedRouteOwnershipMirrorUsesReversePaintIntent()
+{
+    const qint32 water = 10;
+    const qint32 lava = 20;
+    const int tileWidth = 4;
+    const int tileHeight = 3;
+    const QVector<qint32> current = {
+        lava, lava,  lava,  lava, lava,
+        lava, water, water, lava, water,
+        lava, water, lava,  water, lava,
+        lava, lava,  lava,  lava, lava
+    };
+    const QVector<qint32> baseline(current.size(), lava);
+    QVector<STerrainTransitionSignature> signatures;
+    for(int y = 0; y < tileHeight; ++y)
+        for(int x = 0; x < tileWidth; ++x)
+        {
+            const int nw = y * (tileWidth + 1) + x;
+            signatures.append(signature(
+                current.at(nw), current.at(nw + 1),
+                current.at(nw + tileWidth + 2),
+                current.at(nw + tileWidth + 1)));
+        }
+    const STerrainRouteOwnershipPlan plan =
+        planConnectedTerrainRouteOwnership(
+            tileWidth, tileHeight, signatures,
+            QVector<bool>(tileWidth * tileHeight, true),
+            current, baseline,
+            QVector<qint32>(tileWidth * tileHeight, 0));
+
+    QVERIFY(!plan.ownerByCell.isEmpty());
+    for(qint32 owner : plan.ownerByCell)
+        QCOMPARE(owner, water);
+    QVERIFY(plan.preservedCells.isEmpty());
+}
+
+void TerrainVirtualAtlasTests::routeOwnerFiltersOppositeGeneratedExactCandidates()
+{
+    const qint32 water = 10;
+    const qint32 lava = 20;
+    CTerrainTransitionCatalog catalog;
+    const STerrainTransitionSignature requested =
+        signature(water, lava, lava, water);
+    STerrainTransitionVariant waterRoute;
+    waterRoute.signature = requested;
+    waterRoute.packedTile = quint16(7);
+    waterRoute.routeOwnerMaterial = 10;
+    QVERIFY(catalog.addVariant(waterRoute));
+    STerrainTransitionVariant lavaRoute = waterRoute;
+    lavaRoute.packedTile = quint16(8);
+    lavaRoute.routeOwnerMaterial = 20;
+    QVERIFY(catalog.addVariant(lavaRoute));
+
+    for(int x = 0; x < 32; ++x)
+        for(int y = 0; y < 32; ++y)
+        {
+            bool found = false;
+            QCOMPARE(catalog.selectForPaint(
+                         requested, x, y, 0x524f5554u, 20, &found),
+                     lavaRoute.packedTile);
+            QVERIFY(found);
+            QCOMPARE(catalog.selectForPaint(
+                         requested, x, y, 0x524f5554u, 10, &found),
+                     waterRoute.packedTile);
+            QVERIFY(found);
+        }
+
+    CTerrainTransitionCatalog legacyGeneratedOnly;
+    STerrainTransitionVariant legacyGenerated = waterRoute;
+    legacyGenerated.packedTile = quint16(9);
+    legacyGenerated.routeOwnerMaterial = 0;
+    legacyGenerated.canonicalGeneratedRoute = true;
+    QVERIFY(legacyGeneratedOnly.addVariant(legacyGenerated));
+    bool found = true;
+    legacyGeneratedOnly.selectForPaint(
+        requested, 0, 0, 0x524f5554u, lava, &found);
+    QVERIFY(!found);
+
+    CTerrainTransitionCatalog authoredPrecedence;
+    STerrainTransitionVariant authored = legacyGenerated;
+    authored.packedTile = quint16(6);
+    authored.canonicalGeneratedRoute = false;
+    QVERIFY(authoredPrecedence.addVariant(authored));
+    QVERIFY(authoredPrecedence.addVariant(waterRoute));
+    QCOMPARE(authoredPrecedence.selectForPaint(
+                 requested, 0, 0, 0x524f5554u, lava, &found),
+             authored.packedTile);
+    QVERIFY(found);
+
+    CTerrainTransitionCatalog generatedUniformCatalog;
+    STerrainTransitionVariant generatedUniform;
+    generatedUniform.signature = signature(lava, lava, lava, lava);
+    generatedUniform.packedTile = quint16(12);
+    generatedUniform.canonicalGeneratedRoute = true;
+    QVERIFY(generatedUniformCatalog.addVariant(generatedUniform));
+    QCOMPARE(generatedUniformCatalog.selectForPaint(
+                 generatedUniform.signature, 0, 0, 0x524f5554u,
+                 lava, &found),
+             generatedUniform.packedTile);
+    QVERIFY(found);
+}
+
+void TerrainVirtualAtlasTests::ambiguousAndMultiMaterialRouteComponentsArePreserved()
+{
+    const int tileWidth = 3;
+    const int tileHeight = 1;
+    const QVector<STerrainTransitionSignature> signatures = {
+        signature(1, 2, 2, 1),
+        signature(1, 2, 3, 1),
+        signature(1, 2, 2, 1)
+    };
+    const QVector<qint32> current = {1, 2, 1, 2,
+                                     1, 2, 3, 2};
+    const QVector<qint32> baseline = {2, 1, 1, 2,
+                                      2, 1, 3, 2};
+    const STerrainRouteOwnershipPlan junctionPlan =
+        planConnectedTerrainRouteOwnership(
+            tileWidth, tileHeight, signatures,
+            QVector<bool>(tileWidth * tileHeight, true),
+            current, baseline, QVector<qint32>({1, 0, 1}));
+    QVERIFY(junctionPlan.ownerByCell.isEmpty());
+    QVERIFY(junctionPlan.preservedCells.contains(0));
+    QVERIFY(junctionPlan.preservedCells.contains(2));
+    bool junctionReason = false;
+    for(const STerrainRouteOwnershipComponent& component :
+            junctionPlan.components)
+        junctionReason |= component.ambiguity
+            == ETerrainRouteOwnershipAmbiguity::MultiMaterialJunction;
+    QVERIFY(junctionReason);
+
+    const QVector<STerrainTransitionSignature> twoMaterial = {
+        signature(1, 1, 2, 2), signature(1, 2, 2, 2)};
+    const QVector<qint32> unchanged = {1, 1, 2,
+                                       2, 2, 2};
+    const STerrainRouteOwnershipPlan mixedProvenance =
+        planConnectedTerrainRouteOwnership(
+            2, 1, twoMaterial, QVector<bool>(2, true),
+            unchanged, unchanged, QVector<qint32>({1, 2}));
+    QVERIFY(mixedProvenance.ownerByCell.isEmpty());
+    QCOMPARE(mixedProvenance.preservedCells, QSet<int>({0, 1}));
+}
+
+void TerrainVirtualAtlasTests::mapResolutionNormalizesRouteOwnerAndIsIdempotent()
+{
+    Fixture fixture;
+    const qint32 water = 10;
+    const qint32 lava = 20;
+    const STerrainTransitionSignature requested =
+        signature(water, lava, lava, water);
+
+    STerrainTransitionVariant waterRoute;
+    waterRoute.signature = requested;
+    SMprPackedTile waterPacked;
+    waterPacked.tileIndex = 10;
+    waterRoute.packedTile = waterPacked.encode();
+    // Simulate the pre-fix in-memory R8 hybrid: generated artwork was exact
+    // but carried no owner. Semantic-delta evidence must be able to replace
+    // it without treating it as authored route-neutral artwork.
+    waterRoute.routeOwnerMaterial = 0;
+    waterRoute.canonicalGeneratedRoute = true;
+    QVERIFY(fixture.catalog.addVariant(waterRoute));
+
+    STerrainTransitionVariant lavaRoute = waterRoute;
+    SMprPackedTile lavaPacked;
+    lavaPacked.tileIndex = 11;
+    lavaRoute.packedTile = lavaPacked.encode();
+    lavaRoute.routeOwnerMaterial = lava;
+    QVERIFY(fixture.catalog.addVariant(lavaRoute));
+
+    QByteArray payload;
+    QDataStream sec(&payload, QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              QVector<qint32>(64, 1), 0));
+
+    const int cellX = 8;
+    const int cellY = 8;
+    const int cellKey = cellY * 16 + cellX;
+    STerrainTileCommand damage;
+    STerrainTileDelta wrong;
+    wrong.globalX = cellX;
+    wrong.globalY = cellY;
+    wrong.layer = ETerrainTileLayer::Land;
+    wrong.before = model.packedTile(cellX, cellY,
+                                    ETerrainTileLayer::Land);
+    wrong.after = waterRoute.packedTile;
+    damage.deltas.append(wrong);
+    QVERIFY(model.apply(damage, true, &report));
+
+    CTerrainVirtualMaterialField repairField;
+    QVERIFY(repairField.resize(16, 16, water));
+    QVERIFY(repairField.setMaterial(cellX + 1, cellY, lava));
+    QVERIFY(repairField.setMaterial(cellX + 1, cellY + 1, lava));
+    QCOMPARE(repairField.cellSignature(cellX, cellY), requested);
+    const QMap<int, qint32> owners = {{cellKey, lava}};
+    const QSet<int> force = {cellKey};
+    const STerrainTileCommand repair = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x524f5554u, &report,
+        false, &repairField, false, false, &owners, &force, nullptr);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QCOMPARE(repair.deltas.size(), 1);
+    QCOMPARE(repair.deltas.front().before, waterRoute.packedTile);
+    QCOMPARE(repair.deltas.front().after, lavaRoute.packedTile);
+
+    QVERIFY(model.apply(repair, true, &report));
+    QCOMPARE(model.packedTile(cellX, cellY, ETerrainTileLayer::Land),
+             lavaRoute.packedTile);
+    QVERIFY(model.apply(repair, false, &report));
+    QCOMPARE(model.packedTile(cellX, cellY, ETerrainTileLayer::Land),
+             waterRoute.packedTile);
+    QVERIFY(model.apply(repair, true, &report));
+    QCOMPARE(model.packedTile(cellX, cellY, ETerrainTileLayer::Land),
+             lavaRoute.packedTile);
+
+    const STerrainTileCommand second = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, fixture.catalog, 0x524f5554u, &report,
+        false, &repairField, false, false, &owners, &force, nullptr);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(second.deltas.isEmpty());
 }
 
 void TerrainVirtualAtlasTests::mapResolutionPreservesRuntimeTypeForTiedGeneratedBlends()
@@ -6224,6 +6583,11 @@ void TerrainVirtualAtlasTests::workingAtlasGeneratesImmediatelyAndReusesTuple()
     bool decoded=false;
     QCOMPARE(working.catalog().gridSignatureForPacked(reused,&decoded),missing);
     QVERIFY(decoded);
+    const STerrainTransitionVariant generatedRoute =
+        working.catalog().variantForPacked(reused, &decoded);
+    QVERIFY(decoded);
+    QCOMPARE(generatedRoute.routeOwnerMaterial, qint32(1));
+    QVERIFY(generatedRoute.canonicalGeneratedRoute);
 }
 
 void TerrainVirtualAtlasTests::workingAtlasStagingInjectedFailureLeavesLiveStateUntouched()

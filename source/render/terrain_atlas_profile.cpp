@@ -258,7 +258,7 @@ bool uniform(const STerrainTransitionSignature& signature)
 QJsonObject STerrainAtlasProfile::toJson() const
 {
     QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 9);
+    root.insert(QStringLiteral("schemaVersion"), 10);
     root.insert(QStringLiteral("cornerSpace"),
                 QStringLiteral("tile-preview-nw-ne-se-sw-v1"));
     root.insert(QStringLiteral("mprNamespace"), mprNamespace);
@@ -303,6 +303,9 @@ QJsonObject STerrainAtlasProfile::toJson() const
         object.insert(QStringLiteral("signature"), signatureJson(slot.signature));
         object.insert(QStringLiteral("assigned"), slot.assigned);
         object.insert(QStringLiteral("ambiguous"), slot.ambiguous);
+        if(slot.routeOwnerMaterial > 0)
+            object.insert(QStringLiteral("routeOwnerMaterial"),
+                          slot.routeOwnerMaterial);
         if(!slot.sourceSlotAliases.isEmpty())
         {
             object.insert(QStringLiteral("sourceNamespace"),
@@ -331,7 +334,7 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
                                     CValidationReport* report)
 {
     const int schemaVersion = object.value(QStringLiteral("schemaVersion")).toInt();
-    if(!profile || (schemaVersion < 1 || schemaVersion > 9)
+    if(!profile || (schemaVersion < 1 || schemaVersion > 10)
        || !object.value(QStringLiteral("families")).isArray()
        || !object.value(QStringLiteral("slots")).isArray())
     {
@@ -428,6 +431,8 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         slot.assigned = schemaVersion >= 2
             ? item.value(QStringLiteral("assigned")).toBool(!slot.ambiguous)
             : !slot.ambiguous;
+        slot.routeOwnerMaterial = schemaVersion >= 10
+            ? item.value(QStringLiteral("routeOwnerMaterial")).toInt(0) : 0;
         if(schemaVersion >= 8
            && item.value(QStringLiteral("sourceSlots")).isArray())
         {
@@ -475,6 +480,23 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
                                    "The semantic atlas profile contains an invalid slot signature");
             return false;
         }
+        QSet<qint32> routeMaterials;
+        for(qint32 material : {slot.signature.northWest,
+                               slot.signature.northEast,
+                               slot.signature.southEast,
+                               slot.signature.southWest})
+            routeMaterials.insert(material);
+        if(slot.routeOwnerMaterial < 0
+           || (slot.routeOwnerMaterial > 0
+               && (routeMaterials.size() != 2
+                   || !routeMaterials.contains(slot.routeOwnerMaterial))))
+        {
+            if(report) report->add(
+                "terrain.atlas_profile_route_owner",
+                EValidationSeverity::Error,
+                "A generated route owner must be one of exactly two semantic corner materials");
+            return false;
+        }
         slotIds.insert(slot.slot);
         parsed.slotDefinitions.append(slot);
     }
@@ -507,7 +529,7 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
     }
     if(!parsed.normalizeMembership(report))
         return false;
-    parsed.schemaVersion = 9;
+    parsed.schemaVersion = 10;
     *profile = parsed;
     return true;
 }
@@ -1010,6 +1032,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
                 definition.sourceSlotAliases = aliases;
                 definition.sourcePixelSha256 = tile.pixelSha256;
             }
+            definition.routeOwnerMaterial = tile.routeOwnerMaterial;
             if(definition.assigned)
                 for(qint32 id : {definition.signature.northWest,
                                   definition.signature.northEast,
@@ -1135,6 +1158,16 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
             : STerrainTransitionSignature();
         definition.assigned = found;
         definition.ambiguous = false;
+        if(found)
+        {
+            bool provenanceFound = false;
+            const STerrainTransitionVariant provenance =
+                workingCatalog.variantForPacked(
+                    packed.encode(), &provenanceFound);
+            if(provenanceFound)
+                definition.routeOwnerMaterial =
+                    provenance.routeOwnerMaterial;
+        }
         if(found)
             for(qint32 id : {definition.signature.northWest,
                               definition.signature.northEast,
@@ -1491,6 +1524,8 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
             variant.signature = CTerrainTransitionCatalog::rotated(
                 paintBase, -rotation);
             variant.packedTile = packed.encode();
+            variant.routeOwnerMaterial = slot.routeOwnerMaterial;
+            variant.canonicalGeneratedRoute = slot.routeOwnerMaterial > 0;
             if((allowLand && !result.landCatalog.addVariant(variant, report))
                || (allowOverlay && !result.overlayCatalog.addVariant(variant, report))
                || !result.overlayCompatibleCatalog.addVariant(variant, report))

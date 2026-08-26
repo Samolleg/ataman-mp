@@ -80,6 +80,59 @@ struct STerrainTransitionSignature
     }
 };
 
+enum class ETerrainRouteOwnershipEvidence
+{
+    None,
+    SemanticDelta,
+    GeneratedProvenance
+};
+
+enum class ETerrainRouteOwnershipAmbiguity
+{
+    None,
+    MissingEvidence,
+    MixedSemanticDelta,
+    MixedGeneratedProvenance,
+    MultiMaterialJunction
+};
+
+// One visual boundary is a four-neighbour chain of two-material cells whose
+// shared edge contains both materials. Point contacts and uniform shared
+// edges do not merge otherwise independent outlines. A nearby three-/four-
+// material junction invalidates the whole component instead of being silently
+// folded into a two-material route.
+struct STerrainRouteOwnershipComponent
+{
+    QVector<int> cellIndexes;
+    qint32 firstMaterial{0};
+    qint32 secondMaterial{0};
+    qint32 ownerMaterial{0};
+    ETerrainRouteOwnershipEvidence evidence{
+        ETerrainRouteOwnershipEvidence::None};
+    ETerrainRouteOwnershipAmbiguity ambiguity{
+        ETerrainRouteOwnershipAmbiguity::None};
+};
+
+struct STerrainRouteOwnershipPlan
+{
+    QMap<int, qint32> ownerByCell;
+    QSet<int> preservedCells;
+    QVector<STerrainRouteOwnershipComponent> components;
+};
+
+// Semantic delta is authoritative when a component contains current edits:
+// every changed incident vertex must move from the other pair member to one
+// unanimous current material. With no delta, every component cell must carry
+// one unanimous exact generated-route owner. Missing or mixed evidence is
+// preserved rather than guessed.
+STerrainRouteOwnershipPlan planConnectedTerrainRouteOwnership(
+    int tileWidth, int tileHeight,
+    const QVector<STerrainTransitionSignature>& currentSignatures,
+    const QVector<bool>& availableCells,
+    const QVector<qint32>& currentVertexMaterials,
+    const QVector<qint32>& baselineVertexMaterials,
+    const QVector<qint32>& exactGeneratedRouteOwners);
+
 struct STerrainTileDelta
 {
     int globalX{0};
@@ -186,6 +239,14 @@ struct STerrainTransitionVariant
     // Decode-only entries remain available to signatureForPacked(), while
     // automatic painting considers only reviewed semantic catalog entries.
     bool paintSelectable{true};
+    // Zero is route-neutral authored artwork. Canonical generated artwork
+    // records the material whose reviewed mask language produced its pixels.
+    // This is exact provenance, not placement history.
+    qint32 routeOwnerMaterial{0};
+    // Distinguishes legacy in-memory generated entries with owner 0 from
+    // authored route-neutral exact artwork. It is derived from generated
+    // provenance and is not placement history.
+    bool canonicalGeneratedRoute{false};
 };
 
 class CTerrainTransitionCatalog
@@ -203,6 +264,10 @@ public:
     quint16 selectForPaint(const STerrainTransitionSignature& signature,
                            int globalX, int globalY, quint32 distributionSeed,
                            bool* found = nullptr) const;
+    quint16 selectForPaint(const STerrainTransitionSignature& signature,
+                           int globalX, int globalY, quint32 distributionSeed,
+                           qint32 preferredRouteOwnerMaterial,
+                           bool* found) const;
     // Exact map repair sometimes has a reviewed runtime type inherited from
     // the physical predecessor. Restrict the deterministic paint selection to
     // physical slots carrying that type instead of substituting another equal
@@ -211,6 +276,11 @@ public:
                            int globalX, int globalY, quint32 distributionSeed,
                            const QSet<int>& allowedPhysicalSlots,
                            bool* found = nullptr) const;
+    quint16 selectForPaint(const STerrainTransitionSignature& signature,
+                           int globalX, int globalY, quint32 distributionSeed,
+                           const QSet<int>& allowedPhysicalSlots,
+                           qint32 preferredRouteOwnerMaterial,
+                           bool* found) const;
     quint16 lowestPaintRotationForSlot(
         const STerrainTransitionSignature& signature, quint16 selectedPacked,
         bool* found = nullptr) const;
@@ -240,6 +310,7 @@ private:
                               int globalX, int globalY,
                               quint32 distributionSeed, bool paintOnly,
                               const QSet<int>* allowedPhysicalSlots,
+                              qint32 preferredRouteOwnerMaterial,
                               bool* found) const;
     QVector<STerrainTransitionVariant> m_variants;
     QHash<quint16, int> m_packedLookup;
@@ -656,14 +727,18 @@ public:
         const STerrainTileCommand& stroke,
         const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
         CValidationReport* report = nullptr,
-        bool randomizeUniformRotation = false) const;
+        bool randomizeUniformRotation = false,
+        qint32 preferredRouteOwnerMaterial = 0) const;
     STerrainTileCommand makeVirtualMapResolution(
         ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
         quint32 distributionSeed, CValidationReport* report = nullptr,
         bool randomizeUniformRotation = false,
         const CTerrainVirtualMaterialField* repairField = nullptr,
         bool allowPartialMaterialField = false,
-        bool repairDecodedCells = true) const;
+        bool repairDecodedCells = true,
+        const QMap<int, qint32>* preferredRouteOwners = nullptr,
+        const QSet<int>* forceExactCells = nullptr,
+        const QSet<int>* preserveCells = nullptr) const;
     bool recoverUnambiguousVirtualMaterialField(
         ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
         CTerrainVirtualMaterialField* output,

@@ -63,6 +63,7 @@ STerrainResolveAuditSession session(quint64 actionId)
     runtime.predecessorRuntimeType = 3;
     runtime.selectedRuntimeType = 3;
     runtime.selectedWorkingSlot = 44;
+    runtime.routeOwnerMaterial = 2;
     runtime.origin = QStringLiteral("canonical-generated");
     runtime.blendProvenance = QStringLiteral("canonical-generated:mask");
     runtime.cellCount = 2;
@@ -116,6 +117,9 @@ void TerrainResolveAuditTests::sessionJsonIsBoundedAndContainsRequiredResolverEv
     QCOMPARE(json.value(QStringLiteral("runtimeTypeDecisions")).toArray()
                  .at(0).toObject().value(QStringLiteral("origin")).toString(),
              QStringLiteral("canonical-generated"));
+    QCOMPARE(json.value(QStringLiteral("runtimeTypeDecisions")).toArray()
+                 .at(0).toObject().value(QStringLiteral("routeOwnerMaterial"))
+                 .toInt(), 2);
     const QJsonObject skipped = json.value(QStringLiteral("skippedReasons"))
         .toArray().at(0).toObject();
     QCOMPARE(skipped.value(QStringLiteral("count")).toInt(), 4);

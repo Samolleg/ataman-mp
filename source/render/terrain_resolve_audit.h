@@ -31,6 +31,7 @@ struct STerrainResolveRuntimeDecision
     qint32 predecessorRuntimeType{-1};
     qint32 selectedRuntimeType{-1};
     int selectedWorkingSlot{-1};
+    qint32 routeOwnerMaterial{0};
     QString origin;
     QString blendProvenance;
     int cellCount{0};

@@ -61,6 +61,8 @@ QJsonObject terrainWorkingPhysicalIdentityJson(
     if(!aliases.isEmpty())
         identity.insert(QStringLiteral("sourceAliases"), aliases);
     identity.insert(QStringLiteral("blendProvenance"), working.blendProvenance);
+    identity.insert(QStringLiteral("routeOwnerMaterial"),
+                    working.routeOwnerMaterial);
     identity.insert(QStringLiteral("stockDerivedBlend"),
                     working.stockDerivedBlend);
     identity.insert(QStringLiteral("canonicalGeneratedBlend"),
@@ -150,6 +152,8 @@ QJsonObject terrainAuthoredPhysicalIdentityJson(
         identity.insert(QStringLiteral("sourceAliases"), aliases);
     identity.insert(QStringLiteral("blendProvenance"),
                     QStringLiteral("original map atlas"));
+    identity.insert(QStringLiteral("routeOwnerMaterial"),
+                    profileSlot ? profileSlot->routeOwnerMaterial : 0);
     identity.insert(QStringLiteral("stockDerivedBlend"), false);
     identity.insert(QStringLiteral("canonicalGeneratedBlend"), false);
     identity.insert(QStringLiteral("runtimeTerrainType"), runtimeTerrainType);

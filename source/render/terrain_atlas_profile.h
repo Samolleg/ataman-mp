@@ -121,6 +121,9 @@ struct STerrainAtlasProfileSlot
     QString sourceNamespace;
     QVector<int> sourceSlotAliases;
     QByteArray sourcePixelSha256;
+    // Exact canonical-generation route owner. Zero means authored or legacy
+    // route-neutral provenance; it is never inferred from slot order.
+    qint32 routeOwnerMaterial{0};
 };
 
 // A profile is always scoped to both an MPR namespace and the exact decoded
@@ -128,7 +131,7 @@ struct STerrainAtlasProfileSlot
 // unresolved entries remain unassigned until a user fixes or excludes them.
 struct STerrainAtlasProfile
 {
-    int schemaVersion{9};
+    int schemaVersion{10};
     QString mprNamespace;
     QByteArray atlasPixelSha256;
     int atlasSlotCount{0};

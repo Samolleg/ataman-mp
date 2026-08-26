@@ -201,6 +201,8 @@ QJsonObject terrainResolveAuditSessionJson(const STerrainResolveAuditSession& se
                     decision.predecessorRuntimeType);
         item.insert(QStringLiteral("selectedRuntimeType"), decision.selectedRuntimeType);
         item.insert(QStringLiteral("selectedWorkingSlot"), decision.selectedWorkingSlot);
+        item.insert(QStringLiteral("routeOwnerMaterial"),
+                    decision.routeOwnerMaterial);
         item.insert(QStringLiteral("origin"), decision.origin);
         item.insert(QStringLiteral("blendProvenance"), decision.blendProvenance);
         item.insert(QStringLiteral("cellCount"), decision.cellCount);

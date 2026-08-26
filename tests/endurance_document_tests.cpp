@@ -9356,7 +9356,7 @@ void EnduranceDocumentTests::semanticAtlasInferenceUsesRendererOrientationAndPre
     QVERIFY2(STerrainAtlasProfile::fromJson(legacyJson, &migrated,
                                             &migrationReport),
              qPrintable(migrationReport.toText()));
-    QCOMPARE(migrated.schemaVersion, 9);
+    QCOMPARE(migrated.schemaVersion, 10);
     QCOMPARE(migrated.slotDefinitions.at(1).signature.northWest, signature.northWest);
     QCOMPARE(migrated.slotDefinitions.at(1).signature.southWest, signature.southWest);
     const auto detail = std::find_if(analysis.materials.cbegin(), analysis.materials.cend(),
@@ -9542,7 +9542,7 @@ void EnduranceDocumentTests::authoredAtlasProfileMatchesZone1Catalog()
     QVERIFY2(STerrainAtlasProfile::fromJson(legacyAuthored, &migratedAuthored,
                                             &migrationReport),
              qPrintable(migrationReport.toText()));
-    QCOMPARE(migratedAuthored.schemaVersion, 9);
+    QCOMPARE(migratedAuthored.schemaVersion, 10);
     QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.northWest,
              qint32(4));
     QCOMPARE(migratedAuthored.slotDefinitions.at(50).signature.southWest,
@@ -9927,7 +9927,7 @@ void EnduranceDocumentTests::authoredPresetSeparatesZone18ReviewedLayers()
     for(const STerrainAtlasProfileFamily& family : reopened.families)
         reopenedSharedFamilies += family.landAllowed && family.overlayAllowed;
     QCOMPARE(reopenedSharedFamilies, 1);
-    QCOMPARE(reopened.schemaVersion, 9);
+    QCOMPARE(reopened.schemaVersion, 10);
     const STerrainAtlasAnalysis analysis = profile.approvedAnalysis(&report);
     QVERIFY2(analysis.usable, qPrintable(report.toText()));
     bool sharedSlot = false;
@@ -11086,8 +11086,9 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
     foreignTile.sourceSlotAliases.append(1);
     foreignTile.canonicalSignature.northWest = 1;
     foreignTile.canonicalSignature.northEast = 2;
-    foreignTile.canonicalSignature.southEast = 3;
+    foreignTile.canonicalSignature.southEast = 2;
     foreignTile.canonicalSignature.southWest = 1;
+    foreignTile.routeOwnerMaterial = 2;
     finalized.tiles.append(foreignTile);
     QString diagnostic;
     finalized.pageMmpPayloads.append(ei::encodeMmpDxt1(
@@ -11115,6 +11116,7 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
                  foreignTile.canonicalSignature));
     QCOMPARE(portable.slotDefinitions.at(3).sourceNamespace,
              QStringLiteral("foreign-zone"));
+    QCOMPARE(portable.slotDefinitions.at(3).routeOwnerMaterial, qint32(2));
     QMap<qint32, qint32> portableTypes;
     for(const STerrainAtlasProfileFamily& family : portable.families)
         portableTypes.insert(family.id, family.tileType);
@@ -11145,13 +11147,29 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
                  &reopened, root.path(), nullptr, &report),
              qPrintable(report.toText()));
     QCOMPARE(reopened.assignedSlotCount(), 4);
-    QCOMPARE(reopened.schemaVersion, 9);
+    QCOMPARE(reopened.schemaVersion, 10);
     QCOMPARE(reopened.slotDefinitions.at(0).sourceNamespace,
              QStringLiteral("source"));
     QCOMPARE(reopened.slotDefinitions.at(0).sourceSlotAliases,
              QVector<int>({0, 17}));
     QCOMPARE(reopened.slotDefinitions.at(0).sourcePixelSha256,
              QByteArray(64, 'a'));
+    QCOMPARE(reopened.slotDefinitions.at(3).routeOwnerMaterial, qint32(2));
+    const STerrainAtlasAnalysis reopenedAnalysis =
+        reopened.usableAnalysis(&report);
+    QVERIFY2(reopenedAnalysis.usable, qPrintable(report.toText()));
+    bool reopenedRouteFound = false;
+    SMprPackedTile reopenedRoutePacked;
+    reopenedRoutePacked.tileIndex = quint8(
+        reopened.slotDefinitions.at(3).slot % 64);
+    reopenedRoutePacked.atlasIndex = quint8(
+        reopened.slotDefinitions.at(3).slot / 64);
+    const STerrainTransitionVariant reopenedRoute =
+        reopenedAnalysis.landCatalog.variantForPacked(
+            reopenedRoutePacked.encode(),
+            &reopenedRouteFound);
+    QVERIFY(reopenedRouteFound);
+    QCOMPARE(reopenedRoute.routeOwnerMaterial, qint32(2));
 
     STerrainAtlasFinalization incomplete = finalized;
     incomplete.tiles[3].canonicalSignature = STerrainTransitionSignature();
@@ -11194,6 +11212,7 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
         variant.signature = CTerrainTransitionCatalog::rotated(
             preview, -rotation);
         variant.packedTile = packed.encode();
+        variant.routeOwnerMaterial = stone;
         QVERIFY(catalog.addVariant(variant));
     }
     QVector<QImage> tiles(128, QImage(8, 8, QImage::Format_RGBA8888));
@@ -11221,6 +11240,7 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
     QCOMPARE(profile.atlasSlotCount, 128);
     QCOMPARE(profile.assignedSlotCount(), 1);
     QCOMPARE(profile.slotDefinitions.at(64).signature, preview);
+    QCOMPARE(profile.slotDefinitions.at(64).routeOwnerMaterial, stone);
     QCOMPARE(profile.provenance,
              CTerrainAtlasProfileStore::workingAtlasProvenance());
     QVERIFY(profile.validateBinding(
@@ -11237,6 +11257,8 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
         &reopenedProfile, directory.path(), nullptr, &report));
     QCOMPARE(reopenedProfile.provenance,
              CTerrainAtlasProfileStore::workingAtlasProvenance());
+    QCOMPARE(reopenedProfile.slotDefinitions.at(64).routeOwnerMaterial,
+             stone);
     const STerrainAtlasAnalysis analysis = profile.usableAnalysis(&report);
     QVERIFY2(analysis.usable, qPrintable(report.toText()));
     bool found = false;
@@ -11246,6 +11268,9 @@ void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraft
     packed.rotation = 0;
     QCOMPARE(analysis.landCatalog.gridSignatureForPacked(
                  packed.encode(), &found), grid);
+    QVERIFY(found);
+    QCOMPARE(analysis.landCatalog.variantForPacked(
+                 packed.encode(), &found).routeOwnerMaterial, stone);
     QVERIFY(found);
 
     // The real regression needs a second boundary: Save a draft from a map

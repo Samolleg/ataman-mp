@@ -78,6 +78,9 @@ struct STerrainFinalizedTile
     QString blendProvenance;
     bool stockDerivedBlend{false};
     bool canonicalGeneratedBlend{false};
+    // Exact material whose reviewed route generated this transition. Zero is
+    // reserved for authored/legacy route-neutral provenance.
+    qint32 routeOwnerMaterial{0};
     // Runtime MP terrain class. This is physical-slot metadata, independent
     // of semantic material IDs and packed rotation.
     qint32 runtimeTerrainType{-1};
@@ -150,6 +153,7 @@ struct STerrainWorkingTileIdentity
     QString blendProvenance;
     bool stockDerivedBlend{false};
     bool canonicalGeneratedBlend{false};
+    qint32 routeOwnerMaterial{0};
     qint32 runtimeTerrainType{-1};
 };
 

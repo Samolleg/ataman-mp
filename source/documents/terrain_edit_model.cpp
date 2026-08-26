@@ -247,6 +247,238 @@ quint16 clampedHeight(float value, bool* wasClamped = nullptr)
 }
 }
 
+STerrainRouteOwnershipPlan planConnectedTerrainRouteOwnership(
+    int tileWidth, int tileHeight,
+    const QVector<STerrainTransitionSignature>& currentSignatures,
+    const QVector<bool>& availableCells,
+    const QVector<qint32>& currentVertexMaterials,
+    const QVector<qint32>& baselineVertexMaterials,
+    const QVector<qint32>& exactGeneratedRouteOwners)
+{
+    STerrainRouteOwnershipPlan plan;
+    const int cellCount = tileWidth * tileHeight;
+    const int vertexWidth = tileWidth + 1;
+    const int vertexCount = vertexWidth * (tileHeight + 1);
+    if(tileWidth <= 0 || tileHeight <= 0
+       || currentSignatures.size() != cellCount
+       || availableCells.size() != cellCount)
+        return plan;
+
+    struct SRouteCell
+    {
+        bool transition{false};
+        bool junction{false};
+        qint32 first{0};
+        qint32 second{0};
+    };
+    QVector<SRouteCell> cells(cellCount);
+    for(int cell = 0; cell < cellCount; ++cell)
+    {
+        if(!availableCells.at(cell))
+            continue;
+        QSet<qint32> materials;
+        const STerrainTransitionSignature& value = currentSignatures.at(cell);
+        for(qint32 material : {value.northWest, value.northEast,
+                               value.southEast, value.southWest})
+            if(material > 0)
+                materials.insert(material);
+        if(materials.size() > 2)
+        {
+            cells[cell].junction = true;
+            continue;
+        }
+        if(materials.size() != 2)
+            continue;
+        QVector<qint32> ordered = materials.values().toVector();
+        std::sort(ordered.begin(), ordered.end());
+        cells[cell].transition = true;
+        cells[cell].first = ordered.at(0);
+        cells[cell].second = ordered.at(1);
+    }
+
+    const auto samePair = [&cells](int first, int second) {
+        return cells.at(first).transition && cells.at(second).transition
+            && cells.at(first).first == cells.at(second).first
+            && cells.at(first).second == cells.at(second).second;
+    };
+    const auto connectedAcrossMixedEdge = [
+        &currentSignatures, &cells, &samePair,
+        tileWidth](int first, int second) {
+        if(!samePair(first, second))
+            return false;
+        const int firstX = first % tileWidth;
+        const int firstY = first / tileWidth;
+        const int secondX = second % tileWidth;
+        const int secondY = second / tileWidth;
+        qint32 firstA = 0, firstB = 0, secondA = 0, secondB = 0;
+        const STerrainTransitionSignature& a = currentSignatures.at(first);
+        const STerrainTransitionSignature& b = currentSignatures.at(second);
+        if(secondX == firstX + 1 && secondY == firstY)
+        {
+            firstA = a.northEast; firstB = a.southEast;
+            secondA = b.northWest; secondB = b.southWest;
+        }
+        else if(secondX == firstX - 1 && secondY == firstY)
+        {
+            firstA = a.northWest; firstB = a.southWest;
+            secondA = b.northEast; secondB = b.southEast;
+        }
+        else if(secondY == firstY + 1 && secondX == firstX)
+        {
+            firstA = a.southWest; firstB = a.southEast;
+            secondA = b.northWest; secondB = b.northEast;
+        }
+        else if(secondY == firstY - 1 && secondX == firstX)
+        {
+            firstA = a.northWest; firstB = a.northEast;
+            secondA = b.southWest; secondB = b.southEast;
+        }
+        else
+            return false;
+        return firstA == secondA && firstB == secondB
+            && firstA != firstB
+            && (firstA == cells.at(first).first
+                || firstA == cells.at(first).second)
+            && (firstB == cells.at(first).first
+                || firstB == cells.at(first).second);
+    };
+
+    QVector<bool> visited(cellCount, false);
+    const bool deltaFieldsAvailable =
+        currentVertexMaterials.size() == vertexCount
+        && baselineVertexMaterials.size() == vertexCount;
+    const bool provenanceAvailable =
+        exactGeneratedRouteOwners.size() == cellCount;
+    for(int seed = 0; seed < cellCount; ++seed)
+    {
+        if(visited.at(seed) || !cells.at(seed).transition)
+            continue;
+        STerrainRouteOwnershipComponent component;
+        component.firstMaterial = cells.at(seed).first;
+        component.secondMaterial = cells.at(seed).second;
+        QVector<int> frontier;
+        frontier.append(seed);
+        visited[seed] = true;
+        while(!frontier.isEmpty())
+        {
+            const int cell = frontier.takeLast();
+            component.cellIndexes.append(cell);
+            const int x = cell % tileWidth;
+            const int y = cell / tileWidth;
+            const int neighbors[4] = {
+                x > 0 ? cell - 1 : -1,
+                x + 1 < tileWidth ? cell + 1 : -1,
+                y > 0 ? cell - tileWidth : -1,
+                y + 1 < tileHeight ? cell + tileWidth : -1};
+            for(int neighbor : neighbors)
+                if(neighbor >= 0 && !visited.at(neighbor)
+                   && connectedAcrossMixedEdge(cell, neighbor))
+                {
+                    visited[neighbor] = true;
+                    frontier.append(neighbor);
+                }
+        }
+        std::sort(component.cellIndexes.begin(), component.cellIndexes.end());
+
+        bool touchesJunction = false;
+        for(int cell : component.cellIndexes)
+        {
+            const int x = cell % tileWidth;
+            const int y = cell / tileWidth;
+            for(int neighborY = y - 1; neighborY <= y + 1; ++neighborY)
+                for(int neighborX = x - 1; neighborX <= x + 1; ++neighborX)
+                    if(neighborX >= 0 && neighborX < tileWidth
+                       && neighborY >= 0 && neighborY < tileHeight
+                       && cells.at(neighborY * tileWidth + neighborX).junction)
+                        touchesJunction = true;
+        }
+        if(touchesJunction)
+            component.ambiguity =
+                ETerrainRouteOwnershipAmbiguity::MultiMaterialJunction;
+        else
+        {
+            QSet<int> incidentVertices;
+            for(int cell : component.cellIndexes)
+            {
+                const int x = cell % tileWidth;
+                const int y = cell / tileWidth;
+                const int northWest = y * vertexWidth + x;
+                incidentVertices.insert(northWest);
+                incidentVertices.insert(northWest + 1);
+                incidentVertices.insert(northWest + vertexWidth);
+                incidentVertices.insert(northWest + vertexWidth + 1);
+            }
+            QSet<qint32> deltaOwners;
+            bool invalidDelta = false;
+            if(deltaFieldsAvailable)
+                for(int vertex : incidentVertices)
+                {
+                    const qint32 current = currentVertexMaterials.at(vertex);
+                    const qint32 baseline = baselineVertexMaterials.at(vertex);
+                    if(current == baseline)
+                        continue;
+                    const bool currentInPair = current == component.firstMaterial
+                        || current == component.secondMaterial;
+                    const bool baselineInPair = baseline == component.firstMaterial
+                        || baseline == component.secondMaterial;
+                    if(!currentInPair || !baselineInPair)
+                    {
+                        invalidDelta = true;
+                        continue;
+                    }
+                    deltaOwners.insert(current);
+                }
+            if(invalidDelta || deltaOwners.size() > 1)
+                component.ambiguity =
+                    ETerrainRouteOwnershipAmbiguity::MixedSemanticDelta;
+            else if(deltaOwners.size() == 1)
+            {
+                component.ownerMaterial = *deltaOwners.constBegin();
+                component.evidence =
+                    ETerrainRouteOwnershipEvidence::SemanticDelta;
+            }
+            else
+            {
+                QSet<qint32> provenanceOwners;
+                bool missingProvenance = !provenanceAvailable;
+                if(provenanceAvailable)
+                    for(int cell : component.cellIndexes)
+                    {
+                        const qint32 owner = exactGeneratedRouteOwners.at(cell);
+                        if(owner != component.firstMaterial
+                           && owner != component.secondMaterial)
+                            missingProvenance = true;
+                        else
+                            provenanceOwners.insert(owner);
+                    }
+                if(missingProvenance || provenanceOwners.isEmpty())
+                    component.ambiguity =
+                        ETerrainRouteOwnershipAmbiguity::MissingEvidence;
+                else if(provenanceOwners.size() > 1)
+                    component.ambiguity =
+                        ETerrainRouteOwnershipAmbiguity::MixedGeneratedProvenance;
+                else
+                {
+                    component.ownerMaterial = *provenanceOwners.constBegin();
+                    component.evidence =
+                        ETerrainRouteOwnershipEvidence::GeneratedProvenance;
+                }
+            }
+        }
+
+        if(component.ownerMaterial > 0
+           && component.ambiguity
+                == ETerrainRouteOwnershipAmbiguity::None)
+            for(int cell : component.cellIndexes)
+                plan.ownerByCell.insert(cell, component.ownerMaterial);
+        else
+            for(int cell : component.cellIndexes)
+                plan.preservedCells.insert(cell);
+        plan.components.append(component);
+    }
+    return plan;
+}
+
 void appendTerrainTileCommand(STerrainTileCommand* stroke,
                               const STerrainTileCommand& stamp)
 {
@@ -546,6 +778,23 @@ bool CTerrainTransitionCatalog::addVariant(const STerrainTransitionVariant& vari
                         "Transition variants require a positive distribution weight");
         return false;
     }
+    QSet<qint32> routeMaterials;
+    for(qint32 material : {variant.signature.northWest,
+                           variant.signature.northEast,
+                           variant.signature.southEast,
+                           variant.signature.southWest})
+        routeMaterials.insert(material);
+    if(variant.routeOwnerMaterial < 0
+       || (variant.routeOwnerMaterial > 0
+           && (routeMaterials.size() != 2
+               || !routeMaterials.contains(variant.routeOwnerMaterial))))
+    {
+        if(report)
+            report->add("terrain.transition_route_owner",
+                EValidationSeverity::Error,
+                "A generated transition route owner must be one of exactly two semantic corner materials");
+        return false;
+    }
     if(m_packedLookup.contains(variant.packedTile))
     {
         if(report)
@@ -555,6 +804,32 @@ bool CTerrainTransitionCatalog::addVariant(const STerrainTransitionVariant& vari
     }
     const int physicalSlot = SMprPackedTile::decode(
         variant.packedTile).atlasSlot();
+    SMprPackedTile physical = SMprPackedTile::decode(variant.packedTile);
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        physical.rotation = quint8(rotation);
+        const auto existingPacked = m_packedLookup.constFind(physical.encode());
+        if(existingPacked != m_packedLookup.constEnd()
+           && m_variants.at(existingPacked.value()).routeOwnerMaterial
+                != variant.routeOwnerMaterial)
+        {
+            if(report)
+                report->add("terrain.transition_route_owner",
+                    EValidationSeverity::Error,
+                    "Every rotation of one physical terrain tile must carry the same route owner provenance");
+            return false;
+        }
+        if(existingPacked != m_packedLookup.constEnd()
+           && m_variants.at(existingPacked.value()).canonicalGeneratedRoute
+                != variant.canonicalGeneratedRoute)
+        {
+            if(report)
+                report->add("terrain.transition_route_owner",
+                    EValidationSeverity::Error,
+                    "Every rotation of one physical terrain tile must carry the same generated-route provenance class");
+            return false;
+        }
+    }
     const QVector<int> sameSignature = m_signatureLookup.value(
         signatureKey(variant.signature));
     for(int existingIndex : sameSignature)
@@ -567,6 +842,25 @@ bool CTerrainTransitionCatalog::addVariant(const STerrainTransitionVariant& vari
                 report->add("terrain.transition_physical_weight",
                     EValidationSeverity::Error,
                     "Every valid rotation of one physical terrain tile must use the same distribution weight");
+            return false;
+        }
+        if(SMprPackedTile::decode(existing.packedTile).atlasSlot() == physicalSlot
+           && existing.routeOwnerMaterial != variant.routeOwnerMaterial)
+        {
+            if(report)
+                report->add("terrain.transition_route_owner",
+                    EValidationSeverity::Error,
+                    "Every rotation of one physical terrain tile must carry the same route owner provenance");
+            return false;
+        }
+        if(SMprPackedTile::decode(existing.packedTile).atlasSlot() == physicalSlot
+           && existing.canonicalGeneratedRoute
+                != variant.canonicalGeneratedRoute)
+        {
+            if(report)
+                report->add("terrain.transition_route_owner",
+                    EValidationSeverity::Error,
+                    "Every rotation of one physical terrain tile must carry the same generated-route provenance class");
             return false;
         }
     }
@@ -601,15 +895,23 @@ quint16 CTerrainTransitionCatalog::select(
     quint32 distributionSeed, bool* found) const
 {
     return selectCandidates(signature, globalX, globalY, distributionSeed,
-                            false, nullptr, found);
+                            false, nullptr, 0, found);
 }
 
 quint16 CTerrainTransitionCatalog::selectCandidates(
     const STerrainTransitionSignature& signature, int globalX, int globalY,
     quint32 distributionSeed, bool paintOnly,
-    const QSet<int>* allowedPhysicalSlots, bool* found) const
+    const QSet<int>* allowedPhysicalSlots,
+    qint32 preferredRouteOwnerMaterial, bool* found) const
 {
     const QVector<int> indexed = m_signatureLookup.value(signatureKey(signature));
+    QSet<qint32> requestedMaterials;
+    for(qint32 material : {signature.northWest, signature.northEast,
+                           signature.southEast, signature.southWest})
+        requestedMaterials.insert(material);
+    const bool applyRouteOwner = preferredRouteOwnerMaterial > 0
+        && requestedMaterials.size() == 2
+        && requestedMaterials.contains(preferredRouteOwnerMaterial);
     QMap<int, QVector<int>> byPhysicalSlot;
     for(int index : indexed)
     {
@@ -619,6 +921,18 @@ quint16 CTerrainTransitionCatalog::selectCandidates(
         const int physicalSlot = SMprPackedTile::decode(
             variant.packedTile).atlasSlot();
         if(allowedPhysicalSlots && !allowedPhysicalSlots->contains(physicalSlot))
+            continue;
+        // Authored artwork is route-neutral and retains precedence. Explicit
+        // generated provenance is eligible only for its own connected-region
+        // owner, so an opposite cached route cannot displace the requested
+        // one merely because it has the same semantic corners and MP type.
+        if(applyRouteOwner
+           && ((variant.routeOwnerMaterial > 0
+                && variant.routeOwnerMaterial
+                    != preferredRouteOwnerMaterial)
+               || (variant.canonicalGeneratedRoute
+                   && variant.routeOwnerMaterial
+                        != preferredRouteOwnerMaterial)))
             continue;
         byPhysicalSlot[physicalSlot].append(index);
     }
@@ -690,7 +1004,19 @@ quint16 CTerrainTransitionCatalog::selectForPaint(
     const STerrainTransitionSignature lookup = m_mirrorPaintGridY
         ? mirroredGridY(signature) : signature;
     return selectCandidates(lookup, globalX, globalY, distributionSeed,
-                             true, nullptr, found);
+                             true, nullptr, 0, found);
+}
+
+quint16 CTerrainTransitionCatalog::selectForPaint(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, qint32 preferredRouteOwnerMaterial,
+    bool* found) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    return selectCandidates(lookup, globalX, globalY, distributionSeed,
+                             true, nullptr,
+                             preferredRouteOwnerMaterial, found);
 }
 
 quint16 CTerrainTransitionCatalog::selectForPaint(
@@ -701,7 +1027,19 @@ quint16 CTerrainTransitionCatalog::selectForPaint(
     const STerrainTransitionSignature lookup = m_mirrorPaintGridY
         ? mirroredGridY(signature) : signature;
     return selectCandidates(lookup, globalX, globalY, distributionSeed,
-                             true, &allowedPhysicalSlots, found);
+                             true, &allowedPhysicalSlots, 0, found);
+}
+
+quint16 CTerrainTransitionCatalog::selectForPaint(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, const QSet<int>& allowedPhysicalSlots,
+    qint32 preferredRouteOwnerMaterial, bool* found) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    return selectCandidates(lookup, globalX, globalY, distributionSeed,
+                             true, &allowedPhysicalSlots,
+                             preferredRouteOwnerMaterial, found);
 }
 
 quint16 CTerrainTransitionCatalog::lowestPaintRotationForSlot(
@@ -6231,7 +6569,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
 STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
     const STerrainTileCommand& stroke,const CTerrainTransitionCatalog& catalog,
     quint32 distributionSeed,CValidationReport* report,
-    bool randomizeUniformRotation) const
+    bool randomizeUniformRotation,
+    qint32 preferredRouteOwnerMaterial) const
 {
     STerrainTileCommand command;
     command.description=QStringLiteral("Resolve virtual terrain stroke");
@@ -6286,7 +6625,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
         const quint16 after = uniform
             ? selectUniformInteriorTile(catalog, exact, x, y,
                 paintSeed, randomizeUniformRotation, &found)
-            : catalog.selectForPaint(exact, x, y, paintSeed, &found);
+            : catalog.selectForPaint(exact, x, y, paintSeed,
+                preferredRouteOwnerMaterial, &found);
         if(!found){++unresolved;continue;}
         command.semanticAudit.affectedCells.append(QPoint(x,y));
         if(after==before)continue;
@@ -6474,7 +6814,10 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
     bool randomizeUniformRotation,
     const CTerrainVirtualMaterialField* repairField,
     bool allowPartialMaterialField,
-    bool repairDecodedCells) const
+    bool repairDecodedCells,
+    const QMap<int, qint32>* preferredRouteOwners,
+    const QSet<int>* forceExactCells,
+    const QSet<int>* preserveCells) const
 {
     STerrainTileCommand command;
     command.description=QStringLiteral("Resolve missing terrain blends");
@@ -6509,6 +6852,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
     };
     const auto selectExact = [&](const STerrainTransitionSignature& exact,
                                   int x, int y,
+                                  int cellKey,
                                   qint32 requiredRuntimeType,
                                   bool* found) {
         QSet<int> allowedPhysicalSlots;
@@ -6534,10 +6878,13 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         if(uniformSignature(exact))
             return selectUniformInteriorTile(catalog, exact, x, y, paintSeed,
                 randomizeUniformRotation, found, allowedSlots);
+        const qint32 preferredOwner = preferredRouteOwners
+            ? preferredRouteOwners->value(cellKey, 0) : 0;
         return allowedSlots
             ? catalog.selectForPaint(exact, x, y, paintSeed, *allowedSlots,
-                found)
-            : catalog.selectForPaint(exact, x, y, paintSeed, found);
+                preferredOwner, found)
+            : catalog.selectForPaint(exact, x, y, paintSeed,
+                preferredOwner, found);
     };
     const auto refuseRuntimeTypeSubstitution = [report](
         int x, int y, const STerrainTransitionSignature& exact,
@@ -6583,6 +6930,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         pendingCells.remove(key);
         const int x = key % tileCountX();
         const int y = key / tileCountX();
+        if(preserveCells && preserveCells->contains(key))
+            continue;
         bool available = false;
         const quint16 before = packedTile(x, y, layer, &available);
         if(!available)
@@ -6595,7 +6944,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         bool predecessorTypeFound = false;
         const qint32 predecessorType = tileType(before, &predecessorTypeFound);
         bool found = false;
-        selectExact(exact, x, y,
+        selectExact(exact, x, y, key,
                     predecessorTypeFound ? predecessorType : -1, &found);
         if(!found)
         {
@@ -6661,6 +7010,39 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
                         neighborY * tileCountX() + neighborX, true);
     }
 
+    // Route-only normalization keeps the authoritative semantic tuple fixed
+    // but re-runs exact physical selection through the component owner gate.
+    // It is deliberately added after semantic frontier convergence so an
+    // artwork-route correction cannot influence shared-corner recovery.
+    if(forceExactCells)
+        for(int key : *forceExactCells)
+        {
+            if(key < 0 || key >= tileCountX() * tileCountY()
+               || (preserveCells && preserveCells->contains(key)))
+                continue;
+            const int x = key % tileCountX();
+            const int y = key / tileCountX();
+            bool found = false;
+            STerrainTransitionSignature exact;
+            if(repairField)
+                exact = repairField->cellSignature(x, y, &found);
+            if(!found && values.size()
+                    == (tileCountX() + 1) * (tileCountY() + 1))
+            {
+                const int northWest = y * (tileCountX() + 1) + x;
+                exact.northWest = values.at(northWest);
+                exact.northEast = values.at(northWest + 1);
+                exact.southWest = values.at(
+                    northWest + tileCountX() + 1);
+                exact.southEast = values.at(
+                    northWest + tileCountX() + 2);
+                found = exact.northWest > 0 && exact.northEast > 0
+                    && exact.southEast > 0 && exact.southWest > 0;
+            }
+            if(found)
+                plannedSignatures.insert(key, exact);
+        }
+
     QSet<int> unresolvedCells;
     for(int y = 0; y < tileCountY(); ++y)
         for(int x = 0; x < tileCountX(); ++x)
@@ -6668,6 +7050,9 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
             bool available = false;
             const quint16 before = packedTile(x, y, layer, &available);
             if(!available)
+                continue;
+            const int key = y * tileCountX() + x;
+            if(preserveCells && preserveCells->contains(key))
                 continue;
             STerrainTransitionSignature exact;
             if(!missingBlendRepairSignature(
@@ -6678,7 +7063,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
             const qint32 predecessorType = tileType(
                 before, &predecessorTypeFound);
             bool found = false;
-            selectExact(exact, x, y,
+            selectExact(exact, x, y, key,
                         predecessorTypeFound ? predecessorType : -1, &found);
             if(!found)
             {
@@ -6688,7 +7073,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
                                                   predecessorType);
                     return STerrainTileCommand();
                 }
-                unresolvedCells.insert(y * tileCountX() + x);
+                unresolvedCells.insert(key);
             }
         }
 
@@ -6705,7 +7090,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         bool predecessorTypeFound = false;
         const qint32 predecessorType = tileType(before, &predecessorTypeFound);
         bool found = false;
-        const quint16 after = selectExact(entry.value(), x, y,
+        const quint16 after = selectExact(entry.value(), x, y, key,
             predecessorTypeFound ? predecessorType : -1, &found);
         if(!found)
         {

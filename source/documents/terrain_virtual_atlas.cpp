@@ -39,7 +39,8 @@ QVector<qint32> corners(const STerrainTransitionSignature& signature)
 }
 
 QByteArray typedPixelKey(const QByteArray& pixelHash, qint32 runtimeType,
-                         const STerrainTransitionSignature& signature)
+                         const STerrainTransitionSignature& signature,
+                         qint32 routeOwnerMaterial = 0)
 {
     QByteArray key = pixelHash;
     char bytes[4];
@@ -50,6 +51,9 @@ QByteArray typedPixelKey(const QByteArray& pixelHash, qint32 runtimeType,
         qToLittleEndian<qint32>(material, reinterpret_cast<uchar*>(bytes));
         key.append(bytes, 4);
     }
+    qToLittleEndian<qint32>(routeOwnerMaterial,
+        reinterpret_cast<uchar*>(bytes));
+    key.append(bytes, 4);
     return key;
 }
 
@@ -1433,6 +1437,15 @@ void refreshFinalizationStableIdentity(
         qToLittleEndian<qint32>(tile.runtimeTerrainType,
             reinterpret_cast<uchar*>(typeBytes));
         stable.addData(typeBytes, 4);
+        // Keep ownerless legacy/authored finalizations byte-for-byte stable.
+        // Only exact generated owner evidence extends the namespace identity.
+        if(tile.routeOwnerMaterial > 0)
+        {
+            stable.addData("route-owner-v1", 14);
+            qToLittleEndian<qint32>(tile.routeOwnerMaterial,
+                reinterpret_cast<uchar*>(typeBytes));
+            stable.addData(typeBytes, 4);
+        }
         stable.addData(tile.sourceNamespace.toUtf8().toLower());
         for(int sourceAlias : tile.sourceSlotAliases)
         {
@@ -3004,7 +3017,8 @@ int CTerrainVirtualAtlas::typedTileVariant(int sourceIndex, qint32 runtimeType)
         return sourceIndex;
     const QByteArray key = typedPixelKey(
         m_generatedTiles.at(sourceIndex).pixelSha256, runtimeType,
-        m_generatedTiles.at(sourceIndex).canonicalSignature);
+        m_generatedTiles.at(sourceIndex).canonicalSignature,
+        m_generatedTiles.at(sourceIndex).routeOwnerMaterial);
     const int existing = m_generatedByPixels.value(key, -1);
     if(existing >= 0) return existing;
     STerrainFinalizedTile variant = m_generatedTiles.at(sourceIndex);
@@ -3047,11 +3061,12 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
                 allowedSlots.insert(slot);
         packed = m_catalog.selectForPaint(
             signature, cellX, cellY, m_distributionSeed, allowedSlots,
-            &authored);
+            preferredPaintMaterial, &authored);
     }
     else
         packed = m_catalog.selectForPaint(
-            signature, cellX, cellY, m_distributionSeed, &authored);
+            signature, cellX, cellY, m_distributionSeed,
+            preferredPaintMaterial, &authored);
     if(authored)
     {
         result.authored = true;
@@ -3091,6 +3106,13 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     quint8 rotation = 0;
     const STerrainTransitionSignature canonical =
         canonicalSignature(signature, &rotation);
+    QSet<qint32> generatedMaterials;
+    for(qint32 id : corners(canonical))
+        generatedMaterials.insert(id);
+    const qint32 generatedRouteOwner = generatedMaterials.size() == 2
+        && preferredPaintMaterial != 0
+        && generatedMaterials.contains(preferredPaintMaterial)
+            ? preferredPaintMaterial : 0;
     const ETerrainBlendStyle style = blendStyleForSignature(
         canonical, preferredPaintMaterial);
     qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
@@ -3138,6 +3160,9 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
     qToLittleEndian<qint32>(reviewedStyleMaterial,
         reinterpret_cast<uchar*>(typeBytes));
     key.append(typeBytes, 4);
+    qToLittleEndian<qint32>(generatedRouteOwner,
+        reinterpret_cast<uchar*>(typeBytes));
+    key.append(typeBytes, 4);
     qToLittleEndian<qint32>(runtimeType,
         reinterpret_cast<uchar*>(typeBytes));
     key.append(typeBytes, 4);
@@ -3152,7 +3177,8 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
             return result;
         const QByteArray pixelsHash = imageHash(pixels);
         index = m_generatedByPixels.value(
-            typedPixelKey(pixelsHash, runtimeType, canonical), -1);
+            typedPixelKey(pixelsHash, runtimeType, canonical,
+                          generatedRouteOwner), -1);
         if(index < 0)
         {
             STerrainFinalizedTile generated;
@@ -3161,14 +3187,14 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
             generated.pixelSha256 = pixelsHash;
             generated.authored = false;
             generated.blendProvenance = provenance;
-            QSet<qint32> generatedMaterials;
-            for(qint32 id : corners(canonical)) generatedMaterials.insert(id);
             generated.canonicalGeneratedBlend = generatedMaterials.size() > 1;
+            generated.routeOwnerMaterial = generatedRouteOwner;
             generated.runtimeTerrainType = runtimeType;
             index = m_generatedTiles.size();
             m_generatedTiles.append(generated);
             m_generatedByPixels.insert(
-                typedPixelKey(pixelsHash, runtimeType, canonical), index);
+                typedPixelKey(pixelsHash, runtimeType, canonical,
+                              generated.routeOwnerMaterial), index);
         }
         m_generatedBySignature.insert(key, index);
     }
@@ -3342,6 +3368,13 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         basePacked.atlasIndex = quint8(sourceSlot / 64);
         candidate.canonicalSignature = decodeCatalog.gridSignatureForPacked(
             basePacked.encode(), &signatureFound);
+        bool provenanceFound = false;
+        const STerrainTransitionVariant provenanceVariant =
+            decodeCatalog.variantForPacked(
+                basePacked.encode(), &provenanceFound);
+        if(provenanceFound)
+            candidate.routeOwnerMaterial =
+                provenanceVariant.routeOwnerMaterial;
         const bool signatureAssigned = signatureFound
             && candidate.canonicalSignature.northWest > 0
             && candidate.canonicalSignature.northEast > 0
@@ -3361,7 +3394,9 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
 
         const QByteArray dedupeKey = candidate.pixelSha256
             + QByteArray(1, '\0')
-            + QByteArray::number(candidate.runtimeTerrainType);
+            + QByteArray::number(candidate.runtimeTerrainType)
+            + QByteArray(1, '\0')
+            + QByteArray::number(candidate.routeOwnerMaterial);
         const QVector<int> matchingHashes = exactAuthoredOutputs.value(dedupeKey);
         for(int outputSlot : matchingHashes)
         {
@@ -3372,7 +3407,9 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
                 continue; // SHA-256 collision: preserve both physical tiles.
             const bool semanticsAgree = signatureAssigned
                 && retained.canonicalSignature == candidate.canonicalSignature
-                && retained.runtimeTerrainType == candidate.runtimeTerrainType;
+                && retained.runtimeTerrainType == candidate.runtimeTerrainType
+                && retained.routeOwnerMaterial
+                    == candidate.routeOwnerMaterial;
             if(!semanticsAgree)
             {
                 result.error = QStringLiteral(
@@ -4645,6 +4682,7 @@ QByteArray CTerrainWorkingAtlas::stateFingerprint() const
         addBytes(tile.blendProvenance.toUtf8());
         addInt(tile.stockDerivedBlend ? 1 : 0);
         addInt(tile.canonicalGeneratedBlend ? 1 : 0);
+        addInt(tile.routeOwnerMaterial);
         addInt(tile.runtimeTerrainType);
         addInt(tile.sourceSlotAliases.size());
         for(int alias : tile.sourceSlotAliases)
@@ -4843,6 +4881,12 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
             packed.encode(), &found);
         if(!found)
             identity->canonicalSignature = STerrainTransitionSignature();
+        bool variantFound = false;
+        const STerrainTransitionVariant variant =
+            m_authoredCatalog.variantForPacked(
+                packed.encode(), &variantFound);
+        if(variantFound)
+            identity->routeOwnerMaterial = variant.routeOwnerMaterial;
         return true;
     }
     if(!m_resolver || sourceIndex < 0
@@ -4860,6 +4904,7 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
     identity->blendProvenance = source.blendProvenance;
     identity->stockDerivedBlend = source.stockDerivedBlend;
     identity->canonicalGeneratedBlend = source.canonicalGeneratedBlend;
+    identity->routeOwnerMaterial = source.routeOwnerMaterial;
     return true;
 }
 
@@ -4942,6 +4987,7 @@ bool CTerrainWorkingAtlas::restoreFinalizedProvenance(
             tile.blendProvenance.clear();
             tile.stockDerivedBlend = false;
             tile.canonicalGeneratedBlend = false;
+            tile.routeOwnerMaterial = 0;
             tile.sourceSlotAliases.clear();
             for(const STerrainWorkingTileIdentity& identity : retained)
                 if(identity.sourceSlot >= 0
@@ -4950,6 +4996,16 @@ bool CTerrainWorkingAtlas::restoreFinalizedProvenance(
             std::sort(tile.sourceSlotAliases.begin(), tile.sourceSlotAliases.end());
             tile.sourceSlot = tile.sourceSlotAliases.isEmpty()
                 ? -1 : tile.sourceSlotAliases.front();
+            QSet<qint32> retainedOwners;
+            bool everyRetainedIdentityHasOwner = true;
+            for(const STerrainWorkingTileIdentity& identity : retained)
+                if(identity.routeOwnerMaterial > 0)
+                    retainedOwners.insert(identity.routeOwnerMaterial);
+                else
+                    everyRetainedIdentityHasOwner = false;
+            if(retainedOwners.size() == 1
+               && everyRetainedIdentityHasOwner)
+                tile.routeOwnerMaterial = *retainedOwners.constBegin();
             origins->retainedMapOutputs.insert(outputSlot);
             continue;
         }
@@ -4983,6 +5039,7 @@ bool CTerrainWorkingAtlas::restoreFinalizedProvenance(
             tile.blendProvenance = selected.blendProvenance;
             tile.stockDerivedBlend = selected.stockDerivedBlend;
             tile.canonicalGeneratedBlend = false;
+            tile.routeOwnerMaterial = selected.routeOwnerMaterial;
             origins->importedAuthoredOutputs.insert(outputSlot);
             continue;
         }
@@ -4995,6 +5052,7 @@ bool CTerrainWorkingAtlas::restoreFinalizedProvenance(
                 tile.blendProvenance = selected.blendProvenance;
                 tile.stockDerivedBlend = selected.stockDerivedBlend;
                 tile.canonicalGeneratedBlend = true;
+                tile.routeOwnerMaterial = selected.routeOwnerMaterial;
             }
             tile.authored = false;
             tile.sourceSlot = -1;
@@ -5116,6 +5174,9 @@ void CTerrainWorkingAtlas::installCatalogVariants(
             STerrainTransitionVariant variant;
             variant.signature = CTerrainTransitionCatalog::rotated(base, -rotation);
             variant.packedTile = packed.encode();
+            variant.routeOwnerMaterial = sourceTile.authored
+                ? 0 : sourceTile.routeOwnerMaterial;
+            variant.canonicalGeneratedRoute = !sourceTile.authored;
             // Global-authored and canonical-generated tiles fill an exact
             // signature/runtime gap. They are not an extra variation pool
             // when this map already authored a selectable candidate for that
