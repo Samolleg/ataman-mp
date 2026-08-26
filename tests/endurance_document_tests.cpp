@@ -6588,6 +6588,70 @@ void EnduranceDocumentTests::firstModernStrokeOwnsFieldInitializationAndManualUn
         ETerrainTileLayer::Land, &redoneCurrent, &redoneBaseline));
     QCOMPARE(redoneCurrent, paintedCurrent);
     QCOMPARE(redoneBaseline, paintedBaseline);
+
+    // The viewport now collapses the first uniform preview and its exact
+    // release resolution before touching the live model. Model that boundary
+    // with the normal 7x7 square tile brush: one apply must establish the
+    // complete semantic field and every core cell, never the partial first
+    // stamp that previously became visible until the gesture was repeated.
+    CTerrainEditModel atomicStamp;
+    QVERIFY(atomicStamp.load(document));
+    QVector<quint16> atomicBefore;
+    for(int y = 0; y < atomicStamp.tileCountY(); ++y)
+        for(int x = 0; x < atomicStamp.tileCountX(); ++x)
+            atomicBefore.append(atomicStamp.packedTile(
+                x, y, ETerrainTileLayer::Land));
+    STerrainTileBrush sevenBySeven;
+    sevenBySeven.centerX = 8.0f;
+    sevenBySeven.centerY = 8.0f;
+    sevenBySeven.radius = 3.0f;
+    sevenBySeven.shape = ETerrainTileBrushShape::Square;
+    CValidationReport atomicReport;
+    STerrainTileCommand atomic = atomicStamp.makeVirtualTileMaterialPaint(
+        sevenBySeven, ETerrainTileLayer::Land, 2, catalog,
+        0x41544f4du, &atomicReport, true);
+    QVERIFY2(!atomicReport.hasErrors(), qPrintable(atomicReport.toText()));
+    QCOMPARE(atomic.semanticAudit.paintedCoreCells.size(), 49);
+    CTerrainEditModel atomicPlan = atomicStamp;
+    QVERIFY2(atomicPlan.apply(atomic, true, &atomicReport),
+             qPrintable(atomicReport.toText()));
+    const STerrainTileCommand atomicResolution =
+        atomicPlan.makeVirtualStrokeResolution(
+            atomic, catalog, 0x41544f4du, &atomicReport, true, 2);
+    QVERIFY2(!atomicReport.hasErrors(), qPrintable(atomicReport.toText()));
+    appendTerrainTileCommand(&atomic, atomicResolution);
+
+    CTerrainVirtualMaterialField beforeAtomicField;
+    QVERIFY(!atomicStamp.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &beforeAtomicField, false));
+    QVERIFY2(atomicStamp.apply(atomic, true, &atomicReport),
+             qPrintable(atomicReport.toText()));
+    for(int y = 5; y <= 11; ++y)
+        for(int x = 5; x <= 11; ++x)
+        {
+            bool available = false;
+            const quint16 packed = atomicStamp.packedTile(
+                x, y, ETerrainTileLayer::Land, &available);
+            QVERIFY(available);
+            bool decoded = false;
+            const STerrainTransitionSignature exact =
+                catalog.gridSignatureForPacked(packed, &decoded);
+            QVERIFY(decoded);
+            QCOMPARE(exact.northWest, qint32(2));
+            QCOMPARE(exact.northEast, qint32(2));
+            QCOMPARE(exact.southEast, qint32(2));
+            QCOMPARE(exact.southWest, qint32(2));
+        }
+    QVERIFY2(atomicStamp.apply(atomic, false, &atomicReport),
+             qPrintable(atomicReport.toText()));
+    QVector<quint16> atomicUndone;
+    for(int y = 0; y < atomicStamp.tileCountY(); ++y)
+        for(int x = 0; x < atomicStamp.tileCountX(); ++x)
+            atomicUndone.append(atomicStamp.packedTile(
+                x, y, ETerrainTileLayer::Land));
+    QCOMPARE(atomicUndone, atomicBefore);
+    QVERIFY(!atomicStamp.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &beforeAtomicField, false));
 }
 
 void EnduranceDocumentTests::refusedFirstModernStrokeLeavesFieldlessStateUntouched()
@@ -7465,7 +7529,7 @@ void EnduranceDocumentTests::terrainStrokePublishesAtlasAndSectorAsOneFrame()
     const int applyResolution = release.indexOf(
         "resolutionApplied = applyTerrainTilePreview(", resolution);
     const int publishAtlas = release.indexOf(
-        "syncWorkingTerrainAtlas(&releaseReport)", resolution);
+        "syncWorkingTerrainAtlas(", resolution);
     QVERIFY2(resolution >= 0 && applyResolution > resolution
                  && publishAtlas > applyResolution,
              "Terrain release can publish a new atlas and present a frame before the matching sector buffers are rebuilt");
@@ -7481,16 +7545,31 @@ void EnduranceDocumentTests::terrainStrokePublishesAtlasAndSectorAsOneFrame()
         paintStart);
     QVERIFY(paintStart >= 0 && paintEnd > paintStart);
     const QByteArray paint = source.mid(paintStart, paintEnd - paintStart);
+    const int exactStampPreparation = paint.indexOf(
+        "prepareExactModernTerrainStamp(");
     const int firstPaintApply = paint.indexOf(
         "applyTerrainTilePreview(command, true)");
     const int firstPaintPublish = paint.lastIndexOf(
         "syncWorkingTerrainAtlas(");
+    QVERIFY2(exactStampPreparation >= 0
+                 && firstPaintApply > exactStampPreparation
+                 && firstPaintPublish > firstPaintApply,
+             "Modern paint still publishes its temporary uniform preview before exact blend resolution, exposing an incomplete first stamp for one frame");
     QVERIFY2(firstPaintApply >= 0 && firstPaintPublish > firstPaintApply,
              "A direct Modern stamp can publish its atlas before the matching cell/VBO update");
     const QByteArray paintAtomicWindow = paint.mid(
         firstPaintApply, firstPaintPublish - firstPaintApply);
     QVERIFY2(!paintAtomicWindow.contains("processEvents("),
              "A direct Modern stamp yields a visible frame between cell and atlas publication");
+
+    const int syncStart = source.indexOf(
+        "bool CView::syncWorkingTerrainAtlas(");
+    const int syncEnd = source.indexOf(
+        "void CView::finalizeVirtualTerrainAtlas()", syncStart);
+    QVERIFY(syncStart >= 0 && syncEnd > syncStart);
+    const QByteArray sync = source.mid(syncStart, syncEnd - syncStart);
+    QVERIFY2(sync.contains("presentCompletedTerrainPublication"),
+             "A completed live terrain atlas/cell transaction is only queued for a later frame, allowing the compositor to expose the offscreen upload interval");
 }
 
 void EnduranceDocumentTests::resolveRouteOwnershipOnlyAuditsRepairCandidates()
@@ -7505,6 +7584,8 @@ void EnduranceDocumentTests::resolveRouteOwnershipOnlyAuditsRepairCandidates()
     QVERIFY(resolveStart >= 0 && resolveEnd > resolveStart);
     const QByteArray resolve = source.mid(resolveStart,
                                            resolveEnd - resolveStart);
+    const int layerGate = resolve.indexOf(
+        "const bool routeOwnershipEnabled = layer == ETerrainTileLayer::Overlay");
     const int candidateField = resolve.indexOf("routeOwnershipEvidenceCells");
     const int plan = resolve.indexOf(
         "planConnectedTerrainRouteOwnership(", candidateField);
@@ -7512,6 +7593,8 @@ void EnduranceDocumentTests::resolveRouteOwnershipOnlyAuditsRepairCandidates()
         "routeOwnershipEvidenceCells", plan);
     const int warning = resolve.indexOf(
         "terrain.resolve_route_ownership_preserved", plan);
+    QVERIFY2(layerGate >= 0 && layerGate < candidateField,
+             "The overlay-only route-ownership repair is still applied to Ground and can suppress ordinary land blend repair");
     QVERIFY2(candidateField >= 0 && plan > candidateField
                  && candidateArgument > plan,
              "Resolve still scopes ownership to ordinary repair candidates instead of explicit route evidence");
@@ -10650,6 +10733,18 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
              "Each foreign terrain binding is not verified off the UI thread");
     QVERIFY2(source.contains("applyDeferredGlobalTerrainPaletteHydration("),
              "Deferred exact-binding results are never published back to the palettes");
+
+    const int adoptStart = source.indexOf(
+        "bool CView::adoptPrewarmedTerrainFamily(");
+    const int adoptEnd = source.indexOf(
+        "void CView::refreshClassicAutoPalette()", adoptStart);
+    QVERIFY(adoptStart >= 0 && adoptEnd > adoptStart);
+    const QByteArray adopt = source.mid(adoptStart, adoptEnd - adoptStart);
+    QVERIFY2(adopt.contains("mergeTerrainHydrationCaches("),
+             "Adopting an older family-prewarm snapshot still replaces thumbnail caches populated by newer background hydration");
+    QVERIFY2(!adopt.contains(
+                 "m_terrainGlobalUniformTileCache = staged->uniformTileCache"),
+             "Family-prewarm adoption can erase every already-hydrated brush thumbnail");
 
     const int finalizeStart = source.indexOf(
         "void CView::finalizeVirtualTerrainAtlas()");

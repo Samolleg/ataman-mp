@@ -491,6 +491,10 @@ private:
     bool adoptPrewarmedTerrainFamily(qint32 terrainType,
                                      ETerrainTileLayer layer,
                                      CValidationReport* report);
+    bool prepareExactModernTerrainStamp(STerrainTileCommand* command,
+                                        qint32 terrainType,
+                                        CValidationReport* report,
+                                        bool* atlasPublicationPending);
     void refreshClassicAutoPalette();
     void refreshManualAtlasPalette(bool invalidate = true);
     void refreshWorkingTerrainPalettes();
@@ -515,7 +519,9 @@ private:
         CValidationReport* report,
         SWorkingTerrainResolveStage* staging = nullptr);
     bool syncWorkingTerrainAtlas(CValidationReport* report,
-                                 CTerrainWorkingAtlas* staging = nullptr);
+                                 CTerrainWorkingAtlas* staging = nullptr,
+                                 bool presentCompletedFrame = false);
+    void presentCompletedTerrainPublication();
     bool ensureModernTerrainArtworkAssigned(
         ETerrainTileLayer layer,
         const CTerrainTransitionCatalog& catalog);

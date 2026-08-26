@@ -1525,6 +1525,52 @@ struct STerrainFamilyPrewarmResult
     qint64 workerMilliseconds{0};
 };
 
+void mergeTerrainHydrationCaches(
+    const SWorkingTerrainResolveStage& staged,
+    QMap<QString, STerrainAtlasArchiveBindingResult>* boundAtlasCache,
+    QSet<QString>* missingPages,
+    QMap<QString, QImage>* transitionTileCache,
+    QMap<QString, QImage>* uniformTileCache,
+    QMap<qint32, QImage>* materialSources,
+    QMap<qint32, STerrainGlobalMaterialSource>* materialSourceIdentities)
+{
+    if(!boundAtlasCache || !missingPages || !transitionTileCache
+       || !uniformTileCache || !materialSources
+       || !materialSourceIdentities)
+        return;
+    const auto mergeMissing = [boundAtlasCache, missingPages](
+        const QString& key) {
+        if(!boundAtlasCache->contains(key))
+            missingPages->insert(key);
+    };
+    for(auto binding = staged.boundAtlasCache.constBegin();
+        binding != staged.boundAtlasCache.constEnd(); ++binding)
+    {
+        if(!boundAtlasCache->contains(binding.key()))
+            boundAtlasCache->insert(binding.key(), binding.value());
+        missingPages->remove(binding.key());
+    }
+    for(const QString& key : staged.missingPages)
+        mergeMissing(key);
+    for(auto tile = staged.decodedTileCache.constBegin();
+        tile != staged.decodedTileCache.constEnd(); ++tile)
+        if(!transitionTileCache->contains(tile.key()))
+            transitionTileCache->insert(tile.key(), tile.value());
+    for(auto tile = staged.uniformTileCache.constBegin();
+        tile != staged.uniformTileCache.constEnd(); ++tile)
+        if(!uniformTileCache->contains(tile.key()))
+            uniformTileCache->insert(tile.key(), tile.value());
+    for(auto source = staged.materialSources.constBegin();
+        source != staged.materialSources.constEnd(); ++source)
+        if(!materialSources->contains(source.key()))
+            materialSources->insert(source.key(), source.value());
+    for(auto identity = staged.materialSourceIdentities.constBegin();
+        identity != staged.materialSourceIdentities.constEnd(); ++identity)
+        if(!materialSourceIdentities->contains(identity.key()))
+            materialSourceIdentities->insert(
+                identity.key(), identity.value());
+}
+
 QByteArray terrainTilePixelSha256(const QImage& source);
 
 CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent, pShareWidget)
@@ -11517,16 +11563,121 @@ bool CView::adoptPrewarmedTerrainFamily(qint32 terrainType,
     m_workingTerrainAtlas->setDistributionSeed(m_tileStrokeDistributionSeed);
     m_workingAtlasProtectedSlots = staged->protectedSlots;
     m_importedTerrainTransitions = staged->importedTransitions;
-    m_terrainGlobalBoundAtlasCache = staged->boundAtlasCache;
-    m_terrainGlobalTransitionMissingPages = staged->missingPages;
-    m_terrainGlobalTransitionTileCache = staged->decodedTileCache;
-    m_terrainGlobalUniformTileCache = staged->uniformTileCache;
-    m_terrainGlobalMaterialSources = staged->materialSources;
-    m_terrainGlobalMaterialSourceIdentities =
-        staged->materialSourceIdentities;
+    // The prewarm stage can be older than background palette hydration. Merge
+    // its newly verified entries into the live caches; replacing the maps here
+    // erased all thumbnails that finished while the worker was running and
+    // forced the next map load to decode every reviewed-HD binding again.
+    mergeTerrainHydrationCaches(
+        *staged, &m_terrainGlobalBoundAtlasCache,
+        &m_terrainGlobalTransitionMissingPages,
+        &m_terrainGlobalTransitionTileCache,
+        &m_terrainGlobalUniformTileCache,
+        &m_terrainGlobalMaterialSources,
+        &m_terrainGlobalMaterialSourceIdentities);
     ei::log(eLogInfo, QString(
         "Terrain family prewarm adopted for atomic first sample material:%1")
         .arg(terrainType));
+    return true;
+}
+
+bool CView::prepareExactModernTerrainStamp(
+    STerrainTileCommand* command, qint32 terrainType,
+    CValidationReport* report, bool* atlasPublicationPending)
+{
+    if(!command || command->isEmpty() || !m_workingTerrainAtlas
+       || terrainType <= 0)
+        return command && !command->isEmpty();
+
+    // The virtual painter produces a uniform drag preview first and used to
+    // publish it immediately, then replace it with exact blends on release.
+    // Build that intermediate state on a model copy, realize every required
+    // tuple, and collapse preview + resolution into one live command instead.
+    CTerrainEditModel stagedEdit = m_terrainEdit;
+    if(!stagedEdit.apply(*command, true, report))
+        return false;
+
+    QVector<QPoint> changedVertices = command->semanticAudit.paintedVertices;
+    for(const STerrainTileCommand::SVirtualVertexDelta& vertex :
+            command->virtualVertices)
+        changedVertices.append(QPoint(vertex.globalX, vertex.globalY));
+    if(changedVertices.isEmpty())
+        return true;
+
+    const ETerrainTileLayer layer = command->semanticAudit.layer;
+    CTerrainVirtualMaterialField field;
+    if(!stagedEdit.copyVirtualMaterialField(layer, &field, false))
+    {
+        if(report) report->add("terrain.virtual_stamp_field",
+            EValidationSeverity::Error,
+            "The exact Modern stamp has no complete vertex-material field.");
+        return false;
+    }
+    QSet<int> affected;
+    for(const QPoint& vertex : changedVertices)
+        for(int y : {vertex.y() - 1, vertex.y()})
+            for(int x : {vertex.x() - 1, vertex.x()})
+                if(x >= 0 && x < field.tileWidth()
+                   && y >= 0 && y < field.tileHeight())
+                    affected.insert(y * field.tileWidth() + x);
+
+    struct SMissingStampSignature
+    {
+        STerrainTransitionSignature signature;
+        int x{0};
+        int y{0};
+    };
+    QMap<QByteArray, SMissingStampSignature> missing;
+    QVector<int> cells = affected.values().toVector();
+    std::sort(cells.begin(), cells.end());
+    for(int cell : cells)
+    {
+        const int x = cell % field.tileWidth();
+        const int y = cell / field.tileWidth();
+        bool found = false;
+        const STerrainTransitionSignature signature =
+            field.cellSignature(x, y, &found);
+        if(!found)
+            continue;
+        bool exactAvailable = false;
+        m_workingTerrainAtlas->catalog().selectForPaint(
+            signature, x, y, m_tileStrokeDistributionSeed,
+            terrainType, &exactAvailable);
+        if(exactAvailable)
+            continue;
+        SMissingStampSignature item;
+        item.signature = signature;
+        item.x = x;
+        item.y = y;
+        missing.insert(globalTransitionKey(signature), item);
+    }
+
+    QMap<int, quint64> usage;
+    if(!missing.isEmpty())
+        usage = workingTerrainAtlasUsage();
+    for(auto item = missing.constBegin();
+        item != missing.constEnd(); ++item)
+        if(!realizeWorkingTerrainSignature(
+               item.value().signature, item.value().x, item.value().y,
+               &usage, report, nullptr, terrainType))
+            return false;
+    if(report && report->hasErrors())
+        return false;
+
+    const STerrainTileCommand resolution =
+        stagedEdit.makeVirtualStrokeResolution(
+            *command, m_workingTerrainAtlas->catalog(),
+            m_tileStrokeDistributionSeed, report,
+            m_landscapeTools
+                && m_landscapeTools->randomizeUniformRotation(),
+            terrainType);
+    if(report && report->hasErrors())
+        return false;
+    appendTerrainTileCommand(command, resolution);
+    if(atlasPublicationPending
+       && !m_workingTerrainAtlas->changedSlots().isEmpty())
+        *atlasPublicationPending = true;
+    command->semanticAudit.solverMode =
+        QStringLiteral("virtual-exact-atomic-stamp");
     return true;
 }
 
@@ -12992,7 +13143,8 @@ QByteArray terrainTilePixelSha256(const QImage& source)
 }
 
 bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
-                                    CTerrainWorkingAtlas* staging)
+                                    CTerrainWorkingAtlas* staging,
+                                    bool presentCompletedFrame)
 {
     CTerrainWorkingAtlas* atlas = staging
         ? staging : m_workingTerrainAtlas.data();
@@ -13135,9 +13287,24 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
             m_landscapeTools->setGeneratedAtlasTileCount(
                 atlas->generatedTileCount());
         refreshWorkingTerrainPalettes();
-        update();
+        if(presentCompletedFrame)
+            presentCompletedTerrainPublication();
+        else
+            update();
     }
     return true;
+}
+
+void CView::presentCompletedTerrainPublication()
+{
+    // Terrain atlas upload and sector-buffer replacement are both complete at
+    // this point. Present that coherent state synchronously before returning
+    // to Qt's event loop; a merely queued update allowed legacy compositor
+    // paths to expose the offscreen upload interval as a one-frame flash.
+    if(isValid() && isVisible())
+        updateGL();
+    else
+        update();
 }
 
 void CView::finalizeVirtualTerrainAtlas()
@@ -17281,6 +17448,11 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 pure.northWest, m_workingTerrainAtlas->catalog(),
                 m_tileStrokeDistributionSeed, &report,
                 m_landscapeTools->randomizeUniformRotation());
+            if(!report.hasErrors() && !semanticOverlayCommand.isEmpty()
+               && !prepareExactModernTerrainStamp(
+                   &semanticOverlayCommand, pure.northWest, &report,
+                   &workingAtlasPublicationPending))
+                semanticOverlayCommand = STerrainTileCommand();
             if(report.hasErrors()
                || (!semanticOverlayCommand.isEmpty()
                    && !applyTerrainTilePreview(semanticOverlayCommand, true)))
@@ -17293,7 +17465,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             }
         }
         if(workingAtlasPublicationPending
-           && !syncWorkingTerrainAtlas(&report))
+           && !syncWorkingTerrainAtlas(&report, nullptr, true))
         {
             if(!semanticOverlayCommand.isEmpty())
                 applyTerrainTilePreview(semanticOverlayCommand, false);
@@ -17570,6 +17742,13 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             }
         }
 
+        if(!classicAuto && m_tileStrokeAutoResolveBlends
+           && !command.isEmpty()
+           && !prepareExactModernTerrainStamp(
+               &command, terrainType, &report,
+               &workingAtlasPublicationPending))
+            command = STerrainTileCommand();
+
     }
     STerrainPaintAuditAction audit;
     audit.actionId = m_terrainPaintActionId++;
@@ -17610,7 +17789,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             emit updateMsg(tr("Terrain preview was refused; no undo entry was created."));
         }
         else if(workingAtlasPublicationPending
-                && !syncWorkingTerrainAtlas(&report))
+                && !syncWorkingTerrainAtlas(&report, nullptr, true))
         {
             applyTerrainTilePreview(command, false);
             audit.outcome = QStringLiteral("refused");
@@ -18088,7 +18267,8 @@ void CView::endTileBrushGroup()
                 {
                     QElapsedTimer uploadTimer;
                     uploadTimer.start();
-                    if(!syncWorkingTerrainAtlas(&releaseReport))
+                    if(!syncWorkingTerrainAtlas(
+                           &releaseReport, nullptr, true))
                         releaseReport.add("terrain.working_atlas_sync",
                             EValidationSeverity::Error,
                             "The completed stroke could not install its generated exact transitions.");
@@ -18548,6 +18728,12 @@ void CView::resolveMissingTerrainBlends()
         for(int layerIndex = 0; layerIndex < 2; ++layerIndex)
         {
             const ETerrainTileLayer layer = layers[layerIndex];
+            // Connected route ownership was introduced for the reported
+            // Lava-on-Water overlay repair. Ground contains ordinary authored
+            // multi-material junctions at map scale; treating those as route
+            // evidence made the established Ground resolver preserve valid
+            // candidates and added a full-map ownership scan to every Shift+R.
+            const bool routeOwnershipEnabled = layer == ETerrainTileLayer::Overlay;
             CTerrainVirtualMaterialField& field = repairFields[layerIndex];
             if(!staged.terrainEdit.initializeVirtualMaterialField(
                    layer, staged.atlas->catalog(), &report,
@@ -18559,7 +18745,8 @@ void CView::resolveMissingTerrainBlends()
                         "The map-wide resolver could not establish a deterministic material field");
                 break;
             }
-            if(!staged.terrainEdit.copyVirtualMaterialField(
+            if(routeOwnershipEnabled
+               && !staged.terrainEdit.copyVirtualMaterialField(
                    layer, &routeFields[layerIndex], false))
             {
                 report.add("terrain.resolve_route_field",
@@ -18589,8 +18776,10 @@ void CView::resolveMissingTerrainBlends()
             QVector<qint32> exactGeneratedRouteOwners(cellCount, 0);
             QVector<qint32> currentVertexMaterials;
             QVector<qint32> baselineVertexMaterials;
-            staged.terrainEdit.copyVirtualMaterialFieldState(
-                layer, &currentVertexMaterials, &baselineVertexMaterials);
+            if(routeOwnershipEnabled)
+                staged.terrainEdit.copyVirtualMaterialFieldState(
+                    layer, &currentVertexMaterials,
+                    &baselineVertexMaterials);
             for(int y = 0; y < field.tileHeight(); ++y)
                 for(int x = 0; x < field.tileWidth(); ++x)
                 {
@@ -18599,9 +18788,12 @@ void CView::resolveMissingTerrainBlends()
                     const quint16 packed = staged.terrainEdit.packedTile(
                         x, y, layer, &available);
                     bool signatureFound = false;
-                    routeSignatures[cell] = routeFields[layerIndex].cellSignature(
-                        x, y, &signatureFound);
-                    routeAvailable[cell] = available && signatureFound;
+                    if(routeOwnershipEnabled)
+                    {
+                        routeSignatures[cell] = routeFields[layerIndex]
+                            .cellSignature(x, y, &signatureFound);
+                        routeAvailable[cell] = available && signatureFound;
+                    }
                     STerrainTransitionSignature repairSignature;
                     semanticRepairCells[cell] = available
                         && staged.terrainEdit.missingBlendRepairSignature(
@@ -18609,57 +18801,64 @@ void CView::resolveMissingTerrainBlends()
                             &field, completeField, &repairSignature);
                     if(semanticRepairCells.at(cell))
                         semanticRepairSignatures[cell] = repairSignature;
-                    bool provenanceFound = false;
-                    const STerrainTransitionVariant provenance =
-                        staged.atlas->catalog().variantForPacked(
-                            packed, &provenanceFound);
-                    bool provenanceSignatureFound = false;
-                    const STerrainTransitionSignature provenanceSignature =
-                        staged.atlas->catalog().gridSignatureForPacked(
-                            packed, &provenanceSignatureFound);
-                    if(provenanceFound
-                       && provenance.canonicalGeneratedRoute
-                       && provenanceSignatureFound
-                       && provenanceSignature == routeSignatures.at(cell))
-                        exactGeneratedRouteOwners[cell] =
-                            provenance.routeOwnerMaterial;
-                    const int vertexWidth = field.tileWidth() + 1;
-                    const int northWest = y * vertexWidth + x;
-                    const int northEast = northWest + 1;
-                    const int southWest = northWest + vertexWidth;
-                    const int southEast = southWest + 1;
-                    const bool deltaFieldAvailable =
-                        currentVertexMaterials.size()
-                            == vertexWidth * (field.tileHeight() + 1)
-                        && baselineVertexMaterials.size()
-                            == currentVertexMaterials.size();
-                    const bool semanticDeltaEvidence = deltaFieldAvailable
-                        && (currentVertexMaterials.at(northWest)
-                                != baselineVertexMaterials.at(northWest)
-                            || currentVertexMaterials.at(northEast)
-                                != baselineVertexMaterials.at(northEast)
-                            || currentVertexMaterials.at(southEast)
-                                != baselineVertexMaterials.at(southEast)
-                            || currentVertexMaterials.at(southWest)
-                                != baselineVertexMaterials.at(southWest));
-                    const bool canonicalGeneratedEvidence = available
-                        && staged.atlas->tileOriginForSlot(
-                            SMprPackedTile::decode(packed).atlasSlot())
-                                == ETerrainWorkingTileOrigin::CanonicalGenerated;
-                    routeOwnershipEvidenceCells[cell] =
-                        routeAvailable.at(cell)
-                        && (semanticDeltaEvidence
-                            || canonicalGeneratedEvidence);
+                    if(routeOwnershipEnabled)
+                    {
+                        bool provenanceFound = false;
+                        const STerrainTransitionVariant provenance =
+                            staged.atlas->catalog().variantForPacked(
+                                packed, &provenanceFound);
+                        bool provenanceSignatureFound = false;
+                        const STerrainTransitionSignature provenanceSignature =
+                            staged.atlas->catalog().gridSignatureForPacked(
+                                packed, &provenanceSignatureFound);
+                        if(provenanceFound
+                           && provenance.canonicalGeneratedRoute
+                           && provenanceSignatureFound
+                           && provenanceSignature
+                                == routeSignatures.at(cell))
+                            exactGeneratedRouteOwners[cell] =
+                                provenance.routeOwnerMaterial;
+                        const int vertexWidth = field.tileWidth() + 1;
+                        const int northWest = y * vertexWidth + x;
+                        const int northEast = northWest + 1;
+                        const int southWest = northWest + vertexWidth;
+                        const int southEast = southWest + 1;
+                        const bool deltaFieldAvailable =
+                            currentVertexMaterials.size()
+                                == vertexWidth * (field.tileHeight() + 1)
+                            && baselineVertexMaterials.size()
+                                == currentVertexMaterials.size();
+                        const bool semanticDeltaEvidence = deltaFieldAvailable
+                            && (currentVertexMaterials.at(northWest)
+                                    != baselineVertexMaterials.at(northWest)
+                                || currentVertexMaterials.at(northEast)
+                                    != baselineVertexMaterials.at(northEast)
+                                || currentVertexMaterials.at(southEast)
+                                    != baselineVertexMaterials.at(southEast)
+                                || currentVertexMaterials.at(southWest)
+                                    != baselineVertexMaterials.at(southWest));
+                        const bool canonicalGeneratedEvidence = available
+                            && staged.atlas->tileOriginForSlot(
+                                SMprPackedTile::decode(packed).atlasSlot())
+                                    == ETerrainWorkingTileOrigin::CanonicalGenerated;
+                        routeOwnershipEvidenceCells[cell] =
+                            routeAvailable.at(cell)
+                            && (semanticDeltaEvidence
+                                || canonicalGeneratedEvidence);
+                    }
                 }
-            routePlans[layerIndex] = planConnectedTerrainRouteOwnership(
-                field.tileWidth(), field.tileHeight(), routeSignatures,
-                routeAvailable, currentVertexMaterials,
-                baselineVertexMaterials, exactGeneratedRouteOwners,
-                routeOwnershipEvidenceCells);
-            routeOwners[layerIndex] =
-                routePlans[layerIndex].ownerByCell;
-            preserveRouteComponents[layerIndex] =
-                routePlans[layerIndex].preservedCells;
+            if(routeOwnershipEnabled)
+            {
+                routePlans[layerIndex] = planConnectedTerrainRouteOwnership(
+                    field.tileWidth(), field.tileHeight(), routeSignatures,
+                    routeAvailable, currentVertexMaterials,
+                    baselineVertexMaterials, exactGeneratedRouteOwners,
+                    routeOwnershipEvidenceCells);
+                routeOwners[layerIndex] =
+                    routePlans[layerIndex].ownerByCell;
+                preserveRouteComponents[layerIndex] =
+                    routePlans[layerIndex].preservedCells;
+            }
             int preservedRouteCellCount = 0;
             QStringList preservedRouteExamples;
             for(int y = 0; y < field.tileHeight(); ++y)
