@@ -253,7 +253,8 @@ STerrainRouteOwnershipPlan planConnectedTerrainRouteOwnership(
     const QVector<bool>& availableCells,
     const QVector<qint32>& currentVertexMaterials,
     const QVector<qint32>& baselineVertexMaterials,
-    const QVector<qint32>& exactGeneratedRouteOwners)
+    const QVector<qint32>& exactGeneratedRouteOwners,
+    const QVector<bool>& repairCandidateCells)
 {
     STerrainRouteOwnershipPlan plan;
     const int cellCount = tileWidth * tileHeight;
@@ -261,8 +262,12 @@ STerrainRouteOwnershipPlan planConnectedTerrainRouteOwnership(
     const int vertexCount = vertexWidth * (tileHeight + 1);
     if(tileWidth <= 0 || tileHeight <= 0
        || currentSignatures.size() != cellCount
-       || availableCells.size() != cellCount)
+       || availableCells.size() != cellCount
+       || (!repairCandidateCells.isEmpty()
+           && repairCandidateCells.size() != cellCount))
         return plan;
+    const bool scopedToRepairCandidates =
+        repairCandidateCells.size() == cellCount;
 
     struct SRouteCell
     {
@@ -351,7 +356,9 @@ STerrainRouteOwnershipPlan planConnectedTerrainRouteOwnership(
         exactGeneratedRouteOwners.size() == cellCount;
     for(int seed = 0; seed < cellCount; ++seed)
     {
-        if(visited.at(seed) || !cells.at(seed).transition)
+        if(visited.at(seed) || !cells.at(seed).transition
+           || (scopedToRepairCandidates
+               && !repairCandidateCells.at(seed)))
             continue;
         STerrainRouteOwnershipComponent component;
         component.firstMaterial = cells.at(seed).first;
@@ -466,6 +473,9 @@ STerrainRouteOwnershipPlan planConnectedTerrainRouteOwnership(
             }
         }
 
+        const int componentIndex = plan.components.size();
+        for(int cell : component.cellIndexes)
+            plan.componentByCell.insert(cell, componentIndex);
         if(component.ownerMaterial > 0
            && component.ambiguity
                 == ETerrainRouteOwnershipAmbiguity::None)
@@ -6905,6 +6915,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
     // transient packed choice replace the model-owned virtual field.
     QMap<int, STerrainTransitionSignature> plannedSignatures;
     QMap<int, bool> pendingCells;
+    QSet<int> unresolvedCells;
+    QSet<int> runtimeTypeSkippedCells;
     for(int y = 0; y < tileCountY(); ++y)
         for(int x = 0; x < tileCountX(); ++x)
         {
@@ -6950,6 +6962,12 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         {
             if(predecessorTypeFound)
             {
+                if(allowPartialMaterialField)
+                {
+                    unresolvedCells.insert(key);
+                    runtimeTypeSkippedCells.insert(key);
+                    continue;
+                }
                 refuseRuntimeTypeSubstitution(x, y, exact, predecessorType);
                 return STerrainTileCommand();
             }
@@ -7043,7 +7061,6 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
                 plannedSignatures.insert(key, exact);
         }
 
-    QSet<int> unresolvedCells;
     for(int y = 0; y < tileCountY(); ++y)
         for(int x = 0; x < tileCountX(); ++x)
         {
@@ -7069,6 +7086,12 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
             {
                 if(predecessorTypeFound)
                 {
+                    if(allowPartialMaterialField)
+                    {
+                        unresolvedCells.insert(key);
+                        runtimeTypeSkippedCells.insert(key);
+                        continue;
+                    }
                     refuseRuntimeTypeSubstitution(x, y, exact,
                                                   predecessorType);
                     return STerrainTileCommand();
@@ -7096,6 +7119,12 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         {
             if(predecessorTypeFound)
             {
+                if(allowPartialMaterialField)
+                {
+                    unresolvedCells.insert(key);
+                    runtimeTypeSkippedCells.insert(key);
+                    continue;
+                }
                 refuseRuntimeTypeSubstitution(x, y, entry.value(),
                                               predecessorType);
                 return STerrainTileCommand();
@@ -7117,7 +7146,14 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
         delta.requestedSignature = entry.value();
         command.deltas.append(delta);
     }
-    if(!unresolvedCells.isEmpty()&&report)report->add(
+    if(!runtimeTypeSkippedCells.isEmpty() && report)
+        report->add("terrain.virtual_map_runtime_type_skipped",
+            EValidationSeverity::Warning,
+            QString("%1 map cell(s) were preserved because no exact blend exists with their predecessor runtime terrain type")
+                .arg(runtimeTypeSkippedCells.size()));
+    QSet<int> ambiguousCells = unresolvedCells;
+    ambiguousCells.subtract(runtimeTypeSkippedCells);
+    if(!ambiguousCells.isEmpty()&&report)report->add(
         allowPartialMaterialField
             ? "terrain.virtual_map_ambiguous_skipped"
             : "terrain.virtual_map_unresolved",
@@ -7125,9 +7161,9 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
             ? EValidationSeverity::Warning : EValidationSeverity::Error,
         allowPartialMaterialField
             ? QString("%1 ambiguous map cell(s) were preserved rather than moving a tied material boundary")
-                  .arg(unresolvedCells.size())
+                  .arg(ambiguousCells.size())
             : QString("%1 map cell(s) could not be resolved to an exact physical blend")
-                  .arg(unresolvedCells.size()));
+                  .arg(ambiguousCells.size()));
     return command;
 }
 

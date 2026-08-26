@@ -117,6 +117,7 @@ struct STerrainRouteOwnershipPlan
 {
     QMap<int, qint32> ownerByCell;
     QSet<int> preservedCells;
+    QMap<int, int> componentByCell;
     QVector<STerrainRouteOwnershipComponent> components;
 };
 
@@ -131,7 +132,8 @@ STerrainRouteOwnershipPlan planConnectedTerrainRouteOwnership(
     const QVector<bool>& availableCells,
     const QVector<qint32>& currentVertexMaterials,
     const QVector<qint32>& baselineVertexMaterials,
-    const QVector<qint32>& exactGeneratedRouteOwners);
+    const QVector<qint32>& exactGeneratedRouteOwners,
+    const QVector<bool>& repairCandidateCells = QVector<bool>());
 
 struct STerrainTileDelta
 {

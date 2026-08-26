@@ -598,6 +598,8 @@ private slots:
     void terrainTileStrokeCompositionKeepsFirstAndFinalValues();
     void interruptedTerrainStrokeRejectsUnownedStamp();
     void workingAtlasPublicationPreservesActiveStrokeTransaction();
+    void terrainStrokePublishesAtlasAndSectorAsOneFrame();
+    void resolveRouteOwnershipOnlyAuditsRepairCandidates();
     void workingAtlasPreviewPublishesOnlyChangedPhysicalTiles();
     void resolveMissingBlendsStagesDeterministicLoadBaseline();
     void terrainHeightStrokeCompositionKeepsFirstAndFinalValues();
@@ -7434,6 +7436,59 @@ void EnduranceDocumentTests::workingAtlasPublicationPreservesActiveStrokeTransac
                                         released);
     QVERIFY2(released >= 0 && undoOwned > released && flushed > undoOwned,
              "Deferred palette refresh can run before the completed stroke owns its undo entry");
+}
+
+void EnduranceDocumentTests::terrainStrokePublishesAtlasAndSectorAsOneFrame()
+{
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+    const int releaseStart = source.indexOf("void CView::endTileBrushGroup()");
+    const int releaseEnd = source.indexOf("void CView::cancelTileBrushGroup()",
+                                          releaseStart);
+    QVERIFY(releaseStart >= 0 && releaseEnd > releaseStart);
+    const QByteArray release = source.mid(releaseStart,
+                                           releaseEnd - releaseStart);
+    const int resolution = release.indexOf("makeVirtualStrokeResolution(");
+    const int applyResolution = release.indexOf(
+        "resolutionApplied = applyTerrainTilePreview(", resolution);
+    const int publishAtlas = release.indexOf(
+        "syncWorkingTerrainAtlas(&releaseReport)", resolution);
+    QVERIFY2(resolution >= 0 && applyResolution > resolution
+                 && publishAtlas > applyResolution,
+             "Terrain release can publish a new atlas and present a frame before the matching sector buffers are rebuilt");
+    const QByteArray atomicWindow = release.mid(
+        applyResolution, publishAtlas - applyResolution);
+    QVERIFY2(!atomicWindow.contains("processEvents("),
+             "Terrain release yields a visible frame between sector and atlas publication");
+}
+
+void EnduranceDocumentTests::resolveRouteOwnershipOnlyAuditsRepairCandidates()
+{
+    const QByteArray source = viewSource();
+    QVERIFY2(!source.isEmpty(),
+             "Could not locate source/render/view.cpp from the test worktree");
+    const int resolveStart = source.indexOf(
+        "void CView::resolveMissingTerrainBlends()");
+    const int resolveEnd = source.indexOf(
+        "void CView::beginTileBrushGroup()", resolveStart);
+    QVERIFY(resolveStart >= 0 && resolveEnd > resolveStart);
+    const QByteArray resolve = source.mid(resolveStart,
+                                           resolveEnd - resolveStart);
+    const int candidateField = resolve.indexOf("routeOwnershipCandidates");
+    const int plan = resolve.indexOf(
+        "planConnectedTerrainRouteOwnership(", candidateField);
+    const int candidateArgument = resolve.indexOf(
+        "routeOwnershipCandidates", plan);
+    const int irrelevantGate = resolve.indexOf(
+        "if(!routeOwnershipCandidate)", plan);
+    const int warning = resolve.indexOf(
+        "terrain.resolve_route_ownership_preserved", plan);
+    QVERIFY2(candidateField >= 0 && plan > candidateField
+                 && candidateArgument > plan,
+             "Resolve still expands route ownership across every transition on the map");
+    QVERIFY2(irrelevantGate > plan && warning > irrelevantGate,
+             "Resolve still reports ownership ambiguity before proving that the cell needs repair");
 }
 
 void EnduranceDocumentTests::workingAtlasPreviewPublishesOnlyChangedPhysicalTiles()

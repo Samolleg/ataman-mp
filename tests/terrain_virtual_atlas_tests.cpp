@@ -560,8 +560,10 @@ private slots:
     void virtualTilePaintTargetsFourCellCorners();
     void mapResolutionRepairsWrongPhysicalBlendAndUndoesExactly();
     void mapResolutionPreservesRuntimeTypeForTiedGeneratedBlends();
+    void mapResolutionPreservesMissingTypedCandidateInPartialMode();
     void connectedRouteOwnershipUsesSemanticDeltaAcrossAllTopologies();
     void connectedRouteOwnershipMirrorUsesReversePaintIntent();
+    void connectedRouteOwnershipScopesPlanningToRepairCandidates();
     void routeOwnerFiltersOppositeGeneratedExactCandidates();
     void ambiguousAndMultiMaterialRouteComponentsArePreserved();
     void mapResolutionNormalizesRouteOwnerAndIsIdempotent();
@@ -4678,6 +4680,42 @@ void TerrainVirtualAtlasTests::connectedRouteOwnershipMirrorUsesReversePaintInte
     QVERIFY(plan.preservedCells.isEmpty());
 }
 
+void TerrainVirtualAtlasTests::connectedRouteOwnershipScopesPlanningToRepairCandidates()
+{
+    // Zone-sized regression shape: many unrelated columns contain valid
+    // pre-existing transitions, while Resolve has exactly one candidate.
+    // Planning that candidate must traverse its complete connected outline,
+    // but it must not classify every unrelated transition on the map.
+    const int tileWidth = 128;
+    const int tileHeight = 96;
+    const int cellCount = tileWidth * tileHeight;
+    const STerrainTransitionSignature vertical = signature(1, 2, 2, 1);
+    const QVector<STerrainTransitionSignature> signatures(
+        cellCount, vertical);
+    const QVector<bool> available(cellCount, true);
+    const QVector<qint32> unchanged(
+        (tileWidth + 1) * (tileHeight + 1), 1);
+    const QVector<qint32> provenance(cellCount, 1);
+    QVector<bool> repairCandidates(cellCount, false);
+    const int candidateX = 63;
+    const int candidateY = 48;
+    repairCandidates[candidateY * tileWidth + candidateX] = true;
+
+    const STerrainRouteOwnershipPlan plan =
+        planConnectedTerrainRouteOwnership(
+            tileWidth, tileHeight, signatures, available,
+            unchanged, unchanged, provenance, repairCandidates);
+
+    QCOMPARE(plan.components.size(), 1);
+    QCOMPARE(plan.components.front().cellIndexes.size(), tileHeight);
+    QCOMPARE(plan.ownerByCell.size(), tileHeight);
+    for(int y = 0; y < tileHeight; ++y)
+        QCOMPARE(plan.ownerByCell.value(y * tileWidth + candidateX),
+                 qint32(1));
+    QVERIFY2(!plan.ownerByCell.contains(candidateY * tileWidth),
+             "An unrelated exact transition was pulled into Resolve ownership planning");
+}
+
 void TerrainVirtualAtlasTests::routeOwnerFiltersOppositeGeneratedExactCandidates()
 {
     const qint32 water = 10;
@@ -5020,6 +5058,74 @@ void TerrainVirtualAtlasTests::mapResolutionPreservesRuntimeTypeForTiedGenerated
     QVERIFY(model.apply(repair, false, &report));
     QCOMPARE(model.packedTile(3, 3, ETerrainTileLayer::Land), quint16(0));
     QCOMPARE(model.packedTile(12, 12, ETerrainTileLayer::Land), quint16(1));
+}
+
+void TerrainVirtualAtlasTests::mapResolutionPreservesMissingTypedCandidateInPartialMode()
+{
+    CTerrainTransitionCatalog catalog;
+    STerrainTransitionVariant uniformOne;
+    uniformOne.signature = signature(1, 1, 1, 1);
+    uniformOne.packedTile = 0;
+    QVERIFY(catalog.addVariant(uniformOne));
+    STerrainTransitionVariant uniformTwo;
+    uniformTwo.signature = signature(2, 2, 2, 2);
+    uniformTwo.packedTile = 1;
+    QVERIFY(catalog.addVariant(uniformTwo));
+    STerrainTransitionVariant tied;
+    tied.signature = signature(1, 1, 2, 2);
+    tied.packedTile = 2;
+    QVERIFY(catalog.addVariant(tied));
+
+    QByteArray payload;
+    QDataStream stream(&payload, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xCF4BF774) << quint8(0);
+    payload.append(QByteArray(33 * 33 * 8, '\0'));
+    payload.append(QByteArray(16 * 16 * 2, '\0'));
+    STerrainSectorSource source;
+    source.memberName = QStringLiteral("CaveSet000000.SEC");
+    source.sectorX = 0;
+    source.sectorY = 0;
+    source.type = 0;
+    source.payload = payload;
+    source.landTileOffset = 5 + 33 * 33 * 8;
+    QVector<qint32> modelTypes(64, 5);
+    modelTypes[1] = 6;
+    modelTypes[2] = 5;
+    CTerrainEditModel model;
+    CValidationReport report;
+    QVERIFY(model.loadSources(1, 1, 100.0f, {source}, &report, 1,
+                              modelTypes, 0));
+    STerrainTileCommand damage;
+    STerrainTileDelta wrong;
+    wrong.globalX = 8;
+    wrong.globalY = 8;
+    wrong.layer = ETerrainTileLayer::Land;
+    wrong.before = 0;
+    wrong.after = 1;
+    damage.deltas.append(wrong);
+    QVERIFY(model.apply(damage, true, &report));
+
+    CTerrainVirtualMaterialField repairField;
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    QVERIFY(repairField.resize(16, 16, unset));
+    QVERIFY(repairField.setMaterial(8, 8, 1));
+    QVERIFY(repairField.setMaterial(9, 8, 1));
+    QVERIFY(repairField.setMaterial(9, 9, 2));
+    QVERIFY(repairField.setMaterial(8, 9, 2));
+    CValidationReport partialReport;
+    const STerrainTileCommand repair = model.makeVirtualMapResolution(
+        ETerrainTileLayer::Land, catalog, 0x50415254u,
+        &partialReport, false, &repairField, true, true);
+    QVERIFY2(!partialReport.hasErrors(), qPrintable(partialReport.toText()));
+    QVERIFY(repair.deltas.isEmpty());
+    QCOMPARE(model.packedTile(8, 8, ETerrainTileLayer::Land), quint16(1));
+    bool focusedWarning = false;
+    for(const SValidationFinding& finding : partialReport.findings())
+        focusedWarning |= finding.code == QStringLiteral(
+            "terrain.virtual_map_runtime_type_skipped");
+    QVERIFY2(focusedWarning,
+             "A partial map Resolve silently omitted its unavailable typed tuple");
 }
 
 void TerrainVirtualAtlasTests::mapResolutionReachesFixedPointInOneCommand()
