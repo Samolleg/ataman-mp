@@ -9038,12 +9038,51 @@ void EnduranceDocumentTests::zone1R16SquareOverlayBrushCoversDisplayedCells()
     CTerrainEditModel terrain;
     QVERIFY2(terrain.load(document, &report), qPrintable(report.toText()));
 
+    CValidationReport profileReport;
+    const STerrainAtlasProfile profile = CTerrainAtlasPresetCatalog::exactProfile(
+        QStringLiteral("zone1"),
+        QByteArrayLiteral("35cc3b90985888b5c5206f8c5980321beb46f0be7b1e96b4a3467677ac2a4665"),
+        512, &profileReport);
+    QVERIFY2(profile.approved, qPrintable(profileReport.toText()));
+    STerrainAtlasAnalysis analysis = profile.approvedAnalysis(&profileReport);
+    QVERIFY2(analysis.usable, qPrintable(profileReport.toText()));
+    const QVector<STerrainGlobalMaterialFamily> globalFamilies =
+        CTerrainAtlasPresetCatalog::globalUniformFamilies(&profileReport);
+    analysis.landCatalog = CTerrainAtlasPresetCatalog::globalizedCatalog(
+        profile, analysis.landCatalog, &globalFamilies);
+    analysis.overlayCatalog = CTerrainAtlasPresetCatalog::globalizedCatalog(
+        profile, analysis.overlayCatalog, &globalFamilies);
+    analysis.overlayCompatibleCatalog =
+        CTerrainAtlasPresetCatalog::globalizedCatalog(
+            profile, analysis.overlayCompatibleCatalog, &globalFamilies);
+    CTerrainTransitionCatalog catalog =
+        analysis.overlayCatalogWithLandFamilies();
+
+    const qint32 lavaOrange = 2039464354;
+    terrain.enableWorkingAtlasSlots(1024);
+    STerrainTransitionVariant lavaUniform;
+    lavaUniform.signature.northWest = lavaUniform.signature.northEast =
+        lavaUniform.signature.southEast = lavaUniform.signature.southWest =
+            lavaOrange;
+    SMprPackedTile lavaUniformPacked;
+    lavaUniformPacked.atlasIndex = 8;
+    lavaUniformPacked.tileIndex = 0;
+    lavaUniform.packedTile = lavaUniformPacked.encode();
+    QVERIFY(catalog.addVariant(lavaUniform));
+
     // Exact R16 stroke regions recovered from its resolve journal. A square
-    // Tile target displays and commits all 49 cells; inactive overlay cells
-    // must not silently turn that square into the reported sparse stamp.
+    // Tile target displays and commits all 49 cells. Reproduce the complete
+    // first-use Modern transaction against the real recovered Overlay field;
+    // merely proving that the cells exist missed the sparse first stamp.
     const QVector<QPoint> centers({QPoint(8, 44), QPoint(8, 52)});
     for(const QPoint& center : centers)
     {
+        CTerrainEditModel painted = terrain;
+        CValidationReport paintReport;
+        QVERIFY2(painted.initializeVirtualMaterialField(
+            ETerrainTileLayer::Overlay, catalog, &paintReport,
+            ETerrainMaterialFieldRecovery::RecoverDeterministically),
+            qPrintable(paintReport.toText()));
         int availableCells = 0;
         for(int y = center.y() - 3; y <= center.y() + 3; ++y)
             for(int x = center.x() - 3; x <= center.x() + 3; ++x)
@@ -9053,6 +9092,46 @@ void EnduranceDocumentTests::zone1R16SquareOverlayBrushCoversDisplayedCells()
                 availableCells += available ? 1 : 0;
             }
         QCOMPARE(availableCells, 49);
+
+        STerrainTileBrush brush;
+        brush.centerX = center.x();
+        brush.centerY = center.y();
+        brush.radius = 3.0f;
+        brush.shape = ETerrainTileBrushShape::Square;
+        STerrainTileCommand stamp = painted.makeVirtualTileMaterialPaint(
+            brush, ETerrainTileLayer::Overlay, lavaOrange, catalog,
+            0x52313746u, &paintReport, true);
+        QVERIFY2(!paintReport.hasErrors(), qPrintable(paintReport.toText()));
+        QCOMPARE(stamp.semanticAudit.paintedCoreCells.size(), 49);
+        QSet<int> directlyPaintedCore;
+        for(const STerrainTileDelta& delta : stamp.deltas)
+        {
+            if(delta.globalX >= center.x() - 3
+               && delta.globalX <= center.x() + 3
+               && delta.globalY >= center.y() - 3
+               && delta.globalY <= center.y() + 3)
+                directlyPaintedCore.insert(
+                    delta.globalY * painted.tileCountX() + delta.globalX);
+        }
+        QCOMPARE(directlyPaintedCore.size(), 49);
+        QVERIFY2(painted.apply(stamp, true, &paintReport),
+                 qPrintable(paintReport.toText()));
+        for(int y = center.y() - 3; y <= center.y() + 3; ++y)
+            for(int x = center.x() - 3; x <= center.x() + 3; ++x)
+            {
+                bool available = false;
+                const quint16 packed = painted.packedTile(
+                    x, y, ETerrainTileLayer::Overlay, &available);
+                QVERIFY(available);
+                bool decoded = false;
+                const STerrainTransitionSignature exact =
+                    catalog.gridSignatureForPacked(packed, &decoded);
+                QVERIFY(decoded);
+                QCOMPARE(exact.northWest, lavaOrange);
+                QCOMPARE(exact.northEast, lavaOrange);
+                QCOMPARE(exact.southEast, lavaOrange);
+                QCOMPARE(exact.southWest, lavaOrange);
+            }
     }
 }
 
@@ -9114,19 +9193,19 @@ void EnduranceDocumentTests::modernSquareTileStampResolvesAlreadySemanticCoreCel
         0x52313653u, &report, true);
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     QCOMPARE(stamp.semanticAudit.paintedCoreCells.size(), 49);
+    QSet<int> directlyPaintedCore;
+    for(const STerrainTileDelta& delta : stamp.deltas)
+        if(delta.globalX >= 5 && delta.globalX <= 11
+           && delta.globalY >= 5 && delta.globalY <= 11)
+            directlyPaintedCore.insert(
+                delta.globalY * terrain.tileCountX() + delta.globalX);
+    QCOMPARE(directlyPaintedCore.size(), 49);
 
     CTerrainEditModel planned = terrain;
     QVERIFY2(planned.apply(stamp, true, &report), qPrintable(report.toText()));
     const STerrainTileCommand resolution = planned.makeVirtualStrokeResolution(
         stamp, catalog, 0x52313653u, &report, true, 2);
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
-    bool centerResolved = false;
-    for(const STerrainTileDelta& delta : resolution.deltas)
-        if(delta.globalX == 8 && delta.globalY == 8
-           && delta.layer == ETerrainTileLayer::Land)
-            centerResolved = true;
-    QVERIFY2(centerResolved,
-             "Release resolution omitted an already-semantic tile-target core cell");
     appendTerrainTileCommand(&stamp, resolution);
     QVERIFY2(terrain.apply(stamp, true, &report), qPrintable(report.toText()));
 

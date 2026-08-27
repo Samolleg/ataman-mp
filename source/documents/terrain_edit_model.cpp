@@ -6532,7 +6532,8 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
         // only cells incident to changed vertices, so changing this collateral
         // cell here would otherwise leave a permanent uniform hole at an edge.
         // A wholly semantic-no-op stroke remains a deliberate variant reroll.
-        if(!command.virtualVertices.isEmpty() && exact == current)
+        if(!command.virtualVertices.isEmpty() && exact == current
+           && !previewCoreCells.contains(cell))
         {
             command.semanticAudit.affectedCells.append(QPoint(x,y));
             continue;
