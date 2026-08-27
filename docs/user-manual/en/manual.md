@@ -1,7 +1,7 @@
 # EI Mapper Endurance User Manual
 
-Version scope: **EI Mapper Endurance 0.3.0-alpha.26**, repository baseline
-`596327e509f4cee5a4072a5a3a5cda7b425d09bd`.
+Version scope: **EI Mapper Endurance 0.5.0-alpha**, repository baseline
+`eec794b1aab6df8e187816174bdebc7987e49ce2`.
 
 This is a task-oriented manual for people authoring Evil Islands and Jamais Vu
 maps. Menu and button names are written exactly as they appear in the English

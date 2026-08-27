@@ -1,8 +1,8 @@
 # EI Mapper Endurance user manual / Руководство пользователя
 
 This manual describes the implemented UI and authoring contracts in **EI
-Mapper Endurance 0.3.0-alpha.26** at repository baseline
-`596327e509f4cee5a4072a5a3a5cda7b425d09bd`.
+Mapper Endurance 0.5.0-alpha** at repository baseline
+`eec794b1aab6df8e187816174bdebc7987e49ce2`.
 
 It is not a roadmap: unchecked wishes are excluded, and current limitations and
 advanced diagnostic/ownership operations are labeled in the text.

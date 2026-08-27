@@ -1,6 +1,6 @@
 # EI Mapper: Endurance Edition roadmap
 
-Current development version: `0.3.0-alpha.26`.
+Current development version: `0.5.0-alpha`.
 
 This file tracks product goals, not development diaries. Completed goals link
 to the approved commits, changelists, or validation reports that implemented
