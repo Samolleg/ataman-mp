@@ -5921,6 +5921,59 @@ void TerrainVirtualAtlasTests::overlayVirtualPaintAllowsSparseInactiveField()
                     .arg(x).arg(y)));
             }
     }
+
+    // Saving an Overlay-only Modern edit must not require the deliberately
+    // sparse Overlay field to become map-wide.  Rebuild the complete Ground
+    // field, pin every active Overlay reference, and prove that publication
+    // preserves both the painted water and inactive-overlay sentinels.
+    QVERIFY2(model.initializeVirtualMaterialField(
+                 ETerrainTileLayer::Land, fixture.catalog, &report,
+                 ETerrainMaterialFieldRecovery::RecoverDeterministically),
+             qPrintable(report.toText()));
+    CTerrainVirtualMaterialField landField;
+    QVERIFY(model.copyVirtualMaterialField(
+        ETerrainTileLayer::Land, &landField, true));
+    QVector<quint16> pinnedOverlay;
+    for(int y = 0; y < model.tileCountY(); ++y)
+        for(int x = 0; x < model.tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 packed = model.packedTile(
+                x, y, ETerrainTileLayer::Overlay, &available);
+            if(available && packed != 0xffffu)
+                pinnedOverlay.append(packed);
+        }
+    QVERIFY(!pinnedOverlay.isEmpty());
+
+    CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images);
+    const STerrainAtlasFinalization finalized = atlas.finalize(
+        landField, "SparseOverlaySave", 512, {1, 2, 3, 4}, &report,
+        pinnedOverlay);
+    QVERIFY2(finalized.success,
+             qPrintable(finalized.error + QStringLiteral("\n")
+                        + report.toText()));
+    const STerrainPortableAtlasPackage package =
+        CTestTerrainVirtualAtlas::buildPortablePackage(
+            document, model, finalized, ETerrainTileLayer::Land, &report);
+    QVERIFY2(package.success,
+             qPrintable(package.error + QStringLiteral("\n")
+                        + report.toText()));
+    CMprDocument reopened;
+    QVERIFY2(reopened.loadBytes(package.mprBytes,
+                                "sparse-overlay-result.mpr", &report),
+             qPrintable(report.toText()));
+    CTerrainEditModel published;
+    QVERIFY2(published.load(reopened, &report), qPrintable(report.toText()));
+    bool available = false;
+    const quint16 painted = published.packedTile(
+        8, 8, ETerrainTileLayer::Overlay, &available);
+    QVERIFY(available);
+    bool found = false;
+    QCOMPARE(finalizedSignature(finalized, painted, &found),
+             signature(2, 2, 2, 2));
+    QVERIFY(found);
+    published.packedTile(0, 0, ETerrainTileLayer::Overlay, &available);
+    QVERIFY(!available);
 }
 
 void TerrainVirtualAtlasTests::collapsedUniformBaselineRecoversExactRotatedBlend()

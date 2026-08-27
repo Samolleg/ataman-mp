@@ -158,10 +158,13 @@ inline STerrainPublicationLayerPlan terrainPublicationLayerPlan(
     plan.publishLand = landActive;
     plan.publishOverlay = overlayActive;
     plan.valid = landActive || overlayActive;
-    if(landActive)
+    // Overlay geometry is sparse by design, so its shared-corner material
+    // field cannot be the map-wide compaction field. Always rebuild the
+    // complete Ground grid and pin/remap live Overlay references. This is the
+    // existing combined-layer publication contract and preserves inactive
+    // 0xffff Overlay sentinels exactly.
+    if(plan.valid)
         plan.primary = ETerrainPublicationPrimaryLayer::Land;
-    else if(overlayActive)
-        plan.primary = ETerrainPublicationPrimaryLayer::Overlay;
     return plan;
 }
 

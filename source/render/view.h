@@ -429,7 +429,8 @@ private:
         const QByteArray& atlasPixelSha256,
         const QByteArray& profileBytes,
         SResArchiveNewMember* member,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        const CTerrainEditModel* terrainEdit = nullptr) const;
     bool restoreTerrainSemanticFieldFromArchive(
         const QFileInfo& mprFile, const QString& terrainArchivePath,
         bool requireMember = false);

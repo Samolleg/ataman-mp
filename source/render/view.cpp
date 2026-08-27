@@ -12733,7 +12733,8 @@ bool CView::buildTerrainSemanticFieldMember(
     const QByteArray& candidateMprBytes, const QFileInfo& destinationMpr,
     const QString& mprNamespace, const QByteArray& atlasPixelSha256,
     const QByteArray& profileBytes,
-    SResArchiveNewMember* member, CValidationReport* report) const
+    SResArchiveNewMember* member, CValidationReport* report,
+    const CTerrainEditModel* terrainEdit) const
 {
     if(!member) return false;
     *member = SResArchiveNewMember();
@@ -12742,8 +12743,12 @@ bool CView::buildTerrainSemanticFieldMember(
         rawAtlasHash = QByteArray::fromHex(rawAtlasHash);
     if(candidateMprBytes.isEmpty() || rawAtlasHash.size() != 32
        || profileBytes.isEmpty()
-       || !m_terrainEditAvailable || m_terrainEdit.vertexCountX() <= 0
-       || m_terrainEdit.vertexCountY() <= 0)
+       || !m_terrainEditAvailable)
+        return true;
+    const CTerrainEditModel& semanticTerrain = terrainEdit
+        ? *terrainEdit : m_terrainEdit;
+    if(semanticTerrain.vertexCountX() <= 0
+       || semanticTerrain.vertexCountY() <= 0)
         return true;
 
     STerrainSemanticFieldDocument document;
@@ -12753,15 +12758,15 @@ bool CView::buildTerrainSemanticFieldMember(
     document.atlasPixelSha256 = rawAtlasHash;
     document.profileSha256 = QCryptographicHash::hash(
         profileBytes, QCryptographicHash::Sha256);
-    document.vertexWidth = m_terrainEdit.vertexCountX();
-    document.vertexHeight = m_terrainEdit.vertexCountY();
+    document.vertexWidth = semanticTerrain.vertexCountX();
+    document.vertexHeight = semanticTerrain.vertexCountY();
     const int count = document.vertexWidth * document.vertexHeight;
     QVector<qint32> ignored;
-    m_terrainEdit.copyVirtualMaterialFieldState(
+    semanticTerrain.copyVirtualMaterialFieldState(
         ETerrainTileLayer::Land, &document.land, &ignored);
     if(document.land.size() != count)
         document.land.clear();
-    m_terrainEdit.copyVirtualMaterialFieldState(
+    semanticTerrain.copyVirtualMaterialFieldState(
         ETerrainTileLayer::Overlay, &document.overlay, &ignored);
     if(document.overlay.size() != count)
         document.overlay.clear();
@@ -13515,30 +13520,38 @@ void CView::finalizeVirtualTerrainAtlas()
         ?m_workingTerrainAtlas->catalog()
         :(layer==ETerrainTileLayer::Land
             ?m_terrainAtlasAnalysis.landCatalog:m_terrainAtlasAnalysis.overlayCatalog);
+    // Overlay material fields are intentionally sparse outside active overlay
+    // geometry. Finalize against a complete Ground snapshot and pin/remap the
+    // live Overlay references. Seed only this copy so cancelling or refusing a
+    // save cannot mutate the open document's hidden semantic state.
+    CTerrainEditModel publicationTerrain = m_terrainEdit;
     CTerrainVirtualMaterialField field;
-    if((identityOnlyRequest||persistedDraft)
-       && !m_terrainEdit.virtualMaterialFieldActive(layer)
-       && !m_terrainEdit.initializeVirtualMaterialField(
+    if(!publicationTerrain.copyVirtualMaterialField(layer, &field, false)
+       && !publicationTerrain.initializeVirtualMaterialField(
            layer, catalog, &report,
-           persistedDraft
-               ? ETerrainMaterialFieldRecovery::RecoverDeterministically
-               : ETerrainMaterialFieldRecovery::RequireExactTopology))
+           ETerrainMaterialFieldRecovery::RecoverDeterministically))
     {
         QMessageBox::critical(this, tr("Modern MPR save refused"),
-            tr("This MPR cannot be converted to an exact shared-corner material "
-               "field without changing terrain meaning. No identity or file was "
-               "changed.\n\n%1").arg(report.toText()));
+            tr("The Ground material layout could not be decoded for safe atlas "
+               "compaction. No identity or file was changed.\n\n%1")
+                .arg(report.toText()));
         return;
     }
-    if(!m_terrainEdit.copyVirtualMaterialField(layer,&field))
+    if(!publicationTerrain.copyVirtualMaterialField(layer, &field, false))
     {
         QMessageBox::critical(this,tr("Modern MPR save refused"),
-            tr("The virtual material field is incomplete; no package was written."));
+            tr("The Ground material layout could not be prepared for safe atlas "
+               "compaction. No package was written."));
         return;
     }
     for(int y = 0; y < field.tileHeight(); ++y)
         for(int x = 0; x < field.tileWidth(); ++x)
         {
+            // Untouched Ground cells retain their exact packed identity during
+            // finalization. Legacy shared-corner disagreements therefore need
+            // no synthesized blend and must not block an Overlay-only save.
+            if(!publicationTerrain.virtualMaterialCellChanged(layer, x, y))
+                continue;
             bool found = false;
             const STerrainTransitionSignature signature =
                 field.cellSignature(x, y, &found);
@@ -13565,11 +13578,12 @@ void CView::finalizeVirtualTerrainAtlas()
     finalizeProgress.setLabelText(tr(
         "Auditing preserved terrain references and unused slots..."));
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    for(int y=0;y<m_terrainEdit.tileCountY();++y)
-        for(int x=0;x<m_terrainEdit.tileCountX();++x)
+    for(int y=0;y<publicationTerrain.tileCountY();++y)
+        for(int x=0;x<publicationTerrain.tileCountX();++x)
         {
             bool available=false;
-            const quint16 packed=m_terrainEdit.packedTile(x,y,preserved,&available);
+            const quint16 packed=publicationTerrain.packedTile(
+                x,y,preserved,&available);
             // 0xffff is the inactive-overlay sentinel, not atlas slot 16383.
             // Pinning it caused valid land finalization to fail with the
             // misleading "slot 16383 was not pinned" error.
@@ -13620,10 +13634,11 @@ void CView::finalizeVirtualTerrainAtlas()
         for(int x=0;x<field.tileWidth();++x)
         {
             bool available=false;
-            const quint16 packed=m_terrainEdit.packedTile(x,y,layer,&available);
+            const quint16 packed=publicationTerrain.packedTile(
+                x,y,layer,&available);
             bool typeFound=false;
             const qint32 type=available
-                ?m_terrainEdit.tileType(packed,&typeFound):-1;
+                ?publicationTerrain.tileType(packed,&typeFound):-1;
             placedCellTypes.append(typeFound?type:-1);
             placedPackedCells.append(available?packed:quint16(0));
             bool routeFound = false;
@@ -13635,7 +13650,7 @@ void CView::finalizeVirtualTerrainAtlas()
             placedRouteOwners.append(
                 routeFound ? route.routeOwnerMaterial : 0);
             preservePlacedCells.append(
-                !m_terrainEdit.virtualMaterialCellChanged(layer,x,y));
+                !publicationTerrain.virtualMaterialCellChanged(layer,x,y));
         }
     const CTerrainTransitionCatalog* finalizedDecodeCatalog =
         m_workingTerrainAtlas
@@ -13920,7 +13935,7 @@ void CView::finalizeVirtualTerrainAtlas()
     finalized.isolatedNamespace = selectedIdentity;
 
     const STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
-        m_mprDocument,m_terrainEdit,m_mprMaterials,finalized,layer,&report);
+        m_mprDocument,publicationTerrain,m_mprMaterials,finalized,layer,&report);
     if(!package.success)
     {
         const QString findings=report.findings().isEmpty()
@@ -14094,7 +14109,7 @@ void CView::finalizeVirtualTerrainAtlas()
            package.mprBytes, mprDestination, portableProfile.mprNamespace,
            portableProfile.atlasPixelSha256, embeddedProfileMember.payload,
            &semanticFieldMember,
-           &portableProfileReport))
+           &portableProfileReport, &publicationTerrain))
     {
         QMessageBox::critical(this, tr("Atlas package not written"),
             tr("The exact shared-corner material field could not be bound to "

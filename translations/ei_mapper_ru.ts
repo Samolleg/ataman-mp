@@ -9045,17 +9045,17 @@ Use Save MPR to update the editable draft, or use Save MPR As and choose the fin
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="13528" />
-            <source>This MPR cannot be converted to an exact shared-corner material field without changing terrain meaning. No identity or file was changed.
+            <source>The Ground material layout could not be decoded for safe atlas compaction. No identity or file was changed.
 
 %1</source>
-            <translation>Этот MPR нельзя преобразовать в точное поле материалов общих углов без изменения вида рельефа. Идентификатор и файлы не изменены.
+            <translation>Не удалось расшифровать структуру материалов земли для безопасного уплотнения атласа. Идентификатор и файлы не изменены.
 
 %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="13536" />
-            <source>The virtual material field is incomplete; no package was written.</source>
-            <translation>Виртуальное поле материалов неполно; пакет не записан.</translation>
+            <source>The Ground material layout could not be prepared for safe atlas compaction. No package was written.</source>
+            <translation>Не удалось подготовить структуру материалов земли для безопасного уплотнения атласа. Пакет не записан.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="13556" />

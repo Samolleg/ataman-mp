@@ -1549,7 +1549,10 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     const STerrainPublicationLayerPlan overlayOnly =
         terrainPublicationLayerPlan(false, true);
     QVERIFY(overlayOnly.valid);
-    QCOMPARE(overlayOnly.primary, ETerrainPublicationPrimaryLayer::Overlay);
+    // Overlay material fields are sparse wherever no overlay geometry exists.
+    // Publication must therefore rebuild the complete Ground field and pin /
+    // remap the edited Overlay cells, just like the combined-layer path.
+    QCOMPARE(overlayOnly.primary, ETerrainPublicationPrimaryLayer::Land);
     QVERIFY(!overlayOnly.publishLand);
     QVERIFY(overlayOnly.publishOverlay);
 
