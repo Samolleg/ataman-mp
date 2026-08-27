@@ -20,7 +20,8 @@ history. The permanent safety and compatibility rules are in
 - [ ] Finish structural validation and remapping for Behavior attachments:
   detect orphan/wrong-parent relationships and complete cross-owner compound
   copy/remap transactions without weakening the implemented authoring UI.
-- [ ] Add Russian localization and an in-app language switch.
+- [x] Add Russian localization and an in-app language switch
+  ([`b3854b0e`](https://github.com/Ilufus/ei-mapper-endurance/commit/b3854b0e)).
 - [ ] Add opt-in Windows associations for `.mpr`, `.mob`, and `.collection`.
 - [ ] Add a viewport action that copies the current camera transform as
   ready-to-paste game script calls.
