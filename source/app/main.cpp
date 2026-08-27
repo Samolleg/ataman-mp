@@ -527,6 +527,12 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption workspaceVisualSequenceOption("workspace-visual-sequence",
         "Open semicolon-separated MPR|MOB stages in one process and exit after each stage resolves.",
         "stages");
+    QCommandLineOption terrainStampRegressionOption("terrain-stamp-regression",
+        "Run one real 6x6 Modern Lava-on-Water overlay viewport stamp, frame-capture it, validate undo/redo, then exit.");
+    QCommandLineOption terrainStampRegressionResultOption(
+        "terrain-stamp-regression-result",
+        "Write --terrain-stamp-regression JSON evidence to this file.",
+        "file");
     parser.addOption(validateOption);
     parser.addOption(roundtripOption);
     parser.addOption(jsonOption);
@@ -542,6 +548,8 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(workspaceLoadSmokeOption);
     parser.addOption(workspaceVisualSmokeOption);
     parser.addOption(workspaceVisualSequenceOption);
+    parser.addOption(terrainStampRegressionOption);
+    parser.addOption(terrainStampRegressionResultOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
     parser.process(app);
 
@@ -556,6 +564,12 @@ int runHeadlessCommand(QApplication& app)
     {
         app.setProperty("workspaceVisualSmoke", true);
         app.setProperty("workspaceVisualSequence", parser.value(workspaceVisualSequenceOption));
+    }
+    if(parser.isSet(terrainStampRegressionOption))
+    {
+        app.setProperty("terrainStampRegression", true);
+        app.setProperty("terrainStampRegressionResult",
+                        parser.value(terrainStampRegressionResultOption));
     }
 
     if(parser.isSet(versionOption))
@@ -3659,6 +3673,76 @@ int main(int argc, char *argv[])
         {
             for(const QString& path : startupDocuments)
                 window.openDocument(QFileInfo(path));
+            if(qApp->property("terrainStampRegression").toBool())
+            {
+                QSharedPointer<int> attempts(new int(0));
+                QSharedPointer<std::function<void()>> waitForReady(
+                    new std::function<void()>);
+                *waitForReady = [&window, attempts, waitForReady]() {
+                    ++*attempts;
+                    if(!window.view()->terrainStampRegressionReady()
+                       && *attempts < 300)
+                    {
+                        QTimer::singleShot(100, *waitForReady);
+                        return;
+                    }
+                    const QString outputPath = qApp->property(
+                        "terrainStampRegressionResult").toString();
+                    if(!window.view()->terrainStampRegressionReady())
+                    {
+                        QJsonObject evidence;
+                        evidence.insert(QStringLiteral("success"), false);
+                        evidence.insert(QStringLiteral("attempts"), *attempts);
+                        evidence.insert(QStringLiteral("error"),
+                            QStringLiteral("The loaded MPR did not become ready for terrain painting."));
+                        const QByteArray json = QJsonDocument(evidence).toJson(
+                            QJsonDocument::Indented);
+                        if(!outputPath.isEmpty())
+                        {
+                            QFile output(outputPath);
+                            if(output.open(QIODevice::WriteOnly
+                                           | QIODevice::Truncate))
+                                output.write(json);
+                        }
+                        QCoreApplication::exit(6);
+                        return;
+                    }
+                    window.showMaximized();
+                    window.raise();
+                    window.activateWindow();
+                    if(!outputPath.isEmpty())
+                    {
+                        QFile ready(outputPath + QStringLiteral(".ready"));
+                        if(ready.open(QIODevice::WriteOnly
+                                      | QIODevice::Truncate))
+                            ready.write("viewport-ready\n");
+                    }
+                    QTimer::singleShot(2000, &window,
+                        [&window, attempts, outputPath]() {
+                        QJsonObject evidence;
+                        const bool passed =
+                            window.view()->runTerrainStampRegression(
+                                2039464354, 6, 6, &evidence);
+                        evidence.insert(QStringLiteral("attempts"), *attempts);
+                        const QByteArray json = QJsonDocument(evidence).toJson(
+                            QJsonDocument::Indented);
+                        if(!outputPath.isEmpty())
+                        {
+                            QFile output(outputPath);
+                            if(output.open(QIODevice::WriteOnly
+                                           | QIODevice::Truncate))
+                                output.write(json);
+                        }
+                        ei::log(passed ? eLogInfo : eLogWarning,
+                            QStringLiteral("Terrain stamp regression result:\n%1")
+                                .arg(QString::fromUtf8(json)));
+                        QTimer::singleShot(2000, qApp,
+                            [passed]() { QCoreApplication::exit(passed ? 0 : 6); });
+                    });
+                };
+                QTimer::singleShot(100, *waitForReady);
+                return;
+            }
             if(qApp->property("workspaceLoadSmoke").toBool())
             {
                 const QString graphOutput = qEnvironmentVariable(

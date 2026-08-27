@@ -5162,6 +5162,13 @@ void CView::paintGL()
         frameTelemetry.terrainSectorsVisible = counters.terrainSectorsVisible;
     }
     drawTestOverlaysOpenGl();
+    if(m_terrainStampRegressionFrameCapture && width() > 0 && height() > 0)
+    {
+        QImage frame(width(), height(), QImage::Format_RGBA8888);
+        ei::gl::ReadPixels(0, 0, width(), height(), GL_RGBA,
+                           GL_UNSIGNED_BYTE, frame.bits());
+        m_terrainStampRegressionFrames.append(frame.mirrored());
+    }
     if(diagnoseFrame)
     {
         logOpenGlDiagnosticState(QStringLiteral("frame/overlays-complete"), true);
@@ -13117,11 +13124,21 @@ bool CView::realizeWorkingTerrainSignature(
                 .arg(runtimeType).arg(preferredRuntimeType));
         return false;
     }
-    if(!terrainEdit->setWorkingAtlasSlotType(resolvedSlot, runtimeType))
+    // One exact-family realization can publish several reviewed physical
+    // variants at once. Installing only the one variant selected for this
+    // coordinate left its siblings in the paint catalog but unavailable to
+    // CTerrainEditModel until the atlas was uploaded. A first uniform-only
+    // stamp then painted only the cells whose distribution happened to pick
+    // that one installed slot; every later stamp worked after publication
+    // installed the complete table. Make the complete realized family
+    // paintable before constructing the first live map command.
+    const QVector<qint32> activeRuntimeTypes = atlas->activeTileTypes();
+    terrainEdit->enableWorkingAtlasSlots(activeRuntimeTypes.size());
+    if(!terrainEdit->installWorkingAtlasSlotTypes(activeRuntimeTypes))
     {
         if(report) report->add("terrain.working_type_install",
             EValidationSeverity::Error,
-            "The resolved exact transition could not install its runtime terrain type.");
+            "The resolved exact transition family could not install all of its runtime terrain types.");
         return false;
     }
     if(usage)
@@ -17250,7 +17267,488 @@ bool CView::resolveTerrainPaintFootprint(
     brush->radius = footprint->radius;
     brush->shape = footprint->square
         ? ETerrainTileBrushShape::Square : ETerrainTileBrushShape::Circle;
+    if(m_terrainStampRegressionFootprintOverride)
+    {
+        *brush = m_terrainStampRegressionBrush;
+        *footprint = m_terrainStampRegressionFootprint;
+    }
     return true;
+}
+
+bool CView::runTerrainStampRegression(qint32 materialId, int stampWidth,
+                                      int stampHeight, QJsonObject* result)
+{
+    if(result)
+        *result = QJsonObject();
+    const auto fail = [result](const QString& error) {
+        if(result)
+        {
+            result->insert(QStringLiteral("success"), false);
+            result->insert(QStringLiteral("error"), error);
+        }
+        return false;
+    };
+    if(stampWidth <= 0 || stampHeight <= 0)
+        return fail(QStringLiteral("The requested stamp dimensions are invalid."));
+    if(!m_pLand || !m_pLand->isMprLoad() || !m_terrainEditAvailable
+       || !m_landscapeTools || !m_workingTerrainAtlas)
+        return fail(QStringLiteral("The loaded MPR is not ready for terrain painting."));
+    if(!ensureTerrainAutoCatalogReady())
+        return fail(QStringLiteral("The terrain catalog is not ready."));
+
+    m_landscapeTools->activateMode(ELandscapeEditMode::OverlayPaint, true);
+    m_landscapeTools->setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+    if(QAbstractButton* tileTarget =
+           m_landscapeTools->findChild<QAbstractButton*>(
+               QStringLiteral("tilePaintTarget")))
+        tileTarget->setChecked(true);
+    if(QAbstractButton* square =
+           m_landscapeTools->findChild<QAbstractButton*>(
+               QStringLiteral("squarePaintShape")))
+        square->setChecked(true);
+    if(QAbstractButton* autoResolve =
+           m_landscapeTools->findChild<QAbstractButton*>(
+               QStringLiteral("modernAutoResolveBlends")))
+        autoResolve->setChecked(false);
+    if(!m_landscapeTools->selectPaintTerrainType(materialId))
+        return fail(QStringLiteral("The requested Modern overlay material is absent from the live palette."));
+
+    // The exact reported oracle is Lava painted into the existing Water / Still
+    // overlay. Find a complete uniform rectangle instead of relying on a
+    // hand-picked coordinate that may straddle an inactive overlay boundary.
+    constexpr qint32 waterStill = 1522175125;
+    const CTerrainTransitionCatalog& catalog =
+        m_workingTerrainAtlas->catalog();
+    QPoint topLeft(-1, -1);
+    int bestDistance = std::numeric_limits<int>::max();
+    for(int y = 0; y + stampHeight <= m_terrainEdit.tileCountY(); ++y)
+        for(int x = 0; x + stampWidth <= m_terrainEdit.tileCountX(); ++x)
+        {
+            bool valid = true;
+            for(int dy = 0; dy < stampHeight && valid; ++dy)
+                for(int dx = 0; dx < stampWidth; ++dx)
+                {
+                    bool available = false;
+                    const quint16 packed = m_terrainEdit.packedTile(
+                        x + dx, y + dy, ETerrainTileLayer::Overlay,
+                        &available);
+                    bool decoded = false;
+                    const STerrainTransitionSignature signature = available
+                        ? catalog.gridSignatureForPacked(packed, &decoded)
+                        : STerrainTransitionSignature();
+                    if(!available || !decoded
+                       || signature.northWest != waterStill
+                       || signature.northEast != waterStill
+                       || signature.southEast != waterStill
+                       || signature.southWest != waterStill)
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+            if(!valid)
+                continue;
+            const int distance = qAbs((x + stampWidth / 2)
+                                      - m_terrainEdit.tileCountX() / 2)
+                + qAbs((y + stampHeight / 2)
+                       - m_terrainEdit.tileCountY() / 2);
+            if(distance < bestDistance)
+            {
+                bestDistance = distance;
+                topLeft = QPoint(x, y);
+            }
+        }
+    if(topLeft.x() < 0)
+        return fail(QStringLiteral("No complete %1x%2 Water / Still overlay rectangle exists in this MPR.")
+                    .arg(stampWidth).arg(stampHeight));
+
+    QVector<quint16> before;
+    CTerrainEditModel baselineModel = m_terrainEdit;
+    m_terrainStampRegressionBaselinePacked.clear();
+    before.reserve(stampWidth * stampHeight);
+    for(int dy = 0; dy < stampHeight; ++dy)
+        for(int dx = 0; dx < stampWidth; ++dx)
+        {
+            bool available = false;
+            before.append(m_terrainEdit.packedTile(
+                topLeft.x() + dx, topLeft.y() + dy,
+                ETerrainTileLayer::Overlay, &available));
+            m_terrainStampRegressionBaselinePacked.insert(
+                (topLeft.y() + dy) * m_terrainEdit.tileCountX()
+                    + topLeft.x() + dx,
+                before.back());
+            if(!available)
+                return fail(QStringLiteral("The selected overlay rectangle became unavailable."));
+        }
+
+    const float centerX = float(topLeft.x())
+        + float(stampWidth - 1) * 0.5f;
+    const float centerY = float(topLeft.y())
+        + float(stampHeight - 1) * 0.5f;
+    m_terrainStampRegressionBrush.centerX = centerX;
+    m_terrainStampRegressionBrush.centerY = centerY;
+    m_terrainStampRegressionBrush.radius =
+        float(qMax(stampWidth, stampHeight) - 1) * 0.5f;
+    m_terrainStampRegressionBrush.shape = ETerrainTileBrushShape::Square;
+    m_terrainStampRegressionFootprint.anchor = QPoint(
+        qFloor(centerX), qFloor(centerY));
+    m_terrainStampRegressionFootprint.radius =
+        qMax(stampWidth, stampHeight) / 2;
+    m_terrainStampRegressionFootprint.square = true;
+    m_terrainStampRegressionFootprint.cellCentered = true;
+    m_terrainStampRegressionFootprintOverride = true;
+
+    const int pickCellX = qFloor(centerX);
+    const int pickCellY = qFloor(centerY);
+    QVector3D world(float(pickCellX * 2 + 1),
+                    float(pickCellY * 2 + 1), 0.0f);
+    m_pLand->projectPt(world, false);
+
+    CValidationReport plannedReport;
+    const STerrainTileCommand planned =
+        m_terrainEdit.makeVirtualTileMaterialPaint(
+            m_terrainStampRegressionBrush, ETerrainTileLayer::Overlay,
+            materialId, m_workingTerrainAtlas->catalog(),
+            m_tileStrokeDistributionSeed, &plannedReport,
+            m_landscapeTools->randomizeUniformRotation());
+
+    // Center the actual tested rectangle in the rendered viewport. Updating an
+    // off-screen sector is sufficient for the document oracle but cannot expose
+    // the one-frame presentation defect reported during a visible brush stamp.
+    moveCameraToPoint(world);
+    m_cam->moveAwayOn(35.0f);
+    update();
+
+    // The physical presentation regression records the DWM-composited window,
+    // not merely this widget's default framebuffer. Signal only after any
+    // reviewed-artwork preparation dialog has closed, then leave a short,
+    // event-driven baseline window before the real stamp is issued.
+    const QString regressionOutput = qApp->property(
+        "terrainStampRegressionResult").toString();
+    if(!regressionOutput.isEmpty())
+    {
+        QFile stampReady(regressionOutput + QStringLiteral(".stamp-ready"));
+        if(stampReady.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            stampReady.write("stamp-ready\n");
+    }
+    if(QWidget* rootWindow = window())
+    {
+        rootWindow->raise();
+        rootWindow->activateWindow();
+    }
+    QEventLoop presentationBaseline;
+    QTimer::singleShot(2000, &presentationBaseline,
+                       &QEventLoop::quit);
+    presentationBaseline.exec(QEventLoop::ExcludeUserInputEvents);
+
+    m_terrainStampRegressionFrames.clear();
+    m_terrainStampRegressionFrameCapture = true;
+    const int actionCountBefore = m_terrainPaintActions.size();
+    const QRect viewport(0, 0, width(), height());
+    const QVector3D projected = world.project(
+        m_cam->viewMatrix(), m_projection, viewport);
+    const QPoint pointer(qRound(projected.x()),
+                         qRound(height() - projected.y()));
+    if(projected.z() < 0.0f || projected.z() > 1.0f
+       || !rect().contains(pointer))
+    {
+        m_terrainStampRegressionFrameCapture = false;
+        m_terrainStampRegressionFootprintOverride = false;
+        return fail(QStringLiteral(
+            "The test rectangle did not project inside the live viewport."));
+    }
+
+    // Exercise the same CView -> COperationManager -> CTileBrush route as a
+    // real click. Calling begin/set/end directly missed the reported input-
+    // handler presentation boundary and therefore was not a valid flicker
+    // regression even though it tested the document mutation correctly.
+    QMouseEvent hover(QEvent::MouseMove, pointer, Qt::NoButton,
+                      Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(this, &hover);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    const auto writePresentationMarker = [regressionOutput](const QString& suffix) {
+        if(regressionOutput.isEmpty())
+            return;
+        QFile marker(regressionOutput + suffix);
+        if(marker.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            marker.write(QDateTime::currentDateTimeUtc()
+                             .toString(Qt::ISODateWithMs).toUtf8() + '\n');
+    };
+    writePresentationMarker(QStringLiteral(".stamp-press"));
+    QMouseEvent press(QEvent::MouseButtonPress, pointer, Qt::LeftButton,
+                      Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(this, &press);
+    writePresentationMarker(QStringLiteral(".stamp-release"));
+    QMouseEvent release(QEvent::MouseButtonRelease, pointer, Qt::LeftButton,
+                        Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(this, &release);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    m_terrainStampRegressionFrameCapture = false;
+    m_terrainStampRegressionFootprintOverride = false;
+
+    if(m_terrainPaintActions.size() <= actionCountBefore)
+        return fail(QStringLiteral("The viewport stroke produced no paint audit action."));
+    const STerrainPaintAuditAction action =
+        m_terrainPaintActions.at(actionCountBefore);
+    const int expectedCells = stampWidth * stampHeight;
+    QSet<QPoint> core;
+    for(const QPoint& point : action.semantic.paintedCoreCells)
+        if(point.x() >= topLeft.x()
+           && point.x() < topLeft.x() + stampWidth
+           && point.y() >= topLeft.y()
+           && point.y() < topLeft.y() + stampHeight)
+            core.insert(point);
+
+    int exactTargetCells = 0;
+    int unchangedCells = 0;
+    int unchangedAdvertisedAsTarget = 0;
+    QVector<quint16> after;
+    after.reserve(expectedCells);
+    for(int dy = 0; dy < stampHeight; ++dy)
+        for(int dx = 0; dx < stampWidth; ++dx)
+        {
+            bool available = false;
+            const quint16 packed = m_terrainEdit.packedTile(
+                topLeft.x() + dx, topLeft.y() + dy,
+                ETerrainTileLayer::Overlay, &available);
+            after.append(packed);
+            const int beforeIndex = dy * stampWidth + dx;
+            if(packed == before.at(beforeIndex))
+                ++unchangedCells;
+            bool decoded = false;
+            const STerrainTransitionSignature signature = available
+                ? m_workingTerrainAtlas->catalog().gridSignatureForPacked(
+                      packed, &decoded)
+                : STerrainTransitionSignature();
+            if(decoded && signature.northWest == materialId
+               && signature.northEast == materialId
+               && signature.southEast == materialId
+               && signature.southWest == materialId)
+                ++exactTargetCells;
+        }
+
+    STerrainTransitionSignature pureTarget;
+    pureTarget.northWest = pureTarget.northEast = pureTarget.southEast =
+        pureTarget.southWest = materialId;
+    QSet<quint16> advertisedTargetPacked;
+    QJsonArray advertisedVariants;
+    for(const STerrainTransitionVariant& variant :
+            m_workingTerrainAtlas->catalog().paintVariants(pureTarget))
+    {
+        advertisedTargetPacked.insert(variant.packedTile);
+        QJsonObject item;
+        const SMprPackedTile decoded =
+            SMprPackedTile::decode(variant.packedTile);
+        item.insert(QStringLiteral("packed"), int(variant.packedTile));
+        item.insert(QStringLiteral("slot"), decoded.atlasSlot());
+        item.insert(QStringLiteral("rotation"), int(decoded.rotation));
+        item.insert(QStringLiteral("workingRuntimeType"),
+                    m_workingTerrainAtlas->runtimeTerrainTypeForSlot(
+                        decoded.atlasSlot()));
+        bool modelTypeFound = false;
+        const qint32 modelType = m_terrainEdit.tileType(
+            variant.packedTile, &modelTypeFound);
+        item.insert(QStringLiteral("modelRuntimeTypeFound"),
+                    modelTypeFound);
+        item.insert(QStringLiteral("modelRuntimeType"), modelType);
+        bool roundTripFound = false;
+        const STerrainTransitionSignature roundTrip =
+            m_workingTerrainAtlas->catalog().gridSignatureForPacked(
+                variant.packedTile, &roundTripFound);
+        item.insert(QStringLiteral("roundTripFound"), roundTripFound);
+        item.insert(QStringLiteral("roundTripNorthWest"),
+                    roundTrip.northWest);
+        item.insert(QStringLiteral("roundTripNorthEast"),
+                    roundTrip.northEast);
+        item.insert(QStringLiteral("roundTripSouthEast"),
+                    roundTrip.southEast);
+        item.insert(QStringLiteral("roundTripSouthWest"),
+                    roundTrip.southWest);
+        advertisedVariants.append(item);
+    }
+    for(int index = 0; index < before.size(); ++index)
+        if(after.at(index) == before.at(index)
+           && advertisedTargetPacked.contains(before.at(index)))
+            ++unchangedAdvertisedAsTarget;
+
+    baselineModel.enableWorkingAtlasSlots(
+        m_workingTerrainAtlas->activeTileTypes().size());
+    const bool baselineTypesInstalled =
+        baselineModel.installWorkingAtlasSlotTypes(
+            m_workingTerrainAtlas->activeTileTypes());
+    CValidationReport postAdoptionProbeReport;
+    const STerrainTileCommand postAdoptionProbe =
+        baselineModel.makeUniformTilePaint(
+            m_terrainStampRegressionBrush, ETerrainTileLayer::Overlay,
+            pureTarget, m_workingTerrainAtlas->catalog(),
+            m_tileStrokeDistributionSeed,
+            m_landscapeTools->randomizeUniformRotation(),
+            &postAdoptionProbeReport);
+
+    const auto frameDifference = [](const QImage& left,
+                                    const QImage& right) {
+        if(left.size() != right.size() || left.isNull() || right.isNull())
+            return 1.0;
+        quint64 different = 0;
+        quint64 sampled = 0;
+        for(int y = 0; y < left.height(); y += 8)
+            for(int x = 0; x < left.width(); x += 8)
+            {
+                const QColor a = left.pixelColor(x, y);
+                const QColor b = right.pixelColor(x, y);
+                const int distance = qAbs(a.red() - b.red())
+                    + qAbs(a.green() - b.green())
+                    + qAbs(a.blue() - b.blue());
+                different += distance > 48 ? 1 : 0;
+                ++sampled;
+            }
+        return sampled ? double(different) / double(sampled) : 1.0;
+    };
+    double baselineFinalDifference = 0.0;
+    double maximumTransientDifference = 0.0;
+    if(m_terrainStampRegressionFrames.size() >= 2)
+    {
+        const QImage& baseline = m_terrainStampRegressionFrames.front();
+        const QImage& finalFrame = m_terrainStampRegressionFrames.back();
+        baselineFinalDifference = frameDifference(baseline, finalFrame);
+        for(int index = 1;
+            index + 1 < m_terrainStampRegressionFrames.size(); ++index)
+            maximumTransientDifference = qMax(maximumTransientDifference,
+                qMin(frameDifference(m_terrainStampRegressionFrames.at(index),
+                                     baseline),
+                     frameDifference(m_terrainStampRegressionFrames.at(index),
+                                     finalFrame)));
+    }
+    const double transientLimit = qMax(0.02,
+        baselineFinalDifference * 4.0 + 0.01);
+    const bool frameStable = maximumTransientDifference <= transientLimit;
+
+    const int undoCountAfter = m_pUndoStack ? m_pUndoStack->count() : -1;
+    bool undoExact = m_pUndoStack && m_pUndoStack->canUndo();
+    if(undoExact)
+    {
+        m_pUndoStack->undo();
+        int index = 0;
+        for(int dy = 0; dy < stampHeight && undoExact; ++dy)
+            for(int dx = 0; dx < stampWidth; ++dx, ++index)
+            {
+                bool available = false;
+                undoExact = m_terrainEdit.packedTile(
+                    topLeft.x() + dx, topLeft.y() + dy,
+                    ETerrainTileLayer::Overlay, &available) == before.at(index)
+                    && available;
+                if(!undoExact)
+                    break;
+            }
+        if(m_pUndoStack->canRedo())
+            m_pUndoStack->redo();
+        else
+            undoExact = false;
+    }
+
+    const bool success = core.size() == expectedCells
+        && exactTargetCells == expectedCells
+        && action.outcome == QStringLiteral("applied")
+        && frameStable && undoExact;
+    if(result)
+    {
+        QJsonArray coreCoordinates;
+        for(const QPoint& point : action.semantic.paintedCoreCells)
+        {
+            QJsonObject coordinate;
+            coordinate.insert(QStringLiteral("x"), point.x());
+            coordinate.insert(QStringLiteral("y"), point.y());
+            coreCoordinates.append(coordinate);
+        }
+        result->insert(QStringLiteral("success"), success);
+        result->insert(QStringLiteral("topLeftX"), topLeft.x());
+        result->insert(QStringLiteral("topLeftY"), topLeft.y());
+        result->insert(QStringLiteral("width"), stampWidth);
+        result->insert(QStringLiteral("height"), stampHeight);
+        result->insert(QStringLiteral("expectedCoreCells"), expectedCells);
+        result->insert(QStringLiteral("auditedCoreCells"), core.size());
+        result->insert(QStringLiteral("allAuditedCoreCells"),
+                       action.semantic.paintedCoreCells.size());
+        result->insert(QStringLiteral("coreCoordinates"), coreCoordinates);
+        result->insert(QStringLiteral("plannedCoreCells"),
+                       planned.semanticAudit.paintedCoreCells.size());
+        result->insert(QStringLiteral("plannedDeltas"),
+                       planned.deltas.size());
+        result->insert(QStringLiteral("plannedValidation"),
+                       plannedReport.toText());
+        result->insert(QStringLiteral("actionCountBefore"), actionCountBefore);
+        result->insert(QStringLiteral("actionCountAfter"),
+                       m_terrainPaintActions.size());
+        result->insert(QStringLiteral("actionBrushCenterX"),
+                       action.semantic.brush.centerX);
+        result->insert(QStringLiteral("actionBrushCenterY"),
+                       action.semantic.brush.centerY);
+        result->insert(QStringLiteral("actionBrushRadius"),
+                       action.semantic.brush.radius);
+        result->insert(QStringLiteral("actionBrushSquare"),
+                       action.semantic.brush.shape
+                           == ETerrainTileBrushShape::Square);
+        result->insert(QStringLiteral("paintTargetMode"),
+                       int(m_landscapeTools->paintTargetMode()));
+        result->insert(QStringLiteral("viewportPointerX"), pointer.x());
+        result->insert(QStringLiteral("viewportPointerY"), pointer.y());
+        result->insert(QStringLiteral("viewportWidth"), width());
+        result->insert(QStringLiteral("viewportHeight"), height());
+        result->insert(QStringLiteral("appliedBrushCenterX"),
+                       m_terrainStampRegressionAppliedBrush.centerX);
+        result->insert(QStringLiteral("appliedBrushCenterY"),
+                       m_terrainStampRegressionAppliedBrush.centerY);
+        result->insert(QStringLiteral("appliedBrushRadius"),
+                       m_terrainStampRegressionAppliedBrush.radius);
+        result->insert(QStringLiteral("appliedBrushSquare"),
+                       m_terrainStampRegressionAppliedBrush.shape
+                           == ETerrainTileBrushShape::Square);
+        result->insert(QStringLiteral("exactTargetCells"), exactTargetCells);
+        result->insert(QStringLiteral("unchangedCells"), unchangedCells);
+        result->insert(QStringLiteral("unchangedAdvertisedAsTarget"),
+                       unchangedAdvertisedAsTarget);
+        result->insert(QStringLiteral("advertisedTargetVariants"),
+                       advertisedVariants);
+        result->insert(QStringLiteral("modernAutoResolveBlends"),
+                       m_landscapeTools->modernAutoResolveBlends());
+        result->insert(QStringLiteral("baselineTypesInstalled"),
+                       baselineTypesInstalled);
+        result->insert(QStringLiteral("postAdoptionProbeCoreCells"),
+                       postAdoptionProbe.semanticAudit.paintedCoreCells.size());
+        result->insert(QStringLiteral("postAdoptionProbeDeltas"),
+                       postAdoptionProbe.deltas.size());
+        result->insert(QStringLiteral("postAdoptionProbeValidation"),
+                       postAdoptionProbeReport.toText());
+        result->insert(QStringLiteral("liveProbeCoreCells"),
+                       m_terrainStampRegressionLiveProbeCoreCells);
+        result->insert(QStringLiteral("liveProbeDeltas"),
+                       m_terrainStampRegressionLiveProbeDeltas);
+        result->insert(QStringLiteral("preCommandPackedChanges"),
+                       m_terrainStampRegressionPreCommandPackedChanges);
+        result->insert(QStringLiteral("changedDeltas"), action.deltas.size());
+        result->insert(QStringLiteral("outcome"), action.outcome);
+        result->insert(QStringLiteral("undoCountAfter"), undoCountAfter);
+        result->insert(QStringLiteral("undoExact"), undoExact);
+        result->insert(QStringLiteral("capturedFrames"),
+                       m_terrainStampRegressionFrames.size());
+        result->insert(QStringLiteral("baselineFinalDifference"),
+                       baselineFinalDifference);
+        result->insert(QStringLiteral("maximumTransientDifference"),
+                       maximumTransientDifference);
+        result->insert(QStringLiteral("transientLimit"), transientLimit);
+        result->insert(QStringLiteral("frameStable"), frameStable);
+        if(!success)
+            result->insert(QStringLiteral("error"), QStringLiteral(
+                "The real viewport stroke did not fill the complete requested core, preserve one undo transaction, or present stable frames."));
+    }
+    return success;
+}
+
+bool CView::terrainStampRegressionReady()
+{
+    return m_pLand && m_pLand->isMprLoad() && m_terrainEditAvailable
+        && m_landscapeTools && m_workingTerrainAtlas
+        && ensureTerrainAutoCatalogReady();
 }
 
 void CView::setTile(QVector3D posOnLand, bool bLand)
@@ -17276,6 +17774,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!resolveTerrainPaintFootprint(posOnLand, bLand, &pTile, &tileLoc,
                                      &brush, &detailVertex, &freshFootprint))
         return;
+    if(m_terrainStampRegressionFootprintOverride)
+        m_terrainStampRegressionAppliedBrush = brush;
     const bool firstStrokeStamp = m_tilePaintStrokeActive
         && !m_lastTerrainPaintCenterValid;
     if(firstStrokeStamp
@@ -17716,6 +18216,36 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                 emit updateMsg(previewReport.toText());
             m_tileStrokeActions += stampCenters.size();
             return;
+        }
+        if(m_terrainStampRegressionFootprintOverride
+           && !m_tileStrokeAutoResolveBlends)
+        {
+            m_terrainStampRegressionPreCommandPackedChanges = 0;
+            for(auto baseline =
+                    m_terrainStampRegressionBaselinePacked.constBegin();
+                baseline !=
+                    m_terrainStampRegressionBaselinePacked.constEnd();
+                ++baseline)
+            {
+                bool available = false;
+                const int x = baseline.key() % m_terrainEdit.tileCountX();
+                const int y = baseline.key() / m_terrainEdit.tileCountX();
+                const quint16 current = m_terrainEdit.packedTile(
+                    x, y, layer, &available);
+                if(!available || current != baseline.value())
+                    ++m_terrainStampRegressionPreCommandPackedChanges;
+            }
+            CValidationReport liveProbeReport;
+            const STerrainTileCommand liveProbe =
+                m_terrainEdit.makeUniformTilePaint(
+                    brush, layer, pure, semanticCatalog,
+                    m_tileStrokeDistributionSeed,
+                    m_landscapeTools->randomizeUniformRotation(),
+                    &liveProbeReport);
+            m_terrainStampRegressionLiveProbeCoreCells =
+                liveProbe.semanticAudit.paintedCoreCells.size();
+            m_terrainStampRegressionLiveProbeDeltas =
+                liveProbe.deltas.size();
         }
         const ETerrainSemanticPaintPolicy classicPolicy =
             m_landscapeTools->classicAutoSafeMode()

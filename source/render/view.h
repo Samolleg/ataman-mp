@@ -59,6 +59,7 @@ class QSlider;
 class QToolButton;
 class QCheckBox;
 class QDialog;
+class QJsonObject;
 class QResizeEvent;
 class CKeyManager;
 class CMob;
@@ -351,6 +352,13 @@ public:
     void beginTileBrushGroup();
     void endTileBrushGroup();
     void cancelTileBrushGroup();
+    // Non-interactive, lossless regression entry point. It executes one real
+    // Modern viewport stroke against the loaded MPR, validates undo/redo, and
+    // samples every frame presented during the transaction. The caller must
+    // discard the in-memory document afterwards; this method never saves.
+    bool terrainStampRegressionReady();
+    bool runTerrainStampRegression(qint32 materialId, int width, int height,
+                                   QJsonObject* result);
     void beginTerrainPreviewBatch();
     void endTerrainPreviewBatch();
     bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
@@ -874,6 +882,16 @@ private:
     bool m_terrainPaintProjectionLand{true};
     STerrainPaintFootprintSnapshot m_terrainPaintFootprint;
     bool m_terrainPaintFootprintValid{false};
+    bool m_terrainStampRegressionFootprintOverride{false};
+    STerrainTileBrush m_terrainStampRegressionBrush;
+    STerrainTileBrush m_terrainStampRegressionAppliedBrush;
+    STerrainPaintFootprintSnapshot m_terrainStampRegressionFootprint;
+    int m_terrainStampRegressionLiveProbeCoreCells{-1};
+    int m_terrainStampRegressionLiveProbeDeltas{-1};
+    QMap<int, quint16> m_terrainStampRegressionBaselinePacked;
+    int m_terrainStampRegressionPreCommandPackedChanges{-1};
+    bool m_terrainStampRegressionFrameCapture{false};
+    QVector<QImage> m_terrainStampRegressionFrames;
     bool m_terrainSampleGestureActive{false};
     bool m_terrainSampleKeyValid{false};
     QPoint m_lastTerrainSamplePoint;
