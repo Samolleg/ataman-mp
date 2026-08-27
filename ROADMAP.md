@@ -132,10 +132,32 @@ boundaries as MOB and MPR authoring.
 
 ## Remaining beta gates
 
-- [ ] Ship the generated-blend terrain painter and explicit **Finalize Atlas**
+- [x] Ship the generated-blend terrain painter and explicit **Finalize Atlas**
   workflow tracked in 0.4.x.
 - [ ] Run the representative Base/JMV beta acceptance matrix for database and
   RES review, mutation, reopen, preservation, and cross-tool navigation.
+
+## 0.5 release-candidate known issues and boundaries
+
+- [ ] **Lava + Resolve Blends:** direct Modern painting follows the selected
+  Lava material, but **Shift+R** cannot yet preserve one visually consistent
+  route owner across every rare connected Lava-on-Water transition without
+  regressing ordinary Ground/Overlay repair. The bounded generic resolver is
+  retained while this remains under review.
+- The shipped 32-bit runtime is validated through **4,096 terrain-atlas slots / 64
+  pages**. Endurance can represent the packed-format maximum of 16,384 slots,
+  but sizes above 4,096 are not release-supported: the controlled 8,192-slot
+  run failed from 32-bit address-space pressure.
+- Test Current Map hot-reloads ordinary MPR/MOB changes in-process. A terrain
+  atlas byte/page/slot change deliberately restarts only the owned test process
+  so the game cannot retain a stale resource identity.
+- [ ] Clear or explicitly waive the remaining headless UI-check failures for
+  compact Landscape Tools layout and floating-dock native-window identity.
+  Their corresponding interactive workflows have passed tester review, but the
+  automated release gate is not yet clean.
+- [ ] Isolate the recurring ANGLE compatibility error after
+  `frame/overlays-complete`; no equivalent default desktop-OpenGL defect is
+  currently confirmed.
 
 ## Approved changelists and evidence
 
@@ -147,6 +169,7 @@ boundaries as MOB and MPR authoring.
 - [Integrated Database Editor contract](docs/DATABASE_EDITOR_VERTICAL_SLICE.md).
 - [Viewport Visuals, Noise sculpt, and live-stroke responsiveness](packaging/ALPHA26_SCULPT_PERFORMANCE_R4.md).
 - [Full database editor coverage](docs/releases/0.3.0-alpha.26-full-database-editor.md).
+- [Expanded terrain-atlas shipped-runtime boundary](docs/validation/EXPANDED_TERRAIN_ATLAS_RUNTIME.md).
 - Resource Browser validation:
   [r1](packaging/ALPHA26_RESOURCE_BROWSER_R1.md),
   [r2](packaging/ALPHA26_RESOURCE_BROWSER_R2.md), and
